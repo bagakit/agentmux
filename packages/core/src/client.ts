@@ -88,6 +88,7 @@ import {
 } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
+import { parseSessionHistoryResourceOptions, readRecordedImage, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
@@ -151,6 +152,8 @@ import type {
   AgentSessionHistoryMetadata,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
+  AgentSessionHistoryResourceReadOptions,
+  AgentSessionHistoryResourceReadResult,
   AgentSessionQuestionReplyReceipt,
   AgentSessionHistoryQuestionAnswer,
   AgentSessionHistorySource,
@@ -1928,6 +1931,45 @@ export class AgentMuxClient {
       options.signal?.removeEventListener('abort', cancelled)
       lifetime.close()
     }
+  }
+
+  /** Read only an image part freshly located in the original native source; never read a caller path. */
+  async sessionHistoryResource(agentSessionId: string, input: AgentSessionHistoryResourceReadOptions): Promise<AgentSessionHistoryResourceReadResult> {
+    const checked = parseSessionHistoryResourceOptions(input)
+    input = { ...checked, source: { ...checked.source },
+      ...(checked.args ? { args: [...checked.args] } : {}), ...(checked.env ? { env: { ...checked.env } } : {}) }
+    if (this.providerReadsDisposed) throw new AgentMuxError('History reading client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
+    if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('History reading is busy; retry this resource.', 'AGENT_SESSION_HISTORY_BUSY')
+    input.signal?.throwIfAborted()
+    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const cancel = (): void => controller.abort(input.signal?.reason)
+    input.signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      const binding = await read(this.nativeHistoryBinding(agentSessionId, input, controller.signal, 'read'))
+      const { session, provider, handle } = binding
+      const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
+      if (source.providerId !== input.source.providerId || source.nativeSessionId !== input.source.nativeSessionId)
+        throw new AgentMuxError('The resource belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      const identity = { agentSessionId, source, ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+        recordId: input.recordId, partIndex: input.partIndex }
+      if (!provider.readSessionHistoryRecord) return { ...identity, reference: input.expectedReference,
+        result: { status: 'unavailable', code: 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED',
+          message: 'This Provider cannot locate an exact native record. The original resource reference remains available.' } }
+      const located = await read(provider.readSessionHistoryRecord({ source, recordId: input.recordId,
+        ...(input.turnId === undefined ? {} : { turnId: input.turnId }), signal: controller.signal,
+        command: resolveAgentExecutable(input.commandOverride, provider.executable), args: input.args ?? [], env: input.env ?? {},
+        workspacePath: session.workspacePath, ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }))
+      const record = normalizeSessionHistoryPage(source, { source, items: [located], nextCursor: null }, 1).items[0]!
+      if (record.id !== input.recordId || input.turnId !== undefined && record.turnId !== input.turnId)
+        throw new AgentMuxError('The native lookup returned another record.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+      const part = record.contentParts[input.partIndex]
+      if (!part || part.kind !== 'resource' || part.resourceType !== 'image' || part.reference !== input.expectedReference)
+        throw new AgentMuxError('The exact resource part changed or is not an image.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
+      await read(binding.assertCurrent())
+      const result = await read(readRecordedImage(part.reference, input.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal))
+      await read(binding.assertCurrent())
+      return { ...identity, reference: part.reference, ...(part.label === undefined ? {} : { label: part.label }), result }
+    } finally { input.signal?.removeEventListener('abort', cancel); lifetime.close() }
   }
 
   /** Observe an exact durable native source only while a Consumer needs it. No Runtime connection. */

@@ -8,7 +8,7 @@ import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
 export const AGENTMUX_HOSTED_METHODS = [
   'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession',
-  'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'inspectManagedHooks',
+  'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'reattachAgent', 'ensureAgentContinuity',

@@ -41,6 +41,8 @@ import type {
   AgentProviderNativeSessionDiscovery,
   AgentProviderNativeSessionDiscoveryContext,
   AgentProviderSessionHistoryContext,
+  AgentProviderSessionHistoryRecordContext,
+  AgentSessionHistoryItem,
   AgentProviderSessionQuestionReplyContext,
   AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryObservationContext,
@@ -152,6 +154,7 @@ export type AgentProvider = {
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
+  readSessionHistoryRecord?(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem>
   prepareSessionQuestionReply?(context: AgentProviderSessionQuestionReplyContext): Promise<string>
   observeSessionHistory?(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle>
   /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
@@ -194,6 +197,7 @@ export type AgentProviderDefinition = {
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
+  readSessionHistoryRecord?: (context: AgentProviderSessionHistoryRecordContext) => Promise<AgentSessionHistoryItem>
   prepareSessionQuestionReply?: (context: AgentProviderSessionQuestionReplyContext) => Promise<string>
   observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
@@ -347,6 +351,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.prepareInteractionResponse ? { prepareInteractionResponse: definition.prepareInteractionResponse } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
+    ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),
     ...(definition.prepareSessionQuestionReply ? { prepareSessionQuestionReply: definition.prepareSessionQuestionReply } : {}),
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),

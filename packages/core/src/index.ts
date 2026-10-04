@@ -78,3 +78,6 @@ export { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest } from './remot
 export type { RemoteCoreUpgradeHost, RemoteCoreUpgradeExpected, RemoteCoreUpgradeCandidate, RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt, RemoteCoreUpgradeOptions } from './remote-core-upgrade.js'
 export { createPortableCoreArtifact } from './portable-core-artifact.js'
 export type { PortableCoreArtifact } from './portable-core-artifact.js'
+
+export { SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
+export type { AgentSessionHistoryResourceParams, AgentSessionHistoryResourceResult } from './session-history-resource.js'

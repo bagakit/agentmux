@@ -836,6 +836,36 @@ export type AgentProviderSessionHistoryContext = {
   signal: AbortSignal
 }
 
+/** An exact recorded image; expectedReference compares the re-read part and never authorizes a path. */
+export type AgentSessionHistoryResourceRequest = {
+  source: AgentSessionHistorySource
+  turnId?: string
+  recordId: string
+  partIndex: number
+  expectedReference: string
+  /** May only reduce the fixed 16 MiB image byte budget. */
+  maxBytes?: number
+}
+export type AgentSessionHistoryResourceReadOptions = AgentSessionHistoryResourceRequest & Pick<AgentSessionHistoryPageOptions,
+  'signal' | 'commandOverride' | 'args' | 'env'>
+export type AgentSessionHistoryResourceReadResult = {
+  agentSessionId: string
+  source: AgentSessionHistorySource
+  turnId?: string
+  recordId: string
+  partIndex: number
+  reference: string
+  label?: string
+  result: { status: 'read'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; dataBase64: string; byteLength: number }
+    | { status: 'unavailable'; code: string; message: string }
+}
+
+/** Provider-owned stable lookup through its original native reader, never a moving newest page. */
+export type AgentProviderSessionHistoryRecordContext = Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'> & {
+  turnId?: string
+  recordId: string
+}
+
 export type AgentProviderSessionQuestionReplyContext = Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'> & {
   turnId: string
   recordId: string

@@ -13,6 +13,7 @@ import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
+import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeAgentSession } from './agent-session-store.js'
@@ -223,6 +224,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (!Array.isArray(answers) || JSON.stringify(p.questionIds) !== JSON.stringify(answers.map(answer => answer.questionId))) fail()
         break
       }
+      case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])

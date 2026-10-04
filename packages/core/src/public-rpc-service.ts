@@ -15,6 +15,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates,
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
 import { AgentMuxError } from './errors.js'
 import { readAgentSessionHistory, validateSessionHistoryReadInput } from './session-history-reader.js'
+import { parseSessionHistoryResourceParams, parseSessionHistoryResourceResult } from './session-history-resource.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
@@ -41,7 +42,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
@@ -98,6 +99,7 @@ const NATIVE_FIELDS = {
   'agent.inspect': ['target'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
+  'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -364,6 +366,27 @@ export class AgentMuxRpcService {
       return await target.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, authorHuman: true, sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
         ...(sourceDevice ? { sourceDevice } : {}),
         ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.history.resource') {
+      const input = parseSessionHistoryResourceParams(params)
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact resource Host owner is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+      const client = owners[0]!.client
+      context.signal?.throwIfAborted()
+      let result: AgentMuxRpcResult<'agent.history.resource'>
+      if (client.forwardRpc) {
+        const { caller: _localCaller, ...readContext } = context
+        const forwarded = { ...input, hostId: 'local' }
+        const remote = parseSessionHistoryResourceResult(await client.forwardRpc('agent.history.resource', forwarded, readContext), forwarded)
+        result = { ...remote, hostId: input.hostId }
+      } else {
+        const { hostId, agentSessionId, ...request } = input
+        const descriptor = (await client.sessionHistorySources()).find(entry => entry.hostId === hostId && entry.agentSessionId === agentSessionId)
+        if (!descriptor) throw new AgentMuxError('No exact retained Session exists at the requested Host.', 'UNKNOWN_AGENT_SESSION')
+        result = { hostId, ...await client.sessionHistoryResource(agentSessionId, { ...request,
+          ...(context.signal ? { signal: context.signal } : {}) }) }
+      }
+      return parseSessionHistoryResourceResult(result, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.history') {
       const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>

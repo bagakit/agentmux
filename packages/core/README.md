@@ -29,7 +29,9 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 同一 SQLite 身份的写入竞争返回 `AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED`，本次页不发布；观察保留，后续原生提交可恢复。主来源被替换或 native identity 不一致返回 `AGENT_SESSION_HISTORY_SOURCE_CHANGED`，只停止这个来源的观察。两种情况都不删除已有正文、原 Session 或健康 Run；调用者保留旧阅读窗口并显示明确的读取状态。无 WAL 的已关闭数据库沿同一只读 VFS 读取，不创建 native WAL/SHM。JSONL 来源替换按原来源边界处理，不能以相同路径或新 mtime 推断仍是原会话。
 
-CLI/RPC 复用原 `agent history` / `agent.history`；Native Resume 仍通过 Core Session 生命周期完成。Hook、Permission、Usage 和问题回答是各自独立声明的能力，不能因 history reader 可用而冒充已接入。
+`sessionHistoryResource(agentSessionId, request)` 读取原生记录中准确声明的图片。request 包含原 source、turnId（存在时）、recordId、partIndex 和 required expectedReference；Provider 必须经既有 native reader 准确重读 record，引用比对后才读 file／raster data。返回 `read`（MIME/base64/byteLength）或带 reason 的 `unavailable`；错 source／record／part／reference 拒绝本次操作。固定 16 MiB 原图上限只可通过 maxBytes 缩小，原生读取协议的独立预算继续有效。opaque／HTTP 不自动抓取，其他 Provider 未贡献准确 record 读取时明确 unavailable；不通过最新页重放、正文／时间或第二资源缓存授权。公共 RPC `agent.history.resource` 与 CLI `agent history resource --input FILE|-` 使用同一请求和准确回执，hostId／agentSessionId 指向原语义 Host，不连接或控制 Run。
+
+CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 仍通过 Core Session 生命周期完成。Hook、Permission、Usage 和问题回答是各自独立声明的能力，不能因 history reader 可用而冒充已接入。
 
 ## Runtime 边界
 
