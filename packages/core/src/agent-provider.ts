@@ -38,6 +38,7 @@ import type {
   AgentTerminalScreenSnapshot,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
+  AgentProviderForkContext,
   AgentProviderNativeSessionDiscovery,
   AgentProviderNativeSessionDiscoveryContext,
   AgentProviderSessionHistoryContext,
@@ -163,6 +164,7 @@ export type AgentProvider = {
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
+  buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
@@ -203,6 +205,12 @@ export type AgentProviderDefinition = {
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
   buildResumeArgs?: (
+    sessionId: string,
+    transcriptPath: string | undefined,
+    prompt: string | undefined,
+    args: readonly string[]
+  ) => string[]
+  buildForkArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
     prompt: string | undefined,
@@ -284,6 +292,9 @@ function assertManagedHookContribution(contribution: {
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
   assertManagedHookContribution(definition)
   const { catalog: catalogSeed } = definition
+  if (Boolean(catalogSeed.capabilities.providerFork?.current) !== Boolean(definition.buildForkArgs)) {
+    throw new AgentMuxError('Native fork capability and its launch contribution must be declared together.', 'INVALID_AGENT_PROVIDER')
+  }
   if (definition.terminalHandshake && (!definition.terminalHandshake.query || !definition.terminalHandshake.response)) {
     throw new AgentMuxError('Agent terminal handshake bytes cannot be empty.', 'INVALID_AGENT_PROVIDER')
   }
@@ -371,6 +382,18 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
+    ...(definition.buildForkArgs ? { buildForkLaunch(context: AgentProviderForkContext): AgentLaunchPlan {
+      const handle = context.nativeHandle
+      if (handle.kind !== 'provider' || handle.providerId !== catalog.id) {
+        throw new AgentMuxError('Native fork source does not belong to this Provider.', 'INVALID_NATIVE_SESSION_HANDLE')
+      }
+      const prompt = context.prompt?.trim() ? context.prompt : undefined
+      if (prompt && catalog.promptDelivery === 'post-launch-only') {
+        throw new AgentMuxError(`${catalog.label} cannot receive a prompt at launch; fork it first, then submit the prompt.`, 'AGENT_LAUNCH_PROMPT_UNSUPPORTED')
+      }
+      return { command: resolveAgentExecutable(context.commandOverride, catalog.executable),
+        args: definition.buildForkArgs!(handle.sessionId, handle.transcriptPath, prompt, context.args), env: { ...context.env } }
+    } } : {}),
     async probeCapabilities(probe, commandOverride) {
       const command = resolveAgentExecutable(commandOverride, catalog.executable)
       return {

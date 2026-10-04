@@ -19,6 +19,8 @@ import type {
   AgentSessionQuestionReplyReceipt,
   AgentMuxAgentCreateInput,
   AgentMuxAgentSession,
+  AgentMuxNativeSessionConfirmationInput,
+  AgentMuxNativeSessionConfirmation,
   AgentMuxAgentContinuityResult,
   AgentMuxAgentContinuityConflictReason,
   AgentMuxAgentContinuityUnavailableReason,
@@ -105,7 +107,7 @@ import type {
 export { SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_NAME }
 
 /** Renderer can request a page; native invocation belongs to the trusted host. */
-export type SessionHistoryPageOptions = Pick<AgentSessionHistoryPageOptions, 'cursor' | 'limit'>
+export type SessionHistoryPageOptions = Pick<AgentSessionHistoryPageOptions, 'cursor' | 'limit' | 'refreshNativeSource' | 'nativeSource'>
 export type SessionHistoryObservationReady =
   | { source: AgentSessionHistoryObservationHandle['source'] }
   | { error: { code: string; message: string } }
@@ -843,6 +845,7 @@ export type AgentLaunchInput = {
   scratchTopicId?: string
   agentSessionId?: string
   createOperationId?: string
+  forkSource?: AgentMuxAgentCreateInput['forkSource']
   prompt?: string
   /** Host-generated content, kept separate from the original request. */
   agentMuxNote?: string
@@ -982,6 +985,10 @@ export type SessionSnapshot = SessionSnapshotBase & (
       executorId: AgentExecutorId
       /** Core's native Provider/ACP Session ID for display; never a replacement for the AgentMux SID. */
       nativeSessionId?: string
+      nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
+      observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
+      nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
+      nativeConfirmation?: NonNullable<AgentMuxAgentSession['nativeConfirmation']>
       capabilities: AgentCapabilities
       /** Core record freshness; activity updatedAt cannot order authoritative Session snapshots. */
       agentSessionUpdatedAt: number
@@ -991,6 +998,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
       creation?: NonNullable<AgentMuxAgentSession['creation']>
+      forkedFrom?: AgentMuxAgentSession['forkedFrom']
       /** Core-owned admission identity. null is confirmed empty; undefined is unknown. */
       promptSubmissionPredecessor?: string | null | undefined
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
@@ -1082,6 +1090,10 @@ export type AgentSessionRecoveryCandidate = {
   executorId: AgentExecutorId
   /** Durable native identity remains displayable while its Run is unavailable. */
   nativeSessionId?: string
+  nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
+  observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
+  nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
+  nativeConfirmation?: NonNullable<AgentMuxAgentSession['nativeConfirmation']>
   capabilities: AgentCapabilities
   /** Core's last native semantic state; missing entry time remains unknown. */
   semanticStatus?: AgentStatus
@@ -1657,6 +1669,7 @@ export type AgentMuxDesktopApi = {
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     historyResource(session: SessionHistoryReference, input: AgentSessionHistoryResourceRequest): Promise<AgentSessionHistoryResourceReadResult>
+    confirmNativeSession(session: AgentSessionControl, input: AgentMuxNativeSessionConfirmationInput): Promise<AgentMuxNativeSessionConfirmation>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
       options?: { signal?: AbortSignal }): Promise<AgentSessionHistoryObservationHandle>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>

@@ -488,11 +488,14 @@ export function ActivityView({
     const nativeIds = new Set(page?.items.filter((item) => item.kind === 'user-message').map((item) => item.id))
     // A historical native window contains only its own source records. Recent facts stay
     // in the shared current window; a missing/different source never erases observed input.
-    const observedMessages = userMessages?.filter((message) => message.source.kind !== 'native' || !page ||
-      message.source.providerId !== page.source.providerId || message.source.nativeSessionId !== page.source.nativeSessionId ||
-      !readingWindow.historical && !nativeIds.has(message.rawId))
+    const observedMessages = userMessages?.filter((message) => {
+      if (message.source.kind !== 'native' || !page) return true
+      const sameSource = message.source.providerId === page.source.providerId && message.source.nativeSessionId === page.source.nativeSessionId
+      if (conversationReading?.nativeSourceFacts && !sameSource) return false
+      return !sameSource || !readingWindow.historical && !nativeIds.has(message.rawId)
+    })
     return buildActivityEntries(items, observedMessages)
-  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical])
+  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, conversationReading?.nativeSourceFacts])
   const placed = useMemo(() => placeSegments(segments), [segments])
   const nativeSupplement = (entry: Segment): boolean => entry.kind === 'user-message' && entry.message.source.kind === 'native'
   const observations = placed.reduce((summary, { entry }) => {
@@ -803,7 +806,7 @@ export function ActivityView({
   const hasItems = unifiedItems.length > 0
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
   const readingEntry = conversationReading && (readingWindow.loading || readingWindow.hasMore || readingWindow.historical ||
-    conversationReading.opened || readingWindow.newerOutside || readingWindow.error || readingAction) ? (
+    conversationReading.opened || readingWindow.newerOutside || readingWindow.error || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
     <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
         {readingWindow.loading ? <span role="status" aria-live="polite" className="activity-feed__reading-status">
@@ -816,6 +819,13 @@ export function ActivityView({
             aria-label="Current" title="Return to latest messages" onClick={readingWindow.showCurrent}>
             <ArrowDown size={12} aria-hidden="true" />Current</button>
         ) : null}
+        {conversationReading.nativeSourceFacts?.nativeConfirmation ? <>
+          <span className="activity-feed__reading-status">{readingWindow.previousSource ? 'Previous native source' : 'Current native source'}</span>
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            onClick={readingWindow.showCurrentSource}>Current source</button>
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            onClick={readingWindow.showPreviousSource}>Previous source</button>
+        </> : null}
         {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
           className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
           onClick={conversationReading.onClose}><ArrowLeft size={12} aria-hidden="true" />Return</button> : null}

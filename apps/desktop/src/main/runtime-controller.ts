@@ -14,6 +14,8 @@ import {
   type AgentSessionQuestionReplyReceipt,
   type AgentMuxAgentMessageInput,
   type AgentMuxRpcCallContext,
+  type AgentMuxNativeSessionConfirmationInput,
+  type AgentMuxNativeSessionConfirmation,
   runtimeStorageUsage,
   loadSessionHistorySources,
   agentInteractionResponseUnavailableReason,
@@ -65,6 +67,7 @@ import type {
   TerminalLaunchInput
 } from '../shared/contracts.js'
 import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
+import { projectNativeSourceFacts } from '../shared/agent-native-source.js'
 import {
   scanTerminalOscColorQueries,
   type TerminalOscColorQueryReplyColors
@@ -269,6 +272,7 @@ function projectSession(
       kind: 'agent',
       providerId: subject.providerId,
       executorId: subject.executorId,
+      ...projectNativeSourceFacts(subject.agentSession),
       ...(subject.agentSession.nativeHandle
         ? { nativeSessionId: subject.agentSession.nativeHandle.sessionId }
         : {}),
@@ -293,6 +297,7 @@ function projectSession(
         ? { terminalPromptDelivery: structuredClone(subject.agentSession.terminalPromptDelivery) }
         : {}),
       ...(subject.agentSession.creation ? { creation: structuredClone(subject.agentSession.creation) } : {}),
+      ...(subject.agentSession.forkedFrom ? { forkedFrom: structuredClone(subject.agentSession.forkedFrom) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(subject.agentSession),
       ...(subject.agentSession.terminalOutputChannel
         ? { terminalOutputChannel: structuredClone(subject.agentSession.terminalOutputChannel) }
@@ -755,6 +760,7 @@ export class RuntimeController {
           workspacePath: session.workspacePath,
           providerId: session.providerId,
           executorId: session.executorId,
+          ...projectNativeSourceFacts(session),
           ...(session.nativeHandle ? { nativeSessionId: session.nativeHandle.sessionId } : {}),
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
@@ -907,6 +913,7 @@ export class RuntimeController {
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
+          ...(request.forkSource === undefined ? {} : { forkSource: request.forkSource }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(request.initialMessage ? { initialMessage: request.initialMessage } : {}),
           ...(request.cols === undefined ? {} : { cols: request.cols }),
@@ -1034,6 +1041,8 @@ export class RuntimeController {
     const page = await host.client.sessionHistoryPage(control.agentSessionId, {
       ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
       ...(options?.limit === undefined ? {} : { limit: options.limit }),
+      ...(options?.refreshNativeSource === undefined ? {} : { refreshNativeSource: options.refreshNativeSource }),
+      ...(options?.nativeSource === undefined ? {} : { nativeSource: options.nativeSource }),
       commandOverride: executor.command, args: executor.args, env: executor.env
     })
     if (this.hosts.get(control.hostId) !== host) {
@@ -1691,6 +1700,14 @@ export class RuntimeController {
         : { kind: 'terminal-run', runId: control.runId },
       config
     )
+  }
+
+  async confirmNativeSession(control: AgentSessionControl, input: AgentMuxNativeSessionConfirmationInput): Promise<AgentMuxNativeSessionConfirmation> {
+    if (control.kind !== 'agent' || control.agentSessionId !== input.agentSessionId || control.run.runId !== input.expectedRun.runId) {
+      throw new AgentMuxError('Native confirmation must target this exact Session and Run.', 'STALE_AGENT_SESSION')
+    }
+    const client = await this.connectedClient(control.hostId)
+    return await client.confirmAgentNativeSession(input)
   }
 
   /**

@@ -142,6 +142,10 @@ export type AgentMuxSpaceAgentFact = {
   cwd: string
   createOperationId: string | null
   initialPrompt: 'not-requested' | 'confirmed' | 'unconfirmed' | 'unknown'
+  agentMuxContext?: 'confirmed' | 'unconfirmed' | 'unknown'
+  creationPersistence?: 'unconfirmed'
+  creationFailure?: { step: 'session-commit' | 'hook-bind' | 'handshake'; code: string; message: string }
+  forkedFrom?: import('./agent-fork.js').AgentMuxAgentForkSource
 }
 export type AgentMuxSpaceMutationReport = {
   requestId: string
@@ -227,6 +231,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
       | { kind: 'new-agent'; executorId: string; prompt?: string }
+      | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       | { kind: 'agent-session'; agentSessionId: string };
       destination: AgentMuxSpaceDestination; focus: boolean;
       caller?: { agentSessionId: string; capability?: string } }

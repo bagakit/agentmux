@@ -498,6 +498,8 @@ export type AgentCapabilities = {
   timeline: 'unavailable' | 'complete-events' | 'streaming'
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
+  /** Native copies preserve their Provider context and receive a new conversation identity. */
+  providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
   /** Declared native immediate semantics; absence keeps ordinary prompt input available. */
   promptExecution?: { immediate: 'interrupt-before-input' | 'native-steer' }
@@ -631,9 +633,47 @@ export type AgentHookSubject = {
 }
 
 export type AgentNativeBinding = {
-  source: 'native-hook' | 'process-witness' | 'semantic-resume-target'
+  source: 'native-hook' | 'process-witness' | 'semantic-resume-target' | 'user-confirmed'
   run: AgentMuxRunRef
   observedAt: number
+}
+
+/** A bounded current-source observation on the original Session; absence is a quiet confirmed binding. */
+export type AgentNativeSourceObservation = {
+  state: 'changed' | 'unknown' | 'ambiguous'
+  run: AgentMuxRunRef
+  observedAt: number
+  reason: string
+}
+
+export type AgentMuxNativeSessionConfirmationInput = {
+  agentSessionId: string
+  expectedRun: AgentMuxRunRef
+  expectedNativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  candidateNativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  expectedObservationAt: number
+  operationId: string
+}
+
+/** The last explicit transition receipt preserves the old locator and unsettled interaction, not input authority. */
+export type AgentNativeSessionConfirmationReceipt = {
+  operationId: string
+  run: AgentMuxRunRef
+  previousNativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  nativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  observedAt: number
+  candidateObservedAt: number
+  previousInteraction?: AgentMuxPendingInteraction
+  /** Original prompt operation remains reconcilable, but cannot replay into this source. */
+  previousPromptSubmissionId?: string
+}
+
+export type AgentMuxNativeSessionConfirmation = {
+  session: AgentMuxAgentSession
+  confirmation: AgentNativeSessionConfirmationReceipt
+  persisted: true
+  /** False reconciles an older confirmed operation without changing today's binding. */
+  current: boolean
 }
 
 export type AgentHookReceipt = {
@@ -731,7 +771,9 @@ export type AgentSessionHistoryCollaboration =
 
 /** The durable locator for reading; deliberately carries no Run or input authority. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
-  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt'>
+  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt'> & {
+  previousNativeHandle?: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+}
 
 export type AgentSessionHistoryDescriptor = {
   agentSessionId: string
@@ -799,6 +841,8 @@ export type AgentSessionHistoryPageOptions = {
   requireCurrentSource?: true
   /** Cancel this bounded read, independently of the healthy Run or other readers. */
   signal?: AbortSignal
+  /** Read the original records retained by the latest explicit source confirmation. Never controls the Run. */
+  nativeSource?: 'previous'
   /** The host supplies its configured Executor invocation, as for create/resume. */
   commandOverride?: string
   args?: readonly string[]
@@ -947,6 +991,8 @@ export type AgentMuxAgentSession = {
   creation?: AgentMuxAgentCreationFact
   /** Exact user retirement from which this Run explicitly continued; not a guessed reason. */
   reopenedFrom?: { run: AgentMuxRunRef; source: 'user'; observedAt: number }
+  /** Exact ancestry of a native copy; it does not confer current source or input authority. */
+  forkedFrom?: import('./agent-fork.js').AgentMuxAgentForkSource
   /**
    * The chosen launch-option ids that fixed this Agent's security posture at spawn (sandbox, approval,
    * permission-mode — see agent-launch-option.ts). Persisted so a stop/resume re-resolves the SAME argv
@@ -995,6 +1041,10 @@ export type AgentMuxAgentSession = {
   nativeBinding?: AgentNativeBinding
   /** A confirmed process source that cannot silently replace a retained resume target. */
   observedNativeHandle?: AgentNativeSessionHandle
+  nativeSourceObservation?: AgentNativeSourceObservation
+  nativeConfirmation?: AgentNativeSessionConfirmationReceipt
+  /** Original confirmed operation facts; the Provider still has only one current conversation. */
+  nativeConfirmationHistory?: AgentNativeSessionConfirmationReceipt[]
   nativePromptPredecessor?: AgentNativePromptPredecessor
   hookReceipt?: AgentHookReceipt
   /**
@@ -1008,7 +1058,14 @@ export type AgentMuxAgentSession = {
 
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
+  /** Complete authenticated creation intent hash; no raw launch secrets are persisted. */
+  intentDigest?: string
+  /** The actual Run is kept while its Session commit cannot be confirmed. */
+  persistence?: 'unconfirmed'
+  failure?: { step: 'session-commit' | 'hook-bind' | 'handshake'; code: string; message: string }
   initialPrompt: 'not-requested' | 'confirmed' | 'unconfirmed' | 'unknown'
+  /** Delivery of this creation's AgentMux reminder, separately from a user prompt. */
+  agentMuxContext?: 'confirmed' | 'unconfirmed' | 'unknown'
 }
 
 /** Original message segments and verified authors captured before Input dispatch. */
@@ -1640,6 +1697,9 @@ export type AgentProviderResumeContext = {
   env: Readonly<Record<string, string>>
   commandOverride?: string
 }
+
+/** Current-conversation native fork uses the same launch inputs as resume, with a new identity. */
+export type AgentProviderForkContext = AgentProviderResumeContext
 
 export type NativeHookEnvelope = {
   receiptId: string

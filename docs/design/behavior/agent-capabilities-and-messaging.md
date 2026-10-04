@@ -14,6 +14,7 @@
 - [Agent 已经这样多久了](#agent-已经这样多久了)
 - [Provider Launch Option](#provider-launch-option)
 - [Provider 能力对齐与移植边界](#provider-能力对齐与移植边界)
+- [同一 Run 内的原生会话切换](#同一-run-内的原生会话切换)
 - [注意力处理与结果审查闭环](#注意力处理与结果审查闭环)
 - [Agents 入口与 Activity 详情归一](#agents-入口与-activity-详情归一)
 - [Agents、队列与 Message Tools](#agents队列与-message-tools)
@@ -139,6 +140,18 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 已知合法空原生 reasoning 采用既有“未记录思考文字”的轻量折叠呈现，保原记录身份、顺序与时间；未解释的附带内容仍可读，不把协议元数据铺成思考正文。 原生公开说明的阶段与协作结构只由 Provider 的正式记录解释，并沿同一公共 History item 保全；阶段缺失或未知不从正文、位置或时间猜。公开进度说明与正式回答可区分，但不等同隐藏推理、任务完成或作者认证。原生协作保原步骤 ID、sender／receiver native 引用、操作状态与目标最后已知状态，彼此不替代；native Agent 引用不能冒 AgentMux Session／Run 或当前 Runtime 状态。未知结构和附带内容仍完整可读、可复制，不增加另一套来源、身份 registry、记录缓存或轮询。阶段与协作的共同呈现只见[《可复用对话与 Workflow 表面组件》](conversation-input.md#可复用对话与-workflow-表面组件)。
 
 `sessionHistoryPage` 的 `refreshNativeSource: true` 仍可在当前来源核对失败时保留读取原耐久来源；这不证明当前会话已刷新。需要据当前来源作自动操作判断的调用者可同时指定 `requireCurrentSource: true`，由原 Provider discovery 与同 Run、进程、来源见证在读前和返回前核验。无法确认只拒绝这一次严格读，不阻断健康输入、普通 History 读取或原已保存安排。`signal` 取消本次有界读及其见证，不关闭 Run 或其他消费者；旧游标不能用于当前来源刷新。
+
+## 同一 Run 内的原生会话切换
+
+Provider 的统一会话模型始终指向一个当前与用户交互的原生会话。同 Run 的这份 conversation binding 可以变化；Provider 解释当前、已改变、未知或含糊的原生依据，Core 持有绑定转换、旧语义资格的来源隔离与历史保全，Region 不因此替换 Run。fork 的来源和 ancestry 可作为已有事实的可选元信息，不成为 Client 操作当前会话的前提，也不将公共 Provider 模型提升为原生 Session 树。已存在的单一主来源及当下有效性见证沿原 Provider 接缝复用，子任务观察不另造当前主会话或 Runtime。
+
+在同一 Region 的健康原生 CLI 内新建、fork 或恢复另一原生会话时，AgentMux 必须可靠区分 Provider 原生来源是否改变，不能因 AgentMux Session／Run 未变继续把旧来源的状态、用量、交互或历史当成当前事实。转换依据由 Provider 解释真实当前主主体与原生协议，Core 在原 Session 绑定中持有确认、候选与未知；Client 不按 slash 命令、终端正文、cwd 或到达次序猜身份。无法确认时保留原来源、可读历史、工作面和健康输入，并持续说明未确认步骤及恢复动作。
+
+已确认来源变化或待确认的可信候选须在该 Region 的右上 Agent 信息入口可见，展开能辨原绑定、候选、确认范围及可执行动作。可靠自动确认暂不可成立时，允许以就地提醒和用户明确点击采用准确候选完成切换；人工确认必须绑定当前 Host、AgentMux Session、Run、原来源与本次候选，过期、冲突或未知的那一次操作如实拒绝，不能顺带关闭健康 Agent。读取历史、Refresh、普通 Hook 或恢复握手不隐式替换用户明确选择的 Level B 原生目标；明确选择新源也不能伪称原目标已经恢复。
+
+确认新来源不启动、停止或重建原 Run，不改变执行 cwd、空间身份、布局或未发送稿。旧来源的 pending interaction、回答、readiness 和输入资格不能借同一 Run 留到新来源；旧 Hook、观察回调、分页游标与迟到保存不能覆盖新事实。在途及 unknown Input 继续沿原 operation 和真实受据核对，不自动重放或把未知当作未发生；旧记录仍按原来源可读，新源采用自己的窗口和游标。原生 ID 确认与记录可读／持久确认分别表达，候选尚无记录时不能借旧路径拼造可恢复身份。公共确认、发现和回执复用同一 Core owner，GUI 与 Agent 使用同一目标、权限和结果合同。
+
+连续确认保留同一 Session 的原操作回执与来源定位，当前绑定仍只有一个。重复历史 operation 只核对那次已持久确认的结果，并明确它是否仍是当前确认；不会重新切换来源。旧来源的 unknown 权限回答和输入事实仍可检查，不因后续确认被覆盖。默认旧历史入口读取最近一次确认的前来源，更早定位留在原回执中。
 
 ## 注意力处理与结果审查闭环
 

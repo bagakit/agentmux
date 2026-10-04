@@ -7,6 +7,7 @@ import {
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
+  type AgentMuxPreparedCreation,
   type AgentMuxRecoverableStopOperation,
   type AgentMuxRetiredAgentSession
 } from './agent-session-store.js'
@@ -234,6 +235,28 @@ export class AgentMuxAgentSessionRegistry {
 
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession) {
     return await this.store.prepareReopen(reservation, session)
+  }
+
+  async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation) {
+    return await this.store.prepareCreate(reservation, seed)
+  }
+
+  async claimCreate(agentSessionId: string, operationId: string, intentDigest: string) {
+    return await this.store.claimCreate(agentSessionId, operationId, intentDigest, {
+      ownerId: this.lifecycleOwnerId, ownerPid: process.pid, now: Date.now(),
+      expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs
+    })
+  }
+
+  /** Actual started Run projection; its durable prepared seed remains until commit is confirmed. */
+  rememberStartedCreation(value: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
+    const session = normalizeStoredAgentSession(value), previous = this.sessions.get(session.agentSessionId)
+    if (!session.creation?.intentDigest || !session.forkedFrom ||
+      previous && !sameRun(previous.run, session.run)) throw new AgentMuxError('Unconfirmed creation does not match the retained real Run.', 'STALE_AGENT_SESSION')
+    this.assertAvailable(session)
+    if (previous) this.forget(previous)
+    this.remember(session)
+    return this.get(session.agentSessionId)
   }
 
   async releaseReopenOwner(): Promise<void> {

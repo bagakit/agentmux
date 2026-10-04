@@ -180,6 +180,12 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
         const agent = actual.agent as Record<string, unknown>
         if (request.content.kind === 'agent-session' && agent.agentSessionId !== request.content.agentSessionId ||
           request.content.kind === 'new-agent' && agent.executorId !== null && agent.executorId !== request.content.executorId) fail()
+        if (request.content.kind === 'fork-agent') {
+          const origin = agent.forkedFrom as typeof request.content.source | undefined, expected = request.content.source
+          if (agent.agentSessionId === expected.agentSessionId || !origin || origin.agentSessionId !== expected.agentSessionId ||
+            origin.expectedRun.runId !== expected.expectedRun.runId || origin.expectedNativeHandle.providerId !== expected.expectedNativeHandle.providerId ||
+            origin.expectedNativeHandle.sessionId !== expected.expectedNativeHandle.sessionId || origin.expectedNativeHandle.transcriptPath !== expected.expectedNativeHandle.transcriptPath) fail()
+        }
       }
       break
     case 'space.inspect':

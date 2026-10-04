@@ -64,6 +64,8 @@ Endpoint, Host route and execution identity are separate:
 --host on commands that support it selects a Host ID known to that service; it is not an SSH address.
 local means the receiving Core service's own machine, including when that service is remote.
 agent ls and agent inspect return routeHostId for that service and retain session.hostId unchanged.
+Provider turn failures appear in status.session.semanticStatus.failure with code, message, recovery and available native evidence.
+An error status does not imply that its Run exited; ordinary input follows the current Run and readiness facts.
 Use routeHostId with agent context --host; its hostId is the route and sourceHostId is the original source.
 Keep the same endpoint for discovery and follow-up. Host IDs are not global machine IDs.
 

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -30,6 +30,9 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     expect(ordinary.length).toBeGreaterThan(0)
     const graph = parseAgentMuxSpatialGraph({ spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} })
     const stdinByMethod: Record<string, string> = {
+      'agent.native.confirm': JSON.stringify({ agentSessionId: 'SID', expectedRun: { runId: 'RUN' },
+        expectedNativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'before' },
+        candidateNativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'current' }, expectedObservationAt: 1, operationId: 'NATIVE' }),
       'space.commit': JSON.stringify(graph),
       'browser.task.batch': JSON.stringify({ parameters: { fresh: 'input' }, items: [{ id: 'ITEM', parameters: { fresh: 'item' } }] }),
       'browser.task.run': JSON.stringify({ fresh: 'input' })
@@ -64,7 +67,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       ['settings', 'set', 'client.label', '--help'],
       ['settings', 'browser-links', 'forget', ''],
       ['space', 'inspect', '--operation-id', 'O1'],
-      ['agent', 'open', '--project', 'P', '--source-workspace', 'W', '--space', 'S', '--new-zone', '--directory', ' ' + upstreamFixturePath("literal directory") + ' ', '--new-tab', '--executor', 'E', '--prompt', '--help', '--operation-id', 'OPEN'],
+      ['agent', 'open', '--project', 'P', '--source-workspace', 'W', '--space', 'S', '--new-zone', '--directory', ' ' + fixturePath("literal directory") + ' ', '--new-tab', '--executor', 'E', '--prompt', '--help', '--operation-id', 'OPEN'],
       ['settings', 'prompts', 'update', '--help', '--input', fixture.inputPath]
     ]
     for (const args of cases) {
@@ -76,7 +79,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       { operationId: 'M1', target: { kind: 'agent-session', agentSessionId: 'constructor' }, text: '--help' },
       { id: '--help' }, { key: 'client.label', value: '--help' }, { input: { scheme: '' } }, { target: { operationId: 'O1' } },
       { operationId: 'OPEN', content: { kind: 'new-agent', executorId: 'E', prompt: '--help' }, destination: {
-        spaceId: 'S', newTab: true, newZone: { kind: 'directory', projectId: 'P', sourceWorkspaceId: 'W', path: ' ' + upstreamFixturePath("literal directory") + ' ' }
+        spaceId: 'S', newTab: true, newZone: { kind: 'directory', projectId: 'P', sourceWorkspaceId: 'W', path: ' ' + fixturePath("literal directory") + ' ' }
       }, focus: false }, { id: '--help', input: { changes: { name: 'raw' }, expected: { name: 'before' } } }
     ])
     const taskArgs = ['browser', 'task', 'run', '--browser', '--help', '--asset', 'constructor', '--version', '2', '--step', '--run', '--help']
@@ -187,11 +190,11 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       process: pending, app: pending, runtime: pending, main: pending, renderer: pending }
     const tool = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: 'TOOL',
       definition: { id: 'TOOL', revision: 'r', name: 'Fixture', icon: 'terminal', enabled: true,
-        statusBar: 'icon', workspacePath: upstreamFixturePath("fixture"), script: "console.log('fixture')", args: [], actions: [] },
+        statusBar: 'icon', workspacePath: fixturePath("fixture"), script: "console.log('fixture')", args: [], actions: [] },
       state: 'idle', reason: null, admission: null, latestConfirmed: null, consumerCount: 0, sequence: 1 }
     for (const entry of streamEntries) for (const followed of entry.method === 'agent.output' ? [false, true] : [false]) {
       const initial = entry.method === 'agent.output'
-        ? { session: { kind: 'agent', agentSessionId: 'SID', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: upstreamFixturePath("fixture"),
+        ? { session: { kind: 'agent', agentSessionId: 'SID', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("fixture"),
           run: { runId: 'RUN' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }, run: { runId: 'RUN', state: 'running', latestOutputBytes: 10 },
           terminal: { type: 'not-requested' }, resizeRevision: 0, gap: { requestedAfterByte: 0, firstAvailableByte: 5 } }
         : entry.method === 'browser.follow' ? { runOperation: null, gap: { droppedThrough: 3 } }

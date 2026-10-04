@@ -29,6 +29,11 @@ const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 /** Bound the optional initial-composer observation; expiry never disables prompt input. */
 const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
 
+function promptBelongsToPreviousNativeSource(session: AgentMuxAgentSession, submissionId: string): boolean {
+  return [session.nativeConfirmation, ...(session.nativeConfirmationHistory ?? [])]
+    .some(receipt => receipt?.previousPromptSubmissionId === submissionId)
+}
+
 function promptFailureCauseDetail(error: unknown): string {
   const cause = error instanceof AgentMuxError
     ? { code: error.code, name: error.name, message: error.message, ...(error.detail === undefined ? {} : { detail: error.detail }),
@@ -337,6 +342,12 @@ export class AgentPromptSubmissionCoordinator {
     assertSession?: (session: AgentMuxAgentSession) => void,
     transportQualification?: AgentPromptTransportQualification
   ): Promise<void> {
+    if (promptBelongsToPreviousNativeSource(session, submissionId)) {
+      // A known acknowledgement is a receipt-only retry. Never re-enter the old input plan.
+      if (session.promptCompletionAdmission?.submissionId === submissionId && session.promptCompletionAdmission.acknowledged === true ||
+        session.terminalPromptSubmission?.submissionId === submissionId && session.terminalPromptSubmission.submit.acknowledged === true) return
+      throw new AgentMuxError('This original prompt belongs to the previous native conversation. Its operation and receipt are retained; it will not replay into the current source. Raw Agent input remains available.', 'AGENT_PROMPT_SOURCE_CHANGED')
+    }
     let confirmedFutureIdle = false
     if (expectedFutureIntent !== undefined && session.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(session)) {
       const provider = this.deps.providers.get(session.providerId)
@@ -369,6 +380,7 @@ export class AgentPromptSubmissionCoordinator {
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     }
     const assertAdmission = (current: AgentMuxAgentSession): void => {
+      if (promptBelongsToPreviousNativeSource(current, submissionId)) throw new AgentMuxError('Native conversation changed before prompt admission.', 'AGENT_PROMPT_SOURCE_CHANGED')
       if (signal?.aborted) throw agentMuxCancellationError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED', signal.reason)
       const preclaim = transportQualification?.protocolInput?.preclaim
       if (preclaim && !preclaim.claimStarted && renderSignal?.aborted && renderSignal.reason === preclaim.interruption) {

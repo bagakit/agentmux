@@ -53,7 +53,7 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext): Prom
   }
   // One process can hold the same main record under several descriptors.
   const unique = new Map(main.map(value => [JSON.stringify([value.id, value.file.path, String(value.file.device), String(value.file.inode)]), value]))
-  if (unique.size > 1) throw unavailable('Several main native sessions are open; the target is ambiguous.')
+  if (unique.size > 1) throw new AgentMuxError('Several main native sessions are open; the target is ambiguous.', 'AGENT_NATIVE_IDENTITY_AMBIGUOUS')
   const original = unique.values().next().value
   if (!original) return null
   const family = new Set([original.id])

@@ -124,7 +124,11 @@ it('requires a fresh current witness for automatic reads while ordinary retained
  expect(retained.source.nativeSessionId).toBe('retained-old')
  await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })).rejects.toThrow('Current source observation unavailable')
  expect((await f.read()).source.nativeSessionId).toBe('retained-old')
- expect(await readFile(join(f.root, 'sessions.json'))).toEqual(bytes)
+ const saved = JSON.parse(await readFile(join(f.root, 'sessions.json'), 'utf8')).sessions[0]
+ const original = JSON.parse(bytes.toString()).sessions[0]
+ expect(saved).toMatchObject({ ...original, updatedAt: expect.any(Number),
+  nativeSourceObservation: { state: 'unknown', run: original.run, reason: 'current-main-unconfirmed', observedAt: expect.any(Number) } })
+ expect(saved.nativeHandle).toEqual(original.nativeHandle)
  expect((await f.kernel.status(RUN)).state.type).toBe('running')
  expect(discover).toHaveBeenCalledTimes(2)
 })
@@ -311,7 +315,10 @@ it.each(['absent','throw','several mains','only child','unknown metadata','missi
  const observer=await succeeds(f.client.observeSessionHistory(SID,()=>{},f.options)),page=await succeeds(f.read())
  expect(page.source.nativeSessionId).toBe('retained-old');expect(observer.source).toEqual(page.source)
  expect(page.items[0]?.id).toBe('old-final')
- expect(f.client.agentSession(SID)).toEqual(original)
+ const after=f.client.agentSession(SID),{nativeSourceObservation:observation,updatedAt:_updated,...facts}=after
+ const {updatedAt:_originalUpdated,...originalFacts}=original
+ expect(facts).toEqual(originalFacts)
+ expect(observation).toMatchObject({state:kind==='several mains'?'ambiguous':'unknown',run:original.run})
  expect(f.events.some(event=>event.type==='agent-error' && event.code==='AGENT_NATIVE_SOURCE_UNCONFIRMED')).toBe(true)
  observer.dispose()
 })
@@ -476,6 +483,15 @@ it('invalidates the original temporary observation after durable B then durable 
   expect(durableB.source.nativeSessionId).toBe(NATIVE)
   expect((await loadAgentSessions(f.store))[0]!.nativeHandle?.sessionId).toBe(NATIVE)
 
+  const pendingA = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
+  expect(pendingA.source.nativeSessionId).toBe(NATIVE)
+  const observed=f.client.agentSession(SID)
+  expect(observed.observedNativeHandle?.sessionId).toBe('retained-old')
+  await f.client.confirmAgentNativeSession({agentSessionId:SID,expectedRun:observed.run,
+    expectedNativeHandle:observed.nativeHandle as Extract<NonNullable<typeof observed.nativeHandle>,{kind:'provider'}>,
+    candidateNativeHandle:observed.observedNativeHandle as Extract<NonNullable<typeof observed.nativeHandle>,{kind:'provider'}>,
+    expectedObservationAt:observed.nativeSourceObservation!.observedAt,operationId:'exact-aba-confirm'})
+  pendingA.dispose()
   const currentA = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
   expect(currentA.source.nativeSessionId).toBe('retained-old')
   expect((await loadAgentSessions(f.store))[0]!.nativeHandle?.sessionId).toBe('retained-old')

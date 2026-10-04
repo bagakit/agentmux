@@ -1,6 +1,6 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile, symlink, mkdir } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -12,10 +12,10 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 
 function graph(): AgentMuxSpatialGraph {
   return {
-    spaces:['a','b'].map(spaceId => ({spaceId,kind:'topic',name:spaceId,hostId:'host',directoryPath:upstreamFixturePath("project/")+spaceId,projectId:'project'})),
-    zones:[{zoneId:'zone',workspaceId:'resource',kind:'directory',hostId:'host',directoryPath:upstreamFixturePath("project"),branch:null}],
+    spaces:['a','b'].map(spaceId => ({spaceId,kind:'topic',name:spaceId,hostId:'host',directoryPath:fixturePath("project/")+spaceId,projectId:'project'})),
+    zones:[{zoneId:'zone',workspaceId:'resource',kind:'directory',hostId:'host',directoryPath:fixturePath("project"),branch:null}],
     tabs:[{tabId:'tab',zoneId:'zone',workspaceId:'resource',name:null,regionIds:['agent','browser']}],
-    regions:[{regionId:'agent',tabId:'tab',kind:'agent',agentSessionId:'original-session',runId:'original-run',execution:{hostId:'host',cwd:upstreamFixturePath("execution")}},
+    regions:[{regionId:'agent',tabId:'tab',kind:'agent',agentSessionId:'original-session',runId:'original-run',execution:{hostId:'host',cwd:fixturePath("execution")}},
       {regionId:'browser',tabId:'tab',kind:'browser',agentSessionId:null,runId:null,execution:null}],
     bindings:[{zoneId:'zone',spaceId:'a'},{zoneId:'zone',spaceId:'b'}],
     layouts:{resource:createWorkspaceLayout('g',['tab']),foreign:createWorkspaceLayout('other',['tab'])},
@@ -33,7 +33,6 @@ afterEach(async () => { for (const server of servers.splice(0)) await server.sto
 let cli: string, worker: string
 beforeAll(async () => {
   const output = resolve('.tmp/durable-spatial-index')
-  await mkdir(output, { recursive: true })
   await symlink('../../packages/core/node_modules',join(output,'node_modules'),'dir').catch(error => { if(error.code !== 'EEXIST') throw error })
   cli = join(output,'cli.mjs'); worker = join(output,'worker.mjs')
   const compiled = await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',metafile:true,logLevel:'silent'})
@@ -84,7 +83,7 @@ describe('Core durable spatial owner without an App',() => {
   it('finds original Zone members even when there is no display location',() => {
     const g=graph();g.layouts={}
     const catalog=spatialCatalog(g,{zoneId:'zone'})
-    expect(catalog.tabs).toEqual(g.tabs.map(tab => ({ ...tab, nameRevision: 0 })));expect(catalog.regions).toEqual(g.regions);expect(catalog.locations).toEqual([])
+    expect(catalog.tabs).toEqual(g.tabs);expect(catalog.regions).toEqual(g.regions);expect(catalog.locations).toEqual([])
   })
   it('preserves the same Tab in two Groups and returns every occurrence without arbitration',async () => {
     const {store}=await fixture();const g=graph();g.layouts.resource={root:{type:'split',direction:'horizontal',ratio:0.5,first:{type:'leaf',groupId:'g'},second:{type:'leaf',groupId:'second'}},groups:[...g.layouts.resource!.groups,{id:'second',tabOrder:['tab'],recentTabIds:[],activeTabId:'tab'}],activeGroupId:'g'}
@@ -118,7 +117,7 @@ describe('Core durable spatial owner without an App',() => {
     const unbound=await run(cli,['space','unbind','--zone','zone','--space','a'],env)
     expect(unbound.code,unbound.stderr).toBe(0);expect((await store.read())!.graph.bindings).toEqual([{zoneId:'zone',spaceId:'b'}])
     const listed=await run(cli,['space','ls','--zone','zone'],env)
-    expect(listed.code,listed.stderr).toBe(0);expect(listed.result.result.catalog.tabs).toEqual(graph().tabs.map(tab => ({ ...tab, nameRevision: 0 })))
+    expect(listed.code,listed.stderr).toBe(0);expect(listed.result.result.catalog.tabs).toEqual(graph().tabs)
     expect((await store.read())!.graph.regions[0]).toEqual(graph().regions[0])
   })
 })

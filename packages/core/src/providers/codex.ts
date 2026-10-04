@@ -172,6 +172,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, replyCorrelation: 'none',
+        providerFork: { current: true },
         promptExecution: { immediate: 'native-steer' },
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
@@ -206,6 +207,12 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,
+    buildForkArgs: (sessionId, _transcriptPath, prompt, args) => [
+      'fork', sessionId,
+      ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
+      ...(prompt ? [prompt] : []),
+      ...args
+    ],
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       'resume', sessionId,
       ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),

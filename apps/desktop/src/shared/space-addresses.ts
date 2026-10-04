@@ -1,4 +1,5 @@
 import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, TopicCategory } from '@agentmux/core/control'
+import type { AgentMuxAgentForkSource } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicPhysicalPath } from './scratch-topics'
 import { categorySpaceFact, isKnowledgeTopic, UNCLASSIFIED_TOPIC_CATEGORY_ID } from './topic-categories'
@@ -89,6 +90,8 @@ export type SpatialRequestBinding = {
   }
   /** An explicit message recipient reference, never a payload or delivery receipt. */
   recoveryRecipient?: { hostId: string; agentSessionId: string; topicId: string; tabId: string; regionId: string }
+  /** Exact source of this admitted fork, including before a new Session can be observed. */
+  forkSource?: AgentMuxAgentForkSource
   from?: AgentMuxSpaceAddress
   target: Pick<AgentMuxSpaceDestination, 'spaceId' | 'zoneId' | 'tabId' | 'regionId' | 'displayWorkspaceId' | 'groupId'>
   resource?: { hostId: string; path: string; kind: 'directory' | 'worktree'; branch: string | null; sourceWorkspaceId: string }

@@ -1,5 +1,6 @@
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentForkSource } from './agent-fork.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { isSplitDirection } from './split-direction-ssot.js'
@@ -167,12 +168,17 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'prompt', 'agentSessionId'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'prompt', 'agentSessionId', 'source'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
       fields(input, ['kind', 'executorId', 'prompt'], code)
       content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code),
+        ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
+    } else if (input.kind === 'fork-agent') {
+      fields(input, ['kind', 'source', 'prompt'], code)
+      if (target.newZone) fail('Fork preserves its source execution directory; select an existing destination.', code)
+      content = { kind: 'fork-agent', source: parseAgentForkSource(input.source),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
     } else if (input.kind === 'agent-session') {
       fields(input, ['kind', 'agentSessionId'], code)
@@ -345,11 +351,19 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
-    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt'], code)
+    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
       providerId: nullableId(item.providerId, 'Provider', code), executorId: nullableId(item.executorId, 'Executor', code), hostId: spaceControlId(item.hostId, 'Host', code),
       cwd: string(item.cwd, 'Execution cwd', code), createOperationId: nullableId(item.createOperationId, 'Creation operation', code),
-      initialPrompt: member(item.initialPrompt, ['not-requested', 'confirmed', 'unconfirmed', 'unknown'], 'Initial prompt', code) }
+      initialPrompt: member(item.initialPrompt, ['not-requested', 'confirmed', 'unconfirmed', 'unknown'], 'Initial prompt', code),
+      ...(item.agentMuxContext === undefined ? {} : { agentMuxContext: member(item.agentMuxContext, ['confirmed', 'unconfirmed', 'unknown'], 'AgentMux identity reminder', code) }),
+      ...(item.creationPersistence === undefined ? {} : { creationPersistence: member(item.creationPersistence, ['unconfirmed'], 'Creation persistence', code) }),
+      ...(item.creationFailure === undefined ? {} : { creationFailure: (() => {
+        const failure = fields(item.creationFailure, ['step', 'code', 'message'], code)
+        return { step: member(failure.step, ['session-commit', 'hook-bind', 'handshake'], 'Creation step', code),
+          code: string(failure.code, 'Creation failure code', code), message: string(failure.message, 'Creation failure message', code) }
+      })() }),
+      ...(item.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(item.forkedFrom) }) }
   })()
   const resource = source.resource === null ? null : (() => {
     const item = fields(source.resource, ['projectId', 'sourceWorkspaceId', 'hostId', 'path', 'workspaceId', 'kind', 'branch'], code)

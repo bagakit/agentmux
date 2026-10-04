@@ -46,7 +46,8 @@ it.each([
 })
 it('validates a generic native-steer contribution at definition and runtime without changing default', () => {
  const original = new AgentProviderRegistry().get('codex')
- const definition: AgentProviderDefinition = {catalog: {...original.catalog, id: 'generic-steer', hookStrategy: {kind: 'none'}},
+ const { providerFork: _fork, ...capabilities } = original.catalog.capabilities
+ const definition: AgentProviderDefinition = {catalog: {...original.catalog, capabilities, id: 'generic-steer', hookStrategy: {kind: 'none'}},
   hook: {rules: []}, buildArgs: (_, args) => [...args], terminalPromptRender: original.terminalPromptRender!,
   planPromptInput: prompt => ({kind: 'render-then-submit',payload: prompt,renderedText: prompt,submit: '\r'}),
   inspectPromptExecution: () => 'interruptible', readPromptExecutionEvidence: async () => ({sourceId: 'source',id: 'working',state: 'working'}),
