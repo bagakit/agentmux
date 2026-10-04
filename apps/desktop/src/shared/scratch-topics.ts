@@ -80,6 +80,8 @@ Do not create an empty Goal before the proposed requirement is understood and co
 
 Read "$AGENTMUX_CLI" --skill, "$AGENTMUX_CLI" mote playbook pmo and the relevant command help before acting. The public app snapshot, Settings workspace registration, Goal update/binding, Agent open/input and receipt inspection capabilities are the route; do not invent commands. Desktop goal start and goal assign --start can launch or deliver to an execution Agent, so inspect their actual Session and delivery facts before repeating. A domain-only metadata command or an assignment alone is not equivalent to that execution. Authorization to carry out a bounded attempt is separate from the person's goal confirmation and result acceptance; do not demand the latter as a replacement for authorization already given.
 
+For everyday collaboration, offer a few worthwhile ideas grounded in the user's current direction, confirmed original notes, linked Goals and the exact discussion context that is actually available. Explain relevance, source, scope and a concrete next step; distinguish proposals from facts and unknowns. Use explicit feedback and saved cooperation preferences for later suggestions without inferring global preferences from a passing remark. Keep follow-ups brief and timely; read relevant original materials before repeating a settled question. Discussion or read-only research does not authorize external messages, purchases, schedules or writes.
+
 Current user instructions and authoritative Runtime, permission, Session, Project, Goal and Run facts take precedence over this default role, saved personality and Topic history. Keep healthy Agents, existing files and work surfaces available. Do not invent an identity, capability, assignment or successful delivery.`
 
 export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# Mote Guide
@@ -115,6 +117,8 @@ export type ScratchTopicSnapshot = {
   topicPath: string
   title: string
   summary: string
+  /** Confirmed independently of optional detail reads; absent means unconfirmed. */
+  kind?: 'mote' | 'topic'
   soul?: { path: string; content: string; version: string }
   moteArchive?: MoteArchiveState
   readError?: string
@@ -124,6 +128,10 @@ export type ScratchTopicSnapshot = {
 
 /** Read-only original directory authority; independent of Topic/SOUL sidecar contents. */
 export type ScratchDirectoryFact = Pick<ScratchTopicSnapshot, 'id' | 'identityDirectoryPath' | 'physicalDirectoryPath' | 'confirmedDirectoryPaths' | 'readError'>
+
+export type ScratchTopicList = ScratchTopicSnapshot[] & { issues?: string[] }
+/** Plain envelope survives Electron IPC and contextBridge; list attributes do not. */
+export type ScratchTopicListResponse = { topics: ScratchTopicSnapshot[]; issues: string[] }
 
 export type TopicWikiSnapshot = {
   path: string
@@ -193,7 +201,8 @@ export function scratchWorkspaceFilePath(workspace: { id: string; path: string }
   const id = scratchTopicIdFromDirectoryName(name!)
   if (!id) return directoryChild(workspace.path, path)
   const topic = topics?.find(item => item.id === id)
-  if (!topic || topic.readError) return null
+  if (!topic || topic.readError && (!topic.physicalDirectoryPath ||
+      !topic.confirmedDirectoryPaths?.includes(topic.physicalDirectoryPath))) return null
   const physical = scratchTopicPhysicalPath(workspace, topic)
   return parts.length ? directoryChild(physical, parts.join('/')) : physical
 }

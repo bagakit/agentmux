@@ -1,5 +1,5 @@
 import { Check, Copy, SquareDashed, TerminalSquare } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { AgentAvatarAppearance, AgentExecutorConfig, SessionHistoryReference } from '../../../shared/contracts'
 import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -9,13 +9,14 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
-export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, visible = true }: {
+export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, actions, visible = true }: {
   phase: 'launch' | 'restore' | 'connect'
   surfaceKind: 'agent' | 'terminal'
   request?: PendingAgentLaunch['request']
   executor?: AgentExecutorConfig | undefined
   appearance?: AgentAvatarAppearance | undefined
   session?: SessionHistoryReference | undefined
+  actions?: ReactNode
   visible?: boolean
 }) {
   const [copying, setCopying] = useState(false)
@@ -45,6 +46,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
     eyebrow={phase === 'launch' ? 'Launch request' : 'Session connection'}
     title={title}
     detail={detail}
+    actions={actions}
     supplement={<div className="session-connecting__body">
       {surfaceKind === 'agent' ? <div className="session-connecting__executor">
         {executor

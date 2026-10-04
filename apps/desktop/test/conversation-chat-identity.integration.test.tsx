@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -8,7 +9,7 @@ import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { api } from '../src/renderer/src/lib/api'
 import type { AgentSessionControl } from '../src/shared/contracts'
@@ -67,9 +68,8 @@ it('uses recorded peer identity and the user display default in the actual Activ
 
 it('keeps native attribution unknown while History presents the same user appearance', async () => {
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
-  await act(async () => root.render(<SessionHistoryView control={control} label="Implementation" visible themeId="graphite" fontSize={12}
-    workspaceRoot={_hygiene_fixturePath("private")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
-  expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(e => e.dataset.historyItemId)).toEqual(['native-input', 'native-answer', 'native-activity'])
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: control, label: "Implementation", visible: true, workspaceRoot: _hygiene_fixturePath("private"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
+  expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(e => e.dataset.nativeRecordId)).toEqual(['native-input', 'native-answer', 'native-activity'])
   const native = host.querySelector<HTMLElement>('[data-message-id="native-input"]')!
   expect(native.dataset.speakerRole).toBe('human')
   expect(native.querySelector('.log-turn__who')?.textContent).toBe('You')

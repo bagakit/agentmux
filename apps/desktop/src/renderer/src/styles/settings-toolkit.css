@@ -146,20 +146,26 @@
 .toolkit-library__parent { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .toolkit-library__directory { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
-.toolkit-template__identity { display: flex; align-items: flex-start; gap: var(--sp-4); padding-block: var(--sp-4); }
-.toolkit-template__identity > svg { flex: none; margin-top: var(--sp-2); color: var(--green); }
-.toolkit-template__identity h3 { margin: 0 0 var(--sp-2); color: var(--text); font: 600 var(--fs-display)/1.4 var(--font-sans); }
-.toolkit-template__identity p { margin: 0; color: var(--text-2); line-height: 1.6; }
-.toolkit-template__source { max-height: 300px; overflow: auto; padding: var(--sp-4); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-meta)/1.6 var(--font-mono); }
 
-/* Creation has one clear leading action; starting points remain optional. */
-.toolkit-workbench__toolbar > button, .toolkit-template__adopt, .toolkit-workbench__empty > .toolkit-workbench__create { min-height: 32px; padding: var(--sp-3) var(--sp-4); }
-.toolkit-workbench__starting { color: var(--text-2); background: transparent; box-shadow: none; }
-.toolkit-workbench__starting:hover:not(:disabled) { color: var(--text); background: var(--wash-3); box-shadow: none; }
-.toolkit-workbench :is(.toolkit-workbench__create, .toolkit-workbench__starting, .toolkit-template__adopt):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+/* Creation has one clear leading action. */
+.toolkit-workbench__toolbar > button, .toolkit-workbench__empty > .toolkit-workbench__create { min-height: 32px; padding: var(--sp-3) var(--sp-4); }
+.toolkit-workbench .toolkit-workbench__create:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .toolkit-icon-picker summary:hover { border-color: var(--green-line); background: var(--green-bg); }
 .toolkit-icon-picker summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 @container toolkit-settings (width > 660px) {
-  .toolkit-workbench:is([data-creation-empty='true'], [data-starting-point='true']) .toolkit-workbench__toolbar > .toolkit-workbench__create { color: var(--text-2); background: transparent; box-shadow: none; font-weight: 560; }
-  .toolkit-workbench:is([data-creation-empty='true'], [data-starting-point='true']) .toolkit-workbench__toolbar > .toolkit-workbench__create:hover:not(:disabled) { color: var(--text); background: var(--wash-3); }
+  .toolkit-workbench[data-creation-empty='true'] .toolkit-workbench__toolbar > .toolkit-workbench__create { color: var(--text-2); background: transparent; box-shadow: none; font-weight: 560; }
+  .toolkit-workbench[data-creation-empty='true'] .toolkit-workbench__toolbar > .toolkit-workbench__create:hover:not(:disabled) { color: var(--text); background: var(--wash-3); }
 }
+
+.toolkit-package__identity { display: flex; gap: var(--sp-4); align-items: center; padding-block: var(--sp-3); }
+.toolkit-package__identity > span { display: grid; place-items: center; flex: none; width: 48px; height: 48px; border: 1px solid var(--green-line); border-radius: var(--radius-lg); color: var(--green); background: var(--green-bg); }
+.toolkit-package__identity h3 { margin: 0 0 var(--sp-1); color: var(--text); font: 600 var(--fs-display)/1.4 var(--font-sans); overflow-wrap: anywhere; }
+.toolkit-package__identity p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.toolkit-package__source { display: grid; gap: var(--sp-3); padding: var(--sp-5); min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.toolkit-package__source > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.toolkit-package__source > header > span { display: flex; align-items: center; gap: var(--sp-2); color: var(--text); font-size: var(--fs-body); font-weight: 550; }
+.toolkit-package__source p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.65; }
+.toolkit-package__source code, .toolkit-package__preview > small { color: var(--text-3); overflow-wrap: anywhere; font-size: var(--fs-meta); }
+.toolkit-package__source-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.toolkit-package__preview { min-width: 0; }
+.toolkit-package__preview .toolkit-result__script { margin-block: var(--sp-3); height: 220px; }

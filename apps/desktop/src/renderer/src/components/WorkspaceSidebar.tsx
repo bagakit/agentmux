@@ -1,4 +1,4 @@
-import { HostBadge } from './HostBadge'
+import { HostBadge, HostIcon } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import { projectGroupsFor } from '../lib/cross-device-project-groups'
@@ -10,9 +10,10 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { ProjectActivity } from './ProjectActivity'
+import { useDirectorySessions } from '../lib/workbench-session-subscriptions'
 import { Folders, Layers, Link2, Pin, Plus, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity } from '../../../shared/contracts'
+import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity, type WorkspaceRecord, type SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import {
   projectGroupKey,
@@ -49,7 +50,6 @@ function isPathInside(inner: string, outer: string): boolean {
 export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const displayPath = usePathDisplay()
   const config = useAppStore((state) => state.config)
-  const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
@@ -70,6 +70,11 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const [removing, setRemoving] = useState(false)
   const [query, setQuery] = useState('')
   const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
+  const iconInvoker = useRef<HTMLElement | null>(null)
+  function changeIcon(target: SpaceIconTarget): void {
+    iconInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setIconTarget(target)
+  }
   const filtering = Boolean(query.trim())
   const treeRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -103,28 +108,13 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     ))
     return { ...group, nodes: group.nodes.filter(({ project }) => hits.some(({ project: hit }) => hit.id === project.id || (hit.hostId === project.hostId && isPathInside(hit.repoPath, project.repoPath)))) }
   }).filter((group) => group.nodes.length > 0), [groups, filtering, query, config?.hosts])
-  // Build location buckets once. Rows and collapsed summaries only visit their own consumers.
-  const sessionsByProject = useMemo(() => {
-    const byLocation = new Map<string, typeof sessions>()
-    for (const session of sessions) {
-      const key = JSON.stringify([session.hostId, session.workspacePath])
-      const bucket = byLocation.get(key)
-      if (bucket) bucket.push(session)
-      else byLocation.set(key, [session])
-    }
-    return new Map(projects.map((project) => [project.id, [...new Map(project.workspaces.flatMap((workspace) =>
-      byLocation.get(JSON.stringify([workspace.hostId, workspace.path])) ?? []).map((session) => [session.id, session])).values()]]))
-  }, [sessions, projects])
-  const lastActivityByProject = useMemo(() => {
-    const now = Date.now()
-    return new Map([...sessionsByProject].map(([id, owned]) => [id, folderLastActivityAt(owned, now)]))
-  }, [sessionsByProject])
   const folderSections = useMemo(() => {
     const hostIds = [...new Set(['local', ...(config?.hosts.map(host => host.id) ?? []), ...projects.map(project => project.hostId)])]
     const remote = hostIds.some(id => id !== 'local')
     return hostIds.map(hostId => ({ hostId, key: folderSectionKey(hostId),
-      label: hostId === 'local' && !remote ? 'Folders' : config?.hosts.find(host => host.id === hostId)?.label ?? (hostId === 'local' ? 'This Mac' : hostId),
+      label: hostId === 'local' && !remote ? 'Folders' : hostIdentityProjection(hostId, config?.hosts.find(host => host.id === hostId)).label,
       projects: projects.filter(project => project.hostId === hostId),
+      workspaces: projects.filter(project => project.hostId === hostId).flatMap(project => project.workspaces),
       groups: shownGroups.filter(group => group.hostId === hostId)
     }))
   }, [config?.hosts, projects, shownGroups])
@@ -138,7 +128,8 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     const descendants = new Map(projectNodes.map(({ project }) => [project.id, [] as string[]]))
     for (const [id, parents] of ancestors) for (const parent of parents) descendants.get(parent)!.push(id)
     const groupKeys = new Map(groups.flatMap((group) => group.nodes.map((node) => [node.project.id, projectGroupKey(group)] as const)))
-    return { nodes, ancestors, descendants, groupKeys }
+    const rolledWorkspaces = new Map(projectNodes.map(({ project }) => [project.id, [project.id, ...descendants.get(project.id)!].flatMap(id => nodes.get(id)!.workspaces)]))
+    return { nodes, ancestors, descendants, groupKeys, rolledWorkspaces }
   }, [projectNodes, groups])
   const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
   // 密度是看法不是数据：缺席即默认档，读处一律 `?? 'default'`，不改树结构/归属/选中/滚动位置。
@@ -231,119 +222,120 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   }
 
   function projectRow({ project, depth }: ProjectRailNode) {
-    const target = folderSpaceIconTarget(project)
-    const manualIcon = icons[target.key] ?? null
-    const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId} folderIdentityKey={target.key}
-      manualIcon={manualIcon} lastActivityAt={manualIcon === null ? lastActivityByProject.get(project.id) ?? null : undefined}
-      visible={manualIcon === null ? visible : undefined} />
     const ancestors = projectRelations.ancestors.get(project.id) ?? []
     if (!filtering && ancestors.some((id) => collapsedProjectGroups[projectCollapseKey(id)] === true)) return null
     const parentKey = ancestors.at(-1) ?? projectRelations.groupKeys.get(project.id) ?? folderSectionKey(project.hostId)
     const descendants = projectRelations.descendants.get(project.id) ?? []
     const hasChildren = descendants.length > 0
     const collapsed = !filtering && collapsedProjectGroups[projectCollapseKey(project.id)] === true
-    const visibleProjectIds = collapsed ? [project.id, ...descendants] : [project.id]
-    const projectSessions = [...new Map(visibleProjectIds.flatMap((id) => sessionsByProject.get(id) ?? []).map((session) => [session.id, session])).values()]
-    const sessionCount = projectSessions.length
-    // Rolled up from the same Session projection the window bar and the tab dots read, so a
-    // collapsed project can no longer hide an Agent that is waiting on you.
-    const attention = rowAttention(projectSessions)
-    const attentionLabel = rowAttentionLabel(attention)
-    const producingCount = producingAgentCount(projectSessions)
-    const workingLabel = producingCount > 0
-      ? `${producingCount} ${producingCount === 1 ? 'Agent is' : 'Agents are'} working`
-      : null
-    const idleCount = idleAgentCount(projectSessions)
-    const idleLabel = idleCount > 0 ? `${idleCount} idle` : null
-    const rowStateLabel = [workingLabel, idleLabel, attentionLabel].filter(Boolean).join(' · ')
-    const countTitle = [
-      `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
-      `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
-      ...(rowStateLabel ? [rowStateLabel] : [])
-    ].join(' · ')
-    const memberships = projectGroupsFor(projectGroups, project.id)
-    const groupNames = memberships.map(group => group.name).join(', ')
-    const related = associations.related.get(project.id) ?? []
-    const active = project.id === activeProjectId
-    const preferred = project.id === activeProjectId
-      ? activeWorkspaceId
-      : project.preferredWorkspaceId
-    // 复制分支名只对 git worktree 有意义：一个聚合了多个 worktree 的 folder 项目本身没有单一分支。
-    // 取被这一行选中的那个 workspace 的 branch，没有就不给这一项。
-    const preferredWorkspace = project.workspaces.find((workspace) => workspace.id === preferred)
-    const branch = preferredWorkspace?.branch ?? null
-    const row = (
-      <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
-      {hasChildren ? <SpaceDisclosure icon={identity}
-        expanded={!collapsed} label={`${collapsed ? 'Expand' : 'Collapse'} ${project.name}`} disabled={filtering}
-        onToggle={() => toggleProjectGroup(projectCollapseKey(project.id))} /> : null}
-      <button
-        className={`project-rail-row ${hasChildren ? 'project-rail-row--disclosure ' : ''}${active ? 'project-rail-row--active' : ''}`}
-        data-project-group-reference={memberships.length ? memberships.map(group => group.groupId).join(' ') : undefined}
-        title={`${memberships.length ? `In ${groupNames}\n` : ''}${displayPath(project.repoPath, project.hostId)} · ${countTitle}`}
-        aria-label={[project.name, memberships.length ? `In ${groupNames}` : null, rowStateLabel].filter(Boolean).join(' · ')}
-        aria-current={active ? 'page' : undefined}
-        data-space-nav={project.id}
-        data-space-parent={parentKey}
-        data-space-expanded={hasChildren && !filtering ? !collapsed : undefined}
-        data-workspace-id={preferred ?? undefined}
-        data-space-icon-target={target.key}
-        {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
-        // 分类成员、路径聚合与真实目录层级相加；这里只报层数，像素归密度合同和样式表。
-        {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
-        {...(workingAgentCount(projectSessions) > 0 ? { 'data-running': 'true' } : {})}
-        onClick={() => {
-          if (!preferred) return
-          const keepBoardOpen = mainSurface === 'board'
-          void selectWorkspace(preferred).then(() => {
-            if (keepBoardOpen) setMainSurface('board')
-          })
-        }}
-      >
-        {hasChildren ? null : identity}
-        <span className="project-rail-row__identity">
-          <strong>{project.name}</strong>
-
-        </span>
-      </button>
-      {related.length > 0 ? <button type="button" className="icon-button project-association"
-        aria-label={`Related projects for ${project.name}`} title={`Related Git projects\n${related.map(id => {
-          const candidate = projects.find(candidate => candidate.id === id)!
-          return `${candidate.name} · ${config?.hosts.find(host => host.id === candidate.hostId)?.label ?? candidate.hostId} · ${displayPath(candidate.repoPath, candidate.hostId)}`
-        }).join('\n')}\nSame Git origin; grouping is optional`}
-        onClick={() => setGroupDialog({ seed: project.id })}><Link2 size={13} /></button> : null}
-      </div>
-    )
-    return (
-      <div key={project.id} data-space-folder={project.id}
-        className={`project-rail-folder-block${!filtering && pinnedItems[project.id]?.length ? ' project-rail-folder-block--pinned' : ''}`}>
-        <WorkspaceRowContextMenu
-          path={project.repoPath}
-          branch={branch}
-          isLocal={project.hostId === 'local'}
-          workspaceId={preferred ?? project.preferredWorkspaceId}
-          onRemove={() => setRemoveRequest(project)}
-          onChangeIcon={() => setIconTarget(target)}
-          onGroupProjects={() => setGroupDialog({ seed: project.id })}
+    const workspaces = collapsed ? projectRelations.rolledWorkspaces.get(project.id)! : project.workspaces
+    return <ProjectPresence key={project.id} workspaces={workspaces} recencyWorkspaces={project.workspaces} visible={visible}>{(projectSessions, lastActivityAt, contexts) => {
+      const target = folderSpaceIconTarget(project)
+      const manualIcon = icons[target.key] ?? null
+      const identity = <SpaceObjectIcon kind="folder" name={project.name} workspaceId={project.preferredWorkspaceId} folderIdentityKey={target.key}
+        manualIcon={manualIcon} lastActivityAt={manualIcon === null ? lastActivityAt : undefined}
+        visible={manualIcon === null ? visible : undefined} />
+      const sessionCount = projectSessions.length
+      // Rolled up from the same Session projection the window bar and the tab dots read, so a
+      // collapsed project can no longer hide an Agent that is waiting on you.
+      const attention = rowAttention(projectSessions)
+      const attentionLabel = rowAttentionLabel(attention)
+      const producingCount = producingAgentCount(projectSessions)
+      const workingLabel = producingCount > 0
+        ? `${producingCount} ${producingCount === 1 ? 'Agent is' : 'Agents are'} working`
+        : null
+      const idleCount = idleAgentCount(projectSessions)
+      const idleLabel = idleCount > 0 ? `${idleCount} idle` : null
+      const rowStateLabel = [workingLabel, idleLabel, attentionLabel].filter(Boolean).join(' · ')
+      const countTitle = [
+        `${project.workspaces.length} ${project.workspaces.length === 1 ? 'worktree' : 'worktrees'}`,
+        `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
+        ...(rowStateLabel ? [rowStateLabel] : [])
+      ].join(' · ')
+      const memberships = projectGroupsFor(projectGroups, project.id)
+      const groupNames = memberships.map(group => group.name).join(', ')
+      const related = associations.related.get(project.id) ?? []
+      const active = project.id === activeProjectId
+      const preferred = project.id === activeProjectId
+        ? activeWorkspaceId
+        : project.preferredWorkspaceId
+      // 复制分支名只对 git worktree 有意义：一个聚合了多个 worktree 的 folder 项目本身没有单一分支。
+      // 取被这一行选中的那个 workspace 的 branch，没有就不给这一项。
+      const preferredWorkspace = project.workspaces.find((workspace) => workspace.id === preferred)
+      const branch = preferredWorkspace?.branch ?? null
+      const row = (
+        <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
+        {hasChildren ? <SpaceDisclosure icon={identity}
+          expanded={!collapsed} label={`${collapsed ? 'Expand' : 'Collapse'} ${project.name}`} disabled={filtering}
+          onToggle={() => toggleProjectGroup(projectCollapseKey(project.id))} /> : null}
+        <button
+          className={`project-rail-row ${hasChildren ? 'project-rail-row--disclosure ' : ''}${active ? 'project-rail-row--active' : ''}`}
+          data-project-group-reference={memberships.length ? memberships.map(group => group.groupId).join(' ') : undefined}
+          title={`${memberships.length ? `In ${groupNames}\n` : ''}${displayPath(project.repoPath, project.hostId)} · ${countTitle}`}
+          aria-label={[project.name, memberships.length ? `In ${groupNames}` : null, rowStateLabel].filter(Boolean).join(' · ')}
+          aria-current={active ? 'page' : undefined}
+          data-space-nav={project.id}
+          data-space-parent={parentKey}
+          data-space-expanded={hasChildren && !filtering ? !collapsed : undefined}
+          data-workspace-id={preferred ?? undefined}
+          data-space-icon-target={target.key}
+          {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
+          // 分类成员、路径聚合与真实目录层级相加；这里只报层数，像素归密度合同和样式表。
+          {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
+          {...(workingAgentCount(projectSessions) > 0 ? { 'data-running': 'true' } : {})}
+          onClick={() => {
+            if (!preferred) return
+            const keepBoardOpen = mainSurface === 'board'
+            void selectWorkspace(preferred).then(() => {
+              if (keepBoardOpen) setMainSurface('board')
+            })
+          }}
         >
-          <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={projectSessions} contexts={activityContextsForWorkspaces(visibleProjectIds.flatMap((id) => projectRelations.nodes.get(id)!.workspaces))} /> : null}</div>
-        </WorkspaceRowContextMenu>
-        {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
-            projectWorkspaces). The pinned branch name labels the row; navigation prefers the
-            worktree carrying that branch (in-scope data, no fetch), else the project's preferred
-            workspace — the same selectWorkspace path the parent row uses. */}
-        {!filtering && pinnedChildRows(
-          project.id,
-          depth + 1,
-          (branchName) => ({
-            label: branchName,
-            targetId:
-              project.workspaces.find((workspace) => workspace.branch === branchName)?.id ??
-              preferred ?? project.preferredWorkspaceId
-          })
-        )}
-      </div>
-    )
+          {hasChildren ? null : identity}
+          <span className="project-rail-row__identity">
+            <strong>{project.name}</strong>
+
+          </span>
+        </button>
+        {related.length > 0 ? <button type="button" className="icon-button project-association"
+          aria-label={`Related projects for ${project.name}`} title={`Related Git projects\n${related.map(id => {
+            const candidate = projects.find(candidate => candidate.id === id)!
+            return `${candidate.name} · ${config?.hosts.find(host => host.id === candidate.hostId)?.label ?? candidate.hostId} · ${displayPath(candidate.repoPath, candidate.hostId)}`
+          }).join('\n')}\nSame Git origin; grouping is optional`}
+          onClick={() => setGroupDialog({ seed: project.id })}><Link2 size={13} /></button> : null}
+        </div>
+      )
+      return (
+        <div key={project.id} data-space-folder={project.id}
+          className={`project-rail-folder-block${!filtering && pinnedItems[project.id]?.length ? ' project-rail-folder-block--pinned' : ''}`}>
+          <WorkspaceRowContextMenu
+            path={project.repoPath}
+            branch={branch}
+            isLocal={project.hostId === 'local'}
+            workspaceId={preferred ?? project.preferredWorkspaceId}
+            onRemove={() => setRemoveRequest(project)}
+            onChangeIcon={() => changeIcon(target)}
+            onGroupProjects={() => setGroupDialog({ seed: project.id })}
+          >
+            <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={projectSessions} contexts={contexts} /> : null}</div>
+          </WorkspaceRowContextMenu>
+          {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
+              projectWorkspaces). The pinned branch name labels the row; navigation prefers the
+              worktree carrying that branch (in-scope data, no fetch), else the project's preferred
+              workspace — the same selectWorkspace path the parent row uses. */}
+          {!filtering && pinnedChildRows(
+            project.id,
+            depth + 1,
+            (branchName) => ({
+              label: branchName,
+              targetId:
+                project.workspaces.find((workspace) => workspace.branch === branchName)?.id ??
+                preferred ?? project.preferredWorkspaceId
+            })
+          )}
+        </div>
+      )
+    }}</ProjectPresence>
   }
 
   return (
@@ -380,19 +372,17 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         >{railDensity === 'default' ? <Rows2 size={15} /> : railDensity === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}</button>
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
-        {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={setIconTarget} /> : null}
+        {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={changeIcon} visible={visible} /> : null}
         <ProjectGroupsTree projects={projects} query={query} activeProjectId={activeProjectId}
-          visible={visible} sessionsByProject={sessionsByProject} lastActivityByProject={lastActivityByProject}
+          visible={visible}
           onCreate={() => setGroupDialog({})} onEdit={editing => setGroupDialog({ editing })} onDissolve={group => { setDissolveIssue(null); setDissolveRequest(group) }} />
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
-          const folderSessions = [...new Map(section.projects.flatMap(project => sessionsByProject.get(project.id) ?? []).map(session => [session.id, session])).values()]
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={folderSections.length > 1 || section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <Folders size={14} />}
+          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : folderSections.length > 1 ? <HostIcon kind="local" size={14} /> : <Folders size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
-            activity={foldersCollapsed && folderSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={folderSessions}
-              contexts={activityContextsForWorkspaces(section.projects.flatMap((project) => project.workspaces))} /> : undefined} />
+            activity={foldersCollapsed ? <DirectoryActivity workspaces={section.workspaces} visible={visible} /> : undefined} />
           {filtering && section.groups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
           {foldersCollapsed ? null : section.groups.map((group) => {
             const key = projectGroupKey(group)
@@ -405,7 +395,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
                     parentKey={section.key}
                     collapsed={collapsed}
                     filtering={filtering}
-                    sessions={[...new Map(group.nodes.flatMap((node) => sessionsByProject.get(node.project.id) ?? []).map((session) => [session.id, session])).values()]}
+                    visible={visible}
                     onToggle={() => { if (!filtering) toggleProjectGroup(key) }}
                   />
                 ) : null}
@@ -437,7 +427,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             else setDissolveIssue(`Dissolution is applied here. Saving is unconfirmed: ${result.reason ?? 'The Core save acknowledgement is unavailable.'} Retry saving to confirm it.`)
           }, error => { reportError(error); setDissolveIssue('The group could not be dissolved. Retry saving; original work is retained.') }).finally(() => setDissolving(false))
         }} />
-      <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} />
+      <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() => iconInvoker.current?.isConnected ? iconInvoker.current : null} />
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove project view?"
@@ -465,17 +455,20 @@ function GroupHeader({
   parentKey,
   collapsed,
   filtering,
-  sessions: groupSessions,
+  visible,
   onToggle
 }: {
   parentKey: string
   group: ProjectRailGroup
   collapsed: boolean
   filtering: boolean
-  sessions: ReturnType<typeof useAppStore.getState>['sessions']
+  visible: boolean
   onToggle: () => void
 }) {
   const displayPath = usePathDisplay()
+  const workspaces = useMemo(() => group.nodes.flatMap(node => node.project.workspaces), [group.nodes])
+  const groupSessions = useDirectorySessions(workspaces, visible)
+  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
   const attention = rowAttention(groupSessions)
   const attentionLabel = rowAttentionLabel(attention)
   const producing = producingAgentCount(groupSessions)
@@ -514,10 +507,30 @@ function GroupHeader({
       {collapsed && groupSessions.some((session) => session.kind === 'agent') ? (
         <ProjectActivity
           compact
+          visible={visible}
           sessions={groupSessions}
-          contexts={activityContextsForWorkspaces(group.nodes.flatMap((node) => node.project.workspaces))}
+          contexts={contexts}
         />
       ) : null}
     </div>
   )
+}
+
+function ProjectPresence({ workspaces, recencyWorkspaces, visible, children }: {
+  workspaces: readonly WorkspaceRecord[]
+  recencyWorkspaces: readonly WorkspaceRecord[]
+  visible: boolean
+  children(sessions: SessionSnapshot[], lastActivityAt: number | null, contexts: ReturnType<typeof activityContextsForWorkspaces>): ReactNode
+}) {
+  const sessions = useDirectorySessions(workspaces, visible)
+  const own = useDirectorySessions(recencyWorkspaces, visible)
+  const lastActivityAt = useMemo(() => folderLastActivityAt(own, Date.now()), [own])
+  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
+  return children(sessions, lastActivityAt, contexts)
+}
+
+function DirectoryActivity({ workspaces, visible }: { workspaces: readonly WorkspaceRecord[]; visible: boolean }) {
+  const sessions = useDirectorySessions(workspaces, visible)
+  const contexts = useMemo(() => activityContextsForWorkspaces(workspaces), [workspaces])
+  return sessions.some(session => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sessions} contexts={contexts} /> : null
 }

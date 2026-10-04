@@ -2,6 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
+import { workbenchRegionBounds } from '@agentmux/layout'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { readFile, writeFile, mkdtemp } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
@@ -17,8 +18,10 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { api } from '../src/renderer/src/lib/api'
-import { documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { noteCreationTarget } from '../src/renderer/src/lib/note-creation'
+import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { zoneContext } from '../src/renderer/src/lib/space-agent-control'
 import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { agent, neighborSid, privateEnvironment, regionIdC, tabId, targetSid } from './helpers/workface-control-fixture'
@@ -63,21 +66,44 @@ async function mount(path: string, workspaceId = 'resource', composer = false) {
 
 describe.skipIf(restoring)('File open through compiled CLI and the actual File owner', () => {
   it('opens the first Topic File at the Zone directory, keeps background selection and shares the original Note mapping', async () => {
-    const before = protectedFacts(), topic = fileTopics[0]!, path = `${topic.directoryPath}/notes 中文.md`
+    const topic = fileTopics[0]!, zone = zoneFor(SCRATCH_WORKSPACE_ID, true)
+    const launcher = { ...createWorkbenchTab('private-topic-note-launcher', { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID,
+      regionId: 'private-topic-note-launcher-region' }), topicId: topic.id,
+      space: { zoneId: zone.zoneId, spaceId: zoneContext(useAppStore.getState(), fileTopics, zone) } }
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [launcher.id]: launcher }, layouts: { ...state.layouts,
+      [SCRATCH_WORKSPACE_ID]: { ...state.layouts[SCRATCH_WORKSPACE_ID]!, groups: state.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group =>
+        group.id === 'topic-group' ? { ...group, tabOrder: [...group.tabOrder, launcher.id] } : group) } } }))
+    const before = protectedFacts(), path = `${topic.directoryPath}/notes 中文.md`
     const result = await open('notes 中文.md', SCRATCH_WORKSPACE_ID)
     expect(result).toMatchObject({ resource: { hostId: 'local', workspaceId: SCRATCH_WORKSPACE_ID,
       workspacePath: _hygiene_fixturePath("private/workface-scratch"), zonePath: _hygiene_fixturePath("private/workface-scratch/") + topic.directoryPath, path },
       placement: { status: 'created' }, data: { kind: 'text' }, navigation: 'background', changed: true, outcome: 'opened',
-      save: { localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' }, issues: [] })
+      save: { localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' }, issues: [] })
     expect(result.placement.locations.map(location => [location.displayWorkspaceId, location.groupId])).toEqual([[SCRATCH_WORKSPACE_ID, 'topic-group']])
     expect(api.files.read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path)
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBeNull()
     expect(protectedFacts()).toEqual(before); fixture!.noLifecycle()
-    const target = surface(path, SCRATCH_WORKSPACE_ID)
     const note = noteCreationTarget(useAppStore.getState(), fileTopics, { workspaceId: SCRATCH_WORKSPACE_ID, groupId: 'topic-group',
-      displayWorkspaceId: SCRATCH_WORKSPACE_ID, launcher: { tabId: target.id, regionId: target.file.regionId } })
-    expect(note.relativeDirectory).toBe(topic.directoryPath)
-    await mount(path, SCRATCH_WORKSPACE_ID); expect(container.querySelector('textarea')?.value).toContain('Current readable source')
+      displayWorkspaceId: SCRATCH_WORKSPACE_ID, launcher: { tabId: launcher.id, regionId: launcher.layout.activeRegionId } })
+    expect(note).toEqual({ workspaceId: SCRATCH_WORKSPACE_ID, hostId: 'local', workspacePath: _hygiene_fixturePath("private/workface-scratch"),
+      directoryPath: result.resource!.zonePath, relativeDirectory: topic.directoryPath, zoneId: result.resource!.zoneId,
+      sourceSpaceId: launcher.space.spaceId, displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'topic-group' })
+    await mount(path, SCRATCH_WORKSPACE_ID); await vi.waitFor(() => expect(container.querySelector('textarea')?.value).toContain('Current readable source'))
+  })
+  it.each(['up', 'down'] as const)('opens a File %s of the exact original Region and preserves its siblings and background selection', async direction => {
+    const before = protectedFacts(), original = useAppStore.getState().tabs[tabId]!, layouts = useAppStore.getState().layouts, tabIds = Object.keys(useAppStore.getState().tabs)
+    const result = await open(`split-${direction}.md`, 'resource', ['--display-workspace', 'display', '--group', 'display-group',
+      '--tab', tabId, '--region', regionIdC, '--split', direction])
+    expect(result).toMatchObject({ placement: { status: 'created', tabId }, data: { kind: 'text' }, navigation: 'background', outcome: 'opened', issues: [] })
+    const tab = useAppStore.getState().tabs[tabId]!, inserted = result.placement.regionId!
+    expect(tab.regions[inserted]).toMatchObject({ kind: 'file', workspaceId: 'resource', path: `split-${direction}.md` })
+    for (const [id, region] of Object.entries(original.regions)) expect(tab.regions[id]).toBe(region)
+    expect(Object.keys(useAppStore.getState().tabs)).toEqual(tabIds)
+    const cells = workbenchRegionBounds(tab.layout.root), anchor = cells.find(cell => cell.regionId === regionIdC)!.bounds, added = cells.find(cell => cell.regionId === inserted)!.bounds
+    expect(added.x).toBe(anchor.x); expect(added.width).toBe(anchor.width); expect(added.height).toBe(anchor.height)
+    expect(direction === 'up' ? added.y + added.height : anchor.y + anchor.height).toBe(direction === 'up' ? anchor.y : added.y)
+    expect(tab.layout.activeRegionId).toBe(original.layout.activeRegionId)
+    expect(useAppStore.getState().layouts).toEqual(layouts); expect(protectedFacts()).toEqual(before); fixture!.noLifecycle()
   })
   it('reuses the canonical File, preserves the dirty TextDoc and opens another display without choosing the caller Workspace', async () => {
     const first = await open('draft.md'), target = surface('draft.md'), key = documentKey('resource', 'draft.md')
@@ -205,6 +231,12 @@ it(restoreName, async () => {
     const payload = JSON.parse(await readFile(process.env.AGENTMUX_WORKFACE_RESTORE_RECORD!, 'utf8'))
     expect(process.pid).not.toBe(payload.parentPid)
     localStorage.setItem('agentmux-workbench-v1', payload.record)
+    // The original Core spatial graph owns Tabs/Regions across process restart.
+    // The Renderer checkpoint keeps its own drafts and presentation metadata.
+    expect(payload.spatial.graph.tabs.length).toBeGreaterThan(0)
+    await api.spatial.commit({ expectedRevision: 0, graph: payload.spatial.graph })
+    const restoredSpatial = await api.spatial.read()
+    expect(restoredSpatial?.graph).toEqual(payload.spatial.graph)
     vi.spyOn(api.config, 'get').mockResolvedValue(fileConfig); vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
     vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(fileTopics)
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [agent(targetSid), agent(neighborSid)], timelines: {}, recoveryCandidates: [] })
@@ -220,17 +252,30 @@ it(restoreName, async () => {
       await mount('restore.md'); await vi.waitFor(() => expect(container.querySelector('textarea')?.value).toBe('Fresh restored original source'))
       expect(api.files.read).toHaveBeenCalledExactlyOnceWith('resource', 'restore.md')
       await writeFile(payload.childProof, JSON.stringify({ parentPid: payload.parentPid, pid: process.pid, recordSha256: createHash('sha256').update(payload.record).digest('hex'),
+        spatialSha256: createHash('sha256').update(JSON.stringify(restoredSpatial!.graph)).digest('hex'),
         tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts, drafts: useAppStore.getState().agentComposerDrafts, paneText: container.querySelector('textarea')?.value }))
     } finally { dispose() }
     return
   }
-  await open('restore.md', 'resource', ['--focus']); await prepareRendererUpdate()
+  await open('restore.md', 'resource', ['--focus'])
+  // This arranged CLI fixture disposes its observer. Use the same production
+  // projection and original Core API as the File view restart fixture.
+  const original = useAppStore.getState(), saved = await api.spatial.read()
+  const descriptors = desktopWorkbenchFromSpatial(desktopSpatialGraph(original, fileTopics, saved?.graph ?? null))
+  useAppStore.setState({ tabs: Object.fromEntries(Object.entries(original.tabs).map(([id, tab]) =>
+    [id, { ...tab, ...(descriptors.tabs[id]?.space ? { space: descriptors.tabs[id]!.space } : {}) }])) })
+  await prepareRendererUpdate()
   const state = useAppStore.getState(), record = localStorage.getItem('agentmux-workbench-v1')!; expect(record.length).toBeGreaterThan(0)
   const directory = await mkdtemp(_hygiene_fixturePath("tmp/amx-wfo-")), recordPath = join(directory, 'record.json'), childProof = join(directory, 'child-proof.json'), reportPath = join(directory, 'vitest.json')
-  await writeFile(recordPath, JSON.stringify({ parentPid: process.pid, record, childProof, tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts }))
+  const committed = await api.spatial.commit({ expectedRevision: saved?.revision ?? 0, graph: desktopSpatialGraph(state, fileTopics, saved?.graph ?? null) })
+  const spatial = await api.spatial.read()
+  expect(spatial).toEqual(committed)
+  expect(spatial!.graph.tabs.length).toBeGreaterThan(0)
+  await writeFile(recordPath, JSON.stringify({ parentPid: process.pid, record, spatial, childProof, tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts }))
   const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson'),
-    AGENTMUX_WORKFACE_RESTORE_PHASE: 'file-open-child', AGENTMUX_WORKFACE_RESTORE_RECORD: recordPath })
+    AGENTMUX_WORKFACE_RESTORE_PHASE: 'file-open-child', AGENTMUX_WORKFACE_RESTORE_RECORD: recordPath,
+    ...(process.env.AGENTMUX_WORKFACE_MUTATION_CONFIG ? { AGENTMUX_WORKFACE_MUTATION_CONFIG: resolve(process.env.AGENTMUX_WORKFACE_MUTATION_CONFIG) } : {}) })
   try {
     const result = await promisify(execFile)(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', process.env.AGENTMUX_WORKFACE_MUTATION_CONFIG ?? 'vitest.config.ts',
       ownFile, '--testNamePattern', restoreName, '--maxWorkers=1', '--reporter=json', '--outputFile=' + reportPath], { env, timeout: 30000 })
@@ -241,5 +286,6 @@ it(restoreName, async () => {
   expect(report.testResults[0].assertionResults.filter((item: { status: string }) => item.status === 'passed').map((item: { title: string }) => item.title)).toEqual([restoreName])
   const proof = JSON.parse(await readFile(childProof, 'utf8')); expect(proof.pid).not.toBe(process.pid)
   expect(proof.recordSha256).toBe(createHash('sha256').update(record).digest('hex')); expect(proof.tabs).toEqual(state.tabs); expect(proof.layouts).toEqual(state.layouts)
+  expect(proof.spatialSha256).toBe(createHash('sha256').update(JSON.stringify(spatial!.graph)).digest('hex'))
   expect(proof.drafts).toEqual(state.agentComposerDrafts); expect(proof.paneText).toBe('Fresh restored original source')
 }, 40000)

@@ -1,0 +1,20 @@
+.surface-mode-switch { position: relative; isolation: isolate; overflow: hidden; flex: 0 0 auto; display: flex; gap: var(--sp-1); margin: var(--sp-1) var(--sp-2) 0; padding: var(--sp-1); border: 0; border-radius: var(--radius); background: transparent; box-shadow: none; }
+.surface-mode-switch > .liquid-selection { --radius: var(--radius-sm); border: 0; border-radius: var(--radius-sm); background: var(--surface-3); box-shadow: none; }
+.surface-mode-switch button { position: relative; z-index: 1; flex: 1; min-width: 0; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-meta); font-weight: 600; cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease; }
+.surface-mode-switch button:hover { color: var(--text-2); background: var(--surface-2); }
+.surface-mode-switch button.selected, .surface-mode-switch button.selected:hover { color: var(--text); background: transparent; box-shadow: none; }
+.surface-mode-switch button:active, .surface-mode-switch button.selected:active { background: var(--wash-2); }
+.surface-mode-switch button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+@media (prefers-reduced-motion: reduce) { .surface-mode-switch button { transition: none; } }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .surface-mode-switch { background: var(--surface-1); backdrop-filter: none; box-shadow: inset 0 0 0 1px var(--line); }
+  .surface-mode-switch > .liquid-selection { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line); }
+  .surface-mode-switch > .liquid-selection > i { display: none; }
+}
+@media (forced-colors: active) {
+  .surface-mode-switch { background: Canvas; backdrop-filter: none; box-shadow: none; outline: 1px solid ButtonText; outline-offset: -1px; }
+  .surface-mode-switch > .liquid-selection { display: none; }
+  .surface-mode-switch button { color: ButtonText; }
+  .surface-mode-switch button.selected, .surface-mode-switch button.selected:hover, .surface-mode-switch button.selected:active { color: HighlightText; background: Highlight; forced-color-adjust: none; }
+  .surface-mode-switch button:focus-visible { outline: 1px solid ButtonText; outline-offset: 1px; }
+}

@@ -103,7 +103,7 @@ beforeEach(async () => {
   }
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(0)
   runtime = new RuntimeController(store, localRuntimeConnector)
-  runtime.commit({ hosts: [{ id: 'local', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
+  runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', name: 'Private local', kind: 'local' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: directory, kind: 'folder' }] }

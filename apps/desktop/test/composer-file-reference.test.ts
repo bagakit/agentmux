@@ -2,8 +2,11 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { describe, expect, it } from 'vitest'
 import {
   appendFileReferences,
+  appendNamedFileReference,
   workspaceRelativePath
-} from '../src/renderer/src/lib/composer-file-reference.js'
+} from '@agentmux/client-ui/composer-file-reference'
+import { expandSemanticReferences, parseComposerDraft } from '@agentmux/client-ui/composer-semantic-reference'
+import { draftDocument, documentDraft } from '@agentmux/client-ui/components/InlineComposer'
 
 describe('composer file references', () => {
   it('writes paths inside the workspace relative to it', () => {
@@ -36,5 +39,13 @@ describe('composer file references', () => {
 
   it('leaves the draft untouched when the picker was dismissed', () => {
     expect(appendFileReferences('unchanged', [], _hygiene_fixturePath("repo"))).toBe('unchanged')
+  })
+
+  it('keeps a chosen filename compact while round-tripping and sending its complete original path', () => {
+    const path = _hygiene_fixturePath("host-private/original operation/attachment.png")
+    const draft = appendNamedFileReference('请阅读', path, '头像参考.png')
+    expect(parseComposerDraft(draft)).toContainEqual(expect.objectContaining({ reference: expect.objectContaining({ kind: 'file', label: '头像参考.png', reference: '@' + path }) }))
+    expect(documentDraft(draftDocument(draft))).toBe(draft)
+    expect(expandSemanticReferences(draft)).toBe('请阅读 @' + path + ' ')
   })
 })

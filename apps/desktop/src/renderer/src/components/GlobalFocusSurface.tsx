@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Unplug, Users } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
@@ -8,6 +9,7 @@ import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
 import { FocusDisconnectedProjects } from './FocusDisconnectedProjects'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey } from '../lib/focus-project-lanes'
+import { useFocusHistorySources } from '../lib/focus-history-sources'
 import type { ExecutionFocusPresentation } from '../lib/focus-tab-projection'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
@@ -24,14 +26,37 @@ import { executionFocusSessionId } from '../lib/agent-focus'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { sessionPresentationById } from '../lib/session-presentation'
-import { topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
-import { scratchTopicsForConfig, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { topicIdForSession, workspaceForSession, type WorkbenchTab } from '../lib/workbench-tabs'
+import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
+import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
+import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
+
+function FocusLocationChoice({ reference, tab, workspaceName, groupIndex, regionIndex, onSelect }: {
+  reference: WorkbenchProjectionSelection
+  tab: WorkbenchTab | undefined
+  workspaceName: string
+  groupIndex: number
+  regionIndex: number
+  onSelect: () => void
+}) {
+  const sessions = useWorkbenchTabSessions(tab)
+  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
+  const names = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab)))
+  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab)))
+  return <button type="button" className="small-button focus-location-choice" onClick={onSelect}
+    title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
+    <strong>{tab ? workbenchTabDisplayName(tab, sessions, names, timelines, sessionNameMetadata) : 'Original work surface'}</strong>
+    <small>{workspaceName}{' · '}{groupIndex >= 0 ? `Group ${groupIndex + 1}` : 'Original Group'}
+      {' · '}{regionIndex >= 0 ? `Region ${regionIndex + 1}` : 'Original Region'}</small>
+  </button>
+}
 
 export function GlobalFocusSurface({ presentation, currentReference = null, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, workspaceOpen, onCloseWorkspace, onSelectContext, onSelectLocation, visible: hostVisible = true }: {
   visible?: boolean
@@ -74,6 +99,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
+  const timelines = useAppStore(useShallow(state => {
+    const held: typeof state.timelines = {}
+    for (const entry of executionHistory) if (entry.identity?.kind === 'agent' && state.timelines[entry.sessionId]) held[entry.sessionId] = state.timelines[entry.sessionId]!
+    return held
+  }))
+  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
+  const visible = hostVisible && surfaceVisible
+  const catalogue = useFocusHistorySources(visible)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
@@ -105,8 +138,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [])
   const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
-  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
-  const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes), [executionHistory, allLanes])
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots, executionHistory), [laneContexts, config, facts, tabs, topicSnapshots, executionHistory])
+  const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {
+    timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
+  }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
   const trimmedQuery = query.trim()
   const search = trimmedQuery.toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
@@ -126,6 +161,12 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }, [disconnectedContexts.size])
   const filteredRetainedProjects = retainedProjects.filter(item => (project === 'all' || item.key === project) && bucketFilter === 'all'
     && `${item.name} ${item.identity.workspacePath} ${item.identity.branch ?? ''} ${item.identity.topicId ?? ''}`.toLocaleLowerCase().includes(search))
+  const recentProjects = filteredRetainedProjects.filter(item => item.recent)
+  const pastProjects = filteredRetainedProjects.filter(item => !item.recent)
+  const readProjectHistory = (item: typeof retainedProjects[number]) => {
+    const at = Math.max(item.lastFocusedAt ?? 0, item.lastActivityAt ?? 0)
+    if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
+  }
   const openDisconnected = (laneId?: string, trigger?: HTMLElement) => {
     setDisconnectedReveal(laneId && trigger ? { laneId, trigger } : null)
     setDisconnectedOpen(true)
@@ -133,10 +174,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const closeDisconnected = () => { setDisconnectedOpen(false); setDisconnectedReveal(null) }
   const clearFilters = () => { setQuery(''); setProject('all'); setBucketFilter('all') }
   const boardRowsRef = useRef<HTMLDivElement>(null)
-  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
-  const visible = hostVisible && surfaceVisible
   const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
-  const hasBoardLanes = boardLanes.length > 0
+  const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
   useLayoutEffect(() => {
     const rows = boardRowsRef.current
     if (!visible || disconnectedExpanded || !hasBoardLanes || !rows || typeof ResizeObserver === 'undefined') return
@@ -145,7 +184,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       if (!groups || rows.clientWidth <= 0) return
       const style = getComputedStyle(groups), cards = groups.querySelector<HTMLElement>('.focus-context-group__cards')
       const gap = parseFloat(style.columnGap) || 0
-      const next = { width: rows.clientWidth, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
+      const next = { width: groups.getBoundingClientRect().width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
       setLaneMetrics(current => current.width === next.width && current.padding === next.padding && current.gap === next.gap && current.cardGap === next.cardGap ? current : next)
     }
     measure()
@@ -170,8 +209,17 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
     const groups = groupFocusContexts(rows)
     const counts: FocusLaneCounts = [groups.attention.length, groups.working.length, groups.results.length, groups.idle.length]
-    return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Other context states">
-      {buckets.filter(bucket => bucket === 'disconnected' || (counts.some(count => count > 0) && groups[bucket].length === 0)).map(bucket => {
+    const sparse = counts.reduce((total, count) => total + count, 0) === 1
+    const groupHeader = (bucket: FocusColumn, inline = false) => {
+      const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[bucket]
+      const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
+      const label = neutral?.label ?? meta.label
+      const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
+      return <header className="focus-context-group__header" data-bucket={bucket} data-visible-state={inline || undefined} title={countDescription} aria-label={countDescription} key={bucket}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong><span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span></span></header>
+    }
+    return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Context states">
+      {buckets.filter(bucket => bucket === 'disconnected' || sparse || (counts.some(count => count > 0) && groups[bucket].length === 0)).map(bucket => {
+        if (bucket !== 'disconnected' && groups[bucket].length > 0) return groupHeader(bucket, true)
         const meta = bucketMeta[bucket], Icon = meta.icon
         return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · ${groups[bucket].length}`} aria-label={`${meta.label} · ${groups[bucket].length}`} key={bucket}>
           {bucket === 'disconnected' ? <FocusDisconnectedGroup contexts={groups.disconnected} laneId={lane.id} onReveal={openDisconnected} /> : <Icon size={12} aria-hidden="true" />}
@@ -179,13 +227,12 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       })}
     </div></div>{counts.some(count => count > 0) ? <FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
       buckets.map((bucket, index) => {
-        const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[bucket]
+        const meta = bucketMeta[bucket], grouped = groups[bucket]
         if (bucket === 'disconnected' || grouped.length === 0) return null
         const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
         const label = neutral?.label ?? meta.label
-        const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
-        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
-          <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong><span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span></span></header>
+        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
+          {!sparse ? groupHeader(bucket) : null}
             <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })
@@ -227,6 +274,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
       {hierarchyErrors.length ? <p className="focus-hierarchy-warning" role="status" title={hierarchyErrors.join('\n')}>Some lane details could not load. Contexts remain available.</p> : null}
+      {catalogue.error ? <p className="focus-hierarchy-warning" role="status" title={catalogue.error}>Project status could not be checked. Recent projects remain available; retry sources in conversation records.</p> : null}
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
         const current = useAppStore.getState()
@@ -255,12 +303,12 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
-          <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={boardLanes.length === 0 || undefined} hidden={disconnectedExpanded} inert={disconnectedExpanded}>
-            {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedProjectKey={project} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+          <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined} hidden={disconnectedExpanded} inert={disconnectedExpanded}>
+            {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
           </div></WorkbenchPresentationContext.Provider>
           <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={shownSessionId} projectKey={project} expanded={disconnectedExpanded} canReturn reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} /></WorkbenchPresentationContext.Provider>
-          <FocusRetainedProjects projects={filteredRetainedProjects} total={retainedProjects.length} onRead={item => { if (item.lastFocusedAt !== null) setHistoryWindowRequest(current => ({ at: item.lastFocusedAt!, sequence: (current?.sequence ?? 0) + 1 })) }} />
+          <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />
         </div>
       </div>}
       </div>
@@ -307,13 +355,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
               const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
               const groupIndex = layout ? groupIds(layout.root).indexOf(reference.groupId) : -1
               const regionIndex = tab ? regionIds(tab.layout.root).indexOf(reference.regionId) : -1
-              return <button type="button" className="small-button focus-location-choice" key={JSON.stringify(reference)} onClick={() => onSelectLocation ? onSelectLocation(reference) : selectedId ? focusExecutionSession(selectedId, reference) : undefined}
-                title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
-                <strong>{tab?.name ?? reference.tabId}</strong>
-                <small>{config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? reference.displayWorkspaceId}
-                  {' · '}{groupIndex >= 0 ? `Group ${groupIndex + 1}` : reference.groupId}
-                  {' · '}{regionIndex >= 0 ? `Region ${regionIndex + 1}` : reference.regionId}</small>
-              </button>
+              return <FocusLocationChoice key={JSON.stringify(reference)} reference={reference} tab={tab}
+                workspaceName={config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? 'Original Space'}
+                groupIndex={groupIndex} regionIndex={regionIndex}
+                onSelect={() => onSelectLocation ? onSelectLocation(reference) : selectedId ? focusExecutionSession(selectedId, reference) : undefined} />
             })}</div> : null}
           </div>
           : presentation?.unselected ? <div className="global-session-workspace__empty" data-focus-unselected>
@@ -321,7 +366,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           </div> : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} />
+    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} catalogue={catalogue} />
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}

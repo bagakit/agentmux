@@ -19,7 +19,6 @@
 /* A reading inset clears the padded local paint; moving controls to Focus releases it. */
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) { --agent-region-reading-inset: calc(var(--sp-6) + var(--sp-2)); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .terminal-view__xterm { margin-top: var(--agent-region-reading-inset); height: calc(100% - var(--agent-region-reading-inset)); }
-.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .session-history__toolbar { padding-top: var(--agent-region-reading-inset); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-launch-notice > .service-window,
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .service-window { padding-top: var(--agent-region-reading-inset); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-body[data-observation-surface='workflow'] { box-sizing: border-box; padding-top: var(--agent-region-reading-inset); }

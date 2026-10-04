@@ -1,9 +1,12 @@
+const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts'
 import type { SettingsModule, SettingsPaneProps } from '../src/renderer/src/components/settings/settings-catalog'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+// This shell test owns navigation and drafts; the browser-only Monaco leaf has its own gates.
+vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ default: () => <textarea data-inline-editor /> }))
 const registration = vi.hoisted(() => ({ originalIds: [] as string[] }))
 
 // Extend only the real compile-time composition. Panel has no fixture prop and the generic
@@ -73,13 +76,18 @@ const overviewRow = () => connected('[data-settings-overview] [data-settings-sec
 it('a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(registration.originalIds).toEqual([
-    'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'toolkit', 'agents', 'prompts', 'workspaces', 'hosts', 'devices'
+    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'mote', 'space', 'focus', 'goals', 'survey', 'notes', 'toolkit', 'agents', 'prompts', 'hosts', 'devices'
   ])
   const catalog = visibleSettingsSections('')
-  expect(catalog.map(module => module.id)).toEqual([...registration.originalIds, 'fixture-module'])
+  expect(catalog.map(module => module.id)).toEqual([
+    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
+    'hosts', 'devices', 'toolkit', 'agents', 'prompts', 'fixture-module',
+    'space', 'focus', 'goals', 'survey', 'notes', 'mote'
+  ])
   const navigation = settingsNavGroups('').flatMap(group => group.items)
   expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
   expect(navigation).toHaveLength(catalog.length)
+  expect(navigation.map(module => module.id)).toEqual(catalog.map(module => module.id))
   expect([...dom.container.querySelectorAll('[data-settings-overview] [data-settings-section]')]
     .map(node => node.getAttribute('data-settings-section'))).toEqual(navigation.map(module => module.id))
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')]
@@ -181,24 +189,57 @@ it('Browser module saves its authored automation value against the original fiel
 })
 
 
-it('finds the editable account starting point through ordinary auth and usage settings search without creating or running', async () => {
+it('finds the saved local Auth tool through ordinary auth and usage settings search without creating or running', async () => {
+  useAppStore.setState({ config: { ...composerConfig, toolkit: { tools: [{ id: 'auth', name: 'Auth', icon: 'key-round', enabled: true, statusBar: 'icon', script: 'console.log(1)', args: [], revision: 'saved-local', workspacePath: _hygiene_fixturePath("fixed") }] } } })
   const save = vi.spyOn(api.config, 'save').mockResolvedValue(undefined)
   const add = vi.spyOn(api.toolkit, 'add')
   const run = vi.spyOn(api.toolkit, 'run')
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  for (const query of ['auth', 'account', '用量']) {
+  for (const query of ['auth', 'account', '用量', 'Mods']) {
     await input('[aria-label="Search settings"]', query)
     expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')]
-      .map(node => node.textContent)).toEqual(['Toolkit'])
-    expect(connected('.settings-content__header h2').textContent).toBe('Toolkit')
+      .map(node => node.textContent)).toEqual(['Toolkit Library'])
+    expect(connected('.settings-content__header h2').textContent).toBe('Toolkit Library')
+    expect(connected('.toolkit-library').getAttribute('aria-label')).toBe('Toolkit Library')
     expect(connected<HTMLElement>('[data-settings-pane="toolkit"]').hidden).toBe(false)
   }
-  const start = connected<HTMLButtonElement>('[data-tool-template="account-usage"]')
-  expect(start.textContent).toBe('Account usage example')
-  expect(start.title).toBe('Review an editable starting point')
-  await act(async () => start.click())
-  expect(connected('[aria-label="Account usage template"] h3').textContent).toBe('Account usage')
-  expect(connected('.toolkit-template__source').textContent?.length).toBeGreaterThan(100)
+  const local = connected<HTMLButtonElement>('[data-tool-id="auth"]')
+  expect(local.textContent).toContain('Auth')
+  expect(local.textContent).toContain('Custom')
+  await act(async () => local.click())
+  expect(connected<HTMLInputElement>('.toolkit-editor__name input').value).toBe('Auth')
+  expect(dom.container.querySelector('[data-tool-template]')).toBeNull()
+  expect(save).not.toHaveBeenCalled()
+  expect(add).not.toHaveBeenCalled()
+  expect(run).not.toHaveBeenCalled()
+})
+
+it('presents Mods beside Preferences through the actual shell and preserves the authored tool draft across pages', async () => {
+  useAppStore.setState({ config: { ...composerConfig, toolkit: { tools: [{ id: 'custom-summary', name: 'My summary', icon: 'terminal', enabled: true, statusBar: 'icon', script: 'console.log(1)', args: [], revision: 'saved-local', workspacePath: _hygiene_fixturePath("fixed") }] } } })
+  const save = vi.spyOn(api.config, 'save').mockResolvedValue(undefined)
+  const add = vi.spyOn(api.toolkit, 'add')
+  const run = vi.spyOn(api.toolkit, 'run')
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  const overview = connected('[aria-labelledby="settings-overview-toolkit"]')
+  expect(connected('h3', overview).textContent).toBe('Mods')
+  expect(connected('[data-settings-section="toolkit"]', overview).textContent).toContain('Toolkit Library')
+  const nav = connected('nav[aria-label="Settings sections"]')
+  const row = connected('[data-settings-target="toolkit"]', nav)
+  expect(row.previousElementSibling!.textContent).toBe('Mods')
+  const groups = settingsNavGroups('')
+  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
+  expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
+  await section('Toolkit Library')
+  expect(connected('.settings-content__breadcrumb').textContent).toBe('Mods')
+  await dom.click('[data-tool-id="custom-summary"]')
+  await input('.toolkit-editor__name input', 'Keep my custom draft')
+  const pane = connected('[data-settings-pane="toolkit"]')
+  await section('General')
+  expect(pane.hidden).toBe(true)
+  await section('Toolkit Library')
+  expect(connected('[data-settings-pane="toolkit"]')).toBe(pane)
+  expect(connected<HTMLInputElement>('.toolkit-editor__name input').value).toBe('Keep my custom draft')
   expect(save).not.toHaveBeenCalled()
   expect(add).not.toHaveBeenCalled()
   expect(run).not.toHaveBeenCalled()

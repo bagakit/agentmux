@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { currentHostCheck } from '../lib/host-check'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
@@ -12,7 +13,7 @@ import { executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
 import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
-import { appendFileReferences } from '../lib/composer-file-reference'
+import { appendFileReferences } from '@agentmux/client-ui/composer-file-reference'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
@@ -113,9 +114,13 @@ export function NewTabSurface({
     state.workbenchSpaceSelection !== null && state.workbenchSpaceSelection.tabId === null)
   // A visible Tab can contain an unselected Launcher created by Control. Only its
   // selected Region may acquire input; the original empty-group Launcher has no Region.
-  const inputRegionActive = useAppStore(state => tabId && regionId
-    ? state.tabs[tabId]?.layout.activeRegionId === regionId
-    : tabId === undefined && regionId === undefined)
+  const inputRegionActive = useAppStore(state => {
+    if (!tabId || !regionId) return tabId === undefined && regionId === undefined
+    if (state.tabs[tabId]?.regions[regionId]?.kind !== 'launcher') return false
+    const reference = presentation.surface === 'mote' ? presentation.reference : mainRegionReference(state.workbenchSpaceSelection)
+    return reference ? reference.tabId === tabId && reference.regionId === regionId
+      : !presentation.surface && state.tabs[tabId]?.layout.activeRegionId === regionId
+  })
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
@@ -146,11 +151,12 @@ export function NewTabSurface({
   const launcherRef = tabId && regionId ? { tabId, regionId } : undefined
   // 「这个槽在我眼里是什么样」只判一次，落点在 warmTerminalPreview。要显示哪个 session、要不要显示
   // 「正在预热」、槽在不在，分开算必然漂移，症状是转圈提示归 A 而终端画面归 B 这种自相矛盾的画面。
-  const { session: warmSession, pending: warmPending, slotHeld: warmSlotHeld } = warmTerminalPreview({
+  const warmPreview = warmTerminalPreview({
     warmTerminal,
     warmKey,
     launcherId
   })
+  const { slotHeld: warmSlotHeld } = warmPreview
   const executors = useMemo(
     () => executorsForHost(config, workspace?.hostId, detections, inventory),
     [config?.executors, config?.hosts, detections, workspace, inventory]
@@ -226,12 +232,12 @@ export function NewTabSurface({
     if (warmSlotHeld && warmTerminal?.session) automaticWarmAttempt.current = null
     // A target choice must not stop another project's healthy reusable shell.
     // The ordinary explicit Terminal action remains available for this exact target.
-    if (workspace && (!warmTerminal || warmTerminal.key === warmKey) && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
+    if (workspace && (!warmTerminal || warmSlotHeld) && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
       (warmSlotHeld || automaticWarmAttempt.current !== warmKey)) {
       if (!warmSlotHeld) automaticWarmAttempt.current = warmKey
       prewarmTerminal(workspace.id, launcherId)
     }
-  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmTerminal?.key, warmKey, sections.terminal])
+  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, Boolean(warmTerminal), warmKey, sections.terminal])
 
   useEffect(() => {
     if (!workspace || (host?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, host) : executors.every((executor) => executor.detection))) return
@@ -340,7 +346,7 @@ export function NewTabSurface({
       style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties}>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
-        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('workspaces')} />
+        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} />
 
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Primary Mote Agent is unconfirmed',
@@ -373,7 +379,7 @@ export function NewTabSurface({
           active={visible && presentationActive} onSelect={chooseExecutor} />
         <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}
           onPasteImage={(file, insert) => { void feedback.run(async () => {
-            if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing this Mac.')
+            if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing the local machine.')
             await insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return feedback.isCurrent() ? appendFileReferences('', [path]) : null }, { separate: true }) }) }}
           autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
@@ -406,7 +412,7 @@ export function NewTabSurface({
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
-        sections={sections} onSectionChange={setSection} warmSession={warmSession} warmPending={warmPending}
+        sections={sections} onSectionChange={setSection} warmPreview={warmPreview}
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
         onRun={run} />
       {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}

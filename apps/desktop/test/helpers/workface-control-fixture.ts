@@ -112,7 +112,8 @@ export async function runWorkfaceRestore(ownFile: string, restoreName: string, p
   const state = useAppStore.getState()
   expect(Object.keys(state.tabs)).toEqual([tabId, decoyTabId])
   await writeFile(recordPath, JSON.stringify({ parentPid: process.pid, record, childProof, tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts }))
-  const env = privateEnvironment({ AGENTMUX_WORKFACE_RESTORE_PHASE: phase, AGENTMUX_WORKFACE_RESTORE_RECORD: recordPath })
+  const env = privateEnvironment({ AGENTMUX_WORKFACE_RESTORE_PHASE: phase, AGENTMUX_WORKFACE_RESTORE_RECORD: recordPath,
+    ...(process.env.AGENTMUX_QUALIFICATION_KEY ? { AGENTMUX_QUALIFICATION_KEY: process.env.AGENTMUX_QUALIFICATION_KEY } : {}) })
   try {
     const result = await promisify(execFile)(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config',
       process.env.AGENTMUX_WORKFACE_MUTATION_CONFIG ?? 'vitest.config.ts', ownFile, '--testNamePattern', restoreName,

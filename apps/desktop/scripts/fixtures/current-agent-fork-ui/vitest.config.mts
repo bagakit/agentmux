@@ -8,14 +8,26 @@ const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any
   find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
   replacement: resolve(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
+for (const name of ['demand', 'relay']) {
+  const workspaceManifest = JSON.parse(readFileSync(resolve(root, 'packages', name, 'package.json'), 'utf8'))
+  for (const [key, value] of Object.entries(workspaceManifest.exports) as [string, any][]) aliases.push({
+    find: new RegExp('^' + (key === '.' ? '@agentmux/' + name : '@agentmux/' + name + '/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
+    replacement: resolve(root, 'packages', name, value.import.replace('./dist/', name === 'demand' ? './' : './src/').replace(/\.js$/, '.ts'))
+  })
+}
+const clientUiExports = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
+for (const [key, value] of Object.entries(clientUiExports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
+  const target = typeof value === 'string' ? value : (value as { browser: string }).browser
+  const name = key === '.' ? '@agentmux/client-ui' : '@agentmux/client-ui/' + key.slice(2)
+  const pattern = name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
+  aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: resolve(root, 'packages/client-ui', target).replace('*', '$1') })
+}
 aliases.push({ find: /^@agentmux\/layout$/, replacement: resolve(root, 'packages/core/src/spatial-layout.ts') })
-export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'] },
+export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' }, resolve: { alias: aliases, conditions: ['browser'] },
   plugins: [{ name: 'fork-ui-current-source', enforce: 'pre',
-    resolveId(id) { if (/(^|\/)ConversationView(?:\.js)?$/.test(id)) return '\0fork-unused-conversation' },
-    load(id) { if (id === '\0fork-unused-conversation') return 'export function ConversationView(){throw new Error("Unrelated ConversationView invoked in current-fork UI proof")}' },
     transform(source, id) {
     const file = relative(root, id.split('?')[0]!)
-    if (!file.startsWith('apps/desktop/src/') && !file.startsWith('packages/core/src/')) return
+    if (!file.startsWith('apps/desktop/src/') && !/^packages\/(?:core|demand|relay|client-ui)\/src\//.test(file)) return
     let code = source
     if (process.env.AMX_FORK_UI_MUTATION) {
       const mutation = JSON.parse(readFileSync(process.env.AMX_FORK_UI_MUTATION, 'utf8'))
@@ -25,6 +37,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
       }
     }
     if (process.env.AMX_FORK_UI_LOADED) appendFileSync(process.env.AMX_FORK_UI_LOADED, JSON.stringify({ file,
+      fileSHA256: createHash('sha256').update(readFileSync(resolve(root, file))).digest('hex'),
       sourceSHA256: createHash('sha256').update(source).digest('hex'), loadedSHA256: createHash('sha256').update(code).digest('hex'), mutated: code !== source }) + '\n')
     if (code !== source) return { code, map: null }
   } }], test: { include: ['apps/desktop/test/current-agent-fork-ui.test.tsx'], passWithNoTests: false,

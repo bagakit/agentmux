@@ -7,17 +7,18 @@ export async function sessionInputWriteResult(write: () => Promise<void>): Promi
     await write()
     return { ok: true }
   } catch (error) {
-    const source = error instanceof Error ? error as Error & { code?: string; detail?: string; controlFailure?: AgentMuxControlFailure } : null
+    const source = error instanceof Error ? error as Error & { code?: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string } : null
     return { ok: false, error: {
       code: typeof source?.code === 'string' ? source.code : 'SESSION_INPUT_FAILED',
       message: source?.message ?? String(error),
+      ...(source?.logId === undefined ? {} : { logId: source.logId }),
       ...(source?.detail === undefined ? {} : { detail: source.detail }),
       ...(source?.controlFailure === undefined ? {} : { controlFailure: source.controlFailure })
     } }
   }
 }
 
-/** Preserve the original typed failure after the Main→preload structured-clone boundary. */
+/** Restore the original typed failure in Renderer after IPC and contextBridge copy the envelope. */
 export function unwrapSessionInputWriteResult(result: SessionInputWriteResult): void {
   if (!result.ok) throw Object.assign(new Error(result.error.message), result.error)
 }

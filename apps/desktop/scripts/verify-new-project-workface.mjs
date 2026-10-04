@@ -27,7 +27,6 @@ const receipt = { schema: 'agentmux.new-project-workface.v1', passed: false, evi
     'Actual ConfigOwner/registerWorkspace and Core spatial filesystem owner; three independent Electron processes share one private profile and state file.',
     'Existing public spatial/navigation contracts are reused. The old null choice and original descriptor observation gap plus two Space bindings are explicit fault inputs, not a claim of the user profile cause. A bounded private spatial ACK hold permits stable unknown capture; Core durable origin is retained and released before save. Restart may confirm that original origin.',
     'Runtime execution and warm Terminal are isolated; no lifecycle/send request is admitted. No real Agent/Run recovery, user App restart, installed package or full production-build claim.',
-    'Missing unrelated zone-file-resource and ConversationView dependencies (AgentAsyncQuestionCard/conversation-files) are isolated leaves that throw if invoked. This task does not repair those source-tree limitations.',
     'Chromium flush request alone is not disk ACK; subsequent independent process readback proves the nonempty draft and exact client selection.'
   ] }
 await fs.mkdir(evidence, { recursive: true })
@@ -77,17 +76,17 @@ try {
     find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
     replacement: path.join(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
   }))
+
+  const clientUiExports = JSON.parse(await fs.readFile(path.join(root, 'packages/client-ui/package.json'), 'utf8')).exports
+  for (const [key, value] of Object.entries(clientUiExports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
+    const target = typeof value === 'string' ? value : value.browser
+    const name = key === '.' ? '@agentmux/client-ui' : '@agentmux/client-ui/' + key.slice(2)
+    const pattern = name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
+    aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: path.join(root, 'packages/client-ui', target).replace('*', '$1') })
+  }
   aliases.push({ find: /^@agentmux\/layout$/, replacement: path.join(root, 'packages/core/src/spatial-layout.ts') })
   const consumed = new Map()
   const guardPlugin = { name: 'explicit-unused-missing-leaves', enforce: 'pre',
-    resolveId(id) {
-      if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-zone-file-resource'
-      if (/(^|\/)ConversationView(?:\.js)?$/.test(id)) return '\0unused-conversation-view'
-    },
-    load(id) {
-      if (id === '\0unused-zone-file-resource') return 'export function zoneFileResource(){throw new Error("Unused file-resource leaf invoked in workface proof")}'
-      if (id === '\0unused-conversation-view') return 'export function ConversationView(){throw new Error("Unused conversation-history leaf invoked in workface proof")}'
-    },
     transform(code, id) { if (id.startsWith(root + '/apps/desktop/src/') || id.startsWith(root + '/packages/core/src/') || id.startsWith(root + '/packages/client-ui/src/')) consumed.set(path.relative(root, id.split('?')[0]), hash(code)) }
   }
   const renderer = path.join(evidence, 'renderer')
@@ -98,7 +97,7 @@ try {
     assert.ok(consumed.has(file), 'Actual compiled product consumer: ' + file)
   receipt.compiledSource = Object.fromEntries(consumed)
   const main = path.join(evidence, 'main.cjs')
-  const nodeAliases = Object.fromEntries(aliases.filter(value => String(value.find).includes('@agentmux')).map(value => [value.find.source.slice(1, -1).replaceAll('\\/', '/').replaceAll('\\.', '.'), value.replacement]))
+  const nodeAliases = Object.fromEntries(aliases.filter(value => String(value.find).includes('@agentmux') && !value.find.source.includes('(')).map(value => [value.find.source.slice(1, -1).replaceAll('\\/', '/').replaceAll('\\.', '.'), value.replacement]))
   await buildNode({ absWorkingDir: root, entryPoints: [path.join(fixture, 'main.ts')], outfile: main,
     bundle: true, format: 'cjs', platform: 'node', external: ['electron'], alias: nodeAliases, logLevel: 'error',
     // Retain the spatial owner's source-module resolution for its native filesystem lock.

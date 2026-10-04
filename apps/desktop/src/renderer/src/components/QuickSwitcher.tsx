@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as Dialog from '@radix-ui/react-dialog'
 import { CornerDownLeft, FileCode2, Globe2, Search, PanelsTopLeft, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -13,6 +14,8 @@ import { AgentAvatar } from './AgentAvatar'
 import { StatusDot } from './StatusDot'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useAppStore } from '../store'
+import { QuickOpenFiles } from './QuickOpenFiles'
+import { desktopElementVisible } from '../lib/desktop-presentation'
 
 // One modal overlay a single keystroke summons to jump anywhere in the window — any agent session or
 // any open non-session tab — without reaching for the mouse. It reuses the Radix Dialog shell the app
@@ -31,7 +34,8 @@ function KindGlyph({ item }: { item: QuickSwitchItem }) {
   return item.subtitle.includes('://') ? <Globe2 size={13} /> : <FileCode2 size={13} />
 }
 
-export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; onClose: () => void; returnFocus?: () => HTMLElement | null }) {
+  const scratchTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const tabs = useAppStore((state) => state.tabs)
@@ -40,17 +44,20 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
   const activateTab = useAppStore((state) => state.activateTab)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [mode, setMode] = useState<'sessions' | 'files'>('sessions')
   const listRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const activated = useRef(false)
 
   const items = useMemo(
     () =>
-      buildQuickSwitchIndex({
+      buildQuickSwitchIndex({ topics: scratchTopicsForConfig(config, scratchTopicSnapshots),
         config,
         sessions,
         tabs,
         tabGroupOf: (workspaceId, tabId) => tabGroupForTab(layouts[workspaceId], tabId)
       }),
-    [config, sessions, tabs, layouts]
+    [config, scratchTopicSnapshots, sessions, tabs, layouts]
   )
   const results = useMemo(() => rankQuickSwitchItems(items, query), [items, query])
 
@@ -60,6 +67,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
   // A fresh open starts clean: empty query, top row highlighted.
   useEffect(() => {
     if (open) {
+      activated.current = false
       setQuery('')
       setActiveIndex(0)
     }
@@ -72,6 +80,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
 
   function activate(item: QuickSwitchItem | undefined): void {
     if (!item) return
+    activated.current = true
     if (item.target.kind === 'session') selectSession(item.target.sessionId)
     else activateTab(item.target.workspaceId, item.target.tabGroupId, item.target.tabId)
     onClose()
@@ -82,9 +91,18 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
       <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <Dialog.Overlay className="quick-switch__overlay dialog-scrim" />
         <Dialog.Content
+          ref={contentRef}
           className="quick-switch dialog-surface"
-          aria-label="Jump to a session or tab"
+          aria-label={mode === 'files' ? 'Open a project file' : 'Jump to a session or tab'}
+          onCloseAutoFocus={event => {
+            event.preventDefault()
+            if (activated.current) return
+            const target = returnFocus?.(), active = document.activeElement
+            if (target && desktopElementVisible(target) &&
+                (active === document.body || active === target || !active?.isConnected || contentRef.current?.contains(active))) target.focus({ preventScroll: true })
+          }}
           onKeyDown={(event) => {
+            if (mode === 'files') return
             // 组字确认用的 Enter（CJK 输入法）不能激活选中项，否则一次组字确认会误跳到某个会话/标签。
             if (isImeCompositionKeyDown(event)) return
             if (event.key === 'ArrowDown') {
@@ -99,10 +117,15 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
             }
           }}
         >
-          <Dialog.Title className="quick-switch__title">Jump to a session or tab</Dialog.Title>
+          <Dialog.Title className="quick-switch__title">{mode === 'files' ? 'Open a project file' : 'Jump to a session or tab'}</Dialog.Title>
           <Dialog.Description className="quick-switch__description">
-            Search by name or amux Agent ID. Agents that need you rank first.
+            {mode === 'files' ? 'Search project file names. Add a line and column to reveal source.' : 'Search by name or amux Agent ID. Agents that need you rank first.'}
           </Dialog.Description>
+          <div className="quick-switch__modes" aria-label="Quick switch mode">
+            <button type="button" aria-pressed={mode === 'sessions'} onClick={() => setMode('sessions')}>Sessions & tabs</button>
+            <button type="button" aria-pressed={mode === 'files'} onClick={() => setMode('files')}>Project files</button>
+          </div>
+          {mode === 'files' ? open ? <QuickOpenFiles onClose={() => { activated.current = true; onClose() }} /> : null : <>
           <div className="quick-switch__input">
             <Search size={15} />
             {/* autoFocus is honest here: the dialog exists only to take this query. */}
@@ -136,11 +159,12 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
                     <span className="quick-switch__row-title">{item.title}</span>
                     <span className="quick-switch__row-subtitle">{item.subtitle}</span>
                   </span>
-                  {item.state && !item.providerId ? <StatusDot status={{ state: item.state, source: 'native-hook', observedAt: item.observedAt }} /> : null}
+                  {item.state && !item.providerId ? <StatusDot status={{ state: item.state, source: 'native-hook' }} /> : null}
                 </button>
               ))
             )}
           </div>
+          </>}
           <div className="quick-switch__footer">
             <span><kbd>↑</kbd><kbd>↓</kbd> to navigate</span>
             <span><kbd><CornerDownLeft size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>

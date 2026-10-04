@@ -31,11 +31,14 @@ export type WorkspaceFilePreviewFormat = (typeof WORKSPACE_FILE_PREVIEW_FORMATS)
 export type WorkspaceFilePreviewKind = WorkspaceFilePreviewFormat['kind']
 export type WorkspaceFilePreviewReadOptions = { expectedRevision?: string }
 
-export function workspaceFilePreviewFormat(path: string): WorkspaceFilePreviewFormat | null {
+export function workspaceFileExtension(path: string): string {
   const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
   const dot = name.lastIndexOf('.')
-  if (dot <= 0) return null
-  const extension = name.slice(dot + 1).toLowerCase()
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+export function workspaceFilePreviewFormat(path: string): WorkspaceFilePreviewFormat | null {
+  const extension = workspaceFileExtension(path)
   return Object.hasOwn(WORKSPACE_FILE_PREVIEW_FORMATS, extension)
     ? WORKSPACE_FILE_PREVIEW_FORMATS[extension as keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS] : null
 }

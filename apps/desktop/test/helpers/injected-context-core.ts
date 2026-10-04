@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readFile, writeFile } from 'node:fs/promises'
 import { expect, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, type AgentMuxAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, normalizeAgentSession, type AgentMuxAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
 
 /** Real Core/FileStore; only private Native I/O, probes and hooks are controlled. */
 export async function injectedContextCore(root: string, initial?: AgentMuxStoredAgentSession) {
@@ -10,7 +10,7 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const path = join(root, 'sessions.json')
   const store = new AgentMuxFileAgentSessionStore(path)
-  const sessions = await store.load()
+  const sessions = (await store.load()).map(value => normalizeAgentSession(value))
   if (initial && sessions.length === 0) await store.compareAndSwap(null, initial)
   const requests: Array<{ runId: string; operationId: string; expectedByte: number; data: string }> = []
   const writes: string[] = [], receipts = new Map<string, unknown>(), cursors = new Map<string, number>()

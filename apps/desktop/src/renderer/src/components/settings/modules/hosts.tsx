@@ -15,11 +15,11 @@ export const hostsSettingsModule = {
   id: 'hosts',
   group: 'connections',
   title: 'Environments',
-  description: 'Local and SSH connections for your workspace.',
+  description: 'Connections, project folders, and remote access.',
   icon: Server,
-  keywords: 'host hosts ssh remote hostname user port key test connection environment project',
+  keywords: 'host hosts ssh remote hostname user port key test connection environment project folder workspace worktree register open',
   savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'environment' : 'environments'}`,
-  Pane({ config, active }) {
-    return <HostSettingsPane config={config} onSave={saveHosts} active={active} />
+  Pane({ config, active, onClose, navigationRequest }) {
+    return <HostSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} navigationRequest={navigationRequest} />
   }
 } as const satisfies SettingsModule

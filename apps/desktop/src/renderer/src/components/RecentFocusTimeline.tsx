@@ -33,7 +33,7 @@ import { focusVisitFacts, focusWorkingFacts, focusLiveFacts, focusGapFacts, type
 import { FocusTimelineRulerSettings, type FocusDateChoice } from './FocusTimelineRulerSettings'
 import { createFocusTimeFormatters, focusDateCandidates, focusRulerLabels, focusRulerTicks, focusUtcOffset, resolvedFocusTimeZone, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { useSessionUserMessages } from '../lib/session-user-messages'
-import { useFocusHistorySources } from '../lib/focus-history-sources'
+import { useFocusHistorySources, type FocusHistoryCatalogue } from '../lib/focus-history-sources'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
@@ -563,12 +563,13 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   </Dialog.Portal></Dialog.Root>
 }
 
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, historyWindowRequest }: {
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, historyWindowRequest, catalogue: sharedCatalogue }: {
   entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
   /** Pure main-Region presentation input; the Reader continues using currentSessionId. */
   currentContext?: Pick<FocusContext, 'id' | 'hostId'> | null | undefined
   lanes?: readonly FocusProjectLane[]; hierarchy?: FocusHierarchyFacts; onSelect(sessionId: string): void
   historyWindowRequest?: { at: number; sequence: number } | undefined
+  catalogue?: FocusHistoryCatalogue
 }) {
   const [mode, setMode] = useState<'compact' | 'expanded' | 'collapsed'>('compact')
   const [hours, setHours] = useState<number>(4)
@@ -740,7 +741,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     document.addEventListener('keydown', dismiss)
     return () => document.removeEventListener('keydown', dismiss)
   }, [cancelPreviewIntent])
-  const catalogue = useFocusHistorySources(mode !== 'collapsed' && documentVisible)
+  const localCatalogue = useFocusHistorySources(!sharedCatalogue && mode !== 'collapsed' && documentVisible)
+  const catalogue = sharedCatalogue ?? localCatalogue
   const [sourceLimit, setSourceLimit] = useState(30)
   const observations = useMemo(() => observeFocusInputTracks(entries), [entries])
   const inputSources = useMemo(() => {

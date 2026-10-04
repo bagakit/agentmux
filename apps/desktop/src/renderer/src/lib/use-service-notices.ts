@@ -10,6 +10,8 @@ export type ServiceNoticeItem = {
   /** Display metadata from this notice's owner; never part of its read identity. */
   observedAt?: number
   notice: RenderableServiceNotice
+  /** Compact owner-supplied explanation; the original facts remain in Details. */
+  summary?: RenderableServiceNotice['notice']
   action?: { label: string; run(): void }
 }
 
@@ -18,12 +20,12 @@ export function serviceNoticeFingerprint(item: ServiceNoticeItem): string {
   return JSON.stringify([item.occurrence, item.notice.kind, item.cause ?? item.notice.notice])
 }
 
-/** Only acknowledgement is persisted. Current problems remain projections of their owners. */
-export function useReadReceipts(scope: string, current: Readonly<Record<string, string>>, available = true) {
+/** Only acknowledgement is persisted. Only a complete, available owner projection may prune receipts. */
+export function useReadReceipts(scope: string, current: Readonly<Record<string, string>>, available = true, complete = true) {
   const receipts = useAppStore((state) => state.noticeReadReceipts[scope] ?? EMPTY_RECEIPTS)
   const signature = JSON.stringify(current)
   useEffect(() => {
-    if (!available) return
+    if (!available || !complete) return
     useAppStore.setState((state) => {
       const prior = state.noticeReadReceipts[scope]
       if (!prior) return state
@@ -34,7 +36,7 @@ export function useReadReceipts(scope: string, current: Readonly<Record<string, 
       else delete next[scope]
       return { noticeReadReceipts: next }
     })
-  }, [scope, signature, available])
+  }, [scope, signature, available, complete])
   function acknowledge(ids: readonly string[]) {
     if (!ids.length) return
     useAppStore.setState((state) => ({ noticeReadReceipts: {
@@ -46,9 +48,9 @@ export function useReadReceipts(scope: string, current: Readonly<Record<string, 
 }
 
 
-export function useServiceNotices(scope: string, notices: readonly ServiceNoticeItem[], available = true) {
+export function useServiceNotices(scope: string, notices: readonly ServiceNoticeItem[], available = true, complete = true) {
   const current = Object.fromEntries(notices.map((item) => [item.id, serviceNoticeFingerprint(item)]))
-  const receipts = useReadReceipts(scope, current, available)
+  const receipts = useReadReceipts(scope, current, available, complete)
   return { available, notices, unread: notices.filter((item) => receipts.unread.includes(item.id)),
     acknowledge: (items: readonly ServiceNoticeItem[]) => receipts.acknowledge(items.map((item) => item.id)) }
 }

@@ -26,6 +26,9 @@ import { HostExecutorSettings } from './HostExecutorSettings'
 import { currentExecutorDetection, executorDetectionLabel } from '../../lib/executor-detection'
 import { useResourceDrafts } from './use-resource-drafts'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
+import { ProviderCatalogPane } from './ProviderCatalogPane'
+import { api } from '../../lib/api'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 
 const NO_DETECTIONS: ReturnType<typeof useAppStore.getState>['executorDetections'] = {}
@@ -71,14 +74,6 @@ function statusCopy(state: ReturnType<typeof useAppStore.getState>['executorDete
   }
 }
 
-function nextExecutorId(providerId: string, drafts: Readonly<Record<string, ExecutorDraft>>): string {
-  const base = providerId.replace(/[^A-Za-z0-9_-]/g, '-') || 'agent'
-  let suffix = 2
-  if (!Object.hasOwn(drafts, base)) return base
-  while (Object.hasOwn(drafts, `${base}-${suffix}`)) suffix += 1
-  return `${base}-${suffix}`
-}
-
 export function assertExecutorProviderIdentity(
   executorId: string,
   existing: AgentExecutorConfig | undefined,
@@ -108,7 +103,11 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [selectedId, setSelectedId] = useState<string | null>(() => executorId ?? Object.keys(config.executors)[0] ?? null)
   const [view, setView] = useState<'library' | 'editor'>(executorId ? 'editor' : 'library')
-  const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
+  const [providersOpen, setProvidersOpen] = useState(false)
+  const [catalogRead, setCatalogRead] = useState<{ state: 'idle' | 'loading' | 'ready' | 'error'; error?: string }>({ state: 'idle' })
+  const catalogPending = useRef(false)
+  const mounted = useRef(true)
+  const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean; field?: 'provider' } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [launchOpen, setLaunchOpen] = useState<Record<string, boolean>>({})
   const editor = useRef<HTMLDivElement>(null)
@@ -148,6 +147,37 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const matches = (id: string) => !filter.query.trim() || filter.snapshot.includes(id)
   const matchCount = executors.filter(({ id }) => matches(id)).length
 
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  async function refreshProviders(): Promise<void> {
+    if (catalogPending.current) return
+    catalogPending.current = true
+    setCatalogRead({ state: 'loading' })
+    try {
+      const catalog = await api.providers.list()
+      if (!mounted.current) return
+      useAppStore.setState({ providerCatalog: catalog })
+      setCatalogRead({ state: 'ready' })
+    } catch (cause) {
+      if (mounted.current) setCatalogRead({ state: 'error', error: presentError(cause) })
+    } finally {
+      catalogPending.current = false
+    }
+  }
+
+  function openProviders(): void {
+    setProvidersOpen(true)
+    if (providerCatalog.length === 0 && catalogRead.state === 'idle') void refreshProviders()
+  }
+
+  function closeProviders(): void {
+    setProvidersOpen(false)
+    if (view === 'editor' && selectedId) setPendingEdit({ id: selectedId, select: false })
+    else setReturnFocus({ id: selectedId })
+  }
 
   useEffect(() => {
     if (!active || !detectionTarget) return
@@ -160,6 +190,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     if (!active || !targetId || consumedNavigation.current === request) return
     consumedNavigation.current = request
     setSelectedId(targetId)
+    setProvidersOpen(false)
     setView('editor')
     setFilter({ query: '', snapshot: [] })
     setPendingEdit({ id: targetId, select: false })
@@ -168,10 +199,12 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   useEffect(() => {
     if (!pendingEdit || pendingEdit.id !== selectedId) return
     const name = editor.current?.querySelector<HTMLInputElement>('input[data-executor-name]')
-    const target = name ?? editor.current?.querySelector<HTMLElement>('.settings-resource-editor__empty')
+    const target = pendingEdit.field === 'provider'
+      ? editor.current?.querySelector<HTMLSelectElement>('[data-executor-provider]')
+      : name ?? editor.current?.querySelector<HTMLElement>('.settings-resource-editor__empty')
     if (!target) return
     target.focus()
-    if (name && pendingEdit.select) name.select()
+    if (target === name && pendingEdit.select) name.select()
     setPendingEdit(null)
   }, [pendingEdit, selectedId])
 
@@ -206,11 +239,34 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setDrafts((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
   }
 
+  function createExecutorId(providerId: string): string {
+    let id: string
+    do { id = `${providerId}-${crypto.randomUUID().slice(0, 8)}` }
+    while (Object.hasOwn(drafts, id) || Object.hasOwn(config.executors, id) || Object.hasOwn(resource.expected, id))
+    return id
+  }
+
   function chooseProvider(id: string, providerId: string): void {
     const draft = drafts[id]!
+    if (saving || Object.hasOwn(resource.expected, id) || draft.providerId === providerId) return
     const previous = providerCatalog.find((provider) => provider.id === draft.providerId)
     const next = providerCatalog.find((provider) => provider.id === providerId)!
-    update(id, { providerId, command: draft.command === previous?.executable ? next.executable : draft.command })
+    const nextId = createExecutorId(providerId)
+    setDrafts((current) => {
+      const records = { ...current }
+      records[nextId] = { ...records[id]!, providerId,
+        command: draft.command === previous?.executable ? next.executable : draft.command }
+      delete records[id]
+      return records
+    })
+    setLaunchOpen((current) => {
+      const records = { ...current, [nextId]: current[id] ?? false }
+      delete records[id]
+      return records
+    })
+    setFilter({ query: '', snapshot: [] })
+    setSelectedId(nextId)
+    setPendingEdit({ id: nextId, select: false, field: 'provider' })
   }
 
   async function saveDrafts(makeDrafts: () => Record<string, ExecutorDraft>): Promise<void> {
@@ -256,16 +312,16 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     })
   }
 
-  function addExecutor(): void {
-    const provider = providerCatalog[0]
-    if (!provider) return
-    const id = nextExecutorId(provider.id, drafts)
+  function addExecutor(provider = providerCatalog[0]): void {
+    if (!provider) { openProviders(); return }
+    const id = createExecutorId(provider.id)
     setDrafts((current) => ({ ...current, [id]: {
       label: `${provider.label} ${Object.keys(current).length + 1}`, providerId: provider.id,
       command: provider.executable, args: '', env: '{}', injectAgentMuxGuide: true
     } }))
     setFilter({ query: '', snapshot: [] })
     setSelectedId(id)
+    setProvidersOpen(false)
     setView('editor')
     setPendingEdit({ id, select: true })
   }
@@ -278,14 +334,16 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
       <div hidden={scope !== 'templates'}>
     <div className="settings-pane-stack settings-resource-workbench" data-resource-view={view}>
       <div className="settings-pane-toolbar">
-        <span className="settings-resource-count">{filter.query.trim() ? `${matchCount} of ` : ''}{executors.length} {executors.length === 1 ? 'executor' : 'executors'}</span>
-        <div className="settings-resource-check-tools">
+        <span className="settings-resource-count">{providersOpen ? (providerCatalog.length || catalogRead.state === 'ready' ? `${providerCatalog.length} providers` : catalogRead.state === 'loading' ? 'Loading providers…' : 'Provider catalog') : `${filter.query.trim() ? `${matchCount} of ` : ''}${executors.length} ${executors.length === 1 ? 'executor' : 'executors'}`}</span>
+        <button type="button" className="small-button settings-providers-toggle" aria-pressed={providersOpen} onClick={() => providersOpen ? closeProviders() : openProviders()}>Providers{providerCatalog.length ? <span>{providerCatalog.length}</span> : null}</button>
+        {!providersOpen && <div className="settings-resource-check-tools">
             <span className="settings-group-note">Local availability</span>
             <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}</button>
-        </div>
-        <button className="small-button" disabled={providerCatalog.length === 0 || saving} onClick={addExecutor}><Plus size={13} /> Add executor</button>
+        </div>}
+        <button className="small-button" disabled={saving} onClick={() => addExecutor()}><Plus size={13} /> Add executor</button>
       </div>
-      <div className="settings-resource-split">
+      {providersOpen ? <ProviderCatalogPane entries={providerCatalog} read={catalogRead} saving={saving}
+        onRefresh={() => void refreshProviders()} onBack={closeProviders} onCreate={addExecutor} /> : <div className="settings-resource-split">
         <SettingsResourceLibrary label="Executors" selectedId={selectedId} query={filter.query} onQuery={filterExecutors} onSelect={selectExecutor} focusRequest={returnFocus}
           items={executors.filter(({ id }) => matches(id)).map(({ id, draft, detection }) => ({
             id, name: draft.label, detail: `${agentProviderLabel(draft.providerId)} · ${id}`,
@@ -311,7 +369,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
                 <label><span>Name</span><input data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
-                  <label><span>Provider</span><select value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
+                  <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
                 <div className="agent-avatar-settings__row">
                   <span className="agent-avatar-settings__name"><strong>Appearance</strong><small>Recognize this executor across your workspace</small></span>
                   <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...avatar, tint: event.target.value })} /></label>
@@ -338,7 +396,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><Bot size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : 'Your agent configurations'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Choose an executor to edit its identity and launch configuration.'}</p></div> : null}
           {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ChevronDown size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ShieldOff size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
         </div>
-      </div>
+      </div>}
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />
     </div></div></div>
   )

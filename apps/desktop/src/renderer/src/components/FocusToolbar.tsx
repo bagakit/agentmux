@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { AlertCircle, ArrowUpRight, Check, ChevronDown, Inbox, MessageCircle, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
@@ -14,7 +15,7 @@ import { topicIdForSession } from '../lib/workbench-tabs'
 import { scratchMoteTopics, scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
-import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -35,6 +36,7 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   const renameTab = useAppStore(state => state.renameTab)
   const stop = useFocusStopAgent()
   const sessions = useWorkbenchTabSessions(tab ?? undefined)
+  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab ?? undefined)
   const agentNames = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab ?? undefined)))
   const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab ?? undefined)))
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
@@ -63,7 +65,7 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
   const renameCancelledRef = useRef(false)
   const originalTerminal = tab && Object.values(tab.regions).some(surface => surface.kind === 'terminal' && surface.sessionId === selectedId)
-  const name = tab ? workbenchTabDisplayName(tab, sessions, agentNames, timelines) : selected?.name || 'Session awaiting recovery'
+  const name = tab ? workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata) : selected?.name || 'Session awaiting recovery'
   const activeSurface = reference && tab?.regions[reference.regionId]
   const statusLabel = selected?.stateLabel ?? (activeSurface ? activeSurface.kind[0]!.toUpperCase() + activeSurface.kind.slice(1) : originalTerminal ? 'Terminal' : 'Recovery unknown')
   useEffect(() => {
@@ -125,7 +127,7 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     const region = moteTab?.regions[moteTab.layout.activeRegionId]
     const session = region?.kind === 'agent' ? state.sessions.find(item => item.id === region.sessionId) : undefined
     const executorId = topicId === PMO_TEAMS_TOPIC_ID ? primaryMoteExecutorId(state)
-      : session?.kind === 'agent' && topicIdForSession(state.config, session) === topicId &&
+      : session?.kind === 'agent' && topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)) === topicId &&
         state.config?.executors[session.executorId]?.providerId === session.providerId ? session.executorId : undefined
     const prompt = `Discuss this Tab with me. Inspect this exact complete work surface before suggesting or making changes.\n\n${formatTabAddress(target.tabId)}`
     discussionFlight.current = true; setDiscussionPending(true)

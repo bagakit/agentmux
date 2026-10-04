@@ -15,7 +15,7 @@ export type FileExplorerRowProjection = {
 }
 
 export function createFileExplorerRowProjection(
-  visibleFlatRows: TreeNode[]
+  visibleFlatRows: readonly TreeNode[]
 ): FileExplorerRowProjection {
   const rowsByPath = new Map(visibleFlatRows.map((row) => [row.path, row]))
   let indexByPath: Map<string, number> | null = null

@@ -1,4 +1,7 @@
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
+import type { SplitDirection } from '@agentmux/layout'
+import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
+import { workbenchSplitDirectionIcon } from './workbench-split-menu-icons'
 import * as DropdownMenu from './HoverDropdownMenu'
 import {
   AlertTriangle,
@@ -48,6 +51,7 @@ import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
+import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
 import { BrowserTaskReliability, useBrowserTaskReliabilityRefresh, type BrowserTaskReliabilityRequest } from './BrowserTaskReliability'
@@ -78,6 +82,7 @@ import { readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } f
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
+import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
 
 const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
   responsive: 'Responsive',
@@ -97,8 +102,108 @@ export function browserCaptureMatchesIdentity(
   return capture.browserId === identity.id && capture.navigationId === identity.navigationId
 }
 
-export function BrowserPane({
+type BrowserPaneProps = Omit<Parameters<typeof BrowserPaneContent>[0], 'addressDraft' | 'connection'>
+
+export function BrowserPane(props: BrowserPaneProps) {
+  return <BrowserPaneOwner key={props.tab.browserId} {...props} />
+}
+
+// Main connection state must survive a failed child tree and its local view retry.
+function useBrowserOwnerConnection({ tab, released = false, onControlConfirmation }: BrowserPaneProps) {
+  const applyBrowserEvent = useAppStore(state => state.applyBrowserEvent)
+  const reportError = useAppStore(state => state.reportError)
+  const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState<string | null>(null)
+  const [restoreAttempt, setRestoreAttempt] = useState(0)
+  const nativeLifecycleRef = useRef<'present' | 'releasing' | 'released' | 'restoring'>(
+    released ? 'released' : 'present'
+  )
+  const lifecycleTokenRef = useRef(0)
+  const recoveryInputs = useRef({ tab, released, onControlConfirmation })
+  recoveryInputs.current = { tab, released, onControlConfirmation }
+  // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
+  // restoring uses its URL/Profile/Viewport and publishes a fresh navigation identity through the
+  // ordinary Browser updated event.  A token prevents a quick tab switch from committing a stale
+  // restore after the policy has changed its mind.
+  useEffect(() => {
+    const token = ++lifecycleTokenRef.current
+    const { tab, onControlConfirmation } = recoveryInputs.current
+    if (released) {
+      setRestoring(false)
+      onControlConfirmation?.(tab.regionId, true)
+      if (nativeLifecycleRef.current === 'released' || nativeLifecycleRef.current === 'releasing') return
+      nativeLifecycleRef.current = 'releasing'
+      void api.browser.release(tab.browserId)
+        .then(() => {
+          if (lifecycleTokenRef.current !== token) return
+          nativeLifecycleRef.current = 'released'
+        })
+        .catch((error) => {
+          if (lifecycleTokenRef.current !== token) return
+          nativeLifecycleRef.current = 'present'
+          recoveryInputs.current.onControlConfirmation?.(recoveryInputs.current.tab.regionId, false)
+          reportError(error)
+        })
+      return
+    }
+    if (nativeLifecycleRef.current === 'present' || nativeLifecycleRef.current === 'restoring') return
+    nativeLifecycleRef.current = 'restoring'
+    onControlConfirmation?.(tab.regionId, true)
+    setRestoreError(null)
+    setRestoring(true)
+    void api.browser.restore(tab.browserId, {
+      workspaceId: tab.workspaceId,
+      profileId: tab.profileId,
+      viewport: tab.viewport
+    }).then((browser) => {
+      if (browser.id !== tab.browserId) throw new Error('The Browser restore returned a different page identity. The original page and address are kept; retry its connection.')
+      if (lifecycleTokenRef.current !== token || released) {
+        // A stale Renderer observation is not permission to release a healthy page. Only the
+        // actual release policy can dispose a late restored owner; Main owns its identity.
+        if (recoveryInputs.current.released && recoveryInputs.current.tab.browserId === browser.id) void api.browser.release(browser.id).catch(() => {})
+        return
+      }
+      nativeLifecycleRef.current = 'present'
+      setRestoring(false)
+      applyBrowserEvent({ type: 'updated', browser })
+      recoveryInputs.current.onControlConfirmation?.(recoveryInputs.current.tab.regionId, false)
+    }).catch((error) => {
+      if (lifecycleTokenRef.current !== token) return
+      nativeLifecycleRef.current = 'released'
+      setRestoring(false)
+      setRestoreError(presentError(error))
+    })
+    return () => {
+      // Invalidate only this UI observation. Main still owns the request and original page.
+      lifecycleTokenRef.current += 1
+    }
+  }, [applyBrowserEvent, released, reportError, restoreAttempt, tab.browserId])
+
+  useEffect(() => () => {
+    lifecycleTokenRef.current += 1
+    recoveryInputs.current.onControlConfirmation?.(recoveryInputs.current.tab.regionId, false)
+  }, [])
+
+  return { restoring, restoreError, nativeLifecycleRef, retryConnection: () => setRestoreAttempt(attempt => attempt + 1) }
+}
+
+function BrowserPaneOwner(props: BrowserPaneProps) {
+  const connection = useBrowserOwnerConnection(props)
+  const addressDraft = useRef<BrowserWorkfaceAddressDraft>({ browserId: props.tab.browserId,
+    value: props.tab.url === 'about:blank' ? '' : props.tab.url, edited: false })
+  if (addressDraft.current.browserId !== props.tab.browserId) addressDraft.current = { browserId: props.tab.browserId,
+    value: props.tab.url === 'about:blank' ? '' : props.tab.url, edited: false }
+  else if (!addressDraft.current.edited) addressDraft.current.value = props.tab.url === 'about:blank' ? '' : props.tab.url
+  return <BrowserWorkfaceBoundary key={props.tab.browserId} tab={props.tab} addressDraft={addressDraft}
+    presentations={props.presentations} presentationTargetId={props.presentationTargetId} onRegionClose={props.onRegionClose}>
+    <BrowserPaneContent {...props} addressDraft={addressDraft} connection={connection} />
+  </BrowserWorkfaceBoundary>
+}
+
+function BrowserPaneContent({
   tab,
+  addressDraft,
+  connection,
   visible,
   released = false,
   yieldToFocusRing = false,
@@ -107,9 +212,18 @@ export function BrowserPane({
   onControlConfirmation,
   presentations = [],
   renderPresentationFrame,
-  onPresentationInputSelected
+  onPresentationInputSelected,
+  onRegionSplit,
+  regionSplitSurface,
+  onRegionClose
 }: {
   tab: BrowserWorkbenchSurface
+  addressDraft: import('react').RefObject<BrowserWorkfaceAddressDraft>
+  connection: ReturnType<typeof useBrowserOwnerConnection>
+  /** Original Region actions; these never create or dispose the page directly. */
+  onRegionSplit?: ((direction: SplitDirection) => void) | undefined
+  regionSplitSurface?: WorkbenchViewTarget['surface'] | undefined
+  onRegionClose?: (() => void) | undefined
   presentations?: readonly WorkbenchBrowserPresentation[] | undefined
   renderPresentationFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onPresentationInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
@@ -142,27 +256,7 @@ export function BrowserPane({
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
-  const selectedPresentationId = useAppStore(state => {
-    const selected = presentations.filter(presentation => {
-      const { target, occurrence, visible, active } = presentation
-      const reference = target.reference, location = occurrence.location
-      if (!visible || !active || !reference || reference.displayWorkspaceId !== location.displayWorkspaceId ||
-        reference.groupId !== location.groupId || reference.tabId !== location.tabId) return false
-      // Keep the existing Space Group initialization for its visible Browser siblings.
-      if (target.surface === 'space') return state.mainSurface === 'workbench' &&
-        state.layouts[location.displayWorkspaceId]?.activeGroupId === location.groupId
-      if (target.surface === 'survey') {
-        return state.mainSurface === 'survey'
-      }
-      if (reference.regionId !== location.regionId) return false
-      if (target.surface === 'focus') return state.mainSurface === 'agents'
-      return false
-    })
-    const current = state.mainSurface === 'survey' ? state.surveyZoneSelection?.active : null
-    const explicit = current ? selected.filter(presentation => presentation.target.surface === 'survey' &&
-      presentation.occurrence.location.tabId === current.tabId) : []
-    return explicit.length === 1 ? explicit[0]!.occurrence.presentationId : selected.length === 1 ? selected[0]!.occurrence.presentationId : null
-  })
+  const selectedPresentationId = useAppStore(state => selectedBrowserPresentationId(presentations, state))
   const media = useBrowserPresentationCapture(tab.browserId)
   const stageRef = useRef<HTMLDivElement>(null)
   // 焦点结论用 ref 承接，边界同步那条 effect 从 ref 读它而不订阅它（#545）：直接把 prop 放进那条
@@ -181,12 +275,18 @@ export function BrowserPane({
     screenshotToken.current += 1
     selectionToken.current += 1
   }
-  const [address, setAddress] = useState(tab.url === 'about:blank' ? '' : tab.url)
+  const [address, setAddress] = useState(addressDraft.current.value)
   const [addressError, setAddressError] = useState<string | null>(null)
   const addressInputs = useRef(new Map<string, ReturnType<typeof createRef<BrowserAddressInputHandle>>>())
-  const addressDraftEdited = useRef(false)
+  const addressDraftEdited = useRef(addressDraft.current.edited)
   const addressBrowser = useRef(tab.browserId)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
+  const [savedBookmark, setSavedBookmark] = useState<{
+    browserId: string
+    navigationId: BrowserSnapshot['navigationId']
+    workspaceId: string
+    path: string
+  } | null>(null)
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -228,11 +328,7 @@ export function BrowserPane({
   // 每换一个 scheme 就把勾选清回去。不清的话，上一次勾了「记住」会让下一个**不同的** scheme
   // 一出现就预先勾着——用户扫一眼点 Open，等于替他记住了一件他没答应的事。
   useEffect(() => setRememberAppLink(false), [tab.appLinkPrompt?.scheme])
-  const [restoring, setRestoring] = useState(false)
-  const nativeLifecycleRef = useRef<'present' | 'releasing' | 'released' | 'restoring'>(
-    released ? 'released' : 'present'
-  )
-  const lifecycleTokenRef = useRef(0)
+  const { restoring, restoreError, retryConnection, nativeLifecycleRef } = connection
   const [annotationNote, setAnnotationNote] = useState('')
   const [replayPlan, setReplayPlan] = useState<BrowserReplayPlan | null>(null)
   const [replayBusy, setReplayBusy] = useState(false)
@@ -280,63 +376,7 @@ export function BrowserPane({
     setTaskAssetReview(null)
   }, [tab.browserId])
 
-  // Browser release/restore is a Main-owned lifecycle.  The Region snapshot remains in the Store;
-  // restoring uses its URL/Profile/Viewport and publishes a fresh navigation identity through the
-  // ordinary Browser updated event.  A token prevents a quick tab switch from committing a stale
-  // restore after the policy has changed its mind.
-  useEffect(() => {
-    const token = ++lifecycleTokenRef.current
-    if (released) {
-      onControlConfirmation?.(tab.regionId, true)
-      if (nativeLifecycleRef.current === 'released' || nativeLifecycleRef.current === 'releasing') return
-      nativeLifecycleRef.current = 'releasing'
-      void api.browser.release(tab.browserId)
-        .then(() => {
-          if (lifecycleTokenRef.current !== token) return
-          nativeLifecycleRef.current = 'released'
-        })
-        .catch((error) => {
-          if (lifecycleTokenRef.current !== token) return
-          nativeLifecycleRef.current = 'present'
-          onControlConfirmation?.(tab.regionId, false)
-          reportError(error)
-        })
-      return
-    }
-    if (nativeLifecycleRef.current === 'present' || nativeLifecycleRef.current === 'restoring') return
-    nativeLifecycleRef.current = 'restoring'
-    onControlConfirmation?.(tab.regionId, true)
-    setRestoring(true)
-    void api.browser.restore(tab.browserId, {
-      workspaceId: tab.workspaceId,
-      profileId: tab.profileId,
-      viewport: tab.viewport
-    }).then((browser) => {
-      if (lifecycleTokenRef.current !== token || released) {
-        void api.browser.release(browser.id).catch(() => {})
-        return
-      }
-      nativeLifecycleRef.current = 'present'
-      setRestoring(false)
-      applyBrowserEvent({ type: 'updated', browser })
-      onControlConfirmation?.(tab.regionId, false)
-    }).catch((error) => {
-      if (lifecycleTokenRef.current !== token) return
-      nativeLifecycleRef.current = 'released'
-      setRestoring(false)
-      reportError(error)
-    })
-    return () => {
-      // Invalidate an in-flight Main request; the request itself remains owned by Main and will
-      // either commit through the token check above or be released as soon as it resolves.
-      lifecycleTokenRef.current += 1
-    }
-  }, [applyBrowserEvent, released, reportError, tab.browserId, tab.profileId, tab.url, tab.viewport, tab.regionId, onControlConfirmation])
-
-  useEffect(() => () => onControlConfirmation?.(tab.regionId, false), [tab.regionId, onControlConfirmation])
-
   useEffect(() => () => {
-    lifecycleTokenRef.current += 1
     screenshotToken.current += 1
     selectionToken.current += 1
     void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
@@ -354,7 +394,7 @@ export function BrowserPane({
   const annotationOwnerPresent = useCallback(() => nativeLifecycleRef.current === 'present', [])
   const annotationSync = useBrowserAnnotationMarkers({
     browserId: tab.browserId, navigationId: tab.navigationId, annotations,
-    active: !released && !restoring, nativeOwnerPresent: annotationOwnerPresent
+    active: !released && !restoring && restoreError === null, nativeOwnerPresent: annotationOwnerPresent
   })
 
   useLayoutEffect(() => {
@@ -373,6 +413,7 @@ export function BrowserPane({
           !visible ||
           released ||
           restoring ||
+          restoreError !== null ||
           elementSelection !== null ||
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
@@ -433,7 +474,7 @@ export function BrowserPane({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [elementSelection, released, restoring, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible, presentations.length])
+  }, [elementSelection, released, restoring, restoreError, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible, presentations.length])
 
   useLayoutEffect(() => {
     // Portal children run before their host moves. Rebind against connected ancestors after that
@@ -468,7 +509,12 @@ export function BrowserPane({
 
   function navigateAddress(submittedAddress: string): void {
     if (!submittedAddress.trim()) return
+    if (released || restoring || restoreError !== null) {
+      setAddressError('The original page connection is not confirmed. Your input is kept; retry the connection or open the address in your external browser.')
+      return
+    }
     addressDraftEdited.current = false
+    addressDraft.current.edited = false
     setAddressError(null)
     void run(() => api.browser.navigate(tab.browserId, submittedAddress), cause => {
       setAddressError(`Page could not open: ${presentError(cause)}. Your input and page are kept; retry here.`)
@@ -755,7 +801,18 @@ export function BrowserPane({
   const selectElement = () => selectionBusy ? cancelElementSelection() : void beginElementSelection()
   const openDevTools = () => void runCommand(async () => await api.browser.openDevTools(tab.browserId))
   const saveBookmark = () => void runCommand(async () => {
-    await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
+    const identity = browserIdentity.current
+    setSavedBookmark(null)
+    const path = await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
+    if (browserIdentity.current.id !== identity.id || browserIdentity.current.navigationId !== identity.navigationId) return
+    setSavedBookmark({ browserId: identity.id, navigationId: identity.navigationId, workspaceId: tab.workspaceId, path })
+  })
+  const currentBookmark = savedBookmark?.browserId === tab.browserId && savedBookmark.navigationId === tab.navigationId &&
+    savedBookmark.workspaceId === tab.workspaceId ? savedBookmark : null
+  const openSavedBookmark = () => void runCommand(async () => {
+    if (!currentBookmark || browserIdentity.current.id !== currentBookmark.browserId ||
+      browserIdentity.current.navigationId !== currentBookmark.navigationId) return
+    await openFile(currentBookmark.path, undefined, undefined, currentBookmark.workspaceId)
   })
   const viewBookmarkSource = (target?: WorkbenchViewTarget) => void runCommand(async () => {
     const origin = tab.bookmarkOrigin
@@ -820,37 +877,43 @@ export function BrowserPane({
     </DropdownMenu.RadioGroup>
   )
 
-  if (released || restoring) {
-    if (restoring) {
-      return (
-        <FullPageLoadingSurface
-          scope="region"
-          phase="recovering"
-          eyebrow="Browser recovery"
-          title="Restoring browser"
-          detail="Rebuilding the Main-owned page surface before live navigation returns."
-        />
-      )
-    }
-    return (
-      <section className="surface-memory-released" role="status" aria-live="polite">
-        <strong>Browser parked</strong>
-        <span>Switch back to this tab to restore the browser.</span>
-      </section>
-    )
-  }
+  const regionCloseButton = onRegionClose ? <button
+    type="button" className="browser-toolbar__close" title="Close split" aria-label="Close split"
+    onPointerDown={event => event.stopPropagation()}
+    onClick={event => { event.stopPropagation(); onRegionClose() }}
+  ><X size={12} /></button> : null
 
   const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
     const key = presentation?.occurrence.presentationId ?? tab.browserId
     let addressInput = addressInputs.current.get(key)
     if (!addressInput) { addressInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(key, addressInput) }
     const visible = presentation?.visible ?? true
-    const inSurvey = presentation?.target.surface === 'survey'
-    const blocked = released || restoring || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
+    const regionSurface = presentation?.target.surface ?? regionSplitSurface
+    const inSurvey = regionSurface === 'survey'
+    const regionSplitAllowed = regionSurface !== undefined && regionSurface !== 'survey'
+    const regionSplitItems = regionSplitAllowed && onRegionSplit ? <>
+      <DropdownMenu.Label className="browser-menu__label">New region</DropdownMenu.Label>
+      {WORKBENCH_TAB_SPLIT_ACTIONS.map(action => {
+        const Icon = workbenchSplitDirectionIcon(action.direction)
+        return <DropdownMenu.Item key={action.direction} className="browser-menu__item"
+          aria-label={`New region ${action.direction}`} onSelect={() => onRegionSplit(action.direction)}>
+          <Icon size={12} /><span>{action.label}</span>
+        </DropdownMenu.Item>
+      })}
+    </> : null
+    const connectionUnavailable = released || restoring || restoreError !== null
+    const blocked = connectionUnavailable || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
 
-        {screenshot ? (
+        {connectionUnavailable ? <div className="pane-state" role="status" aria-live="polite">
+          <Globe2 size={23} />
+          <strong>{restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}</strong>
+          <span>{restoreError ?? (restoring ? 'Waiting for the original page connection. Your page, address and other work are kept.' : 'Switch back to this tab to restore the original page.')}</span>
+          <span>You can edit the address or open it in your external browser while the connection is unavailable.</span>
+          {restoreError ? <button className="small-button" type="button" disabled={released || restoring}
+            onClick={retryConnection}>Retry connection</button> : null}
+        </div> : screenshot ? (
           visible && !released && !restoring ?
           <ScreenshotEditor
             anchor={stageRef.current}
@@ -928,7 +991,7 @@ export function BrowserPane({
             <form className="survey-start-input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
               <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
                 historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
-                onValueChange={value => { addressDraftEdited.current = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
+                onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
               <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
             </form>
           </div> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
@@ -956,7 +1019,10 @@ export function BrowserPane({
         </button>
         <button type="button" className="browser-toolbar__navigation" aria-label="Back" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ArrowLeft size={13} /></button>
         <button type="button" className="browser-toolbar__navigation" aria-label="Forward" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ArrowRight size={13} /></button>
-        <button type="button" className="browser-toolbar__reload" aria-label="Reload" title="Reload" disabled={busy} onClick={() => void run(() => api.browser.reload(tab.browserId))}>
+        <button type="button" className="browser-toolbar__reload" aria-label={connectionUnavailable ? 'Retry browser connection' : 'Reload'}
+          title={connectionUnavailable ? restoring ? 'Waiting for the original page connection' : 'Retry the original page connection' : 'Reload'}
+          disabled={busy || released || restoring}
+          onClick={() => { if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId)) }}>
           {tab.loading || busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
         {inSurvey && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
@@ -964,7 +1030,7 @@ export function BrowserPane({
           <BrowserAddressInput
             ref={addressInput} aria-label="Browser address" value={address} placeholder="Search or enter an address"
             historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
-            onValueChange={value => { addressDraftEdited.current = true; setAddress(value); setAddressError(null) }}
+            onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
         </label>}
@@ -1023,8 +1089,8 @@ export function BrowserPane({
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
-                <DropdownMenu.Label>Viewport</DropdownMenu.Label>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+                <DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>
                 {viewportOptions}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -1060,11 +1126,12 @@ export function BrowserPane({
         ) : null}
           <DropdownMenu.Root onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" className={toolbar?.more ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
+              <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
-                <DropdownMenu.Label>Page</DropdownMenu.Label>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+                {regionSplitItems ? <>{regionSplitItems}<DropdownMenu.Separator className="browser-menu__separator" /></> : null}
+                <DropdownMenu.Label className="browser-menu__label">Page</DropdownMenu.Label>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Back" disabled={!tab.canGoBack || busy} onSelect={() => void run(() => api.browser.back(tab.browserId))}>
                   <ArrowLeft size={12} /><span>Back</span>
                 </DropdownMenu.Item>
@@ -1092,7 +1159,8 @@ export function BrowserPane({
                 {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={() => viewBookmarkSource(presentation?.target)}>
                   <FileCode2 size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
-                {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
+                {toolbar?.viewport ? <><DropdownMenu.Separator className="browser-menu__separator" /><DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
+                <DropdownMenu.Separator className="browser-menu__separator" />
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
                   <SlidersHorizontal size={12} /><span>Browser tools…</span>
                 </DropdownMenu.Item>
@@ -1102,7 +1170,13 @@ export function BrowserPane({
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
+        {regionCloseButton}
       </form>
+      {currentBookmark ? <p className="browser-bookmark-result" role="status">
+        <Check size={12} aria-hidden="true" /><span>Saved</span>
+        <code title={currentBookmark.path}>{currentBookmark.path}</code>
+        <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
+      </p> : null}
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
@@ -1113,7 +1187,7 @@ export function BrowserPane({
         ...(annotationSync.cause ? { cause: annotationSync.cause } : {}), available: annotationSync.available, visible
       }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
       <div className="browser-body">
-      {presentation && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={presentation}
+      {presentation && !connectionUnavailable && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={presentation}
         inputSelected={presentation.occurrence.presentationId === selectedPresentationId}
         onInputSelected={() => onPresentationInputSelected?.(presentation.target)}
         blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>

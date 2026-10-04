@@ -20,8 +20,8 @@ for (const platform of ['darwin-arm64', 'linux-x64']) {
   const directory = join(root, 'packages/core/vendor/ctxmux', platform)
   const path = join(directory, 'manifest.json'), manifest = await json(path)
   assert.equal(await digest(path), contract.manifests[platform])
-  assert.equal(manifest.source.commit, contract.source.commit)
-  assert.equal(manifest.source.tree, contract.source.tree)
+  assert.equal(manifest.source.commit, contract.sources[platform].commit)
+  assert.equal(manifest.source.tree, contract.sources[platform].tree)
   assert.equal(manifest.source.worktree_clean, true)
   assert.equal(manifest.product.protocol, contract.protocol)
   assert.equal(manifest.sdk.protocol, contract.protocol)
@@ -107,13 +107,13 @@ if (slice === 'source') {
   }
   await run(process.execPath, ['apps/desktop/scripts/fixtures/ctxmux-p22-qualification/core-gap.mjs'])
   const nativePath = join(root, '.tmp/ctxmux-p22-qualification/core-gap-runtime.json'), native = await json(nativePath)
-  assert(native.passed && native.userRuntimeTouched === false); assert.equal(native.sourceCommit, contract.source.commit)
+  assert(native.passed && native.userRuntimeTouched === false); assert.equal(native.sourceCommit, contract.sources['darwin-arm64'].commit)
   assert.equal(native.runs.length, 2); assert(native.gapCount > 0); assert(native.inputReceipts.length > 0)
   assert.equal(native.cleanup.rootRemoved, true); assert.deepEqual(native.cleanup.remaining, [])
   await writeFile(join(evidence, 'core-gap-runtime.json'), await readFile(nativePath))
   const after = await fingerprints([...paths, ...compiled]); assert.deepEqual(after, before, 'Candidate changed during source proof')
   await writeFile(join(evidence, 'source.json'), JSON.stringify({ passed: true, userRuntimeTouched: false, checkpoint,
-    sourceCommit: contract.source.commit, protocol: contract.protocol, manifests: contract.manifests, loadedSdkFiles: entries.length,
+    sourceCommit: contract.sources['darwin-arm64'].commit, protocol: contract.protocol, manifests: contract.manifests, loadedSdkFiles: entries.length,
     tests: { passed: report.numPassedTests, path: 'affected-tests.json', sha256: await digest(join(evidence, 'affected-tests.json')) },
     mutations, callers, inputs: after, actualCoreGap: { path: 'core-gap-runtime.json', sha256: hash(await readFile(nativePath)) },
     cleanup: native.cleanup, limitations: ['No user Runtime transition or installed App qualification.',
@@ -145,7 +145,7 @@ if (slice === 'source') {
   const frames = [scene.screenshotNormal, scene.screenshotRestart, scene.screenshotGap]
   for (const frame of frames) assert.equal(await digest(frame.path), frame.sha256)
   await writeFile(join(evidence, 'scene.json'), JSON.stringify({ passed: true, userRuntimeTouched: false, checkpoint,
-    sourceCommit: contract.source.commit, protocol: contract.protocol, runtimeReceipt: { path, sha256: await digest(path) }, frames,
+    sourceCommit: contract.sources['darwin-arm64'].commit, protocol: contract.protocol, runtimeReceipt: { path, sha256: await digest(path) }, frames,
     limitations: scene.limitations }, null, 2) + '\n')
 }
 console.log(`Current Main protocol-22 ${slice} integration proof passed; user Runtime untouched.`)

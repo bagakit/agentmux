@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
+import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -13,7 +14,7 @@ import type {
 import { projectSessionUserMessages } from '@agentmux/core'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+
 import { api } from '../src/renderer/src/lib/api'
 import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { speakerOf } from '../src/renderer/src/lib/conversation-speaker'
@@ -29,7 +30,7 @@ const control: AgentSessionControl = {
 
 let host: HTMLDivElement
 let root: Root
-let historyPageSpy: ReturnType<typeof vi.spyOn>
+let historyPageSpy: import('vitest').MockInstance<typeof api.sessions.historyPage>
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -53,7 +54,7 @@ afterEach(async () => {
 })
 
 describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
-  it('历史入口 (SessionHistoryView): 读取同一公开 Core native user 事实，保留 record 身份与 parts，不猜 Human/You', async () => {
+  it('历史入口 (ActivityView): 读取同一公开 Core native user 事实，保留 record 身份与 parts，不猜 Human/You', async () => {
     const contentParts: AgentSessionHistoryContentPart[] = [
       { kind: 'text', text: 'Native terminal prompt from user' },
       { kind: 'resource', resourceType: 'file', reference: 'src/native-entry.ts' }
@@ -82,16 +83,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
 
     await act(async () => {
       root.render(
-        <SessionHistoryView
-          control={control}
-          label="Claude"
-          visible
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("repo")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
+        <ActivityView {...activityReadingProps({ control: control, label: "Claude", visible: true, workspaceRoot: _hygiene_fixturePath("repo"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />
       )
     })
 
@@ -119,7 +111,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     expect(body?.textContent).toContain('src/native-entry.ts')
 
     // Stable record identity preserved on container
-    const article = host.querySelector('article[data-history-item-id="record-native-turn-1"]')
+    const article = host.querySelector('article[data-native-record-id="record-native-turn-1"]')
     expect(article).not.toBeNull()
     expect(article?.getAttribute('data-history-kind')).toBe('user-message')
   })
@@ -143,16 +135,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
 
     await act(async () => {
       root.render(
-        <SessionHistoryView
-          control={control}
-          label="Pi"
-          visible
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("repo")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
+        <ActivityView {...activityReadingProps({ control: control, label: "Pi", visible: true, workspaceRoot: _hygiene_fixturePath("repo"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />
       )
     })
 
@@ -199,21 +182,12 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     expect(projected[1]!.rawId).toBe('turn-rec-beta')
     expect(projected[0]!.content).toBe(projected[1]!.content)
 
-    // DOM verification through SessionHistoryView
+    // DOM verification through ActivityView
     historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(testPage)
 
     await act(async () => {
       root.render(
-        <SessionHistoryView
-          control={control}
-          label="Claude"
-          visible
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("repo")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
+        <ActivityView {...activityReadingProps({ control: control, label: "Claude", visible: true, workspaceRoot: _hygiene_fixturePath("repo"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />
       )
     })
 

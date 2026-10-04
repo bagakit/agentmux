@@ -1,3 +1,5 @@
+import type { SessionControl } from '../../../shared/contracts'
+import { TerminalStorageDetails } from './TerminalStorageDetails'
 import type { ReactNode } from 'react'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
@@ -8,7 +10,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 export function TerminalServiceNotices({ scope, visible = true, available = true,
   reveal, replayGeometry, viewportSync, continuation,
   attachment, sessionObservation, causes = {}, historyNotice, historyContent,
-  refreshingObservation = false, onRefreshObservation }: {
+  refreshingObservation = false, onRefreshObservation, storageControl, continuationReason }: {
   scope: string
   visible?: boolean
   available?: boolean
@@ -22,6 +24,8 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
   historyNotice?: ServiceNoticeItem | null
   historyContent?: ReactNode
   refreshingObservation?: boolean
+  storageControl?: SessionControl
+  continuationReason?: string | undefined
   onRefreshObservation?(): void
 }) {
   const notices: ServiceNoticeItem[] = (Object.entries({ attachment, sessionObservation, reveal, replayGeometry, viewportSync, continuation }) as
@@ -42,5 +46,6 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
     <ServiceWindowNotice notice={viewportSync} />
     <ServiceWindowNotice notice={continuation} />
     {historyContent}
+    {storageControl ? <TerminalStorageDetails control={storageControl} scope={scope} visible={visible} continuationReason={continuationReason} /> : null}
   </ServiceNoticeDisclosure>
 }

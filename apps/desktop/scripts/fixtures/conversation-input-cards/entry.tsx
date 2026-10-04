@@ -1,11 +1,12 @@
 import { fixturePath as _hygiene_fixturePath, fixtureYear as _hygiene_fixtureYear } from "../../lib/fixture-values.mjs"
+import { activityReadingProps } from '../../../test/helpers/activity-reading-props'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { useRef, useState } from 'react'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { api } from '../../../src/renderer/src/lib/api'
 import { ActivityView } from '../../../src/renderer/src/components/ActivityView'
-import { SessionHistoryView } from '../../../src/renderer/src/components/SessionHistoryView'
+
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from '../../../src/renderer/src/components/ConversationAnnotationNote'
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import type { AgentSessionControl } from '../../../src/shared/contracts'
@@ -56,8 +57,7 @@ function Scene() {
   return <main className="chat-preview">
     <div className="chat-preview__toolbar"><strong>{history ? 'Conversation history' : 'Conversation'}</strong><span>Private actual Renderer · controlled public records · no Agent Run</span></div>
     <div className="chat-preview__reading" ref={regionRef}>
-      {history ? <SessionHistoryView control={control} visible label="Implementation" themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("private-chat")}
-        describeSpeaker={describeSpeaker} onSelectAnnotation={onSelectAnnotation} openWorkspaceFile={() => {}} openHttpLink={() => {}} onClose={() => {}} /> :
+      {history ? <ActivityView {...activityReadingProps({ control: control, visible: true, label: "Implementation", workspaceRoot: _hygiene_fixturePath("private-chat"), describeSpeaker: describeSpeaker, onSelectAnnotation: onSelectAnnotation, openWorkspaceFile: () => {}, openHttpLink: () => {}, onClose: () => {} })} /> :
         <ActivityView sessionId={id} capability="complete-events" displayState="done" items={items} userMessages={messages} describeSpeaker={describeSpeaker} onSelectAnnotation={onSelectAnnotation} />}
     </div>
     <ConversationAnnotationNote ref={annotationRef} regionRef={regionRef} sessionId={id} active onAnnotate={note => setDraft(value => `${value}\n\nRegarding ${note.messageId}: ${note.quote}\n${note.note}`)} />

@@ -90,7 +90,10 @@
 
 .browser-surface { height: 100%; min-height: 0; display: flex; flex-direction: column; container: browser-pane / inline-size; background: var(--surface-0); }
 .browser-toolbar { min-width: 0; display: flex; align-items: center; gap:var(--sp-1); padding:var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); }
-.workbench-region:has(> .workbench-region__close) > .workbench-session-region-host > .browser-surface > .browser-toolbar { padding-right: var(--region-close-clearance); }
+.browser-bookmark-result { flex: none; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-1) var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.browser-bookmark-result > svg { flex: none; color: var(--green); }
+.browser-bookmark-result > span, .browser-bookmark-result > button { flex: none; }
+.browser-bookmark-result > code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: inherit; }
 .browser-toolbar > button { width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .browser-toolbar > button:disabled { opacity: .3; cursor: default; }
@@ -117,16 +120,17 @@
   .browser-toolbar > .browser-toolbar__navigation { display: none; }
   .browser-toolbar > .browser-toolbar__reload { display: none; }
 }
-.browser-menu { min-width: 210px; max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; z-index: var(--layer-popover); pointer-events: auto; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-0); box-shadow: var(--elev-2, 0 10px 24px var(--scrim-2)), 0 14px 36px rgba(0, 0, 0, 0.45); }
+.browser-menu { min-width: min(210px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: var(--radix-dropdown-menu-content-available-height); overflow-x: hidden; overflow-y: auto; z-index: var(--layer-popover); pointer-events: auto; outline: none; padding:var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); box-shadow: var(--elev-2); }
 .browser-menu [role="group"] { display: grid; gap:1px; }
 .browser-menu [role="menuitemradio"], .browser-menu [role="menuitemcheckbox"] { position: relative; }
 .browser-menu > [role="menuitemradio"] + [role="menuitemradio"] { margin-top:1px; }
-.browser-menu > [data-radix-menu-content] { outline: none; }
 .browser-menu [role="menuitemradio"] > span:first-child,
 .browser-menu [role="menuitemcheckbox"] > span:first-child { width: 14px; display: inline-flex; align-items: center; justify-content: center; }
-.browser-menu > [data-radix-menu-label], .browser-menu [role="group"] > [data-radix-menu-label] { padding:var(--sp-2) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.browser-menu__label { padding:var(--sp-2) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.browser-menu__separator { height: 1px; margin: var(--sp-2) var(--sp-3); background: var(--line-soft); }
 .browser-menu__item { min-height: 28px; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap:var(--sp-4); padding:var(--sp-2) var(--sp-4); border-radius: var(--radius-sm); outline: none; font-size: var(--fs-body); user-select: none; cursor: pointer; }
 .browser-menu__item[data-highlighted], .browser-menu__item:hover:where(:not([data-disabled])) { color: var(--text); background: var(--surface-2); }
+.browser-menu__item[data-highlighted] { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .browser-menu__item[data-disabled] { opacity: .3; cursor: default; }
 .browser-menu__indicator { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--green); }
 .browser-menu__item small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
@@ -192,7 +196,6 @@
    竖读下来是一条连续的脊，而不是三个盒子摞在一起。 */
 .browser-trace-rail > * { flex: none; border: 0; border-radius: 0; background: transparent; }
 .browser-trace-rail > * + * { border-top: 1px solid var(--line-soft); }
-.browser-trace-rail .browser-rsi-timeline { flex: 1 1 auto; min-height: 0; }
 /* Keep edge actions clear of the overlay scrollbar at their full hit size. */
 .browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }
 .browser-demonstration__steps .browser-rsi-timeline__empty { display: block; }

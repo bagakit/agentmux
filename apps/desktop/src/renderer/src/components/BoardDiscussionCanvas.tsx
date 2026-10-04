@@ -1,5 +1,7 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentAvatar } from './AgentAvatar'
+import { HostBadge } from './HostBadge'
+import { hostIdentityProjection } from '../lib/region-execution-host'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
   Bot,
@@ -8,7 +10,6 @@ import {
   MessageSquarePlus,
   NotebookText,
   Play,
-  RadioTower,
   RefreshCw,
   Unlink,
   X
@@ -50,6 +51,7 @@ export function BoardDiscussionCanvas({
   const [error, setError] = useState<string | null>(null)
 
   const hostId = row?.workspace?.hostId ?? anchor.hostId
+  const host = hostIdentityProjection(hostId, config?.hosts.find(host => host.id === hostId))
   const executors = useMemo(
     () => configuredExecutors(config).map((executor) => ({
       ...executor,
@@ -148,7 +150,7 @@ export function BoardDiscussionCanvas({
                   <strong>{row.name}</strong>
                   <small title={row.path ? displayPath(row.path, hostId) : undefined}>{row.path ? displayPath(row.path, hostId) : 'No worktree'}</small>
                 </div>
-                <em>{hostId === 'local' ? 'This Mac' : <><RadioTower size={11} /> {hostId}</>}</em>
+                <em>{host.kind === 'local' ? host.label : <HostBadge context="Host" host={host} />}</em>
               </section>
 
               {!row.path ? (
@@ -173,7 +175,7 @@ export function BoardDiscussionCanvas({
                 <>
                   <section className="discussion-section">
                     <header>
-                      <div><span>Agent</span><small>Detected on {hostId === 'local' ? 'this Mac' : hostId}</small></div>
+                      <div><span>Agent</span><small>Detected on {host.kind === 'local' ? 'this computer' : host.label}</small></div>
                       <button type="button" className="icon-button" title="Refresh Agents" disabled={detecting} onClick={() => void detectExecutors(hostId)}>
                         {detecting ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
                       </button>

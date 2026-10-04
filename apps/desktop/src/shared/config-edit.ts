@@ -1,6 +1,10 @@
-import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, type AppConfig } from './contracts'
+import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
+import { resolveUserProfile, type UserProfile } from './user-profile'
+import { resolveFocusRecentActivityHours, resolveFocusLinkDestination } from './focus-preferences'
+import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences'
+import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
@@ -14,6 +18,20 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function effective(path: string, value: unknown): unknown {
+  if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
+  if (path === 'focus') return value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }
+  if (path === 'focus.recentActivityHours') return resolveFocusRecentActivityHours(value)
+  if (path === 'focus.linkDestination') return resolveFocusLinkDestination(value)
+  if (path === 'notes') return resolveNotesPreferences(value as NotesPreferences | undefined)
+  if (path === 'notes.fontSize') return value ?? resolveNotesPreferences(undefined).fontSize
+  if (path === 'notes.contentWidth') return value ?? resolveNotesPreferences(undefined).contentWidth
+  if (path === 'goals') return resolveGoalsPreferences(value as GoalsPreferences | undefined)
+  if (path === 'goals.defaultView') return value ?? resolveGoalsPreferences(undefined).defaultView
+  if (path === 'goals.showFinished') return value ?? resolveGoalsPreferences(undefined).showFinished
+  if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
+  if (path === 'moteDirectoryView') return value ?? MOTE_DIRECTORY_VIEW_DEFAULT
+  if (path === 'moteDirectoryAvatarSize') return value ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT
+  if (path === 'goalsCommonActions') return resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined)
   if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }
   if (path === 'toolkit.performance') return value ?? DEFAULT_PERFORMANCE_PREFERENCES
   if (path === 'toolkit.performance.enabled') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.enabled
@@ -42,8 +60,11 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
-    // Optional Toolkit domains still merge authored fields/identities after a concurrent first tool is added.
-    if (path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
+    // Optional domains still merge authored fields/identities after a concurrent first edit.
+    if (path === 'notes' || path === 'goals') {
+      // Compare effective defaults without persisting fields the user did not edit.
+      actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
+    } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
     }
     // Environment is one literal launch value, never a merge of independently authored keys.

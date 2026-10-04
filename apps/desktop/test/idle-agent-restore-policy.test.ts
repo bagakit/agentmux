@@ -4,6 +4,7 @@ import type { AgentStatus } from '@agentmux/core'
 import type { AgentSessionRecoveryCandidate, AppConfig, RuntimeSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import { agentStartupRecoveryDecision } from '../src/renderer/src/lib/idle-agent-restore-policy.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 const now = 200_000_000
@@ -68,6 +69,8 @@ function seed(ids: string[]) {
   const tabs = Object.fromEntries(ids.map((id) => [`tab-${id}`, createWorkbenchTab(`tab-${id}`, {
     regionId: `region-${id}`, kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: id
   })]))
+  const spaceId = directoryIdentity('local', _hygiene_fixturePath("private/policy"))
+  for (const tab of Object.values(tabs)) tab.space = { spaceId, zoneId: workspaceZoneId(spaceId, 'workspace') }
   const layouts = { workspace: createWorkspaceLayout('private-group', Object.keys(tabs)) }
   const focus = { execution: { sessionId: ids[0]!, history: ids.map((id, index) => ({ sessionId: id, focusedAt: now - index })) }, pmo: { sessionId: null } }
   const drafts = Object.fromEntries(ids.map(id => [id, `Original draft ${id}`]))
@@ -120,7 +123,7 @@ describe('actual Store cold start', () => {
     const original = seed(['unknown'])
     const snapshot = vi.spyOn(api.sessions, 'snapshot')
     if (mode === 'rejected') snapshot.mockRejectedValue(new Error('Runtime observation timed out'))
-    else snapshot.mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: mode === 'unverified' ? [candidate('unknown', done(now))] : [], ...(mode === 'unverified' ? { runtimeOwnershipWarnings: ['local'] } : {}) })
+    else snapshot.mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: mode === 'unverified' ? [candidate('unknown', done(now))] : [], ...(mode === 'unverified' ? { runtimeEndpointWarnings: [{ hostId: 'local', availability: 'unverified', step: 'Confirming Host identity', code: 'CONTROL_PROTOCOL_ERROR', message: 'The semantic Host identity is unconfirmed.', recovery: 'Reconnect the original Host.' }] } : {}) })
     const recover = vi.spyOn(api.sessions, 'recover')
     await initialize(); assertWorkbench(original); expect(recover).not.toHaveBeenCalled()
   })

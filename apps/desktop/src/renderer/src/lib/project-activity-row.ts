@@ -18,7 +18,7 @@ export type ProjectActivityRow = {
 }
 
 /** 压成 30s / 4m / 2h，与旧 quietDuration 的数值口径一致，只是把 " idle" 后缀交给调用处拼。 */
-function elapsedShort(ms: number): string {
+export function elapsedShort(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000))
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)

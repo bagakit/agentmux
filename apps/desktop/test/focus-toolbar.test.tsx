@@ -17,8 +17,8 @@ let root: Root, container: HTMLDivElement, id: string
 const tabId = 'accurate-focus-tab', originalTabName = 'Working surface · release review'
 function FocusFixture() {
   const state = useAppStore()
-  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []), reference => useAppStore.getState().selectExecutionFocusReference(reference, state.agentFocus.execution))
-  return createElement(GlobalFocusSurface, { presentation })
+  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []), reference => useAppStore.getState().selectMainRegion(reference, state.workbenchSpaceSelection))
+  return <GlobalFocusSurface presentation={presentation} />
 }
 function ToolbarFixture({ regionOnly = false }: { regionOnly?: boolean }) {
   const tab = useAppStore(state => state.tabs[tabId])
@@ -75,7 +75,7 @@ it('direct Space control uses the existing navigation owner and close only dismi
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(id)
   const sessions = useAppStore.getState().sessions
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close Focus workspace"]')!.click())
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull(); expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(id); expect(useAppStore.getState().sessions).toBe(sessions)
 })
 it('Escape cancels inline rename while blur commits a user name including spaces', async () => {
   const open = async () => { await act(async () => container.querySelector<HTMLButtonElement>('.focus-toolbar__identity')!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ContextMenu' }))); await pick('Rename Tab') }

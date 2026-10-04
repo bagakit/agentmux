@@ -1,4 +1,5 @@
-import type { AgentTimelineSnapshot } from '@agentmux/core'
+import { scratchTopicsForConfig } from './scratch-topic-snapshots'
+import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
@@ -10,6 +11,7 @@ import { turnWorking } from './activity-working-state'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import { sessionRecentActivity } from './session-recency'
 import { sessionStatusLabel } from './session-presentation'
+import { agentStateEnteredAt } from './agent-state-time'
 import { launcherTimelineRecap, type LauncherRecap } from './launcher-resume'
 import { observeAgentSession } from './agent-observation'
 import type { AgentObservation } from '@agentmux/core/agent-status'
@@ -24,6 +26,7 @@ export type FocusContext = {
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
   runId: string; workingEnteredAt: number | null
+  stateEnteredAt?: number
   workspace: WorkspaceRecord | undefined
   originAddress?: string
   recap: LauncherRecap | null
@@ -45,6 +48,19 @@ type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, 
 function activityEntryTime(session: SessionSnapshot): number | undefined {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
   return activity && isAgentActivityStatusSource(activity.source) ? activity.stateEnteredAt : undefined
+}
+/** Held task timestamps only; visits, output bytes and repeated observations are absent. */
+export function focusLastTaskActivityAt(items: readonly AgentTimelineItem[], enteredAt?: number, now = Date.now()): number | null {
+  let latest: number | null = null
+  const remember = (at: number | undefined) => {
+    if (at !== undefined && Number.isFinite(at) && at > 0 && at <= now) latest = Math.max(latest ?? 0, at)
+  }
+  remember(enteredAt)
+  for (const item of items) {
+    if (item.kind !== 'lifecycle') remember(item.updatedAt)
+    else if (item.activityState && 'state' in item.activityState && isAgentActivityStatusSource(item.source)) remember(item.activityState.stateEnteredAt)
+  }
+  return latest
 }
 function workingEntryTime(session: SessionSnapshot): number | null {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
@@ -72,7 +88,8 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
     : unknown ? 'Idle / Unknown' : 'Idle / Recovery'
   return { label, detail: `Idle ${idle} · Activity unknown ${unknown} · Recovery ${recovery}` }
 }
-function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
+/** Read-only Agent facts shared by Focus and the scoped Space directory. No eligibility policy or IO. */
+export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
   const state = session.status.state, items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
   const result = latest?.kind === 'assistant_message' && latest.status === 'complete' && latest.content?.trim() ? latest : null
@@ -84,10 +101,8 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
     ? 'Activity unknown' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
       ? 'Activity not reported' : sessionStatusLabel(session)
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
-  const activityTimes = items.filter(item => item.kind !== 'lifecycle').map(item => item.updatedAt)
-  const enteredAt = activityEntryTime(session)
-  if (enteredAt !== undefined) activityTimes.push(enteredAt)
-  const lastActivityAt = activityTimes.reduce<number | null>((last, time) => Number.isFinite(time) && time > 0 ? Math.max(last ?? 0, time) : last, null)
+  const lastActivityAt = focusLastTaskActivityAt(items, activityEntryTime(session), now)
+  const stateEnteredAt = agentStateEnteredAt(session, now)
   const recap = items.length ? launcherTimelineRecap(timeline) : null
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
@@ -121,10 +136,10 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
   return { id: session.id, name, detail, state: state === 'working' && activitySemantic !== 'active' ? 'running' : state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
-    runId: session.control.run.runId, workingEnteredAt: activitySemantic === 'unknown' || activitySemantic === 'unsupported' ? null : workingEntryTime(session), recap, detailIsRecap, detailKind,
+    runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'unknown' || activitySemantic === 'unsupported' ? null : workingEntryTime(session), recap, detailIsRecap, detailKind,
     ...(activitySemantic === undefined ? {} : { activitySemantic }) }
 }
-function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {
+function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: number): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
     && a.status.detail === b.status.detail
@@ -132,6 +147,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolea
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
     && a.control.run.runId === b.control.run.runId && workingEntryTime(a) === workingEntryTime(b)
+    && agentStateEnteredAt(a, now) === agentStateEnteredAt(b, now)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
 }
 export type FocusProjection = { contexts: FocusContext[]; laneContexts: FocusContext[]; pmoAttention: string[] }
@@ -158,21 +174,21 @@ function createFocusProjectionCache() {
       retained.add(session.id)
       const activitySemantic = observeAgentSession(session, now).semantic
       const timeline = input.timelines[session.id], name = input.agentNames[session.id], old = cache.get(session.id)
-      if (old && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session) && old.timeline === timeline && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+      if (old && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo' && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         continue
       }
-      const sameOwner = old && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
-      const workspace = sameOwner ? old.workspace : workspaceForSession(input.config, session)
-      const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) : null
+      const sameOwner = old && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
+      const workspace = sameOwner ? old.workspace : workspaceForSession(input.config, session, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots))
+      const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots)) : null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
       const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))
       if (lane === 'pmo') {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
       } else {
-        const next = context(session, timeline, name, workspace, topicId)
+        const next = agentContextForSession(session, timeline, name, workspace, topicId)
         if (lane === null) {
           next.detail = 'Mote identity is not confirmed · ' + next.detail
           next.detailIsRecap = false

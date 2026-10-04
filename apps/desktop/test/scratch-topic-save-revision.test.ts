@@ -10,6 +10,7 @@ const fileApi = vi.hoisted(() => {
   return {
     writes,
     api: {
+      scratch: { listTopics: vi.fn(async () => []), readTopic: vi.fn(async () => null) },
       files: {
         write(
           workspaceId: string,

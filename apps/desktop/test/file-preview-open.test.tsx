@@ -56,6 +56,21 @@ async function clickFileAction(text: string) {
 }
 
 describe('the common file-open owner', () => {
+  it('reopening an existing draft reuses all unchanged document and Region facts', async () => {
+    const { id, file, key } = await mountFile('stable.ts', true)
+    const before = useAppStore.getState()
+    await act(async () => { await before.openFileAndReveal('stable.ts', 'group', undefined, 'workspace') })
+    const after = useAppStore.getState()
+    expect(after.documents).toBe(before.documents)
+    expect(after.documentGenerations).toBe(before.documentGenerations)
+    expect(after.documentObservationGenerations).toBe(before.documentObservationGenerations)
+    expect(after.documentIssues).toBe(before.documentIssues)
+    expect(after.documents[key]).toBe(before.documents[key])
+    expect(after.dirtyDocuments[key]).toBe(true)
+    expect(after.tabs[id]!.regions[file.regionId]).toBe(file)
+    expect(after.workbenchSpaceSelection?.regionId).toBe(file.regionId)
+    expect(api.files.read).toHaveBeenCalledTimes(1)
+  })
   it('known media bypasses UTF-8 without sacrificing the same File/Tab/Region identity or persisted projection', async () => {
     const paths = ['photo.png', 'music.mp3', 'film.mp4', 'document.pdf']
     for (const path of paths) expect(await useAppStore.getState().openFile(path, 'group', { line: 3 }, 'workspace')).toBe(true)
@@ -90,6 +105,7 @@ describe('the common file-open owner', () => {
     expect(useAppStore.getState().documents[key]?.content).toBe(text); expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
   })
   it('encoded Markdown image and bookmark clicks use the original file owner, preserving the dirty source and split neighbor', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
     const { id, file, key } = await mountFile('docs/readme.md')
     const state = useAppStore.getState(), originalTab = addWorkbenchRegion(state.tabs[id]!, file.regionId, 'right',
       { kind: 'file', regionId: 'neighbor', workspaceId: 'workspace', path: 'neighbor.txt' })
@@ -102,8 +118,13 @@ describe('the common file-open owner', () => {
     const bookmark = vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url: 'https://example.test/saved', binary: false })
     const browser = vi.spyOn(api.browser, 'create').mockImplementation(async (browserId, url) => ({ id: browserId, url: url!, title: 'Saved link', loading: false, canGoBack: false, canGoForward: false }))
     await click('Preview')
-    const links = [...container.querySelectorAll<HTMLButtonElement>('.md-image-attachment, button.md-link--file')]
-    expect(links.map(button => button.title)).toEqual(['docs/images/photo one.png', 'docs/图片.png', 'docs/Research & Notes.webloc'])
+    const images = [...container.querySelectorAll('.file-markdown-image')]
+    expect(images).toHaveLength(2)
+    const imageActions = images.map(image => [...image.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open file')!)
+    expect(imageActions.every(Boolean)).toBe(true)
+    const bookmarkAction = container.querySelector<HTMLButtonElement>('button.md-link--file')!
+    expect(bookmarkAction.title).toBe('docs/Research & Notes.webloc')
+    const links = [...imageActions, bookmarkAction]
     await act(async () => links[0]!.click())
     await act(async () => links[1]!.click())
     expect(useAppStore.getState().tabs[fileTabId('workspace', 'docs/images/photo one.png')]).toBeDefined()

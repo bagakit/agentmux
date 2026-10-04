@@ -15,10 +15,13 @@
 @import './topic-topology.css';
 @import './topic-knowledge.css';
 @import './file-explorer.css';
+@import './surface-mode-switch.css';
 @import './source-control.css';
 @import './git-history.css';
 @import './workbench.css';
 @import './file-preview.css';
+@import './file-data-preview.css';
+@import './pdf-content.css';
 @import './note.css';
 @import './terminal.css';
 @import './surfaces.css';
@@ -26,6 +29,8 @@
 @import './settings-toolkit.css';
 @import './toolkit-custom.css';
 @import './settings-keyboard-shortcuts.css';
+@import './settings-workflows.css';
+@import './settings-focus.css';
 @import './board.css';
 @import './global-board.css';
 @import './goals.css';
@@ -33,6 +38,7 @@
 @import './focus-timeline-ruler.css';
 @import './pmo-teams-topic.css';
 @import './mote-workface.css';
+@import './mote-idea-controls.css';
 @import './browser.css';
 @import './browser-operation-surface.css';
 @import './browser-step-evidence.css';
@@ -44,6 +50,7 @@
 @import '@agentmux/client-ui/styles/interaction.css';
 @import '@agentmux/client-ui/styles/inline-rename-field.css';
 @import './settings-prompts.css';
+@import './liquid-selection.css';
 @import './settings-materials.css';
 @import './survey.css';
 @import './result-review.css';
@@ -57,12 +64,12 @@
 @import './resume.css';
 @import './activity.css';
 @import '@agentmux/client-ui/styles/conversation-message.css';
+@import '@agentmux/client-ui/styles/conversation-reactions.css';
 @import '@agentmux/client-ui/styles/markdown.css';
 @import '@agentmux/client-ui/styles/conversation-image.css';
 @import '@agentmux/client-ui/styles/conversation-input-details.css';
 @import '@agentmux/client-ui/styles/conversation-tool-trace.css';
 @import '@agentmux/client-ui/styles/conversation-native-thread.css';
-@import './session-history.css';
 @import './workflow.css';
 @import '@agentmux/client-ui/styles/conversation-avatar.css';
 @import './conversation-axis.css';
@@ -72,7 +79,14 @@
 @import './agent-avatar.css';
 @import './full-page-loading.css';
 @import './session-recap.css';
+@import './session-recovery-actions.css';
 
-@import "./conversation-ruler.css";
+@import './conversation-ruler.css';
 
 @import './host-identity.css';
+
+@import './surface-mode-switch.css';
+
+@import './mote-idea-controls.css';
+
+@import './liquid-selection.css';

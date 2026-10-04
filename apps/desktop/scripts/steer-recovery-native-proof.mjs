@@ -21,9 +21,16 @@ const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?
 const diagnosticOnly = process.argv.includes('--steer-recovery-diagnostic')
 const typedCrossCore = process.argv.includes('--typed-response-cross-core')
 const typedFirstHook = process.argv.includes('--typed-response-first-hook')
+const startupFirstSend = process.argv.includes('--startup-first-send')
+const startupRestoredOnly = process.argv.includes('--startup-restored-first-send')
+const finalQualification = process.argv.includes('--steer-recovery-final') || !(diagnosticOnly || typedCrossCore || startupFirstSend || startupRestoredOnly)
+const startupQualification = startupFirstSend || startupRestoredOnly
+assert.ok(!(startupFirstSend && startupRestoredOnly), 'Startup proof triggers have distinct qualification scopes')
+assert.ok(!finalQualification || !(startupQualification || diagnosticOnly || typedCrossCore), 'Final GUI recovery qualification has a distinct Source and Native scope')
+assert.ok(!startupQualification || !(diagnosticOnly || typedCrossCore), 'Startup first Send is a distinct Native qualification')
 assert.ok(!typedFirstHook || typedCrossCore, 'First-Hook qualification must use the two-Core Native mode')
 assert.ok(!(diagnosticOnly && typedCrossCore), 'Diagnostic and two-Core qualification are distinct proof modes')
-for (const arg of process.argv.slice(2)) assert.ok(arg === '--steer-recovery' || arg === '--steer-recovery-diagnostic' || arg === '--typed-response-cross-core' || arg === '--typed-response-first-hook' || arg.startsWith('--receipt-path=') || arg.startsWith('--probe-root='), 'Unknown bounded native option: ' + arg)
+for (const arg of process.argv.slice(2)) assert.ok(arg === '--steer-recovery' || arg === '--steer-recovery-diagnostic' || arg === '--typed-response-cross-core' || arg === '--typed-response-first-hook' || arg === '--startup-first-send' || arg === '--startup-restored-first-send' || arg === '--steer-recovery-final' || arg.startsWith('--receipt-path=') || arg.startsWith('--probe-root='), 'Unknown bounded native option: ' + arg)
 assert.ok(receiptPath && probeRoot && process.env.AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT)
 const root = await realpath(await mkdtemp(join(probeRoot, 'sr-')))
 const userData = join(root, 'ui'), runtime = join(root, 'rt'), workspace = join(root, 'ws'), codexHome = join(root, 'home')
@@ -36,7 +43,7 @@ Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE
   AGENTMUX_SPATIAL_STATE_STORE: env.AGENTMUX_SPATIAL_STATE_STORE, AGENTMUX_MESSAGE_QUEUE_PATH: env.AGENTMUX_MESSAGE_QUEUE_PATH, CODEX_HOME: codexHome })
 for (const dir of [userData, runtime, join(runtime, 'state/ctxmux'), workspace, codexHome]) await mkdir(dir, { recursive: true, mode: 0o700 })
 const report = { schema: 'agentmux.steer-recovery-native.v1', passed: false, userRunTouched: false, sharedSourceWritten: false,
-  root, phases: [], diagnosticOnly, typedCrossCore, typedFirstHook, boundary: 'A actual Desktop native resume; B real permission on that recovered Run; independent Desktop restart is separate.' }
+  root, phases: [], diagnosticOnly, typedCrossCore, typedFirstHook, startupFirstSend, startupRestoredOnly, finalQualification, boundary: 'A actual Desktop native resume; B real permission on that recovered Run; independent Desktop restart is separate.' }
 const progress = async stage => { report.stage = stage; await writeFile(receiptPath, JSON.stringify(report, null, 2)); console.log('private_native_stage=' + stage) }
 const responseClaims = []
 const pendingTransitions = []
@@ -83,7 +90,7 @@ const backend = createServer(async (request, response) => {
     assert.ok(JSON.stringify(tool.parameters.properties.sandbox_permissions).includes('require_escalated'))
     report.nativeTool = { name: tool.name, schema: tool.parameters }
     permissionIssued = true
-    const arguments_ = JSON.stringify({ cmd: typedFirstHook ? 'sleep 0.2; printf PRIVATE_PERMISSION_PROBE' : 'printf PRIVATE_PERMISSION_PROBE', sandbox_permissions: 'require_escalated', justification: 'Private recovery fixture approval' })
+    const arguments_ = JSON.stringify({ cmd: typedFirstHook || finalQualification ? 'sleep 0.2; printf PRIVATE_PERMISSION_PROBE' : 'printf PRIVATE_PERMISSION_PROBE', sandbox_permissions: 'require_escalated', justification: 'Private recovery fixture approval' })
     const item = { type: 'function_call', id: 'private_tool_item_' + requests.length, call_id: 'private_approval_call_' + requests.length, name: tool.name, arguments: arguments_, status: 'completed' }
     event({ type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } })
     event({ type: 'response.function_call_arguments.delta', output_index: 0, item_id: item.id, delta: arguments_ })
@@ -189,6 +196,38 @@ async function selectWaitingOriginal(cdp, body) {
   return { selected, publicChoice }
 }
 async function stored(cdp) { return cdp.evaluate(`JSON.parse(localStorage.getItem('agentmux-workbench-v1'))?.state`) }
+async function postSendEmptyNativeComposer(marker, accepted, calledAt) {
+  const turnId = accepted.nativeRecords[0]?.payload?.internal_chat_message_metadata_passthrough?.turn_id
+  assert.equal(typeof turnId, 'string', 'The actual original Native user record must carry its turn identity')
+  const nativeEnd = await until('matching actual Native task completion after original first Send', async () => {
+    const bytes = await readFile(accepted.nativeHandle.transcriptPath), rows = bytes.toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const userIndex = rows.findIndex(row => row.type === 'response_item' && row.payload?.type === 'message' && row.payload.role === 'user' &&
+      row.payload.internal_chat_message_metadata_passthrough?.turn_id === turnId && row.payload.content?.some(part => part.text === marker))
+    assert.ok(userIndex >= 0)
+    const started = rows.slice(0, userIndex).find(row => row.type === 'event_msg' && row.payload?.type === 'task_started' && row.payload.turn_id === turnId)
+    const completed = rows.slice(userIndex + 1).filter(row => row.type === 'event_msg' && row.payload?.type === 'task_complete' && row.payload.turn_id === turnId)
+    assert.ok(completed.length <= 1); if (!started || completed.length !== 1) return false
+    const path = receiptPath + '.' + accepted.operationId + '.completed.native.jsonl'
+    await writeFile(path, bytes)
+    return { turnId, userIndex, started, completed: completed[0], path, sha256: sha(bytes) }
+  })
+  const done = await until('new authenticated matching native turn-end after original first Send', async () => {
+    const value = await canonical(), end = value?.hookReceipt
+    return value?.run.runId === accepted.run.runId && value?.semanticStatus?.state === 'done' &&
+      end?.run.runId === accepted.run.runId && end.lifecycleEvent === 'turn-end' && end.observedAt >= calledAt &&
+      (!end.nativeTurnId || end.nativeTurnId === turnId) && end.id !== accepted.typedSubmission.prepare?.previousReceiptId && value
+  })
+  assert.deepEqual(done.nativeHandle, accepted.nativeHandle)
+  await client.refreshAgentSession(id, done.run)
+  const run = (await client.statusAgent(id)).run
+  const throughFence = Math.max(run.latestOutputBytes, done.hookReceipt.outputCursorBytes ?? 0)
+  let snapshot
+  const throughByte = await client.screenEvidence.wait(client.agentSession(id), throughFence, false, screen => {
+    snapshot = screen.snapshot(); return new AgentProviderRegistry().get('codex').inspectPromptExecution(snapshot) === 'idle'
+  }, { timeoutMs: 10000, requireCompleteFrame: true, timeoutMessage: 'Original first Send did not leave a complete empty ordinary composer', terminalMessage: 'Private native Run ended' })
+  assert.ok(throughByte >= throughFence)
+  return { observedAt: Date.now(), nativeEnd, hookReceipt: done.hookReceipt, run, throughFence, throughByte, snapshot, context: 'idle' }
+}
 async function nativeAccepted(marker, operationId) {
   const current = await until(marker + ' original Core typed submit', async () => {
     const value = await canonical()
@@ -432,7 +471,31 @@ try {
   client = new AgentMuxClient({ store }); await client.connect()
   client.onEvent(event => { if (event.type === 'terminal-output') output += event.data ?? '' })
   const initial = await client.createAgent({ agentSessionId: id, createOperationId: randomUUID(), providerId: 'codex', executorId: 'private-recovery', commandOverride: executable, args,
-    workspacePath: workspace, env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false, prompt: 'PRIVATE_INITIAL_SETUP', cols: 120, rows: 40 })
+    workspacePath: workspace, env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false, ...(startupFirstSend ? {} : { prompt: 'PRIVATE_INITIAL_SETUP' }), cols: 120, rows: 40 })
+  if (startupFirstSend) {
+    // Native identity is the prerequisite, not pane/transport readiness. There is no
+    // fixture status, source, screen, key or progress-file await before the first submit.
+    let nativeIdentityObservedAt
+    const identified = await until('first real authenticated native SessionStart identity', async () => {
+      const value = await canonical()
+      if (!value?.nativeHandle || value.hookReceipt?.lifecycleEvent !== 'session-start') return false
+      nativeIdentityObservedAt = Date.now(); return value
+    })
+    const operationId = randomUUID(), prompt = 'PRIVATE_INITIAL_FIRST_SEND'
+    const phase = { phase: 'I-initial-native-first-public-immediate-Send', nativeIdentityObservedAt,
+      hookReceipt: identified.hookReceipt, nativeHandle: identified.nativeHandle, run: initial.run, operationId,
+      prompt, calledAt: Date.now() }
+    report.phases.push(phase)
+    await client.submitAgentPrompt({ ...agentPromptCondition(identified), agentSessionId: id, operationId, prompt, execution: 'immediate' })
+    phase.returnedAt = Date.now()
+    phase.accepted = await nativeAccepted(prompt, operationId)
+    phase.emptyComposer = await postSendEmptyNativeComposer(prompt, phase.accepted, phase.calledAt)
+    assert.equal(phase.accepted.mode, 'immediate')
+    assert.equal(phase.accepted.run.runId, initial.run.runId)
+    assert.deepEqual(phase.accepted.nativeHandle, identified.nativeHandle)
+    phase.passed = true
+    await progress('initial-first-public-immediate-Send-accepted')
+  }
   const originalAttachment = await client.reattachAgent(initial.agentSessionId, 0)
   output += originalAttachment.attachment.replay.map(event => event.data ?? '').join('')
   await progress('initial-native-created')
@@ -529,7 +592,7 @@ try {
   const before = await stored(first.cdp)
   assert.equal(before.viewModes[id], 'conversation')
   assert.equal((await canonical()).run.runId, original.run.runId, 'Cold boot must not restore a stopped CLI before actual Send')
-  await draft(first.cdp, 'PRIVATE_RECOVERED_UI_BODY'); await send(first.cdp)
+  await draft(first.cdp, 'PRIVATE_RECOVERED_UI_BODY'); const recoveredFirstSendCalledAt = Date.now(); await send(first.cdp)
   const firstIntent = await until('actual UI original recovery operation', async () => (await stored(first.cdp))?.agentSteerQueues?.[id]?.find(entry => entry.text === 'PRIVATE_RECOVERED_UI_BODY'))
   assert.equal(firstIntent.execution, 'immediate'); assert.ok(firstIntent.promptCondition !== undefined)
   report.originalSelection = firstIntent
@@ -545,6 +608,7 @@ try {
   } catch (error) {
     if (error.code !== 'PRIVATE_CORE_DELIVERY_UNCONFIRMED') throw error
     restorationFailure = error
+    if (startupQualification || finalQualification) throw error
     const current = await canonical(), retained = (await stored(first.cdp)).agentSteerQueues[id].find(entry => entry.operationId === firstIntent.operationId)
     assert.notEqual(current.run.runId, original.run.runId); assert.equal(current.nativeHandle.sessionId, original.nativeHandle.sessionId)
     assert.equal(retained.execution, 'immediate'); assert.ok(retained.promptCondition !== null)
@@ -564,6 +628,35 @@ try {
 
   if (diagnosticOnly) { await captureFirstSendDiagnostic(first.cdp); throw new Error('Diagnostic-only A capture completed; B/C are not qualified by this run.') }
 
+  if (startupQualification) {
+    report.phases.find(phase => phase.phase === 'A-native-resume-original-UI-Send').emptyComposer = await postSendEmptyNativeComposer('PRIVATE_RECOVERED_UI_BODY', restored, recoveredFirstSendCalledAt)
+    assert.equal(report.phases.find(phase => phase.phase === 'A-native-resume-original-UI-Send')?.passed, true)
+    if (startupFirstSend) {
+      assert.equal(report.phases.find(phase => phase.phase === 'I-initial-native-first-public-immediate-Send')?.passed, true)
+      report.startupFirstSend = { passed: true, initialTrigger: 'First Core-owned authenticated SessionStart/nativeHandle',
+        restoredTrigger: 'Original GUI Cmd+Enter after on-demand native resume',
+        boundary: 'Two actual startup eligibility triggers only; create-return before native identity, permission and Desktop restart remain unqualified.' }
+    } else {
+      report.startupRestoredFirstSend = { passed: true, trigger: 'Original GUI Cmd+Enter after on-demand native resume',
+        boundary: 'Restored first Send only. Genuine PRIVATE_INITIAL_SETUP history is retained; initial blank startup, permission and Desktop restart remain unqualified.' }
+    }
+    report.passed = true
+  } else {
+  if (finalQualification) {
+    report.phases.find(phase => phase.phase === 'A-native-resume-original-UI-Send').emptyComposer = await postSendEmptyNativeComposer('PRIVATE_RECOVERED_UI_BODY', restored, recoveredFirstSendCalledAt)
+    // Observe the real existing Main/Hosted publication. This private listener neither
+    // changes product state nor seeds permission/queue facts, and never receives hot bytes.
+    await first.cdp.evaluate(`(() => {
+      const proof = { events: [], dropped: 0 };
+      proof.dispose = window.agentmux.sessions.onEvent(value => {
+        if(value.type !== 'core' || value.hostId !== 'local' || value.event.type !== 'agent-session' || value.event.session.agentSessionId !== ${JSON.stringify(id)}) return;
+        if(proof.events.length === 200) { proof.dropped++; return; }
+        proof.events.push({ observedAt: Date.now(), session: structuredClone(value.event.session) });
+      });
+      window.__privateRecoveryCompletionProof = proof;
+      return true;
+    })()`)
+  }
   // On the actual recovered Run, an actual native approval request must pause the original UI
   // intent; its actual typed answer, rather than Esc or a GUI flag, is the wake owner.
   await client.refreshAgentSession(id, restored.run)
@@ -578,13 +671,72 @@ try {
   assert.equal(waiting.execution, 'immediate'); assert.equal(waiting.promptCondition, null)
   assert.equal((await client.statusAgent(id)).run.acceptedInputBytes, cursorBefore)
   assert.equal(requests.filter(request => textOf(request).includes(waiting.text)).length, 0)
-  const deny = permission.options.find(option => option.kind === 'reject-once')
-  assert.ok(deny, 'Actual typed native approval must expose its reject-once option')
-  await first.cdp.evaluate(`window.agentmux.sessions.respondInteraction(${JSON.stringify({ kind: 'agent', hostId: 'local', agentSessionId: id, run: restored.run })},${JSON.stringify({ kind: 'permission', requestId: permission.id, decision: { outcome: 'selected', optionId: deny.id } })})`)
+  const decision = permission.options.find(option => option.kind === (finalQualification ? 'allow-once' : 'reject-once'))
+  assert.ok(decision, 'Actual typed native approval must expose its declared decision option')
+  const response = { kind: 'permission', requestId: permission.id, decision: { outcome: 'selected', optionId: decision.id } }
+  const typedCalledAt = Date.now()
+  await first.cdp.evaluate(`window.agentmux.sessions.respondInteraction(${JSON.stringify({ kind: 'agent', hostId: 'local', agentSessionId: id, run: restored.run })},${JSON.stringify(response)})`)
+  const typedReturnedAt = Date.now()
+  let typedCompletion
+  if (finalQualification) {
+    typedCompletion = { request: permission, response, typedCalledAt, typedReturnedAt, afterReturn: await canonical() }
+    report.guiTypedCompletion = typedCompletion
+    const pending = typedCompletion.afterReturn?.pendingInteraction
+    assert.equal(pending?.request.id, permission.id, 'Actual GUI typed ACK window must preserve its pending native owner')
+    assert.equal(pending.response?.acknowledged, true)
+    assert.equal(pending.nativeCompleted, undefined)
+    assert.equal(pending.response.value.requestId, permission.id)
+    assert.equal(pending.response.value.kind, 'permission')
+    assert.equal(pending.response.value.optionId, decision.id)
+    assert.equal(pending.response.inputByteRange.startByte, cursorBefore)
+    typedCompletion.frozenResponse = structuredClone(pending.response)
+    const events = await until('GUI typed pending disappears through actual corresponding PostToolUse', async () => {
+      const observed = await first.cdp.evaluate(`({events:window.__privateRecoveryCompletionProof.events,dropped:window.__privateRecoveryCompletionProof.dropped})`)
+      assert.equal(observed.dropped, 0)
+      const completed = observed.events.find(item => item.session.run.runId === restored.run.runId &&
+        item.session.pendingInteraction?.request.id !== permission.id &&
+        !item.session.pendingInteraction?.additionalRequests?.some(request => request.id === permission.id) &&
+        item.session.hookReceipt?.eventName === 'PostToolUse' && item.session.hookReceipt.run.runId === restored.run.runId)
+      return completed && { observedAt: Date.now(), ...observed, completionEvent: completed }
+    })
+    const claims = events.events.filter(item => item.session.pendingInteraction?.request.id === permission.id && item.session.pendingInteraction.response)
+    assert.ok(claims.some(item => item.session.pendingInteraction.response.acknowledged === true))
+    const { acknowledged: _ack, ...frozenIdentity } = typedCompletion.frozenResponse
+    for (const claim of claims) {
+      const { acknowledged: _claimAck, ...identity } = claim.session.pendingInteraction.response
+      assert.deepEqual(identity, frozenIdentity)
+    }
+    typedCompletion.publicMainEvents = events
+    const native = await until('actual exact GUI permission Native call outcome', async () => {
+      const bytes = await readFile(restored.nativeHandle.transcriptPath)
+      const rows = bytes.toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+      const calls = rows.filter(row => row.type === 'response_item' && row.payload?.type === 'function_call' && row.payload.call_id === permission.nativeToolCallId)
+      const outcomes = rows.filter(row => row.type === 'response_item' && row.payload?.type === 'function_call_output' && row.payload.call_id === permission.nativeToolCallId)
+      assert.ok(calls.length <= 1 && outcomes.length <= 1)
+      if (calls.length !== 1 || outcomes.length !== 1) return false
+      assert.equal(calls[0].payload.name, 'exec_command')
+      assert.equal(JSON.parse(calls[0].payload.arguments).cmd, 'sleep 0.2; printf PRIVATE_PERMISSION_PROBE')
+      assert.ok(JSON.stringify(outcomes[0].payload.output).includes('PRIVATE_PERMISSION_PROBE'))
+      const path = receiptPath + '.gui-typed-completion.native.jsonl'
+      await writeFile(path, bytes)
+      return { observedAt: Date.now(), path, sha256: sha(bytes), calls, outcomes }
+    })
+    typedCompletion.native = native
+    const backendCarriers = await until('exact native permission outcome in actual backend history', () => {
+      const values = requests.flatMap((value, requestIndex) => (value.input?.filter(item => item.type === 'function_call_output' && item.call_id === permission.nativeToolCallId) ?? [])
+        .map(outcome => ({ requestIndex, latestUser: textOf(value), outcome })))
+      return values.length && values
+    })
+    // Subsequent ordinary prompts may carry old tool results as legitimate history.
+    // Native execution uniqueness is established by the one actual source outcome above.
+    assert.equal(new Set(backendCarriers.map(item => JSON.stringify(item.outcome))).size, 1)
+    assert.ok(JSON.stringify(backendCarriers[0].outcome.output).includes('PRIVATE_PERMISSION_PROBE'))
+    typedCompletion.backendHistoryCarriers = backendCarriers
+  }
   const resumed = await nativeAccepted(waiting.text, waiting.operationId)
   assert.equal(resumed.run.runId, restored.run.runId); assert.equal(resumed.mode, 'immediate')
   report.phases.push({ phase: 'B-native-permission-clear-resumes-original-selection', request: permission, beforeInputBytes: cursorBefore, waiting, publicChoice,
-    permissionSetup, entryPoint: 'real GUI bare Enter queue -> public message.pending.send exact original -> real typed permission answer', accepted: resumed })
+    permissionSetup, ...(typedCompletion ? { typedCompletion } : {}), entryPoint: 'real GUI bare Enter queue -> public message.pending.send exact original -> real typed permission answer', accepted: resumed })
   await progress('B-original-selection-accepted-after-native-answer')
 
   // A persisted original selection remains inspectable after SIGKILL but receives no automatic
@@ -605,10 +757,10 @@ try {
   await killDesktop(first); first = undefined
   second = await launch('second')
   assert.notEqual(second.child.pid, firstPid)
-  const after = await until('independently restored original queue', async () => { const value = await stored(second.cdp); return value?.agentSteerQueues?.[id]?.some(entry => entry.operationId === bootIntent.operationId && entry.errorCode === 'AGENT_EXECUTION_NOT_REQUESTED') && value })
+  const after = await until('independently restored original queue', async () => { const value = await stored(second.cdp); return value?.agentSteerQueues?.[id]?.some(entry => entry.operationId === bootIntent.operationId && entry.awaitingExplicitSend === true) && value })
   assert.equal(after.viewModes[id], 'conversation')
   assert.equal(after.agentComposerDrafts[id], savedBefore.agentComposerDrafts[id])
-  assert.deepEqual(after.agentSteerQueues[id].map(({ error, errorCode, status, ...entry }) => entry), savedBefore.agentSteerQueues[id].map(({ error, errorCode, status, ...entry }) => entry))
+  assert.deepEqual(after.agentSteerQueues[id].map(({ awaitingExplicitSend, status, ...entry }) => entry), savedBefore.agentSteerQueues[id].map(({ awaitingExplicitSend, status, ...entry }) => entry))
   assert.deepEqual((await new AgentMuxSpatialStateStore().read()).graph, graphBefore.graph)
   assert.equal((await client.statusAgent(id)).run.acceptedInputBytes, nativeRunBefore.acceptedInputBytes)
   assert.equal((await client.statusAgent(id)).run.pid, nativeRunBefore.pid)
@@ -616,13 +768,20 @@ try {
   assert.equal((await canonical()).pendingInteraction.request.id, bootPermission.id)
   assert.equal(requests.filter(request => textOf(request).includes(bootIntent.text)).length, 0)
   report.phases.push({ phase: 'C-independent-Desktop-boot-pauses-original-choice', firstPid, secondPid: second.child.pid, intent: bootIntent, publicChoice: bootChoice, beforeRun: nativeRunBefore,
-    bootSetup, automaticInputBytes: 0, draft: after.agentComposerDrafts[id], graph: graphBefore, restoredIntent: after.agentSteerQueues[id] })
+    bootSetup, automaticInputBytes: 0, draft: after.agentComposerDrafts[id], graph: graphBefore, restoredIntent: after.agentSteerQueues[id],
+    bootAuthorization: 'awaitingExplicitSend', originalStoredCausePreserved: true,
+    storedCauseFieldPresence: after.agentSteerQueues[id].map(entry => ({ operationId: entry.operationId,
+      fields: Object.fromEntries(['error', 'errorCode', 'detail', 'controlFailure'].map(key => [key, Object.hasOwn(entry, key)])) })),
+    causeBoundary: 'All original stored queue fields are compared. Absent fields do not prove durable structured cause facts.' })
   if (restorationFailure) throw restorationFailure
   report.steerRecovery = { passed: true }; report.passed = true
+  if (finalQualification) report.steerRecoveryFinal = { passed: true, scope: 'Fresh complete Main GUI A/B/C only; separate T008 protocol qualification is required', actualNativeCompletionObserved: true, originalPendingResumedOnce: true, restartAutomaticInputBytes: 0 }
+  }
   }
 } catch (error) {
   failure = error; report.failure = { name: error.name, message: error.message, code: error.code, detail: error.detail, stack: error.stack }
   report.diagnostics = { daemonError, canonical: await canonical().then(value => value && { run: value.run, semanticStatus: value.semanticStatus, pendingInteraction: value.pendingInteraction, nativeHandle: value.nativeHandle, terminalPromptDelivery: value.terminalPromptDelivery, terminalPromptSubmission: value.terminalPromptSubmission }), requestCount: requests.length }
+  if (finalQualification && first) report.finalCompletionEvents = await first.cdp.evaluate(`({events:window.__privateRecoveryCompletionProof?.events,dropped:window.__privateRecoveryCompletionProof?.dropped})`).catch(error => ({ unavailable: error.message }))
   if (first) report.diagnostics.renderer = await first.cdp.evaluate(`({queued:JSON.parse(localStorage.getItem('agentmux-workbench-v1'))?.state?.agentSteerQueues?.[${JSON.stringify(id)}],visible:document.querySelector('[data-workbench-region-id="recovery-agent"]')?.innerText})`).catch(error => ({ unavailable: error.message }))
   await captureStartupFailureFacts().catch(error => { report.startupCaptureError = diagnosticError(error) })
   await progress('failed-before-cleanup')

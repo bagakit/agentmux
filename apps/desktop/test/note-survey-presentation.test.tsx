@@ -71,7 +71,7 @@ const switchTab = () => dom.click('.global-survey-surface button.workbench-tab[d
 it('passes the actual projection through the original Stable Portal and selects only Survey', async () => {
   const before = await mountSurvey(); await save()
   expect(receipt()).toMatchObject({ status: 'written', revealed: true, draft: 'Captured thought', presentation: { presentationId: 'survey-workbench' }, target: { workspacePath: _hygiene_fixturePath("repo"), displayWorkspaceId: 'workspace', groupId: 'g' } })
-  expect(useAppStore.getState().surveyZoneSelection?.active?.tabId).toBe(fileTabId('workspace', path))
+  expect(useAppStore.getState().surveyZoneSelection?.active?.tabId).toBe(first.id)
   expect(snapshot()).toEqual(before); expect(useAppStore.getState().tabs.second).toBe(second)
 })
 it.each([false, true])('keeps a same-Zone later Tab/Group selection while creation waits (multipleGroups=%s)', async multipleGroups => {

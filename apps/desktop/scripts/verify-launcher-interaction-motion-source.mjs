@@ -23,7 +23,7 @@ const relative = path => path.replace(`${root}/`, '')
 const component = name => `apps/desktop/src/renderer/src/components/${name}.tsx`
 const sourcePaths = [
   component('NewTabSurface'), component('LauncherEnvironment'), component('LaunchOptionControls'),
-  component('LauncherSecondarySurfaces'), component('settings/LiquidSelectionSurface'),
+  component('LauncherSecondarySurfaces'), component('LiquidSelectionSurface'),
   component('LauncherMoteAction'), component('LauncherResumePicker'), component('WorkspaceWorkbench'),
   'apps/desktop/src/renderer/src/lib/launcher-state.ts',
   'apps/desktop/src/renderer/src/lib/primary-mote-executor.ts',
@@ -77,7 +77,7 @@ function checkReport(run, expectedGreen) {
 }
 function productCallers() {
   const owners = [
-    ['NewTabSurface', component('NewTabSurface')], ['LiquidSelectionSurface', component('settings/LiquidSelectionSurface')],
+    ['NewTabSurface', component('NewTabSurface')], ['LiquidSelectionSurface', component('LiquidSelectionSurface')],
     ['LauncherEnvironment', component('LauncherEnvironment')], ['LaunchRefine', component('LaunchOptionControls')],
     ['LauncherSecondarySurfaces', component('LauncherSecondarySurfaces')]
   ]

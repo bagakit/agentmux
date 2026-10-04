@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url'
 
 export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel' }) {
   assert.ok(['full','placement','buttons','toolkit'].includes(captureScope),'已知明确 capture scope')
-  const toolkitFixture = ['toolkit-custom-ui', 'toolkit-template'].includes(fixtureName)
+  const toolkitFixture = fixtureName === 'toolkit-custom-ui'
   assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
   assert.ok(['baseline','state','focus'].includes(cssMutant)&& (captureScope==='buttons'||cssMutant==='baseline'),'明确有界私有CSS变异')
   const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures',fixtureName)
@@ -33,7 +33,6 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     for(const file of [configFile,path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
     if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
-    if(fixtureName==='toolkit-template')for(const name of ['main.cjs','preload.cjs','coordinator.cjs'])await bind(path.join(desktop,'scripts/fixtures/toolkit-custom-ui',name))
     const aliases=new Map()
     for(const name of ['core','demand','layout']){
       const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))

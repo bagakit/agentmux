@@ -16,12 +16,19 @@ const fixture = _hygiene_fixtureData(relativeFixture_fixture)
 // official record shapes over controlled readonly stdio; not a vendor Writer.
 const current: AgentSessionHistoryPage = fixture.current as AgentSessionHistoryPage
 let root: Root, host: HTMLDivElement
+let readGroups: Set<string>
 const initial = useAppStore.getState()
 const flush = async () => { await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }) }
 async function show(page = current): Promise<void> {
   await act(async () => root.render(<ActivityView capability="complete-events" items={[]} userMessages={[]}
     sessionId={page.agentSessionId} nativeHistoryPage={page} />))
   await flush()
+  for (const head of host.querySelectorAll<HTMLButtonElement>('.conversation-native-thread .wf-head')) {
+    const id = head.closest<HTMLElement>('[data-observation-id]')!.dataset.observationId!
+    if (readGroups.has(id)) continue
+    readGroups.add(id)
+    if (head.getAttribute('aria-expanded') === 'false') await act(async () => head.click())
+  }
 }
 function row(id: string): HTMLElement {
   const element = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"]`)
@@ -37,6 +44,7 @@ async function open(id: string): Promise<HTMLElement> {
   return element
 }
 beforeEach(() => {
+  readGroups = new Set()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })

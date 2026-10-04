@@ -1,7 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
 import { api } from '../src/renderer/src/lib/api'
@@ -9,6 +9,7 @@ import { scratchTopicsScope, type ScratchTopicsSnapshot } from '../src/renderer/
 import { useAppStore } from '../src/renderer/src/store'
 import { SCRATCH_WORKSPACE_ID, type ScratchTopicSnapshot } from '../src/shared/scratch-topics'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { installFileTreeGeometry } from './helpers/file-tree-geometry'
 
 const dom = composerDOM()
 const home = _hygiene_fixturePath("Users/scratch-reader")
@@ -24,8 +25,9 @@ const snapshot = (topics: readonly ScratchTopicSnapshot[] | null, revision = 1):
   scope: scratchTopicsScope(workspace), revision, topics, reading: false, error: null
 })
 const originalBridge = Object.getOwnPropertyDescriptor(window, 'agentmux')
-let read: ReturnType<typeof vi.spyOn>, clipboard: ReturnType<typeof vi.spyOn>, report: ReturnType<typeof vi.fn>
+let read: MockInstance<typeof api.files.readDirectory>, clipboard: MockInstance<typeof api.ui.writeClipboardText>, report: ReturnType<typeof vi.fn>
 beforeEach(() => {
+  installFileTreeGeometry()
   read = vi.spyOn(api.files, 'readDirectory').mockImplementation(async (id, path) => {
     expect(id).toBe(SCRATCH_WORKSPACE_ID)
     if (path === '') return [{ name: logical, path: logical, isDirectory: true, isSymlink: false }]

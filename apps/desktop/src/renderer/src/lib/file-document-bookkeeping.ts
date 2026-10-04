@@ -148,6 +148,8 @@ export function documentLifetime(key: string): number {
 }
 
 export function advanceDocumentLifetime(key: string): number {
+  // A new document lifetime must not join the previous lifetime’s pending read.
+  fileOpenRequests.delete(key)
   const lifetime = documentLifetime(key) + 1
   fileDocumentLifetimes.set(key, lifetime)
   fileReadRequestIds.set(key, (fileReadRequestIds.get(key) ?? 0) + 1)

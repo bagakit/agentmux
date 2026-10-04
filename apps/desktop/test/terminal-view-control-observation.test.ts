@@ -11,7 +11,8 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
-import { readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
+import { observeTerminalInputGeometry, readTerminalInputOverlapTop, readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
+import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 
 // Native parser, buffers, modes and viewport methods are real; DOM paint/addons and Run boundary are not.
 const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null }))
@@ -227,4 +228,52 @@ it('omits observations for presentation-only Regions even when a callback is pre
   releases.push(registerTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId }, getter))
   expect(await inspect()).toMatchObject({ kind: 'launcher' })
   expect((await inspect()).terminalView).toBeUndefined(); expect(getter).not.toHaveBeenCalled()
+})
+
+it('protects the actual current row after the caret moves left, including a wide continuation cell, without changing control facts', async () => {
+  const terminal = await ready('AAAAAAAA界')
+  const element = terminal.element!
+  const screen = document.createElement('div'); screen.className = 'xterm-screen'; element.append(screen)
+  vi.spyOn(screen, 'getBoundingClientRect').mockReturnValue(new DOMRect(10, 20, terminal.cols * 10, terminal.rows * 20))
+  const popup = new DOMRect(100, 21, 9, 18), line = terminal.buffer.active.getLine(0)!
+  expect(line.getCell(8)!.getWidth()).toBe(2); expect(line.getCell(9)!.getWidth()).toBe(0)
+  const before = terminalResourceOwnerCounts(), changed = vi.fn()
+  const stop = observeTerminalInputGeometry(origin.regionId, element, changed); releases.push(stop)
+  expect(terminalResourceOwnerCounts().terminalListeners).toBe(before.terminalListeners + 3)
+  changed.mockClear()
+  await act(async () => await new Promise<void>(resolve => terminal.write('\x1b[9D', resolve)))
+  expect(terminal.buffer.active.cursorX).toBe(1); expect(line.translateToString(true)).toBe('AAAAAAAA界')
+  expect(changed).toHaveBeenCalled()
+  expect(readTerminalInputOverlapTop(origin.regionId, element, popup)).toBe(20)
+  expect(readTerminalInputOverlapTop(origin.regionId, document.createElement('div'), popup)).toBeUndefined()
+  expect(Object.keys((await inspect()).terminalView!).sort()).toEqual(['acceptsInput','buffer','liveReady','mouseTrackingMode','readOnly','runId','sampledAt','viewGrid','visible'].sort())
+  await act(async () => await new Promise<void>(resolve => terminal.write('\x1b[2J\x1b[HAAA', resolve)))
+  expect(readTerminalInputOverlapTop(origin.regionId, element, popup)).toBeUndefined()
+  stop(); stop(); expect(terminalResourceOwnerCounts()).toEqual(before)
+  await render(session, { visible: false })
+  expect(readTerminalInputOverlapTop(origin.regionId, element, popup)).toBeUndefined()
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it('binds a floating consumer before its view registers and replaces a same-element Run owner without keeping stale subscriptions', () => {
+  const regionId = 'late-geometry-region', element = document.createElement('div'), popup = new DOMRect(1, 2, 3, 4)
+  const changed = vi.fn(), firstStop = vi.fn(), nextStop = vi.fn()
+  let firstEvent: (() => void) | undefined, nextEvent: (() => void) | undefined
+  const firstSubscribe = vi.fn((_element: HTMLElement, notify: () => void) => { firstEvent = notify; return firstStop })
+  const nextSubscribe = vi.fn((_element: HTMLElement, notify: () => void) => { nextEvent = notify; return nextStop })
+  const floatStop = observeTerminalInputGeometry(regionId, element, changed); releases.push(floatStop)
+  expect(readTerminalInputOverlapTop(regionId, element, popup)).toBeUndefined()
+  const identity = { regionId, sessionId: session.id, runId: session.control.run.runId }
+  const old = registerTerminalViewObservation(identity, () => observed(), { readOverlapTop: () => 20, subscribe: firstSubscribe }); releases.push(old)
+  expect(firstSubscribe).toHaveBeenCalledExactlyOnceWith(element, expect.any(Function))
+  expect(readTerminalInputOverlapTop(regionId, element, popup)).toBe(20)
+  const latest = registerTerminalViewObservation({ ...identity, runId: 'next-geometry-run' }, () => observed('next-geometry-run'), { readOverlapTop: () => 30, subscribe: nextSubscribe }); releases.push(latest)
+  expect(firstStop).toHaveBeenCalledTimes(1); expect(nextSubscribe).toHaveBeenCalledExactlyOnceWith(element, expect.any(Function))
+  changed.mockClear(); firstEvent!(); expect(changed).not.toHaveBeenCalled()
+  nextEvent!(); expect(changed).toHaveBeenCalledTimes(1)
+  old(); expect(readTerminalInputOverlapTop(regionId, element, popup)).toBe(30)
+  latest(); expect(nextStop).toHaveBeenCalledTimes(1)
+  expect(readTerminalInputOverlapTop(regionId, element, popup)).toBeUndefined()
+  floatStop(); expect(nextStop).toHaveBeenCalledTimes(1)
+  expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })

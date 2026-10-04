@@ -26,6 +26,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { mainRegionReference } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { restoreAgentFocus, sanitizeAgentFocus } from '../src/renderer/src/lib/agent-focus'
 import { installNativePopover } from './fixtures/mote-workface'
 const initial = useAppStore.getState()
@@ -78,7 +79,7 @@ async function fixture() {
       useAppStore.setState(initial, true); useLauncherState.setState(initialLauncher, true); window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() }
   }
 }
-it('actual File pointer selects its original occurrence without changing Agent/history/Space or original DOM/Range', async () => {
+it('actual File pointer selects its original occurrence without changing Agent/history or original DOM/Range', async () => {
   const f = await fixture()
   try {
     const before = useAppStore.getState(), leaf = f.container.querySelector<HTMLElement>('[data-selection-leaf="explicit-exact-tab/exact-r2"]')!
@@ -88,7 +89,7 @@ it('actual File pointer selects its original occurrence without changing Agent/h
     expect(selection.toString()).toBe('readable')
     const mounts = [...leaves.mounts], reads = { page: vi.spyOn(api.sessions, 'historyPage'), timeline: vi.spyOn(api.sessions, 'timeline'), catalog: vi.spyOn(api.sessions, 'historySources') }
     await f.chooseFile(); const after = useAppStore.getState()
-    expect(after.agentFocus.execution.reference).toEqual(f.file)
+    expect(mainRegionReference(after.workbenchSpaceSelection)).toEqual(f.file)
     expect(after.agentFocus.execution.sessionId).toBe(f.session.id)
     expect(after.agentFocus.execution.history).toBe(before.agentFocus.execution.history)
     expect(after.sessions).toBe(before.sessions); expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts)
@@ -137,12 +138,12 @@ it('the original Launcher submit keeps its resource Workspace and exact display 
     let created: string | null = null
     await act(async () => {
       created = useAppStore.getState().openLauncher({ workspaceId: f.resource.id,
-        displayWorkspaceId: f.display.id, tabGroupId: f.reference.groupId, reveal: false })
+        displayWorkspaceId: f.display.id, tabGroupId: f.reference.groupId!, reveal: false }) ?? null
       expect(created).not.toBeNull()
       const tab = useAppStore.getState().tabs[created!]!
-      useAppStore.getState().selectExecutionFocusReference({ ...f.reference, tabId: tab.id, regionId: tab.layout.activeRegionId }, held)
+      useAppStore.getState().selectMainRegion({ ...f.reference, tabId: tab.id, regionId: tab.layout.activeRegionId }, before.workbenchSpaceSelection)
     })
-    const state = useAppStore.getState(), reference = state.agentFocus.execution.reference!
+    const state = useAppStore.getState(), reference = mainRegionReference(state.workbenchSpaceSelection)!
     expect(f.container.querySelector('.focused-tab-workspace .launch-surface')).not.toBeNull()
     const submit = vi.fn(state.launchAgent)
     await act(async () => useAppStore.setState({ launchAgent: submit }))
@@ -174,21 +175,24 @@ it('the original Launcher submit keeps its resource Workspace and exact display 
     }
   } finally { await f.close() }
 })
-it('rejects the late old held tuple and old semantic Agent intent without overwriting newer local selection', async () => {
+it('rejects the late old held tuple and later main navigation without overwriting newer local selection', async () => {
   const f = await fixture()
   try {
-    const old = useAppStore.getState().agentFocus.execution
+    const old = useAppStore.getState().workbenchSpaceSelection
     await f.chooseFile(); const current = useAppStore.getState()
-    await act(async () => current.selectExecutionFocusReference(f.reference, old))
+    await act(async () => expect(current.selectMainRegion(f.reference, old)).toBe(false))
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(current.workbenchSpaceSelection)
     expect(useAppStore.getState().agentFocus).toBe(current.agentFocus)
     await act(async () => current.focusExecutionSession(f.other.id))
+    await act(async () => useAppStore.getState().selectMainRegion(f.reference))
     const newer = useAppStore.getState()
-    await act(async () => newer.selectExecutionFocusReference(f.file, current.agentFocus.execution))
+    await act(async () => expect(newer.selectMainRegion(f.file, current.workbenchSpaceSelection)).toBe(false))
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(newer.workbenchSpaceSelection)
     expect(useAppStore.getState().agentFocus).toBe(newer.agentFocus)
     expect(newer.agentFocus.execution.sessionId).toBe(f.other.id)
   } finally { await f.close() }
 })
-it('actual Settings click rejects old selection and returns the original DOM/Range; another main surface rejects it too', async () => {
+it('actual Settings click rejects old selection and returns the original DOM/Range; other main surfaces share the same owner', async () => {
   const f = await fixture()
   try {
     const before = useAppStore.getState(), leaf = f.container.querySelector<HTMLElement>('[data-selection-leaf="explicit-exact-tab/exact-r2"]')!
@@ -197,7 +201,7 @@ it('actual Settings click rejects old selection and returns the original DOM/Ran
     const settings = f.container.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')!
     expect(settings).not.toBeNull(); await act(async () => settings.click())
     expect(f.container.querySelector('.settings-page')).not.toBeNull()
-    await act(async () => useAppStore.getState().selectExecutionFocusReference(f.file, before.agentFocus.execution))
+    await act(async () => useAppStore.getState().selectMainRegion(f.file, before.workbenchSpaceSelection))
     expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
     await act(async () => settings.click())
     expect(f.container.querySelector('.settings-page')).toBeNull()
@@ -206,38 +210,39 @@ it('actual Settings click rejects old selection and returns the original DOM/Ran
     expect(leaf.querySelector('textarea')?.value).toBe('Original unsent draft')
     await act(async () => useAppStore.getState().setMainSurface('survey'))
     const away = useAppStore.getState()
-    await act(async () => away.selectExecutionFocusReference(f.file, away.agentFocus.execution))
+    await act(async () => away.selectMainRegion(f.file, away.workbenchSpaceSelection))
     expect(useAppStore.getState().agentFocus).toBe(away.agentFocus)
+    expect(mainRegionReference(useAppStore.getState().workbenchSpaceSelection)).toEqual(f.file)
   } finally { await f.close() }
 })
 it('rejects deleted/root-excluded occurrences, retains the exact reference, and never picks another location', async () => {
   const f = await fixture()
   try {
     const before = useAppStore.getState()
-    await act(async () => before.selectExecutionFocusReference({ ...f.file, regionId: 'deleted-region' }, before.agentFocus.execution))
+    await act(async () => before.selectMainRegion({ ...f.file, regionId: 'deleted-region' }, before.workbenchSpaceSelection))
     expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
     const layout = before.layouts[f.display.id]!
     await act(async () => useAppStore.setState({ layouts: { ...before.layouts, [f.display.id]: { ...layout,
       root: { type: 'leaf', groupId: 'display-first-group' } } } }))
     const excluded = useAppStore.getState()
-    await act(async () => excluded.selectExecutionFocusReference(f.file, excluded.agentFocus.execution))
+    await act(async () => excluded.selectMainRegion(f.file, excluded.workbenchSpaceSelection))
     expect(useAppStore.getState().agentFocus).toBe(excluded.agentFocus)
     expect(excluded.agentFocus.execution.reference).toEqual(f.reference)
     expect(f.container.querySelector('.focused-tab-workspace')).toBeNull()
-    expect(f.container.querySelector('.focus-location-recovery')?.textContent).toContain('no longer confirmed')
+    expect(f.container.querySelector('.focus-location-recovery')?.textContent).toContain('no confirmed Region')
   } finally { await f.close() }
 })
 it('original durable reference restores a non-Agent content occurrence independently of Agent initial choices', async () => {
   const f = await fixture()
   try {
     await f.chooseFile(); const before = useAppStore.getState()
-    expect(before.agentFocus.execution.reference).toEqual(f.file)
+    expect(mainRegionReference(before.workbenchSpaceSelection)).toEqual(f.file)
     const saved = JSON.parse(JSON.stringify(before.agentFocus)), restored = sanitizeAgentFocus(restoreAgentFocus(saved), before.sessions, () => 'execution')
     await act(async () => useAppStore.setState({ agentFocus: restored }))
-    expect(useAppStore.getState().agentFocus.execution.reference).toEqual(f.file)
+    expect(mainRegionReference(useAppStore.getState().workbenchSpaceSelection)).toEqual(f.file)
     expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(f.exact.id)
     const unknown = sanitizeAgentFocus(restoreAgentFocus(saved), [], () => 'execution', new Set([f.session.id]))
-    expect(unknown.execution.reference).toEqual(f.file)
+    expect(unknown.execution.reference).toEqual(before.agentFocus.execution.reference)
     await act(async () => useAppStore.setState({ agentFocus: unknown, sessions: [] }))
     expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(f.exact.id)
     expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)

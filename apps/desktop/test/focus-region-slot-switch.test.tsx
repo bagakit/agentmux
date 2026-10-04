@@ -35,7 +35,7 @@ let root: Root, container: HTMLDivElement, agentId: string
 function Scene({ regionOnly, anotherTarget }: { regionOnly: boolean; anotherTarget?: WorkbenchViewTarget }) {
   const state = useAppStore()
   const presentation = useMemo(() => executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []),
-    selected => useAppStore.getState().selectExecutionFocusReference(selected, state.agentFocus.execution), regionOnly ? 'region' : 'tab'),
+    selected => useAppStore.getState().selectMainRegion(selected, state.workbenchSpaceSelection), regionOnly ? 'region' : 'tab'),
   [state.agentFocus.execution, state.tabs, state.layouts, state.config, regionOnly])
   const projection = presentation.projection, selected = projection?.selection[0]
   const targets: WorkbenchViewTargets = selected && projection ? { [tabId]: [

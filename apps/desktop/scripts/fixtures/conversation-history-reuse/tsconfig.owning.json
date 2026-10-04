@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../src/renderer/src/global.d.ts", "../../../test/history-shared-native-process.test.tsx", "../../../test/history-process-collapsed-prepend.test.tsx", "../../../test/conversation-reading-state.integration.test.tsx", "../../../test/session-history-entry-views.test.tsx", "../../../test/conversation-history-reuse.test.tsx", "vitest.owning.config.mts"],
+  "compilerOptions": {"allowImportingTsExtensions":true}
+}

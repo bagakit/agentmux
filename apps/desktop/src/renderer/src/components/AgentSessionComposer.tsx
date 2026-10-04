@@ -1,24 +1,22 @@
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
+import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
-import { appendFileReferences } from '../lib/composer-file-reference'
+import { appendFileReferences } from '@agentmux/client-ui/composer-file-reference'
 import { appendSemanticReference, encodeSemanticReference, expandSemanticReferences, semanticReferenceKind, semanticReferenceLabel, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { AGENT_COMMAND_GROUP_LABEL, composerShortcutForBareWord, composerShortcutSuggestion, composerShortcutsForProvider, resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import {
   caretAtFirstLine,
-  caretAtLastLine,
-  emptyHistory,
-  navigateHistory,
-  recordHistory,
-  type HistoryState
+  caretAtLastLine
 } from '../lib/composer-history'
 import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit } from '../lib/composer-resubmit-guard'
 import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
@@ -28,10 +26,10 @@ import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
-import { useComposerFeedback } from './ComposerFeedback'
-import { errorIdentity } from '@agentmux/client-ui/error-presentation'
+import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
+import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
@@ -45,9 +43,8 @@ export type AgentComposerAvailability = {
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
 const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
-// History and the resubmit guard survive a Composer remount within the same application run.
+// The resubmit guard survives a Composer remount within the same application run.
 // Drafts remain owned by the store; transient operation feedback stays with the mounted Composer.
-const historyBySession = new Map<string, HistoryState>()
 const lastSubmitBySession = new Map<string, LastSubmit>()
 
 
@@ -83,12 +80,13 @@ export function AgentSessionComposer({
 }) {
   useObservedConsumerCommit('composer', visible)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
+  useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(sessionId)
   const text = useObservedAppStore('composer', visible, (state) => state.agentComposerDrafts[sessionId] ?? '')
   const setAgentComposerDraft = useObservedAppStore('composer', visible, (state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useObservedAppStore('composer', visible, (state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useObservedAppStore('composer', visible, (state) => state.enqueueAgentSteer)
-  const removeAgentSteer = useObservedAppStore('composer', visible, (state) => state.removeAgentSteer)
+  const archiveAgentSteer = useObservedAppStore('composer', visible, (state) => state.archiveAgentSteer)
   const moveAgentSteer = useObservedAppStore('composer', visible, (state) => state.moveAgentSteer)
   const sendQueuedAgentSteer = useObservedAppStore('composer', visible, (state) => state.sendQueuedAgentSteer)
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
@@ -113,7 +111,7 @@ export function AgentSessionComposer({
   }) : undefined
   const workspace = useObservedAppStore('composer', visible, (state) =>
     state.config?.workspaces.find((item) =>
-      session?.kind === 'agent' && workspaceOwnsSessionPath(item, session)
+      session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
     )
   )
   const activeFile = useObservedAppStore('composer', visible, (state) =>
@@ -183,7 +181,7 @@ export function AgentSessionComposer({
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
-    historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
+    useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
   function queue(): void {
@@ -198,7 +196,7 @@ export function AgentSessionComposer({
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
-    historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
+    useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
   // Shell-style up/down history recall. The multiline resolution: recall only fires at the line boundary
@@ -209,10 +207,7 @@ export function AgentSessionComposer({
   function historyRecall(direction: 'older' | 'newer', draft: string, caret: number): string | null {
     if (direction === 'older' && !caretAtFirstLine(draft, caret)) return null
     if (direction === 'newer' && !caretAtLastLine(draft, caret)) return null
-    const result = navigateHistory(historyBySession.get(sessionId) ?? emptyHistory, direction, draft)
-    if (!result) return null
-    historyBySession.set(sessionId, result.state)
-    return result.value
+    return useAppStore.getState().recallAgentComposerHistory(sessionId, direction, draft)
   }
 
 
@@ -272,23 +267,29 @@ export function AgentSessionComposer({
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           text: entry.text,
+          ...(entry.archived ? { archived: true as const } : {}),
+          confirmed: Boolean(confirmedSteerDelivery(timeline, sessionId, entry.operationId)),
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
           editable: agentSteerCanEdit(entry, sendingId),
           immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
           preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',
           sending: entry.operationId === sendingId && sendingPhase === 'submitting',
-          unconfirmed: entry.promptCondition != null && (entry.status === 'deferred' || entry.status === 'failed'),
+          unconfirmed: entry.promptCondition !== null && (entry.status === 'deferred' || entry.status === 'failed'),
+          ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
-          ...(entry.error ? { error: errorIdentity(entry.error) } : {}),
+          ...(entry.logId ? { logId: entry.logId } : {}),
+          ...(entry.error ? { error: entry.error } : {}),
         }))}
-        onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
+        {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
+          await feedback.run(async () => { await archiveAgentSteer(sessionId, operationId, expectedText, archived) })
+        } } : {})}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
-        {...(!disabled && !readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
+        {...(!readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
         {...(!disabled && !readOnly ? { onEditQueued: async (id: string, expectedText: string, nextText: string) => {
           feedback.dismiss()
           try { useAppStore.getState().editQueuedAgentSteer(sessionId, id, expectedText, nextText) }
@@ -298,6 +299,7 @@ export function AgentSessionComposer({
     >
     {(mailbox, pending) => (
     <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
+      feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}

@@ -18,12 +18,13 @@ vi.mock('../src/renderer/src/store.js', () => ({
   })
 }))
 vi.mock('../src/renderer/src/lib/api.js', () => ({ api: { files: { reveal: vi.fn() } } }))
-import { EditorPane } from '../src/renderer/src/components/EditorPane.js'
+import { FileSourceEditor } from '../src/renderer/src/components/FileSourceEditor.js'
 
 let root: Root
 let container: HTMLDivElement
 async function render(visible = true) {
-  await act(async () => root.render(createElement(EditorPane, {
+  await act(async () => root.render(createElement(FileSourceEditor, {
+      viewState: { current: null },
     tabId: 'tab', visible,
     surface: { regionId: 'region', kind: 'file', workspaceId: 'workspace', path: 'app.ts' }
   })))
@@ -36,6 +37,7 @@ function mount() {
     focus: vi.fn(() => input.focus()), getContainerDomNode: () => host, addCommand: vi.fn(), addAction: vi.fn(),
     createContextKey: vi.fn(() => ({ set: vi.fn() })),
     onDidChangeCursorSelection: vi.fn(), onDidDispose: vi.fn(),
+    getModel: vi.fn(() => ({})), saveViewState: vi.fn(() => null),
     revealLineInCenter: vi.fn(), setPosition: vi.fn()
   }
   expect(fixture.mount).toBeTypeOf('function')

@@ -217,7 +217,10 @@ export class DesktopSpatialPersistence {
     this.state = state;
   }
   async read(): Promise<AgentMuxSpatialState | null> {
-    this.state = await this.port.read();
+    const observed = await this.port.read();
+    if (observed === null && this.state !== null)
+      throw new Error('The original Core spatial document was not returned. Its confirmed references are retained; re-read the original owner.');
+    this.state = observed;
     this.readConfirmed = true;
     return this.state;
   }

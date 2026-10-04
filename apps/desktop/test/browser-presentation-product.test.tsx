@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { act, createElement } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { expect, it, vi } from 'vitest'
+import { previewFrame, previewMedia } from './helpers/browser-preview-media'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.mock('react-resizable-panels',()=>createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 import { App } from '../src/renderer/src/App'
@@ -38,16 +39,14 @@ it('actual App keeps both exact Browser workfaces on one capture; Settings hides
   const arm=vi.spyOn(api.browser,'armPresentationCapture').mockResolvedValue({captureId:'original-capture',browserId:browser.id,})
   const ack=vi.spyOn(api.browser,'ackPresentationCapture').mockResolvedValue(undefined)
   const events=vi.spyOn(api.browser,'onPresentationEvent').mockImplementation(()=>()=>{})
-  const track={id:'original-track',stop:vi.fn()}
-  const stream=new MediaStream()
-  Object.defineProperty(stream,'getTracks',{value:()=>[track]})
+  const {track,stream}=previewMedia('original-track')
   const capture=vi.fn(async()=>stream)
   const priorMedia=Object.getOwnPropertyDescriptor(navigator,'mediaDevices')
   Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getDisplayMedia:capture}})
   const originalRect=HTMLElement.prototype.getBoundingClientRect
   HTMLElement.prototype.getBoundingClientRect=function(){return this.hasAttribute('data-native-browser-stage')||this.classList.contains('workbench-region')
     ? {x:10,y:40,width:640,height:320,left:10,top:40,right:650,bottom:360,toJSON:()=>({})}:originalRect.call(this)}
-  const play=vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined)
+  const play=vi.spyOn(HTMLMediaElement.prototype,'play').mockImplementation(function () { previewFrame(this); return Promise.resolve() })
   useAppStore.setState({...initial,loading:false,initialize:async()=>()=>{},config:{...config,workspaces:[workspace]},sessions:[],
     activeWorkspaceId:workspace.id,mainSurface:'workbench',tabs:{[tab.id]:tab},layouts:{[workspace.id]:createWorkspaceLayout('original-group',[tab.id])},toolsOpen:false,projectRailOpen:false,
     scratchTopicSnapshots:{[workspace.id]:{scope:scratchTopicsScope(workspace),revision:0,topics:[topic],error:null,reading:false}},
@@ -120,13 +119,12 @@ it('a fresh Survey Browser selects its exact visible occurrence before capture, 
   const activate = vi.spyOn(api.browser, 'activatePresentation').mockImplementation(async id => { expect(held.get(id)!.geometry.visible).toBe(true); sequence.push('select'); return { outcome: 'selected' } })
   const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockImplementation(async () => { sequence.push('capture'); return { captureId: 'survey-original-capture', browserId: page.id } })
   const ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined), events = vi.spyOn(api.browser, 'onPresentationEvent').mockImplementation(() => () => {})
-  const stream = new MediaStream(), stop = vi.fn()
-  Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'survey-track', stop }] })
+  const { stream } = previewMedia('survey-track')
   const capture = vi.fn().mockRejectedValueOnce(new Error('Timeout starting video source')).mockResolvedValue(stream)
   const priorMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: capture } })
   const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(220, 60, 620, 320))
-  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function () { previewFrame(this); return Promise.resolve() })
   const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
     await act(async () => root.render(createElement(App)))
@@ -161,14 +159,15 @@ it('hidden registration and unconfirmed selection preserve the next visible acti
   const activate = vi.spyOn(api.browser, 'activatePresentation').mockResolvedValueOnce({ outcome: 'input-unconfirmed', reason: 'hidden', message: 'Visibility changed before selection' }).mockResolvedValue({ outcome: 'selected' })
   const register = vi.spyOn(api.browser, 'registerPresentation').mockResolvedValue({ leaseId: 'same-lease' }), update = vi.spyOn(api.browser, 'updatePresentation').mockResolvedValue(undefined), remove = vi.spyOn(api.browser, 'removePresentation').mockResolvedValue(undefined)
   const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockResolvedValue({ captureId: 'capture', browserId: 'browser' }), ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined), events = vi.spyOn(api.browser, 'onPresentationEvent').mockImplementation(() => () => {})
-  const stream = new MediaStream(); Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'track', stop: vi.fn() }] })
+  const { stream } = previewMedia('track')
   const priorMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: vi.fn(async () => stream) } })
-  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 320)), play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 320)), play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function () { previewFrame(this); return Promise.resolve() })
   function Workface({ visible }: { visible: boolean }) { const media = useBrowserPresentationCapture('browser'); return createElement(BrowserPresentationStage, { browserId: 'browser', navigationId: 'navigation', presentation: { ...presentation, visible }, inputSelected: true, blocked: false, media }) }
   const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
     await act(async () => root.render(createElement(Workface, { visible: false })))
+    await vi.waitFor(async () => { await act(async () => {}); expect(register).toHaveBeenCalledTimes(1) })
     expect(register).toHaveBeenCalledTimes(1); expect(activate).not.toHaveBeenCalled(); expect(arm).not.toHaveBeenCalled()
     await act(async () => root.render(createElement(Workface, { visible: true })))
     await vi.waitFor(async () => { await act(async () => {}); expect(activate).toHaveBeenCalled() })

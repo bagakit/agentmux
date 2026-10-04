@@ -9,7 +9,7 @@ import { useAppStore } from '../store'
 import { MoteAvatarCrop } from './MoteAvatarCrop'
 import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
-import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** Shared chooser; drafts stay local until Save, authored metadata has the existing store owner. */
@@ -27,6 +27,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   const [faceDraft, setFaceDraft] = useState(DEFAULT_MOTE_FACE)
   const [alternativeDraft, setAlternativeDraft] = useState<SpaceIconChoice | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const content = useRef<HTMLDivElement>(null)
   const returnKey = useRef<string | null>(null)
   const editor = useRef<object>({}), inputRequest = useRef<object>({})
   const currentTarget = useRef(target); currentTarget.current = target
@@ -42,9 +43,10 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     return () => { editor.current = {}; inputRequest.current = {} }
   }, [target?.key])
 
+  const supportsImages = Boolean(target?.avatarTarget || target?.imageTarget)
   async function prepare(file: File): Promise<void> {
     const original = target, session = editor.current, request = {}; inputRequest.current = request
-    if (!original?.avatarTarget) return
+    if (!original || !original.avatarTarget && !original.imageTarget) return
     setPreparing(true); setError(null)
     const current = () => editor.current === session && inputRequest.current === request && currentTarget.current?.key === original.key
     try {
@@ -54,7 +56,9 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         const reader = new FileReader(); reader.onerror = () => reject(new Error('This image could not be read.'))
         reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(file)
       })
-      const value = await api.scratch.previewMoteAvatar(original.avatarTarget.workspaceId, original.avatarTarget.topicId, { mimeType: file.type, dataUrl } as MoteAvatarInput, original.avatarTarget.objectKey)
+      const input = { mimeType: file.type, dataUrl } as MoteAvatarInput
+      const value = original.imageTarget ? await api.spaceObjects.previewAvatar(original.imageTarget, input)
+        : await api.scratch.previewMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
       if (current()) { setEditingFace(false); setPreviewReady(false); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1 })) }
     } catch (cause) { if (current()) { setErrorStep('prepare'); setError(presentError(cause)) } }
     finally { if (current()) setPreparing(false) }
@@ -66,9 +70,11 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     setBusy(true); setError(null)
     try {
       let choice = draft
-      if (!editingFace && preview && original.avatarTarget) {
+      if (!editingFace && preview && (original.avatarTarget || original.imageTarget)) {
         if (!canvas.current) throw new Error('The avatar preview is not ready. Select the image again.')
-        choice = await api.scratch.saveMoteAvatar(original.avatarTarget.workspaceId, original.avatarTarget.topicId, { mimeType: 'image/png', dataUrl: canvas.current.toDataURL('image/png') }, original.avatarTarget.objectKey)
+        const input = { mimeType: 'image/png' as const, dataUrl: canvas.current.toDataURL('image/png') }
+        choice = original.imageTarget ? await api.spaceObjects.saveAvatar(original.imageTarget, input)
+          : await api.scratch.saveMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
       }
       // A completed asset belongs to the submitted object, but a replaced editor cannot publish it.
       if (!current()) return
@@ -89,33 +95,35 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   return <Dialog.Root open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
-      <Dialog.Content className={`space-icon-picker dialog-surface${target?.avatarTarget ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+      <Dialog.Content ref={content} className={`space-icon-picker dialog-surface${supportsImages ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}
         onCloseAutoFocus={event => {
           event.preventDefault()
-          const row = returnFocus?.() ?? [...document.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
+          const row = returnFocus ? returnFocus() : [...document.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
             .find(node => node.dataset.spaceIconTarget === returnKey.current)
-          row?.focus()
+          const active = document.activeElement
+          if (row?.isConnected && (active === document.body || active === row || !active?.isConnected || content.current?.contains(active))) row.focus({ preventScroll: true })
         }}>
         <header className="space-icon-picker__header">
-          <Dialog.Title className="space-icon-picker__title">{target?.avatarTarget ? 'Change avatar' : 'Change icon'}</Dialog.Title>
+          <Dialog.Title className="space-icon-picker__title">{supportsImages ? 'Change avatar' : 'Change icon'}</Dialog.Title>
           <Dialog.Description className="space-icon-picker__description">{target?.name}</Dialog.Description>
         </header>
-        {target?.avatarTarget ? <>
-          <div className="mote-avatar-source" role="group" aria-label="Mote avatar style">
+        {supportsImages && target ? <>
+          {target.avatarTarget ? <><div className="mote-avatar-source" role="group" aria-label="Mote avatar style">
             <LiquidSelectionSurface selected={editingFace ? 'face' : 'alternative'} active={target !== null} targetAttribute="data-avatar-source" />
             <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source(true)}><Smile size={15} />Make a face<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
             <button type="button" data-avatar-source="alternative" aria-pressed={!editingFace} disabled={busy} onClick={() => source(false)}><Shapes size={15} />Icon or image<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
           </div>
           <MoteFaceEditor face={faceDraft} visible={editingFace} disabled={busy} onChange={select} />
+          </> : null}
           <div className="mote-avatar-alternative" hidden={editingFace}>
             {preview ? <MoteAvatarCrop key={preview.revision} source={preview.dataUrl} canvasRef={canvas} disabled={busy || preparing}
-              onReady={() => setPreviewReady(true)} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label="Your Mote avatar preview">
-              <SpaceObjectIcon kind="mote" name={target.name} manualIcon={alternativeDraft} avatarWorkspaceId={target.avatarTarget.workspaceId}
-                avatarTopicId={target.avatarTarget.topicId} avatarObjectKey={target.key} />
+              onReady={() => setPreviewReady(true)} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label={`Your ${target.kind} avatar preview`}>
+              <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
+                avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.key} />
             </div>}
             <label className="small-button mote-avatar-file"><ImagePlus size={15} />Upload image
-              <input aria-label="Choose Mote image" type="file" accept="image/png,image/jpeg" disabled={busy}
+              <input aria-label={target.avatarTarget ? 'Choose Mote image' : `Choose image for ${target.name}`}  type="file" accept="image/png,image/jpeg" disabled={busy}
                 onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void prepare(file) }} />
               <span>PNG or JPG · up to 8 MB</span>
             </label>
@@ -133,8 +141,8 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; retry saving.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         <footer>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
-          <button type="button" className={`${target?.avatarTarget ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={target?.avatarTarget ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'} disabled={busy || preparing || Boolean(!editingFace && preview && !previewReady)} onClick={() => void save()}>
-            {busy ? 'Saving…' : error && errorStep === 'save' ? 'Retry saving' : target?.avatarTarget ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'}
+          <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'} disabled={busy || preparing || Boolean(!editingFace && preview && !previewReady)} onClick={() => void save()}>
+            {busy ? 'Saving…' : error && errorStep === 'save' ? 'Retry saving' : supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'}
           </button>
         </footer>
       </Dialog.Content>

@@ -1,5 +1,5 @@
-import { readFile, readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { constants, open, readdir, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
 
 export type ProjectAppearance = { kind: 'repository' | 'directory'; icon: string | null }
 
@@ -51,20 +51,39 @@ async function fileSig(path: string): Promise<string | null> {
 }
 
 /** Encode one candidate if it is a real, small-enough image. Returns null so callers try the next. */
-async function tryFile(path: string): Promise<Hit | null> {
+async function tryFile(path: string, root: string): Promise<Hit | null> {
+  let handle
   try {
-    const info = await stat(path)
-    if (!info.isFile() || info.size > MAX_ICON_BYTES) return null // size cap BEFORE reading the bytes
-    const bytes = await readFile(path)
+    // A conventional symlink can identify an asset only inside this original directory.
+    const actual = await realpath(path)
+    const pathWithinRoot = relative(root, actual)
+    if (isAbsolute(pathWithinRoot) || pathWithinRoot === '..' || pathWithinRoot.startsWith('..' + sep)) return null
+    handle = await open(actual, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    const info = await handle.stat()
+    if (!info.isFile() || info.size > MAX_ICON_BYTES) return null
+    const buffer = Buffer.alloc(MAX_ICON_BYTES + 1)
+    let count = 0
+    while (count < buffer.length) {
+      const read = await handle.read(buffer, count, buffer.length - count, count)
+      if (!read.bytesRead) break
+      count += read.bytesRead
+    }
+    if (count > MAX_ICON_BYTES) return null
+    const bytes = buffer.subarray(0, count)
     const mime = sniffImageMime(bytes)
     if (!mime) return null
     return { icon: `data:${mime};base64,${bytes.toString('base64')}`, winner: path, winnerSig: `${info.mtimeMs}:${info.size}` }
-  } catch { return null }
+  } catch (error) {
+    // Absence, an invalid mark or an escaping link can try another asset. A storage failure
+    // is unknown, not a confirmed directory with no icon.
+    if (['ENOENT', 'ENOTDIR', 'ELOOP'].includes((error as NodeJS.ErrnoException).code ?? '')) return null
+    throw error
+  } finally { await handle?.close() }
 }
 
 async function findIcon(root: string): Promise<Hit | null> {
   for (const candidate of FIXED_CANDIDATES) {
-    const hit = await tryFile(join(root, candidate))
+    const hit = await tryFile(join(root, candidate), root)
     if (hit) return hit
   }
   // Breadth-first so shallower icons win; the fixed list already handled the conventional exact paths.
@@ -77,11 +96,12 @@ async function findIcon(root: string): Promise<Hit | null> {
     // overload — `entry.name` then types as Buffer and every use of it below fails. Control-flow
     // inference from the call site gets `Dirent[]` right (same shape as core's agent-skills.ts).
     let entries
-    try { entries = await readdir(dir, { withFileTypes: true }) } catch { continue }
+    try { entries = await readdir(dir, { withFileTypes: true }) }
+    catch (error) { if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) continue; throw error }
     // Sort for a deterministic winner across filesystems; conventional names sort ahead of the rest.
     const files = entries.filter((entry) => entry.isFile() && ICON_NAME.test(entry.name)).map((entry) => entry.name).sort()
     for (const name of files) {
-      const hit = await tryFile(join(dir, name))
+      const hit = await tryFile(join(dir, name), root)
       if (hit) return hit
     }
     if (depth < MAX_DIR_DEPTH) {
@@ -104,8 +124,10 @@ const CACHE_TTL_MS = 60_000
 
 /** Probe a project root for its own icon, magic-byte-verified and encoded as a data: URI; cached. */
 export async function projectAppearance(root: string): Promise<ProjectAppearance> {
+  try { root = await realpath(root) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'directory', icon: null }; throw error }
   let rootMtime: number
-  try { rootMtime = (await stat(root)).mtimeMs } catch { return { kind: 'directory', icon: null } }
+  rootMtime = (await stat(root)).mtimeMs
 
   const cached = cache.get(root)
   if (

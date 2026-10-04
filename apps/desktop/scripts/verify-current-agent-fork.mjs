@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 const root = resolve(import.meta.dirname, '../../..'), run = promisify(execFile)
@@ -12,33 +12,60 @@ const { build } = createRequire(join(root, 'packages/core/package.json'))('esbui
 const evidence = process.argv[2] ? resolve(root, process.argv[2]) : join(root, '.bagakit/feature-tracker/features/f-2qy8fxfgc/artifacts/core-verification')
 const temporary = await mkdtemp(join(tmpdir(), 'amx-fork-gate-'))
 const sha = data => createHash('sha256').update(data).digest('hex')
+const workspaceAliases = {}
+for (const name of ['core', 'demand', 'relay']) {
+  const manifest = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8'))
+  for (const [key, value] of Object.entries(manifest.exports)) workspaceAliases[key === '.' ? '@agentmux/' + name : '@agentmux/' + name + '/' + key.slice(2)] =
+    join(root, 'packages', name, value.import.replace('./dist/', name === 'demand' ? './' : './src/').replace(/\.js$/, '.ts'))
+}
 const receipt = { passed: false, source: 'current production Provider/Core/space owner plus private actual CLI',
   userRuntimeTouched: false, sourceCandidates: {}, mutations: [], isolation: [
     'Two different native protocol file/launch fixtures use actual Provider builders in a real private ctxmux PTY. No authenticated upstream Agent request is sent.',
     'Managed native hook config installation is isolated in the fixture. Core creation, environment, reservation, Session store, guide, input and Runtime controls are actual source.',
     'The original Renderer spatial business owner is consumed through a real public service, Client and CLI. No replacement creation or position owner is introduced.',
     'Spatial save consumes the actual Desktop graph converter and Core filesystem spatial owner; an independent process rereads both native Session store and exact durable topology. Full Electron presentation is consumed by the subsequent UI gate.',
-    'The unrelated missing file-resource leaf throws if invoked; no file business is exercised.'
+    'File business is not exercised; the production spatial owner and its actual source imports remain in the loaded graph.'
   ] }
 await mkdir(evidence, { recursive: true })
 receipt.verificationInputs = Object.fromEntries(await Promise.all([
   'apps/desktop/test/current-agent-fork.test.ts', 'apps/desktop/scripts/fixtures/current-agent-fork/vitest.config.mts',
   'apps/desktop/scripts/verify-current-agent-fork.mjs', 'packages/core/test/current-fork-lifecycle.test.ts',
-  'packages/core/test/fixtures/current-fork-lifecycle/vitest.owning.config.mts'
+  'packages/core/test/fixtures/current-fork-lifecycle/vitest.owning.config.mts',
+  ...['core', 'demand', 'relay', 'client-ui'].map(name => 'packages/' + name + '/package.json')
 ].map(async path => [path, sha(await readFile(join(root, path)))])))
 try {
+  const sourcePlugin = { name: 'fork-current-workspace-source', setup(builder) {
+    builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async args => {
+      const file = relative(root, args.path)
+      if (!/^packages\/(?:core|demand|relay)\/src\//.test(file)) return
+      const code = await readFile(args.path, 'utf8'), hash = sha(code)
+      if (receipt.sourceCandidates[file]) assert.equal(receipt.sourceCandidates[file], hash, 'Unchanged bundled source: ' + file)
+      receipt.sourceCandidates[file] = hash
+      return { contents: code, loader: args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.ts') ? 'ts' : 'js' }
+    })
+  } }
   await mkdir(join(temporary, 'bin')); await mkdir(join(temporary, 'dist'))
-  await symlink(join(root, 'packages/core/node_modules'), join(temporary, 'node_modules'))
+  await mkdir(join(temporary, 'node_modules'))
+  const linked = new Set()
+  for (const name of ['core', 'demand', 'relay']) {
+    const manifest = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8'))
+    for (const dependency of [...Object.keys(manifest.dependencies ?? {}), ...(name === 'core' ? ['@ctxmux/sdk'] : [])]) {
+      if (dependency.startsWith('@agentmux/') || linked.has(dependency)) continue
+      if (dependency.startsWith('@')) await mkdir(join(temporary, 'node_modules', dependency.split('/')[0]), { recursive: true })
+      await symlink(join(root, 'packages', name, 'node_modules', dependency), join(temporary, 'node_modules', dependency))
+      linked.add(dependency)
+    }
+  }
   await writeFile(join(temporary, 'package.json'), '{"type":"module"}\n')
   await writeFile(join(temporary, 'bin/agentmux'), "#!/usr/bin/env node\nimport '../dist/agentmux.js'\n")
   const cli = await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(temporary, 'dist/agentmux.js'),
-    bundle: true, format: 'esm', platform: 'node', packages: 'external', metafile: true })
+    bundle: true, format: 'esm', platform: 'node', packages: 'external', alias: workspaceAliases, plugins: [sourcePlugin], metafile: true })
   for (const file of ['agentmux-cli-commands.ts', 'agent-fork.ts', 'space-control-parser.ts']) assert.ok(Object.keys(cli.metafile.inputs).some(path => path.endsWith('/' + file)), 'Actual CLI source: ' + file)
   const store = await build({ entryPoints: [join(root, 'packages/core/src/agent-session-store.ts')], outfile: join(temporary, 'dist/store.js'),
-    bundle: true, format: 'esm', platform: 'node', packages: 'external', metafile: true,
+    bundle: true, format: 'esm', platform: 'node', packages: 'external', alias: workspaceAliases, plugins: [sourcePlugin], metafile: true,
     define: { 'import.meta.url': JSON.stringify(pathToFileURL(join(root, 'packages/core/src/agent-session-store.ts')).href) } })
   const spatial = await build({ entryPoints: [join(root, 'packages/core/src/spatial-state.ts')], outfile: join(temporary, 'dist/spatial.js'),
-    bundle: true, format: 'esm', platform: 'node', packages: 'external', metafile: true,
+    bundle: true, format: 'esm', platform: 'node', packages: 'external', alias: workspaceAliases, plugins: [sourcePlugin], metafile: true,
     define: { 'import.meta.url': JSON.stringify(pathToFileURL(join(root, 'packages/core/src/spatial-state.ts')).href) } })
   receipt.bundles = { cli: { sha256: sha(await readFile(join(temporary, 'dist/agentmux.js'))), sources: Object.keys(cli.metafile.inputs) },
     store: { sha256: sha(await readFile(join(temporary, 'dist/store.js'))), sources: Object.keys(store.metafile.inputs) },
@@ -53,7 +80,7 @@ try {
     const name = suite.name + '-' + (mutation || (index ? 'control-after' : 'control')), loadedPath = join(evidence, name + '.loaded.ndjson')
     await writeFile(loadedPath, '')
     let result
-    try { const actual = await run('pnpm', ['exec', 'vitest', 'run', '--config', suite.config], {
+    try { const actual = await run(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', suite.config], {
       cwd: root, env: { ...process.env, AGENTMUX_TEST_OBJECT_CLI: join(temporary, 'bin/agentmux'), AMX_FORK_STORE_MODULE: join(temporary, 'dist/store.js'),
         AMX_FORK_SPATIAL_MODULE: join(temporary, 'dist/spatial.js'),
         [suite.mutationKey]: mutation, [suite.loadedKey]: loadedPath }, timeout: 150000, maxBuffer: 4 * 1024 * 1024 }); result = { code: 0, output: actual.stdout + actual.stderr } }

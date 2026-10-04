@@ -3,6 +3,7 @@ import type { ConversationSenderDetails, ConversationSpeaker } from '@agentmux/c
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ProjectIcon } from './ProjectIcon'
 import type { MoteConversationIdentity } from '../lib/mote-conversation-identity'
+import { useAppStore } from '../store'
 
 /** The message avatar composes existing project and Agent identities; the axis stays a small marker. */
 export function ConversationMessageAvatar({ speaker, name, providerId, project, mote, size = 32 }: {
@@ -13,11 +14,13 @@ export function ConversationMessageAvatar({ speaker, name, providerId, project, 
   mote?: MoteConversationIdentity | undefined
   size?: number
 }) {
+  const humanAvatar = useAppStore(state => speaker.role === 'human' ? state.config?.profile?.avatar : undefined)
   if (speaker.role === 'agent' && mote) return <span className="conversation-message-avatar conversation-message-avatar--mote" data-mote-author={mote.topicId} title={mote.name} style={{ width: size, height: size }}>
     <ConversationSpeakerAvatar speaker={speaker} name={name} mote={mote} size={size} />
   </span>
   if (speaker.role !== 'agent' || !project) return <ConversationSpeakerAvatar
     speaker={speaker} name={name} size={speaker.role === 'agent' ? size : Math.min(20, size)}
+    humanAvatar={humanAvatar}
     {...(providerId === undefined ? {} : { providerId })} />
   return <span className="conversation-message-avatar" data-project-workspace-id={project.workspaceId}
     title={`${name} · ${project.name} · Current project`} style={{ width: size, height: size }}>
