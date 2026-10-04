@@ -26,6 +26,8 @@ import {
 export type FileWorkbenchState = {
   tabs: Record<string, WorkbenchTab>
   documents: Record<string, FileDocument>
+  /** Alternate user drafts remain reachable independently of disk observations. */
+  retainedDocumentDrafts?: Record<string, FileDocument[]>
   dirtyDocuments: Record<string, boolean>
   documentGenerations: Record<string, number>
   documentObservationGenerations: Record<string, number>
@@ -597,6 +599,7 @@ export function reduceFileRename(
   const documentGenerations = { ...state.documentGenerations }
   const documentObservationGenerations = { ...state.documentObservationGenerations }
   const documentIssues = { ...state.documentIssues }
+  const retainedDocumentDrafts = { ...state.retainedDocumentDrafts }
   const savingDocuments = { ...state.savingDocuments }
   for (const { tab, surfaces } of affectedTabs) {
     const nextId = replacements.get(tab.id) ?? tab.id
@@ -656,6 +659,14 @@ export function reduceFileRename(
         }
       : issue
   }
+  for (const [key, drafts] of Object.entries(state.retainedDocumentDrafts ?? {})) {
+    if (!key.startsWith(documentPrefix)) continue
+    const documentPath = key.slice(documentPrefix.length)
+    if (!isPathWithinSubtree(documentPath, path)) continue
+    const renamedPath = remapPathWithinSubtree(documentPath, path, nextPath)
+    delete retainedDocumentDrafts[key]
+    retainedDocumentDrafts[documentKey(workspaceId, renamedPath)] = drafts.map(draft => ({ ...draft, path: renamedPath }))
+  }
   for (const key of Object.keys(savingDocuments)) {
     if (!key.startsWith(documentPrefix)) continue
     const documentPath = key.slice(documentPrefix.length)
@@ -671,6 +682,7 @@ export function reduceFileRename(
     documentGenerations,
     documentObservationGenerations,
     documentIssues,
+    retainedDocumentDrafts,
     savingDocuments,
     layouts: Object.fromEntries(
       Object.entries(state.layouts).map(([id, layout]) => [

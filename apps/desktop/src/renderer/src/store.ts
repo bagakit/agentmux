@@ -545,6 +545,7 @@ type AppState = {
   scratchTopicOrder: string[]
   setScratchTopicOrder(order: readonly string[]): void
   documents: Record<string, FileDocument>
+  retainedDocumentDrafts: Record<string, FileDocument[]>
   dirtyDocuments: Record<string, boolean>
   documentGenerations: Record<string, number>
   documentObservationGenerations: Record<string, number>
@@ -1011,6 +1012,7 @@ type AppState = {
   updateDocument(tabId: string, content: string, regionId?: string): void
   saveDocument(tabId: string, regionId?: string): Promise<void>
   overwriteDocument(tabId: string, regionId?: string): Promise<void>
+  useRetainedDocumentDraft(tabId: string, regionId?: string): void
   reloadDocument(tabId: string, regionId?: string): Promise<void>
   refreshDocument(workspaceId: string, path: string): Promise<void>
   launchBoardAgent(
@@ -2365,6 +2367,7 @@ type PersistedAppState = {
   agentComposerNotes?: Record<string, string>
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
+  retainedDocumentDrafts?: Record<string, FileDocument[]>
   dirtyDocuments?: Record<string, boolean>
   restoredWorkbench?: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
@@ -2601,6 +2604,7 @@ function selectPersistedInputs(state: AppState) {
     // 到任何界面（没有对应 session），与上面 agentNames 同一个道理。
     agentSteerQueues: state.agentSteerQueues,
     documents: state.documents,
+    retainedDocumentDrafts: state.retainedDocumentDrafts,
     noteBlockSelections: state.noteBlockSelections,
     dirtyDocuments: state.dirtyDocuments,
     tabs: state.tabs,
@@ -3173,6 +3177,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   activeWorkspaceId: null,
   scratchTopicOrder: [],
   documents: {},
+  retainedDocumentDrafts: {},
   dirtyDocuments: {},
   documentGenerations: {},
   documentObservationGenerations: {},
@@ -7536,6 +7541,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async overwriteDocument(tabId, regionId) {
     await enqueueFileSave(tabId, true, regionId)
+  },
+  useRetainedDocumentDraft(tabId, regionId) {
+    // Read both buffers at the user's click, so a later edit is kept rather than overwritten.
+    set(state => {
+      const surface = fileSurface(state.tabs[tabId], regionId)
+      if (!surface) return state
+      const key = documentKey(surface.workspaceId, surface.path)
+      const document = state.documents[key], drafts = state.retainedDocumentDrafts[key]
+      if (!document || !drafts?.length) return state
+      const [selected, ...remaining] = drafts
+      return { documents: { ...state.documents, [key]: { ...document, content: selected!.content } },
+        retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...remaining, document] },
+        dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
+        documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 } }
+    })
   },
   async reloadDocument(tabId, regionId) {
     const surface = fileSurface(get().tabs[tabId], regionId)
