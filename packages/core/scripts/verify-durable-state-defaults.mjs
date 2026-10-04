@@ -1,33 +1,6 @@
-import { tmpdir as upstreamFixtureTmpdir } from 'node:os'
-import { join as upstreamFixtureJoin, parse as upstreamFixtureParse, sep as upstreamFixtureSep } from 'node:path'
-import { pathToFileURL as upstreamFixturePathToFileURL } from 'node:url'
-const upstreamFixtureRoot = upstreamFixtureJoin(upstreamFixtureTmpdir(), 'agentmux-fixtures');
-const upstreamFixtureDayMilliseconds = 24 * 60 * 60 * 1_000;
-/** Preserve lexical path cases while deriving the absolute root from this Host. */
-function upstreamFixturePath(relative) {
-    const temporary = relative.replace(/^(?:private\/)?tmp\//u, '');
-    const base = temporary === relative ? upstreamFixtureRoot : upstreamFixtureTmpdir();
-    return base + upstreamFixtureSep + temporary.replaceAll('/', upstreamFixtureSep);
-}
-/** Deterministic time from Unix zero and explicit relative units. */
-function upstreamFixtureEpoch(days, seconds = 0, milliseconds = 0) {
-    return days * upstreamFixtureDayMilliseconds + seconds * 1_000 + milliseconds;
-}
-function upstreamFixtureDay(days, separator = '-') {
-    return new Date(upstreamFixtureEpoch(days)).toISOString().slice(0, 10).replaceAll('-', separator);
-}
-function upstreamFixtureClock(hour, minute, second, milliseconds) {
-    const units = second === undefined ? [hour, minute] : [hour, minute, second];
-    const clock = units.map(value => String(value).padStart(2, '0')).upstreamFixtureJoin(':');
-    return milliseconds === undefined ? clock : clock + '.' + milliseconds;
-}
-function upstreamFixtureFileUrl(relative) {
-    return upstreamFixturePathToFileURL(upstreamFixturePath(relative)).href;
-}
-/** A short Host-rooted display path keeps captured terminal rows within their viewport. */
-function upstreamFixtureDisplayPath(relative) {
-    return upstreamFixtureJoin(upstreamFixtureParse(upstreamFixtureTmpdir()).root, relative);
-}
+import { tmpdir as fixtureTmpdir } from 'node:os'
+import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
+const fixtureRootPath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -43,7 +16,7 @@ const base = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
 const exec = promisify(execFile)
 const out = join(base, '.tmp/core-durable-state-defaults')
 await mkdir(out, { recursive: true })
-const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-durable-"))
+const root = await mkdtemp(fixtureRootPath("tmp/amx-durable-"))
 const endpoints = join(root, 'endpoints'), state = join(root, 'persistent')
 await mkdir(join(root, 'home'), { mode: 0o700 })
 const critical = [fileURLToPath(import.meta.url), ...['runtime-paths', 'agent-session-store', 'client', 'ctxmux-run-adapter']
@@ -72,6 +45,8 @@ const [mode, root] = process.argv.slice(2)
 const nativeId = mode.startsWith('live-') ? 'private-live-native-id' : 'private-durable-native-id'
 const template = new AgentProviderRegistry().get('codex')
 const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'durable-fixture', label: 'Private durable protocol',
+ // Declare this private protocol's actual terminal/resume capabilities independently of the template.
+ capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: true, replyCorrelation: 'none' },
  executable: '/usr/bin/python3', expectedProcess: '/usr/bin/python3', hookStrategy: { kind: 'none' },
  readySignal: { kind: 'foreground-process', expectedProcess: '/usr/bin/python3' } },
  hook: { rules: [{ events: ['SessionStart'], state: 'working' }],
