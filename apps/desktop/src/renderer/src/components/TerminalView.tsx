@@ -1,4 +1,5 @@
 import { rendererPerformance } from '../lib/renderer-performance'
+import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
@@ -692,7 +693,8 @@ export function TerminalView({
       // onData 与 onBinary 是两个独立的 xterm 订阅（见 subscribeTerminalInput），
       // 加上 search addon 的结果计数和 onScroll 读出清理；各自都在 cleanup 里释放。
       // 少数一个就等于把一条泄漏账瞒下去。
-      listeners: 9
+      // Natural interaction observation owns two passive capture listeners.
+      listeners: 11
     })
     let webgl: WebglAddon | null = null
     let webglContextLoss: { dispose(): void } | null = null
@@ -740,6 +742,13 @@ export function TerminalView({
         acceptsInput: acceptsInputRef.current,
         liveReady: readyForLiveOutput
       })
+    const interaction = createTerminalInteractionObservation({
+      host: terminalRoot,
+      readContext: () => ({ visible: visibleRef.current, liveReady: readyForLiveOutput,
+        acceptsInput: acceptsCurrentInput(), readOnly: readOnlyRef.current,
+        buffer: terminal.buffer.active.type, mouseTrackingMode: terminal.modes.mouseTrackingMode }),
+      slow: (detail, duration) => rendererPerformance.terminalInteraction(detail, duration)
+    })
     const readObservation = (): AgentMuxTerminalViewObservation | undefined => {
       if (disposed || terminalRef.current !== terminal) return undefined
       const buffer = terminal.buffer.active
@@ -776,7 +785,8 @@ export function TerminalView({
       visible: visibleRef.current, visibleSinceAt: visibleSinceRef.current, readySinceAt,
       revealed, liveReady: readyForLiveOutput, acceptsInput: acceptsCurrentInput(), replaying: replayingContinuation,
       inFlightWrites: linkPreviewWrites, queuedItems: liveOutputQueue.length, queuedBytes: liveOutputQueue.byteLength, pendingItems: pending.length, pendingBytes: pending.length ? pendingBytes : 0,
-      cols: terminal.cols, rows: terminal.rows, normalLines: terminal.buffer.normal.length, alternateLines: terminal.buffer.alternate.length
+      cols: terminal.cols, rows: terminal.rows, normalLines: terminal.buffer.normal.length, alternateLines: terminal.buffer.alternate.length,
+      interaction: interaction.snapshot()
     }))
     let droppedPendingThrough = 0
     let droppedPendingResize: AgentMuxTerminalResize | null = null
@@ -1175,7 +1185,12 @@ export function TerminalView({
     const sendInput = terminalInputSender({
       accepts: acceptsCurrentInput,
       write: (data, source) => {
-        if (!readOnlyRef.current) void api.sessions.write(session.control, data, source).catch(reportError)
+        if (!readOnlyRef.current) {
+          const startedAt = rendererPerformance.start()
+          const request = api.sessions.write(session.control, data, source)
+          if (source === 'user') interaction.observeWriteRequest(request, startedAt)
+          void request.catch(reportError)
+        }
       }
     })
     const pasteInput = createTerminalPasteInput(terminal, (text, terminalData) => {
@@ -1426,6 +1441,7 @@ export function TerminalView({
     })
     return () => {
       disposed = true
+      interaction.dispose()
       if (refreshObservationRef.current === refreshObservation) {
         refreshObservationRef.current = null
         onObservationRefreshRef.current?.(null)

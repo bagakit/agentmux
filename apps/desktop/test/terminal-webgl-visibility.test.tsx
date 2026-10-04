@@ -202,12 +202,12 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(fixture.webgl).toHaveLength(1)
   const terminal = fixture.terminals[0]!
   const first = fixture.webgl[0]!
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 9 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 11 })
 
   await render(false)
   expect(first.disposed).toHaveBeenCalledOnce()
   expect(first.contextLossDisposed).toHaveBeenCalledOnce()
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 9 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 11 })
   // Split an ANSI parser sequence across separate hidden writes, in byte order.
   await hiddenOutput('\u001b[3', 7)
   await hiddenOutput('1mhidden\u001b[0m', 10)
@@ -248,7 +248,7 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(0)
   expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 9 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 11 })
   await render(true)
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(1)

@@ -80,6 +80,14 @@ const countsParser = record({ monacoEditors: nullable(count), monacoModels: null
   runtimeSubscriptions: count, terminalViews: count, terminalAddons: count, terminalListeners: count })
 const boolean: Parser = v => { if (typeof v !== 'boolean') invalid() }
 const timingParser = record({ count, totalMs: number, maxMs: number })
+const terminalInteractionParser = record({ observedSinceAt: number,
+  keydown: record({ count, unknownDelayCount: count, delay: timingParser }),
+  wheel: record({ count, unknownDelayCount: count, delay: timingParser }),
+  writeRequests: record({ started: count, completed: count, failed: count, pending: count, wall: timingParser,
+    lastStartedAt: nullable(number), lastSettledAt: nullable(number) }),
+  lastEvent: nullable(record({ kind: v => { if (!['keydown', 'wheel'].includes(v as string)) invalid() },
+    observedAt: number, delayMs: nullable(number), visible: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean,
+    buffer: v => { if (!['normal', 'alternate'].includes(v as string)) invalid() }, mouseTrackingMode: identity })) })
 const consumerParser = record({ checks: count, changes: count, commits: count })
 const visibilityParser = record({ visible: consumerParser, hidden: consumerParser })
 const boundedArray = (max: number, parse: Parser): Parser => v => {
@@ -104,9 +112,9 @@ const performanceParser = record({ startedAt: number, observedAt: number, record
   terminals: boundedArray(64, record({ sessionId: identity, runId: identity, regionId: nullable(identity),
     visible: boolean, visibleSinceAt: nullable(number), readySinceAt: nullable(number), revealed: boolean, liveReady: boolean, acceptsInput: boolean,
     replaying: boolean, inFlightWrites: count, queuedItems: count, queuedBytes: count, pendingItems: count, pendingBytes: count,
-    cols: count, rows: count, normalLines: count, alternateLines: count })), omittedTerminals: count, unavailableTerminals: count,
+    cols: count, rows: count, normalLines: count, alternateLines: count, interaction: terminalInteractionParser })), omittedTerminals: count, unavailableTerminals: count,
   tabSwitches: boundedArray(16, tabSwitchParser), tabSwitchesOmitted: count,
-  slowEvents: boundedArray(32, record({ kind: v => { if (!['session-event','terminal-write','long-task','input-delay'].includes(v as string)) invalid() },
+  slowEvents: boundedArray(32, record({ kind: v => { if (!['session-event','terminal-write','long-task','input-delay','terminal-interaction'].includes(v as string)) invalid() },
     detail: text, observedAt: number, durationMs: number })),
   observerCost: record({ snapshots: timingParser, performanceCallbacks: timingParser }) })
 export function parseRendererPerformanceSnapshot(value: unknown): RendererPerformanceSnapshot {
