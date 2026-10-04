@@ -3740,11 +3740,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
-      try { await applyNotesStorageSnapshot(pendingNotesStorage ?? await api.notesStorage.inspect()) }
+      // Resource/draft rebinding publishes synchronously; reconnecting a file watch must
+      // neither hold healthy Session publication nor trap a later directory receipt in boot.
+      try {
+        const observed = pendingNotesStorage ?? await api.notesStorage.inspect()
+        const latest = pendingNotesStorage ?? observed
+        pendingNotesStorage = null
+        void applyNotesStorageSnapshot(latest).catch(error => get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))))
+      }
       catch (error) { get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))) }
       // Publication releases the boot buffer before optional spatial/browser work awaits.
       // Latest replacement facts survive a noisy neighbor; truncated timelines use Core.
       booting = false
+      if (pendingNotesStorage) {
+        const latest = pendingNotesStorage; pendingNotesStorage = null
+        void applyNotesStorageSnapshot(latest).catch(error => get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))))
+      }
       for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
       for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
       for (const { hostId, warning } of pendingSessionEvents.endpointWarnings.values()) {
