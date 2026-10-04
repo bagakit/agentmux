@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowUpRight, Check, ChevronRight, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -117,7 +118,7 @@ export function GlobalBoardSurface() {
     <div className="goals-layout"><div className="goals-index">
       <GoalsCommonActions contextCompact={Boolean(selectedDemandId)} onReturnToCommon={() => setSelectedDemand(null)} />
       <header className="goals-toolbar">
-        <label className="goals-search"><Search size={14} /><input ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
+        <label className="goals-search"><Search size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
         <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
         <div className="goals-view-toggle" role="group" aria-label="Goal view"><button type="button" aria-label="List view" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={14} /></button><button type="button" aria-label="Board view" aria-pressed={view === 'board'} onClick={() => setView('board')}><Columns3 size={14} /></button></div>
         <button ref={newGoalRef} type="button" className="goals-button" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><CirclePlus size={13} />New Goal</button>
