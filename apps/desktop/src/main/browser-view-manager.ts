@@ -158,6 +158,7 @@ type PresentationCapture = {
   source: WebContentsView
   profileId: string
   granted: boolean
+  preparingSource: boolean
   revoked: boolean
   trackIds: readonly string[] | null
 }
@@ -439,7 +440,23 @@ export class BrowserViewManager {
     const capture: PresentationCapture = {
       id: randomUUID(), entry: lease.entry, document: lease.document,
       source: lease.entry.view, profileId: lease.entry.profileId,
-      granted: false, revoked: false, trackIds: null
+      granted: false, preparingSource: false, revoked: false, trackIds: null
+    }
+    // A never-shown native widget cannot start tab capture, even with positive bounds.
+    // Draw the original below the App Renderer until acquisition settles; this neither
+    // selects an occurrence nor exposes a native input target over the workface.
+    if (!lease.entry.visible) {
+      lease.entry.bounds ??= { ...lease.geometry.bounds }
+      capture.preparingSource = true
+      try {
+        capture.source.setBounds(lease.entry.bounds)
+        this.window.contentView.addChildView(capture.source, 0)
+        capture.source.setVisible(true)
+      } catch (error) {
+        try { this.finishPresentationCapturePreparation(capture) }
+        catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Browser preview preparation and cleanup failed') }
+        throw error
+      }
     }
     this.presentationCaptures.set(capture.id, capture)
     lease.entry.captureId = capture.id
@@ -459,6 +476,7 @@ export class BrowserViewManager {
       if (capture.entry.captureId === capture.id) capture.entry.captureId = null
       if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
       this.presentationCaptures.delete(capture.id)
+      this.finishPresentationCapturePreparation(capture)
       return
     }
     if (!['ready', 'stopped'].includes(ack.outcome) || !Array.isArray(ack.trackIds) ||
@@ -477,6 +495,7 @@ export class BrowserViewManager {
       this.presentationCaptures.delete(capture.id)
     }
     if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
+    this.finishPresentationCapturePreparation(capture)
   }
 
   async activatePresentation(sender: WebContents, frame: WebFrameMain | null,
@@ -705,8 +724,32 @@ export class BrowserViewManager {
     const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
     if (!capture || capture.revoked) return
     capture.revoked = true
+    try { this.finishPresentationCapturePreparation(capture) }
+    catch (error) { console.warn('Browser preview preparation cleanup failed:', error) }
     if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
     this.sendPresentation({ type: 'capture-revoked', browserId: entry.id, captureId: capture.id, reason })
+  }
+
+  private finishPresentationCapturePreparation(capture: PresentationCapture): void {
+    if (!capture.preparingSource) return
+    if (!this.owns(capture.entry, capture.source) || capture.source.webContents.isDestroyed() || this.window.isDestroyed()) {
+      capture.preparingSource = false
+      return
+    }
+    // A real selection may have arrived while media acquisition was pending.
+    const errors: unknown[] = []
+    let canRestorePlacement = capture.entry.visible
+    if (!capture.entry.visible) {
+      try { capture.source.setVisible(false); canRestorePlacement = true }
+      catch (error) { errors.push(error) }
+    }
+    // A failed hide must leave the passive source below the Renderer. Profile
+    // replacement/release may already have detached the old source.
+    if (canRestorePlacement && this.window.contentView.children.includes(capture.source)) {
+      try { this.window.contentView.addChildView(capture.source, 1) } catch (error) { errors.push(error) }
+    }
+    if (errors.length) throw new AggregateError(errors, 'Browser preview preparation cleanup failed')
+    capture.preparingSource = false
   }
 
   private invalidatePresentationRequester(): void {
@@ -2458,6 +2501,7 @@ export class BrowserViewManager {
     entry.bounds = normalized
     entry.visible = true
     entry.view.setBounds(entry.bounds)
+    if (becomingVisible) this.window.contentView.addChildView(entry.view, 1)
     entry.view.setVisible(true)
     if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
   }

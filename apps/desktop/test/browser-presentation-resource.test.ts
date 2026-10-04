@@ -81,8 +81,14 @@ const occurrence = (id: string): BrowserPresentationOccurrence => ({ presentatio
 async function fixture(focused = true) {
   const root = mkdtempSync(join(tmpdir(), 'browser-presentation-resource-'))
   const app = new native.Contents(), views: InstanceType<typeof native.View>[] = []
+  const addChildView = vi.fn((view: InstanceType<typeof native.View>, index = views.length) => {
+    const previous = views.indexOf(view)
+    if (previous !== -1) views.splice(previous, 1)
+    views.splice(index, 0, view)
+  })
   const window = { webContents: app, isDestroyed: () => false, isFocused: () => focused, contentView: {
-    addChildView: (view: InstanceType<typeof native.View>) => views.push(view),
+    get children() { return views },
+    addChildView,
     removeChildView: (view: InstanceType<typeof native.View>) => { views.splice(views.indexOf(view), 1) }
   } }
   const manager = new BrowserViewManager(window as never,
@@ -104,8 +110,79 @@ async function fixture(focused = true) {
     expect(result).toHaveLength(1)
     return result[0]
   }
-  return { manager, app, frame, source, views, register, events, request, browser }
+  return { manager, app, frame, source, views, register, events, request, browser, addChildView }
 }
+
+it('prepares a never-selected passive source below the Renderer and hides it after acquisition', async () => {
+  const f = await fixture(), lease = f.register('A')
+  expect(f.source.getBounds().width).toBe(0)
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  expect(f.source.getBounds()).toEqual(geometry.bounds)
+  expect(f.source.getVisible()).toBe(true)
+  expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 0)
+  expect(f.manager.nativeOwner('browser')).toBeUndefined()
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  expect(f.events()).toEqual([])
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  expect(f.source.getVisible()).toBe(false)
+  expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 1)
+  expect(f.views).toEqual([f.source])
+})
+
+it.each(['failed', 'stopped', 'revoked'] as const)('ends passive source preparation on %s without navigation or input transfer', async outcome => {
+  const f = await fixture(), lease = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  expect(f.source.getVisible()).toBe(true)
+  if (outcome === 'revoked') f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, { visible: false })
+  else f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, outcome === 'failed'
+    ? { outcome, message: 'Video source timed out' } : { outcome, trackIds: ['late-track'] })
+  expect(f.source.getVisible()).toBe(false)
+  expect(f.manager.nativeOwner('browser')).toBeUndefined()
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  expect(f.source.webContents.getURL()).toBe('https://generic.example/one')
+  expect(f.source.webContents.dead).toBe(false)
+})
+
+it('keeps source viewport on passive rearm and preserves selection made during acquisition', async () => {
+  const f = await fixture(), a = f.register('A')
+  const first = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, first.captureId, { outcome: 'failed', message: 'First acquisition failed' })
+  const mirrorBounds = { ...geometry.bounds, x: 550, width: 220 }
+  const b = f.register('B', { visible: true, bounds: mirrorBounds })
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, b.leaseId)
+  expect(capture.captureId).not.toBe(first.captureId)
+  expect(f.source.getBounds()).toEqual(geometry.bounds)
+  await f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId, { kind: 'select', focus: 'preserve' })
+  expect(f.source.getBounds()).toEqual(mirrorBounds)
+  expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 1)
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  expect(f.source.getVisible()).toBe(true)
+  expect(f.manager.nativeOwner('browser')?.view).toBe(f.source)
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+})
+
+it('keeps revocation observable when preparation cleanup fails and permits explicit rearm', async () => {
+  const f = await fixture(), lease = f.register('A')
+  const appRenderer = new native.View()
+  f.views.push(appRenderer)
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  const hide = vi.spyOn(f.source, 'setVisible').mockImplementationOnce(() => { throw new Error('Native hide unavailable') })
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, { visible: false })
+    expect(f.events()).toEqual([{ type: 'capture-revoked', browserId: 'browser', captureId: capture.captureId, reason: 'no-visible-presentations' }])
+    expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 0)
+    expect(f.views).toEqual([f.source, appRenderer])
+    expect(warn).toHaveBeenCalledOnce()
+    f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, geometry)
+    const next = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+    expect(next.captureId).not.toBe(capture.captureId)
+    expect(f.source.webContents.dead).toBe(false)
+    expect(f.source.webContents.focus).not.toHaveBeenCalled()
+  } finally { hide.mockRestore(); warn.mockRestore() }
+})
 
 it('rejects foreign requester, child frame and invalid occurrence/bounds without touching the original page', async () => {
   const f = await fixture()
