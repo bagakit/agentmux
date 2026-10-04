@@ -25,6 +25,10 @@ await verifyRendererSourceMutations({
   mutations: [
     { label: 'state-glyphs-collapse', file: component, before: '<PhaseGlyph phase={phase} />', after: '<PhaseGlyph phase="completed" />' },
     { label: 'stop-action-disconnected', file: component, before: 'onSelect={() => onStop()}', after: 'onSelect={() => {}}' },
+    { label: 'return-terminal-gated', file: component, before: "const canReturnControl = activity.control === 'human'", after: "const canReturnControl = canStop && activity.control === 'human'" },
+    { label: 'return-action-disconnected', file: component, before: 'onSelect={() => onReturnControl()}', after: 'onSelect={() => {}}' },
+    { label: 'return-control-ignored', file: component, before: "const canReturnControl = activity.control === 'human'", after: 'const canReturnControl = true' },
+    { label: 'stop-terminal-ignored', file: component, before: 'const canStop = Boolean(operation && !terminal)', after: 'const canStop = true' },
     { label: 'separate-operation-toolbar', file: pane, before: status, after: `      </form>\n${status}\n      <form className="browser-operation-toolbar">` }
   ]
 })

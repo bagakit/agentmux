@@ -86,9 +86,9 @@ describe('Browser operation status in existing controls', () => {
     } finally { await view.close() }
   })
 
-  it('opens with keyboard and limits return/stop actions to a current operation', async () => {
+  it.each(['running', 'human'] as const)('opens with keyboard and keeps Return separate from Stop on an active %s operation', async (phase) => {
     const resume = vi.fn()
-    const view = await renderStatus({ operation: { ...operation, phase: 'human' }, control: 'human' }, { onReturnControl: resume, onStop: vi.fn() })
+    const view = await renderStatus({ operation: { ...operation, phase }, control: 'human' }, { onReturnControl: resume, onStop: vi.fn() })
     try {
       await act(async () => { view.trigger.focus(); view.trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
       const menu = document.querySelector('.browser-operation-menu')!
@@ -98,11 +98,39 @@ describe('Browser operation status in existing controls', () => {
       await act(async () => items[0]!.click())
       expect(resume).toHaveBeenCalledExactlyOnceWith()
     } finally { await view.close() }
-    const failed = await renderStatus({ operation: { ...operation, phase: 'failed' }, control: 'human' }, { onReturnControl: resume, onStop: vi.fn(), onOpenTimeline: vi.fn() })
+  })
+
+  it.each(['completed', 'failed', 'stopped', 'indeterminate', null] as const)('keeps Return reachable with human control after %s', async (phase) => {
+    const resume = vi.fn(), stop = vi.fn(), take = vi.fn()
+    const activity: BrowserActivityState = { operation: phase ? { ...operation, phase, finishedAt: _hygiene_fixtureTime(-67225599800) } : null, control: 'human' }
+    const original = structuredClone(activity)
+    const view = await renderStatus(activity, { onReturnControl: resume, onStop: stop, onTakeControl: take, onOpenTimeline: vi.fn() })
     try {
-      await act(async () => failed.trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-      expect(Array.from(document.querySelectorAll('.browser-operation-menu [role="menuitem"]')).map(item => item.textContent)).toEqual(['Activity'])
-    } finally { await failed.close() }
+      await act(async () => { view.trigger.focus(); view.trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+      const items = Array.from(document.querySelectorAll<HTMLElement>('.browser-operation-menu [role="menuitem"]'))
+      expect(items.map(item => item.textContent)).toEqual(['Return to Agent', 'Activity'])
+      expect(view.host.querySelector('.browser-operation-status')!.getAttribute('data-phase')).toBe(phase ?? 'idle')
+      const label = phase === null ? 'You have control' : phase === 'completed' ? 'Completed' : phase === 'failed' ? 'Failed' : phase === 'stopped' ? 'Stopped' : 'Needs review'
+      expect(view.trigger.getAttribute('aria-label')).toContain(label)
+      await act(async () => { items[0]!.focus(); items[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+      expect(resume).toHaveBeenCalledExactlyOnceWith()
+      expect(stop).not.toHaveBeenCalled()
+      expect(take).not.toHaveBeenCalled()
+      expect(activity).toEqual(original)
+    } finally { await view.close() }
+  })
+
+  it.each(['completed', 'failed', 'stopped', 'indeterminate', null] as const)('does not offer Return or Stop with agent control after %s', async (phase) => {
+    const resume = vi.fn(), stop = vi.fn(), take = vi.fn()
+    const view = await renderStatus({ operation: phase ? { ...operation, phase } : null, control: 'agent' }, { onReturnControl: resume, onStop: stop, onTakeControl: take, onOpenTimeline: vi.fn() })
+    try {
+      await act(async () => view.trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+      const items = Array.from(document.querySelectorAll<HTMLElement>('.browser-operation-menu [role="menuitem"]'))
+      expect(items.map(item => item.textContent)).toEqual(['Activity'])
+      expect(resume).not.toHaveBeenCalled()
+      expect(stop).not.toHaveBeenCalled()
+      expect(take).not.toHaveBeenCalled()
+    } finally { await view.close() }
   })
 
   it('keeps the reported failure and recovery line persistent while raw diagnostics mount only on demand', async () => {
