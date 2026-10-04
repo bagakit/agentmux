@@ -79,7 +79,6 @@
 .notebook-page-heading { max-width: var(--note-content-width, 760px); margin: 0 auto; padding: var(--sp-8) var(--sp-8) 0; }
 .notebook-breadcrumb { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; border: 0; background: transparent; padding: 0; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; cursor: pointer; }
 .notebook-page-title { display: block; width: 100%; margin: 16px 0 13px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--text); font-size: clamp(24px, 3cqw, 32px); font-weight: 550; letter-spacing: -.03em; }
-.notebook-page-title:focus-visible { outline: 0; box-shadow: 0 1px 0 var(--line-soft); }
 .notebook-page-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; color: var(--text-3); }
 .notebook-page-actions .note-text-button { font-size: 11px; padding: 2px 0; color: var(--text-3); }
 .notebook-page-actions .note-text-button:hover, .notebook-page-actions .note-text-button[aria-expanded="true"] { color: var(--text); background: transparent; }
