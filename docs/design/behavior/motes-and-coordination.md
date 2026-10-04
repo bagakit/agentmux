@@ -1,6 +1,6 @@
 # Mote 与 PMO 协调
 
-本文集中本主题的交互与行为要求。已确认约束定义必须成立的结果，不代表当前实现通过验收；提案、历史与当轮授权状态按正文的明确范围阅读。
+本文定义 Mote 的持久身份、资料与合作方式，以及快捷工作面、主对话恢复和协调职责。Mote 是自己的 Space，可绑定多处内容；它与一次 AgentSession／Run、展示位置及普通知识库 Topic 分开。公开产品关系为 Mote；Work（Space、Focus、Goals）；Know（Survey、Recall），导航归[空间合同](spaces-and-layout.md#左下角导航space-与-goals)。本文要求不代签实现或安装验收。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/motes-and-coordination.md)
 
@@ -11,18 +11,10 @@
 - [Topic 与 Mote 的物理目录](#topic-与-mote-的物理目录)
 - [Mote 头像与主 Mote](#mote-头像与主-mote)
 - [Mote 归档与恢复](#mote-归档与恢复)
-- [全局 Board 与固定 Leader Topic](#全局-board-与固定-leader-topic)
-- [Leader Topic 入口的浮动与收纳](#leader-topic-入口的浮动与收纳)
-- [Leader Topic 入口头像](#leader-topic-入口头像)
-- [Leader Topic 与任务写入确认](#leader-topic-与任务写入确认)
-- [默认 Session 的浮动工作面](#默认-session-的浮动工作面)
-- [Leader 对话浮窗的清晰度](#leader-对话浮窗的清晰度)
-- [PMO Teams 入口位置与展开动效](#pmo-teams-入口位置与展开动效)
-- [Leader Topic 的身份与职责](#leader-topic-的身份与职责)
+- [主 Mote 与 Goals 协作](#主-mote-与-goals-协作)
 - [PMO teams topic 名称与职责](#pmo-teams-topic-名称与职责)
-- [PMO Teams 从入口展开](#pmo-teams-从入口展开)
-- [PMO 浮窗标题与 Board 左侧清单](#pmo-浮窗标题与-board-左侧清单)
-- [PMO Teams 快捷面与工作面外壳](#pmo-teams-快捷面与工作面外壳)
+- [快捷工作面的打开与恢复](#快捷工作面的打开与恢复)
+- [Mote 预制与持久人格](#mote-预制与持久人格)
 
 ## Mote 快捷入口与当前协调上下文
 
@@ -91,6 +83,10 @@ Mote 提供可理解、可纠正、接得上工作的长期合作体验。合作
 
 用户可检查的安排、偏好和生成动作按[公共能力贡献约定](../../guides/public-capability-contributions.md)评估并消费同一业务 owner 的公共接口；发现、配置或读取不隐含启动、投递或外部授权。上述行为要求不以提示词在场、保存请求成功或单个模型样本代替实际链路资格。
 
+### 主对话的自动接回
+
+快捷模式的原目录配置同时记录主对话恢复时机。Main Mote 固定启动时恢复；其他 Mote 缺省打开时，并可选择启动时。Profile 明确呈现保存的时机，Main 的必选状态直接说明；保存不发送消息，不因保存即时启动会话。恢复的准确身份、原工作面保全、普通闲置门槛的例外与失败/退休边界只定义于 [Session 恢复的显式固定主对话合同](session-recovery.md#冷启动按需恢复p0-末位)。没有准确主对话时仍保原选择入口，不任取成员。浮窗只有真正打开可触发打开时恢复，单纯 hover 预览、隐藏/后台的挂载与历史阅读不触发。
+
 ### 目标、持续推进与成果回报
 
 Mote 的主动推进沿原 Goal、准确执行 Session 与原续跑调度成立。用户可以在当前 Mote 的真实讨论中交代一个目标，确认原 Goal 的成功条件，并明确选择关联的执行者；“持续推进”是单独授权，默认不打开。此后同一目标的当前进展、需要用户决定的事项、下一次检查与成果入口就地可达，不要求用户先填写脚本目录或另建执行清单。探索性聊天与初次认识不自动创建空 Goal。Goal 的定义、确认和成果接受唯一见[《Goals 与 Demand》](goals-and-demand.md)。
@@ -129,10 +125,6 @@ Profile 的当前工作以原 Goal 状态、验收和记录为准，缺省最多
 - **旧执行与新启动各用真实地址。** 已有 Session/Run 的保存 cwd 与身份原样，迁移不停止、重启或改写健康执行；旧地址仍连到同一对象，活跃进程继续读写原 inode。新启动使用 canonical cwd，经 Core 原公共能力创建。真实进程重启后恢复原工作面、引用与状态，旧 Session 继续沿自己的原地址恢复，不借迁移造替代 Session 或把 unknown 当终局。
 - **旧 alias 不放宽文件边界。** ScratchTopics 与通用文件入口共用 Main 的受限目录解析，只接受已确认身份、精确旧直系目录与相应 canonical 目标的映射；读取仍遵守原已允许的 explicit 只读链接能力；任意链接不因此获得变更权限或新增可访问范围，被替换的根/目标及逃逸继续按原权限与路径规则拒绝。主 Mote 的删除／移动保护、头像资产范围及原保存冲突检查仍成立；失败只拒绝这次错误目标的动作，不拿走健康 Agent 与原工作面。
 
-### 主对话的自动接回
-
-快捷模式的原目录配置同时记录主对话恢复时机。Main Mote 固定启动时恢复；其他 Mote 缺省打开时，并可选择启动时。Profile 明确呈现保存的时机，Main 的必选状态直接说明；保存不发送消息，不因保存即时启动会话。恢复的准确身份、原工作面保全、普通闲置门槛的例外与失败/退休边界只定义于 [Session 恢复的显式固定主对话合同](session-recovery.md#冷启动按需恢复p0-末位)。没有准确主对话时仍保原选择入口，不任取成员。浮窗只有真正打开可触发打开时恢复，单纯 hover 预览、隐藏/后台的挂载与历史阅读不触发。
-
 ## Mote 头像与主 Mote
 
 用户要求：“MOTE也支持下更换头像吧，调研下DOT和Muse的能力，也看下discord的体验，对mote做下优化”，并明确参考 OpenAI dot、Meta Muse 或 Grok Bot。用户可以为同一 Mote 更换本地图片头像、预览最终圆形显示、明确保存或取消，并恢复默认外观。头像属于原耐久 Mote 身份，入口、卡片/头像两态左栏、Space 树与完整 Space 使用同一已选外观；图像、名称、类型、真实执行状态和展开/选中状态各自表达，不把 Session/Provider 头像当成 Mote 身份。选择沿既有外观 owner 持有，原图标、图片和捏脸外观是同一互斥选择，图像资产属于同一 Mote 耐久目录，不新增身份名册、第二份当前选择或 SOUL 人格字段。编辑和异步保存绑定明确原对象；未保存草稿不改变其它入口，取消不写入，读取/保存失败保原已确认头像和待保存选择，说明未确认与重试动作，不阻挡原工作面或健康 Agent。换头像不启动/停止 Run，不改原目标、Tab/Region、执行历史、草稿、SOUL/Wiki 或授权；本条不扩展联网生成或另一套人格系统，状态表情遵守下述约束。
@@ -161,92 +153,43 @@ Mote 头像「平时也要偶尔活动」：实际可见的日常身份头像不
 
 主 Mote 继续沿[《Mote 头像与主 Mote》](#mote-头像与主-mote)的固定默认身份存在。本次设计判断是主 Mote 不能被归档后隐去，以保留默认可达入口；这不是用户关于归档的原话，也不限制关闭其 Tab、收起浮窗、换头像、修改标题或正常内部文件操作。应用服务最终边界同样保护主身份，不能只隐藏菜单。控件语言、Space 最小宽度下的名称／归档状态与次要动作入口见 surface-density[《Mote 归档与恢复》](../presentation/motes-and-coordination.md#mote-归档与恢复)。
 
-## 全局 Board 与固定 Leader Topic
+## 主 Mote 与 Goals 协作
 
-用户确认：Board 不作为 Agents 的默认主视图。Board 是全局任务面，跨 Project、Workspace、Branch、Topic 可见；它承载任务卡、任务状态、目标项目和与 Agent 执行的关联，不再以当前 Workspace 的 Branch/Topic × Agent 状态矩阵作为产品模型。任务状态与 Agent/Attempt/Session 状态是不同事实，不能用同一个列或状态字段互相替代。
+主 Mote 保原 `launcher:leader` 耐久身份、目录、SOUL、Wiki、头像与资料；历史 Leader Topic／PMO teams topic 只表示同一协调对象的旧称。主 Mote 可以读取全局 Project、Goal 与 Agent 事实，不因背景 Scratch、活动项目或名称变化改目标；其中 Agent 仍是经 Core 公共能力运行的正常 AgentSession，不另建隐藏 Runtime。
 
-Agents 提供一个常驻 Mote 快捷入口，其全部对象选择与当前目标遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。默认对象保原 Leader Topic 的耐久内容身份，当前产品对象是主 Mote；其中 Session 是正常 AgentSession，必须通过 Core 公开能力运行，不建立隐藏 Runtime。它可以读取全局项目目录与 Board，不借背景当前 Scratch 选择替换已选协调上下文。
+用户可直接与 Mote 讨论，意图与授权未足够时轻量澄清，不先造空 Goal／Project。显式 New Goal 则先保存真实待定义 Goal，再进入同一主 Mote 内该 Goal 的专属讨论 Tab；两条创建边界、真实 bot 配置、Project 上下文及未知恢复唯一见[Goals 的显式新建与专属讨论](goals-and-demand.md#显式新建与专属讨论)。Mote 讨论的创建／更新结果、准确 Project、分析依据与关联 Session 在对话和目标详情可追踪，不把任务分派变成不可见副作用。
 
-用户可以直接与默认 Session 讨论需求。Session 分析后可以在全局 Board 创建任务，并为任务标记应执行的 Project；创建结果、目标 Project、分析依据和关联 Session 必须在对话与任务卡上可追踪，不能把跨项目的创建变成不可见的副作用。无法确定目标 Project 时保留待确认状态，不猜测归属，也不阻断 Session 继续对话。
-
-Board 的“New Demand”直接在窗口中央打开固定 Leader Topic 浮窗，并注入本次需求讨论的提示词，让 Leader Agent 开始和人澄清目标及项目归属。入口携带当前 Project 筛选上下文，不创建空白 Demand；后续 Demand 写入遵守既有确认策略。
-
-入口只负责进入原 Mote 工作面，不代替 Board 的全局浏览入口。恢复状态未知时，入口仍保留并打开原恢复提示；不能因启动握手或读取快照失败清空全局 Board。当前对象、开合与定位唯一见[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，视觉见密度 SSOT 同名节。
-
-点击 Leader 头像后必须在同一个入口内呈现可见的 Leader Topic 工作面：头像打开的是已经准备好的固定 Topic 浮窗，浮窗必须有可见的 Workbench、Tab/Region 和可输入的 Composer；若 Topic 准备仍在进行，先显示全幅恢复/加载表面，准备完成后自动切换到内容，不能留下空白浮层或只更新隐藏状态。准备失败时保留浮窗并在其中显示服务窗式失败说明与重试动作。
-
-点击 Leader 头像后必须在同一个入口内呈现可见的 Leader Topic 工作面：头像打开的是已经准备好的固定 Topic 浮窗，浮窗必须有可见的 Workbench、Tab/Region 和可输入的 Composer；若 Topic 准备仍在进行，先显示全幅恢复/加载表面，准备完成后自动切换到内容，不能留下空白浮层或只更新隐藏状态。准备失败时保留浮窗并在其中显示服务窗式失败说明与重试动作。
-
-## Leader Topic 入口的浮动与收纳
-
-“收起”只关闭当前 Mote 快捷面，不移除 footer 的常驻入口；不再切换浮动/紧凑入口形态。入口保持独立助手图标与命中区，不代替任何主工作面导航。临时悬停、明确固定、全部对象选择、邻近定位与重启恢复唯一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。
-
-入口属于全局 chrome，不依赖是否正在浏览 Board；切到 Workbench、Settings 或窄窗口仍可见、可键盘进入，不能因没有活动 Tab 或分屏而消失。通知栏、Agents roster 和入口不得各自复制未读事实，统一消费原注意力 owner。
-
-## Leader Topic 入口头像
-
-Leader Topic 的当前产品身份与字形沿[《Space、Folder 与 Topic》](spaces-and-layout.md#spacefolder-与-topic)及密度 SSOT[《控件语言》](../presentation/shared-rules.md#控件语言)，入口头像只表达持久 Mote 身份，不代替真实 Agent 状态。头像、快捷面与收起动作的可见联系统一归[《Mote 快捷入口与当前协调上下文》](../presentation/motes-and-coordination.md#mote-快捷入口与当前协调上下文)，不另留浮动态头像、三个点、自由位置或另一份开合状态；打开和收起不创建第二个 Topic 或 Session。
-
-默认 Session 使用的宿主能力必须是通用的 CUI/JSON 协议：读取全局 Project 目录和 Board、搜索任务、创建/更新任务、绑定目标 Project、关联 Attempt/Session、读取事件增量。Provider 只提供 Agent 对话与生命周期，不把 Board 命令塞进某个 Provider 配置；协议失败属于流程状态，必须在入口或对话中说明并保留已有任务。
-
-`agentmux` CLI 必须能让 Agent 查到当前所有已注册项目，以及各项目中的其他活跃 Agent；返回稳定 Project/Workspace/Session ID、路径、Provider/Executor 和真实状态。未打开 Tab 的活跃 Agent 仍可发现，未知或查询失败不能伪装成空列表。
-
-## Leader Topic 与任务写入确认
-
-项目调度 Agent 的持久协调对象是主 Mote，历史称为 Leader Topic。它持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执，保原耐久内容及固定 `launcher:leader` 身份；实际执行仍是正常 AgentSession，不把 Mote 当成普通知识库 Topic 或某次 Session。其文件系统真相和重启恢复继续由原 owner 持有，不进入普通 Topic 的默认成员，也不随着用户当前 Scratch Topic 改变。
-
-Task 写入策略必须是用户可配置的开关，默认值为“按风险确认”。明确且低风险的单项目请求可以直接创建，并在对话和 Board 中产生可追踪的 Task receipt；涉及跨项目路由、目标不明确、不可逆或高影响动作时，先展示来源与依据、候选 Project、风险和待确认项，不能静默写入。用户也可以切换为“全部确认”或“默认直接创建”，设置的改变必须持久化并在入口可见。
-
-每次用户确认、修改目标 Project、接受/拒绝风险判断或撤销 Task，都要作为该主 Mote 的结构化决策记录进入原全局知识库。记录至少包含原始请求、候选与最终 Project、风险判断、用户选择、Task/operationId、时间和来源 Session；不能把完整聊天转储冒充可检索知识。主 Mote 可以根据这些记录学习风险与路由建议，但学习只改变建议和默认排序，不能绕过用户当前设置、确认闸门或既有事实；当证据不足时仍显示“无法确定”，让用户决定。
-
-该知识库的读取、写入、检索和增量订阅必须通过通用版本化 CUI/JSON 能力暴露给调度 Agent；Provider 不拥有知识库语义，也不能通过 Provider 配置暗中改变 Board 的写入规则。
-
-## 默认 Session 的浮动工作面
-
-默认 Session 和全部 Mote 的快捷打开形态统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)：保留背后原工作面，不用跳转 Scratch 主路由冒充快捷面。内容是已选 Mote 的原 Tab、Region、Agent 身份、输出和 composer，只是附着投影，不创建第二个 Session、PTY 或聊天产品；Board、Focus 等入口明确打开准确目标时复用这一个快捷面，不另维护一份 Mote；一次跨上下文带入与后续独立选择只见[导航上下文合同](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。
-
-固定开合与目标属于持久 UI 状态。重启先恢复原面与 Tab/Region，再尝试 reattach/resume；恢复握手、探测或渲染失败时保留入口和持久工作面，在服务窗说明失败步骤，不清空布局。
-
-快捷面与主工作面分别拥有自己的导航焦点；面内新建、关闭、文件与快捷键必须按该 Mote 的明确身份与原空间关系执行。当前 Mote 工作面的可见性也必须进入现有终端泊车、内存预算与通知判定，不能一边显示一边回收。定位与开合统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，关闭只收起。旧的“跳到 Scratch 主路由”实现不能作为此行为的替代。
-
-## Leader 对话浮窗的清晰度
-
-Leader 浮窗默认以已有 Agent 对话模式打开，用户仍可切换终端；悬停与固定的模式优先级统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。外缘在复杂工作面上清晰可辨，选择区与内容是一体的紧凑表面，不保留独立身份标题行。固定 Mote 的原内容、Session、收纳和重启恢复保持同一事实。
-
-## PMO Teams 入口位置与展开动效
-
-PMO Teams 不再提供独立的浮动头像形态；产品入口的位置见[《左下角导航、Space 与 Goals》](spaces-and-layout.md#左下角导航space-与-goals)。打开后龙头像仍作为同一入口的身份锚点，不被移到随机屏幕位置。悬停与固定面的邻近定位、视口适配统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，不另持自由位置状态；有界尺寸拖拽与记忆统一沿该节对应条目。
-
-入口的展开反馈与实际目标状态遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，具体静止表面与动效只定义在 surface-density 的同名章节。
-
-## Leader Topic 的身份与职责
-
-- `launcher:leader` 是 AgentMux 的协调者 Topic，不是普通 Project Agent 的替身。它的默认职责是理解需求、澄清缺口、提出 Project/Topic/Session 分配方案、记录 Demand 决策并跟踪进展。
-- Leader 默认先对话后执行：没有用户明确确认和目标 Agent 分配时，不自行修改业务文件、不替用户完成编码任务、不把“帮我推进”默认为“自己直接实现”。它可以读取全局 Project、Tab、Region、Session 和 Agent 摘要，用于做出可检查的分配建议。
-- Leader 的身份必须同时写入固定 Topic 的默认 Wiki 和启动时的 AgentMux context；用户消息、Runtime、权限、Session 与 Project 事实优先于 Wiki。普通 Topic 继续使用通用 Topic Wiki，不得误把 Leader 角色传播给其他 Topic。
-- Leader 需要实际执行工作时，先把目标、承担者、Project、Session、风险和验收写成待确认方案；用户确认后再通过公开 Demand/CUI 能力分配或触发工作。确认前的工具调用只能用于观察、澄清和准备，不得产生不可逆业务写入。
+Goals 的主实体为 Goal，底层沿 Demand 身份；它不再以 Branch／Topic × Agent 状态矩阵组织，也不属于另一 Agents／Session／Board 全局导航。目标摘要、数量和空态只消费持久 Demand：零目标不把 `main` 或任意 Branch 当需求行；状态、筛选、路由队列和执行观察投影只由[Goals](goals-and-demand.md#demand-的完整业务闭环)定义。Mote 快捷面不是 Goals 总览的替代。
 
 ## PMO teams topic 名称与职责
 
-固定协调对象的产品类型与快捷入口统一称为 Mote，原 `PMO teams topic` / `PMO teams` 是历史名称；PMO 作为默认角色之一，约束见[《Space、Folder 与 Topic》](spaces-and-layout.md#spacefolder-与-topic)。现有协调职责是和人讨论需求、组织执行 Agent、分配工作并持续跟进结果；底层仍是同一个耐久内容对象，改名不创建新对象，不改变已存在的 Session、对话、文件目录和布局身份。Mote 保原 Space，普通 Topic 对应 Category 中的 Zone，两者不会因复用文件能力而合并归属。用户已明确授权的分配与推进直接执行，不重复索要确认；默认把项目实现交给执行 Agent，只有用户明确要求 PMO 亲自实现时才承担该项实现。普通 Topic 不继承 PMO 身份。
+Mote 默认与人讨论需求、组织执行 Agent、分配工作并持续跟进结果；PMO 是协调角色，普通 Topic 不继承它。Mote 保自己的 Space，普通 Topic 是 Category 中的 Zone；复用文件、公共能力或 Scratch 不改变身份和成员归属。
 
-## PMO Teams 从入口展开
+Mote 先发现准确 Project、Executor、Session、Tab／Region 和已有能力，再提出可检查的分工。范围、位置、风险或授权缺失且影响下一步时才追问；用户已经明确授权的有限创建、分配与推进直接执行，目标确认与结果接受各自成立，不反复索取原授权，也不替人认可。默认细设计和实现交给执行 Agent，Mote 继续讨论、组织、跟进和取证；只有用户明确要求 Mote 亲自实现时才承担该项实现。未知能力、身份、投递或结果保原工作面与健康 Agent，不猜成功、不用直接配置写入绕过公共 owner。
 
-Mote 的悬停、固定与收起统一沿[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，不另留随面板拖动的头像、最小化或另一套入口动作。产品名称的当前约束见[《Space、Folder 与 Topic》](spaces-and-layout.md#spacefolder-与-topic)；名称与入口变化不改变持久 Topic、Session 或 Run 身份。
+真实项目目录及最小初始指令、项目注册、同一 Demand 绑定、执行 Session 创建／复用、首任务投递与结果核验分别留下实际事实。项目注册不证明目录已建，记录指派不证明送达，Session／Run 退出不证明目标达成。一次未知 create／start／发送先读原操作和实体，不自动重放；准确上下文与通用职责在新讨论和复用原会话的请求中都可用，具体闭环引用[Goals 的协调合同](goals-and-demand.md#mote-协调与已有授权)。
 
-## PMO 浮窗标题与 Board 左侧清单
+### 需求写入授权与决策记录
 
-- Mote 展开后是一块连续的紧凑工作面。当前目标、对象选择、动作与入口锚点遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，层级与密度只定义在 surface-density 的同名章节；不再用独立身份标题行重复占位。
-- PMO 快捷面的边界与焦点清楚，选择区与控件不挤压对话首屏。展开、收起和窗口重启继续复用同一份状态，不能生成第二个 Topic 或 Session。
-- Board 左侧工具面板只展示持久化 Demand 的摘要、数量和明确空态。Demand 为零时不得把 `main` 或任意 Branch 名称当成需求行；Branch/Project 上下文只在真正需要展示归属时出现，不能冒充 Board 主实体。
-- Board 工具顶栏只保留一组不重叠的工作面控制和 Board 身份。Project Rail 被 Board 遮挡时，不得用固定宽度的侧栏 chrome 挤压或覆盖 Board 图标；控件必须在窄宽度下仍保持可见、可点击和可读。
-- Demand 有两条创建入口：用户直接在 PMO Teams Topic 对话时，PMO 先澄清需求并在确认后决定是否公开创建；用户点击 Board 的“新建”按钮时，界面先创建一条可见 Demand，再以该 Demand 的上下文打开同一个 PMO Teams Topic 浮窗。两条入口都不能创建第二个 Topic 或把 Demand 偷换成 Session。
+需求写入策略可配置为“按风险确认”（默认）、“全部确认”或“默认直接创建”，保存后在原入口可见。明确且低风险的单项目请求按已给授权创建并产生可追踪 receipt；跨项目路由、目标不明、不可逆或高影响动作展示来源、候选 Project、风险及缺少的确认，不静默写入。“默认直接创建”不绕过准确目标、既有权限与必要的风险授权；后续动作也不把过去授权扩大到新对象。
 
-## PMO Teams 快捷面与工作面外壳
+用户确认、改变目标 Project、接受／拒绝风险判断或撤销 Demand，作为结构化决策进入原知识／决策 owner，保原请求、候选与最终 Project、风险、用户选择、Demand／operationId、时间和来源 Session。完整聊天转储不冒充可检索决策；建议和排序可消费历史，不能绕过当前设置、确认闸门或权威事实，证据不足仍表达未知。通用版本化公共能力提供原记录的读写、检索与增量观察，Provider 不拥有这些语义，不新建第二份任务或记忆账本；未核实能力如实列缺口。
 
-Mote 选择、入口锚点、连续工作面与持久边界只见[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。通用 Workbench 的 Tab/Region 能力复用原 owner，不保留重复身份标题、自由移动、最大化或独立位置状态；有界尺寸拖拽与记忆仅由同名 Mote 条目定义，不叠加窗口 chrome、空态装饰与另一份 Mote 标识。
+### Wiki 与应用协调指令
 
+应用署名的通用协调职责由单一 Notes owner 持有，当前源码入口为 [MOTE_COORDINATION_ROLE](../../../apps/desktop/src/shared/scratch-topics.ts)。它适用于 Mote 的实际新讨论与复用请求，不靠改 CTA 原句、复制配置或重建 Mote 生效，也不覆盖用户 SOUL／Wiki。普通 Topic 与执行 Agent 不因复用组件获得协调角色。
 
+Topic 与 Mote 各自已保存的 Wiki 仍是对应原内容对象的可编辑知识，启用、内容版本和更新时间可见并可恢复；禁用不注入，恢复不重建 Topic／Mote／Session。准备会话时明示实际读取来源与版本；平台安全、当前用户指令、权限及权威 Project／Goal／Session／Run 事实优先于默认建议和历史推断。冲突或读取未知说明具体事实，不伪造状态、不静默覆盖文件或扩大授权。
+
+主 Mote 的默认 Wiki 是可查看、可编辑的初始内容，帮助理解公共 Project／Workspace、空间、Goal／Demand、Session／Attempt 和 ctxmux 能力，包含路由、合并／拆分目标及风险确认建议；已有用户 Wiki 不因默认变化被改写。真实职责与权限不依赖 Wiki 中一句旧角色描述，源码中的初始内容也不代签现存文件或运行会话已更新。
+
+## 快捷工作面的打开与恢复
+
+快捷面只附着呈现已选 Mote 的原 Tab／Region、Session、输出与 composer，保背后原工作面；导航、对象选择、尺寸与入口动作唯一见[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。各入口共用这一个快捷面，不另建聊天产品、Session、PTY、自由位置或第二份开合状态。“收起”不移除常驻入口，入口在 Settings、窄窗、无活动 Tab 或分屏时仍可见且可键盘进入；身份头像不冒充真实 Agent 工作状态。
+
+明确打开后在同一入口内显示原工作面、Tab／Region 与可用输入；准备中显示公共全幅加载／恢复表面，完成后进入内容，不能只改隐藏状态或留空浮层。失败保入口和原面，持续说明失败步骤、当前可用／未知状态与恢复动作。默认显式打开使用 Activity，对已见模式、hover／固定和重启的优先级沿原快捷面合同，不以恢复再触发新的人类打开。
+
+固定目标和开合沿原 UI 偏好恢复，Core 持久空间 owner 先恢复原 Tab／Region、布局与引用；原主对话的自动接回时机只遵循[主对话合同](#主对话的自动接回)及[Session 恢复](session-recovery.md#冷启动按需恢复p0-末位)。hover、隐藏挂载和历史阅读不成为恢复授权。快照、握手或渲染未知不清布局，不换 Session、不自动重发旧输入。快捷面与 Work 保独立导航和真实输入焦点；可见性进入同一终端泊车、预算与通知事实，不能显示时回收内容或为隐藏引用新增消费。
 
 ## Mote 预制与持久人格
 

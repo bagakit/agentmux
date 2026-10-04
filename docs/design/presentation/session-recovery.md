@@ -39,15 +39,10 @@
 
 ## 全页加载大屏
 
-- 启动、恢复、停泊、全页导航和大块数据加载共用一个 `FullPageLoadingSurface` 组件；当前图像、层次、动态和主题合同只见[《Terminal 信息与恢复画面的视觉品质》](terminal-reading.md#terminal-信息与恢复画面的视觉品质)。调用方不重复实现全屏 spinner 或品牌 splash。
-- 前景只承载品牌、真实阶段标题、短说明和当前可用动作，保持稳定可读。loading、recovering、parked 和 failed 共用几何与密度预算，停泊不显示忙碌信号。真实工作面出现后加载层卸载，不留下空的 chrome 行。
+- 启动、恢复、停泊、全页导航和大块数据加载复用 `FullPageLoadingSurface` 的公共阶段、token、活动信号与材质；应用启动和 Region 恢复分别采用[《启动与恢复的分量分开》](#启动与恢复的分量分开)的构图，不把品牌大屏缩小到 Region。调用方不另造 spinner 或重复品牌层。
+- 每张面只承载一份真实阶段标题、短说明、活动信号和当前可用动作；品牌主体限于应用启动面。loading、recovering、parked 和 failed 保持各自容器的稳定几何，停泊不显示忙碌信号。真实工作面出现后加载层卸载，不留下空的 chrome 行。
 - Terminal 内的 Region 舞台限制在原内容面，加载图形与标题不另占一行或挤掉原终端与服务窗；终端网格、状态切换与尺寸事实只按交互 SSOT[《Connecting 与 Terminal 恢复页的全页状态舞台》](../behavior/session-recovery.md#connecting-与-terminal-恢复页的全页状态舞台)执行。
-- 「不重复实现」是**屏幕上只有一份**，不是「调用方自觉不写第二份」。调用方把自己的内容交给
-  `FullPageLoadingSurface` 之后，就不再自带第二份背景、品牌层、活动信号或阶段标签——同一张面上
-  出现两组品牌/信号、两行阶段文案即为违反。这条是  真实发生过的回归：Connecting 面搬进共享
-  组件时把自己那套舞台一起带了进去，而圈着旧舞台的 `:not(.full-page-loading)` 因为两个类落在
-  同一个元素上而全部失效，于是旧的那份既没被样式藏起来、也没被删掉，两份同时显形。约束按
-  「这张面上有几组」验收，不按「代码里写没写」验收。
+- 共享组件接收调用方的真实内容后，屏幕上仍只有一份背景、主状态与活动信号；调用方不再叠同级舞台、重复阶段标签或第二份品牌层。以实际画面核对单份呈现，不能只凭代码复用关系判断。
 - 所有大屏必须提供可访问的 live 文本和不会因动画变化而重复播报的标签；减少动态与隐藏面的约束只见[《Terminal 信息与恢复画面的视觉品质》](terminal-reading.md#terminal-信息与恢复画面的视觉品质)。
 
 ## 重启恢复告示
@@ -84,9 +79,7 @@ Executor 的主标签优先使用用户可读名称；内部 ID 只在详情、�
 
 ## 全局加载表面
 
-Browser restoring、Agent Terminal attach 和 Terminal restoring 共用同一套 Region 级动画与阶段文案，不能各自再造局部 loading 卡片；真实 surface 出现后统一卸载。
-
-应用级和 Region 级加载只保留一套 graphite grid / sweep / registration mark 语言。首次装载显示全幅动画；局部刷新保留已有事实，只在原位显示轻量忙碌信号。任何新的等待态先复用 `FullPageLoadingSurface`，再决定是否需要额外上下文，不另起一套 spinner 视觉。
+Browser restoring、Agent Terminal attach 和 Terminal restoring 共享 Region 级状态语言，构图、动态与停泊／失败区分唯一见[《启动与恢复的分量分开》](#启动与恢复的分量分开)。首次加载沿对应容器呈现完整阶段与原动作；局部刷新保留已有事实，只在原位显示轻量忙碌信号。真实 surface 出现后等待层卸载，不另造局部 loading 卡片或第二套 spinner。
 
 ## 安装后 Renderer 版本边界
 
@@ -104,9 +97,7 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共用同一套
 
 ## 联邦 Runtime 的状态与身份密度
 
-本轮已授权的远端管理范围、多 endpoint 失败隔离、显式管理与真实恢复验收只见交互 SSOT《[联邦 Runtime 与远端恢复边界](../behavior/session-recovery.md#联邦-runtime-与远端恢复边界)》。本节只约束这些事实的密度与呈现，不维护第二份行为、RPC 或恢复合同。
-
-本轮已授权的远端管理范围、多 endpoint 失败隔离、显式管理与真实恢复验收只见交互 SSOT《[联邦 Runtime 与远端恢复边界](../behavior/session-recovery.md#联邦-runtime-与远端恢复边界)》。本机与远端复用原工作面和服务窗语言，单 endpoint 失败不升级为整窗空态、loading 或阻断；本节不另立部署面板、Remote bar 或第二套终端 chrome。
+远端管理范围、多 endpoint 失败隔离、显式管理与真实恢复验收只见交互 SSOT[《联邦 Runtime 与远端恢复边界》](../behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。本机与远端复用原工作面和服务窗语言，单 endpoint 失败不升级为整窗空态、loading 或阻断；本节只定义呈现，不另立部署面板、Remote bar、终端 chrome 或第二份行为／RPC 合同。
 
 - 本机与远端 Runtime 共享同一套状态语汇：`live`、`unverified`、`historical/interrupted` 和 `retired` 必须可区分，不能把远端不可达或探测超时压成绿色的运行中，也不能用空白工作面代替未知状态。
 - 远端 endpoint、Host 和可信身份属于低频元信息，放进既有 tooltip、context menu、服务窗或详情面，不新增一条常驻 Remote bar、第二套 Tab chrome 或重复的 Session/Run 标签。布局、Agent 名称和状态仍由原有工作面承担。

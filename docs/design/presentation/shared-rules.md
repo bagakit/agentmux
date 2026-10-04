@@ -52,7 +52,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 
 ## 保护原则
 
-本轮方向：技术架构延续原有成熟组件，视觉向 Workflow 的低干扰、分层观察语言靠拢。设计规则按「全局基础 → 观察组件 → 聊天表面」阅读；同一约束只在所属层定义，其他章节引用。产品交互和事实归属仍以 Desktop interaction 为准。
+设计方向：技术架构延续原有成熟组件，视觉向 Workflow 的低干扰、分层观察语言靠拢。设计规则按「全局基础 → 观察组件 → 聊天表面」阅读；同一约束只在所属层定义，其他章节引用。产品交互和事实归属仍以 Desktop interaction 为准。
 
 - 全局基础保留 Graphite / Mint、现有字号/间距/状态 token；克制的表面明度与文字层次取代装饰性线框和重复卡片。
 - 观察组件先让用户识别对象、当前状态和需要处理的异常；数字为次级信息，详情按需展开，持续问题始终可找到。运行中、失败、未知须有非颜色提示。
@@ -74,7 +74,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
   由聚焦 Pane 的 Tab/Region 承担变化，失败时由该工作面已有的服务窗/错误面承担反馈，
   不能留下无变化的空白点击结果。
 
-- 本轮整体 review 延续 Graphite / Mint 与既有 Surface 层级：可靠性与焦点约束见交互合同[《整体 review 的可靠性约束》](../behavior/shared-rules.md#整体-review-的可靠性约束)。Prompt 验证降级复用 Session 服务窗，持续可见、不遮挡、不抢焦点；Board 读取失败用现有行内错误语汇，不能用无限 loading 或空态代替。高密度 Board 的排序与分组不应反复全表扫描或复制已分组成员。
+- 整体 review 延续 Graphite / Mint 与既有 Surface 层级：可靠性与焦点约束见交互合同[《整体 review 的可靠性约束》](../behavior/shared-rules.md#整体-review-的可靠性约束)。Prompt 验证降级复用 Session 服务窗，持续可见、不遮挡、不抢焦点；Board 读取失败用现有行内错误语汇，不能用无限 loading 或空态代替。高密度 Board 的排序与分组不应反复全表扫描或复制已分组成员。
 
 - 无独立动作的聚合头像沿用相同身份和状态色，但不显示按钮手势或交互抬升；可定位到 Session 的头像保留现有悬停与键盘焦点表现。
 
@@ -181,7 +181,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 
 ## 颜色
 
-颜色分三组，都从基础 token 派生，没有第四种写法。
+颜色分为以下四组，均从基础 token 派生，不另设全局色值。
 
 | 组 | Token | 说明 |
 | --- | --- | --- |
@@ -231,9 +231,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 
 - **一个 App 只有一条通用 spinner**（`.spin`），它属于**行内**尺度——按钮里、行首、面板 header
   这类 11–16px 的位置。它不携带品牌，也不该携带：十六处行内加载各自长出一个品牌动画，等于没有品牌。
-- **全屏状态覆盖层用品牌语言**。占满一格终端、一块 Board 的等待态是产品的门面，用通用转圈是把
-  最显眼的位置让给了最没有信息的图形。工具属性不是设计粗糙的理由。恢复、启动与停泊的当前
-  材质、布局和动效合同见[《Terminal 信息与恢复画面的视觉品质》](terminal-reading.md#terminal-信息与恢复画面的视觉品质)，沿共享大屏表达真实阶段。
+- **应用启动与 Region 等待使用不同构图**。品牌主体限应用启动面；Region 恢复与停泊采用开放阅读构图，保真实阶段、活动信号和原动作。材质、布局与动态唯一见[《启动与恢复的分量分开》](session-recovery.md#启动与恢复的分量分开)，不能把品牌大屏缩小到终端格。
 - **动效不得是唯一的信息载体**。减少动态时，静态画面、阶段文案和动作仍须准确表达忙碌、停泊
   或失败，不能只留下看不出状态的静图。这条对所有新动效成立，不只恢复态。
 
@@ -274,7 +272,7 @@ Mailbox 原生输入的来源更新与有界阅读告示引用交互文档《用
 | Tooltip / Context Menu | Session ID、Host、开始/活动时间 | 常驻占用内容高度 |
 | Activity View | 最近消息和结构化事件 | Terminal 上方的重复摘要 |
 
-macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；使用平台原生样式，不增加窗口内第二个同义控件。事实与更新行为归交互合同[《Agents / Session / Board 与注意力闭环》](../behavior/goals-and-demand.md#agents--session--board-与注意力闭环)。
+macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；使用平台原生样式，不增加窗口内第二个同义控件。事实与更新行为归交互合同[《跨会话注意力与系统通知》](../behavior/settings-and-observation.md#跨会话注意力与系统通知)。
 
 消息与 Agent 地址的具体可读性约束见交互合同[《A2A 消息要让人一眼看懂》](../behavior/agent-capabilities-and-messaging.md#a2a-消息要让人一眼看懂)；本层只要求工作面优先显示紧凑地址，不常驻铺开机器回执或完整 ID。
 
@@ -298,27 +296,28 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Context Menu | 176px 最小宽；26px Row；8px 横向 Padding；5px 容器 Padding | 全部 Context Menu 共用一套基座。Surface 填充 + 阴影 + 顶部高光建立层级，**不使用描边**；hover 提升明度并把图标转为品牌绿；破坏性项 hover 保持红色语义，不被绿色 hover 覆盖。菜单从指针处生长（120ms），表明它是这次点击召唤出来的，而非盖在界面上的一层浮层 |
 | Activity Log Row | 24px Row；20px 节点槽；56px 等宽时间槽；12px 横向 Padding | 与 Tree Row 同一节奏。整列共用一条 hairline spine，节点用填充光晕挖空它而非画环。展开内容与该行标题同一左缘（104px），不得比自己的标题突出。**仅**机器上报（tool_call / permission / lifecycle）走这一寄存器 |
 | Scratch Topic Row | 标题 11px、摘要 10px 次行；presence 18px 成簇锚定行右缘并垂直居中；结构摘要使用 `--fs-micro` | 一行回答 Topic 身份和工作面结构。Agent 用 Provider 图标成簇表达身份与状态；**同一可复用 presence 组件同时给出 Tab 数量与 Region 结构**。hover 显示 Tab 顺序/标题、分屏布局、每个 Region 的 Executor 和最近活动摘要；没有摘要明确显示 `No recent activity`。键盘 focus 时显示同一结构摘要，不能把 hover 当作唯一信息来源。**不重复呈现同一事实**：不再另挂无法定位的总 Agent 数；结构详情只在一处出现，定位动作仍走全局 `selectSession`。行首不用重复的 Topic 类型图标；对象的共用手动身份遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。选中态使用 Surface 填充，不用左侧竖条。 |
-
-- Topic presence 的静息密度已经收口：Region mosaic 的 Agent 头像只在真实 Region 单元格内出现，背景 Agent 头像与它们不重复；结束态不渲染，未知/断开仍可见并保持中性状态。焦点 Region 沿用共享 1px token，Tab/Region 结构详情通过 hover 与键盘 focus 进入，不增加常驻大卡或第二层状态条。
-| Activity Turn Row | 与 Log Row 共用同一 spine 与 20px 节点槽（14px 图标）；正文 13px/1.6 用 `--text` 主色，caption 11px `--text-3` 大写，时间移到行首右侧的 mono 戳；上下各 6px 呼吸 | user_message、assistant_message 两个可读回合脱离 24px 机器寄存器：正文是主体不是 payload，永不裁剪、永不折叠。<br><br>用户「User 发的消息要单独显示」。**用户发言整块成立**——底色、内缩、圆角与左侧 2px 实心色带一起把它围成一条独立的发言，而不是只给正文一层底：只给正文时 caption 与时刻浮在底色之外，一句话读起来是"一个标签 + 一块底色"两件东西，扫下来与 Agent 回合只差一点底色深浅。成块之后正文自己不再叠第二层底（浅底叠浅底边界更糊），字色降一档——用户自己的话是"我说过什么"的回看，Agent 的答复才是主叙述。Assistant 正文在 S0 上流动，保持敞开的叙述形状。<br><br>那道色带**不属于**被禁掉的选中竖条：禁令针对密集列表里表达**选中**的贴边装饰，这里既不表达选中也不在列表里，走的是同文件已有的**内容**语汇（`.md-quote`、`.log-row__output` 同样用 2px 左侧色带说"这一段是引来的/跑出来的"），一句被读回的用户发言正是一段引文。边界仍由填充承担，色带只在一侧、不画出框。<br><br>形状按 **SPEAKER ROLE** 选，不按 kind：A2A 落地后 agent 侧不管有多少身份都保持同一形状，而"这台机器前面的人说的话"始终是被框起来的那一条。native-hook 的 assistant 回合不进入折叠 |
+| Activity Turn Row | 正文与机器寄存器分开，阅读高度随内容；身份、时间与原操作紧凑 | user_message／assistant_message 使用[共同消息呈现](conversation-input.md#用户消息气泡的内文密度)，作者停靠、气泡与头像不在预算表再定义。完整正文、原生 assistant 与 A2A 作者边界保持；过程步骤仍沿机器行／Workflow 的原展开规则。 |
 | Activity Turn Prose | 标题全部 13px（与正文同号）靠 600 字重与上下留白分级；表格 4×9px 单元、hairline 行分隔；引用块左缩 9px 配 2px 竖线；水平线 1px | 对话回合的正文渲染 GFM 子集：标题、强调、删除线、行内与围栏代码、有序/无序含嵌套列表、表格（含列对齐）、引用块、水平线、链接。**多级标题字号完全相同**——密度合同对字号设下限并禁止用尺度买层级，故 h1..h6 只靠字重、颜色与留白区分，绝不放大。解析器（remark-parse + remark-gfm）只产 mdast **语法树、从不产 HTML**：节点映射为 React 元素，`dangerouslySetInnerHTML` 从不出现，因此不可信的 Agent 输出**没有东西需要 sanitise**——风险面是构造性为零而非"已过滤"。raw HTML 节点按字面文本呈现，绝不成为标签。宽表在自己的 `overflow-x` 容器里横向滚动，不得撑宽回合、更不得让整个 feed 横向滚动。链接渲染为 button 而非 `<a href>`，经既有 openExternal seam 打开（不可信输出里的 `<a>` 是导航逃逸口）。只在 turn register 渲染；机器行保持纯文本，纯文本也不进解析器以免重排从来不是 markdown 的句子 |
 | Activity 历史读取入口 | 当前对话区域内的紧凑轻透明浮动提示和安静文字动作，无全宽边框／独立历史面板；加载状态不占正文行、不推动卡片或改变阅读区高度，正常可读正文不被覆盖；耗尽且无动作时不留空位 | 原较早／回到最新／Return／恢复动作不变；真实等待沿现 Workflow SVG 和短淡入动画，减弱动态时静态；仅局部 polite 通知，不把整个阅读区设 busy，不造百分比、历史总数或另一读取状态；正文选择与原交互不被浮层拦截。数据与保护边界见行为专题[《History 使用共同对话阅读面》](../behavior/terminal-reading.md#history-使用共同对话阅读面)。 |
 | Activity Ruler | 顶部sticky；一行紧凑起止／已加载记录数与范围入口；一排24px参与者轨＋14px状态标尺 | 默认24h，可选6h／12h／24h／3d／7d／全部时间；初始和扩大范围沿共同阅读合同异步补读，缩小仅收窄概览。真实已载成员决定起止，记录不足时收紧轴，不铺空白时段；耗时与偏移进入悬停／键盘说明，无跨度序数退化。身份、密度、状态与可见区共用唯一坐标与原目标。低对比较早记录和较亮最近已记录一小时，最多48桶微高度表达记录密度；连续实线表示已记录工作、轻虚线表示已记录空闲，等待回应独立色，缺事实中性未知。可见范围以14px轨内清楚的轻填充边框标出，置于状态装饰之上、事件刻度之下；正文遮挡按实际sticky高度，折叠过程标题代理原记录，展开后按真实步骤观察。可见区观察不进滚动热路径。详细事实边界只见交互专题的顶部参与者轨约束。 |
 | Activity 时间读数 | 时刻固定 `HH:MM:SS` 24 小时补零；时长按最高非零位起报 `3h04m03s` / `4m03s` / `3.2s` / `840ms`；均 mono + `tabular-nums` | 用户「时间只显示分钟太不友好了, 应该显示从什么时间点到什么时间点, 消耗的时分秒」。<br><br>**时长不在分钟处封顶。**小时位不是可选修饰：Agent 跑一下午是这个产品的常态，而封顶的实现会把一次三小时的 Session 报成 `184m03s`，让读者自己去除以 60。低位补零（等宽下不跳位），高位为零则省掉（短跑不必读 `0h00m03s`）。这条同时管偏移量、标尺跨度、折叠段耗时与读屏可访问名——**只有一个格式化器**，四处共用；任何一处靠切字符串（`+3h04m03s` 去掉加号）拼出时长都会在前缀变化时啃掉一位数字。<br><br>**时刻用固定 24 小时而不是 `toLocaleTimeString`。**读数落在等宽的时间沟里，一列上下必须对齐，而 locale 格式的宽度随小时变化（`h:mm:ss a` vs `HH:mm:ss`）。日志读数取可预测的对齐，这也是各类日志查看器的通行做法。<br><br>**三个事实各就其位，不重复。**标尺头上给真实起止与已加载记录数，耗时退入悬停／键盘说明；一句话的行内给**时刻**（一句话关心"什么时候说的"），偏移量退进 title；机器行直接给**具体时刻**，折叠头给**［记录起时－记录止时］ · N steps**；偏移量退进悬停／键盘可读的时间说明，原耗时若保留仅作次级信息。较长范围用自然换行而不扩大固定时间沟挤掉工具名；同日短钟表、跨日带日期，宽窄都能完整辨认。时间事实与组范围边界只见交互 SSOT《Activity 记录时间的直接阅读》。<br><br>**没有时间可报时不报。**序数轴不渲染跨度，同刻的折叠段不渲染耗时——硬报一个 `0s` 会把 ruler 在类型上刻意排除掉的那种不诚实又请回来（见 Activity Ruler）。<br><br>**分档按将要显示的那个值判。**秒档显示到 0.1s，所以先把时长归到十分之一秒再决定进不进分钟档。两个精度各判一次必印出这套记法里不存在的读数：以整数秒判档、以四舍五入显示，`59_950ms` 会留在秒档而印成 `60.0s`；分/时交界同理会给出 `59m60s`。<br><br>**「一个格式化器」是可执行的约束，不是文档里的说法。**偏移量整段就是「一个符号 + 一段时长」，不自带毫秒档与秒档——那两行与时长格式化器同义，留着就等于同一条规则住在两处，而它真的走岔过：分档修好之后时间沟里仍印着 `+60.0s`，而机器行每一行都在读它。<br><br>**折叠段的耗时算到末步跑完，不是算到末步开始。**起点是首条的 `createdAt`（这一步开始），终点是这一段里最后完成的那个 `updatedAt`（这一步结束），取 max 因为并发几步的完成顺序不必跟着开始顺序。末步往往是最贵的那一步（build、跑测试），拿"末步开始"当终点会把它整段跑的时间漏掉——一个藏着五分钟构建的折叠头会宣称自己只有 1 秒 |
 | Activity 对话轴 | 一排24px高；头像16px，单标记命中24px，参与者簇命中64px | 沿共同消息头像；簇露出最多三个唯一参与者＋余数，完整记录原菜单可达并明确This agent／Sender。完整命中框容纳头像及余数，端点可内侧避让，真实刻度不移位。稀疏原话预览、键盘／Escape共享协议；按实际宽度聚合，不改来源或时间事实。 |
 | Tool Dock Header | 30–34px；10px 左缩进；24px 图标按钮 | 各工具坞标题共享同一左缘。分屏时上下堆叠的标题必须对齐，近似对齐比不对齐更伤观感 |
-| Agent Attention Bar | 24px 高；横跨整宽；12px 横向 Padding；12px 段间距；11px tabular-nums | 窗口底部唯一的跨会话注意力汇总。`surface-1` 填充 + 顶部高光 + 一条 hairline 顶边界定它，不使用描边。复用共享状态点语汇，计数为零保持中性灰；栏存在时把折叠的 Rail 角标抬高让位，纯 CSS `:has()`，不耦合 JS |
+| 跨会话注意力入口 | 沿[Focus 与底部状态入口](settings-and-observation.md#全局通知与底部状态入口)的原紧凑预算 | Working／Needs you／Error 聚合值、请求处理及结果查看只见[Focus 行为 owner](../behavior/focus-context.md#focus-执行上下文项目泳道与底部时间音轨)。不在此另立全宽 Attention Bar、第二 roster 或另一份状态事实 |
 | Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher。**「不扩大」是容器自己的约束，不是"卡片少所以碰巧没长"**：容器必须带有界高度与独立 `overflow`，Agent 装多少都不得把下方的 prompt 推下去。这条由 `apps/desktop/test/surface-scale-contract.test.ts` 守住——它判 `.agent-catalog` 的规则体里 `max-height` 与 `overflow` 同时在场（先断言确实扫到了这条规则）。守的是"有界"这件事而不是 268 这个数：把数字抄进测试等于同一个值住两处，改一处就漂 |
 | Settings Pane | 两层容器，不是一层：**可操作/主内容**卡＝`--surface-1` + `--elev-2` + `--hl` + `--radius-lg`（抬起）；**信息/次级**块＝与页面同底的平铺 `--surface-0` + 一条 `--line-soft` 发丝线，无阴影、不成盒。卡片/区块标题走 `--fs-title`(14)，说明降到 `--fs-meta`/`--text-3` 读作从属；区块头句首大写 `--text-2`，不叠第三层大写字距 | 此前一条规则把合成器、只读说明、执行器分组、工作区列表压成同一个平面，于是整屏一样重、读不出主次——两层的"抬起 vs 平铺"对比**就是**这次重做。**装饰性 hero 说明卡已退役**（见控件语言"装饰性强调图标格"）：绿只留给状态与唯一主操作。侧栏选中＝干净 Surface 填充（`--surface-2` + `--hl`，与 Project Rail active 同语汇），绿落在该项图标或 `aria-current` 上，**不画整圈描边**——侧栏本身是 `--surface-1`，往选中态填 `--surface-1` 等于没填，会让 hover 反而比选中更"实"。每节导航前缀图标各不相同，予以保留。入场用 `--dur-enter`/`--ease-enter` 的淡入上浮，不做长时遮罩揭幕或光标跟随——那类破坏工具身份 |
 | 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
-| Terminal / Editor | Terminal `12px / 1.0`；Editor `14px / 21px` | 由 xterm/Monaco 原生 DPR 渲染，不使用 CSS transform |
+| Terminal / Editor | 字号、行距沿[原渲染 owner](#字号阶梯) | 由 xterm／Monaco 原生 DPR 渲染，不用 CSS transform；不在 App 密度表另设默认值 |
 | Terminal replay recovery | 有界批次；批次间让出事件循环；连续 live bytes 合并成视觉批次；输入/切换控件不被输出队列饿死；切回时按视口记忆停在上次位置或最新输出 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死、逐字绘制或把回放过程暴露成从顶部滚落 |
-| Terminal link span | 裸 URL 下划线只覆盖 ASCII URL 本身；相邻 CJK 文字/标点保持普通终端字形 | 链接边界属于交互合同（见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md) 的 Terminal 链接约束）；不因相邻中文输出改变 URL 的目标或悬停范围 |
+| Terminal link span | 裸 URL 下划线只覆盖 ASCII URL 本身；相邻 CJK 文字/标点保持普通终端字形 | 链接边界只见[《Terminal 链接 hover 范围与单元格》](../behavior/terminal-reading.md#terminal-链接-hover-范围与单元格)；不因相邻中文输出改变 URL 的目标或悬停范围 |
 | Terminal link readout | 延迟出现的边角被动读出；目标为主层、真实类型 / 来源和打开方式为紧凑次层；长目标保留可辨部分，宽度不超过 Region | 用户要求「hover 浮窗信息不清晰」：提高真实目标与动作说明的可扫读层级，用平面、轻边界与共享可读刻度，不加图标按钮、快捷键胶囊或重复路径。事实、清除、避字与打开边界唯一见交互 SSOT[《Terminal 链接读出与目的地面的信息归属》](../behavior/terminal-reading.md#terminal-链接读出与目的地面的信息归属)及[《Terminal 链接 hover 范围与单元格》](../behavior/terminal-reading.md#terminal-链接-hover-范围与单元格) |
-| Terminal restart projection | Runtime 未确认期间保留布局但在 Region 内显示中性等待/不可用状态；权威 snapshot 确认旧 PTY 不存在后清掉 Terminal Region/Tab，不留只有标题的空壳 | Terminal 没有 Provider-native semantic resume，不能把未知身份伪装成可用终端，也不能让临时探测失败变成永久空 Tab |
+| Terminal restart projection | 保留原 durable Tab／Region；Runtime 未确认时就地显示中性等待／不可用事实及原动作，旧 Run 明确丢失时表达真实状态 | Run／PTY 缺失不授权删除持久工作面；移除、明确关闭与恢复资格只见[《工作面持久恢复与启动边界》](../behavior/session-recovery.md#工作面持久恢复与启动边界)。未知不冒充可输入、终局或新 Session |
 | Confirmed Agent crash notice | 沿用现有服务窗与唯一错误提示；由同一分类派生 ARIA 音量 | 行为边界归交互合同[《我们的流程坏了，不等于 Agent 坏了》](../behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)。不另造弹窗、严重度颜色表或覆盖工作面的遮罩 |
 | Managed Hook notice | 服务窗/状态行；不覆盖 Terminal 内容、不抢焦点 | Hook 路径失效属于流程降级，Agent 仍可用；说明如何让当前 App 重新校正配置 |
 | Provider capability notice | 服务窗/状态行；与 Managed Hook notice 共用告示槽 | Provider 的 Hook、resume 或探测能力缺失/降级时只在对应 Agent 旁说明，不覆盖工作面、不抢焦点；unsupported 与暂时 unavailable 必须分开，不画一个看似可点击但必然失败的 Resume 按钮 |
+
+
+- Topic presence 的静息密度已经收口：Region mosaic 的 Agent 头像只在真实 Region 单元格内出现，背景 Agent 头像与它们不重复；结束态不渲染，未知/断开仍可见并保持中性状态。焦点 Region 沿用共享 1px token，Tab/Region 结构详情通过 hover 与键盘 focus 进入，不增加常驻大卡或第二层状态条。
 
 ## Owner
 
@@ -332,7 +331,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Agents | Workspace Tool Panel | 投影现有 Agent Session，不创建第二 Registry |
 | Browser Favorites | Workspace Tool Panel | 只路由 Main-owned Browser View |
 | Agent Launch | Universal New Tab / Topic Launcher | 通过 Core 创建 Session，不属于 Tools 状态 |
-| Branch Board | Board Surface | 投影 Project Scope、四列状态和真实 Run 数量 |
+| Goals 清单／看板 | Goals Surface | 消费同一 Goal／Demand 投影；不另立 Branch × 状态矩阵 |
 | Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab、输入区全部 no-drag |
 
 ## 响应式与可访问性
@@ -341,7 +340,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 - 每个图标按钮必须有 tooltip、`aria-label` 和可见键盘 focus。正常、禁用与忙碌状态由同一公共控件表达；禁用时不响应 hover 或按下效果，不用可点击指针暗示仍能执行。业务动作是否可用仍由原 owner 决定。
 - Tab 名称始终单行；过长省略，空间不足时由 Pane 内横向 overflow 解决。
 - Surface 明度和状态色必须保持足够对比；不可只靠颜色区分选中、危险或不可用。
-- 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Attention Bar 的 StatusCount 同源复用）中，"需要你"（`waiting`/`blocked`）必须带**形状**而非仅靠颜色：琥珀圆点内嵌 `?` 字形，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下字形也无需字形——颜色加角落位置已足够区分，字形只在全尺寸状态点上浮现。
+- 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Focus 注意力汇总同源复用）中，"需要你"（`waiting`/`blocked`）必须带**形状**而非仅靠颜色：琥珀圆点内嵌 `?` 字形，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下字形也无需字形——颜色加角落位置已足够区分，字形只在全尺寸状态点上浮现。
 - **Agent 字母牌**（叠压头像簇里同 provider 多个 Agent 的判别器，可见判别见[对应呈现合同](spaces-and-layout.md#agent-头像簇的可见判别)）：与项目字母牌共享字形与几何语汇——`--fs-micro`、`font-weight: 640`、`line-height: 1`、`overflow: hidden`（emoji 比字母宽，会撑破格子），色相走既有派生并在规则里**声明**默认值（不藏进 `var()` 兜底，全表守卫读的是声明）。不为 Agent 新挑尺寸或配色，保持既有 Provider/会话身份语言。Space 自动对象身份的低彩度约束只见[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)，不改变 Agent 头像的既有派生色相。
   - **10px 不需要豁免，它就是刻度的最小值。** 曾在此写过「字母受 10px 下限约束、须先放大头像格」——那是把「低于 10px 需要具名豁免」错记成「10px 需要豁免」。事实：字号刻度含 10（`--fs-micro`），而 `FONT_SIZE_EXCEPTIONS` 被恒等断言冻结在 7px 且每条都必须真画 `content` 字形，所以字母**根本走不到也不需要**那条豁免路；`.project-rail-row__icon[data-monogram]` 正是在 **16px** 格子里画 10px 字母，一直合规。**头像格不必为字母放大**。这条更正的意义不止于本条：涉及尺寸的约束必须从刻度与守卫的断言反推，"我记得有个下限"不是判据。
   - **一个格子里放第二个记号，本仓的既有答案是角标溢出而非扩容。** 注意力那枚 `?`/`!` 就是这么做的（8px 见方、探出格外），因此第二个记号不以牺牲品牌图标为代价。字母若落在这个位置，须先解决与注意力角标的占位冲突（两者不能同时在同一角），这是一个**取位**决定，不是尺寸决定——裁决见下条。
@@ -380,7 +379,7 @@ styles/
   index.css       入口：@import 的顺序即层叠顺序
   tokens.css  唯一全局主题值——颜色、字号、间距、圆角、阴影、动效
   base.css  reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
-  chrome.css  Titlebar、Project Rail、Tabbar、Attention Bar
+  chrome.css  Titlebar、Project Rail、Tabbar 与窗口 chrome
   space-tree.css  Space 查找、分类、折叠与目录 pins 归属
   space-object-appearance.css  Space 共用身份图标与紧凑选择面
   selector.css  同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
@@ -398,7 +397,7 @@ styles/
   settings-toolkit.css  Settings 工具目录
   toolkit-custom.css  自定义工具的动作、参数与结果
   settings-keyboard-shortcuts.css  Settings 键盘快捷键
-  board.css  Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
+  board.css  Goals／讨论相关表面；历史文件名不定义全局入口或 Branch/Topic × 状态矩阵
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
   goals.css  现有 Agent Goal 与任务约束表面
   focus.css  Focus 三段工作面：历史、状态、选中的 Session
@@ -486,14 +485,12 @@ styles/
 
 ## 成熟产品界面的控件与分组
 
-Board 默认使用“工作面优先”的密度：去掉营销式大标题、hero 文案和底部页面切换器，首屏从任务列与当前详情开始。全局工具栏控制范围、搜索、筛选、排序和默认 Session；操作组使用紧凑的 segmented control、图标按钮和少量文字动作，不把每个动作包进彩色胶囊。
+Goals 的清单／看板、详情和工具带唯一见[《Goals 的目标正文与对齐密度》](goals-and-demand.md#goals-的目标正文与对齐密度)。公共控件保持工作面优先：短工具、清楚作用域、单一选中信号，不为每个动作包彩色胶囊或重建旧 Branch Board。
 
 页面层级靠留白、字号、对齐和单一选中信号建立。Surface 使用中性深色层、hairline 分隔和很小的状态色面积；禁止多彩渐变、发光轮廓、连续彩色线框和无语义的装饰图标。Project 色只在身份点、短边或状态标记上出现，不能铺满整卡。
 
-任务分组只有三种稳定语义：Task 状态列、当前 Task 详情、执行 Session Region。每一个区域都必须有可回答的问题和明确的退出/收起动作；“页面 01/02/03”“MVP 原型页面”这类演示性分组不进入产品表面。浮动入口和右侧 Inspector 是同一工作面的附着层，不能被视觉处理成三个并列产品。
+Goal 清单／详情、执行 Session 观察和 Mote 讨论是同一流程中用途不同的表面，不成为并列产品。每个区域有可回答的问题和明确返回／收起动作；演示性“页面 01／02／03”不进入产品合同。宽窗详情保同屏列表，窄窗需要独立阅读时沿原返回入口，不借覆盖边缘重新定义 drawer 行为。
 
-Task drawer 打开时仍保留 Board 的列和上下文，宽度变化由 drawer 占用空间或覆盖边缘完成，不通过路由跳转或整页重排制造“详情页面”。Session Region 沿用当前 Agent surface 的身份、输出密度和 attachment 事实；只增加观察层，不复制终端 chrome，不画成新的产品卡片。
-
-Default Session 浮窗直接复用原生 Topic Tab/Region：顶部是既有 tab/chrome，中间是既有 Session 内容，底部是既有 composer。不要再画一套客服式的消息卡、头像、欢迎语、独立 Task 卡和复杂确认表单；确认策略只保留一个紧凑设置入口，Task 写入状态使用一行原生通知或消息标记表达。
+Mote 讨论复用原 Tab／Region／Composer，选择区、单一边界与无独立标题行只见[Mote 呈现 owner](motes-and-coordination.md#mote-快捷入口与当前协调上下文)。确认策略与写入状态沿原紧凑控件，真实协作身份和消息正文不因“客服式卡片”禁令被删。
 
 Topic Wiki 注入只在原生 Topic chrome 里以一个轻量状态表达，例如“Wiki · 已加载 12 条规则”或一个可检查的注入图标；不要把整份规则常驻在对话面板。用户点击后进入现有 Topic/Wiki 编辑入口，查看来源、版本、启用状态和最近修改；注入规则在 Agent 输出中只以必要的来源标记出现，避免再造一套知识库卡片。
