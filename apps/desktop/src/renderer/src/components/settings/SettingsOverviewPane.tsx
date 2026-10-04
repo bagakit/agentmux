@@ -3,15 +3,6 @@ import { useEffect, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsModule, SettingsNavGroup } from './settings-catalog'
 import bannerUrl from '../../../../../resources/settings-banner.png'
-import preferencesArtworkUrl from '../../../../../resources/artwork/settings-preferences.png'
-import resourcesArtworkUrl from '../../../../../resources/artwork/settings-resources.png'
-import connectionsArtworkUrl from '../../../../../resources/artwork/settings-connections.png'
-
-const groupArtwork: Record<string, string> = {
-  preferences: preferencesArtworkUrl,
-  resources: resourcesArtworkUrl,
-  connections: connectionsArtworkUrl
-}
 
 /** Presentation only. The parent passes published configuration and the original section catalog. */
 export function SettingsOverviewPane<Module extends SettingsModule>({ config, groups, onOpen }: {
@@ -37,7 +28,6 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
         {(['left', 'right'] as const).map((column) => <div key={column} className="settings-overview__column" data-overview-column={column}>
           {groups.filter((group) => group.overviewColumn === column).map((group) => <section key={group.id} data-settings-group={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
             <header>
-              {groupArtwork[group.id] ? <img className="settings-overview__group-art" src={groupArtwork[group.id]} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} /> : null}
               <h3 id={`settings-overview-${group.id}`}>{group.title}</h3><small>Saved configuration</small>
             </header>
             <div className="settings-overview__entries">
