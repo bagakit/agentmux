@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import type { BrowserTaskStep } from '../../../shared/browser-task-assets'
 
 type Props = { step: BrowserTaskStep; laterSteps: BrowserTaskStep[]; index: number; onChange: (step: BrowserTaskStep) => void }
@@ -13,11 +14,11 @@ export function BrowserTaskBranchEditor({ step, laterSteps, index, onChange }: P
         : { kind: 'element-present', target: { role: 'button', name: '' } } })}>
       <option value="page-url-is">Page URL is</option><option value="element-present">Element is present</option>
     </select></label>
-    {condition.kind === 'page-url-is' ? <input aria-label={`Condition ${index + 1} URL`} value={condition.url} maxLength={2048}
+    {condition.kind === 'page-url-is' ? <TextInput aria-label={`Condition ${index + 1} URL`} value={condition.url} maxLength={2048}
       onChange={event => update({ ...branch, condition: { ...condition, url: event.target.value } })} />
-      : <><input placeholder="Role" aria-label={`Condition ${index + 1} role`} value={condition.target.role} maxLength={240}
+      : <><TextInput placeholder="Role" aria-label={`Condition ${index + 1} role`} value={condition.target.role} maxLength={240}
         onChange={event => update({ ...branch, condition: { ...condition, target: { ...condition.target, role: event.target.value } } })} />
-        <input placeholder="Name" aria-label={`Condition ${index + 1} name`} value={condition.target.name} maxLength={240}
+        <TextInput placeholder="Name" aria-label={`Condition ${index + 1} name`} value={condition.target.name} maxLength={240}
           onChange={event => update({ ...branch, condition: { ...condition, target: { ...condition.target, name: event.target.value } } })} /></>}
     {(['onTrue', 'onFalse'] as const).map(key => <label key={key} className="browser-task-asset__field"><span>{key === 'onTrue' ? 'True' : 'False'}</span>
       <select aria-label={`Condition ${index + 1} ${key === 'onTrue' ? 'true' : 'false'} path`} value={branch[key] ?? ''}
