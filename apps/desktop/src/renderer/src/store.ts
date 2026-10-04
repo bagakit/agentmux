@@ -158,6 +158,7 @@ import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
+import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
@@ -1103,7 +1104,7 @@ type AppState = {
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
-  recoverSession(sessionId: string, operationId?: string): Promise<SessionSnapshot | undefined>
+  recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean }): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
   resyncTimeline(sessionId: string, options?: { observationOnly?: boolean }): Promise<void>
@@ -1284,7 +1285,7 @@ function projectRecoveredSession(
   previousSessionId: string,
   session: SessionSnapshot
 ): Pick<AppState, 'sessions' | 'tabs' | 'agentFocus'> {
-  const tabs = { ...state.tabs }
+  const tabs = session.id === previousSessionId ? state.tabs : { ...state.tabs }
   if (session.id !== previousSessionId) {
     for (const tab of Object.values(state.tabs)) {
       let nextTab = tab
@@ -2199,6 +2200,12 @@ function startSessionMembershipResync(
           if (restoredDuringRead.has(candidate.hostId)) continue
           const current = useAppStore.getState().sessions.find((session) => session.id === candidate.agentSessionId)
           if (!current || attemptedStartupRecovery.has(candidate.agentSessionId)) continue
+          const recoveryState = useAppStore.getState()
+          if (current.kind === 'agent' && deferScratchConversationRecovery(recoveryState.tabs, recoveryState.config, current.id)) {
+            await recoverMoteConversationAtStartup(current)
+            if (sessionMembershipResync !== entry) return
+            continue
+          }
           const decision = agentStartupRecoveryDecision({
             runState: current.processState,
             ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
@@ -3388,6 +3395,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!api.control || typeof api.control.onRequest !== 'function') {
       throw new Error('AgentMux Control API is unavailable')
     }
+    const disposeMoteStartupRecovery = beginMoteStartupRecovery()
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
@@ -3428,6 +3436,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
       cancelSessionMembershipResync()
+      disposeMoteStartupRecovery()
       disposeSessions()
       disposeBrowsers()
       disposeControl()
@@ -3586,6 +3595,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
           now: Date.now()
         })
+        if (deferScratchConversationRecovery(get().restoredWorkbench?.tabs ?? {},
+          get().config !== configBeforeRead && get().config !== null ? get().config : configResult.value, candidate.agentSessionId, [...get().sessions, ...snapshot.sessions])) {
+          if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, { kind: 'pending', detail: 'Original Mote settings are being confirmed after its workface restores.' }))
+          continue
+        }
         if (decision.kind !== 'resume') {
           if (!projected) recoveryFailures.push(recoveryCandidateSession(candidate, { kind: 'pending', detail: agentStartupRecoveryDetail(decision) }))
           continue
@@ -3835,8 +3849,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // it cannot hold up restored workfaces or reconcile a healthy Session into a replacement.
       if (config.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) {
         void Promise.resolve().then(() => api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID))
-          .then(() => get().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true))
           .catch(error => get().reportError(new Error('The primary Mote directory could not be confirmed. Existing work surfaces and Agent work remain available; open Mote to retry. ' + presentError(error))))
+          .then(() => get().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true))
+          .then(() => recoverScratchConversationsAtStartup())
+          .catch(error => get().reportError(error))
       }
       // Restored dirty buffers keep their base revision and immediately resume observation.
       // Refresh marks disk conflicts through the existing reducer; it never overwrites a dirty draft.
@@ -9204,8 +9220,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // inventing a replacement Tab. Navigation and drafts remain owned by the original workbench.
     return attached ? session : undefined
   },
-  async recoverSession(sessionId, operationId) {
+  async recoverSession(sessionId, operationId, options) {
     const before = get()
+    if (options?.stillCurrent && !options.stillCurrent()) return
+    if (options?.preserveView && !hasAttachedSessionView(before.tabs, sessionId)) return
     if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, sessionId)) return
     let projected = before.sessions.find((item) => item.id === sessionId)
     if (!projected) {
@@ -9220,7 +9238,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // A candidate can exist only in Core's durable catalogue. Give it a view at its registered
     // original Host/directory before recovery; the commit below intentionally needs an attached
     // view owner. Existing durable Regions keep their layout/focus during background resync.
-    if (!hasAttachedSessionView(get().tabs, sessionId)) get().selectSession(sessionId)
+    if (!options?.preserveView && !hasAttachedSessionView(get().tabs, sessionId)) get().selectSession(sessionId)
     const priorFailure = current.kind === 'agent' && lifecycleFailureBelongsTo(before.errorNoticeContext?.lifecycle, { subject: current.control })
       ? before.errorNoticeContext : null
     try {
@@ -9231,10 +9249,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // A lost continuity reply is not permission to launch again. First read canonical facts.
         if (!operationId || current.kind !== 'agent') throw error
         const canonical = await api.sessions.refresh(current.control).catch(() => undefined)
-        if (!canonical || canonical.kind !== 'agent' || canonical.id !== sessionId || canonical.processState !== 'running') throw error
+        if (!canonical || canonical.kind !== 'agent' || canonical.control.hostId !== current.control.hostId || canonical.control.agentSessionId !== current.control.agentSessionId || canonical.processState !== 'running') throw error
         recovery = { kind: 'reattachable', session: canonical }
       }
+      if (options?.stillCurrent && !options.stillCurrent()) return
+      if (current.kind === 'agent' && 'agentSessionId' in recovery &&
+        (recovery.agentSessionId !== current.control.agentSessionId || recovery.previousRun.runId !== current.control.run.runId))
+        throw new Error('Recovery response belongs to another Agent Session or Run. The original conversation is kept.')
       if (recovery.kind === 'retired') {
+        if (options?.preserveView) {
+          get().reportError(new Error('The original Session is retired. Its Mote conversation and history are kept; choose another default conversation in Profile.'), { kind: 'indeterminate', subject: current.control })
+          return
+        }
         set((state) => removeSessionProjection(state, sessionId))
         if (priorFailure && get().errorNoticeContext === priorFailure) {
           set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
@@ -9245,6 +9271,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         recovery.kind === 'unavailable' ||
         recovery.kind === 'conflict'
       ) {
+        if (options?.preserveView) {
+          get().reportError(new Error(continuityFailureDetail(recovery)), { kind: 'indeterminate', subject: current.control })
+          return
+        }
         set((state) => ({
           sessions: state.sessions.map((session) => (
             session.id === sessionId && sessionOwnsControl(session, current.control)
@@ -9263,7 +9293,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }))
         return
       }
-      const session = recovery.session
+      if (current.kind === 'agent' && (recovery.session.kind !== 'agent' || recovery.session.control.hostId !== current.control.hostId || recovery.session.control.agentSessionId !== current.control.agentSessionId))
+        throw new Error('Recovery response belongs to another Agent Session. The original conversation is kept.')
+      const session = options?.preserveView ? { ...recovery.session, id: sessionId } : recovery.session
       const after = get()
       const live = after.sessions.find((item) => item.id === sessionId)
       const ownerStillCurrent = live !== undefined &&
@@ -9273,7 +9305,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         workbenchViewCloseAllowsSession(after.closingWorkbenchViews, sessionId) &&
         ownerStillCurrent
       ) {
-        set((state) => projectRecoveredSession(state, sessionId, session))
+        set((state) => ({ ...projectRecoveredSession(state, sessionId, session), ...(options?.preserveView ? { agentFocus: state.agentFocus } : {}) }))
         if (priorFailure && get().errorNoticeContext === priorFailure) {
           set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
         }
@@ -9299,7 +9331,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().reportError(failure)
       }
     } catch (error) {
-      if (operationId) throw error
+      if (operationId && !options?.preserveView) throw error
+      if (options?.stillCurrent && !options.stillCurrent()) return
       const live = get().sessions.find(item => item.id === sessionId)
       if (!live || !sessionOwnsControl(live, current.control)) return
       get().reportError(error, current.kind === 'agent' ? {
@@ -9311,8 +9344,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async stopSession(sessionId) {
     const state = get()
     if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId)) return
-    const session = state.sessions.find((item) => item.id === sessionId)
-    if (session) await api.sessions.stop(session.control).catch((error) => get().reportError(error))
+    const original = state.sessions.find(item => item.id === sessionId)
+    const recovery = cancelMoteSessionRecovery(sessionId)
+    if (recovery) await recovery
+    const session = get().sessions.find(item => item.id === sessionId)
+    if (!session || !original || !workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId)) return
+    try {
+      if (recovery && original.kind === 'agent' && session.kind === 'agent') {
+        if (session.control.hostId !== original.control.hostId || session.control.agentSessionId !== original.control.agentSessionId) return
+        const canonical = await api.sessions.refresh(session.control)
+        if (canonical.kind !== 'agent' || canonical.control.hostId !== original.control.hostId || canonical.control.agentSessionId !== original.control.agentSessionId)
+          throw new Error('Stop response belongs to another Agent Session. The original work is kept.')
+        const live = get().sessions.find(item => item.id === sessionId)
+        if (live?.kind !== 'agent' || live.control.hostId !== original.control.hostId || live.control.agentSessionId !== original.control.agentSessionId ||
+          !workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId)) return
+        await api.sessions.stop(canonical.control)
+      } else await api.sessions.stop(session.control)
+    } catch (error) { get().reportError(error) }
   },
   async canonicalizeAgentLaunch(result) {
     const id = result.created.agentSessionId

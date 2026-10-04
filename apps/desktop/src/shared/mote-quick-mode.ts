@@ -6,7 +6,8 @@ export type MoteDefaultConversation = {
   hostId: string; sessionId: string
   displayWorkspaceId: string; groupId: string; tabId: string; regionId: string
 }
-export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation }
+export type MoteRecoveryTiming = 'startup' | 'on-open'
+export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; recovery?: MoteRecoveryTiming }
 export type MoteQuickMode =
   | { status: 'saved'; defaults: MoteQuickDefaults; version: string }
   | { status: 'missing' }
@@ -32,6 +33,11 @@ export function parseMoteQuickMode(content: string): { status: 'valid'; defaults
   if (source.document.has('defaults') && !isMap(node)) return { status: 'unconfirmed', message: ISSUE }
   const defaults: MoteQuickDefaults = {}
   if (isMap(node)) {
+    if (node.has('recovery')) {
+      const timing = node.get('recovery', true)
+      if (!isScalar(timing) || timing.value !== 'startup' && timing.value !== 'on-open') return { status: 'unconfirmed', message: ISSUE }
+      defaults.recovery = timing.value
+    }
     if (node.has('executorId')) {
       const executor = node.get('executorId', true)
       if (!isScalar(executor) || !validId(executor.value)) return { status: 'unconfirmed', message: ISSUE }
@@ -49,13 +55,15 @@ export function parseMoteQuickMode(content: string): { status: 'valid'; defaults
 }
 /** Only known fields change; the original Markdown, unknown YAML and comments remain. */
 export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefaults): string {
-  if (defaults.executorId !== undefined && !validId(defaults.executorId) || defaults.conversation && !FIELDS.every(field => validId(defaults.conversation![field]))) throw new Error(ISSUE)
+  if (defaults.recovery !== undefined && defaults.recovery !== 'startup' && defaults.recovery !== 'on-open' || defaults.executorId !== undefined && !validId(defaults.executorId) || defaults.conversation && !FIELDS.every(field => validId(defaults.conversation![field]))) throw new Error(ISSUE)
   const original = content ? frontmatter(content) : null
   const parsed = content ? parseMoteQuickMode(content) : null
   if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)
-  if (parsed?.status === 'valid' && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
+  if (parsed?.status === 'valid' && parsed.defaults.recovery === defaults.recovery && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
   const document = original?.document ?? new Document({ version: 1, defaults: {} })
   if (!document.has('defaults')) document.set('defaults', {})
+  if (defaults.recovery === undefined) document.deleteIn(['defaults', 'recovery'])
+  else document.setIn(['defaults', 'recovery'], defaults.recovery)
   if (defaults.executorId === undefined) document.deleteIn(['defaults', 'executorId'])
   else document.setIn(['defaults', 'executorId'], defaults.executorId)
   if (!defaults.conversation) document.deleteIn(['defaults', 'conversation'])
