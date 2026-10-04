@@ -1087,7 +1087,7 @@ type AppState = {
   recoverSession(sessionId: string, operationId?: string): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
-  resyncTimeline(sessionId: string): Promise<void>
+  resyncTimeline(sessionId: string, options?: { observationOnly?: boolean }): Promise<void>
   applyEvent(event: RuntimeEvent): void
   /**
    * 把所有已陈旧的 `working` Agent 降为中性态（见 lib/agent-status-decay）。传 `now` 而非内部读
@@ -1420,7 +1420,7 @@ export function executorAvailabilityFromCheckState(state: AsyncCheckState | unde
 const detectionRequestIds = new Map<string, symbol>()
 const hostExecutorRequests = new Map<string, symbol>()
 const hostCheckRequestIds = new Map<string, number>()
-const timelineResyncs = new Map<string, { requested: boolean; promise: Promise<void> }>()
+const timelineResyncs = new Map<string, { requested: boolean; reconcileRequested: boolean; hostId: string | undefined; promise: Promise<void> }>()
 
 /**
  * Shared loading/error presentation for worktree and fixed-commit diffs through the existing Git
@@ -9159,14 +9159,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     return result
   },
-  async resyncTimeline(sessionId) {
+  async resyncTimeline(sessionId, { observationOnly = false } = {}) {
     const existing = timelineResyncs.get(sessionId)
     if (existing) {
-      existing.requested = true
+      const hostId = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.id === sessionId)?.control.hostId
+      if (!observationOnly || existing.hostId !== hostId) existing.requested = true
+      existing.reconcileRequested ||= !observationOnly
       await existing.promise
       return
     }
-    const entry = { requested: false, promise: Promise.resolve() }
+    const entry = { requested: false, reconcileRequested: !observationOnly, hostId: undefined as string | undefined, promise: Promise.resolve() }
+    timelineResyncs.set(sessionId, entry)
     entry.promise = (async () => {
       try {
         do {
@@ -9175,20 +9178,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             candidate.kind === 'agent' && candidate.id === sessionId
           ))
           if (!session || session.kind !== 'agent') return
-          const snapshot = await api.sessions.timeline(session.control)
-          const pendingBefore = get().agentSteerQueues[sessionId]
-          set((state) => reconcileDeliveredSteers({ ...state, ...reduceTimelineSnapshot(state, snapshot) }, sessionId))
-          if (get().agentSteerQueues[sessionId] !== pendingBefore && !agentSteerDrains.has(sessionId)) {
-            void get().flushAgentSteerQueue(sessionId)
+          entry.hostId = session.control.hostId
+          const reconcile = entry.reconcileRequested
+          entry.reconcileRequested = false
+          try {
+            const snapshot = await api.sessions.timeline(session.control)
+            if (snapshot.agentSessionId !== sessionId) throw new Error('Work history returned a different Session. The original work surface is retained.')
+            // History belongs to the durable Session, so a new Run is allowed;
+            // a different Host must never receive the old request's late page.
+            const current = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.id === sessionId)
+            if (!current || current.control.hostId !== session.control.hostId) continue
+            const pendingBefore = get().agentSteerQueues[sessionId]
+            set((state) => {
+              const next = { ...state, ...reduceTimelineSnapshot(state, snapshot) }
+              return reconcile ? reconcileDeliveredSteers(next, sessionId) : next
+            })
+            if (reconcile && get().agentSteerQueues[sessionId] !== pendingBefore && !agentSteerDrains.has(sessionId)) {
+              void get().flushAgentSteerQueue(sessionId)
+            }
+          } catch (error) {
+            get().reportError(error, observationOnly ? { kind: 'indeterminate', subject: session.control,
+              summary: 'Work history could not be read. The original Session and work surface are kept; open Conversation records and Refresh source to retry.' } : undefined)
           }
         } while (entry.requested)
-      } catch (error) {
-        get().reportError(error)
       } finally {
         timelineResyncs.delete(sessionId)
       }
     })()
-    timelineResyncs.set(sessionId, entry)
     await entry.promise
   },
   applyEvent(event) {

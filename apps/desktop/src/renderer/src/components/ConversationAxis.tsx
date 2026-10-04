@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
+import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { conversationAxis, clusterConversationAxis, type ConversationAxisCluster, type RulerAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
@@ -73,7 +73,7 @@ export function ConversationAxis({
   /**
    * 指到（或聚焦到）一枚标记：交出这枚标记的**矩形**、它对应的那条 item、以及已解析好的身份名。
    *
-   * 交矩形而不是指针坐标：标记是个 24px 的圆形命中区，按指针锚定会让浮层在标记内部随指针漂移；
+   * 交矩形而不是指针坐标：标记使用 20×24px 的命中区，按指针锚定会让浮层在标记内部随指针漂移；
    * 按标记自身的矩形锚定，浮层与它所描述的那枚头像是固定关系。交名字是因为名字**已经**在这里解析
    * 过一次（`describe` 是轴的入参、button 的 aria-label 就是它）——让调用方再解析一遍就是把同一个
    * 判断复制到两处，两处必须逐字一致却各调一次。交 item 而不是已经取好的引文：「展示什么」是调用
@@ -96,7 +96,7 @@ export function ConversationAxis({
   return (
     <div
       className="conversation-axis"
-      style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px` } as CSSProperties}
+      style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px`, '--timeline-marker-height': `${TIMELINE_MARKER_HEIGHT}px` } as CSSProperties}
       role="group"
       aria-label={label}
       // Escape 关面板。挂在轴容器而不是每枚标记上：事件从聚焦的那枚标记冒上来，一处足够，而挂在
@@ -113,6 +113,7 @@ export function ConversationAxis({
     >
       {clusters.map((cluster) => cluster.members.length > 1 ? (
         <AxisCluster key={cluster.members[0]!.item.id} cluster={cluster} size={size}
+          anchorOffset={(cluster.anchorFraction - cluster.fraction) * width}
           describe={describe} conversationSessionId={conversationSessionId} recentFraction={recentFraction} selected={cluster.members.some(mark => mark.index === selectedIndex)}
           onSelect={onSelect} {...(onPeekEnd === undefined ? {} : { onPeekEnd })} />
       ) : (
@@ -120,6 +121,7 @@ export function ConversationAxis({
           key={cluster.members[0]!.item.id}
           mark={cluster.members[0]!}
           fraction={cluster.fraction}
+          anchorOffset={(cluster.anchorFraction - cluster.fraction) * width}
           size={size}
           describe={describe}
           recentFraction={recentFraction}
@@ -143,6 +145,7 @@ export function ConversationAxis({
 function AxisMark({
   mark,
   fraction,
+  anchorOffset,
   size,
   describe,
   selected,
@@ -153,6 +156,7 @@ function AxisMark({
 }: {
   mark: ConversationAxisMark
   fraction: number
+  anchorOffset: number
   recentFraction?: number | null
   size: number
   describe: DescribeSpeaker
@@ -192,6 +196,7 @@ function AxisMark({
           让读屏把同一个名字念两遍。`aria-hidden` 只作用在这一处包装，头像组件本身不动——它在对话
           正文里外层是纯 span，那里那份 aria-label 正是唯一的名字来源，删掉它会让正文的头像变成只有
           视觉能识别的身份。 */}
+      <MarkerStem offset={anchorOffset} />
       <span className="conversation-axis__glyph" aria-hidden="true">
         <AxisAvatar speaker={displaySpeaker} identity={identity} size={size} />
       </span>
@@ -199,8 +204,9 @@ function AxisMark({
   )
 }
 
-function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, conversationSessionId, recentFraction = 0 }: {
+function AxisCluster({ cluster, anchorOffset, size, describe, selected, onSelect, onPeekEnd, conversationSessionId, recentFraction = 0 }: {
   cluster: ConversationAxisCluster
+  anchorOffset: number
   recentFraction?: number | null
   conversationSessionId?: string | undefined
   size: number
@@ -215,6 +221,7 @@ function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, c
         style={{ left: `${cluster.fraction * 100}%` }} data-selected={selected ? '' : undefined}
         data-era={recentFraction === null ? undefined : cluster.members.every(mark => mark.fraction < recentFraction) ? 'history' : cluster.members.every(mark => mark.fraction >= recentFraction) ? 'recent' : 'mixed'}
         aria-label={`${cluster.members.length} messages; choose a record`}>
+        <MarkerStem offset={anchorOffset} />
         <span className="conversation-axis__count" aria-hidden="true">{cluster.members.length > 99 ? '99+' : cluster.members.length}</span>
       </button>
     </Menu.Trigger>
@@ -225,6 +232,11 @@ function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, c
       </Menu.Content>
     </Menu.Portal>
   </Menu.Root>
+}
+
+function MarkerStem({ offset }: { offset: number }) {
+  return Math.abs(offset) > .1 ? <span className="timeline-marker-stem" data-anchor-side={offset < 0 ? 'left' : 'right'}
+    style={{ left: `calc(50% + ${Math.min(0, offset)}px)`, width: `${Math.abs(offset)}px` }} aria-hidden="true" /> : null
 }
 
 /** Render excerpts only while the shared menu mounts its content. */

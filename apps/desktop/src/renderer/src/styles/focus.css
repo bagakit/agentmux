@@ -300,7 +300,7 @@
 .recent-focus__segment:hover, .recent-focus__segment:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .recent-focus__playhead { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 2; background: var(--blue); pointer-events: none; }
 .recent-focus__playhead--ruler::before { position: absolute; top: 0; left: -3px; width: 7px; height: 5px; background: var(--blue); clip-path: polygon(0 0, 100% 0, 50% 100%); content: ''; }
-.recent-focus__message { position: absolute; top: 0; z-index: 3; display: grid; place-items: center; box-sizing: border-box; width: var(--timeline-marker-size); height: var(--timeline-marker-size); padding: 0; transform: translateX(-50%); border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
+.recent-focus__message { position: absolute; top: 0; z-index: 3; display: grid; place-items: center; box-sizing: border-box; width: var(--timeline-marker-size); height: var(--timeline-marker-height); padding: 0; transform: translateX(-50%); border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; }
 .recent-focus__message-avatar { position: absolute; left: 2px; top: 2px; display: flex; }
 .recent-focus__message-direction { position: absolute; right: 0; bottom: 0; display: grid; place-items: center; width: 7px; height: 7px; border-radius: 2px; background: var(--surface-1); color: var(--text-2); font: 8px/1 var(--font-mono); }
 .recent-focus__message-count { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: var(--surface-3); font: 600 9px/1 var(--font-mono); font-variant-numeric: tabular-nums; }

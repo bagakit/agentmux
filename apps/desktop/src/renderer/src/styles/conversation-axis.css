@@ -17,7 +17,7 @@
 /* Absolute marks keep their original time positions; the row contains the full hit height. */
 .conversation-axis {
   position: relative;
-  height: var(--timeline-marker-size);
+  height: var(--timeline-marker-height);
 }
 
 /* A mark.
@@ -37,14 +37,10 @@
   border: 0;
   background: none;
   cursor: pointer;
-  /* Touch targets are far larger than mouse ones, so the hit area is grown around the 16px avatar
-     while the avatar itself stays 16px. `--sp-7` is 24px — the smallest target worth calling one;
-     `--sp-6` is 16px and would leave the hit area exactly the size of the content, i.e. no growth at
-     all while reading like a deliberate touch affordance. This is the mobile-portability requirement
-     met at the source rather than deferred, and it costs no layout because the button is absolutely
-     positioned and centred on its own centre. */
+  /* A compact horizontal target preserves author detail; the full vertical
+     hit height and original keyboard entry remain available. */
   width: var(--timeline-marker-size);
-  height: var(--timeline-marker-size);
+  height: var(--timeline-marker-height);
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -58,6 +54,13 @@
   display: inline-flex;
   transition: transform 120ms ease;
 }
+
+/* A locally displaced entry points back to its original event coordinate.
+   Shared by both consumers; it never participates in hit testing or packing. */
+.timeline-marker-stem { position: absolute; top: 22px; height: 1px; background: var(--text-3); opacity: .55; pointer-events: none; }
+.timeline-marker-stem::after { position: absolute; top: -2px; height: 3px; width: 1px; background: var(--text-3); content: ''; }
+.timeline-marker-stem[data-anchor-side='left']::after { left: 0; }
+.timeline-marker-stem[data-anchor-side='right']::after { right: 0; }
 
 .conversation-axis__mark:focus-visible {
   outline: none;

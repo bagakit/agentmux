@@ -83,7 +83,7 @@ export function conversationAxis(
   return marks
 }
 
-export type ConversationAxisCluster = { fraction: number; members: readonly ConversationAxisMark[] }
+export type ConversationAxisCluster = { fraction: number; anchorFraction: number; members: readonly ConversationAxisMark[] }
 
 /** Width affects density, never timestamps or original record identity. */
 export function clusterConversationAxis(marks: readonly ConversationAxisMark[], width: number): ConversationAxisCluster[] {
