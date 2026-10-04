@@ -430,14 +430,19 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
       case 'topic.create': {
         let topic = await this.requireTopic(p.topicId as string)
         if (topic) {
-          result = { topic: this.topicFact(topic, await this.spatialPort().inspect(topic)), diskDurability: 'confirmed' }; break
+          const original = await this.spatialPort().inspect(topic)
+          if (original.contentKind === 'topic') {
+            result = { topic: this.topicFact(topic, original), diskDurability: 'confirmed' }; break
+          }
+          if (topic.kind !== 'topic' || topic.readError)
+            throw new AgentMuxError('The original Topic content is unconfirmed. Repair its original metadata and retry creation with the same ID; its files and work remain available.', 'TOPIC_SCOPE_UNCONFIRMED')
         }
         const category = p.categoryId ? await this.readCategory(p.categoryId as string) : await this.ensureDefaultCategoryContent()
         await this.spatialPort().ensureCategory(category)
-        if (!topic) {
-          topic = await this.scratch.ensure(this.scope(), p.topicId as string, p.title as string)
-          await this.confirmTopicScaffold(topic)
-        }
+        // A failed spatial CAS can leave durable content without its Core registration.
+        // Ensure the same scaffold without replacing any already authored bytes.
+        topic = await this.scratch.ensure(this.scope(), p.topicId as string, p.title as string)
+        await this.confirmTopicScaffold(topic)
         const position = await this.spatialPort().ensureTopic(topic, category.categoryId)
         result = { topic: this.topicFact(topic, position), diskDurability: 'confirmed' }; break
       }
