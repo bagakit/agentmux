@@ -19,8 +19,8 @@ let intersections: Map<Element, (visible: boolean) => void>, changes: Set<() => 
 const baseline = useAppStore.getState()
 const cssSources = [
   ...['tokens', 'chrome'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css')),
-  ...['conversation-avatar', 'conversation-input-details'].map(name => resolve(import.meta.dirname, '../../../packages/client-ui/src/styles', name + '.css')),
-  ...['mote-workface', 'space-object-appearance'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css'))
+  ...['conversation-avatar', 'conversation-input-details', 'mote-identity'].map(name => resolve(import.meta.dirname, '../../../packages/client-ui/src/styles', name + '.css')),
+  ...['mote-workface', 'space-object-appearance', 'focus'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css'))
 ]
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); reduced = false; commits = 0; intersections = new Map(); changes = new Set(); frames = new Map()
@@ -145,14 +145,18 @@ it('neutral waiting and unknown blink while keeping brows and mouth, sleep keeps
 })
 it('the native owner retains the original 16px Space, 24px input details and 32px historical author slots and author surface', async () => {
   await mount(<><div data-space-slot><SpaceObjectIcon kind="mote" name="Space" manualIcon="book" /></div><div className="conversation-input-details__identity"><SpaceObjectIcon kind="mote" name="Details" manualIcon={null} /></div><ConversationMessageAvatar speaker={{ role: 'agent', id: 'original-agent' }} name="Original Mote" mote={{ workspaceId: 'scratch', topicId: 'custom', objectKey: 'same-original', name: 'Original Mote', icon: image }} /></>)
-  for (const [selector, size] of [['[data-space-slot]', '16px'], ['.conversation-input-details__identity', '24px'], ['[data-mote-author]', '32px']] as const) {
+  for (const [selector, size] of [['[data-space-slot]', '16px'], ['.conversation-input-details__identity', '24px']] as const) {
     const identity = container.querySelector(selector)!.querySelector<HTMLElement>('.project-rail-row__icon')!
     expect(identity.classList.contains('project-rail-row__icon')).toBe(true)
     expect(getComputedStyle(identity).width).toBe(size); expect(getComputedStyle(identity).height).toBe(size)
   }
-  const author = container.querySelector('[data-mote-author] > .project-rail-row__icon')!
-  expect(getComputedStyle(author).overflow).toBe('hidden'); expect(getComputedStyle(author).borderTopWidth).toBe('1px')
-  expect(getComputedStyle(author).backgroundColor).toBeTruthy()
+  // Historical Motes now compose the original round speaker mark, not the project badge.
+  const author = container.querySelector<HTMLElement>('[data-mote-author] > [data-speaker-avatar="mote"]')!
+  expect(getComputedStyle(author).width).toBe('32px'); expect(getComputedStyle(author).height).toBe('32px')
+  expect(getComputedStyle(author).overflow).toBe('hidden'); expect(getComputedStyle(author).borderRadius).toBe('50%')
+  const asset = author.querySelector<HTMLElement>('.space-object-icon')!
+  expect(getComputedStyle(asset).width).toBe('100%'); expect(getComputedStyle(asset).height).toBe('100%')
+  expect(getComputedStyle(asset).overflow).toBe('hidden')
 })
 it('historical message identities and explicitly hidden assets remain static across all appearance sources', async () => {
   const expression = vi.spyOn(expressionAuthority, 'moteExpression')
