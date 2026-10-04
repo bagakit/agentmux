@@ -4,7 +4,12 @@ import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from './session-history.js'
-import type { AgentProviderSessionHistoryContext } from './types.js'
+import { randomUUID } from 'node:crypto'
+import parser from 'stream-json/parser.js'
+import Assembler from 'stream-json/assembler.js'
+import type { Token } from 'stream-json/parser.js'
+import { materializeNativeContent, type NativeContentRange } from './native-history-content.js'
+import type { AgentProviderSessionHistoryContext, AgentSessionHistoryItem } from './types.js'
 
 type Cursor = {
   version: 1
@@ -45,7 +50,7 @@ function decodeCursor(text: string): Cursor {
   }
 }
 
-/** Synchronous reservation and bounded physical byte reading shared across all page readers. */
+/** Bounded physical allocations. Total scan IO follows the related source; it is not a lifetime quota. */
 export async function readNativeHistoryBytes(
   file: FileHandle,
   position: number,
@@ -60,8 +65,8 @@ export async function readNativeHistoryBytes(
   if (!Number.isSafeInteger(position) || position < 0 || !Number.isSafeInteger(length) || length < 0) {
     failure('INVALID_TRANSCRIPT', 'Native transcript read range is invalid.')
   }
-  if (budget.bytesRead + length > SESSION_HISTORY_MAX_PAGE_BYTES) {
-    failure('TOO_LARGE', 'Reading this native history page exceeds its byte budget.')
+  if (length > SESSION_HISTORY_MAX_PAGE_BYTES) {
+    failure('TOO_LARGE', 'A native history physical read exceeds its allocation budget.')
   }
   budget.bytesRead += length
   const data = Buffer.alloc(length)
@@ -87,7 +92,18 @@ export class NativeJsonlHistoryReader {
   private cacheStart = 0
   private head = ''
   private tail = ''
+  private readonly permitsPartialTail: boolean
   readonly continuation: string | undefined
+  private readonly contentRanges = new Map<string, NativeContentRange>()
+
+  /** Child physical sources remain contributed by their Provider, under the same semantic source. */
+  adoptContent(reader: NativeJsonlHistoryReader): void {
+    for (const [marker, range] of reader.contentRanges) this.contentRanges.set(marker, range)
+  }
+
+  materializeItem(item: AgentSessionHistoryItem): Promise<AgentSessionHistoryItem> {
+    return materializeNativeContent(this.context, item, this.contentRanges)
+  }
 
   private constructor(
     private readonly context: AgentProviderSessionHistoryContext,
@@ -98,6 +114,7 @@ export class NativeJsonlHistoryReader {
     budget: NativeHistoryReadBudget
   ) {
     this.budget = budget
+    this.permitsPartialTail = cursor === undefined
     this.identity = { dev, ino }
     this.cut = cursor?.cut ?? size
     this.position = cursor?.before ?? size
@@ -167,28 +184,71 @@ export class NativeJsonlHistoryReader {
     return this.cache
   }
 
-  private parse(data: Buffer, partialTail = false): Record<string, unknown> | null {
+  /** Streaming tokens retain small metadata while large strings stay at their exact physical extent. */
+  private async parseRange(start: number, end: number, partialTail = false): Promise<Record<string, unknown> | null> {
+    const assembler = new Assembler<unknown>(), stream = parser.asStream({ packKeys: true, streamKeys: false,
+      packStrings: false, streamStrings: true, packNumbers: true, streamNumbers: false })
+    const strings: Array<{ start: number; end: number }> = []
+    let quoted = false, escaped = false, stringIndex = 0, value = '', valueBytes = 0, big = false, currentRange: { start: number; end: number } | undefined
+    let retainedBytes = 0, parserError: unknown
     const decoder = new TextDecoder('utf-8', { fatal: true })
-    let text: string
+    stream.on('error', error => { parserError = error })
+    stream.on('data', (token: Token) => {
+      try {
+        if (token.name === 'keyValue') { stringIndex++; retainedBytes += Buffer.byteLength(token.value); assembler.consume(token) }
+        else if (token.name === 'startString') { currentRange = strings[stringIndex++]; value = ''; valueBytes = 0; big = false }
+        else if (token.name === 'stringChunk') {
+          if (!big) {
+            value += token.value
+            valueBytes += Buffer.byteLength(token.value)
+            if (valueBytes > SESSION_HISTORY_MAX_PAGE_BYTES / 2) { value = ''; big = true }
+          }
+        } else if (token.name === 'endString') {
+          if (big || currentRange && currentRange.end - currentRange.start > SESSION_HISTORY_MAX_PAGE_BYTES / 2) {
+            if (!currentRange || currentRange.end <= currentRange.start) return failure('INVALID_TRANSCRIPT', 'A native string extent is incomplete.')
+            value = `__AMUX_CONTENT_${randomUUID().replaceAll('-', '')}__`
+            this.contentRanges.set(value, { path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
+              head: this.head, tail: this.tail, start: currentRange.start, end: currentRange.end })
+          }
+          retainedBytes += Buffer.byteLength(value)
+          assembler.consume({ name: 'stringValue', value })
+        } else { retainedBytes += 16; assembler.consume(token) }
+        if (retainedBytes > SESSION_HISTORY_MAX_PAGE_BYTES) failure('TOO_LARGE', 'Native history metadata exceeds its materialization budget.')
+      } catch (error) { parserError = error; stream.destroy(error as Error) }
+    })
     try {
-      // Stream decoding rejects malformed UTF-8 immediately; only flush can reveal an unfinished suffix.
-      text = decoder.decode(data, { stream: true })
-    } catch {
-      return failure('INVALID_TRANSCRIPT', 'Native transcript contains malformed UTF-8.')
-    }
-    try { text += decoder.decode() } catch {
+      await this.verifyUnchanged()
+      for (let position = start; position < end; position += 64 * 1024) {
+        const bytes = await this.read(position, Math.min(64 * 1024, end - position))
+        // Locate JSON string lexemes without interpreting JSON or retaining their content.
+        for (let index = 0; index < bytes.length; index++) {
+          const byte = bytes[index]!
+          if (!quoted) {
+            if (byte === 34) { quoted = true; escaped = false; strings.push({ start: position + index, end: 0 }) }
+          } else if (escaped) escaped = false
+          else if (byte === 92) escaped = true
+          else if (byte === 34) { quoted = false; strings[strings.length - 1]!.end = position + index + 1 }
+        }
+        let text: string
+        try { text = decoder.decode(bytes, { stream: true }) }
+        catch { return failure('INVALID_TRANSCRIPT', 'Native transcript contains malformed UTF-8.') }
+        await new Promise<void>((resolve, reject) => stream.write(text, error => error ? reject(error) : resolve()))
+        if (parserError) throw parserError
+        // Consumed lexeme positions need not grow with a record's ordinary small strings.
+        if (stringIndex > 1024) { const consumed = stringIndex - (quoted ? 1 : 0); strings.splice(0, consumed); stringIndex -= consumed }
+      }
+      const tail = decoder.decode()
+      await new Promise<void>((resolve, reject) => { stream.once('finish', resolve); stream.once('error', reject); stream.end(tail) })
+      if (parserError) throw parserError
+      if (!assembler.done || !assembler.current || typeof assembler.current !== 'object' || Array.isArray(assembler.current))
+        return failure('INVALID_TRANSCRIPT', 'Native transcript contains a complete non-object record.')
+      return assembler.current as Record<string, unknown>
+    } catch (error) {
+      this.context.signal.throwIfAborted()
+      if (error instanceof AgentMuxError) throw error
       if (partialTail) return null
-      return failure('INVALID_TRANSCRIPT', 'Native transcript contains unfinished UTF-8 in a complete line.')
-    }
-    let value: unknown
-    try { value = JSON.parse(text) } catch {
-      if (partialTail) return null
-      return failure('INVALID_TRANSCRIPT', 'Native transcript contains an invalid complete JSON record.')
-    }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return failure('INVALID_TRANSCRIPT', 'Native transcript contains a complete non-object record.')
-    }
-    return value as Record<string, unknown>
+      return failure('INVALID_TRANSCRIPT', 'Native transcript contains an invalid complete UTF-8 JSON record.')
+    } finally { stream.destroy() }
   }
 
   /** Latest complete record first. A partial append at EOF is excluded from this snapshot. */
@@ -200,26 +260,24 @@ export class NativeJsonlHistoryReader {
       let block = await this.blockEndingAt(at)
       const terminated = block[block.length - 1] === 10
       if (terminated) { at--; block = block.subarray(0, -1) }
-      const chunks: Buffer[] = []
       let start = 0
       while (true) {
         const newline = block.lastIndexOf(10)
         if (newline >= 0) {
           start = this.cacheStart + newline + 1
-          chunks.unshift(block.subarray(newline + 1))
           break
         }
-        chunks.unshift(block)
         at = this.cacheStart
         if (at === 0) break
         block = await this.blockEndingAt(at)
       }
       this.position = start
-      const data = Buffer.concat(chunks)
-      if (data.length === 0) continue
-      const value = this.parse(data, !terminated && end === this.cut && this.head === '')
+      const recordEnd = terminated ? end - 1 : end
+      if (recordEnd === start) continue
+      const value = await this.parseRange(start, recordEnd, !terminated && end === this.cut && this.permitsPartialTail)
       if (value === null) {
         this.cut = start
+        this.head = ''; this.tail = ''
         continue
       }
       this.lastRecordEnd = end
@@ -239,16 +297,14 @@ export class NativeJsonlHistoryReader {
 
   /** Provider format identity/header check; does not move the backwards page position. */
   async readFirst(): Promise<Record<string, unknown> | null> {
-    const chunks: Buffer[] = []
     let position = 0
     while (position < this.cut) {
       const block = await this.read(position, Math.min(64 * 1024, this.cut - position))
       const newline = block.indexOf(10)
-      chunks.push(newline < 0 ? block : block.subarray(0, newline))
-      if (newline >= 0) return this.parse(Buffer.concat(chunks))
+      if (newline >= 0) return await this.parseRange(0, position + newline)
       position += block.length
     }
-    return chunks.length ? this.parse(Buffer.concat(chunks)) : null
+    return position ? await this.parseRange(0, position) : null
   }
 
   private async fingerprints(): Promise<{ head: string; tail: string }> {

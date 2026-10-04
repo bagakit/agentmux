@@ -103,6 +103,7 @@ import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { readRecordedImage } from './session-history-resource-read.js'
+import { isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
@@ -2396,8 +2397,9 @@ export class AgentMuxClient {
         throw new AgentMuxError('This Provider does not expose native conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
       }
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
+      const contentSigningSecret = (await read(loadAgentSessions(this.store))).find(value => value.agentSessionId === agentSessionId)?.hookToken
       const page = await read(provider.readSessionHistoryPage({
-        source, limit, signal: controller.signal,
+        agentSessionId, ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), source, limit, signal: controller.signal,
         command: resolveAgentExecutable(options.commandOverride, provider.executable),
         args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
         ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
@@ -2412,7 +2414,7 @@ export class AgentMuxClient {
     }
   }
 
-  /** Read only an image part freshly located in the original native source; never read a caller path. */
+  /** Read exact recorded content in its original native source; caller fields never authorize a path. */
   async sessionHistoryResource(agentSessionId: string, input: AgentSessionHistoryResourceReadOptions): Promise<AgentSessionHistoryResourceReadResult> {
     const checked = parseSessionHistoryResourceOptions(input)
     input = { ...checked, source: { ...checked.source },
@@ -2424,13 +2426,46 @@ export class AgentMuxClient {
     const cancel = (): void => controller.abort(input.signal?.reason)
     input.signal?.addEventListener('abort', cancel, { once: true })
     try {
-      const binding = await read(this.nativeHistoryBinding(agentSessionId, input, controller.signal, 'read'))
+      const retained = await read(this.historyDescriptor(agentSessionId))
+      const previous = retained.history?.previousNativeHandle
+      const matchesPrevious = previous?.providerId === input.source.providerId && previous.sessionId === input.source.nativeSessionId &&
+        retained.history?.nativeHandle?.sessionId !== input.source.nativeSessionId
+      const binding = await read(this.nativeHistoryBinding(agentSessionId, { ...input, ...(matchesPrevious ? { nativeSource: 'previous' as const } : {}) }, controller.signal, 'read'))
       const { session, provider, handle } = binding
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
       if (source.providerId !== input.source.providerId || source.nativeSessionId !== input.source.nativeSessionId)
         throw new AgentMuxError('The resource belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       const identity = { agentSessionId, source, ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
         recordId: input.recordId, partIndex: input.partIndex }
+      if (isNativeContentReference(input.expectedReference)) {
+        const contentSigningSecret = (await read(loadAgentSessions(this.store))).find(value => value.agentSessionId === agentSessionId)?.hookToken
+        const context = { agentSessionId, ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), source, signal: controller.signal,
+          command: resolveAgentExecutable(input.commandOverride, provider.executable), args: input.args ?? [], env: input.env ?? {},
+          workspacePath: session.workspacePath, ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }
+        let authorizedReference = input.expectedReference
+        if (nativeContentNeedsRevalidation(input.expectedReference, contentSigningSecret)) {
+          // The original credential may have been retired or replaced. The Provider reissues the
+          // exact record; untrusted old paths never authorize physical IO.
+          let cursor: string | undefined
+          for (;;) {
+            const page = await read(provider.readSessionHistoryPage!({ ...context, limit: 100, ...(cursor === undefined ? {} : { cursor }) }))
+            const item = page.items.find(value => value.id === input.recordId && value.turnId === input.turnId)
+            if (item) {
+              const part = item.contentParts[input.partIndex]
+              if (part?.kind !== 'resource' || part.resourceType !== 'text') throw new AgentMuxError('The original native content is no longer the same resource.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+              revalidateNativeContentReference(input.expectedReference, part.reference, contentSigningSecret)
+              authorizedReference = part.reference; break
+            }
+            if (!page.nextCursor) throw new AgentMuxError('The original native record is no longer present.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+            if (page.nextCursor === cursor) throw new AgentMuxError('The native Provider did not advance the exact-record search.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
+            cursor = page.nextCursor
+          }
+        }
+        const result = await read(readNativeContentResource(context, { ...input, expectedReference: authorizedReference }))
+        await read(binding.assertCurrent())
+        return { ...identity, reference: input.expectedReference, result }
+      }
+      if (input.offsetBytes !== undefined) throw new AgentMuxError('Images do not accept a text-content offset.', 'INVALID_AGENT_SESSION_HISTORY_RESOURCE')
       if (!provider.readSessionHistoryRecord) return { ...identity, reference: input.expectedReference,
         result: { status: 'unavailable', code: 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED',
           message: 'This Provider cannot locate an exact native record. The original resource reference remains available.' } }

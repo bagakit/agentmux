@@ -763,7 +763,9 @@ export type AgentSessionHistoryContentPart =
   | { kind: 'text'; text: string;
       /** Provider-owned reading span in the original text, using UTF-16 indices. Copy keeps text complete. */
       readingRange?: { start: number; end: number } }
-  | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other'; reference: string; label?: string }
+  | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other' | 'text'; reference: string; label?: string;
+      /** Exact serialized semantic part, retained at the original source and read in bounded fragments. */
+      content?: { encoding: 'json-utf8'; kind: 'text' | 'reasoning' | 'tool-call' | 'tool-result' | 'resource'; byteLength: number; sha256: string } }
   | { kind: 'reasoning'; text: string; signature?: string; redacted?: boolean }
   | { kind: 'tool-call'; name: string; input: string; callId?: string }
   | { kind: 'tool-result'; output: string; name?: string; callId?: string; failed?: boolean }
@@ -901,6 +903,10 @@ export type AgentProviderNativeSessionDiscovery = {
 }
 
 export type AgentProviderSessionHistoryContext = {
+  /** Core identity of the original reader, when invoked through a Core Session. */
+  agentSessionId?: string
+  /** Existing private Session credential for domain-separated content signatures; never a public locator. */
+  contentSigningSecret?: string
   source: AgentSessionHistorySource
   /** Exact locator captured from this Session's durable native handle; never guessed from a home directory. */
   transcriptPath?: string
@@ -913,15 +919,17 @@ export type AgentProviderSessionHistoryContext = {
   signal: AbortSignal
 }
 
-/** An exact recorded image; expectedReference compares the re-read part and never authorizes a path. */
+/** Exact recorded content; expectedReference compares the original part and never authorizes a caller path. */
 export type AgentSessionHistoryResourceRequest = {
   source: AgentSessionHistorySource
   turnId?: string
   recordId: string
   partIndex: number
   expectedReference: string
-  /** May only reduce the fixed 16 MiB image byte budget. */
+  /** May only reduce the fixed image budget; text fragments use at most 128 KiB. */
   maxBytes?: number
+  /** Byte position in the exact serialized text part. Images do not accept an offset. */
+  offsetBytes?: number
 }
 export type AgentSessionHistoryResourceReadOptions = AgentSessionHistoryResourceRequest & Pick<AgentSessionHistoryPageOptions,
   'signal' | 'commandOverride' | 'args' | 'env'>
@@ -934,6 +942,8 @@ export type AgentSessionHistoryResourceReadResult = {
   reference: string
   label?: string
   result: { status: 'read'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; dataBase64: string; byteLength: number }
+    | { status: 'fragment'; encoding: 'json-utf8'; dataBase64: string; byteLength: number;
+        offsetBytes: number; totalBytes: number; sha256: string; nextOffsetBytes: number | null }
     | { status: 'unavailable'; code: string; message: string }
 }
 

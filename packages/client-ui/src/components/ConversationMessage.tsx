@@ -1,6 +1,7 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
+import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { Check, ChevronRight, Copy, CornerDownRight } from 'lucide-react'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
@@ -11,6 +12,7 @@ import { ConversationInputDetails } from './ConversationInputDetails.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
+import { ConversationResourceText } from './ConversationResourceText.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationAnnotationSelection } from '../lib/conversation-annotation.js'
@@ -119,6 +121,7 @@ export function ConversationMessage({
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
+  const completeCopy = useRef<AbortController | null>(null)
   const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -126,7 +129,8 @@ export function ConversationMessage({
     : content
   const hasContent = parts.some(partHasRenderableContent)
   const hasCopyContent = copyText === undefined ? parts.some((part) => partText(part).length > 0) : copyText.length > 0
-  const isTraceOnly = parts.length > 0 && parts.every((part) => part.kind !== 'text' || part.text.trim().length === 0)
+  const isTraceOnly = parts.length > 0 && parts.every((part) =>
+    part.kind === 'text' ? part.text.trim().length === 0 : !(part.kind === 'resource' && part.resourceType === 'text' && part.content?.kind === 'text'))
   const speaker = recordedSpeaker ? recordedIdentity ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
@@ -158,6 +162,7 @@ export function ConversationMessage({
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [copyReadError, setCopyReadError] = useState<string | null>(null)
   const [idCopyState, setIdCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const activeCopyActionRef = useRef(0)
   const copyTimerRef = useRef<number | null>(null)
@@ -186,7 +191,7 @@ export function ConversationMessage({
     onSelectAnnotation({ messageId, quote, range: range.cloneRange(), contextElement: start })
   }
 
-  async function copyValue(text: string, target: 'message' | 'agent-id'): Promise<void> {
+  async function copyValue(text: string, target: 'message' | 'agent-id', signal?: AbortSignal): Promise<void> {
     const setResult = target === 'agent-id' ? setIdCopyState : setCopyState
     setCopyState('idle')
     setIdCopyState('idle')
@@ -199,13 +204,13 @@ export function ConversationMessage({
     let accepted = false
     try {
       accepted = (target === 'message' && onCopy ? await onCopy(text) : await platform.copyText(text, () => {
-        if (activeCopyActionRef.current === actionId) setResult('failed')
+        if (!signal?.aborted && activeCopyActionRef.current === actionId) setResult('failed')
       })) === true
     } catch {
       // The client owns error feedback; an unknown clipboard result never becomes success.
       accepted = false
     }
-    if (activeCopyActionRef.current !== actionId) return
+    if (signal?.aborted || activeCopyActionRef.current !== actionId) return
     if (accepted) {
       setResult('copied')
       copyTimerRef.current = window.setTimeout(() => {
@@ -219,9 +224,32 @@ export function ConversationMessage({
     }
   }
 
-  function copyMessage(): Promise<void> {
-    return copyValue(copyText ?? parts.map(partText).filter((t) => t.length > 0).join('\n'), 'message')
+  async function copyMessage(): Promise<void> {
+    setCopyReadError(null)
+    completeCopy.current?.abort()
+    const controller = new AbortController(); completeCopy.current = controller
+    try {
+      // An explicit whole-message Copy retains every original part, including deferred bodies.
+      const complete: AgentSessionHistoryContentPart[] = []
+      for (const [index, part] of parts.entries()) {
+        controller.signal.throwIfAborted()
+        if (part.kind !== 'resource' || part.resourceType !== 'text') complete.push(part)
+        else {
+          if (!readHistoryResource || !nativeResourceRecord) throw new Error('Complete recorded content is not available. Retry from the original history.')
+          complete.push(await readSessionHistoryTextResource(part, index, nativeResourceRecord, readHistoryResource, controller.signal))
+        }
+      }
+      controller.signal.throwIfAborted()
+      await copyValue(complete.some((part, index) => part !== parts[index])
+        ? complete.map(partText).filter(t => t.length > 0).join('\n')
+        : copyText ?? complete.map(partText).filter(t => t.length > 0).join('\n'), 'message', controller.signal)
+    } catch (error) { if (!controller.signal.aborted) {
+      setCopyState('failed'); setCopyReadError(error instanceof Error ? error.message : 'Complete recorded content could not be read. Retry.')
+    } }
   }
+
+  useEffect(() => () => { completeCopy.current?.abort() }, [messageId, content, readHistoryResource, nativeResourceRecord?.recordId,
+    nativeResourceRecord?.source.providerId, nativeResourceRecord?.source.nativeSessionId, nativeResourceRecord?.turnId])
 
   useEffect(() => {
     ++activeCopyActionRef.current
@@ -229,6 +257,7 @@ export function ConversationMessage({
     copyTimerRef.current = null
     setCopyState('idle')
     setIdCopyState('idle')
+    setCopyReadError(null)
   }, [messageId, agentReference?.speaker.id])
 
   useEffect(() => { setSystemContextOpen(false) }, [messageId])
@@ -308,7 +337,7 @@ export function ConversationMessage({
         {hasCopyContent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
           {messageActions}
           {copyState === 'failed' ? (
-            <span className="log-turn__copy-error" role="alert">Copy failed</span>
+            <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'}</span>
           ) : null}
           {hasCopyContent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
@@ -370,6 +399,9 @@ export function ConversationMessage({
                 {...(readPastedImage ? { readPastedImage } : {})}
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
+            ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
+              <ConversationResourceText key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown}
+                {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceImage key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
             ) : <div key={key} className="log-turn__resource">

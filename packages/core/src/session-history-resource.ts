@@ -10,7 +10,7 @@ const MAX_DIMENSION = 16_384
 const MAX_REFERENCE_CHARS = Math.ceil(SESSION_HISTORY_IMAGE_MAX_BYTES / 3) * 4 + 128
 export type AgentSessionHistoryResourceParams = AgentSessionHistoryResourceRequest & { hostId: string; agentSessionId: string }
 export type AgentSessionHistoryResourceResult = AgentSessionHistoryResourceReadResult & { hostId: string }
-const requestFields = ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes'] as const
+const requestFields = ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'] as const
 function invalid(message: string, code = 'INVALID_AGENT_SESSION_HISTORY_RESOURCE'): never { throw new AgentMuxError(message, code) }
 function exactString(value: unknown, name: string, code: string, max = 16_384): asserts value is string {
   if (typeof value !== 'string' || !value || value.length > max || /[\0\r\n]/u.test(value)) invalid(`${name} requires an exact bounded string.`, code)
@@ -27,6 +27,7 @@ export function parseSessionHistoryResourceOptions(value: unknown): AgentSession
   if (!Number.isSafeInteger(p.partIndex) || (p.partIndex as number) < 0) invalid('A resource requires its exact content-part index.', code)
   if (p.maxBytes !== undefined && (!Number.isSafeInteger(p.maxBytes) || (p.maxBytes as number) < 1 || (p.maxBytes as number) > SESSION_HISTORY_IMAGE_MAX_BYTES))
     invalid('Image maxBytes may only reduce the fixed 16 MiB budget.', code)
+  if (p.offsetBytes !== undefined && (!Number.isSafeInteger(p.offsetBytes) || (p.offsetBytes as number) < 0)) invalid('Content offset must be a nonnegative safe byte position.', code)
   if (p.signal !== undefined && !(p.signal instanceof AbortSignal)) invalid('Resource cancellation requires an AbortSignal.', code)
   if (p.commandOverride !== undefined) exactString(p.commandOverride, 'Executor command', code)
   if (p.args !== undefined && (!Array.isArray(p.args) || p.args.some(arg => typeof arg !== 'string' || arg.includes('\0')))) invalid('Executor args must be strings.', code)
@@ -114,6 +115,18 @@ export function parseSessionHistoryResourceResult(value: unknown, expected: Agen
     catch { invalid('Recorded resource bytes or MIME are invalid.', code) }
     if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 ||
       imageBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, String(result.mimeType)).status !== 'read') invalid('Recorded resource bytes or MIME are invalid.', code)
+  } else if (result.status === 'fragment') {
+    rpcRecord(result, ['status', 'encoding', 'dataBase64', 'byteLength', 'offsetBytes', 'totalBytes', 'sha256', 'nextOffsetBytes'], code)
+    const max = expected.maxBytes ?? 64 * 1024
+    if (result.encoding !== 'json-utf8' || max > 128 * 1024 || typeof result.dataBase64 !== 'string' ||
+      result.dataBase64.length > Math.ceil(max / 3) * 4 || !Number.isSafeInteger(result.byteLength) || (result.byteLength as number) < 1 ||
+      result.offsetBytes !== (expected.offsetBytes ?? 0) || !Number.isSafeInteger(result.totalBytes) ||
+      (result.totalBytes as number) < (result.offsetBytes as number) + (result.byteLength as number) ||
+      typeof result.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(result.sha256)) invalid('Text content fragment exceeds its exact read scope.', code)
+    const bytes = decodeBase64(result.dataBase64)
+    const after = (result.offsetBytes as number) + bytes.length
+    if (bytes.length !== result.byteLength || bytes.length > max || encodeBase64(bytes) !== result.dataBase64 ||
+      result.nextOffsetBytes !== (after === result.totalBytes ? null : after)) invalid('Text content fragment has an invalid continuation.', code)
   } else invalid('Resource read has an unknown status.', code)
   return p as AgentSessionHistoryResourceResult
 }
