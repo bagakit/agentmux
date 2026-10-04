@@ -18,8 +18,8 @@ export function steerQueueCanDrainNow(
   return steerQueueCanEverDrain(session.processState) && !session.pendingInteraction
 }
 
-// Semantic resume preserves Session identity but replaces the Run. Retain old messages for
-// copying/removal; never silently replay their intent into the new Run.
+// Background consumption keeps the bound Run. Only a fresh explicit Send may rebind a
+// never-dispatched intent in the queue owner; recovery alone never grants input authority.
 export function steerEntryTargetsRun(entry: { runId?: string }, runId: string): boolean {
   return entry.runId === runId
 }
