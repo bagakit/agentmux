@@ -1840,6 +1840,12 @@ function retiredHistoryReferenceIds(sources: readonly AgentSessionHistoryDescrip
   })))
 }
 
+/** Presentation of the original startup producer, never a second Runtime fact. */
+function startupNoticeSummary(remainingMessage: string | null, unconfirmedReferences = 0): string {
+  if (unconfirmedReferences) return `${unconfirmedReferences} saved Session reference(s) have unconfirmed Runtime state. Original Regions remain visible.${remainingMessage ? ' Other startup checks need review.' : ''} See Details for recovery.`
+  return 'Startup checks need attention. Original work surfaces remain visible; see Details for failures and recovery actions.'
+}
+
 function missingSavedRuntimeFactsNotice(count: number): string {
   return `${count} saved Session reference(s) have no current Runtime facts. Their Regions remain visible; retry recovery when the Runtime can confirm them.`
 }
@@ -1952,10 +1958,10 @@ function startSessionMembershipResync(
               resolvedStartupNotice = {
                 error: source.remainingMessage,
                 lastError: source.remainingMessage,
-                errorNoticeContext: null
+                errorNoticeContext: source.remainingMessage ? { kind: 'indeterminate', summary: startupNoticeSummary(source.remainingMessage) } : null
               }
             } else if (source.missingRuntimeFacts && unresolved.length !== source.sessionIds.length) {
-              const updated = { ...notice, startupSessionSnapshot: { ...source, sessionIds: unresolved } }
+              const updated = { ...notice, summary: startupNoticeSummary(source.remainingMessage, unresolved.length), startupSessionSnapshot: { ...source, sessionIds: unresolved } }
               entry.startupNotice = updated
               const message = [source.remainingMessage, missingSavedRuntimeFactsNotice(unresolved.length)].filter(Boolean).join(' ')
               resolvedStartupNotice = { error: message, lastError: message, errorNoticeContext: updated }
@@ -3412,13 +3418,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         loading: false,
         error: startupError || null,
         lastError: startupError || null,
-        errorNoticeContext: emptySessionSnapshotWarning ? {
+        errorNoticeContext: startupError ? {
           kind: 'indeterminate',
-          startupSessionSnapshot: {
+          summary: startupNoticeSummary(otherStartupError || null, emptySessionSnapshotWarning ? (missingRuntimeReferenceIds ?? [...persistedSessionIds]).length : 0),
+          ...(emptySessionSnapshotWarning ? { startupSessionSnapshot: {
             sessionIds: missingRuntimeReferenceIds ?? [...persistedSessionIds],
             remainingMessage: otherStartupError || null,
             ...(missingRuntimeReferenceIds ? { missingRuntimeFacts: true as const } : {})
-          }
+          } } : {})
         } : null,
         errorDismissed: false
       })
