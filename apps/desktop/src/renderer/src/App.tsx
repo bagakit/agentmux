@@ -336,7 +336,7 @@ function DesktopApp() {
       append(focusTab.id, {
         hostId: focusProjection.entity.kind === 'region' ? workbenchRegionProjectionSlotId(`${focusProjection.presentationId}-slot`, reference) : workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
         active: focusVisible, visible: focusVisible, surface: 'focus', retainedRegionId: reference.regionId,
-        headerPortalTargetId: 'focus-workspace-slot-header', projection: focusProjection, reference,
+        projection: focusProjection, reference,
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
       })
     }
