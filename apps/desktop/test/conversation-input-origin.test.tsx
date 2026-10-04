@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, agentPromptCondition, type AgentMessageChannel, type AgentOperationDevice, type AgentSessionHistoryPage, type AgentSessionUserMessage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source'
+import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
@@ -77,7 +78,7 @@ describe('One recorded input origin across common reading surfaces',()=>{
   const message=projectSessionUserMessages({agentSessionId:'native-agent',historyPage:native.page})[0]!
   expect(message.author).toEqual({kind:'unknown'});expect(message.source.kind).toBe('native')
   await dom.render(<ConversationView page={native.page} sessionId="native-agent" executionHostId={receivingHost}/>)
-  expect(dom.container.querySelector('.log-turn__input-source')!.textContent).toBe('原生记录 · 来源未记录')
+  expect(dom.container.querySelector('.log-turn__input-source')!.textContent).toBe('原生 - 未知来源')
   await openInfo();expect(fact(dom.container,'输入渠道')).toBe('渠道未记录');expect(fact(dom.container,'发送设备')).toBe('未记录');expect(fact(dom.container,'来源 Host')).toBe('未记录');expect(fact(dom.container,'当前执行 Host')).toBe(receivingHost)
  })
  it('keeps legacy missing channel and device unknown with no receiver fallback or extra IO',async()=>{
@@ -101,7 +102,9 @@ describe('One recorded input origin across common reading surfaces',()=>{
   await dom.render(<ActivityView {...activityReadingProps({ ...props, visible: false })} />);expect(dom.container.querySelector('.log-turn__text')).toBe(body);expect(read).toHaveBeenCalledTimes(1)
  })
  it('passes public input origin and the receiving Context through actual Focus without a reader',async()=>{
-  const{message}=await submit('api')
+  const{message:input,timeline}=await submit('api')
+  const message=projectConversationRecords({agentSessionId:'agent-1',executionHostId:receivingHost,timeline}).find(record=>record.input?.id===input.id)!
+  expect(message,'Actual shared record for public captured input').toBeDefined()
   const read=vi.spyOn(api.sessions,'historyPage')
   const recipient:FocusContext={id:'agent-1',hostId:receivingHost,name:'Builder',detail:'Original',state:'running',stateLabel:'Running',processState:'running',bucket:'working',kind:'agent',providerId:'claude',topicId:null,workspaceId:'project',workspaceName:'Project',workspacePath:_hygiene_fixturePath("repo"),liveAgent:true,actionable:true,lastActivityAt:null,runId:'run-agent-1',workingEnteredAt:null,workspace:undefined,recap:null,detailIsRecap:false}
   const anchor=document.createElement('button'),frame=document.createElement('div');frame.className='recent-focus';const header=document.createElement('div');header.className='recent-focus__header';frame.append(header,anchor);document.body.append(frame)
@@ -109,7 +112,7 @@ describe('One recorded input origin across common reading surfaces',()=>{
  })
  it('preserves the original body, Range and draft through details and unrelated output',async()=>{
   const{message}=await submit('terminal');await dom.render(card(message))
-  const body=dom.container.querySelector('.log-turn__text')!,text=body.firstChild!.firstChild!,range=document.createRange();range.setStart(text,0);range.setEnd(text,8);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range)
+  const body=dom.container.querySelector('.log-turn__text')!,text=body.querySelector('.md-paragraph')!.firstChild!,range=document.createRange();range.setStart(text,0);range.setEnd(text,8);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range)
   const before=selection.toString();expect(before).toBe('Original')
   await openInfo();expect(dom.container.querySelector('.log-turn__text')).toBe(body);expect(selection.toString()).toBe(before)
   await dom.render(<>{card(message)}<ConversationMessage messageId="unrelated" content="Unrelated output"/></>);expect(dom.container.querySelector('.log-turn__text')).toBe(body);expect(selection.toString()).toBe(before);expect(dom.draft()).toBe('Keep my draft')
