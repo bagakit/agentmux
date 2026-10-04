@@ -1,0 +1,38 @@
+.mote-directory { display: grid; align-content: start; gap: var(--sp-1); min-width: 0; }
+.mote-directory-archive.icon-button { display: inline-flex; flex: 0 0 auto; width: auto; min-width: 30px; height: 24px; padding: 0 4px; gap: 3px; color: var(--text-3); }
+.mote-directory-archive span, .mote-chooser__archive span { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.mote-directory-archive[aria-pressed="true"] { background: var(--surface-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.mote-directory .mote-directory-more.icon-button { display: inline-flex; opacity: .55; pointer-events: auto; }
+.mote-directory-more.icon-button:hover, .mote-directory-more.icon-button:focus-visible { opacity: 1; }
+.mote-directory-current { flex: 0 0 auto; color: var(--text-2); }
+.mote-directory[data-mote-directory-view="collaborators"] { grid-template-columns: repeat(auto-fill, minmax(min(84px, 100%), 1fr)); gap: 5px 3px; padding: 5px 2px 2px; }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-entry { min-width: 0; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry { position: relative; display: block; min-width: 0; }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row { position: relative; display: flex; flex-direction: column; align-items: center; gap: 7px; min-height: 100px; padding: 8px 5px 7px; text-align: center; border-radius: var(--radius); }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row :is(.space-object-icon, .mote-identity-motion) { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 50%; }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row .space-object-icon { overflow: hidden; background: var(--surface-2); }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row :is(.space-object-icon__avatar, .mote-face, .space-object-icon > svg) { width: 100%; height: 100%; }
+.mote-directory[data-mote-directory-view="collaborators"] .space-object-icon__avatar { object-fit: cover; border-radius: 50%; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-row__identity { flex: 0 0 auto; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-row__identity strong { width: 100%; font-size: 11px; line-height: 1.35; }
+.mote-directory[data-mote-directory-view="collaborators"] .mote-directory-more.icon-button { position: absolute; right: 1px; top: 1px; width: 20px; height: 22px; opacity: 0; }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-entry:is(:hover, :focus-within) .mote-directory-more { opacity: 1; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry > :is(.space-pin, .space-mote-edit) { display: none; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry > .project-activity { position: absolute; right: 7px; bottom: 29px; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-row--active { box-shadow: inset 0 0 0 1px var(--line), var(--hl); }
+.mote-directory[data-mote-directory-view="collaborators"] .mote-directory-current { position: absolute; left: 5px; top: 5px; }
+.mote-directory-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
+.mote-directory-settings > label { min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: var(--radius); cursor: pointer; }
+.mote-directory-settings > label[data-selected="true"] { background: var(--surface-2); border-color: var(--focus-line); }
+.mote-directory-settings > label:focus-within { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.mote-directory-settings__preview { height: 68px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.mote-directory-settings__preview > span { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.mote-directory-settings__preview i { display: block; width: 27px; height: 27px; border-radius: 50%; background: var(--text-3); opacity: .6; }
+.mote-directory-settings__preview b { display: block; width: 24px; height: 3px; border-radius: 2px; background: var(--text-3); opacity: .45; }
+.mote-directory-settings__preview[data-view="list"] { flex-direction: column; gap: 5px; }
+.mote-directory-settings__preview[data-view="list"] > span { flex-direction: row; gap: 8px; }
+.mote-directory-settings__preview[data-view="list"] i { width: 13px; height: 13px; }
+.mote-directory-settings__preview[data-view="list"] b { width: 54px; }
+.mote-directory-settings__choice { display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--text-2); font-size: var(--fs-meta); }
+.mote-directory-settings__choice input { margin: 0; accent-color: var(--accent); }
+.mote-directory-settings > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
