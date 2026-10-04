@@ -172,7 +172,7 @@ describe('attachment geometry across asynchronous replay', () => {
   it('connects the geometry owner to TerminalView before the first replay write', () => {
     const source = readFileSync(new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url), 'utf8')
     const begin = source.indexOf('viewport.beginReplay()')
-    const adopt = source.indexOf('viewport.acceptOwnerSize(step.checkpoint.size)')
+    const adopt = source.indexOf('viewport.acceptOwnerSize(checkpoint.restoreSize)')
     const replay = source.indexOf('cursor = await hydrateTerminalReplay([step], writeOutput)')
     const end = source.indexOf('viewport.endReplay(hasReplay)')
     expect(begin).toBeGreaterThan(-1)
