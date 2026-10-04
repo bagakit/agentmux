@@ -37,11 +37,13 @@ beforeEach(async () => {
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic, mote])
+  vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (_workspace, id) => [topic, mote].find(value => value.id === id) ?? null)
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: 'data:image/png;base64,automatic' })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   dispose = await useAppStore.getState().initialize()
   expect(useAppStore.getState().loading).toBe(false)
   await prepareRendererUpdate()
+  useAppStore.setState({ projectRailOpen: true, collapsedProjectGroups: {} })
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
 afterEach(async () => {
@@ -55,7 +57,8 @@ async function mount(children: ReactNode = <><WorkspaceSidebar /><WorkspaceTopic
   await act(async () => root.render(children))
 }
 function row(key: string, overview = false) {
-  const scope = overview ? container.querySelector('.workspace-topic-list') : container.querySelector('.project-rail')
+  // Ordinary Topic leaves now live in the original overview; the Space tree lists categories.
+  const scope = overview || key === topicTarget.key ? container.querySelector('.workspace-topic-list') : container.querySelector('.project-rail')
   expect(scope).not.toBeNull()
   const rows = [...scope!.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
   expect(rows.length).toBeGreaterThan(0)
@@ -92,8 +95,8 @@ function storedIcons() { return JSON.parse(localStorage.getItem('agentmux-workbe
 
 it.each(['F10', 'ContextMenu'] as const)('opens live object menus with %s and returns focus to the current object after Escape', async key => {
   await mount()
-  const targets = [row(moteTarget.key), row(topicTarget.key), row(folderTarget.key), row(topicTarget.key, true)]
-  expect(targets).toHaveLength(4)
+  const targets = [row(moteTarget.key), row(folderTarget.key), row(topicTarget.key, true)]
+  expect(targets).toHaveLength(3)
   for (const target of targets) {
     target.focus()
     await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === 'F10', bubbles: true })))
@@ -108,23 +111,24 @@ it.each(['F10', 'ContextMenu'] as const)('opens live object menus with %s and re
   }
 })
 
-it('changes real Mote, Topic and Folder rows through their actual menus and shares Topic identity with the overview', async () => {
+it('changes real Mote, Topic and Folder rows through their current menus and retains the original Topic identity', async () => {
   await mount()
   const targets = [moteTarget, topicTarget, folderTarget]
   expect(targets).toHaveLength(3)
   for (const target of targets) {
     await menuFor(target.key)
+    if (target.avatarTarget) await click('Icon or image')
     const choices = document.querySelectorAll('[data-space-icon-choice]')
     expect(choices).toHaveLength(Object.keys(SPACE_ICON_CATALOG).length)
     expect(choices.length).toBeGreaterThan(0)
-    await click('Book icon'); await click(target.avatarTarget ? 'Save avatar' : 'Save icon')
+    await click('Book icon'); await click(target.avatarTarget || target.imageTarget ? 'Save avatar' : 'Save icon')
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(manual(target.key)?.dataset.spaceIcon).toBe('book')
   }
   expect(manual(topicTarget.key, true)?.dataset.spaceIcon).toBe('book')
   expect(storedIcons()).toEqual({ [moteTarget.key]: 'book', [topicTarget.key]: 'book', [folderTarget.key]: 'book' })
   await menuFor(topicTarget.key, true)
-  await click('Compass icon'); await click('Save icon')
+  await click('Compass icon'); await click('Save avatar')
   expect(manual(topicTarget.key)?.dataset.spaceIcon).toBe('compass')
   expect(manual(topicTarget.key, true)?.dataset.spaceIcon).toBe('compass')
   expect(document.activeElement).toBe(row(topicTarget.key, true))
@@ -139,7 +143,7 @@ it('leaves cancellation untouched and Restore automatic removes exactly one auth
   expect(storedIcons()).toEqual({ [moteTarget.key]: 'brain', [topicTarget.key]: 'book' })
   expect(manual(topicTarget.key)?.dataset.spaceIcon).toBe('book')
   await menuFor(topicTarget.key)
-  await click('Restore automatic'); await click('Save icon')
+  await click('Restore automatic'); await click('Save avatar')
   expect(storedIcons()).toEqual({ [moteTarget.key]: 'brain' })
   expect(manual(topicTarget.key)).toBeNull()
   expect(row(topicTarget.key).querySelector('[data-space-icon-source="automatic"]')).not.toBeNull()
@@ -175,7 +179,7 @@ it.each(['localStorage', 'platform'] as const)('keeps the actual picker draft op
   await click('Book icon')
   if (failure === 'localStorage') vi.spyOn(window.localStorage, 'setItem').mockImplementationOnce(() => { throw new Error('quota unavailable') })
   else vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('storage owner unconfirmed'))
-  await click('Save icon')
+  await click('Save avatar')
   expect(document.querySelector('[role="dialog"]')).not.toBeNull()
   expect(document.querySelector('.space-icon-picker [role="alert"]')?.textContent).toContain('Your choice is kept')
   expect(button('Book icon').getAttribute('aria-pressed')).toBe('true')

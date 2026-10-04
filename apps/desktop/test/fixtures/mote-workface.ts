@@ -24,7 +24,7 @@ export const moteConfig: AppConfig = {
 export function moteTopic(id: string, title: string, soul: boolean): ScratchTopicSnapshot {
   const directoryPath = _hygiene_fixturePath("topics/") + scratchTopicDirectoryName(id)
   return { id, title, directoryPath, topicPath: directoryPath + '/topic.md', summary: '', collaborators: [],
-    ...(soul ? { soul: { path: directoryPath + '/SOUL.md', content: '# Identity', version: 'v1' } } : {}) }
+    ...(soul ? { soul: { path: directoryPath + '/SOUL.md', content: '# Identity', version: 'v1' }, moteArchive: { state: 'active', version: 'fixture-active' } as const } : {}) }
 }
 export const moteTopics = [moteTopic(PMO_TEAMS_TOPIC_ID, 'Mote', true), moteTopic(customMoteId, 'Analyst with a long persistent name', true),
   moteTopic(quietMoteId, 'Quiet collaborator', true), moteTopic(ordinaryTopicId, 'Ordinary Topic', false)]
@@ -54,10 +54,13 @@ export const ordinaryTab = { ...createWorkbenchTab('ordinary-tab', { kind: 'agen
   regionId: 'ordinary-region', sessionId: ordinaryAgent.id }, 'Execution Topic'), topicId: ordinaryTopicId }
 export const moteTabs = Object.fromEntries([defaultTab, neighborTab, customTab, quietTab, ordinaryTab].map(tab => [tab.id, tab]))
 export function seedMoteWorkface({ directory = true }: { directory?: boolean } = {}): void {
+  // This seed is a new observation. An advisory boot read still in flight must
+  // not publish its earlier catalog over the fixture's confirmed object set.
+  const revision = (useAppStore.getState().workspaceFileRevisions[SCRATCH_WORKSPACE_ID] ?? 0) + 1
   useAppStore.setState({ config: moteConfig, sessions: moteSessions, tabs: moteTabs,
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', Object.keys(moteTabs)), project: createWorkspaceLayout('project-group') },
-    workspaceFileRevisions: {}, scratchTopicSnapshots: directory ? { [SCRATCH_WORKSPACE_ID]: {
-      scope: scratchTopicsScope(scratchWorkspace), revision: 0, topics: moteTopics, error: null, reading: false
+    workspaceFileRevisions: { [SCRATCH_WORKSPACE_ID]: revision }, scratchTopicSnapshots: directory ? { [SCRATCH_WORKSPACE_ID]: {
+      scope: scratchTopicsScope(scratchWorkspace), revision, topics: moteTopics, error: null, reading: false
     } } : {},
     timelines: {}, agentNames: {}, viewModes: {}, demands: {}, recoveryCandidates: [], pendingAgentLaunches: {},
     activeWorkspaceId: 'project', mainSurface: 'board', projectRailOpen: false, toolsOpen: false,

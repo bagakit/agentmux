@@ -53,7 +53,8 @@ export function createMoteApp() {
   useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id)
   const listTopics = vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(moteTopics)
   const ensureMote = vi.spyOn(api.scratch, 'ensureMote').mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id)!)
-  vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id) ?? null)
+  // The real read and list ports describe the same current filesystem catalog.
+  vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (workspace, id) => (await listTopics(workspace)).find(topic => topic.id === id) ?? null)
   const container = document.createElement('div'); document.body.append(container)
   let root = createRoot(container)
   const panel = () => {
