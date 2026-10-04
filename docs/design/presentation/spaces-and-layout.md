@@ -128,6 +128,7 @@ Branch／Worktree 与 Topic 沿同一控件语言选择原工作面；资源身�
 - Tool Dock header 与相邻顶行对齐。非交互品牌标记不进入功能按钮组。
 - Space tools 的工具图标已经表达当前选择，不在活动栏尾部再重复一份 `Files + Branches` 或 `Agents` 标题；图标的选中 treatment、tooltip 与可访问名称保留完整身份。该行右端只放当前工具的明确创建动作：Agents 使用可读 `+` 和完整可访问名，Files 沿现有 New File / New Folder 控件；不增一条通用创建栏。上下文行说明当前目录或工作线，不重复工具名称，长绝对路径进入 tooltip，不靠多层标题消耗树的可视高度。Browser 管理沿同一紧凑控件语言在当前内容旁可达，不为工具入口另叠标题或强制切换 Survey；入口归属只引用交互合同。创建作用域与失败恢复合同引用 interaction[《顶部与项目栏》](../behavior/spaces-and-layout.md#顶部与项目栏)。
 - Tab DOM 始终保留在自己的 Pane owner 下；顶行合并不得改变 DnD、split 或 focus 的状态归属。
+- 空工作面的初始内容、说明与恢复服务窗留在所属右侧内容区，位于原 Tabbar 下方；恢复告示不占 Tabs 上方，不再叠一条重复状态行。确认空 Zone 与未知恢复的行为归[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)，复用原初始 Launcher 与服务窗的密度和动作语言。
 - Workspace/Project 切换不以卸载 DOM 换取密度：非当前 Workbench 使用隐藏与停工状态保留 xterm/TUI attachment，回访时不出现 `Restoring terminal…` 或二次 loading；只有 Region/Workbench 真正关闭才销毁实例。窗口重启后的布局与 Session 恢复约束归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)。
 - 隐藏的 Workbench 或 Region 保留原分割节点与比例，分割手柄停止输入注册，不拦截其它可见工作面的指针或键盘；恢复可见后沿原手柄调整比例。
 - 资源密度采用有限 hot-retain：活动与近期使用的重资源 surface 保持 warm，长期隐藏或超过预算的 surface 才允许 cold-park；跨 Workspace 隐藏的 Workbench 仍保持 warm，避免项目切换制造二次 replay。具体保活/重建约束归交互合同，见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)；本层只要求内存回收不能靠额外常驻缓存、不能让隐藏 surface 继续执行高频工作，并以同场景 owner count 与 working-set before/after 证明收益。

@@ -4918,7 +4918,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         space = { zoneId, spaceId }
         // Topic home is a resource context. A temporary Zone linked to that Topic still uses its
         // original Workspace root and never inherits the active Group's unrelated Topic.
-        topicId = zone.kind === 'home' ? catalog.spaces.find(item => item.spaceId === spaceId)?.topicId : undefined
+        // Category is the display Space; Topic identity remains on its original Zone.
+        // It must not be inferred from a Category's title or a suppressed content Space.
+        const originalTopics = zone.kind === 'home' ? topics.filter(topic =>
+          topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories)?.zoneId === zoneId) : []
+        topicId = originalTopics.length === 1 ? originalTopics[0]!.id
+          : zone.kind === 'home' ? state.spaceZoneBindings[zoneId]?.topicId ?? catalog.spaces.find(item => item.spaceId === spaceId)?.topicId : undefined
       } catch (error) { get().reportError(error); return }
     } else {
       topicId = isScratchWorkspaceId(workspaceId)
@@ -6698,10 +6703,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             [workspace.id]: activateLayoutTab(layout, choice.groupId, choice.tabId) } } : {})
         }
       }
-      // A confirmed empty Mote is an empty discussion surface, not missing discovery.
-      if (scratchTopicKind(snapshot!.id, [snapshot!]) === 'mote' && mayReveal) return { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
-        workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null },
-        retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
+      // Selecting an existing confirmed empty Topic/Zone does not create work.
+      // Explicit createScratchTopic/newTab owns the first durable surface.
+      if (objectChoice && !catalog.tabs.some(tab => tab.zoneId === address.zoneId)) return mayReveal
+        ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
+          workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null },
+          retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
+        : current
       const tab = { ...newLauncherTab(workspace.id), topicId, space: address }
       const nextLayout = addTabPlacement(layout, layout.activeGroupId, tab.id)
       if (!nextLayout) {
