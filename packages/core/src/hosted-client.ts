@@ -1,7 +1,7 @@
 import { randomClientRequestId } from './client-request-id.js'
 import { AgentMuxError } from './errors.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
-import type { AgentMuxClientEvent, AgentMuxAgentSession, AgentMuxRunAttachment, AgentMuxRunRef,
+import type { AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxAgentSession, AgentMuxRunAttachment, AgentMuxRunRef,
   AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle, AgentSessionHistoryObservationOptions } from './types.js'
 import { AGENTMUX_HOSTED_METHODS, type AgentMuxHostedClient, type AgentMuxHostedRpcPort,
   type AgentMuxHostedBootstrap, type AgentMuxHostedMethod, type AgentMuxHostedInvocation,
@@ -530,7 +530,7 @@ export async function connectHostedAgentMux(options: {
       if (finalFence) await rpc.call('runtime.release-consumer', { consumerId, fence: finalFence }).catch(() => {})
       attached.clear()
     },
-    onEvent: (listener: (event: AgentMuxClientEvent) => void) => publisher.onEvent(listener)
+    onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(listener, options)
   }
   for (const method of AGENTMUX_HOSTED_METHODS) client[method] = async (...args: unknown[]) => {
     if (method === 'releaseRunAttachment') {
