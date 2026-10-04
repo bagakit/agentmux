@@ -304,8 +304,12 @@ export class AgentMuxRpcService {
       }
       await this.authenticated(context)
       const targets = (await this.clients()).filter(entry => entry.hostId === input.hostId)
-      if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       context.signal?.throwIfAborted()
+      if (!targets.length && this.ports.forwardControl) {
+        const result = await this.ports.forwardControl<HostSettingsMethod>(method, input, context)
+        return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+      }
+      if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
       await client.connect()
       if (method === 'settings.executors.discover') {
