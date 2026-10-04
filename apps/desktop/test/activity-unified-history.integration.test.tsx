@@ -58,6 +58,11 @@ async function click(label: string) {
  expect(button, label).toBeDefined(); expect(button!.disabled, label).toBe(false)
  await act(async () => button!.click()); await flush()
 }
+async function wheel(deltaY = -100, scrollTop = 0) {
+ const viewport = container.querySelector<HTMLElement>('.activity-feed')!
+ expect(viewport).not.toBeNull(); viewport.scrollTop = scrollTop
+ await act(async () => { viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY })) }); await flush()
+}
 function ids(): string[] {
  const thread = container.querySelector('.conversation-native-thread')!
  expect(thread).not.toBeNull()
@@ -109,6 +114,87 @@ afterEach(async () => {
 })
 
 describe('One Activity reading surface over public original-sequence windows', () => {
+ it('reads from the current Conversation on the first upward wheel, continues original pages and stops at their end', async () => {
+  await seed(); await render(pane())
+  expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
+  const current = ids(), visited = new Set(current)
+  expect(current.at(-1)).toBe('record-359'); const before = requests.length
+  await wheel()
+  expect(requests.length).toBeGreaterThan(before); expect(ids()[0]).toBe('record-270')
+  ids().forEach(id => visited.add(id))
+  for (let page = 0; page < 9; page++) {
+   await wheel(); const actual = ids()
+   expect(actual).toEqual(Array.from({ length: 90 }, (_, n) => `record-${String(n + 240 - page * 30).padStart(3, '0')}`))
+   expect(new Set(actual).size).toBe(actual.length); actual.forEach(id => visited.add(id))
+  }
+  expect(visited.size).toBe(360)
+  const ended = requests.length; await wheel(); await wheel()
+  expect(requests).toHaveLength(ended); expect(requests.every(read => read.limit === 30)).toBe(true)
+  expect(useAppStore.getState().sessions[0]!.control).toEqual(control)
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('ORIGINAL UNSENT DRAFT')
+ })
+ it('does not read on downward or non-top wheel, hidden surfaces, or a second wheel during the same pending page', async () => {
+  await render(compose()); const before = requests.length
+  await wheel(100); await wheel(-100, 81)
+  expect(requests).toHaveLength(before)
+  await render(compose(false)); await wheel()
+  expect(requests).toHaveLength(before); await render(compose())
+  let release!: (page: AgentSessionHistoryPage) => void
+  const page = recent!.nativeHistoryPage!, pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!; viewport.scrollTop = 0
+  await act(async () => {
+   viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
+   viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
+  })
+  expect(requests).toHaveLength(before + 1); expect(requests.at(-1)!.cursor).toBe(page.nextCursor)
+  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30, cursor: page.nextCursor! }))); await flush()
+  expect(ids()).toHaveLength(90); expect(requests).toHaveLength(before + 2)
+ })
+ it('preserves the current original body, expanded trace, Range and visible anchor through the first wheel prepend', async () => {
+  await render(compose())
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!, body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
+  expect(body).not.toBeNull(); const row = body.closest<HTMLElement>('[data-native-record-id]')!
+  viewport.getBoundingClientRect = () => rect(100, 200); row.getBoundingClientRect = () => rect(110)
+  const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
+  trace.open = true; const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Reply 353')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
+  await wheel()
+  expect(ids()).toHaveLength(90); expect(body.isConnected).toBe(true); expect(trace.open).toBe(true)
+  expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Reply')
+  expect(conversationReadingAnchor(viewport)).toEqual({ kind: 'record', id: 'record-353', offset: 10 })
+  expect(viewport.scrollTop).toBe(0)
+ })
+ it('retains the current records and opaque cursor after a first-wheel read failure, then explicitly retries that original page', async () => {
+  await render(compose()); const before = ids(), page = recent!.nativeHistoryPage!, count = requests.length
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce(async (_reference, options) => { requests.push(options ?? {}); throw new Error('Private read unavailable') })
+  await wheel()
+  expect(ids()).toEqual(before); expect(requests.at(-1)!.cursor).toBe(page.nextCursor)
+  expect(container.textContent).toContain('Private read unavailable'); await flush(); expect(requests).toHaveLength(count + 1)
+  await click('Retry'); expect(ids()).toHaveLength(90)
+  expect(requests[count + 1]!.cursor).toBe(page.nextCursor)
+ })
+ it('uses the same wheel navigation with actual public indexed stdio history and its opaque cursor', async () => {
+  const script = join(home, 'indexed-history.mjs'), log = join(home, 'indexed-requests.jsonl')
+  await writeFile(script, `import{appendFileSync}from'node:fs';import{createInterface}from'node:readline';
+const records=Array.from({length:120},(_,n)=>({turnId:'turn-'+n,item:{type:n%2?'agentMessage':'userMessage',id:'indexed-'+n,...(n%2?{text:'Reply '+n}:{content:[{type:'text',text:'Input '+n}]})}}));
+createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);appendFileSync(${JSON.stringify(log)},line+'\\n');const send=result=>process.stdout.write(JSON.stringify({id:r.id,result})+'\\n');if(r.method==='initialize')send({userAgent:'private-indexed-reader'});else if(r.method==='thread/read')send({thread:{id:${JSON.stringify(native)},historyMode:'paginated',turns:[]}});else if(r.method==='thread/items/list'){const end=r.params.cursor?Number(r.params.cursor):records.length,start=Math.max(0,end-r.params.limit);send({data:records.slice(start,end).reverse(),nextCursor:start?String(start):null})}});`)
+  const next = { ...stored, providerId: 'codex', executorId: 'codex', nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: native }, updatedAt: 2 }
+  await store.compareAndSwap(stored, next); stored = next; originalStore = await readFile(join(home, 'sessions.json'))
+  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
+   expect(reference.agentSessionId).toBe(sid); requests.push(options ?? {})
+   const promise = client.sessionHistoryPage(sid, { ...options, commandOverride: process.execPath, args: [script] }); promises.push(promise); return promise
+  })
+  const current = await client.sessionHistoryPage(sid, { limit: 30, commandOverride: process.execPath, args: [script] })
+  expect(current.source).toEqual({ providerId: 'codex', nativeSessionId: native }); expect(current.nextCursor).not.toBeNull()
+  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
+  await wheel(); expect(ids()).toEqual(Array.from({ length: 90 }, (_, n) => `indexed-${n + 30}`))
+  await wheel(); expect(ids()).toEqual(Array.from({ length: 90 }, (_, n) => `indexed-${n}`))
+  const count = requests.length; await wheel(); expect(requests).toHaveLength(count)
+  const actual = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(request => request.method === 'thread/items/list')
+  expect(actual.map(request => request.params)).toEqual([undefined, '90', '60', '30'].map(cursor => ({ threadId: native, sortDirection: 'desc', limit: 30, ...(cursor ? { cursor } : {}) })))
+ })
  it('continues beyond 290 records and a 201-process burst without losing raw pages or moving shared recent facts', async () => {
   await render(compose())
   const currentIds = recent!.nativeHistoryPage!.items.map(item => item.id)
@@ -193,7 +279,8 @@ describe('One Activity reading surface over public original-sequence windows', (
   if (process.env.AGENTMUX_UNIFIED_GAP_OBSERVATIONS) await writeFile(process.env.AGENTMUX_UNIFIED_GAP_OBSERVATIONS, JSON.stringify({ windowIncomplete: recent!.windowIncomplete, recentIds: recent!.nativeHistoryPage!.items.map(item => item.id), currentIds: current, resultingIds: actual, ordinals, gaps: ordinals.flatMap((n, index) => index && n !== ordinals[index - 1]! + 1 ? [{ before: ordinals[index - 1], after: n }] : []), requests, controls: controls.map(spy => spy.mock.calls.length) }, null, 2))
   expect(ordinals).toEqual(Array.from({ length: ordinals.length }, (_, n) => ordinals[0]! + n))
   expect(ordinals[0]).toBeLessThan(rawIds[0]!)
-  expect(recent!.nativeHistoryPage).toBe(original)
+  if (process.env.AGENTMUX_UNIFIED_RECENT_FACTS) await writeFile(process.env.AGENTMUX_UNIFIED_RECENT_FACTS, JSON.stringify({ before: original, after: recent!.nativeHistoryPage }))
+  expect(recent!.nativeHistoryPage).toStrictEqual(original)
   await click('Current'); expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
  })
  it('enters an original earlier window from an unselected context-only anchor, while selected context and real raw anchors keep their protection', async () => {
@@ -281,7 +368,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
   const head = viewport.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
   const count = head.querySelector<HTMLElement>('.log-fold__steps')!
-  expect(count.textContent).toBe('34 steps')
+  expect(count.textContent).toBe('34 步')
   const range = document.createRange(); range.setStart(count.firstChild!, 0); range.setEnd(count.firstChild!, 2)
   window.getSelection()!.addRange(range); viewport.getBoundingClientRect = () => rect(0, 200); head.getBoundingClientRect = () => rect(10)
   const before = ids(); await click('Earlier')
@@ -374,10 +461,10 @@ describe('One Activity reading surface over public original-sequence windows', (
   await render(compose()); await click('Earlier'); await click('Earlier'); await click('Earlier'); await click('Earlier')
   const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!
   const label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
-  expect(label.textContent).toBe('Process')
+  expect(label.textContent).toBe('执行过程')
   const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
   const before = ids(); await click('Current')
-  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Process')
+  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('执行过程')
   window.getSelection()!.removeAllRanges(); await click('Current'); expect(ids().at(-1)).toBe('record-359')
  })
  it('restores a retained folded group using its observation identity when prepend changes its raw-member list', async () => {
