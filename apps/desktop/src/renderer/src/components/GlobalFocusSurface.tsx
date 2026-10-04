@@ -33,8 +33,12 @@ import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
 
-export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, visible: hostVisible = true }: {
+export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, workspaceOpen, onCloseWorkspace, onSelectContext, onSelectLocation, visible: hostVisible = true }: {
   visible?: boolean
+  workspaceOpen?: boolean
+  onCloseWorkspace?: (() => void) | undefined
+  onSelectContext?: ((id: string, reference?: import('../lib/workbench-projection').WorkbenchProjectionSelection) => void) | undefined
+  onSelectLocation?: import('../lib/workbench-projection').WorkbenchProjection['onSelect'] | undefined
   presentation?: ExecutionFocusPresentation
   regionOnly?: boolean | undefined
   onToggleRegion?: (() => void) | undefined
@@ -59,6 +63,9 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const projection = presentation?.projection ?? null
   const selectedTab = projection?.selection.length === 1 ? tabs[projection.selection[0]!.tabId] ?? null : null
+  const activeSurface = projection?.selection[0] && selectedTab?.regions[projection.selection[0].regionId]
+  const shownSessionId = activeSurface && (activeSurface.kind === 'agent' || activeSurface.kind === 'terminal') ? activeSurface.sessionId : null
+  const showWorkspace = workspaceOpen ?? Boolean(projection || presentation?.issue || selectedId)
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
@@ -72,7 +79,8 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const catalogue = useFocusHistorySources(visible)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const focusRegion = useAppStore(state => state.focusRegion)
-  const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
+  const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
+  const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<FocusColumn | 'all'>('all')
@@ -82,13 +90,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const searchRef = useRef<HTMLInputElement | null>(null)
-  const closeWorkspaceReturnRef = useRef(false)
-  const closeWorkspace = () => { closeWorkspaceReturnRef.current = true; focusExecutionSession(null) }
-  useEffect(() => {
-    if (!closeWorkspaceReturnRef.current) return
-    closeWorkspaceReturnRef.current = false
-    if (selectedId === null) searchRef.current?.focus()
-  }, [selectedId])
+  const closeWorkspace = () => { onCloseWorkspace?.(); searchRef.current?.focus() }
   const focusLayoutRef = useRef<HTMLDivElement | null>(null)
   const resizingFocusRef = useRef(false)
   const adjustWorkspaceRatio = (next: number) => setWorkspaceRatio(Math.min(0.76, Math.max(0.38, next)))
@@ -117,7 +119,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
     ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.recap?.text ?? ''} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
   const filtered = matching.filter(row => bucketFilter === 'all' || columnFor(row) === bucketFilter)
-  const selected = executionRows.find(row => row.id === selectedId)
+  const selected = executionRows.find(row => row.id === shownSessionId)
   const filteredIds = new Set(filtered.map(row => row.id))
   const focusProjectLanes = allLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
   const rowsById = new Map(filtered.map(row => [row.id, row]))
@@ -202,13 +204,13 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
-            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
+            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })
     }</FocusLaneGroups> : null}</>
   }
-  return <section className={`global-board-surface global-focus-surface ${selectedId ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" style={{ '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
-    <FocusToolbar selectedId={selectedId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(selectedId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
+  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" style={{ '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)` } as CSSProperties}>
+    <FocusToolbar selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -256,7 +258,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         }
         focusPmoSession(id)
         const region = tab && Object.values(tab.regions).find(region => region.kind === 'agent' && region.sessionId === id)
-        if (tab && region && tab.layout.activeRegionId !== region.regionId) focusRegion(tab.workspaceId, tab.id, region.regionId)
+        if (tab && region && tab.layout.activeRegionId !== region.regionId) focusRegion(tab.workspaceId, tab.id, region.regionId, 'floating-pointer')
         requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), onReturnFocus: () => {
           if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
         } })
@@ -272,7 +274,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         </div>
       </div>}
       </div>
-    {selectedId ? <><div
+    {showWorkspace ? <><div
       className="focus-workspace-resize-handle"
       role="separator"
       tabIndex={0}
@@ -310,7 +312,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
               const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
               const groupIndex = layout ? groupIds(layout.root).indexOf(reference.groupId) : -1
               const regionIndex = tab ? regionIds(tab.layout.root).indexOf(reference.regionId) : -1
-              return <button type="button" className="small-button focus-location-choice" key={JSON.stringify(reference)} onClick={() => focusExecutionSession(selectedId, reference)}
+              return <button type="button" className="small-button focus-location-choice" key={JSON.stringify(reference)} onClick={() => onSelectLocation ? onSelectLocation(reference) : selectedId ? focusExecutionSession(selectedId, reference) : undefined}
                 title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
                 <strong>{tab?.name ?? reference.tabId}</strong>
                 <small>{config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? reference.displayWorkspaceId}

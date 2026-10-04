@@ -142,10 +142,10 @@ export function regionCaretFocusTargets(
 }
 
 /** Keep surviving source leaves readable without selecting a replacement Agent. */
-export function layoutForLogicalRegionFocus(layout: WorkspaceLayout, tabs: Record<string, WorkbenchTab>, retained?: { regionId: string; tabId: string } | null): WorkspaceLayout {
+export function layoutForLogicalRegionFocus(layout: WorkspaceLayout, tabs: Record<string, WorkbenchTab>, retained?: { regionId: string; tabId: string; groupId?: string } | null): WorkspaceLayout {
   if (!retained) return layout
   const source = tabs[retained.tabId]
-  const sourceGroup = source && layout.groups.find(group => group.tabOrder.includes(source.id))
+  const sourceGroup = source && layout.groups.find(group => (!retained.groupId || group.id === retained.groupId) && group.tabOrder.includes(source.id))
   if (sourceGroup) return { ...layout, activeGroupId: sourceGroup.id,
     groups: layout.groups.map(group => group.id === sourceGroup.id ? { ...group, activeTabId: source!.id } : group) }
   return { ...layout, groups: layout.groups.map(group => group.id === layout.activeGroupId ? { ...group, activeTabId: null } : group) }

@@ -45,7 +45,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   [sessionId, origin, reference.displayWorkspaceId])
   const fileContext = useAppStore(selectFileContext)
   const [service, setService] = useState<string | null>(null)
-  const linkOpening = useSessionLinkOpening(origin, setService, selectRegion)
+  const linkOpening = useSessionLinkOpening(origin, setService, selectRegion, target)
   const openProjectFile = linkOpening.activateFile
   const linkRequest = linkOpening.request
   const openProseLink = linkOpening.activateHttp

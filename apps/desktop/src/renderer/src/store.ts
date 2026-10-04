@@ -27,6 +27,7 @@ import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } fr
 import type { EditorRegionMode } from './lib/file-region-presentation'
 import { effectiveFileRegionMode } from './lib/file-region-presentation'
 import { prepareFileSurface } from './lib/file-surface-loading'
+import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
@@ -36,7 +37,8 @@ import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
-import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import type { WorkbenchPresentation } from './lib/workbench-presentation'
+import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
@@ -602,8 +604,8 @@ type AppState = {
   setFocusTimelineHeight(height: number): void
   focusTimelineRuler: FocusRulerPreferences
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
-  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection): void
-  selectExecutionFocusReference(reference: WorkbenchProjectionSelection, expected: Pick<AgentFocusContext['execution'], 'sessionId' | 'reference'>): void
+  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection): boolean
+  selectMainRegion(reference: WorkbenchProjectionSelection, expected?: AgentMuxDesktopSpaceSelection | null): boolean
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
@@ -996,9 +998,10 @@ type AppState = {
     launcher?: { tabId: string; regionId: string },
     url?: string,
     bookmarkOrigin?: { path: string; binary: boolean },
-    requestedWorkspaceId?: string
+    requestedWorkspaceId?: string,
+    requestedDisplayWorkspaceId?: string
   ): Promise<void>
-  openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination): Promise<void>
+  openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination, presentation?: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'>): Promise<void>
   /**
    * 把一个页面存成 `.webloc` 书签，落在 workspace 根下。文件名由标题派生并做撞名退避
    * （`Name.webloc`、`Name 2.webloc`…），返回落地的相对路径。取消（about:blank）或全部候选都撞名
@@ -2764,7 +2767,10 @@ export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise
 
 export function fileNavigationSelection(state: AppState): string {
   // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
-  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyNotebookId, state.surveyNoteId, state.surveyZoneSelection])
+  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyNotebookId, state.surveyNoteId, state.surveyZoneSelection, state.workbenchSpaceSelection])
+  const reference = mainRegionReference(state.workbenchSpaceSelection)
+  if (reference) return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection,
+    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.surveyZoneSelection])
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
@@ -2987,6 +2993,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const surveyZoneSelection = persistedSurveyZoneSelection(selection)
     // Re-emitting the current member preference is a refresh, not later navigation.
     if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
+    if (selection?.active) {
+      const state = get(), active = selection.active as Partial<WorkbenchProjectionSelection>
+      const locations = workbenchSelectionCatalog(state).locations.filter(location => location.zoneId === selection.zoneId &&
+        location.tabId === active.tabId && location.regionId === active.regionId &&
+        (!active.displayWorkspaceId || location.displayWorkspaceId === active.displayWorkspaceId) && (!active.groupId || location.groupId === active.groupId))
+      const exact = [...new Map(locations.map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
+      if (exact.length === 1) state.selectMainRegion(exact[0]!, state.workbenchSpaceSelection)
+    }
     set({ surveyZoneSelection })
     void saveWorkbenchSelection(false)
   },
@@ -5142,19 +5156,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // does not navigate the main workbench or authorize another Zone's launcher.
       set((state) => {
         const focusedTab = focusWorkbenchTabRegion(tab, regionId)
+        const local = focusedSessionId ? focusSessionContext(state, focusedSessionId) : state.agentFocus
         return { regionCaretFocus: null,
           ...(focusedTab === tab ? {} : { tabs: { ...state.tabs, [tabId]: focusedTab } }),
-          ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId, undefined,
-            { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) } : {}) }
+          ...(local.pmo !== state.agentFocus.pmo ? { agentFocus: { ...state.agentFocus, pmo: local.pmo } } : {}) }
       })
       return
     }
     let choice: AgentMuxDesktopSpaceSelection
     try { choice = resolveWorkbenchOccurrenceSelection(get(), workbenchSelectionCatalog(get()),
-      { workspaceId, groupId: tabGroupId, tabId, regionId }) }
+      { workspaceId, groupId: tabGroupId, tabId, regionId }, cause === 'navigation' ? 'navigation' : 'local') }
     catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
     set((state) => ({
-      workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
+      workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
       tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
       layouts: {
         ...state.layouts,
@@ -5462,11 +5476,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       state.agentFocus.execution.sessionId === navigation.agentFocus.execution.sessionId &&
       state.agentFocus.pmo.sessionId === navigation.agentFocus.pmo.sessionId
     ) {
-      set({
-        activeWorkspaceId: workspaceId, mainSurface: 'workbench',
-        tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
-        layouts: { ...state.layouts, [workspaceId]: activateLayoutTab(layout, groupId, tabId) }
-      })
+      get().focusRegion(workspaceId, tabId, regionId, 'navigation', groupId)
+      set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
     }
     await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
   },
@@ -5507,66 +5518,53 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch { return false }
   },
   setMainSurface(mainSurface) {
-    set({ workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    const selectedSessionId = executionFocusSessionId(get().agentFocus)
-    const selectedSession = selectedSessionId
-      ? get().sessions.find((session) => session.id === selectedSessionId)
-      : undefined
-    if (mainSurface === 'workbench' && selectedSession && !get().workbenchSpaceSelection) {
-      // The selected Session is the cross-surface navigation context. Reuse the existing
-      // selectSession path so Workspaces activates its durable Tab/Region instead of creating
-      // a second projection or losing the user's place.
-      set({ mainSurface })
-      get().selectSession(selectedSession.id)
-      return
+    const state = get()
+    // A confirmed old Focus reference can seed an absent Desktop choice. This
+    // never resolves a Session ID or guesses a sibling/first occurrence.
+    if (mainSurface === 'workbench' && !state.workbenchSpaceSelection && state.mainSurface === 'agents' && state.agentFocus.execution.reference) {
+      state.selectMainRegion(state.agentFocus.execution.reference, null)
     }
-    if (mainSurface === 'board' && selectedSessionId) {
-      const linkedDemand = Object.values(get().demands).find((demand) => demand.sessionIds.includes(selectedSessionId))
-      set({ mainSurface, selectedDemandId: linkedDemand?.id ?? null })
-      return
+    const choice = get().workbenchSpaceSelection
+    if (mainSurface === 'survey' && choice?.zoneId && choice.tabId && choice.regionId) {
+      const previous = get().surveyZoneSelection
+      get().setSurveyZoneSelection({ zoneId: choice.zoneId, selection: previous?.zoneId === choice.zoneId ? previous.selection : [],
+        active: { tabId: choice.tabId, regionId: choice.regionId } })
     }
-    set({ mainSurface })
+    set({ mainSurface, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+  },
+  selectMainRegion(reference, expected) {
+    const state = get()
+    if (expected !== undefined && !sameSpatialValue(state.workbenchSpaceSelection, expected)) return false
+    const { overlays } = readDesktopPresentation(desktopSelection(state, workbenchSelectionCatalog(state)), state.tabs)
+    if (overlays.settings === true || overlays.quickSwitcher === true) return false
+    const layout = state.layouts[reference.displayWorkspaceId], tab = state.tabs[reference.tabId]
+    const group = layout?.groups.find(item => item.id === reference.groupId)
+    if (!layout || !group || !groupIds(layout.root).includes(group.id) || !group.tabOrder.includes(reference.tabId) || !tab?.regions[reference.regionId]) return false
+    let choice: AgentMuxDesktopSpaceSelection
+    try { choice = resolveWorkbenchOccurrenceSelection(state, workbenchSelectionCatalog(state), {
+      workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
+    catch (error) { state.reportError(error, { kind: 'indeterminate' }); return false }
+    if (!sameSpatialValue(choice, state.workbenchSpaceSelection) || state.activeWorkspaceId !== choice.workspaceId) {
+      set({ workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, retainedSpatialFocus: null,
+        workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+    }
+    return true
   },
   focusExecutionSession(id, reference) {
-    if (id && reference) {
-      const state = get()
-      if (!confirmedFocusReference(state, id, reference)) return
-      const topicsWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
-      try {
-        const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicsWorkspace) ?? [])
-        if (!catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) return
-      } catch (error) {
-        get().reportError(error, { kind: 'indeterminate', summary: 'The selected work surface directory could not be confirmed. The original Session and work surface are retained.' })
-        return
-      }
+    const state = get()
+    if (id && reference && !confirmedFocusReference(state, id, reference)) return false
+    const agentFocus = id !== null && !state.sessions.some(session => session.id === id)
+      ? focusExecution(state.agentFocus, id) : focusSessionContext(state, id, undefined, reference)
+    set({ agentFocus })
+    if (!id) return true
+    const result = executionFocusPresentation(agentFocus.execution, state.tabs, workbenchSelectionCatalog(state), () => {})
+    const target = result.projection?.selection[0]
+    if (target && get().selectMainRegion(target, state.workbenchSpaceSelection)) {
+      set(current => ({ agentFocus: { ...current.agentFocus, execution: { ...current.agentFocus.execution, reference: target } } }))
+      return true
     }
-    set((state) => ({ agentFocus: id !== null && !state.sessions.some((session) => session.id === id)
-      ? focusExecution(state.agentFocus, id)
-      : focusSessionContext(state, id, undefined, reference) }))
-  },
-  selectExecutionFocusReference(reference, expected) {
-    const state = get(), execution = state.agentFocus.execution
-    if (state.mainSurface !== 'agents' || !expected.sessionId || execution.sessionId !== expected.sessionId ||
-      (expected.reference
-        ? !sameWorkbenchProjectionSelection(execution.reference ?? null, expected.reference)
-        : execution.reference !== undefined)) return
-    const { overlays } = readDesktopPresentation({ surface: 'focus', mainSurface: 'agents', space: null, goalId: null }, state.tabs)
-    if (overlays.settings === true || overlays.quickSwitcher === true) return
-    const layout = state.layouts[reference.displayWorkspaceId]
-    const group = layout?.groups.find(item => item.id === reference.groupId)
-    const tab = state.tabs[reference.tabId]
-    if (!layout || !group || !groupIds(layout.root).includes(group.id) || !group.tabOrder.includes(reference.tabId) ||
-      !tab?.regions[reference.regionId]) return
-    const topicsWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
-    try {
-      const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicsWorkspace) ?? [])
-      if (!catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) return
-    } catch (error) {
-      get().reportError(error, { kind: 'indeterminate', summary: 'The selected work surface directory could not be confirmed. The original Session and work surface are retained.' })
-      return
-    }
-    if (sameWorkbenchProjectionSelection(execution.reference ?? null, reference)) return
-    set({ agentFocus: { ...state.agentFocus, execution: { ...execution, reference } } })
+    state.reportError(new Error(result.issue ?? 'The selected Agent occurrence is unconfirmed. Its workface is kept; choose an exact original location.'), { kind: 'indeterminate' })
+    return false
   },
   focusPmoSession(id) {
     set((state) => {
@@ -5576,7 +5574,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const lane = focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
           scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))))
         if (lane === null) return state
-        if (lane === 'execution') return { agentFocus: focusSessionContext(state, id) }
+        if (lane === 'execution') return state
       }
       return { agentFocus: focusPmo(state.agentFocus, id) }
     })
@@ -6031,14 +6029,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ activeWorkspaceId: displayId!, mainSurface: 'workbench' })
         return
       }
-      if (!placement?.projection) return
+      if (!placement?.projection) {
+        const current = get(), placed = displayId ? current.layouts[displayId] : undefined
+        const group = placed && findGroup(placed, placed.activeGroupId)
+        if (displayId && destinationTabId && exactRegionId && group?.tabOrder.includes(destinationTabId)) {
+          const applied = current.selectMainRegion({ displayWorkspaceId: displayId, groupId: group.id,
+            tabId: destinationTabId, regionId: exactRegionId }, navigation.workbenchSpaceSelection)
+          result.navigation = applied ? 'applied' : 'unconfirmed'
+        }
+        return
+      }
       if (placement.reference) { placement.projection.onSelect(placement.reference); return }
       const tabId = placement.split?.tabId ?? placement.launcher?.tabId ?? fileTabId(workspaceId, path), tab = get().tabs[tabId]
       if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
       const reference = { displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: placement.split && exactRegionId ? exactRegionId : tab.layout.activeRegionId }
       placement.projection.onSelect(reference)
       if (placement.projection.presentationId === 'focus-workbench') result.navigation = get().mainSurface === 'agents' &&
-        sameWorkbenchProjectionSelection(get().agentFocus.execution.reference ?? null, reference) ? 'applied' : 'cancelled' 
+        sameWorkbenchProjectionSelection(mainRegionReference(get().workbenchSpaceSelection), reference) ? 'applied' : 'cancelled' 
     }
     const key = documentKey(workspaceId, path)
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
@@ -7150,7 +7157,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout) throw new Error('Workspace layout is unavailable')
+    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
@@ -7372,7 +7379,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout) throw new Error('Workspace layout is unavailable')
+    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
@@ -7683,7 +7690,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     void get().refreshSession(session.id)
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -7698,9 +7705,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       activeWorkspaceId: state.activeWorkspaceId
     })
     if (!workspaceId) throw new Error('Select a workspace first')
-    const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspaceId
+    const displayWorkspaceId = requestedDisplayWorkspaceId ?? (launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspaceId)
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout) throw new Error('Workspace layout is unavailable')
+    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, tabGroupId)
@@ -7718,6 +7725,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         tabs: { ...current.tabs, [tabId]: targetTab },
         layouts: { ...current.layouts, [displayWorkspaceId!]: nextLayout }
       }))
+      get().selectMainRegion({ displayWorkspaceId: displayWorkspaceId!, groupId: tabGroupId, tabId, regionId }, state.workbenchSpaceSelection)
     }
     try {
       const browser = await api.browser.create(regionId, url, workspaceId)
@@ -7743,7 +7751,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return {
           tabs: {
             ...current.tabs,
-            [currentOwner.tab.id]: replaceWorkbenchRegion(currentOwner.tab, regionId, surface)
+            [currentOwner.tab.id]: { ...replaceWorkbenchRegion(currentOwner.tab, regionId, surface),
+              // Resource attachment is not a later navigation intent.
+              layout: currentOwner.tab.layout }
           }
         }
       })
@@ -7789,14 +7799,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     throw new Error(`Could not save the bookmark: ${lastReason}`)
   },
-  async openHttpLink(origin, rawUrl, destination) {
-    const opening = get(), expectedFocus = opening.agentFocus.execution
-    const focusLink = destination !== 'tab' && opening.mainSurface === 'agents' && expectedFocus.sessionId === origin.sessionId
+  async openHttpLink(origin, rawUrl, destination, presentation) {
+    const opening = get(), expectedChoice = opening.workbenchSpaceSelection
+    const mainFocus = opening.mainSurface === 'agents' && presentation?.surface !== 'mote'
+    const focusLink = destination !== 'tab' && mainFocus && expectedChoice?.workspaceId === origin.workspaceId && expectedChoice.groupId === origin.tabGroupId && expectedChoice.tabId === origin.tabId && expectedChoice.regionId === origin.regionId
     const url = normalizeHttpLinkUrl(rawUrl)
     if (destination === 'system') {
       await api.ui.openExternal(url)
       return
     }
+    if (mainFocus && destination !== 'tab' && !focusLink) throw new Error('The selected Focus Region changed. Choose its original work surface explicitly; the Agent is kept.')
     const targetPlacement = origin.sessionId
       ? resolveSessionPlacement({
           sessionId: origin.sessionId,
@@ -7814,12 +7826,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Directional link destinations require a Tab and Region origin')
     }
 
+    const sourceTab = placementOrigin.tabId ? opening.tabs[placementOrigin.tabId] : undefined
+    if (placementOrigin.tabId && (!sourceTab || !placementOrigin.regionId || !sourceTab.regions[placementOrigin.regionId])) throw new Error('The original link Region is unconfirmed; its work surface is kept.')
+    const resourceWorkspaceId = sourceTab?.workspaceId ?? placementOrigin.workspaceId
     const tabId = destination === 'tab' ? `launcher:${crypto.randomUUID()}` : placementOrigin.tabId!
     const regionId = destination === 'tab' ? initialWorkbenchRegionId(tabId) : newRegionId()
     const pendingLauncher: LauncherWorkbenchSurface = {
       regionId,
       kind: 'launcher',
-      workspaceId: placementOrigin.workspaceId
+      workspaceId: resourceWorkspaceId
     }
     let planned = false
     let placementError: Error | null = null
@@ -7836,7 +7851,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (destination === 'tab') {
         const topicId = inheritedTopicIdForNewTab(
-          placementOrigin.workspaceId,
+          resourceWorkspaceId,
           layout,
           current.tabs,
           originGroup.id
@@ -7889,21 +7904,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (!planned) throw placementError ?? new Error('Link destination could not be created')
 
+    if (destination === 'tab') get().selectMainRegion({ displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId }, expectedChoice)
     const plannedNavigation = fileNavigationSelection(get())
+    const plannedLocalRegion = get().tabs[tabId]?.layout.activeRegionId
     try {
-      await get().createBrowser(placementOrigin.tabGroupId!, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId)
+      await get().createBrowser(placementOrigin.tabGroupId!, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId, placementOrigin.workspaceId)
       const current = get()
-      if (focusLink && fileNavigationSelection(current) === plannedNavigation && current.tabs[tabId]?.regions[regionId]?.kind === 'browser') {
-        current.selectExecutionFocusReference({ displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId }, expectedFocus)
+      if (destination !== 'tab' && fileNavigationSelection(current) === plannedNavigation && current.tabs[tabId]?.regions[regionId]?.kind === 'browser') {
+        if (presentation?.surface === 'mote') {
+          if (current.tabs[tabId]?.layout.activeRegionId !== plannedLocalRegion) return
+          if (presentation.onSelectRegion) presentation.onSelectRegion(regionId)
+          else current.focusRegion(placementOrigin.workspaceId, tabId, regionId, 'floating-pointer', placementOrigin.tabGroupId)
+        } else current.selectMainRegion({ displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId }, expectedChoice)
       }
     } catch (error) {
+      const reclaimPendingMark = (current: AppState, topology: Pick<AppState, 'tabs' | 'layouts'>) => {
+        if (!sameWorkbenchProjectionSelection(mainRegionReference(current.workbenchSpaceSelection), {
+          displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId })) return {}
+        const choice = expectedChoice ? desktopSpaceSelectionAfterClose(expectedChoice, topology, {
+          workspaceId: expectedChoice.workspaceId, tabId: expectedChoice.tabId ?? '',
+          ...(expectedChoice.groupId ? { groupId: expectedChoice.groupId } : {}),
+          ...(expectedChoice.regionId ? { regionId: expectedChoice.regionId } : {}) }) : null
+        return { workbenchSpaceSelection: choice, activeWorkspaceId: choice?.workspaceId ?? current.activeWorkspaceId }
+      }
       set((current) => {
         const liveTab = current.tabs[tabId]
         if (!liveTab || liveTab.regions[regionId] !== pendingLauncher) return current
         if (destination !== 'tab') {
           const nextTab = removeWorkbenchRegion(liveTab, regionId)
           return nextTab
-            ? { tabs: { ...current.tabs, [tabId]: nextTab } }
+            ? { tabs: { ...current.tabs, [tabId]: nextTab }, ...reclaimPendingMark(current, { tabs: { ...current.tabs, [tabId]: nextTab }, layouts: current.layouts }) }
             : current
         }
         const layout = current.layouts[placementOrigin.workspaceId]
@@ -7911,13 +7941,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!layout || !currentTabGroupId) return current
         const tabs = { ...current.tabs }
         delete tabs[tabId]
-        return {
-          tabs,
-          layouts: {
-            ...current.layouts,
-            [placementOrigin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId)
-          }
-        }
+        const topology = { tabs, layouts: { ...current.layouts,
+          [placementOrigin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId) } }
+        return { ...topology, ...reclaimPendingMark(current, topology) }
       })
       throw error
     }

@@ -99,8 +99,8 @@ async function expandDisconnected() {
 function renderedIds() { return [...container.querySelectorAll<HTMLElement>('.global-focus-main [data-session-id]')].map(node=>node.dataset.sessionId).sort() }
 function focusSurface() {
   const state = useAppStore.getState()
-  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, state.agentFocus.execution.sessionId ? spatialCatalog(state, []) : null, reference => state.selectExecutionFocusReference(reference, state.agentFocus.execution))
-  return createElement(GlobalFocusSurface, { presentation })
+  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []), reference => state.selectMainRegion(reference, state.workbenchSpaceSelection))
+  return <GlobalFocusSurface presentation={presentation} />
 }
 
 it('mounted lanes exclude ordinary running, failed and disconnected Terminals and retain every confirmed Agent state',async()=>{

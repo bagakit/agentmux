@@ -5,7 +5,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { selectSpatialCatalog, spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { projectWorkbenchProjection } from './workbench-projection'
+import { projectWorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { createWorkspaceLayout } from '@agentmux/layout'
 
 export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey' } as const
@@ -19,6 +19,12 @@ export type DesktopSelectionState = {
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   tabs: Readonly<Record<string, WorkbenchTab>>
   layouts: Readonly<Record<string, WorkspaceLayout>>
+}
+/** An exact Region address is a view of the existing choice, never a second owner. */
+export function mainRegionReference(choice: AgentMuxDesktopSpaceSelection | null): WorkbenchProjectionSelection | null {
+  return choice?.groupId && choice.tabId && choice.regionId ? {
+    displayWorkspaceId: choice.workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId
+  } : null
 }
 export class DesktopFocusFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }

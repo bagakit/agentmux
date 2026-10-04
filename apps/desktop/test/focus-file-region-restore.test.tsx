@@ -14,7 +14,8 @@ import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { api } from '../src/renderer/src/lib/api'
 import { openSessionFileLink } from '../src/renderer/src/lib/session-link-opening'
 import { createSessionProjectFileContextSelector } from '../src/renderer/src/lib/session-project-file-context'
-import { executionFocusPresentation } from '../src/renderer/src/lib/focus-tab-projection'
+import { mainRegionReference } from '../src/renderer/src/lib/desktop-focus-navigation'
+import { mainFocusPresentation } from '../src/renderer/src/lib/focus-tab-projection'
 import { documentKey, workbenchSurfaces, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore, prepareRendererUpdate } from '../src/renderer/src/store'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
@@ -43,7 +44,7 @@ function fileRegion(): FileWorkbenchSurface {
 function snapshot() {
   const s = useAppStore.getState()
   return { tabs: s.tabs, layouts: s.layouts, drafts: s.agentComposerDrafts, document: s.documents[key], dirty: s.dirtyDocuments[key],
-    focus: s.agentFocus, mainSurface: s.mainSurface, sessions: s.sessions.map(session => ({ id: session.id,
+    focus: s.agentFocus, mainChoice: s.workbenchSpaceSelection, mainSurface: s.mainSurface, sessions: s.sessions.map(session => ({ id: session.id,
       hostId: session.hostId, runId: session.control.run.runId, workspacePath: session.workspacePath })) }
 }
 beforeEach(async () => {
@@ -101,8 +102,8 @@ it(restoreName, async () => {
       expect(restored.documents[key]).toEqual(durable.documents[key]); expect(restored.dirtyDocuments[key]).toBe(true)
       expect(restored.agentFocus).toEqual(durable.agentFocus); expect(restored.mainSurface).toBe(durable.mainSurface)
       expect(restored.agentFocus.execution.sessionId).toBe(targetSid)
-      expect(restored.agentFocus.execution.reference).toEqual({ ...reference, regionId: file.regionId })
-      const projection = executionFocusPresentation(restored.agentFocus.execution, restored.tabs, fileCatalog(), () => {}, 'region').projection
+      expect(mainRegionReference(restored.workbenchSpaceSelection)).toEqual({ ...reference, regionId: file.regionId })
+      const projection = mainFocusPresentation(restored.workbenchSpaceSelection, restored.tabs, fileCatalog(), () => {}, 'region').projection
       expect(projection?.entity).toEqual({ kind: 'region', regionId: file.regionId })
       await act(async () => root.render(<FileSurfaceView tabId={tabId} surface={file} />))
       await act(async () => { await vi.dynamicImportSettled() })
@@ -121,6 +122,7 @@ it(restoreName, async () => {
   }
   useAppStore.setState({ mainSurface: 'agents', agentFocus: { execution: { sessionId: targetSid, reference,
     history: [{ sessionId: targetSid, focusedAt: 1 }] }, pmo: { sessionId: null } } })
+  expect(useAppStore.getState().selectMainRegion(reference)).toBe(true)
   const original = snapshot(), context = createSessionProjectFileContextSelector(targetSid, origin)(useAppStore.getState())
   expect(context.kind).toBe('session')
   await openSessionFileLink(origin, context, path, undefined, 'right')
@@ -128,7 +130,8 @@ it(restoreName, async () => {
   expect(Object.keys(inserted.tabs)).toEqual(Object.keys(original.tabs))
   expect(inserted.tabs[tabId]!.regions[regionIdA]).toBe(original.tabs[tabId]!.regions[regionIdA])
   expect(inserted.agentComposerDrafts).toBe(original.drafts); expect(inserted.mainSurface).toBe('agents')
-  expect(inserted.agentFocus.execution.reference).toEqual({ ...reference, regionId: file.regionId })
+  expect(mainRegionReference(inserted.workbenchSpaceSelection)).toEqual({ ...reference, regionId: file.regionId })
+  expect(inserted.agentFocus.execution.reference).toEqual(reference)
   useAppStore.getState().updateDocument(tabId, retainedContent, file.regionId)
   // The original arranged helper predates Core addressing and disposes its subscription.
   // Use the existing production projection and API, just as the original File view restart fixture does.
@@ -146,7 +149,7 @@ it(restoreName, async () => {
   const beforeRestore = snapshot(); fixture!.noLifecycle()
   const proof = await runWorkfaceRestore(ownFile, restoreName, 'focus-file-region-child')
   expect(proof.document).toEqual(beforeRestore.document); expect(proof.dirty).toBe(true)
-  expect(proof.focus).toEqual(beforeRestore.focus); expect(proof.mainSurface).toBe('agents')
+  expect(proof.mainChoice).toEqual(beforeRestore.mainChoice); expect(proof.focus).toEqual(beforeRestore.focus); expect(proof.mainSurface).toBe('agents')
   expect(proof.sessions).toEqual(beforeRestore.sessions); expect(proof.originalAgentSid).toBe(targetSid)
   expect(proof.paneText).toBe(retainedContent); expect(proof.projectionEntity).toEqual({ kind: 'region', regionId: file.regionId })
   const proofDirectory = process.env.T025_FOCUS_RESTORE_PROOF_DIRECTORY
@@ -158,7 +161,7 @@ it(restoreName, async () => {
     await writeFile(join(proofDirectory, 'parent-snapshot.json'), JSON.stringify({ pid: process.pid, ...beforeRestore }, null, 2))
     await writeFile(join(proofDirectory, 'process-receipt.json'), JSON.stringify({ parentPid: process.pid, restoredPid: proof.pid,
       recordSha256: proof.recordSha256, spatialGraphSha256: proof.spatialGraphSha256, originalTabId: tabId, originalAgentSid: targetSid, fileRegionId: file.regionId,
-      matched: ['tabs', 'layouts', 'Agent Session/Run ids', 'composer drafts', 'unsaved File bytes', 'dirty flag', 'durable Focus reference', 'actual File Pane text'],
+      matched: ['tabs', 'layouts', 'Agent Session/Run ids', 'composer drafts', 'unsaved File bytes', 'dirty flag', 'durable main Region choice and independent Agent MRU', 'actual File Pane text'],
       scope: 'Two independent Node/Vitest processes, actual persistence/restore and File owner; canvas/API fixtures. No whole GUI, native Runtime or real user Run claim.' }, null, 2))
     await rm(privateDirectory, { recursive: true, force: true })
   }

@@ -2,10 +2,12 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Eye, Save } from 'lucide-react'
 import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
 import { workspaceFileFormat } from '../../../shared/workspace-file-format'
-import { documentKey, tabGroupForTab, type FileWorkbenchSurface } from '../lib/workbench-tabs'
+import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { joinWorkspacePath } from '../lib/workspace-paths'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
-import { useAppStore } from '../store'
+import { fileNavigationSelection, useAppStore } from '../store'
+import { resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { FilePreviewPane, ImageContent } from './FilePreviewPane'
@@ -34,6 +36,8 @@ function SourceImage({ content, name, visible }: { content: string; name: string
 export function FileSurfaceView({ tabId, surface, released = false, visible = true }: {
   tabId: string; surface: FileWorkbenchSurface; released?: boolean; visible?: boolean
 }) {
+  const presentation = useWorkbenchBrowserPresentation()
+  const reference = presentation.reference?.tabId === tabId ? { ...presentation.reference, regionId: surface.regionId } : undefined
   const key = documentKey(surface.workspaceId, surface.path)
   const doc = useAppStore(state => state.documents[key])
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary')
@@ -69,36 +73,39 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     return <FilePreviewPane surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
   }
   const openReference = (path: string, location?: { line: number; column?: number }) => {
-    const layout = useAppStore.getState().layouts[surface.workspaceId]
-    const group = layout ? tabGroupForTab(layout, tabId) ?? undefined : undefined
-    void openFile(path, group, location, surface.workspaceId).catch(reportError)
+    try {
+      const state = useAppStore.getState(), resource = state.config?.workspaces.find(item => item.id === surface.workspaceId)
+      if (!reference || !resource) throw new Error('The original File display position or resource is unconfirmed. Its content is retained.')
+      const choice = resolveWorkbenchOccurrenceSelection(state, workbenchSelectionCatalog(state), {
+        workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId, regionId: surface.regionId }, 'navigation')
+      if (!choice.spaceId || !choice.zoneId) throw new Error('The original File context is unconfirmed. Its content is retained.')
+      void openFile(path, reference.groupId, location, surface.workspaceId, undefined, {
+        displayWorkspaceId: reference.displayWorkspaceId, space: { spaceId: choice.spaceId, zoneId: choice.zoneId },
+        resource: { hostId: resource.hostId, path: resource.path }, ...(presentation.projection ? { projection: presentation.projection } : {})
+      }).catch(reportError)
+    } catch (error) { reportError(error) }
   }
   const previewSavedHtml = async (saveFirst: boolean) => {
     const state = useAppStore.getState(), original = state.documents[key]
     const owner = state.tabs[tabId]?.regions[surface.regionId]
     const originalGeneration = state.documentGenerations[key]
     const originalWorkspace = state.activeWorkspaceId, originalMainSurface = state.mainSurface
-    const originalLayout = state.layouts[originalWorkspace ?? '']
-    const originalTab = originalLayout?.groups.find(group => group.id === originalLayout.activeGroupId)?.activeTabId
-    const originalRegion = originalTab ? state.tabs[originalTab]?.layout.activeRegionId : undefined
+    const originalSelection = fileNavigationSelection(state)
     try {
       if (saveFirst) {
         await state.saveDocument(tabId, surface.regionId)
         const current = useAppStore.getState()
-        const currentLayout = current.layouts[current.activeWorkspaceId ?? '']
-        const currentTab = currentLayout?.groups.find(group => group.id === currentLayout.activeGroupId)?.activeTabId
-        const currentRegion = currentTab ? current.tabs[currentTab]?.layout.activeRegionId : undefined
         if (current.tabs[tabId]?.regions[surface.regionId] !== owner ||
           current.activeWorkspaceId !== originalWorkspace || current.mainSurface !== originalMainSurface ||
-          currentLayout?.activeGroupId !== originalLayout?.activeGroupId || currentTab !== originalTab || currentRegion !== originalRegion ||
+          fileNavigationSelection(current) !== originalSelection ||
           current.dirtyDocuments[key] || current.documentIssues[key] ||
           current.documentGenerations[key] !== originalGeneration || current.documents[key]?.content !== original?.content) return
       }
-      const current = useAppStore.getState(), layout = current.layouts[surface.workspaceId]
-      const group = layout ? tabGroupForTab(layout, tabId) : undefined
-      if (!group || !workspaceRoot || !isLocal) throw new Error('Local file Browser preview is unavailable for this workspace.')
+      const current = useAppStore.getState(), layout = reference ? current.layouts[reference.displayWorkspaceId] : undefined
+      const group = reference && layout?.groups.find(item => item.id === reference.groupId && item.tabOrder.includes(tabId))
+      if (!reference || !group || !workspaceRoot || !isLocal) throw new Error('Local file Browser preview is unavailable for this workspace.')
       // Browser normalizes the absolute file path, in its existing sandboxed native view.
-      await current.createBrowser(group, undefined, joinWorkspacePath(workspaceRoot, surface.path), undefined, surface.workspaceId)
+      await current.createBrowser(group.id, undefined, joinWorkspacePath(workspaceRoot, surface.path), undefined, surface.workspaceId, reference.displayWorkspaceId)
     } catch (error) { reportError(error) }
   }
   const preview = doc && visible && !released && previewing ? overBudget
@@ -113,9 +120,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
       renderWorkspaceImage={(path, alt, linked) => <WorkspaceImage key={`${surface.workspaceId}:${path}`} workspaceId={surface.workspaceId} path={path} alt={alt} linked={Boolean(linked)} openFile={() => openReference(path)} />}
       openWorkspaceFile={openReference}
       openHttpLink={(url) => {
-        const state = useAppStore.getState(), layout = state.layouts[surface.workspaceId]
-        const group = layout ? tabGroupForTab(layout, tabId) : undefined
-        if (group) void state.openHttpLink({ workspaceId: surface.workspaceId, tabGroupId: group, tabId, regionId: surface.regionId }, url, 'tab').catch(reportError)
+        if (!reference) { reportError(new Error('The original File display position is unconfirmed. Its content is retained.')); return }
+        void useAppStore.getState().openHttpLink({ workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId, regionId: surface.regionId }, url, 'tab').catch(reportError)
       }} /> : null
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
