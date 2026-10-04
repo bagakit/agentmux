@@ -257,7 +257,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     process.stdout.write(id);
   `, sessionStorePath, longId])
   const compactId = create.stdout
-  expect(compactId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+  expect(compactId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
   const requests: AgentMuxControlRequest[] = []
   const core = await privateRpcCorePort(sessionStorePath, queuePath)
   const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {

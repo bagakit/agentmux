@@ -2,8 +2,9 @@ import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const mutations = {
-  'no-padding': [".padStart(17, '1')", ".padStart(0, '1')"],
-  'truncate-entropy': ['base58.encode(bytes)', 'base58.encode(bytes.slice(0, 11))'],
+  'no-padding': [".padStart(12, '1')", ".padStart(0, '1')"],
+  'accept-overflow': ['id.length <= 12', 'id.length <= 13'],
+  'truncate-entropy': ['base58.encode(bytes)', 'base58.encode(bytes.slice(0, 8))'],
   'ignore-operation': ['${operationId}', 'same-operation']
 } as const
 export default defineConfig({

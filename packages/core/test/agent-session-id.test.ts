@@ -10,19 +10,19 @@ describe('canonical Agent Session identity', () => {
     const ids = await Promise.all(['operation-a', 'operation-b', 'Operation-a'].map(deriveAgentSessionId))
     expect(ids).toHaveLength(3)
     expect(new Set(ids).size).toBe(3)
-    for (const id of ids) expect(id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+    for (const id of ids) expect(id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
     expect(await deriveAgentSessionId('operation-a')).toBe(ids[0])
   })
   it.each([
-    { bytes: Array(12).fill(0), expected: '11111111111111111' },
-    { bytes: [...Array(11).fill(0), 1], expected: '11111111111111112' },
-    { bytes: [...Array(11).fill(0), 58], expected: '11111111111111121' },
-    { bytes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 253, 254, 255], expected: '111FVk6iLh9oUWgRU' },
-    { bytes: Array(12).fill(255), expected: '5qCHTcgbQwpvYZQ9c' }
-  ])('preserves complete entropy with exactly 17 Base58 characters: $expected', ({ bytes, expected }) => {
+    { bytes: Array(9).fill(0), expected: '111111111111' },
+    { bytes: [...Array(8).fill(0), 1], expected: '111111111112' },
+    { bytes: [...Array(8).fill(0), 58], expected: '111111111121' },
+    { bytes: [0, 1, 2, 3, 4, 5, 6, 7, 8], expected: '11An6UebxCZd' },
+    { bytes: [78, 144, 10, 187, 83, 230, 183, 15, 255], expected: 'zzzzzzzzzzzz' }
+  ])('covers the full fixed-width Base58 space including its boundaries: $expected', ({ bytes, expected }) => {
     const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(array => {
       expect(array).toBeInstanceOf(Uint8Array)
-      expect(array?.byteLength).toBe(12)
+      expect(array?.byteLength).toBe(9)
       ;(array as Uint8Array).set(bytes)
       return array
     })
@@ -32,20 +32,55 @@ describe('canonical Agent Session identity', () => {
     } finally { entropy.mockRestore() }
   })
 
+  it('rejects whole overflowing random samples instead of truncating or wrapping them', () => {
+    const samples = [
+      [78, 144, 10, 187, 83, 230, 183, 16, 0], // exactly 58^12
+      Array(9).fill(255),
+      [78, 144, 10, 187, 83, 230, 183, 15, 255] // exactly 58^12 - 1
+    ]
+    const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(array => {
+      expect(array?.byteLength).toBe(9)
+      const sample = samples.shift()
+      if (!sample) throw new Error('Unexpected extra sample')
+      ;(array as Uint8Array).set(sample)
+      return array
+    })
+    try {
+      expect(mintAgentSessionId()).toBe('zzzzzzzzzzzz')
+      expect(entropy).toHaveBeenCalledTimes(3)
+    } finally { entropy.mockRestore() }
+  })
+
   it.each([
-    { byte: 0, expected: '11111111111111111' },
-    { byte: 255, expected: '5qCHTcgbQwpvYZQ9c' }
-  ])('keeps deterministic IDs equally wide at the digest boundaries: $byte', async ({ byte, expected }) => {
-    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest').mockResolvedValue(new Uint8Array(32).fill(byte).buffer)
+    { bytes: Array(9).fill(0), expected: '111111111111' },
+    { bytes: [78, 144, 10, 187, 83, 230, 183, 15, 255], expected: 'zzzzzzzzzzzz' }
+  ])('keeps deterministic IDs equally wide at accepted digest boundaries: $expected', async ({ bytes, expected }) => {
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest').mockResolvedValue(new Uint8Array([...bytes, ...Array(23).fill(0)]).buffer)
     try { expect(await deriveAgentSessionId('boundary-operation')).toBe(expected) }
     finally { digest.mockRestore() }
+  })
+
+  it('retries deterministic overflow with a distinct nonce while keeping the original operation', async () => {
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest')
+      .mockResolvedValueOnce(new Uint8Array([78, 144, 10, 187, 83, 230, 183, 16, 0, ...Array(23).fill(0)]).buffer)
+      .mockResolvedValueOnce(new Uint8Array(32).fill(255).buffer)
+      .mockResolvedValueOnce(new Uint8Array(32).buffer)
+    try {
+      await expect(deriveAgentSessionId('overflow-operation')).resolves.toBe('111111111111')
+      expect(digest).toHaveBeenCalledTimes(3)
+      expect(digest.mock.calls.map(([algorithm, input]) => [algorithm, new TextDecoder().decode(input as Uint8Array)])).toEqual([
+        ['SHA-256', 'agentmux.initial-session.v3:0:overflow-operation'],
+        ['SHA-256', 'agentmux.initial-session.v3:1:overflow-operation'],
+        ['SHA-256', 'agentmux.initial-session.v3:2:overflow-operation']
+      ])
+    } finally { digest.mockRestore() }
   })
 
   it('mints distinct short canonical IDs', () => {
     const ids = Array.from({ length: 1000 }, () => mintAgentSessionId())
     expect(ids).toHaveLength(1000)
     expect(new Set(ids).size).toBe(ids.length)
-    for (const id of ids) expect(id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+    for (const id of ids) expect(id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
   })
 
   it('prefers exact identity, rejects collisions, and never guesses an unknown prefix', () => {
@@ -67,7 +102,7 @@ describe('canonical Agent Session identity', () => {
     try {
       await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: fixturePath("repo"), injectAgentMuxGuide: false })).rejects.toThrow('reservation reached')
       expect(reserved).toHaveLength(1)
-      expect(reserved[0]).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+      expect(reserved[0]).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
     } finally { await client.dispose() }
   })
 
@@ -121,7 +156,7 @@ describe('canonical Agent Session identity', () => {
     try {
       const next = await client.respawnAgent({ previousAgentSessionId: previous.agentSessionId, injectAgentMuxGuide: false })
       expect(create).toHaveBeenCalledTimes(1)
-      expect(next.agentSessionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+      expect(next.agentSessionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
       expect(next.agentSessionId).not.toBe(previous.agentSessionId)
       expect(client.agentSession(previous.agentSessionId).agentSessionId).toBe(previous.agentSessionId)
     } finally { await client.dispose() }
