@@ -422,41 +422,30 @@ describe('RuntimeController configuration transaction', () => {
     vi.clearAllMocks()
   })
 
-  it('waits for the original Host handshake before reading the Provider catalog', async () => {
+  it('reads the local Provider catalog without requiring a Runtime handshake', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
-    Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => null) })
-    const handshake = deferred<void>()
     const catalog = new AgentProviderRegistry().catalog()
-    let confirmed = false
-    client.connect.mockImplementationOnce(async () => { await handshake.promise; confirmed = true })
-    client.providers.catalog.mockImplementation(() => {
-      if (!confirmed) throw new AgentMuxError('The semantic Host identity is not confirmed.', 'CONTROL_UNAVAILABLE')
-      return catalog
-    })
-    const pending = controller.providerCatalog()
-    void pending.catch(() => {})
+    client.connect.mockRejectedValue(new AgentMuxError('Runtime unavailable', 'CONTROL_UNAVAILABLE'))
+    client.providers.catalog.mockReturnValue(catalog)
+    client.connect.mockClear()
     try {
-      await Promise.resolve()
-      expect(client.providers.catalog).not.toHaveBeenCalled()
-      expect(client.dispose).not.toHaveBeenCalled()
+      await expect(controller.providerCatalog()).resolves.toEqual(catalog)
+      expect(client.connect).not.toHaveBeenCalled()
+      expect(client.providers.catalog).toHaveBeenCalledOnce()
       expect(client.stopAgent).not.toHaveBeenCalled()
       expect(client.stopTerminal).not.toHaveBeenCalled()
-      handshake.resolve()
-      await expect(pending).resolves.toEqual(catalog)
-      expect(catalog.length).toBeGreaterThan(0)
-      expect(client.providers.catalog).toHaveBeenCalledOnce()
-    } finally { handshake.resolve(); await pending.catch(() => {}); await controller.dispose() }
+    } finally { await controller.dispose() }
   })
 
-  it('retains the original Host and working input when the Provider catalog handshake fails', async () => {
+  it('retains the original Host and working input when the Provider catalog read fails', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
     Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => null) })
     const host = controller.executionHost('local'), originalSession = client.agentSession()
     const failure = new AgentMuxError('The original Host observation is unavailable.', 'CONTROL_UNAVAILABLE')
-    client.connect.mockRejectedValueOnce(failure)
+    client.providers.catalog.mockImplementationOnce(() => { throw failure })
     try {
       await expect(controller.providerCatalog()).rejects.toBe(failure)
-      expect(client.providers.catalog).not.toHaveBeenCalled()
+      expect(client.providers.catalog).toHaveBeenCalledOnce()
       expect(controller.executionHost('local')).toBe(host)
       expect(client.agentSession()).toEqual(originalSession)
       expect(client.dispose).not.toHaveBeenCalled()
@@ -475,13 +464,13 @@ describe('RuntimeController configuration transaction', () => {
     const [first, healthy] = runtimeFixture.FakeClient.instances
     const failure = new AgentMuxError('Original Provider RPC ended before response.', 'CONTROL_UNAVAILABLE')
     const catalog = new AgentProviderRegistry().catalog()
-    first!.connect.mockRejectedValue(failure)
+    first!.providers.catalog.mockImplementation(() => { throw failure })
     healthy!.providers.catalog.mockReturnValue(catalog)
     const originalHost = controller.executionHost('remote'), originalSession = healthy!.agentSession()
     try {
       await expect(controller.providerCatalog()).resolves.toEqual(catalog)
       expect(catalog.length).toBeGreaterThan(0)
-      expect(first!.providers.catalog).not.toHaveBeenCalled()
+      expect(first!.providers.catalog).toHaveBeenCalledOnce()
       expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ hostId: 'local',
         step: 'Reading Provider catalog', availability: 'unverified', message: failure.message }))
       expect(controller.executionHost('remote')).toBe(originalHost)
@@ -554,7 +543,7 @@ describe('RuntimeController configuration transaction', () => {
     await vi.waitFor(() => expect(second!.connected).toBe(true))
     const failure = new AgentMuxError('Original observation failure.', 'CONTROL_UNAVAILABLE')
     for (const client of [first!, second!]) {
-      if (step === 'Provider') client.connect.mockRejectedValue(failure)
+      if (step === 'Provider') client.providers.catalog.mockImplementation(() => { throw failure })
       else client.sessionHistorySources.mockRejectedValue(failure)
     }
     try {
@@ -594,10 +583,10 @@ describe('RuntimeController configuration transaction', () => {
 
   it.each(['Provider', 'History'] as const)('retains the successful Host and the read-cut warning when a completed %s owner is replaced', async (step) => {
     const controller = await configuredController()
-    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    const config = { ...localConfig, hosts: [{ ...remoteHost, id: 'waiting' }, remoteHost] }
     controller.commit(await controller.prepare(config))
     const [waiting, completed] = runtimeFixture.FakeClient.instances
-    await vi.waitFor(() => expect(completed!.connected).toBe(true))
+    await vi.waitFor(() => expect(waiting!.connected && completed!.connected).toBe(true))
     const release = deferred<void>()
     const registry = new AgentProviderRegistry().catalog()
     const retainedProvider = registry.filter(entry => entry.id === 'claude'), oldProvider = registry.filter(entry => entry.id === 'codex')
@@ -606,8 +595,8 @@ describe('RuntimeController configuration transaction', () => {
       waiting!.providers.catalog.mockReturnValue(retainedProvider)
       completed!.providers.catalog.mockReturnValue(oldProvider)
     } else {
-      waiting!.sessionHistorySources.mockImplementationOnce(async () => { await release.promise; return [{ agentSessionId: 'retained-cut', hostId: 'local', state: 'active' }] })
-      completed!.sessionHistorySources.mockResolvedValue([{ agentSessionId: 'old-owner-data', hostId: 'local', state: 'active' }])
+      waiting!.sessionHistorySources.mockImplementationOnce(async () => { await release.promise; return [{ agentSessionId: 'retained-cut', hostId: 'waiting', state: 'active' }] })
+      completed!.sessionHistorySources.mockResolvedValue([{ agentSessionId: 'old-owner-data', hostId: 'waiting', state: 'active' }])
     }
     const pending = step === 'Provider' ? controller.providerCatalog({ observation: true }) : controller.sessionHistorySources({ observation: true })
     try {
@@ -620,7 +609,7 @@ describe('RuntimeController configuration transaction', () => {
       const cut = await pending
       if (step === 'Provider') {
         expect(cut).toEqual({ catalog: retainedProvider, warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
-      } else expect(cut).toEqual({ sources: [{ agentSessionId: 'retained-cut', hostId: 'local', state: 'active' }],
+      } else expect(cut).toEqual({ sources: [{ agentSessionId: 'retained-cut', hostId: 'waiting', state: 'active' }],
         warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
       expect(controller.endpointWarningSnapshot().filter(warning => warning.hostId === 'remote')).toEqual([])
     } finally { release.resolve(); await pending.catch(() => {}); await controller.dispose() }

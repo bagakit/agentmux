@@ -25,7 +25,7 @@ vi.mock('node:fs/promises', async original => {
   } }
 })
 vi.mock('electron', () => ({
-  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
+  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => resolve('apps/desktop') || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -69,9 +69,7 @@ async function registered() {
   // The remote client below is not a real SSH Runtime and cannot establish SSH support.
   const clients = config.hosts.map(() => {
     const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
-    const internals = client as unknown as { connected: boolean; kernel: { isConnected(): boolean } }
-    internals.connected = true; internals.kernel = { isConnected: () => true }
-    vi.spyOn(client, 'connect').mockResolvedValue(); vi.spyOn(client, 'dispose').mockResolvedValue()
+    vi.spyOn(client, 'connect').mockRejectedValue(new Error('Runtime unavailable during pure executable observation')); vi.spyOn(client, 'dispose').mockResolvedValue()
     vi.spyOn(client, 'probeExecutorAvailability')
     return client
   })
@@ -79,9 +77,9 @@ async function registered() {
   let initialized = false
   const prepare = vi.spyOn(runtime, 'prepare').mockImplementation(async (current): Promise<RuntimePreparation> => {
     const hosts = initialized ? [] : current.hosts.map((host, index) => ({ id: host.id,
-      executionHost: new LocalExecutionHost({ id: host.id, label: host.label }), client: clients[index]! }))
+      executionHost: new LocalExecutionHost({ id: host.id, label: host.label }), client: clients[index]!, config: host }))
     initialized = true
-    return { hosts, removedHostIds: [], reservedHostIds: [], hostSignatures: new Map(current.hosts.map(host => [host.id, JSON.stringify(host)])) }
+    return { hosts, configs: current.hosts, removedHostIds: [], reservedHostIds: [], hostSignatures: new Map(current.hosts.map(({ label: _label, ...host }) => [host.id, JSON.stringify(host)])) }
   })
   vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
   vi.spyOn(store, 'get').mockResolvedValue(config)
@@ -91,7 +89,7 @@ async function registered() {
     async () => { throw new Error('Refresh cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
   const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    configStore: store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
+    configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn(async () => {}) } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   expect(ipc.execute).toBeTypeOf('function'); expect(ipc.handlers.get('executors:detect')).toBeTypeOf('function')
   return { root, config, executable, directory, clients, runtime, prepare, sender, dispose, execute: ipc.execute!,
@@ -101,7 +99,7 @@ async function registered() {
 
 describe('Executor Refresh reaches the registered Main configuration owner', () => {
   it('actual public CLI and native IPC use the same Core file fact and exact saved targets without a View', async () => {
-    const f = await registered(), before = await f.bytes(), publications = f.sender.send.mock.calls.length, preparations = f.prepare.mock.calls.length
+    const f = await registered(), before = await f.bytes(), publications = f.sender.send.mock.calls.filter(([channel]) => channel === 'agentmux:config-changed').length, preparations = f.prepare.mock.calls.length
     const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
     const server = new core.AgentMuxControlServer({ execute: f.execute }, join(f.root, 'control.sock'))
     await server.start()
@@ -113,6 +111,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       expect(JSON.parse(result.stdout).result).toEqual({ input: { executorId: 'first', providerId: 'codex', command: f.executable, host: f.config.hosts[0] },
         executable: f.executable, availability: 'available' })
       expect(f.clients[0]!.probeExecutorAvailability).toHaveBeenCalledExactlyOnceWith('codex', f.executable)
+      expect(f.clients[0]!.connect).not.toHaveBeenCalled()
       const directory = await f.native('second', 'local')
       expect(directory).toEqual({ input: { executorId: 'second', providerId: 'claude', command: f.directory, host: f.config.hosts[0] },
         executable: f.directory, availability: 'missing', cause: { code: 'EXECUTABLE_NOT_FILE', message: `${f.directory} is a directory; expected a regular executable file.` } })
@@ -123,12 +122,12 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       expect(remote).not.toHaveProperty('executable'); expect(f.clients[1]!.probeExecutorAvailability).not.toHaveBeenCalled()
       expect(JSON.stringify([directory, remote])).not.toContain('do-not-expose')
       expect(await f.bytes()).toBe(before); expect(f.prepare).toHaveBeenCalledTimes(preparations)
-      expect(f.sender.send).toHaveBeenCalledTimes(publications)
+      expect(f.sender.send.mock.calls.filter(([channel]) => channel === 'agentmux:config-changed')).toHaveLength(publications)
     } finally { await rpc.dispose(); await server.stop(); await f.dispose() }
   })
 
   it('preserves actual Core unknown I/O cause and missing facts without configuration publication', async () => {
-    const f = await registered(), before = await f.bytes(), publications = f.sender.send.mock.calls.length
+    const f = await registered(), before = await f.bytes(), publications = f.sender.send.mock.calls.filter(([channel]) => channel === 'agentmux:config-changed').length
     try {
       ipc.failurePath = f.executable
       expect(await f.execute({ ...envelope, executorId: 'first', hostId: 'local' })).toMatchObject({
@@ -136,7 +135,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
       })
       ipc.failurePath = ''; await rm(f.executable)
       expect(await f.native('first', 'local')).toMatchObject({ availability: 'missing', executable: f.executable })
-      expect(await f.bytes()).toBe(before); expect(f.sender.send).toHaveBeenCalledTimes(publications)
+      expect(await f.bytes()).toBe(before); expect(f.sender.send.mock.calls.filter(([channel]) => channel === 'agentmux:config-changed')).toHaveLength(publications)
     } finally { await f.dispose() }
   })
 

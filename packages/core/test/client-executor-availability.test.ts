@@ -35,21 +35,17 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true })))
 })
 
-// 造一个已连接的 client，只为让 requireConnected 放行——probeExecutorAvailability 不碰 kernel，
-// 只解析命令再查文件系统。vitest 只转译不查类型，允许改私有面。
+// Executable observation is available with no Runtime connection. Launch fixtures alone
+// provide a controlled connection, stopping before Hook/Runtime work.
+function probeClient(): AgentMuxClient {
+  return new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+}
 function connectedClient(): AgentMuxClient {
-  const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
-  const internals = client as unknown as {
-    connected: boolean
-    kernel: { isConnected(): boolean }
-    requireHookIngressOwner(): Promise<void>
-  }
+  const client = probeClient()
+  const internals = client as unknown as { connected: boolean; kernel: { isConnected(): boolean }; requireHookIngressOwner(): Promise<void> }
   internals.connected = true
   internals.kernel = { isConnected: () => true }
-  // A broken classification must fail an assertion without escaping into shared Hook/Runtime setup.
-  internals.requireHookIngressOwner = vi.fn(async () => {
-    throw new Error('Owned probe fixture stops before Hook or Runtime setup')
-  })
+  internals.requireHookIngressOwner = vi.fn(async () => { throw new Error('Owned probe fixture stops before Hook or Runtime setup') })
   return client
 }
 
@@ -61,14 +57,16 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     await writeFile(bin, '#!/bin/sh\n')
     await chmod(bin, 0o755)
     // commandOverride 是绝对路径 → 只有这一条候选，且它可执行。
-    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'available' })
+    const client = probeClient()
+    await expect(client.probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'available' })
+    expect((await client.probeAgent('codex', bin)).installed).toBe(true)
   })
 
   it('reports missing when the resolved command exists as a path but is not executable', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-missing-'))
     roots.push(root)
     // 绝对路径（含 '/'）→ 候选非空，但文件不存在 → 查成了，确实没装。
-    await expect(connectedClient().probeExecutorAvailability('codex', join(root, 'does-not-exist')))
+    await expect(probeClient().probeExecutorAvailability('codex', join(root, 'does-not-exist')))
       .resolves.toEqual({ executable: join(root, 'does-not-exist'), availability: 'missing' })
   })
 
@@ -78,7 +76,7 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     process.env.PATH = ''
     try {
       // commandOverride 留空 → 用 Provider 的 catalog executable（codex 的是相对名 'codex'）。
-      const outcome = await connectedClient().probeExecutorAvailability('codex')
+      const outcome = await probeClient().probeExecutorAvailability('codex')
       // 单钉这条：零候选必须报 check-failed。把 client.ts 里 `candidates.length === 0` 那支折成
       // 'missing'（或删掉），这条红——那正是那次误报的形态。
       expect(outcome).toEqual({ executable: 'codex', availability: 'check-failed', cause: {
@@ -95,7 +93,7 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-kind-')); roots.push(root)
     const bin = join(root, 'executable'), link = join(root, 'linked-executable')
     await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755); await symlink(bin, link)
-    const client = connectedClient()
+    const client = probeClient()
     await expect(client.probeExecutorAvailability('codex', root)).resolves.toEqual({ executable: root, availability: 'missing', cause: {
       code: 'EXECUTABLE_NOT_FILE', message: `${root} is a directory; expected a regular executable file.`
     } })
@@ -107,9 +105,9 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-probe-read-')); roots.push(root)
     const bin = join(root, 'executable'); await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
     faults.set(bin, { operation: 'stat', code: 'EIO', message: 'controlled stat I/O failure' })
-    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'check-failed', cause: { code: 'EIO', message: 'controlled stat I/O failure' } })
+    await expect(probeClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'check-failed', cause: { code: 'EIO', message: 'controlled stat I/O failure' } })
     faults.set(bin, { operation: 'access', code: 'EACCES', message: 'controlled execute access denial' })
-    await expect(connectedClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'check-failed', cause: { code: 'EACCES', message: 'controlled execute access denial' } })
+    await expect(probeClient().probeExecutorAvailability('codex', bin)).resolves.toEqual({ executable: bin, availability: 'check-failed', cause: { code: 'EACCES', message: 'controlled execute access denial' } })
   })
 
   it('prefers a later ordinary executable over a directory or unknown earlier candidate, preserving unknown when none succeeds', async () => {
@@ -118,7 +116,7 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
     await mkdir(join(first, 'probe-command'), { recursive: true }); await mkdir(second)
     const bin = join(second, 'probe-command'); await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
     vi.stubEnv('PATH', `${first}:${second}`)
-    const client = connectedClient()
+    const client = probeClient()
     await expect(client.probeExecutorAvailability('codex', 'probe-command')).resolves.toEqual({ executable: 'probe-command', availability: 'available' })
     faults.set(join(first, 'probe-command'), { operation: 'stat', code: 'EIO', message: 'controlled first candidate failure' })
     await expect(client.probeExecutorAvailability('codex', 'probe-command')).resolves.toEqual({ executable: 'probe-command', availability: 'available' })
