@@ -5,7 +5,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } f
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
-const evidence = resolve(root, '.tmp/footer-navigation-groups'); mkdirSync(evidence, { recursive: true })
+const evidence = resolve(root, '.tmp/footer-implicit-work-groups'); mkdirSync(evidence, { recursive: true })
 const sourcePaths = ['components/TopRowChrome.tsx', 'components/SurfaceNavigation.tsx', 'styles/agent.css'].map(p => 'apps/desktop/src/renderer/src/' + p)
 const hashes = () => Object.fromEntries(sourcePaths.map(p => [p, createHash('sha256').update(readFileSync(resolve(root, p))).digest('hex')]))
 const originalHashes = hashes()
@@ -34,7 +34,7 @@ function run(name, mutation, files) {
   return { name, total: data.numTotalTests, failed: data.numFailedTests, exit: result.status }
 }
 const baseline = run('baseline', null, [file, 'apps/desktop/test/focus-navigation-preview.test.tsx'])
-const mutants = ['survey-in-work', 'missing-work-label'].map(name => run(name, name, [file]))
+const mutants = ['survey-in-work', 'visible-work-label'].map(name => run(name, name, [file]))
 assert.deepEqual(hashes(), originalHashes, 'Source checkout must remain unchanged')
 writeFileSync(resolve(evidence, 'receipt.json'), JSON.stringify({ passed: true, baseline, mutants, sources: originalHashes, callers: ['App.tsx → SurfaceSwitch', 'TopRowChrome.tsx → SurfaceNavigation metadata', 'App CSS → agent.css'], scope: 'Presentation grouping only; original view/settings owners and identity checks remain real. Visual signoff is additional independent evidence.' }, null, 2) + '\n')
 console.log(JSON.stringify({ passed: true, baseline, mutants }))

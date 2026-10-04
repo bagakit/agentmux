@@ -7,10 +7,10 @@ import original from '../../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../../..')
 const mutations = {
   'survey-in-work': ['SurfaceNavigation.tsx', "navigationContext: 'survey',", "navigationContext: 'work',"],
-  'missing-work-label': ['TopRowChrome.tsx', '<span className="surface-navigation__group-label" aria-hidden="true">Work</span>', '']
+  'visible-work-label': ['TopRowChrome.tsx', '<div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">', '<div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces"><span aria-hidden="true">Work</span>']
 } as const
 const mutation = process.env.AGENTMUX_FOOTER_MUTATION as keyof typeof mutations | undefined
-export default defineConfig({ ...original, root, cacheDir: resolve(root, '.tmp/footer-navigation-groups/cache'),
+export default defineConfig({ ...original, root, cacheDir: resolve(root, '.tmp/footer-implicit-work-groups/cache'),
   plugins: [...original.plugins ?? [], { name: 'footer-source-mutation', enforce: 'pre', transform(source, id) {
     if (!mutation) return
     const [file, before, after] = mutations[mutation], owner = resolve(root, 'apps/desktop/src/renderer/src/components', file)

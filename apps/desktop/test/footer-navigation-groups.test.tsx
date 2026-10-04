@@ -31,8 +31,8 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 it('makes the three Work views one readable group, with independent Survey, settings and Mote entries', () => {
   const work = container.querySelector('[role="group"][aria-label="Work surfaces"]')!, utilities = container.querySelector('[role="group"][aria-label="Survey and settings"]')!
   expect([...work.querySelectorAll('button')].map(item => item.getAttribute('aria-label')?.split(':')[0])).toEqual(['Space', 'Focus', 'Goals'])
-  expect(work.querySelector('.surface-navigation__group-label')?.textContent).toBe('Work')
-  expect(work.querySelector('.surface-navigation__group-label')?.hasAttribute('tabindex')).toBe(false)
+  expect(work.textContent).not.toContain('Work')
+  expect(work.querySelectorAll('[tabindex]')).toHaveLength(0)
   expect([...utilities.querySelectorAll('button')].map(item => item.getAttribute('aria-label')?.split(':')[0])).toEqual(['Survey', 'Settings'])
   expect(work.contains(button('Survey'))).toBe(false); expect(work.contains(button('Settings'))).toBe(false)
   expect(document.querySelector('[aria-label="Open Mote coordination surface"]')?.closest('nav')).toBeNull()

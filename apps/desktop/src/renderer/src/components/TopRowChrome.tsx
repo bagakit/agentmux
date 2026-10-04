@@ -241,7 +241,6 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
       {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'launcher').map(renderPlugin)}
       <nav className="surface-navigation" aria-label="Primary surfaces">
         <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
-          <span className="surface-navigation__group-label" aria-hidden="true">Work</span>
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'work').map(renderPlugin)}
         </div>
         <div className="surface-navigation__utilities" role="group" aria-label="Survey and settings">
