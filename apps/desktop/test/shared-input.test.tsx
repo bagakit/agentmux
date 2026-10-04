@@ -2,8 +2,7 @@
 import { act, createRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { InputGroup } from '@agentmux/client-ui/input'
-import { ComposerTextarea } from '../src/renderer/src/components/ComposerTextarea'
+import { ComposerTextarea, InputGroup } from '@agentmux/client-ui/input'
 
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>
 beforeEach(() => {

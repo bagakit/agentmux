@@ -7,7 +7,7 @@ import {
   composerRenderValue,
   nextComposerCompositionState,
   type ComposerCompositionState
-} from '../src/renderer/src/lib/composer-composition.js'
+} from '@agentmux/client-ui/composer-composition'
 
 /**
  * #609「给 Agent 输入中文, 删掉后再输入, 会变成不是我输入的奇怪的文字」。
@@ -29,7 +29,7 @@ import {
  * 顺序派发 composition 事件。那三件事要真 DOM 环境。别把这族测试读成「IME 已验证正常」。
  */
 
-const SHELL = resolve(__dirname, '../src/renderer/src/components/ComposerTextarea.tsx')
+const SHELL = resolve(__dirname, '../../../packages/client-ui/src/input/ComposerTextarea.tsx')
 const CONSUMER = resolve(__dirname, '../../../packages/client-ui/src/components/AgentComposer.tsx')
 
 function parse(path: string): ts.SourceFile {
@@ -281,8 +281,8 @@ describe('ComposerTextarea 真的把组字接到了这一层', () => {
 // textarea，否则「例外」会在壳被改坏时替它背书。
 // ---------------------------------------------------------------------------
 const RENDERER_SRC = resolve(__dirname, '../src/renderer/src')
-/** 唯一允许出现裸 `<textarea>` 的文件（相对 RENDERER_SRC）。 */
-const SOLE_RAW_TEXTAREA = 'components/ComposerTextarea.tsx'
+// The adapter and primitive are shared; Renderer consumers have no raw-node exception.
+const RAW_PRIMITIVE = resolve(__dirname, '../../../packages/client-ui/src/input/Textarea.tsx')
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = []
@@ -295,11 +295,10 @@ function sourceFiles(dir: string): string[] {
 }
 
 describe('每个受控 textarea 都走认识组字的那层壳', () => {
-  it('整棵 renderer 源码树里只有壳自己渲染裸 textarea', () => {
+  it('Renderer 输入消费不直接渲染裸 textarea', () => {
     const offenders: string[] = []
     for (const file of sourceFiles(RENDERER_SRC)) {
       const relative = file.slice(RENDERER_SRC.length + 1)
-      if (relative === SOLE_RAW_TEXTAREA) continue
       if (tagNamesIn(file).includes('textarea')) offenders.push(relative)
     }
     // 报出文件名而不是只给个数：漂移点要一眼看得到。
@@ -310,16 +309,17 @@ describe('每个受控 textarea 都走认识组字的那层壳', () => {
     ).toEqual([])
   })
 
-  it('自检：扫描面覆盖到了壳与已知消费者，且那条例外真的有前提', () => {
+  it('自检：扫描面非空且共享壳/原生层和生产消费者真实存在', () => {
     // 防这条自己假绿的三种方式：
     //   1. 扫描根/后缀过滤写错 ⇒ 文件集合为空，offenders 恒为空数组，「没扫到」与「扫过了没问题」
     //      打印出来一模一样（本仓「扫描根写错静默变绿」那族）；
     //   2. 提取器认不出 JSX 标签 ⇒ 同上恒真。所以要在**已知有 textarea 的那个文件**上正向验证；
     //   3. 那条例外变成为坏修复背书 ⇒ 壳里的 textarea 被换掉/删掉时，例外让它照旧免检。
     const files = sourceFiles(RENDERER_SRC).map((file) => file.slice(RENDERER_SRC.length + 1))
-    expect(files).toContain(SOLE_RAW_TEXTAREA)
+    expect(files.length).toBeGreaterThan(0)
+    expect(tagNamesIn(RAW_PRIMITIVE)).toContain('textarea')
     expect(
-      tagNamesIn(`${RENDERER_SRC}/${SOLE_RAW_TEXTAREA}`),
+      tagNamesIn(SHELL),
       '壳里没有 textarea：那条例外正在为一个已经坏掉的壳背书'
     ).toContain('Textarea')
 
@@ -329,7 +329,7 @@ describe('每个受控 textarea 都走认识组字的那层壳', () => {
     // 时候必须说明为什么某一格不再需要壳。AgentComposer 改用 ProseMirror 后，Session 与 Launcher 都改用 ProseMirror 后，实际仍有 6 个
     // 消费文件（包括 Gallery 的普通文本示例），所以保留这个地板。
     const consumers = files.filter(
-      (file) => file !== SOLE_RAW_TEXTAREA && tagNamesIn(`${RENDERER_SRC}/${file}`).includes('ComposerTextarea')
+      (file) => tagNamesIn(`${RENDERER_SRC}/${file}`).includes('ComposerTextarea')
     )
     expect(
       consumers.length,
