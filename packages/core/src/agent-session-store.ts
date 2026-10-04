@@ -53,15 +53,10 @@ import type {
   RiskTier
 } from './types.js'
 
-const MAX_STORED_SESSIONS = 256
-const MAX_LIFECYCLE_RESERVATIONS = 256
-const MAX_UNBOUND_RETIRED_RUNS = 256
-const MAX_RETIRED_AGENT_SESSIONS = 256
 const MAX_ID_BYTES = 512
 const MAX_PATH_BYTES = 16 * 1024
-const MAX_RETIRED_RUNS = 16
-const MAX_STORE_BYTES = 1024 * 1024
-const MAX_TIMELINE_STORE_BYTES = 8 * 1024 * 1024
+// Individual text fields remain bounded; cumulative durable history is not a payload.
+const MAX_STORED_TEXT_BYTES = 1024 * 1024
 /**
  * 锁重试的预算与退避。
  *
@@ -323,7 +318,7 @@ function processIsAlive(pid: number): boolean {
 }
 
 function retiredRuns(value: unknown, current: AgentMuxRunRef): AgentMuxRunRef[] {
-  if (!Array.isArray(value) || value.length > MAX_RETIRED_RUNS) {
+  if (!Array.isArray(value)) {
     throw new AgentMuxError('retiredRuns is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const runs = value.map(runRef)
@@ -338,7 +333,7 @@ function retiredRuns(value: unknown, current: AgentMuxRunRef): AgentMuxRunRef[] 
 }
 
 function unboundRetiredRuns(value: unknown): AgentMuxRunRef[] {
-  if (!Array.isArray(value) || value.length > MAX_UNBOUND_RETIRED_RUNS) {
+  if (!Array.isArray(value)) {
     throw new AgentMuxError('Unbound retired Runs are invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const runs = value.map(runRef)
@@ -427,7 +422,7 @@ export function sessionHistoryMetadata(session: AgentMuxStoredAgentSession): Age
 }
 
 function retiredAgentSessions(value: unknown): AgentMuxRetiredAgentSession[] {
-  if (!Array.isArray(value) || value.length > MAX_RETIRED_AGENT_SESSIONS) {
+  if (!Array.isArray(value)) {
     throw new AgentMuxError('Retired Agent Sessions are invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const sessions = value.map(retiredAgentSession)
@@ -453,7 +448,7 @@ function mergeRetiredRuns(
     merged.delete(run.runId)
     merged.set(run.runId, run)
   }
-  return [...merged.values()].slice(-MAX_UNBOUND_RETIRED_RUNS)
+  return [...merged.values()]
 }
 
 function mergeRetiredAgentSessions(
@@ -466,12 +461,11 @@ function mergeRetiredAgentSessions(
     merged.delete(session.agentSessionId)
     merged.set(session.agentSessionId, session)
   }
-  return [...merged.values()].slice(-MAX_RETIRED_AGENT_SESSIONS)
+  return [...merged.values()]
 }
 
 /**
- * 退役 Run 环是容量，不是损坏。环满后丢掉最旧的 Run 时，只指向这些 Run 的退役
- * Session 必须一起离开；否则下一次停止落账会被当成冲突，启动直接退出。
+ * 退役 Session 必须有对应的退役 Run 事实；累计历史不按数量驱逐。
  * 仍出现在当前 Session 列表里的退役身份不在这里消掉，后面的断言继续拒绝。
  */
 function retiredAgentSessionsForRuns(
@@ -1204,7 +1198,7 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
   const source = record(value, 'promptCompletionAdmission.intent')
   const plan = record(source.plan, 'promptCompletionAdmission.intent.plan')
   const bytes = (value: unknown): string => {
-    if (typeof value !== 'string' || !value.length || Buffer.byteLength(value) > MAX_STORE_BYTES) {
+    if (typeof value !== 'string' || !value.length || Buffer.byteLength(value) > MAX_STORED_TEXT_BYTES) {
       throw new AgentMuxError('Frozen prompt input is invalid.', 'INVALID_AGENT_SESSION_STORE')
     }
     return value
@@ -1377,13 +1371,12 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     })() }),
     ...(source.futurePromptIntents === undefined ? {} : { futurePromptIntents: (() => {
       const intents = record(source.futurePromptIntents, 'future prompt intents')
-      if (Object.keys(intents).length > 256) throw new AgentMuxError('Future intent records exceed the bounded Session store.', 'INVALID_AGENT_SESSION_STORE')
       return Object.fromEntries(Object.entries(intents).map(([id, value]) => {
         string(id, 'future intent id')
         const intent = record(value, 'future prompt intent'), message = record(intent.message, 'future prompt source')
         if (typeof intent.active !== 'boolean' || message.authorHuman !== undefined) throw new AgentMuxError('Future prompt origin or active state is invalid.', 'INVALID_AGENT_SESSION_STORE')
-        return [id, { operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORE_BYTES), active: intent.active,
-          message: { userContent: text(message.userContent, 'future prompt content', MAX_STORE_BYTES), ...(message.systemContext === undefined ? {} : { systemContext: text(message.systemContext, 'future prompt context', MAX_STORE_BYTES) }),
+        return [id, { operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORED_TEXT_BYTES), active: intent.active,
+          message: { userContent: text(message.userContent, 'future prompt content', MAX_STORED_TEXT_BYTES), ...(message.systemContext === undefined ? {} : { systemContext: text(message.systemContext, 'future prompt context', MAX_STORED_TEXT_BYTES) }),
             ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'future prompt author') }),
             ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }) },
           ...(intent.lastOccurrenceAt === undefined ? {} : { lastOccurrenceAt: timestamp(intent.lastOccurrenceAt, 'last future occurrence') }),
@@ -1540,9 +1533,6 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
 }
 
 function normalizeAgentSessions(values: readonly unknown[]): AgentMuxStoredAgentSession[] {
-  if (values.length > MAX_STORED_SESSIONS) {
-    throw new AgentMuxError('Agent Session store exceeds its session limit.', 'AGENT_SESSION_STORE_LIMIT')
-  }
   const sessions = values.map(normalizeStoredAgentSession)
   const ids = new Set<string>()
   const runs = new Set<string>()
@@ -1660,7 +1650,6 @@ function salvageSessionList(values: readonly unknown[]): AgentMuxStoredAgentSess
   const nativeHandles = new Set<string>()
   const promptSubmissions = new Set<string>()
   for (const value of values) {
-    if (sessions.length >= MAX_STORED_SESSIONS) break
     let session: AgentMuxStoredAgentSession
     try {
       session = normalizeStoredAgentSession(value)
@@ -1733,9 +1722,6 @@ export async function loadSessionHistorySources(store: AgentMuxAgentSessionStore
 function normalizeLifecycleReservations(
   values: readonly unknown[]
 ): AgentMuxLifecycleReservation[] {
-  if (values.length > MAX_LIFECYCLE_RESERVATIONS) {
-    throw new AgentMuxError('Agent Session store exceeds its reservation limit.', 'AGENT_SESSION_STORE_LIMIT')
-  }
   const reservations = values.map(lifecycleReservation)
   const ids = new Set<string>()
   const sessions = new Set<string>()
@@ -1970,9 +1956,6 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (this.reservations.has(reservation.agentSessionId)) {
       throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     }
-    if (this.reservations.size >= MAX_LIFECYCLE_RESERVATIONS) {
-      throw new AgentMuxError('Agent Session store exceeds its reservation limit.', 'AGENT_SESSION_STORE_LIMIT')
-    }
     assertReservationPrecondition(
       reservation,
       [...this.sessions.values()],
@@ -2199,7 +2182,8 @@ type AgentTimelineFileState = {
 
 /** JSONL 追加行数或体积越过阈值时整写一次快照，把重放成本重新压回常数。 */
 const TIMELINE_COMPACTION_MUTATION_LINES = 256
-const TIMELINE_COMPACTION_BYTES = MAX_TIMELINE_STORE_BYTES / 2
+// Compaction is maintenance, never an admission limit or a reason to trim history.
+const TIMELINE_COMPACTION_BYTES = 4 * 1024 * 1024
 
 function shouldCompactTimeline(timeline: AgentTimelineFileState): boolean {
   return (
@@ -2413,9 +2397,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       if (document.reservations.some((item) => item.agentSessionId === reservation.agentSessionId)) {
         throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
-      }
-      if (document.reservations.length >= MAX_LIFECYCLE_RESERVATIONS) {
-        throw new AgentMuxError('Agent Session store exceeds its reservation limit.', 'AGENT_SESSION_STORE_LIMIT')
       }
       assertReservationPrecondition(
         reservation,
@@ -2686,7 +2667,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     try {
       signal?.throwIfAborted()
       const metadata = await stat(this.path)
-      if (!metadata.isFile() || metadata.size > MAX_STORE_BYTES) {
+      if (!metadata.isFile()) {
         throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
       // 先拿到字节再解析。瞬时读取错误（EACCES/EIO）在此抛出并原样上抛——绝不进入抢救路径，
@@ -2868,7 +2849,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
    * 调用方 abort 属于取消而非 I/O 故障，照常上抛。
    *
    * 去重是内容寻址的：同一份坏文件被反复读到只隔离一次。但这只对**相同内容**成立——
-   * 不同内容的损坏会各自留一份 sidecar，每份最多 MAX_STORE_BYTES(1 MiB)，既不回收也无总量上限。
+   * 不同内容的损坏会各自完整保留一份 sidecar，不按累计字节裁剪原始恢复证据。
    * 当前需求下损坏是罕见事件，堆积不构成实际问题，故不加清理/预算层（那会是预防性抽象）；
    * 若日后 sidecar 真的堆起来，再引入有界回收，别把这里的注释读成「永不堆积」。
    */
@@ -2901,27 +2882,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     pruneTimelines = false
   ): Promise<void> {
     signal?.throwIfAborted()
-    const serialize = (value: AgentSessionStoreDocument) => `${JSON.stringify(value, null, 2)}\n`
-    let retained = document
-    let content = serialize(retained)
-    if (Buffer.byteLength(content) > MAX_STORE_BYTES && document.retiredAgentSessions.length > 0) {
-      // The same durable document owns both limits. Evict the oldest complete archive
-      // records, keeping active Sessions, reservations and retired Run truth intact.
-      // Binary search bounds serialization work when a legal large locator fills it.
-      let lower = 1
-      let upper = document.retiredAgentSessions.length
-      while (lower < upper) {
-        const dropped = Math.floor((lower + upper) / 2)
-        const candidate = serialize({ ...document, retiredAgentSessions: document.retiredAgentSessions.slice(dropped) })
-        if (Buffer.byteLength(candidate) <= MAX_STORE_BYTES) upper = dropped
-        else lower = dropped + 1
-      }
-      retained = { ...document, retiredAgentSessions: document.retiredAgentSessions.slice(lower) }
-      content = serialize(retained)
-    }
-    if (Buffer.byteLength(content) > MAX_STORE_BYTES) {
-      throw new AgentMuxError('Agent Session store exceeds its size limit.', 'AGENT_SESSION_STORE_LIMIT')
-    }
+    const content = `${JSON.stringify(document, null, 2)}\n`
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     try {
       await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true, ...(signal ? { signal } : {}) })
@@ -2929,7 +2890,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (error instanceof DurableWriteError && error.phase === 'after-replace') throw new AgentMuxSessionDurabilityError(error)
       throw error
     }
-    if (pruneTimelines || retained !== document) await this.maintainTimelineFiles(retained)
+    if (pruneTimelines) await this.maintainTimelineFiles(document)
   }
 
   private async maintainTimelineFiles(document: AgentSessionStoreDocument): Promise<void> {
@@ -2964,7 +2925,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     try {
       signal?.throwIfAborted()
       const metadata = await stat(path)
-      if (!metadata.isFile() || metadata.size > MAX_TIMELINE_STORE_BYTES) {
+      if (!metadata.isFile()) {
         throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
       }
       content = await readFile(path, { encoding: 'utf8', signal })
@@ -3020,9 +2981,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   ): Promise<void> {
     signal?.throwIfAborted()
     const content = `${JSON.stringify({ version: 3, ...document })}\n`
-    if (Buffer.byteLength(content) > MAX_TIMELINE_STORE_BYTES) {
-      throw new AgentMuxError('Agent Timeline store exceeds its size limit.', 'AGENT_TIMELINE_STORE_LIMIT')
-    }
     const path = this.timelinePath(document.agentSessionId)
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
     await durableWriteFile(path, content, { mode: 0o600, ...(signal ? { signal } : {}) })

@@ -4046,7 +4046,7 @@ export class AgentMuxClient {
         kind: 'agent',
         ...(retirement ? { reopenedFrom: { run: { ...retirement.run }, source: retirement.source, observedAt: retirement.observedAt } } : {}),
         run: runRef(run.runId),
-        retiredRuns: [...current.retiredRuns, current.run].slice(-16),
+        retiredRuns: [...current.retiredRuns, current.run],
         hookBindingId: hookBinding.bindingId,
         hookToken: hookBinding.endpoint.token,
         // 新 Run 换新凭证：旧 Run 的那枚从此认不出来，无法再以此 Agent 名义说话。
@@ -4156,7 +4156,7 @@ export class AgentMuxClient {
             const restored = await this.registry.update(current.agentSessionId, next.run, failed => {
               const restored: AgentMuxStoredAgentSession = {
               ...previous,
-              retiredRuns: [...previous.retiredRuns, next.run].slice(-16),
+              retiredRuns: [...previous.retiredRuns, next.run],
               // Renderer Run fences require a strictly newer canonical transition, even within
               // one clock tick or after a concurrent update of the failed binding.
               updatedAt: Math.max(Date.now(), failed.updatedAt + 1, next.updatedAt + 1)
