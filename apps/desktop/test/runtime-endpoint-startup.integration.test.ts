@@ -14,12 +14,13 @@ import { createExecutionHost } from '../src/main/host-factory.js'
 import type { AgentMuxPreloadApi, AppConfig, RuntimeEvent } from '../src/shared/contracts.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence.js'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  listeners: new Map<string, Set<(...args: unknown[]) => void>>(), home: _hygiene_fixturePath("tmp/unused-startup-bridge") }))
+  listeners: new Map<string, Set<(...args: unknown[]) => void>>(), home: _hygiene_fixturePath("tmp/unused-startup-bridge"), appPath: '' }))
 const controlled = vi.hoisted(() => ({ paths: new Map<string, string>(),
   gates: new Map<string, { promise: Promise<void>; release(): void; calls: number }>() }))
 // The real public client and official local ctxmux are unchanged. Only the remote transport
@@ -31,9 +32,10 @@ vi.mock('electron', () => ({
   ipcRenderer: { invoke: bridge.invoke, send: vi.fn(),
     on: (channel: string, callback: (...args: unknown[]) => void) => {
       const listeners = bridge.listeners.get(channel) ?? new Set(); listeners.add(callback); bridge.listeners.set(channel, listeners)
-    }, off: (channel: string, callback: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(callback) },
+    }, off: (channel: string, callback: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(callback),
+    removeListener: (channel: string, callback: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(callback) },
   webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => bridge.home, getAppPath: () => bridge.home, isPackaged: false },
+  app: { getPath: () => bridge.home, getAppPath: () => bridge.appPath, isPackaged: false },
   ipcMain: { handle: (channel: string, callback: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, callback),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -66,6 +68,7 @@ async function setup() {
   const remote = await headlessFixture(); scopes.push(remote)
   for (const [key, value] of Object.entries(local.env)) if (key.startsWith('AGENTMUX_') || key.startsWith('CTXMUX_')) vi.stubEnv(key, value!)
   bridge.home = local.root
+  bridge.appPath = join(import.meta.dirname, '..')
   controlled.paths.set('pending.fixture', remote.socketPath); controlled.paths.set('replacement.fixture', remote.socketPath)
   let release!: () => void
   const gate = { promise: new Promise<void>(resolve => { release = resolve }), release: () => release(), calls: 0 }
@@ -98,7 +101,7 @@ async function ipc(scope: Awaited<ReturnType<typeof setup>>) {
     return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)
   })
   const registration = registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
-    runtime: scope.controller, configStore: scope.configStore, scratchTopics: {} as never,
+    runtime: scope.controller, configStore: scope.configStore, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn().mockResolvedValue([]) } as never,
     progressLoops: { subscribe: () => () => {} } as never, workspaceFiles: { dispose: async () => {} } as never })
   // A still-pending remote connect must not delay actual IPC registration. The latch stays closed.
   try { expect(await Promise.race([registration.then(() => true), pause(3000).then(() => false)])).toBe(true) }
@@ -118,6 +121,17 @@ it('registers actual Main IPC and restores the durable Renderer workface with or
   const tabs = { [localTab.id]: localTab, [remoteTab.id]: remoteTab }
   const layouts = { 'local-space': createWorkspaceLayout('saved-local-group', [localTab.id]),
     'remote-space': createWorkspaceLayout('saved-remote-group', [remoteTab.id]) }
+  // Persist the original Core spatial identities through actual Main IPC. The
+  // execution facts come from the independently confirmed private Core owners,
+  // rather than deriving execution from the Region's display Workspace.
+  const graph = desktopSpatialGraph({ config: scope.config, tabs, layouts, sessions: [], spaceZoneBindings: {}, spatialRequests: {} }, [])
+  for (const [regionId, run, hostId] of [['saved-local-region', scope.localRun, 'local'],
+    ['saved-remote-region', scope.remoteRun, 'build-host']] as const) {
+    const region = graph.regions.find(region => region.regionId === regionId)!
+    region.runId = run.runId
+    region.execution = { hostId, cwd: run.workspacePath }
+  }
+  await native.spatial.commit({ expectedRevision: (await native.spatial.read())?.revision ?? 0, graph })
   const saved = JSON.stringify({ version: 1, state: { restoredWorkbench: projectPersistedWorkbench({ tabs, layouts }),
     agentComposerDrafts: { 'saved-agent': 'Original unsent draft' }, activeWorkspaceId: 'local-space' } })
   const storage = new Map([['agentmux-workbench-v1', saved]])
@@ -126,9 +140,22 @@ it('registers actual Main IPC and restores the durable Renderer workface with or
   vi.spyOn(api.config, 'get').mockImplementation(() => native.config.get())
   vi.spyOn(api.sessions, 'snapshot').mockImplementation(() => native.sessions.snapshot())
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => native.sessions.onEvent(listener))
-  vi.spyOn(api.providers, 'list').mockImplementation(() => native.providers.list())
+  vi.spyOn(api.providers, 'list').mockImplementation(native.providers.list)
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(native.sessions.historySources)
+  vi.spyOn(api.spatial, 'read').mockImplementation(native.spatial.read)
+  vi.spyOn(api.spatial, 'commit').mockImplementation(native.spatial.commit)
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(native.spatial.onChange)
   vi.spyOn(api.demands, 'list').mockImplementation(() => native.demands.list())
   vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(() => native.ui.requestStorageFlush())
+  const reads = Promise.all([native.providers.list({ observation: true }), native.sessions.historySources({ observation: true })])
+  try { expect(await Promise.race([reads.then(() => true), pause(3000).then(() => false)]),
+    'Untrusted remote observations must not hold the healthy Host catalog or History read.').toBe(true) }
+  catch (error) { scope.gate.release(); await reads; throw error }
+  const [catalog, history] = await reads
+  expect(catalog.catalog.length).toBeGreaterThan(0)
+  expect(catalog.warnings).toEqual([expect.objectContaining({ hostId: 'build-host', scope: 'observation', step: 'Reading Provider catalog', availability: 'unverified' })])
+  expect(history.sources).toEqual([])
+  expect(history.warnings).toEqual([expect.objectContaining({ hostId: 'build-host', scope: 'observation', step: 'Reading retained History sources', availability: 'unverified' })])
   useAppStore.setState({ loading: true, config: null, restoredWorkbench: null, sessions: [], tabs: {}, layouts: {}, agentComposerDrafts: {} })
   const initialization = useAppStore.getState().initialize()
   try { expect(await Promise.race([initialization.then(() => true), pause(3000).then(() => false)])).toBe(true) }
@@ -142,7 +169,12 @@ it('registers actual Main IPC and restores the durable Renderer workface with or
   expect(restored.activeWorkspaceId).toBe('local-space')
   expect(restored.agentComposerDrafts).toEqual({ 'saved-agent': 'Original unsent draft' })
   expect(restored.sessions.map(session => [session.id, session.hostId])).toEqual([[scope.localRun.runId, 'local']])
-  expect(restored.runtimeEndpointWarnings).toEqual([expect.objectContaining({ hostId: 'build-host', availability: 'unverified' })])
+  expect(restored.runtimeEndpointWarnings).toHaveLength(3)
+  expect(restored.runtimeEndpointWarnings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ hostId: 'build-host', scope: 'observation', step: 'Reading Provider catalog', availability: 'unverified' }),
+    expect.objectContaining({ hostId: 'build-host', scope: 'observation', step: 'Reading retained History sources', availability: 'unverified' }),
+    expect.objectContaining({ hostId: 'build-host', step: 'Connecting to Runtime', availability: 'unverified' })
+  ]))
   expect(scope.gate.calls).toBe(1)
   const control = restored.sessions[0]!.control
   const attached = await native.sessions.attach(control, 0)
@@ -163,6 +195,9 @@ it('registers actual Main IPC and restores the durable Renderer workface with or
         ...(event.event.type === 'connection-state' ? { state: event.event.state } : {}) })) }, null, 2))
   }
   expect(remoteRestored).toBe(true)
+  expect(scope.controller.endpointWarningSnapshot()).toEqual([])
+  expect(vi.mocked(api.providers.list).mock.calls.filter(([options]) => options?.observation)).not.toHaveLength(0)
+  expect(vi.mocked(api.sessions.historySources).mock.calls.filter(([options]) => options?.observation)).not.toHaveLength(0)
   expect(events.filter(event => event.hostId === 'build-host' && event.event.type === 'connection-state')
     .map(event => event.event.type === 'connection-state' && event.event.state)).toEqual(['restored'])
   expect(useAppStore.getState().tabs).toEqual(restored.tabs)

@@ -27,6 +27,7 @@ import {
   type AgentExecutorId,
   type AgentProviderId,
   type AgentSessionHistoryPage,
+  type AgentSessionHistoryDescriptor,
   type AgentSessionHistoryResourceRequest,
   type AgentSessionHistoryResourceReadResult,
   type AgentSessionHistoryObservation,
@@ -59,6 +60,7 @@ import type {
   RuntimeEvent,
   RuntimeSnapshot,
   RuntimeEndpointWarning,
+  ProviderCatalogObservation,
   SessionAttachResult,
   SessionReplayResult,
   SessionControl,
@@ -66,6 +68,7 @@ import type {
   SessionSnapshot,
   SessionHistoryPageOptions,
   SessionHistoryReference,
+  SessionHistorySourcesObservation,
   SessionQuestionReplyInput,
   TerminalLaunchInput
 } from '../shared/contracts.js'
@@ -134,6 +137,11 @@ function endpointWarning(hostId: string, step: string, error: unknown): RuntimeE
     message: error instanceof Error ? error.message : String(error),
     recovery: 'Restore this endpoint connection and retry. Keep its original Session and work surface; inspect an unconfirmed operation before sending it again.'
   }
+}
+
+function observationWarning(hostId: string, step: string, error: unknown, connected: boolean): RuntimeEndpointWarning {
+  return { ...endpointWarning(hostId, step, error), scope: 'observation', availability: connected ? 'connected' : 'unverified',
+    recovery: 'Retry this observation on its original Host. Keep its original Sessions and work surface; no execution is replayed.' }
 }
 
 function hostSignature({ label: _label, ...host }: HostConfig): string {
@@ -383,6 +391,7 @@ export class RuntimeController {
   }
   private hostSignatures = new Map<string, string>()
   private readonly endpointWarnings = new Map<string, RuntimeEndpointWarning>()
+  private readonly observationWarnings = new Map<string, RuntimeEndpointWarning>()
   private readonly endpointConnections = new Map<AgentMuxClient, Promise<void>>()
 
   constructor(
@@ -525,10 +534,12 @@ export class RuntimeController {
         if (host) retired.set(id, host)
         this.hosts.delete(id)
         this.endpointWarnings.delete(id)
+        this.clearHostObservationWarnings(id)
       }
       for (const prepared of preparation.hosts) {
         const previous = this.hosts.get(prepared.id)
         if (previous) retired.set(prepared.id, previous)
+        this.clearHostObservationWarnings(prepared.id)
         const unsubscribe = prepared.client.onEvent((event) => {
           if (this.hosts.get(prepared.id)?.client === prepared.client) this.publish(prepared.id, event)
         })
@@ -629,15 +640,48 @@ export class RuntimeController {
     }
   }
 
-  async providerCatalog(): Promise<AgentCatalogEntry[]> {
+  async providerCatalog(options: { observation: true }): Promise<ProviderCatalogObservation>
+  async providerCatalog(): Promise<AgentCatalogEntry[]>
+  async providerCatalog(options?: { observation: true }): Promise<AgentCatalogEntry[] | ProviderCatalogObservation> {
+    const hosts = [...this.hosts]
+    const step = 'Reading Provider catalog'
+    const warnings = new Map<string, RuntimeEndpointWarning>()
+    const results = await Promise.allSettled(hosts.map(async ([hostId, host]) => {
+      let connected = false
+      try {
+        if (options?.observation) this.assertObservationHostConnection(hostId, host)
+        await host.client.connect()
+        connected = true
+        if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its Provider catalog.', 'EXECUTOR_HOST_CHANGED')
+        const entries = host.client.providers.catalog()
+        this.observationWarnings.delete(JSON.stringify([hostId, step]))
+        return entries
+      } catch (error) {
+        const warning = observationWarning(hostId, step, error, connected)
+        warnings.set(hostId, warning)
+        if (this.hosts.get(hostId) === host) this.observationWarnings.set(JSON.stringify([hostId, step]), warning)
+        throw error
+      }
+    }))
+    const current = results.filter((result, index) => result.status === 'fulfilled' && this.hosts.get(hosts[index]![0]) === hosts[index]![1])
+    if (hosts.length && !current.length) {
+      const failure = results.find(result => result.status === 'rejected')
+      throw failure?.status === 'rejected' ? failure.reason : new AgentMuxError('The execution Hosts changed while reading their Provider catalogs.', 'EXECUTOR_HOST_CHANGED')
+    }
+    for (const [index, result] of results.entries()) if (result.status === 'fulfilled' && this.hosts.get(hosts[index]![0]) !== hosts[index]![1]) {
+      const hostId = hosts[index]![0]
+      warnings.set(hostId, observationWarning(hostId, step,
+        new AgentMuxError('The execution Host changed while reading its Provider catalog.', 'EXECUTOR_HOST_CHANGED'), false))
+    }
     const catalog = new Map<string, AgentCatalogEntry>()
-    for (const host of this.hosts.values()) {
-      await host.client.connect()
-      for (const entry of host.client.providers.catalog()) {
+    for (const result of current) {
+      if (result.status !== 'fulfilled') continue
+      for (const entry of result.value) {
         if (!catalog.has(entry.id)) catalog.set(entry.id, entry)
       }
     }
-    return [...catalog.values()]
+    const entries = [...catalog.values()]
+    return options?.observation ? { catalog: entries, warnings: [...warnings.values()] } : entries
   }
 
   async discoverExecutors(hostId: string): Promise<import('../shared/contracts.js').HostExecutorInventory> {
@@ -804,7 +848,7 @@ export class RuntimeController {
       ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {}),
       // A background connection can finish while another endpoint is being read. This cut still
       // did not observe that endpoint; keep its warning until the restored event's fresh resync.
-      runtimeEndpointWarnings: [...new Map([...this.endpointWarnings, ...unobservedWarnings]).values()]
+      runtimeEndpointWarnings: [...new Map([...this.endpointWarnings, ...unobservedWarnings]).values(), ...this.observationWarnings.values()]
     }
   }
 
@@ -1046,17 +1090,42 @@ export class RuntimeController {
     return { ...await client.inspectAgentCreation(agentSessionId), hostId }
   }
 
-  async sessionHistorySources() {
-    const results = await Promise.allSettled([...this.hosts].map(async ([hostId, { client }]) => {
-      try { return (await client.sessionHistorySources()).map(descriptor => ({ ...descriptor, hostId })) }
-      catch (error) {
-        this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Reading retained History sources', error))
+  async sessionHistorySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
+  async sessionHistorySources(): Promise<AgentSessionHistoryDescriptor[]>
+  async sessionHistorySources(options?: { observation: true }): Promise<AgentSessionHistoryDescriptor[] | SessionHistorySourcesObservation> {
+    const hosts = [...this.hosts]
+    const step = 'Reading retained History sources'
+    const warnings = new Map<string, RuntimeEndpointWarning>()
+    const results = await Promise.allSettled(hosts.map(async ([hostId, host]) => {
+      try {
+        if (options?.observation) this.assertObservationHostConnection(hostId, host)
+        const descriptors = await host.client.sessionHistorySources()
+        if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its retained History sources.', 'EXECUTOR_HOST_CHANGED')
+        this.observationWarnings.delete(JSON.stringify([hostId, step]))
+        return descriptors.map(descriptor => ({ ...descriptor, hostId }))
+      } catch (error) {
+        const warning = observationWarning(hostId, step, error, runtimeOwner(host.client)?.availability === 'connected')
+        warnings.set(hostId, warning)
+        if (this.hosts.get(hostId) === host) this.observationWarnings.set(JSON.stringify([hostId, step]), warning)
         throw error
       }
     }))
+    const current = results.filter((result, index) => result.status === 'fulfilled' && this.hosts.get(hosts[index]![0]) === hosts[index]![1])
     const failure = results.find(result => result.status === 'rejected')
-    if (failure?.status === 'rejected') throw failure.reason
-    return results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+    if (!options?.observation && failure?.status === 'rejected') throw failure.reason
+    if (hosts.length && !current.length) {
+      throw failure?.status === 'rejected' ? failure.reason : new AgentMuxError('The execution Hosts changed while reading their retained History sources.', 'EXECUTOR_HOST_CHANGED')
+    }
+    if (current.length !== results.filter(result => result.status === 'fulfilled').length) {
+      const error = new AgentMuxError('The execution Host changed while reading its retained History sources.', 'EXECUTOR_HOST_CHANGED')
+      if (!options?.observation) throw error
+      for (const [index, result] of results.entries()) if (result.status === 'fulfilled' && this.hosts.get(hosts[index]![0]) !== hosts[index]![1]) {
+        const hostId = hosts[index]![0]
+        warnings.set(hostId, observationWarning(hostId, step, error, false))
+      }
+    }
+    const sources = current.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+    return options?.observation ? { sources, warnings: [...warnings.values()] } : sources
   }
 
   async sessionTimeline(control: SessionHistoryReference) {
@@ -1916,6 +1985,7 @@ export class RuntimeController {
       this.hostLifecycleOperations.clear()
       this.hostSignatures.clear()
       this.endpointWarnings.clear()
+      this.observationWarnings.clear()
       this.terminalInputCursors.clear()
       this.terminalInputTails.clear()
       this.terminalColorQueryRemainders.clear()
@@ -2016,7 +2086,19 @@ export class RuntimeController {
   }
 
   endpointWarningSnapshot(): RuntimeEndpointWarning[] {
-    return [...this.endpointWarnings.values()]
+    return [...this.endpointWarnings.values(), ...this.observationWarnings.values()]
+  }
+
+  private clearHostObservationWarnings(hostId: string): void {
+    for (const [key, warning] of this.observationWarnings) if (warning.hostId === hostId) this.observationWarnings.delete(key)
+  }
+
+  private assertObservationHostConnection(hostId: string, host: RuntimeHost): void {
+    if (host.config.kind !== 'ssh' || runtimeOwner(host.client)?.availability === 'connected') return
+    // The original connection continues in its existing owner. This read cannot wait on an
+    // unconfirmed remote handshake or use its untrusted metadata as another Host's facts.
+    if (runtimeOwner(host.client) === null) this.connectEndpointInBackground(hostId, host.client)
+    throw new AgentMuxError('The endpoint has not completed its trusted Runtime connection. Other endpoints remain available.', 'RUNTIME_UNAVAILABLE')
   }
 
   reportBindingSaveFailure(preparation: Pick<RuntimePreparation, 'runtimeBindings'>, error: unknown): void {

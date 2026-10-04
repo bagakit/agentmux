@@ -8,7 +8,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import type { AgentSessionNameMetadata, AppConfig, RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
+import { AgentProviderRegistry } from '@agentmux/core'
+import type { AgentSessionNameMetadata, AppConfig, RuntimeEndpointWarning, RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -18,8 +19,10 @@ import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../src/renderer/src/lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../src/renderer/src/lib/workbench-tab-presentation'
+import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { regionSurfaceLabel } from '../src/renderer/src/lib/region-display-name'
 import { hydratePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
+import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 
 const initial = useAppStore.getState()
 const ids = ['original-a', 'original-b']
@@ -39,14 +42,18 @@ function Notices() {
 }
 let root: Root, element: HTMLDivElement, dispose: (() => void) | undefined, releasePending: (() => void) | undefined
 let spatialDirectory: string, spatial: AgentMuxSpatialStateStore
+function setHistorySources(sources: AgentSessionHistoryDescriptor[], warnings: RuntimeEndpointWarning[] = []) {
+  vi.mocked(api.sessions.historySources).mockImplementation(historySourcesReader(sources, warnings))
+}
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   useAppStore.setState(initial, true)
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources')
+  setHistorySources([])
   spatialDirectory = await mkdtemp(join(tmpdir(), 'agentmux-startup-session-facts-'))
   spatial = new AgentMuxSpatialStateStore(join(spatialDirectory, 'spatial-state.json'))
   vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.read())
@@ -54,11 +61,14 @@ beforeEach(async () => {
   vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
 })
-async function saveOriginalWorkbench(config = composerConfig, execution = true) {
+async function saveOriginalWorkbench(config = composerConfig, execution = true, secondHost = 'local') {
   const state = useAppStore.getState(), original = state.restoredWorkbench!
   const graph = desktopSpatialGraph({ ...state, config,
     tabs: Object.fromEntries(Object.values(original.tabs).map(tab => [tab.id, hydratePersistedTab(tab)])), layouts: original.layouts,
-    sessions: execution ? ids.map(id => composerSession(id)) : [] }, [])
+    sessions: execution ? ids.map((id, index) => {
+      const session = composerSession(id), hostId = index ? secondHost : 'local'
+      return { ...session, hostId, control: { ...session.control, hostId } }
+    }) : [] }, [])
   const saved = await spatial.commit({ expectedRevision: 0, graph })
   expect((await spatial.read())?.graph).toEqual(saved.graph)
   // The current Core projection supplies exact Space/Zone metadata. Preserve that
@@ -66,7 +76,7 @@ async function saveOriginalWorkbench(config = composerConfig, execution = true) 
   const originalProjection = desktopWorkbenchFromSpatial(saved.graph)
   for (const tab of Object.values(original.tabs)) Object.assign(tab, { space: originalProjection.tabs[tab.id]!.space })
   expect(saved.graph.regions.map(region => region.agentSessionId)).toEqual(ids)
-  expect(saved.graph.regions.map(region => region.execution?.hostId ?? null)).toEqual(execution ? ['local', 'local'] : [null, null])
+  expect(saved.graph.regions.map(region => region.execution?.hostId ?? null)).toEqual(execution ? ['local', secondHost] : [null, null])
 }
 async function missingReferencesFixture(catalogue: AgentSessionHistoryDescriptor[]) {
   const tabs = Object.fromEntries(ids.map(id => [`tab-${id}`, createWorkbenchTab(`tab-${id}`, {
@@ -75,7 +85,7 @@ async function missingReferencesFixture(catalogue: AgentSessionHistoryDescriptor
   useAppStore.setState({ restoredWorkbench: { tabs, layouts: { workspace: createWorkspaceLayout('original-group', Object.keys(tabs)) } },
     loading: true, activeWorkspaceId: 'workspace' })
   await saveOriginalWorkbench()
-  vi.mocked(api.sessions.historySources).mockResolvedValue(catalogue)
+  setHistorySources(catalogue)
   const unrelated = { ...empty(), sessions: [composerSession('healthy-neighbor')],
     timelines: { 'healthy-neighbor': { agentSessionId: 'healthy-neighbor', revision: 1, items: [] } } }
   let finish!: (snapshot: RuntimeSnapshot) => void
@@ -119,7 +129,7 @@ it('settles retained closed references from their own later Core catalogue witho
   vi.mocked(api.providers.list).mockRejectedValue(new Error('Unrelated Provider discovery failure'))
   const f = await missingReferencesFixture([])
   expect(useAppStore.getState().error).toContain('2 saved Session reference(s) have no current Runtime facts')
-  vi.mocked(api.sessions.historySources).mockResolvedValue(ids.map(agentSessionId => ({ agentSessionId, hostId: 'local', state: 'retired' })))
+  setHistorySources(ids.map(agentSessionId => ({ agentSessionId, hostId: 'local', state: 'retired' })))
   await f.settle()
   expect(useAppStore.getState().error).toContain('Unrelated Provider discovery failure')
   expect(useAppStore.getState().error).not.toContain('no current Runtime facts')
@@ -140,7 +150,7 @@ afterEach(async () => {
   await rm(spatialDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 })
 })
 async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial', options: {
-  foreignHost?: boolean; movedDisplay?: boolean; spatial?: 'absent' | 'missing-execution'; initialSnapshot?: RuntimeSnapshot
+  foreignHost?: boolean; movedDisplay?: boolean; secondExecutionHost?: string; spatial?: 'absent' | 'missing-execution'; initialSnapshot?: RuntimeSnapshot | Error
 } = {}) {
   const config: AppConfig = options.foreignHost || options.movedDisplay ? { ...composerConfig,
     hosts: [...composerConfig.hosts, { id: 'foreign-host', kind: 'ssh', label: 'Other Host', hostname: 'private.invalid', user: 'fixture' }],
@@ -158,7 +168,7 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
     agentComposerDrafts: { 'original-a': '原来的未发送草稿', 'original-b': 'Original neighbor draft' } }
   useAppStore.setState({ restoredWorkbench: { tabs, layouts: original.layouts }, loading: true,
     agentFocus: original.agentFocus, agentComposerDrafts: original.agentComposerDrafts, activeWorkspaceId: workspaceId })
-  if (options.spatial !== 'absent') await saveOriginalWorkbench(config, options.spatial !== 'missing-execution')
+  if (options.spatial !== 'absent') await saveOriginalWorkbench(config, options.spatial !== 'missing-execution', options.secondExecutionHost)
   else {
     // Resource metadata is derived from the original configuration, not an execution
     // confirmation. This case still leaves the durable Core graph absent.
@@ -174,6 +184,7 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
   const snapshot = vi.spyOn(api.sessions, 'snapshot').mockImplementationOnce(async () => {
     if (overflow) for (let index = 0; index < 257; index += 1) listener(unknownEvent())
     else if (bufferedEvent) listener(unknownEvent())
+    if (options.initialSnapshot instanceof Error) throw options.initialSnapshot
     return options.initialSnapshot ?? empty()
   })
   if (overflow) snapshot.mockResolvedValueOnce(overflow === 'complete'
@@ -181,14 +192,17 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
   snapshot.mockReturnValue(pending)
   await act(async () => { root.render(<Notices />); dispose = await useAppStore.getState().initialize() })
   expect(useAppStore.getState().loading).toBe(false)
-  expect(snapshot).toHaveBeenCalledTimes(overflow === 'partial' ? 3 : 2)
   if (overflow === 'complete') {
     expect(useAppStore.getState().errorNoticeContext).toBeNull()
     expect(element.querySelector('.error-notice')).toBeNull()
+  } else if (!useAppStore.getState().errorNoticeContext?.startupSessionSnapshot && options.initialSnapshot && !(options.initialSnapshot instanceof Error) && options.initialSnapshot.sessions.length > 0) {
+    if (useAppStore.getState().error) expect(element.querySelector('.error-notice')!.textContent).toContain('Provider catalog lookup did not complete')
+    else expect(element.querySelector('.error-notice')).toBeNull()
   } else {
     expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual(ids)
     expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
-    expect(element.querySelector('.error-notice')!.textContent).toContain('Runtime Session snapshot returned no Session facts')
+    expect(element.querySelector('.error-notice')!.textContent).toContain(options.initialSnapshot instanceof Error
+      ? 'Runtime Session snapshot did not complete' : 'Runtime Session snapshot returned no Session facts')
   }
   const warning = useAppStore.getState().error!
   const settle = async (result: RuntimeSnapshot | Error) => {
@@ -201,14 +215,298 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
     expect(useAppStore.getState().agentComposerDrafts).toEqual(original.agentComposerDrafts)
   }
   retained()
-  return { settle, retained, warning, snapshot }
+  return { settle, retained, warning, snapshot, restore: () => listener({ type: 'core', hostId: 'local', event: {
+    type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: 2 }
+  } }) }
 }
-it('initialization consumes complete overflow facts without another read', async () => {
+const candidates = () => complete().sessions.map(session => ({ ...session, agentSessionId: session.id, run: session.control.run }))
+
+it('startup observation shrinks an initially empty cut to the remaining exact original reference', async () => {
+  const f = await fixture()
+  await f.settle({ ...complete(), sessions: complete().sessions.slice(0, 1) })
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds,
+    'A partial canonical cut must reduce the original unknown count').toEqual([ids[1]])
+  expect(element.querySelector('.error-notice__summary')?.textContent).toContain('1 saved Session')
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual([ids[0]])
+  f.retained()
+})
+it('startup observation confirms exact pending identities without inventing a running Agent or executing recovery', async () => {
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture()
+  await f.settle({ ...empty(), recoveryCandidates: candidates() })
+  expect(useAppStore.getState().error, 'Known pending Session identity is not a Runtime observation failure').toBeNull()
+  expect(element.querySelector('.error-notice')).toBeNull()
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
+  expect(useAppStore.getState().sessions.every(session => session.processState !== 'running')).toBe(true)
+  expect(useAppStore.getState().sessions.flatMap(session => session.kind === 'agent' ? [session.capabilities] : [])).toEqual(candidates().map(session => session.capabilities))
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it('startup observation automatically re-reads the original Provider catalog and preserves another startup failure', async () => {
+  const catalog = new AgentProviderRegistry().catalog()
+  const providers = vi.mocked(api.providers.list).mockRejectedValueOnce(new Error('RPC ended before its response.')).mockImplementation(providerCatalogReader(catalog))
+  vi.mocked(api.demands.list).mockRejectedValue(new Error('Independent Demand failure'))
+  const f = await fixture()
+  expect(f.warning).toContain('Provider catalog lookup did not complete')
+  await f.settle(complete())
+  expect(providers).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().providerCatalog, 'The complete actual catalog and its capabilities must survive retry').toEqual(catalog)
+  expect(useAppStore.getState().error).toContain('Independent Demand failure')
+  expect(useAppStore.getState().error).not.toContain('Provider catalog lookup')
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
+  f.retained()
+})
+it('startup observation settles an original rejected Runtime read on the later canonical cut', async () => {
+  const f = await fixture(false, undefined, { initialSnapshot: new Error('RPC ended before its response.') })
+  await f.settle(complete())
+  expect(useAppStore.getState().error, 'The original failed Runtime observation must settle without restarting').toBeNull()
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
+  f.retained()
+})
+it('startup observation rechecks quiet successful empty cuts until exact original facts appear without an event', async () => {
+  const recover = vi.spyOn(api.sessions, 'recover'), providers = vi.mocked(api.providers.list)
+  const f = await fixture()
+  f.snapshot.mockResolvedValueOnce(empty()).mockResolvedValue(complete())
+  await f.settle(empty())
+  expect(useAppStore.getState().error).toBe(f.warning)
+  await vi.waitFor(() => expect(useAppStore.getState().error,
+    'A quiet original observation must settle when its later canonical facts become readable').toBeNull())
+  expect(f.snapshot).toHaveBeenCalledTimes(4)
+  expect(providers).toHaveBeenCalledTimes(1)
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it('startup observation yields finitely for quiet persistent unknown facts then preserves the original surface', async () => {
+  const f = await fixture()
+  await f.settle(empty())
+  await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledTimes(5))
+  await new Promise(done => setTimeout(done, 100))
+  expect(f.snapshot).toHaveBeenCalledTimes(5)
+  expect(useAppStore.getState().error).toBe(f.warning)
+  f.retained()
+})
+it('startup observation retries Provider failures with a bounded yield and renews only after connection restoration', async () => {
+  const providers = vi.mocked(api.providers.list).mockRejectedValue(new Error('Provider RPC is unavailable'))
+  const f = await fixture()
+  await f.settle(complete())
+  await vi.waitFor(() => expect(providers).toHaveBeenCalledTimes(5))
+  const reads = f.snapshot.mock.calls.length
+  await new Promise(done => setTimeout(done, 100))
+  expect(providers).toHaveBeenCalledTimes(5)
+  expect(f.snapshot).toHaveBeenCalledTimes(reads)
+  expect(useAppStore.getState().error).toContain('Provider RPC is unavailable')
+  expect(useAppStore.getState().errorNoticeContext?.startupProviderCatalog).toBeDefined()
+  const catalog = new AgentProviderRegistry().catalog()
+  providers.mockImplementation(providerCatalogReader(catalog))
+  await act(async () => { f.restore(); await new Promise(done => setTimeout(done, 0)) })
+  expect(useAppStore.getState().error, 'Connection recovery must settle the original Provider producer without restarting').toBeNull()
+  expect(useAppStore.getState().providerCatalog).toEqual(catalog)
+  f.retained()
+})
+it('startup observation retains Provider retry after Runtime facts settle but preserves a later diagnostic', async () => {
+  const providers = vi.mocked(api.providers.list).mockRejectedValue(new Error('Provider RPC is unavailable'))
+  const f = await fixture()
+  await f.settle(complete())
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
+  expect(useAppStore.getState().errorNoticeContext?.startupProviderCatalog).toBeDefined()
+  await act(async () => useAppStore.getState().reportError('Later original document save failed', { kind: 'process-degraded' }))
+  const later = useAppStore.getState().errorNoticeContext
+  providers.mockImplementation(providerCatalogReader(new AgentProviderRegistry().catalog()))
+  await new Promise(done => setTimeout(done, 100))
+  expect(useAppStore.getState().error).toBe('Later original document save failed')
+  expect(useAppStore.getState().errorNoticeContext).toBe(later)
+  f.retained()
+})
+it('startup observation cancels an outstanding Provider retry with the original reader', async () => {
+  const providers = vi.mocked(api.providers.list).mockRejectedValue(new Error('Provider RPC is unavailable'))
+  const f = await fixture()
+  await f.settle(complete())
+  const reads = f.snapshot.mock.calls.length, catalogs = providers.mock.calls.length
+  dispose?.(); dispose = undefined
+  await new Promise(done => setTimeout(done, 100))
+  expect(providers).toHaveBeenCalledTimes(catalogs)
+  expect(f.snapshot).toHaveBeenCalledTimes(reads)
+  f.retained()
+})
+it('startup observation retries a rejected Runtime observation finitely and recovers on its own connection event', async () => {
+  const f = await fixture(false, undefined, { initialSnapshot: new Error('Initial Runtime RPC ended') })
+  await f.settle(new Error('Runtime remains unavailable'))
+  await vi.waitFor(() => expect(f.snapshot).toHaveBeenCalledTimes(5))
+  expect(useAppStore.getState().error).toContain('Initial Runtime RPC ended')
+  const reads = f.snapshot.mock.calls.length
+  await new Promise(done => setTimeout(done, 100))
+  expect(f.snapshot).toHaveBeenCalledTimes(reads)
+  f.snapshot.mockResolvedValue(complete())
+  await act(async () => { f.restore(); await new Promise(done => setTimeout(done, 0)) })
+  expect(useAppStore.getState().error).toBeNull()
+  f.retained()
+})
+it('startup observation retries a Provider-only failure without manufacturing a missing Runtime notice', async () => {
+  const catalog = new AgentProviderRegistry().catalog()
+  vi.mocked(api.providers.list).mockRejectedValueOnce(new Error('Provider-only RPC ended')).mockImplementation(providerCatalogReader(catalog))
+  const f = await fixture(false, undefined, { initialSnapshot: complete() })
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
+  await f.settle(complete())
+  expect(useAppStore.getState().providerCatalog).toEqual(catalog)
+  expect(useAppStore.getState().error).toBeNull()
+  f.retained()
+})
+it.each(['foreign-host', 'unavailable-host', 'missing-execution'] as const)('startup observation keeps a %s candidate genuinely unknown', async mode => {
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture(false, undefined, mode === 'missing-execution' ? { spatial: 'missing-execution' } : undefined)
+  const snapshot: RuntimeSnapshot = { ...empty(), recoveryCandidates: candidates().map(candidate => mode === 'foreign-host'
+    ? { ...candidate, hostId: 'foreign-host' } : candidate), ...(mode === 'unavailable-host' ? { runtimeEndpointWarnings: [{
+      hostId: 'local', step: 'Reading Runtime state', code: 'RUNTIME_UNAVAILABLE', availability: 'unverified',
+      message: 'Original Runtime is unconfirmed', recovery: 'Wait for the original connection'
+    }] } : {}) }
+  await f.settle(snapshot)
+  expect(useAppStore.getState().error).toBe(f.warning)
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it('startup observation classifies retired history from original execution Host after a display move', async () => {
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture(false, undefined, { movedDisplay: true })
+  setHistorySources(ids.map(agentSessionId => ({ agentSessionId, hostId: 'local', state: 'retired' })))
+  await f.settle(empty())
+  expect(useAppStore.getState().error, 'Retirement belongs to the original execution Host, not the display Host').toBeNull()
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it('startup observation keeps metadata failures visible without taking known healthy or pending capabilities', async () => {
+  const f = await fixture()
+  const warning = { hostId: 'local', scope: 'observation' as const, step: 'Reading Provider catalog', code: 'PROVIDER_READ_FAILED',
+    availability: 'unverified' as const, message: 'Original catalog lookup is unconfirmed', recovery: 'The directory will be read again' }
+  await f.settle({ ...empty(), sessions: [complete().sessions[0]!], recoveryCandidates: [candidates()[1]!],
+    timelines: complete().timelines, runtimeEndpointWarnings: [warning] })
+  expect(useAppStore.getState().error).toBeNull()
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
+  expect(useAppStore.getState().sessions[0]?.status.state, 'A metadata read failure cannot disconnect a confirmed healthy Agent').toBe('running')
+  expect(useAppStore.getState().sessions[1]?.processState).not.toBe('running')
+  f.retained()
+})
+it('startup observation reads partial Provider diagnostics after publishing the complete original workface', async () => {
+  const catalog = new AgentProviderRegistry().catalog()
+  const providers = vi.mocked(api.providers.list).mockImplementation(providerCatalogReader(catalog))
+  const recover = vi.spyOn(api.sessions, 'recover'), stop = vi.spyOn(api.sessions, 'stop'), input = vi.spyOn(api.sessions, 'write')
+  const f = await fixture(false, undefined, { initialSnapshot: complete(), foreignHost: true })
+  expect(useAppStore.getState().loading, 'The background diagnostic cut must not hold the original workface').toBe(false)
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([])
+  const warning: RuntimeEndpointWarning = { hostId: 'foreign-host', scope: 'observation', availability: 'unverified',
+    step: 'Reading Provider catalog', code: 'PROVIDER_READ_FAILED', message: 'Other Host catalog did not complete', recovery: 'Read this catalog again' }
+  await f.settle({ ...complete(), runtimeEndpointWarnings: [warning] })
+  expect(useAppStore.getState().runtimeEndpointWarnings, 'A partial successful catalog must expose its exact failed Host diagnostic').toEqual([warning])
+  await act(async () => root.render(<><Notices /><GlobalSystemNotices /></>))
+  expect(element.textContent, 'The actual service window must consume this observation').toContain('Other Host: Reading Provider catalog')
+  expect(useAppStore.getState().providerCatalog).toEqual(catalog)
+  expect(providers).toHaveBeenCalledTimes(1)
+  expect(recover).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled()
+  f.retained()
+})
+it('startup observation settles exact retired metadata only on successful Hosts in a partial history receipt', async () => {
+  const f = await fixture(false, undefined, { foreignHost: true, secondExecutionHost: 'foreign-host' })
+  const warning: RuntimeEndpointWarning = { hostId: 'foreign-host', scope: 'observation', availability: 'unverified',
+    step: 'Reading retained History sources', code: 'HISTORY_READ_FAILED', message: 'Other history owner unavailable', recovery: 'Re-read that original history' }
+  setHistorySources([{ agentSessionId: ids[0]!, hostId: 'local', state: 'retired' }], [warning])
+  await f.settle(empty())
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds,
+    'A partial metadata read must not confirm another failed Host').toEqual([ids[1]])
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
+  f.retained()
+})
+it('startup observation metadata notice cannot hide a separate Session connection failure', async () => {
+  const f = await fixture()
+  await f.settle(complete())
+  const warning: RuntimeEndpointWarning = { hostId: 'local', scope: 'observation', availability: 'unverified',
+    step: 'Reading Provider catalog', code: 'PROVIDER_READ_FAILED', message: 'Catalog owner did not answer', recovery: 'Read the catalog again' }
+  useAppStore.setState({ runtimeEndpointWarnings: [warning], sessions: [{ ...complete().sessions[0]!,
+    status: { state: 'disconnected', source: 'run-process', observedAt: 10, detail: 'Actual Session connection is unconfirmed' } }] })
+  await act(async () => root.render(<><Notices /><GlobalSystemNotices /></>))
+  expect(element.textContent, 'A metadata warning must not hide the original Session connection notice').toContain('Reconnecting to this Agent')
+  expect(useAppStore.getState().sessions[0]!.status.detail).toBe('Actual Session connection is unconfirmed')
+  expect(element.textContent).toContain('Reading Provider catalog')
+  f.retained()
+})
+it('startup observation re-reads only a restored Host Provider producer then reads its current diagnostic cut', async () => {
+  const catalog = new AgentProviderRegistry().catalog(), providers = vi.mocked(api.providers.list).mockImplementation(providerCatalogReader(catalog))
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture(false, undefined, { initialSnapshot: complete() })
+  const warning: RuntimeEndpointWarning = { hostId: 'local', scope: 'observation', availability: 'unverified',
+    step: 'Reading Provider catalog', code: 'PROVIDER_READ_FAILED', message: 'Catalog did not complete', recovery: 'Read the catalog again' }
+  await f.settle({ ...complete(), runtimeEndpointWarnings: [warning] })
+  let refreshed = false
+  providers.mockImplementation(providerCatalogReader(catalog, [], () => { refreshed = true }))
+  f.snapshot.mockImplementation(async () => ({ ...complete(), runtimeEndpointWarnings: refreshed ? [] : [warning] }))
+  await act(async () => { f.restore(); await new Promise(done => setTimeout(done, 80)) })
+  expect(providers).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().runtimeEndpointWarnings, 'A successful metadata re-read needs its later canonical diagnostic cut').toEqual([])
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it('startup observation preserves a partial Provider query cut across quiet snapshots and retries it finitely', async () => {
+  const catalog = new AgentProviderRegistry().catalog()
+  const warning: RuntimeEndpointWarning = { hostId: 'local', scope: 'observation', availability: 'unverified', step: 'Reading Provider catalog',
+    code: 'EXECUTOR_HOST_CHANGED', message: 'The queried original Host was replaced before this catalog completed', recovery: 'Read the current owner catalog' }
+  const providers = vi.mocked(api.providers.list).mockImplementation(providerCatalogReader(catalog, [warning]))
+  const f = await fixture(false, undefined, { initialSnapshot: complete() })
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
+  await f.settle(complete())
+  await vi.waitFor(() => expect(providers).toHaveBeenCalledTimes(5))
+  await new Promise(done => setTimeout(done, 500))
+  expect(providers).toHaveBeenCalledTimes(5)
+  expect(useAppStore.getState().runtimeEndpointWarnings,
+    'A snapshot without a metadata warning must not erase an unresolved producer cut').toEqual([warning])
+  providers.mockImplementation(providerCatalogReader(catalog))
+  await act(async () => { f.restore(); await new Promise(done => setTimeout(done, 0)) })
+  expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([])
+  f.retained()
+})
+it('startup observation re-reads retained History after restore even when original Runtime facts were complete', async () => {
+  const f = await fixture(false, undefined, { initialSnapshot: complete() })
+  const warning: RuntimeEndpointWarning = { hostId: 'local', scope: 'observation', availability: 'unverified', step: 'Reading retained History sources',
+    code: 'HISTORY_READ_FAILED', message: 'This history producer was not read', recovery: 'Re-read the same original history owner' }
+  await f.settle({ ...complete(), runtimeEndpointWarnings: [warning] })
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
+  setHistorySources([])
+  const reads = vi.mocked(api.sessions.historySources).mock.calls.length
+  await act(async () => { f.restore(); await new Promise(done => setTimeout(done, 0)) })
+  expect(api.sessions.historySources).toHaveBeenCalledTimes(reads + 1)
+  expect(useAppStore.getState().runtimeEndpointWarnings,
+    'Restored History metadata needs its own real read, independently of Runtime membership').toEqual([])
+  f.retained()
+})
+it.each([false, true])('startup observation metadata diagnosis preserves explicit input and blocks background work only for unavailable Runtime (%s)', async unavailable => {
+  const f = await fixture()
+  const observation: RuntimeEndpointWarning = { hostId: 'local', scope: 'observation', availability: 'unverified',
+    step: 'Reading retained History sources', code: 'HISTORY_READ_FAILED', message: 'History metadata did not complete', recovery: 'Read the history again' }
+  const warnings = [observation, ...(unavailable ? [{ hostId: 'local', availability: 'unverified' as const,
+    step: 'Reading Runtime sessions', code: 'RUNTIME_UNAVAILABLE', message: 'Original Runtime unavailable', recovery: 'Reconnect the original Runtime' }] : [])]
+  // The observed history receipt preserves this same diagnostic; its metadata
+  // warning does not acquire Runtime authority merely by sharing the Host.
+  setHistorySources([], [observation])
+  await f.settle({ ...complete(), runtimeEndpointWarnings: warnings })
+  const condition = { expectedRun: complete().sessions[0]!.control.run, afterSubmissionId: null }
+  useAppStore.setState({ agentSteerQueues: { [ids[0]!]: [{ operationId: 'original-explicit', text: 'Actual original input',
+    runId: condition.expectedRun.runId, status: 'queued', promptCondition: condition }] } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+  await act(async () => useAppStore.getState().flushAgentSteerQueue(ids[0]!, unavailable ? undefined : 'original-explicit'))
+  if (unavailable) {
+    expect(submit).not.toHaveBeenCalled()
+    expect(useAppStore.getState().error).toBe(f.warning)
+    expect(useAppStore.getState().agentSteerQueues[ids[0]!]![0]!.operationId).toBe('original-explicit')
+  } else {
+    expect(submit, 'A failed metadata observation must not take an existing healthy input capability').toHaveBeenCalledExactlyOnceWith(
+      complete().sessions[0]!.control, 'Actual original input', 'original-explicit', condition, { allowUncertainTurn: true }, false, undefined, undefined, undefined)
+  }
+  f.retained()
+})
+it('initialization publishes complete overflow facts before the background diagnostic read', async () => {
   const f = await fixture(false, 'complete')
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
   expect(element.querySelector('.error-notice__reopen')).toBeNull()
-  expect(f.snapshot).toHaveBeenCalledTimes(2)
+  expect(f.snapshot).toHaveBeenCalledTimes(3)
   f.retained()
 })
 it('partial overflow keeps the original scope until later complete facts arrive', async () => {
@@ -233,14 +531,10 @@ it.each([false, true])('settles only the adopted complete original facts (buffer
   expect(element.querySelector('.error-notice__reopen')).toBeNull()
   f.retained()
 })
-it.each(['empty', 'partial', 'candidate', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)('keeps unresolved %s facts visible', async mode => {
+it.each(['empty', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)('keeps unresolved %s facts visible', async mode => {
   const f = await fixture()
   let snapshot: RuntimeSnapshot | Error = complete()
   if (mode === 'empty') snapshot = empty()
-  if (mode === 'partial') snapshot = { ...complete(), sessions: complete().sessions.slice(0, 1) }
-  if (mode === 'candidate') snapshot = { ...empty(), recoveryCandidates: complete().sessions.map(session => ({
-    ...session, agentSessionId: session.id, providerId: 'codex', executorId: 'codex', run: session.control.run
-  })) }
   if (mode === 'unavailable-host') snapshot = { ...complete(), runtimeEndpointWarnings: [{
     hostId: 'local', step: 'Reading Runtime sessions', code: 'CONTROL_UNAVAILABLE',
     message: 'The original endpoint has not confirmed its current Session facts.',
@@ -272,7 +566,48 @@ it('keeps same-ID facts from a foreign Host from settling the original saved Ses
   expect(useAppStore.getState().error, 'Another Host cannot confirm the original same-ID Session facts').toBe(f.warning)
   expect(useAppStore.getState().lastError).toBe(f.warning)
   expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
+  expect(useAppStore.getState().sessions.every(session => !ids.includes(session.id) || session.control.hostId === 'local'),
+    'A foreign same-ID Session must never lend its input control to the original Region').toBe(true)
   expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it.each(['initial', 'background'] as const)('startup observation rejects configured foreign same-ID fresh native recovery on the %s cut', async cut => {
+  const now = Date.now(), foreign = { ...empty(), recoveryCandidates: candidates().map(candidate => ({ ...candidate,
+    hostId: 'foreign-host', control: { ...candidate.control, hostId: 'foreign-host' },
+    semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: now, stateEnteredAt: now } })) }
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture(false, undefined, { foreignHost: true, ...(cut === 'initial' ? { initialSnapshot: foreign } : {}) })
+  if (cut === 'background') await f.settle(foreign)
+  expect(recover, 'A configured foreign same-ID native fact cannot authorize original recovery').not.toHaveBeenCalled()
+  expect(useAppStore.getState().sessions.some(session => ids.includes(session.id)),
+    'The original Region must retain unknown identity rather than adopt a foreign candidate').toBe(false)
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual(ids)
+  f.retained()
+})
+it('startup observation keeps original input controls and Regions beside an unrelated healthy fact after rejecting a foreign same-ID cut', async () => {
+  const f = await fixture(false, undefined, { foreignHost: true })
+  const original = complete().sessions
+  useAppStore.setState({ sessions: original })
+  const neighbor = composerSession('unrelated-healthy')
+  await f.settle({ ...empty(), sessions: [neighbor, ...original.map(session => ({ ...session, hostId: 'foreign-host',
+    control: { ...session.control, hostId: 'foreign-host' } }))], timelines: { ...complete().timelines,
+    [neighbor.id]: { agentSessionId: neighbor.id, revision: 1, items: [] } } })
+  expect(useAppStore.getState().sessions.slice(0, 2).map(session => session.control),
+    'A rejected saved fact is not a missing or retired original Session').toEqual(original.map(session => session.control))
+  expect(useAppStore.getState().sessions[2]?.id).toBe(neighbor.id)
+  expect(useAppStore.getState().error).toBe(f.warning)
+  f.retained()
+})
+it('startup observation excludes foreign same-ID native Timeline from the initial original workface', async () => {
+  const foreign: RuntimeSnapshot = { ...complete(), sessions: complete().sessions.map(session => ({ ...session, hostId: 'foreign-host',
+    control: { ...session.control, hostId: 'foreign-host' } })), timelines: Object.fromEntries(ids.map(agentSessionId => [agentSessionId, {
+      agentSessionId, revision: 3, items: [{ id: 'foreign-native-fact', agentSessionId, kind: 'assistant_message', status: 'complete',
+        source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Other Host reply', content: 'Foreign reply cannot settle original input' }]
+    }])) }
+  const f = await fixture(false, undefined, { foreignHost: true, initialSnapshot: foreign })
+  expect(ids.some(id => useAppStore.getState().timelines[id] !== undefined),
+    'An unowned same-ID Timeline must never enter original startup conversation or delivery receipts').toBe(false)
+  expect(useAppStore.getState().sessions.some(session => ids.includes(session.id))).toBe(false)
   f.retained()
 })
 it('settles the original execution Host facts after a cross-Host display move', async () => {

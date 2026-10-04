@@ -76,7 +76,8 @@ it('keeps failed-owner Agent, Terminal and unknown-owner saved surface when the 
   expect(unverified.updatedAt).toBe(agent.updatedAt)
   expect(unverified.kind === 'agent' ? unverified.semanticStatus : undefined).toBe(agent.semanticStatus)
   const notices = [...dom.container.querySelectorAll('.service-window__step')].map(item => item.textContent)
-  expect(notices).toEqual(['Build host: Reading Runtime sessions'])
+  expect(notices).toEqual(['Build host: Connection could not be verified'])
+  expect(dom.container.querySelector('details')?.textContent).toContain('Build host: Reading Runtime sessions')
   expect(dom.container.textContent).toContain('current status is unconfirmed')
 })
 

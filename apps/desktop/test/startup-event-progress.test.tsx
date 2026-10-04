@@ -1,20 +1,21 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
-import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
-import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
+import type { AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import type { RuntimeEvent, RuntimeSnapshot, SessionHistorySourcesObservation } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { hydratePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 const initial = useAppStore.getState()
 const ids = ['quiet-a', 'busy-b']
@@ -44,16 +45,21 @@ async function ticks() { for (let count = 0; count < 24; count++) await Promise.
 let directory: string, dispose: (() => void) | undefined, listener: (event: RuntimeEvent) => void
 let releases: Array<() => void>, initializing: Promise<(() => void)> | undefined
 let original: Pick<ReturnType<typeof useAppStore.getState>, 'tabs' | 'layouts' | 'agentFocus' | 'agentComposerDrafts'>
-let recover: ReturnType<typeof vi.spyOn>, stop: ReturnType<typeof vi.spyOn>, send: ReturnType<typeof vi.spyOn>
+let recover: MockInstance<typeof api.sessions.recover>, stop: MockInstance<typeof api.sessions.stop>, send: MockInstance<typeof api.sessions.submitPrompt>
 let input: HTMLTextAreaElement
+let historyObservation: Promise<SessionHistorySourcesObservation>
+async function readHistory(options: { observation: true }): Promise<SessionHistorySourcesObservation>
+async function readHistory(): Promise<AgentSessionHistoryDescriptor[]>
+async function readHistory(options?: { observation: true }): Promise<SessionHistorySourcesObservation | AgentSessionHistoryDescriptor[]> { return options ? historyObservation : [] }
 beforeEach(async () => {
   releases = []; initializing = undefined; dispose = undefined
   useAppStore.setState(initial, true)
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  historyObservation = Promise.resolve({ sources: [], warnings: [] })
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(readHistory)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(callback => { listener = callback; return () => {} })
   recover = vi.spyOn(api.sessions, 'recover'); stop = vi.spyOn(api.sessions, 'stop'); send = vi.spyOn(api.sessions, 'submitPrompt')
   directory = await mkdtemp(join(tmpdir(), 'agentmux-startup-progress-'))
@@ -145,18 +151,18 @@ it('adopts each overflowing background pass and compensates quiet history while 
   expect(useAppStore.getState().sessions.find(session => session.id === ids[1])!.status.observedAt).toBe(356)
   expect(timeline).toHaveBeenCalledWith(composerSession(ids[0]!).control)
   expect(useAppStore.getState().timelines[ids[0]!]).toEqual(history)
-  expect(snapshot).toHaveBeenCalledTimes(2)
-  await vi.advanceTimersByTimeAsync(49); expect(snapshot).toHaveBeenCalledTimes(2)
-  await vi.advanceTimersByTimeAsync(1); expect(snapshot).toHaveBeenCalledTimes(3)
+  expect(snapshot).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(49); expect(snapshot).toHaveBeenCalledTimes(3)
+  await vi.advanceTimersByTimeAsync(1); expect(snapshot).toHaveBeenCalledTimes(4)
   retained()
 })
 
 it('rechecks overflow after history metadata awaits and keeps the scoped notice until a loss-free canonical cut', async () => {
-  const canonical = deferred<RuntimeSnapshot>(), metadata = deferred<Awaited<ReturnType<typeof api.sessions.historySources>>>()
+  const canonical = deferred<RuntimeSnapshot>(), metadata = deferred<SessionHistorySourcesObservation>()
   const repair = deferred<RuntimeSnapshot>()
-  releases.push(() => canonical.resolve(complete()), () => metadata.resolve([]), () => repair.resolve(complete()))
+  releases.push(() => canonical.resolve(complete()), () => metadata.resolve({ sources: [], warnings: [] }), () => repair.resolve(complete()))
   const snapshot = vi.spyOn(api.sessions, 'snapshot').mockResolvedValueOnce(empty()).mockReturnValueOnce(canonical.promise).mockReturnValue(repair.promise)
-  vi.mocked(api.sessions.historySources).mockReturnValue(metadata.promise)
+  historyObservation = metadata.promise
   dispose = await useAppStore.getState().initialize()
   const notice = useAppStore.getState().errorNoticeContext
   expect(notice?.startupSessionSnapshot?.sessionIds).toEqual(ids)
@@ -164,7 +170,7 @@ it('rechecks overflow after history metadata awaits and keeps the scoped notice 
   canonical.resolve(complete()); await ticks()
   expect(api.sessions.historySources).toHaveBeenCalledTimes(1)
   listener(status(ids[0]!, 60, 'done')); storm()
-  metadata.resolve([]); await ticks()
+  metadata.resolve({ sources: [], warnings: [] }); await ticks()
   expect(useAppStore.getState().sessions.find(session => session.id === ids[0])!.status.state).toBe('done')
   expect(useAppStore.getState().errorNoticeContext, 'truncated metadata wait is not a complete observation').toBe(notice)
   expect(snapshot).toHaveBeenCalledTimes(2)
@@ -201,6 +207,6 @@ it('uses a single in-flight read and capped backoff under successive pressured c
   reads[3]!.resolve({ ...complete(), sessions: complete().sessions.map(session => ({ ...session, label: 'stale disposed read' })) })
   await ticks(); await vi.advanceTimersByTimeAsync(5000)
   expect(useAppStore.getState().sessions).toBe(before)
-  expect(snapshot).toHaveBeenCalledTimes(5)
+  expect(snapshot).toHaveBeenCalledTimes(6)
   retained()
 })

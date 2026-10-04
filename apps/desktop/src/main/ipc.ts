@@ -932,7 +932,13 @@ export async function registerIpc(args: {
     app.dock.setBadge(count === 0 ? '' : String(count))
     return true
   })
-  handle('providers:list', () => args.runtime.providerCatalog())
+  handle('providers:list', async (options?: { observation: true }) => {
+    if (options === undefined) return await args.runtime.providerCatalog()
+    if (!options || options.observation !== true || Object.keys(options).some(key => key !== 'observation')) {
+      throw new TypeError('Provider catalog requires an exact observation mode or a catalogue read.')
+    }
+    return await args.runtime.providerCatalog(options)
+  })
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, args.runtime))
   handle('executors:discover', async (hostId: string) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
@@ -949,11 +955,11 @@ export async function registerIpc(args: {
       await configOwner.update(current => configWithRuntimeBindings(current, preparation))
     } catch (error) { args.runtime.reportBindingSaveFailure(preparation, error) }
     const runtimeEndpointWarnings = [...new Map([
-      ...args.runtime.endpointWarningSnapshot().map(warning => [warning.hostId, warning] as const),
+      ...args.runtime.endpointWarningSnapshot().map(warning => [JSON.stringify([warning.hostId, warning.step]), warning] as const),
       // A connection that completed during this read does not make an omitted endpoint a full
       // snapshot. Preserve that cut's unverified membership until the ordinary restored resync.
-      ...(snapshot.runtimeEndpointWarnings ?? []).filter(warning => warning.availability !== 'connected')
-        .map(warning => [warning.hostId, warning] as const)
+      ...(snapshot.runtimeEndpointWarnings ?? []).filter(warning => warning.scope !== 'observation' && warning.availability !== 'connected')
+        .map(warning => [JSON.stringify([warning.hostId, warning.step]), warning] as const)
     ]).values()]
     return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
       args.environmentWarning, app.getPath('home'))
@@ -977,7 +983,13 @@ export async function registerIpc(args: {
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => sessionLaunchResult(() => args.runtime.launchTerminal(input, config)))
   handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
-  handle('sessions:historySources', async () => args.runtime.sessionHistorySources())
+  handle('sessions:historySources', async (options?: { observation: true }) => {
+    if (options === undefined) return await args.runtime.sessionHistorySources()
+    if (!options || options.observation !== true || Object.keys(options).some(key => key !== 'observation')) {
+      throw new TypeError('History sources require an exact observation mode or a complete catalogue read.')
+    }
+    return await args.runtime.sessionHistorySources(options)
+  })
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))

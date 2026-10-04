@@ -5,6 +5,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { AgentMuxClient, AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
+import { RuntimeController } from '../src/main/runtime-controller'
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -28,6 +30,7 @@ let config: AppConfig, original: Extract<SessionSnapshot, { kind: 'agent' }>, so
 let nameOwner: AgentMuxSpatialStateStore, ownerDirectory: string
 const creations = new Map<string, AgentLaunchResult['created']>()
 const diagnostic = 'Original diagnostic ' + 'all retained details; '.repeat(100)
+vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 beforeEach(async () => {
   creations.clear()
   vi.stubGlobal('crypto', webcrypto)
@@ -327,6 +330,40 @@ it('conflicting retained source Hosts stay unknown and a stale Host cannot be su
   vi.mocked(api.sessions.historySources).mockResolvedValue([histories[1]!])
   await expect(takeOverSession(source, 'fixture', () => true)).rejects.toThrow('execution identity changed')
   expect(launch).not.toHaveBeenCalled()
+})
+
+it('an incomplete two-Host catalogue cannot establish a unique takeover source without Core execution', async () => {
+  const goodStore = new AgentMuxMemoryAgentSessionStore(), failedStore = new AgentMuxMemoryAgentSessionStore()
+  await goodStore.compareAndSwap(null, { kind: 'agent', agentSessionId: 'original', hostId: 'local', providerId: 'codex', executorId: 'fixture',
+    workspacePath: _hygiene_fixturePath("repo"), run: { runId: 'retained-original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
+    hookBindingId: 'private-fixture', hookToken: 'private-fixture-token', nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native' } })
+  const failure = new Error('The other exact Host retained metadata is unavailable.')
+  vi.spyOn(failedStore, 'load').mockRejectedValue(failure)
+  const healthy = new AgentMuxClient({ store: goodStore }), failed = new AgentMuxClient({ store: failedStore })
+  const controller = new RuntimeController(goodStore, async () => { throw new Error('No Runtime connection belongs to this metadata fixture') })
+  controller.commit({ hosts: [
+    { id: 'local', config: { id: 'local', kind: 'local', label: 'Private' }, client: healthy, executionHost: { kind: 'local', dispose: vi.fn() } as never },
+    { id: 'other', config: { id: 'other', kind: 'ssh', label: 'Other', hostname: 'other.invalid' }, client: failed, executionHost: { kind: 'local', dispose: vi.fn() } as never }
+  ], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  // This metadata-only fixture has no trusted remote Runtime. Keep that known
+  // observation state without scheduling a native connection to any user owner.
+  Object.assign(failed, { runtimeOwnerIdentity: () => ({ availability: 'unverified' }) })
+  const connect = [vi.spyOn(healthy, 'connect'), vi.spyOn(failed, 'connect')]
+  useAppStore.setState({ sessions: [] })
+  vi.mocked(api.spatial.read).mockResolvedValue(null)
+  const history = vi.spyOn(api.sessions, 'historySources').mockImplementation(() => controller.sessionHistorySources())
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  try {
+    const cut = await controller.sessionHistorySources({ observation: true })
+    expect(cut.sources.map(item => [item.agentSessionId, item.hostId])).toEqual([['original', 'local']])
+    expect(cut.warnings).toEqual([expect.objectContaining({ hostId: 'other', scope: 'observation', code: 'RUNTIME_UNAVAILABLE' })])
+    await expect(takeOverSession({ ...source, hostId: undefined, cwd: undefined }, 'fixture', () => true)).rejects.toBe(failure)
+    expect(history).toHaveBeenCalledExactlyOnceWith()
+    expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+    for (const probe of connect) expect(probe).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+    expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
+  } finally { await controller.dispose() }
 })
 
 it('a fresh Core Region replacement refuses the stale Desktop source without touching either Session', async () => {

@@ -6,6 +6,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { runtimeEndpointNotice } from '../src/renderer/src/lib/runtime-endpoint-notice'
 
 const dom = composerDOM(), openHost = vi.fn()
 beforeEach(() => {
@@ -104,7 +105,9 @@ it('does not let two subset rows erase each other read receipts, but confirmed r
   await act(async () => row('Build server').querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
   await act(async () => row('Other server').querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
   expect(automaticRows().map(node => node.getAttribute('data-unread'))).toEqual(['false', 'false'])
-  expect(Object.keys(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']!)).toEqual(['remote-id', 'other-remote'])
+  expect(Object.keys(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']!)).toEqual([
+    JSON.stringify(['remote-id', first.step]), JSON.stringify(['other-remote', first.step])
+  ])
   const saved = useAppStore.getState().noticeReadReceipts
   await dom.render(null); await mountAll()
   expect(automaticRows().map(node => node.getAttribute('data-unread'))).toEqual(['false', 'false'])
@@ -113,7 +116,7 @@ it('does not let two subset rows erase each other read receipts, but confirmed r
   expect(useAppStore.getState().noticeReadReceipts).toEqual(saved)
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [first] }))
   expect(row().getAttribute('data-unread')).toBe('false')
-  expect(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']).not.toHaveProperty('other-remote')
+  expect(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']).not.toHaveProperty(JSON.stringify(['other-remote', first.step]))
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [] }))
   expect(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']).toBeUndefined()
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [first] }))
@@ -187,4 +190,26 @@ it('handles Escape at the actually focused trigger only while details are open, 
   await act(async () => trigger.dispatchEvent(closedEscape))
   expect(closedEscape.defaultPrevented).toBe(false)
   expect(useAppStore.getState().runtimeEndpointWarnings).toHaveLength(1)
+})
+
+it('keeps two observation steps on one Host distinct without declaring its Runtime unavailable or connected', async () => {
+  const warnings = ['Reading Provider catalog', 'Reading retained History sources'].map(step => ({
+    hostId: 'remote-id', step, code: 'CONTROL_UNAVAILABLE', message: `Original ${step} failure`,
+    recovery: `Retry ${step} on the original Host`, scope: 'observation' as const, availability: 'connected' as const
+  }))
+  const notices = warnings.map(warning => runtimeEndpointNotice(warning, 'Build server', openHost))
+  expect(new Set(notices.map(notice => notice.id)).size).toBe(2)
+  for (const [index, notice] of notices.entries()) {
+    expect(notice.summary!.step).toBe(`Build server: ${warnings[index]!.step}`)
+    expect(notice.summary!.mode).not.toMatch(/Runtime is connected|settings step|running state is unconfirmed/)
+    expect(notice.summary!.restore).toBe(warnings[index]!.recovery)
+  }
+  const drafts = useAppStore.getState().agentComposerDrafts, tabs = useAppStore.getState().tabs
+  await act(async () => useAppStore.setState({ runtimeEndpointWarnings: warnings }))
+  await mount()
+  expect(dom.container.querySelectorAll('.global-system-notices__item')).toHaveLength(2)
+  expect(dom.container.textContent).toContain('Build server: Reading Provider catalog')
+  expect(dom.container.textContent).toContain('Build server: Reading retained History sources')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+  expect(useAppStore.getState().tabs).toBe(tabs)
 })

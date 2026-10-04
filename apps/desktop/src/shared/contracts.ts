@@ -1036,6 +1036,8 @@ export type RuntimeEvent = {
 }
 
 export type RuntimeEndpointWarning = {
+  /** A failed catalog/metadata observation does not declare this Host's Runtime unavailable. */
+  scope?: 'observation'
   /** A configuration workflow failure can coexist with a connected healthy Runtime. */
   availability?: 'connected' | 'unverified'
   hostId: string
@@ -1043,6 +1045,17 @@ export type RuntimeEndpointWarning = {
   code: string
   message: string
   recovery: string
+}
+
+/** Only successful Host reads are in sources; warnings retain this cut's unresolved Hosts. */
+export type SessionHistorySourcesObservation = {
+  sources: AgentSessionHistoryDescriptor[]
+  warnings: RuntimeEndpointWarning[]
+}
+
+export type ProviderCatalogObservation = {
+  catalog: AgentCatalogEntry[]
+  warnings: RuntimeEndpointWarning[]
 }
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
@@ -1648,6 +1661,7 @@ export type AgentMuxDesktopApi = {
     onWindowResize(listener: (event: WindowResizeEvent) => void): () => void
   }
   providers: {
+    list(options: { observation: true }): Promise<ProviderCatalogObservation>
     list(): Promise<AgentCatalogEntry[]>
   }
   executors: {
@@ -1677,6 +1691,7 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentSession>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
+    historySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
     historySources(): Promise<AgentSessionHistoryDescriptor[]>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>

@@ -17,11 +17,13 @@ import type {
   SessionControl,
   SessionReplayResult,
   SessionSnapshot,
+  SessionHistorySourcesObservation,
+  ProviderCatalogObservation,
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
 import { applyConfigEdit } from '../../../shared/config-edit'
-import type { AgentCatalogEntry } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
 import { applyAppLinkForget } from '../../../shared/browser-settings'
 import { resolveBrowserAddress } from '../../../shared/browser-address'
@@ -333,6 +335,27 @@ let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState
 const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
 let mockNotebookState = emptyNotebookState()
 const mockNotebookListeners = new Set<(event: NotebookObservation) => void>()
+async function mockProviderCatalog(options: { observation: true }): Promise<ProviderCatalogObservation>
+async function mockProviderCatalog(): Promise<AgentCatalogEntry[]>
+async function mockProviderCatalog(options?: { observation: true }): Promise<AgentCatalogEntry[] | ProviderCatalogObservation> {
+  const catalog = BUILT_IN_AGENT_PROVIDER_IDS.map((id): AgentCatalogEntry => ({
+    id, label: builtInAgentProviderLabel(id), executable: id, expectedProcess: id,
+    promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: id },
+    hookStrategy: { kind: 'native', installation: 'explicit-managed' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
+    acpStrategy: { kind: 'none' }, capabilities: mockStructuredCapabilities, launchOptions: mockProviderLaunchOptions(id)
+  }))
+  return options?.observation ? { catalog, warnings: [] } : catalog
+}
+async function mockHistorySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
+async function mockHistorySources(): Promise<AgentSessionHistoryDescriptor[]>
+async function mockHistorySources(options?: { observation: true }): Promise<AgentSessionHistoryDescriptor[] | SessionHistorySourcesObservation> {
+  const sources = mockSnapshot.sessions.filter(session => session.kind === 'agent').map(session => ({
+    agentSessionId: session.id, hostId: session.hostId, state: 'active' as const,
+    history: { providerId: session.providerId!, executorId: session.executorId!, workspacePath: session.workspacePath, createdAt: session.createdAt }
+  }))
+  return options?.observation ? { sources, warnings: [] } : sources
+}
+
 const mockApi: AgentMuxDesktopApi = {
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   notebooks: {
@@ -775,20 +798,7 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   providers: {
-    list: async () =>
-      BUILT_IN_AGENT_PROVIDER_IDS.map((id) => ({
-        id,
-        label: builtInAgentProviderLabel(id),
-        executable: id,
-        expectedProcess: id,
-        promptDelivery: 'positional-argv',
-        readySignal: { kind: 'foreground-process', expectedProcess: id },
-        hookStrategy: { kind: 'native', installation: 'explicit-managed' },
-        resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
-        acpStrategy: { kind: 'none' },
-        capabilities: mockStructuredCapabilities,
-        launchOptions: mockProviderLaunchOptions(id)
-      }))
+    list: mockProviderCatalog
   },
   executors: {
     discover: async (hostId) => ({ routeHostId: hostId, runtimeId: `preview:${hostId}`, executors: Object.entries(mockConfig.executors).map(([executorId, config]) => ({
@@ -913,10 +923,7 @@ const mockApi: AgentMuxDesktopApi = {
       if (!timeline) throw new Error(`Timeline not found: ${control.agentSessionId}`)
       return structuredClone(timeline)
     },
-    historySources: async () => mockSnapshot.sessions.filter(session => session.kind === 'agent').map(session => ({
-      agentSessionId: session.id, hostId: session.hostId, state: 'active' as const,
-      history: { providerId: session.providerId!, executorId: session.executorId!, workspacePath: session.workspacePath, createdAt: session.createdAt }
-    })),
+    historySources: mockHistorySources,
     historyPage: async () => {
       throw new Error('Native conversation history is unavailable in the web preview.')
     },
