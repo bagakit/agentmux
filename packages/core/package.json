@@ -30,6 +30,14 @@
       "types": "./dist/control.d.ts",
       "import": "./dist/control.js"
     },
+    "./files": {
+      "types": "./dist/public-rpc-files.d.ts",
+      "import": "./dist/public-rpc-files.js"
+    },
+    "./schedule": {
+      "types": "./dist/agent-schedule.d.ts",
+      "import": "./dist/agent-schedule.js"
+    },
     "./timeline": {
       "types": "./dist/session-timeline.d.ts",
       "import": "./dist/session-timeline.js"
@@ -130,6 +138,14 @@
       "types": "./dist/runtime-client.d.ts",
       "import": "./dist/runtime-client.js"
     },
+    "./notebook-catalog": {
+      "types": "./dist/notebook-catalog.d.ts",
+      "import": "./dist/notebook-catalog.js"
+    },
+    "./notebook-store": {
+      "types": "./dist/notebook-store.d.ts",
+      "import": "./dist/notebook-store.js"
+    },
     "./prompt-reaction": {
       "types": "./dist/prompt-reaction.d.ts",
       "import": "./dist/prompt-reaction.js"
@@ -145,6 +161,10 @@
     "./relay-hosted": {
       "types": "./dist/relay-hosted.d.ts",
       "import": "./dist/relay-hosted.js"
+    },
+    "./delivery-attempt": {
+      "types": "./dist/delivery-attempt.d.ts",
+      "import": "./dist/delivery-attempt.js"
     }
   },
   "bin": {

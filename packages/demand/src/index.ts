@@ -3,3 +3,5 @@ export * from './demand-store.js'
 export * from './errors.js'
 export { runDemandCli } from './cli.js'
 export * from './goals.js'
+
+export * from './content-references.js'

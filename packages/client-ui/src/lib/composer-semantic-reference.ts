@@ -1,4 +1,4 @@
-export type SemanticReferenceKind = 'skill' | 'component' | 'subcommand'
+export type SemanticReferenceKind = 'skill' | 'component' | 'subcommand' | 'file'
 export type ComposerSemanticReference = {
   token: string
   label: string
@@ -15,7 +15,7 @@ export function encodeSemanticReference(item: ComposerSemanticReference): string
 export type ComposerDraftPart = { text: string } | { reference: ComposerSemanticReference; raw: string }
 export function parseComposerDraft(draft: string): ComposerDraftPart[] {
   const parts: ComposerDraftPart[] = []
-  const pattern = /\[([^\]\n]+)\]\(agentmux-(skill|component|subcommand):([^\s)]*)\)/g
+  const pattern = /\[([^\]\n]+)\]\(agentmux-(skill|component|subcommand|file):([^\s)]*)\)/g
   let offset = 0
   for (const match of draft.matchAll(pattern)) {
     let reference: string

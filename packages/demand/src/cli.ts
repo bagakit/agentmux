@@ -1,3 +1,4 @@
+import { parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
 import { DemandNameChangeError, openDemandStore } from './demand-store.js'
 import { DEMAND_CLI_SCHEMA, DEMAND_PRIORITIES, DEMAND_STATUSES, type CreateDemandInput, type DemandNameContext, type DemandPriority, type DemandStatus, type UpdateDemandInput } from './demand-types.js'
@@ -69,6 +70,7 @@ async function execute(command: string, options: Map<string, string[]>, store: R
   }
   if (command === 'create') {
     const input: CreateDemandInput = { title: required(options, 'title'), sessionIds: options.get('session-id') ?? [] }
+    const refs = option(options, 'content-refs'); if (refs !== undefined) input.contentRefs = parseDemandContentReferences(JSON.parse(refs))
     const id = option(options, 'id'); if (id !== undefined) input.id = id
     const description = option(options, 'description'); if (description !== undefined) input.description = description
     const status = statusOption(options, 'status'); if (status !== undefined) input.status = status
@@ -81,6 +83,7 @@ async function execute(command: string, options: Map<string, string[]>, store: R
   }
   if (command === 'update') {
     const patch: UpdateDemandInput = {}
+    const refs = option(options, 'content-refs'); if (refs !== undefined) patch.contentRefs = parseDemandContentReferences(JSON.parse(refs))
     const title = option(options, 'title'); if (title !== undefined) patch.title = title
     const description = option(options, 'description'); if (description !== undefined) patch.description = description
     const status = statusOption(options, 'status'); if (status !== undefined) patch.status = status
@@ -91,7 +94,8 @@ async function execute(command: string, options: Map<string, string[]>, store: R
     const alignment = option(options, 'alignment'); if (alignment !== undefined) patch.alignment = parseAlignmentProposal(JSON.parse(alignment))
     const grounding = option(options, 'grounding'); if (grounding !== undefined) patch.grounding = parseGroundingProposal(JSON.parse(grounding))
     const expectedRevision = numberOption(options, 'expected-revision')
-    const receipt = await store.update(required(options, 'id'), patch, { context, operationId: option(options, 'operation-id') ?? requestId, ...(expectedRevision === undefined ? {} : { expectedRevision }) })
+    const expectedUpdatedAt = numberOption(options, 'expected-updated-at')
+    const receipt = await store.update(required(options, 'id'), patch, { context, operationId: option(options, 'operation-id') ?? requestId, ...(expectedRevision === undefined ? {} : { expectedRevision }), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
     return { receipt, demand: receipt.demand, revision: receipt.revision }
   }
   if (command === 'propose-alignment' || command === 'propose-grounding') {
@@ -236,5 +240,5 @@ function priorityOption(options: Map<string, string[]>, key: string): DemandPrio
 }
 
 function helpText(): string {
-  return `agentmux-demand — filesystem Demand store\n\nUsage:\n  agentmux-demand --root <directory> list\n  agentmux-demand --root <directory> create --title <title> [options]\n  agentmux-demand --root <directory> show --id <id>\n  agentmux-demand --root <directory> update --id <id> [options]\n  agentmux-demand --root <directory> propose-alignment --id <id> --proposal <json>\n  agentmux-demand --root <directory> propose-grounding --id <id> --proposal <json>\n  agentmux-demand --root <directory> delete --id <id> --confirm delete\n  agentmux-demand --root <directory> link-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> unlink-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> link-project --id <id> --project-id <id>\n  agentmux-demand --root <directory> unlink-project --id <id>\n  agentmux-demand --root <directory> decision-log --id <id> --question <text> --decision <text> [--rationale <text>]\n  agentmux-demand --root <directory> activity --id <id> --kind <kind> --message <text>\n  agentmux-demand --root <directory> assign --id <id> [--project-id <id>] [--executor-id <id>] [--no-start]\n  agentmux-demand --root <directory> start --id <id> [--session-id <id>] [--project-id <id>] [--executor-id <id>]\n  agentmux-demand --root <directory> handoff --id <id> --to-executor <id> [--to-session <id>]\n\nTitle update accepts --operation-id <id> and --expected-revision <revision>.\nRead structured title history with name-history --id <id> [--offset <n>] [--limit <1..100>].\nUpdate also accepts --alignment <json> and --grounding <json>. Proposals never confirm goals or accept results.\nThe root must be explicit with --root or AGENTMUX_DEMAND_ROOT.`
+  return `agentmux-demand — filesystem Demand store\n\nUsage:\n  agentmux-demand --root <directory> list\n  agentmux-demand --root <directory> create --title <title> [options]\n  agentmux-demand --root <directory> show --id <id>\n  agentmux-demand --root <directory> update --id <id> [options]\n  agentmux-demand --root <directory> propose-alignment --id <id> --proposal <json>\n  agentmux-demand --root <directory> propose-grounding --id <id> --proposal <json>\n  agentmux-demand --root <directory> delete --id <id> --confirm delete\n  agentmux-demand --root <directory> link-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> unlink-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> link-project --id <id> --project-id <id>\n  agentmux-demand --root <directory> unlink-project --id <id>\n  agentmux-demand --root <directory> decision-log --id <id> --question <text> --decision <text> [--rationale <text>]\n  agentmux-demand --root <directory> activity --id <id> --kind <kind> --message <text>\n  agentmux-demand --root <directory> assign --id <id> [--project-id <id>] [--executor-id <id>] [--no-start]\n  agentmux-demand --root <directory> start --id <id> [--session-id <id>] [--project-id <id>] [--executor-id <id>]\n  agentmux-demand --root <directory> handoff --id <id> --to-executor <id> [--to-session <id>]\n\nTitle update accepts --operation-id <id> and --expected-revision <revision>.\nRead structured title history with name-history --id <id> [--offset <n>] [--limit <1..100>].\nCreate/update accept --content-refs <json> for exact content provenance. Update appends sources and accepts --expected-updated-at <ms> from the original record.\nUpdate also accepts --alignment <json> and --grounding <json>. Proposals never confirm goals or accept results.\nThe root must be explicit with --root or AGENTMUX_DEMAND_ROOT.`
 }

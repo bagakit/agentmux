@@ -5,13 +5,17 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, expect } from 'vitest'
-import { AgentMuxControlServer } from '../../src/control-host.js'
+import { AgentMuxControlServer as SourceControlServer } from '../../src/control-host.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '../../src/control.js'
+import { connectAgentMuxRpc } from '../../src/public-rpc-client.js'
+import type { AgentMuxRpcParams } from '../../src/public-rpc.js'
+const AgentMuxControlServer: typeof SourceControlServer = process.env.AGENTMUX_TEST_FILE_SERVER_ENTRY
+  ? (await import(process.env.AGENTMUX_TEST_FILE_SERVER_ENTRY)).AgentMuxControlServer : SourceControlServer
 
 const exec = promisify(execFile)
 /** Protocol fixture only. Desktop tests separately prove actual owner application. */
 export function workfaceCliFixture(initial: AgentMuxControlResult) {
-  let root: string, server: AgentMuxControlServer, env: NodeJS.ProcessEnv
+  let root: string, server: SourceControlServer, env: NodeJS.ProcessEnv
   const seen: AgentMuxControlRequest[] = []
   let reply = initial
   beforeAll(async () => {
@@ -24,7 +28,7 @@ export function workfaceCliFixture(initial: AgentMuxControlResult) {
   })
   afterAll(async () => { await server?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
   async function run(args: string[]) {
-    try { return { code: 0, ...await exec(process.execPath, [join(process.cwd(), 'packages/core/bin/agentmux'), ...args], { env, timeout: 5_000 }) } }
+    try { return { code: 0, ...await exec(process.execPath, [process.env.AGENTMUX_TEST_OBJECT_CLI ?? join(process.cwd(), 'packages/core/bin/agentmux'), ...args], { env, timeout: 5_000 }) } }
     catch (error) {
       const failure = error as { code: number; stdout: string; stderr: string }
       if (typeof failure.code !== 'number') throw error
@@ -40,7 +44,11 @@ export function workfaceCliFixture(initial: AgentMuxControlResult) {
     expect(parsed.ok).toBe(true)
     return parsed
   }
-  return { seen, run, receipt, setReply(value: AgentMuxControlResult) { reply = value } }
+  async function fileOpen(params: AgentMuxRpcParams<'file.open'>) {
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(root, 'control.sock') } })
+    try { return await client.call('file.open', params) } finally { await client.dispose() }
+  }
+  return { seen, run, receipt, fileOpen, setReply(value: AgentMuxControlResult) { reply = value } }
 }
 export const saved = { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true,
   diskDurability: 'unconfirmed' as const, reason: null }

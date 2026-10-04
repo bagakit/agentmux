@@ -1,7 +1,9 @@
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import {
   formatAmuxSharing, formatSessionAddress, formatMessagingAddress,
-  formatRegionAddress, formatTabAddress
+  formatRegionAddress, formatTabAddress, formatSpaceAddress, formatZoneAddress,
+  formatAmuxSpatialLink, parseAmuxSpatialLink, type AmuxSpatialLinkTarget
 } from '../src/sharing.js'
 
 describe('amux sharing', () => {
@@ -69,5 +71,35 @@ describe('amux sharing', () => {
     const original = ' path:3-9\n\n\`\`\`ts\n  x\n\`\`\`\n'
     expect(formatAmuxSharing('File', original)).toBe(
       '--- amux : File ---\n' + original + '\n-----')
+  })
+
+  it('shares original parent Space and Zone identities without a child or a stale parent hint', () => {
+    const spaceId = JSON.stringify(['local', fixturePath("Topics/工作")]), zoneId = '["topic", "one/two%"]'
+    const card = formatSpaceAddress({ spaceId, label: 'Work\nID: fake' })
+    expect(card.split('\n')).toEqual(['--- amux : Space ---', `ID: ${spaceId}`, 'Name: Work\\nID: fake',
+      `Link: ${formatAmuxSpatialLink({ kind: 'space', spaceId })}`, `# amux space inspect --space='${spaceId}'`, '# amux --skill', '-----'])
+    const zone = formatZoneAddress({ zoneId })
+    expect(zone).toContain(`Link: ${formatAmuxSpatialLink({ kind: 'zone', zoneId })}`)
+    expect(zone).not.toContain('--space='); expect(zone).not.toContain('Name:')
+    expect(formatZoneAddress({ zoneId: "a'b" })).toContain("--zone='a'\"'\"'b'")
+  })
+
+  it('round-trips opaque identities through the strict public URI owner', () => {
+    for (const id of ['original', '中文 🍃', ("[\"host\",\"" + (fixturePath("root/topic")) + "\"]"), 'a?b#c%d|e', "a'b", '\n']) {
+      for (const target of [{ kind: 'space', spaceId: id }, { kind: 'zone', zoneId: id }] as AmuxSpatialLinkTarget[]) {
+        expect(parseAmuxSpatialLink(formatAmuxSpatialLink(target))).toEqual(target)
+      }
+    }
+  })
+
+  it('rejects unsupported targets, hidden actions, malformed encoding and guessed identities', () => {
+    for (const raw of ['amux://agent/S', 'amux://zone/', 'amux://zone/A/B', 'amux://zone/A?space=B',
+      'amux://space/A#x', 'amux://user@zone/A', 'amux://zone:80/A', 'amux://zone/%',
+      'amux://zone/%FF', 'amux://zone/%41', 'amux://zone/%2f', 'amux://ZONE/A', ' amux://zone/A', 'https://zone/A']) {
+      expect(() => parseAmuxSpatialLink(raw), raw).toThrow()
+    }
+    expect(() => parseAmuxSpatialLink(null as unknown as string)).toThrow()
+    expect(() => formatAmuxSpatialLink({ kind: 'zone', zoneId: '' })).toThrow()
+    expect(() => formatAmuxSpatialLink({ kind: 'agent', zoneId: 'S' } as unknown as AmuxSpatialLinkTarget)).toThrow()
   })
 })

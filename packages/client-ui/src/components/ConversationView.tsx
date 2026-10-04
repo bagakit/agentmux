@@ -1,9 +1,9 @@
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentMuxSessionQuestionReplyInput, AgentSessionQuestionReplyReceipt } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { projectConversationRecords } from '../lib/conversation-records.js'
 import { memo, useMemo, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
-import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
 import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
@@ -11,7 +11,7 @@ import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyn
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
+  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
 export type ConversationQuestionReply = (input: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'answers' | 'operationId'>) => Promise<AgentSessionQuestionReplyReceipt>
 
@@ -35,31 +35,28 @@ type Props = ReadingProps & {
 export const ConversationView = memo(function ConversationView({
   page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
-  const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
-    [page, sessionId])
+  const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
+    [page, sessionId, reading.executionHostId])
   if (page.agentSessionId !== sessionId || page.items.length === 0) return null
-  const users = new Map(messages.map((message) => [message.rawId, message]))
+  const descriptions = new Map(describedRecords.map(record => [record.rawId, record]))
   const answers = new Map<string, string>()
   for (const item of page.items) if (item.kind === 'user-message') {
     for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
   }
-  const seen = new Set<string>()
-  const records = page.items.filter((item) => {
-    if (seen.has(item.id)) return false
-    seen.add(item.id)
-    return true
-  })
+  const records = describedRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
 
   const renderRecord: ConversationRecordRenderer = (item, wrapBody) => {
-      const recordId = JSON.stringify(['native', page.source.providerId, page.source.nativeSessionId, item.id])
-      const user = item.kind === 'user-message' ? users.get(item.id) : undefined
-      const speaker = user ? speakerOfUserMessage(user)
-        : item.kind === 'assistant-message' ? { role: 'agent' as const, id: sessionId } : undefined
+      const record = descriptions.get(item.id)!
+      const recordId = record.id
+      const user = record.input
+      const speaker = record.speaker
       const described = speaker ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
-          content={item.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
+          {...(user && item.title ? { recordTitle: item.title } : {})}
+          nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
+          content={record.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
           name={described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}
           providerId={described?.providerId ?? page.source.providerId}
@@ -89,7 +86,7 @@ export const ConversationView = memo(function ConversationView({
     </div> : null}
     <ConversationRecordSequence items={records}
       sourceKey={JSON.stringify([sessionId, page.source.providerId, page.source.nativeSessionId])}
-      renderRecord={renderRecord} {...(recordBoundary ? { recordBoundary } : {})} {...(renderProcess ? { renderProcess } : {})} />
+      renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
   </section>
 })
 

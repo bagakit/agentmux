@@ -1,4 +1,4 @@
-import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay, fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixtureClock, fixtureDay, fixturePath } from '../helpers/fixture-values.js'
 import { mkdtemp, readFile, rm, writeFile, mkdir, open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -40,7 +40,7 @@ const SAMPLE_RECORDS = [
     source: 'USER_EXPLICIT',
     type: 'USER_INPUT',
     status: 'DONE',
-    created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 10, "000") + "Z",
+    created_at: fixtureDay(1) + "T" + fixtureClock(11, 39, 10, "000") + "Z",
     content: '<USER_REQUEST>\nImplement native history for Antigravity\n</USER_REQUEST>\n<ADDITIONAL_METADATA>untrusted-context</ADDITIONAL_METADATA>'
   },
   {
@@ -48,7 +48,7 @@ const SAMPLE_RECORDS = [
     source: 'SYSTEM',
     type: 'CONVERSATION_HISTORY',
     status: 'DONE',
-    created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 11, "000") + "Z",
+    created_at: fixtureDay(1) + "T" + fixtureClock(11, 39, 11, "000") + "Z",
     content: 'Loaded system instructions and workspace context'
   },
   {
@@ -56,7 +56,7 @@ const SAMPLE_RECORDS = [
     source: 'MODEL',
     type: 'PLANNER_RESPONSE',
     status: 'DONE',
-    created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 12, "000") + "Z",
+    created_at: fixtureDay(1) + "T" + fixtureClock(11, 39, 12, "000") + "Z",
     content: 'I will inspect the transcript and implement the reader.'
   },
   {
@@ -64,7 +64,7 @@ const SAMPLE_RECORDS = [
     source: 'SYSTEM',
     type: 'CHECKPOINT',
     status: 'DONE',
-    created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 14, "000") + "Z",
+    created_at: fixtureDay(1) + "T" + fixtureClock(11, 39, 14, "000") + "Z",
     content: 'Checkpoint saved'
   },
   {
@@ -72,7 +72,7 @@ const SAMPLE_RECORDS = [
     source: 'USER_EXPLICIT',
     type: 'USER_INPUT',
     status: 'DONE',
-    created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 40, 0, "000") + "Z",
+    created_at: fixtureDay(1) + "T" + fixtureClock(11, 40, 0, "000") + "Z",
     content: '<USER_REQUEST>Proceed with implementation</USER_REQUEST>'
   },
   {
@@ -80,7 +80,7 @@ const SAMPLE_RECORDS = [
     source: 'MODEL',
     type: 'PLANNER_RESPONSE',
     status: 'DONE',
-    created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 40, 5, "000") + "Z",
+    created_at: fixtureDay(1) + "T" + fixtureClock(11, 40, 5, "000") + "Z",
     content: 'Implementation is complete and verified.'
   }
 ]
@@ -192,39 +192,39 @@ describe('Antigravity session analysis and native history', () => {
       id: `${NATIVE_CONVERSATION_ID}:0`,
       kind: 'user-message',
       contentParts: [{ kind: 'text', text: 'Implement native history for Antigravity' }],
-      startedAt: Date.parse(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 10, "000") + "Z")
+      startedAt: Date.parse(fixtureDay(1) + "T" + fixtureClock(11, 39, 10, "000") + "Z")
     })
     expect(page.items[1]).toEqual({
       id: `${NATIVE_CONVERSATION_ID}:1`,
       kind: 'activity',
       title: 'Antigravity CONVERSATION_HISTORY',
       contentParts: [{ kind: 'text', text: 'Loaded system instructions and workspace context' }],
-      startedAt: Date.parse(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 11, "000") + "Z")
+      startedAt: Date.parse(fixtureDay(1) + "T" + fixtureClock(11, 39, 11, "000") + "Z")
     })
     expect(page.items[2]).toEqual({
       id: `${NATIVE_CONVERSATION_ID}:2`,
       kind: 'assistant-message',
       contentParts: [{ kind: 'text', text: 'I will inspect the transcript and implement the reader.' }],
-      startedAt: Date.parse(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 12, "000") + "Z")
+      startedAt: Date.parse(fixtureDay(1) + "T" + fixtureClock(11, 39, 12, "000") + "Z")
     })
     expect(page.items[3]).toEqual({
       id: `${NATIVE_CONVERSATION_ID}:3`,
       kind: 'activity',
       title: 'Antigravity CHECKPOINT',
       contentParts: [{ kind: 'text', text: 'Checkpoint saved' }],
-      startedAt: Date.parse(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 39, 14, "000") + "Z")
+      startedAt: Date.parse(fixtureDay(1) + "T" + fixtureClock(11, 39, 14, "000") + "Z")
     })
     expect(page.items[4]).toEqual({
       id: `${NATIVE_CONVERSATION_ID}:4`,
       kind: 'user-message',
       contentParts: [{ kind: 'text', text: 'Proceed with implementation' }],
-      startedAt: Date.parse(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 40, 0, "000") + "Z")
+      startedAt: Date.parse(fixtureDay(1) + "T" + fixtureClock(11, 40, 0, "000") + "Z")
     })
     expect(page.items[5]).toEqual({
       id: `${NATIVE_CONVERSATION_ID}:5`,
       kind: 'assistant-message',
       contentParts: [{ kind: 'text', text: 'Implementation is complete and verified.' }],
-      startedAt: Date.parse(upstreamFixtureDay(1) + "T" + upstreamFixtureClock(11, 40, 5, "000") + "Z")
+      startedAt: Date.parse(fixtureDay(1) + "T" + fixtureClock(11, 40, 5, "000") + "Z")
     })
   })
 
@@ -237,7 +237,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(12, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(12, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Fix the test and verify with snapshot</USER_REQUEST>'
       },
       {
@@ -245,7 +245,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(12, 0, 2, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(12, 0, 2, "000") + "Z",
         thinking: 'I need to check the test file and inspect the image.',
         content: 'I will run the command and inspect the visual snapshot.',
         tool_calls: [
@@ -258,7 +258,7 @@ describe('Antigravity session analysis and native history', () => {
         media: [
           {
             mime_type: 'image/png',
-            uri: upstreamFixturePath("workspace/artifacts/snapshot.png")
+            uri: fixturePath("workspace/artifacts/snapshot.png")
           }
         ]
       }
@@ -274,7 +274,7 @@ describe('Antigravity session analysis and native history', () => {
       { kind: 'reasoning', text: 'I need to check the test file and inspect the image.' },
       { kind: 'text', text: 'I will run the command and inspect the visual snapshot.' },
       { kind: 'tool-call', name: 'run_command', input: JSON.stringify({ CommandLine: 'pnpm test' }), callId: 'call_cmd_101' },
-      { kind: 'resource', resourceType: 'image', reference: upstreamFixturePath("workspace/artifacts/snapshot.png") }
+      { kind: 'resource', resourceType: 'image', reference: fixturePath("workspace/artifacts/snapshot.png") }
     ])
   })
 
@@ -285,7 +285,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(12, 5, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(12, 5, 0, "000") + "Z",
         thinking: 'Silently calculating diff...',
         tool_calls: [
           {
@@ -314,7 +314,7 @@ describe('Antigravity session analysis and native history', () => {
         step_index: 0,
         source: 'SYSTEM',
         type: 'INTERNAL_EVENT',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(12, 10, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(12, 10, 0, "000") + "Z",
         content: 'System observation'
       }
     ]
@@ -336,7 +336,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(12, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(12, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Run broken command</USER_REQUEST>'
       },
       {
@@ -345,7 +345,7 @@ describe('Antigravity session analysis and native history', () => {
         type: 'PLANNER_RESPONSE',
         status: 'ERROR',
         error: 'Model generation failed mid-stream',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(12, 0, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(12, 0, 5, "000") + "Z",
         content: 'Partial assistant text before failure.'
       }
     ]
@@ -372,7 +372,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(80) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z",
+        created_at: fixtureDay(80) + "T" + fixtureClock(0, 0, 0, "000") + "Z",
         content: 'user'
       },
       {
@@ -380,7 +380,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(80) + "T" + upstreamFixtureClock(0, 0, 1, "000") + "Z",
+        created_at: fixtureDay(80) + "T" + fixtureClock(0, 0, 1, "000") + "Z",
         content: 'cut',
         truncated_fields: ['content']
       }
@@ -396,7 +396,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(80) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z",
+        created_at: fixtureDay(80) + "T" + fixtureClock(0, 0, 0, "000") + "Z",
         content: 'user'
       },
       {
@@ -404,7 +404,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(80) + "T" + upstreamFixtureClock(0, 0, 1, "000") + "Z",
+        created_at: fixtureDay(80) + "T" + fixtureClock(0, 0, 1, "000") + "Z",
         content: hugeContent
       }
     ]
@@ -477,7 +477,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Truncated prompt prefix...</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -486,7 +486,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 0, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 0, 5, "000") + "Z",
         thinking: 'Short thought...',
         content: 'Short content prefix...',
         truncated_fields: ['content', 'thinking']
@@ -499,7 +499,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Complete full prompt with all extensive instructions</USER_REQUEST>'
       },
       {
@@ -507,7 +507,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 0, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 0, 5, "000") + "Z",
         thinking: 'Complete in-depth chain of thought explaining the complete architecture',
         content: 'Complete full response body with comprehensive solution details.'
       }
@@ -536,7 +536,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 10, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 10, 0, "000") + "Z",
         content: 'Compact prefix',
         truncated_fields: ['content', 'tool_calls']
       }
@@ -561,7 +561,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 0, "000") + "Z",
         content: '<USER_REQUEST>Prompt 0 truncated...</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -570,7 +570,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 5, "000") + "Z",
         content: 'Response 1 truncated...',
         truncated_fields: ['content']
       },
@@ -579,7 +579,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 10, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 10, "000") + "Z",
         content: '<USER_REQUEST>Prompt 2 truncated...</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -588,7 +588,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 15, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 15, "000") + "Z",
         content: 'Response 3 truncated...',
         truncated_fields: ['content']
       }
@@ -600,7 +600,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 0, "000") + "Z",
         content: '<USER_REQUEST>Complete full prompt 0</USER_REQUEST>'
       },
       {
@@ -608,7 +608,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 5, "000") + "Z",
         content: 'Complete full response 1'
       },
       {
@@ -616,7 +616,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 10, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 10, "000") + "Z",
         content: '<USER_REQUEST>Complete full prompt 2</USER_REQUEST>'
       },
       {
@@ -624,7 +624,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 15, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 15, "000") + "Z",
         content: 'Complete full response 3'
       }
     ]
@@ -670,7 +670,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 0, "000") + "Z",
         content: '<USER_REQUEST>Truncated prompt 0...</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -679,7 +679,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 5, "000") + "Z",
         content: 'Truncated response 1...',
         truncated_fields: ['content']
       },
@@ -688,7 +688,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 10, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 10, "000") + "Z",
         content: '<USER_REQUEST>Complete prompt 2 without truncation</USER_REQUEST>'
       },
       {
@@ -696,7 +696,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 15, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 15, "000") + "Z",
         content: 'Complete response 3 without truncation'
       }
     ]
@@ -707,7 +707,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 0, "000") + "Z",
         content: '<USER_REQUEST>Full expanded prompt 0</USER_REQUEST>'
       },
       {
@@ -715,7 +715,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 5, "000") + "Z",
         content: 'Full expanded response 1'
       },
       {
@@ -723,7 +723,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 10, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 10, "000") + "Z",
         content: '<USER_REQUEST>Complete prompt 2 without truncation</USER_REQUEST>'
       },
       {
@@ -731,7 +731,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 30, 15, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 30, 15, "000") + "Z",
         content: 'Complete response 3 without truncation'
       }
     ]
@@ -776,7 +776,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 0, "000") + "Z",
         content: '<USER_REQUEST>Prompt 0 truncated...</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -785,7 +785,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 5, "000") + "Z",
         content: 'Response 1 truncated...',
         truncated_fields: ['content']
       },
@@ -794,7 +794,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 10, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 10, "000") + "Z",
         content: '<USER_REQUEST>Prompt 2 truncated...</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -803,7 +803,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 15, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 15, "000") + "Z",
         content: 'Response 3 truncated...',
         truncated_fields: ['content']
       }
@@ -815,7 +815,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 0, "000") + "Z",
         content: '<USER_REQUEST>Complete full prompt 0</USER_REQUEST>'
       },
       {
@@ -823,7 +823,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 5, "000") + "Z",
         content: 'Complete full response 1'
       },
       {
@@ -831,7 +831,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 10, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 10, "000") + "Z",
         content: '<USER_REQUEST>Complete full prompt 2</USER_REQUEST>'
       },
       {
@@ -839,7 +839,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 35, 15, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 35, 15, "000") + "Z",
         content: 'Complete full response 3'
       }
     ]
@@ -860,7 +860,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 36, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 36, 0, "000") + "Z",
         content: '<USER_REQUEST>New prompt 4</USER_REQUEST>'
       },
       {
@@ -868,7 +868,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 36, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 36, 5, "000") + "Z",
         content: 'New response 5'
       }
     ]
@@ -878,7 +878,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 36, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 36, 0, "000") + "Z",
         content: '<USER_REQUEST>Complete new prompt 4</USER_REQUEST>'
       },
       {
@@ -886,7 +886,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(13, 36, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(13, 36, 5, "000") + "Z",
         content: 'Complete new response 5'
       }
     ]
@@ -925,7 +925,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(14, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(14, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Initial prompt</USER_REQUEST>'
       },
       {
@@ -933,7 +933,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(14, 0, 5, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(14, 0, 5, "000") + "Z",
         content: 'Compact prefix...',
         truncated_fields: ['content']
       }
@@ -976,7 +976,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(15, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(15, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Multi-byte test</USER_REQUEST>',
         truncated_fields: ['content']
       }
@@ -1014,7 +1014,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(16, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(16, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Step 0</USER_REQUEST>',
         truncated_fields: ['content']
       },
@@ -1023,7 +1023,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(16, 1, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(16, 1, 0, "000") + "Z",
         content: '<USER_REQUEST>Step 1</USER_REQUEST>',
         truncated_fields: ['content']
       }
@@ -1081,7 +1081,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'USER_EXPLICIT',
         type: 'USER_INPUT',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(17, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(17, 0, 0, "000") + "Z",
         content: '<USER_REQUEST>Cancel test</USER_REQUEST>',
         truncated_fields: ['content']
       }
@@ -1122,7 +1122,7 @@ describe('Antigravity session analysis and native history', () => {
         source: 'MODEL',
         type: 'PLANNER_RESPONSE',
         status: 'DONE',
-        created_at: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(18, 0, 0, "000") + "Z",
+        created_at: fixtureDay(1) + "T" + fixtureClock(18, 0, 0, "000") + "Z",
         content: 'Budget compact prefix...',
         truncated_fields: ['content']
       }
@@ -1285,9 +1285,8 @@ describe('Antigravity session analysis and native history', () => {
   it('aborts cleanly when reader client is disposed during operation', async () => {
     const { client, session } = await createHarness()
     const promise = client.sessionHistoryPage(session.agentSessionId)
+    const rejected = expect(promise).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_CANCELLED' })
     await client.dispose()
-    await expect(promise).rejects.toMatchObject({
-      code: 'AGENT_SESSION_HISTORY_CANCELLED'
-    })
+    await rejected
   })
 })

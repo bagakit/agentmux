@@ -3,21 +3,27 @@ import { Flag, Info } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
 import type { ConversationSenderDetails, ConversationSpeaker, DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { useClientUiPlatform } from '../platform.js'
+import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 
 /** Opening this disclosure never changes the message's author. */
-export function ConversationInputDetails({ messageId, source, speaker, declaredAgentSessionId, describeSpeaker, recordedIdentity = false, children }: {
+export function ConversationInputDetails({ messageId, source, executionHostId, speaker, declaredAgentSessionId, sourceDeclaration, describeSpeaker, recordedIdentity = false, children }: {
   recordedIdentity?: boolean
   children?: ReactNode
   messageId: string
   source?: AgentSessionUserMessageSource | undefined
+  /** Current receiving session address; not historical sender or execution attribution. */
+  executionHostId?: string | undefined
   speaker?: ConversationSpeaker | undefined
   declaredAgentSessionId?: string | null | undefined
+  /** Authored source label, independent of recorded identity. */
+  sourceDeclaration?: string | undefined
   describeSpeaker?: DescribeSpeaker | undefined
 }) {
   const platform = useClientUiPlatform()
   const senderId = speaker?.role === 'agent' ? speaker.id : declaredAgentSessionId
   const declared = speaker?.role !== 'agent' && Boolean(senderId)
   const identity = JSON.stringify([messageId, source, speaker, senderId])
+  const origin = source ? describeConversationInputSource(source) : undefined
   const [opened, setOpened] = useState<{ identity: string; details?: ConversationSenderDetails } | null>(null)
   const contentId = useId()
   const open = opened?.identity === identity
@@ -37,8 +43,12 @@ export function ConversationInputDetails({ messageId, source, speaker, declaredA
         <dt>Source</dt><dd>{source.kind === 'native' ? `Provider native input · ${source.providerId}` : 'AgentMux submitted record'}</dd>
         <dt>{source.kind === 'native' ? 'Record' : 'Submission'}</dt><dd><code>{source.kind === 'native' ? source.recordId : source.submissionId}</code></dd>
         {source.kind === 'native' ? <><dt>Native session</dt><dd><code>{source.nativeSessionId}</code></dd></> : null}
-        <dt>Delivery channel</dt><dd>Not recorded</dd>
-        <dt>Recorded author</dt><dd>{speaker?.role === 'unknown' ? recordedIdentity ? 'Not recorded' : 'Not recorded · shown as You' : speaker?.role ?? 'Not recorded'}</dd>
+        <dt>输入渠道</dt><dd>{origin!.channelLabel}</dd>
+        <dt>发送设备</dt><dd>{origin!.device?.name ?? '未记录'}</dd>
+        <dt>设备 ID</dt><dd><code>{origin!.device?.deviceId ?? '未记录'}</code></dd>
+        <dt>来源 Host</dt><dd><code>{origin!.device?.hostId ?? '未记录'}</code></dd>
+        <dt>当前执行 Host</dt><dd><code>{executionHostId ?? '未知'}</code></dd>
+        <dt>Recorded author</dt><dd>{speaker?.role === 'unknown' ? recordedIdentity ? 'Not recorded' : sourceDeclaration ? 'Not recorded · source declared in message' : 'Not recorded · shown as You' : speaker?.role ?? 'Not recorded'}</dd>
       </dl> : null}
       {children}
       {senderId ? <div className="conversation-input-details__sender">

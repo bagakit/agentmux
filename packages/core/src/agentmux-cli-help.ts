@@ -24,6 +24,14 @@ Workspace independently: agentmux agent open --executor EXECUTOR --execution-wor
 Split directions are left, right, up and down.
 Opening a split and navigating to an existing Tab are separate operations.
 
+## Open a file beside an exact Region
+agentmux file open --path PATH --zone ZONE --tab TAB --region REGION --split right --display-workspace WORKSPACE --group GROUP --operation-id OPERATION
+
+The Tab, anchor Region, direction (left/right/up/down), Display Workspace and Group
+are one exact destination. Omitting the Tab/Region/split tuple opens a new Tab.
+The reply names the actual File Region; the anchor is not the new Region's identity.
+File opening stays in the background unless --focus is explicit.
+
 ## Move a Region into its own Tab
 agentmux space promote --region REGION --operation-id OPERATION
 agentmux space mv --from-region REGION --expect-session SID --zone ZONE --new-tab --operation-id OPERATION
@@ -116,7 +124,7 @@ export function agentMuxCommandHelp(path: string): string | null {
   if (!selected.length) return null
   const exact = selected.find(entry => entry.method === path)
   const guide = path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
-    : path === 'space' || path.startsWith('space.') || path === 'agent.open' ? SPATIAL_GUIDE
+    : path === 'space' || path.startsWith('space.') || path === 'agent.open' || path === 'file.open' ? SPATIAL_GUIDE
     : path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
     : path === 'settings' || path.startsWith('settings.') ? AGENTMUX_SETTINGS_RESOURCE_GUIDE
     : path === 'goal.create' ? AGENTMUX_GOAL_CREATE_GUIDE

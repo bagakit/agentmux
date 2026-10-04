@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +7,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProviderHookActivationContext } from '../src/agent-provider.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import { withCodexNativeRead } from '../src/providers/codex-native-read.js'
+import { withAppServerNativeRead } from '../src/providers/app-server-native-read.js'
 
 let root: string, client: AgentMuxClient
 beforeEach(async () => {
@@ -95,7 +95,7 @@ describe('native Hook activation through public scoped Core API', () => {
     if(mode==='invalid-enabled') fixture.hooks[0]!.enabled='true'
     if(mode==='invalid-hash') fixture.hooks[0]!.currentHash=''
     if(mode==='errors') fixture.result.data[0]!.errors.push('private-native-secret')
-    if(mode==='wrong-cwd') fixture.result.data[0]!.cwd=upstreamFixturePath("other-private-scope")
+    if(mode==='wrong-cwd') fixture.result.data[0]!.cwd=fixturePath("other-private-scope")
     await fixture.update()
     const result=await client.inspectManagedHooks('codex',fixture.options)
     expect(result.status).toBe(mode.startsWith('invalid')||mode==='errors'||mode==='wrong-cwd'?'error':'partial')
@@ -126,7 +126,7 @@ describe('native Hook activation through public scoped Core API', () => {
 
   it('shares a runtime method allowlist which cannot send a thread or trust mutation',async()=>{
     const fixture=await nativeFixture()
-    await expect(withCodexNativeRead({...fixture.options,command:process.execPath,signal:new AbortController().signal},'hooks', request=>
+    await expect(withAppServerNativeRead({...fixture.options,command:process.execPath,signal:new AbortController().signal},'hooks', request=>
       request('turn/start' as 'hooks/list',{}))).rejects.toMatchObject({code:'INVALID_AGENT_HOOK_RESPONSE'})
     expect((await fixture.calls()).map(call=>call.method)).toEqual(['initialize','initialized'])
     await fixture.assertCleanup()

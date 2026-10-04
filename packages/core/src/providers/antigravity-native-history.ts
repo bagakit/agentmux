@@ -25,6 +25,12 @@ export function antigravityConversationIdFromTranscriptPath(filePath: string): s
   return segments[transcriptIndex - 3] ?? null
 }
 
+export function assertAntigravityHistorySource(context: Pick<AgentProviderSessionHistoryContext, 'transcriptPath' | 'source'>): void {
+  if (context.transcriptPath && antigravityConversationIdFromTranscriptPath(context.transcriptPath) !== context.source.nativeSessionId) {
+    throw new AgentMuxError('Antigravity transcript does not establish this exact native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  }
+}
+
 function extractAntigravityUserRequest(content: string): string {
   const opener = '<USER_REQUEST>'
   const startIndex = content.indexOf(opener)
@@ -253,15 +259,7 @@ export async function readAntigravitySessionHistoryPage(
   context: AgentProviderSessionHistoryContext
 ): Promise<AgentProviderSessionHistoryPage> {
   const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
-  if (context.transcriptPath) {
-    const pathConversationId = antigravityConversationIdFromTranscriptPath(context.transcriptPath)
-    if (pathConversationId !== null && pathConversationId !== context.source.nativeSessionId) {
-      throw new AgentMuxError(
-        'Antigravity transcript belongs to another native Session.',
-        'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
-      )
-    }
-  }
+  assertAntigravityHistorySource(context)
 
   const compactReader = await NativeJsonlHistoryReader.open(context, budget)
   try {
@@ -315,8 +313,6 @@ export async function readAntigravitySessionHistoryPage(
 
       if (fullReader) {
         try {
-          const minNeededStep = Math.min(...neededFullSteps.keys())
-
           while (resolvedFull.size < neededFullSteps.size) {
             context.signal.throwIfAborted()
             let fullEntry: { value: Record<string, unknown>; start: number } | null
@@ -345,9 +341,6 @@ export async function readAntigravitySessionHistoryPage(
               }
             }
 
-            if (stepIndex !== undefined && stepIndex < minNeededStep && resolvedFull.size === neededFullSteps.size) {
-              break
-            }
           }
 
           if (!fullBudgetExceeded) {

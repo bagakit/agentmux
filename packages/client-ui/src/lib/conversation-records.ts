@@ -1,6 +1,7 @@
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { speakerOfUserMessage, type ConversationSpeaker } from './conversation-speaker.js'
+import { describeConversationInputSource } from './conversation-input-source.js'
 
 export type ConversationRecordSource =
   | (AgentSessionHistorySource & { kind: 'native'; recordId: string })
@@ -67,10 +68,14 @@ export function projectConversationRecords({ agentSessionId, executionHostId, hi
 }
 
 export function describeConversationRecordSource(record: ConversationRecord): { caption: string; title: string } {
-  if (record.source.kind === 'native') return {
-    caption: 'Native record',
-    title: `Native record ${record.source.recordId}\nProvider: ${record.source.providerId}\nNative session: ${record.source.nativeSessionId}`
+  const inputOrigin = record.input ? describeConversationInputSource(record.input.source) : undefined
+  if (record.source.kind === 'native') {
+    const origin = inputOrigin ?? describeConversationInputSource(record.source)
+    return { caption: origin.caption,
+      title: `Native record ${record.source.recordId}\nProvider: ${record.source.providerId}\nNative session: ${record.source.nativeSessionId}\n${origin.title}` }
   }
   const item = record.original.kind === 'captured' ? record.original.item : undefined
-  return { caption: 'Captured record', title: `Captured record ${record.rawId}\nSession: ${record.agentSessionId}${item ? `\nSource: ${item.source}` : ''}` }
+  const recordTitle = `Captured record ${record.rawId}\nSession: ${record.agentSessionId}${item ? `\nSource: ${item.source}${item.sourceChannel ? `\nChannel: ${item.sourceChannel}` : ''}` : ''}`
+  return inputOrigin ? { caption: inputOrigin.caption, title: `${recordTitle}\n${inputOrigin.title}` }
+    : { caption: 'Captured record', title: recordTitle }
 }

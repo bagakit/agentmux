@@ -1,5 +1,5 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
-import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { runCompiledObjectCli, objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { describe, expect, it } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -64,7 +64,7 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
   }
 
   it('roundtrips nonempty owner proposals, revisions and acknowledgements through the socket and cross-process CLI', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-goal-control-"))
+    const root = await mkdtemp(fixturePath("tmp/amux-goal-control-"))
     const store = openDemandStore({ root: join(root, 'demands') })
     await store.create({ id: 'goal', title: 'Restore', description: 'User request', sessionIds: ['live-session'] })
     const seen: string[] = []
@@ -75,7 +75,7 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
         const receipt = await store.update(request.demandId, { ...patch, ...(assigneeExecutorId === undefined ? {} : { executorId: assigneeExecutorId }) })
         return { operation: request.operation, demand: project(receipt.demand), receipt: { demandId: receipt.demand.id, updatedAt: receipt.demand.updatedAt } }
       }
-      if (request.operation === 'demand.show') return { operation: request.operation, demand: project((await store.get(request.demandId))!) }
+      if (request.operation === 'demand.show') return { operation: request.operation, demand: project((await store.get(request.demandId))!), goalContinuations: [] }
       if (request.operation === 'demand.list') return { operation: request.operation, demands: (await store.list()).map(project) }
       throw new Error(`Unexpected operation ${request.operation}`)
     } })
@@ -98,7 +98,7 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
       await store.acceptGrounding('goal', 1, (await store.get('goal'))!.grounding!.submissionId)
       const facts = project((await store.get('goal'))!)
       const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-      try { const { parentDemandId, ...publicFacts } = facts; expect(await rpc.call('goal.inspect', { goalId: 'goal' })).toEqual({ goal: { ...publicFacts, parentGoalId: parentDemandId } }) } finally { await rpc.dispose() }
+      try { const { parentDemandId, ...publicFacts } = facts; expect(await rpc.call('goal.inspect', { goalId: 'goal' })).toEqual({ goal: { ...publicFacts, parentGoalId: parentDemandId }, goalContinuations: [] }) } finally { await rpc.dispose() }
       const listed = await run('goal', 'ls')
       expect(listed.code, listed.stderr).toBe(0)
       const { parentDemandId, ...publicFacts } = facts
@@ -123,4 +123,54 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
     const demand = { id: 'goal', title: 'Goal', description: '', status: 'backlog', priority: 'normal', projectId: null, projectName: null, sessionIds: ['live-session'], createdAt: 1, updatedAt: 2, source: 'default-topic' }
     expect(() => parseAgentMuxControlReceipt({ ...base, ok: true, operation: 'demand.list', result: { demands: [{ ...demand, alignment: { ...proposal, revision: 'bad', confirmedAt: null } }] } })).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
   })
+
+  it('preserves exact generic content sources and operation receipts through real public CLI and typed socket callers', async () => {
+    const root = await mkdtemp(fixturePath("tmp/amux-goal-provenance-"))
+    const store = openDemandStore({ root: join(root, 'demands') })
+    const a = { hostId: 'resource-host', workspaceId: 'resource-workspace', zoneId: 'content-zone-a' }
+    const b = { ...a, zoneId: 'content-zone-b' }
+    const c = { ...a, zoneId: 'content-zone-c' }
+    let operationId: string | undefined, stripSources = false
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
+      if (request.operation === 'demand.create') {
+        const receipt = await store.create({ id: request.demandId!, title: request.title, sessionIds: request.sessionIds ?? [], ...(request.contentRefs === undefined ? {} : { contentRefs: request.contentRefs }) })
+        return { operation: request.operation, demand: project(receipt.demand), receipt: { demandId: receipt.demand.id, createdAt: receipt.demand.createdAt } }
+      }
+      if (request.operation === 'demand.update') {
+        const { assigneeExecutorId, ...patch } = request.patch
+        const receipt = await store.update(request.demandId, { ...patch, ...(assigneeExecutorId === undefined ? {} : { executorId: assigneeExecutorId }) }, {
+          operationId: request.requestId, ...(request.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: request.expectedUpdatedAt }) })
+        operationId = receipt.operationId
+        return { operation: request.operation, demand: { ...project(receipt.demand), ...(stripSources ? { contentRefs: [] } : {}) }, receipt: { demandId: receipt.demand.id, updatedAt: receipt.demand.updatedAt } }
+      }
+      if (request.operation === 'demand.show') return { operation: request.operation, demand: project((await store.get(request.demandId))!), goalContinuations: [] }
+      if (request.operation === 'demand.list') return { operation: request.operation, demands: (await store.list()).map(project) }
+      throw new Error(`Unexpected operation ${request.operation}`)
+    } })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const env = objectCliEnvironment(root)
+    try {
+      const created = await runCompiledObjectCli(['goal', 'create', '--goal', 'provenance-goal', '--title', 'Original goal', '--session', 'executing-session', '--content-refs', JSON.stringify([a]), '--risk', 'low', '--confirm', 'automatic'], env)
+      expect(created.code, created.stderr).toBe(0)
+      expect(JSON.parse(created.stdout).result.goal).toMatchObject({ id: 'provenance-goal', contentRefs: [a], sessionIds: ['executing-session'] })
+      const before = (await store.get('provenance-goal'))!
+      const appending = rpc.call('goal.update', { goalId: before.id, expectedUpdatedAt: before.updatedAt, operationId: 'append-original-source', patch: { contentRefs: [b] } })
+      await expect(appending).resolves.toMatchObject({ goal: { contentRefs: [a, b] } })
+      const appended = await appending
+      expect(operationId).toBe('append-original-source')
+      await expect(rpc.call('goal.update', { goalId: before.id, expectedUpdatedAt: before.updatedAt, operationId: 'append-original-source', patch: { contentRefs: [b] } })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+      expect((await store.get(before.id))!.updatedAt).toBe(appended.goal.updatedAt)
+      stripSources = true
+      await expect(rpc.call('goal.update', { goalId: before.id, expectedUpdatedAt: appended.goal.updatedAt, operationId: 'append-with-lost-result', patch: { contentRefs: [c] } })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+      const checked = await rpc.call('goal.inspect', { goalId: before.id })
+      expect(checked.goal?.contentRefs).toEqual([a, b, c])
+      expect((await rpc.call('goal.ls', {})).goals[0]?.contentRefs).toEqual([a, b, c])
+      const inspected = await runCompiledObjectCli(['goal', 'inspect', '--goal', before.id], env)
+      expect(inspected.code, inspected.stderr).toBe(0)
+      expect(JSON.parse(inspected.stdout).result.goal.contentRefs).toEqual([a, b, c])
+      expect((await store.get(before.id))!.sessionIds).toEqual(['executing-session'])
+    } finally { await rpc.dispose(); await server.stop(); await rm(root, { recursive: true, force: true }) }
+  }, 30_000)
+
 })

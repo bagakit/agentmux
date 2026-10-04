@@ -1,3 +1,4 @@
+import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { isAgentActivityStatusSource, semanticStatusStale } from './agent-status-freshness.js'
@@ -31,6 +32,7 @@ export type {
 } from './types.js'
 
 export const MAX_AGENT_TIMELINE_STATUS_ITEMS = MAX_TIMELINE_ITEMS_PER_WINDOW
+export const MAX_AGENT_TIMELINE_INPUT_ITEMS = MAX_TIMELINE_ITEMS_PER_WINDOW
 export const MAX_AGENT_TIMELINE_ITEMS = 3 * MAX_TIMELINE_ITEMS_PER_WINDOW
 const MAX_TIMELINE_MUTATION_BYTES = 128 * 1024
 const UTF8_ENCODER = new TextEncoder()
@@ -191,6 +193,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     ...optionalField(source, 'content'),
     ...authorAgent,
     ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),
+    ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
     ...(authorAgent.authorAgentSessionId === undefined && source.authorHuman === true ? { authorHuman: true } : {}),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),

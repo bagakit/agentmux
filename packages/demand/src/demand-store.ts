@@ -1,3 +1,4 @@
+import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -143,13 +144,14 @@ function parseDemand(value: unknown, label: string): Demand {
     'parentDemandId',
     'phaseIndex',
     'sessionIds',
+    'contentRefs',
     'activities',
     'decisions',
     'alignment',
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -175,6 +177,7 @@ function parseDemand(value: unknown, label: string): Demand {
     parentDemandId,
     phaseIndex,
     sessionIds: stringArray(record.sessionIds, `${label}.sessionIds`),
+    ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
     activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
@@ -329,6 +332,7 @@ export class DemandStore {
         parentDemandId: input.parentDemandId ?? null,
         phaseIndex: input.phaseIndex ?? null,
         sessionIds: [...(input.sessionIds ?? [])],
+        ...(input.contentRefs === undefined ? {} : { contentRefs: [...input.contentRefs] }),
         activities: [],
         decisions: [],
         createdAt: now,
@@ -344,6 +348,14 @@ export class DemandStore {
     patch = structuredClone(patch)
     return this.mutate('update', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
+      if (options.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(options.expectedUpdatedAt) || options.expectedUpdatedAt < 0 || options.expectedUpdatedAt !== demand.updatedAt)) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed. Inspect the original record before appending its content association.')
+      }
+      if (patch.contentRefs !== undefined) {
+        try { demand.contentRefs = appendDemandContentReferences(demand.contentRefs ?? [], patch.contentRefs) } catch (error) {
+          throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, error instanceof Error ? error.message : String(error), error)
+        }
+      }
       if ('confirmedAt' in patch || 'acceptedAt' in patch || 'revision' in patch || 'submissionId' in patch) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Agent updates cannot supply acknowledgement fields.')
       }
@@ -383,10 +395,10 @@ export class DemandStore {
       } catch (error) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, error instanceof Error ? error.message : String(error), error)
       }
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
-    }, patch.title === undefined ? undefined : { ...options, targetId: id, requested: typeof patch.title === 'string' ? patch.title : null })
+    }, patch.title === undefined ? undefined : { ...options, targetId: id, requested: typeof patch.title === 'string' ? patch.title : null }, options.operationId)
   }
 
   async proposeAlignment(id: string, proposal: DemandAlignmentProposal): Promise<DemandReceipt> {
@@ -410,7 +422,7 @@ export class DemandStore {
         demand.alignment.confirmedAt = Date.now()
         demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'goal-confirmed', message: `User confirmed goal revision ${expectedRevision}.`, createdAt: demand.alignment.confirmedAt, actorId: null })
       }
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
@@ -429,7 +441,7 @@ export class DemandStore {
         demand.grounding.acceptedAt = Date.now()
         demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: demand.grounding.acceptedAt, actorId: null })
       }
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
@@ -451,7 +463,7 @@ export class DemandStore {
       const demand = findDemand(snapshot, id, this.storePath)
       inputString(sessionId, 'sessionId')
       if (!demand.sessionIds.includes(sessionId)) demand.sessionIds.push(sessionId)
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
@@ -460,7 +472,7 @@ export class DemandStore {
     return this.mutate('unlink-session', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
       demand.sessionIds = demand.sessionIds.filter((entry) => entry !== sessionId)
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
@@ -488,7 +500,7 @@ export class DemandStore {
       }
       parseActivity(activity, 'activity')
       demand.activities.push(activity)
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
@@ -510,7 +522,7 @@ export class DemandStore {
       }
       parseDecision(decision, 'decision')
       demand.decisions.push(decision)
-      demand.updatedAt = Date.now()
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
   }
@@ -519,7 +531,9 @@ export class DemandStore {
     return this.addDecision(id, input)
   }
 
-  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand, titleAttempt?: TitleAttempt): Promise<DemandReceipt> {
+  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand, titleAttempt?: TitleAttempt, requestedOperationId?: string): Promise<DemandReceipt> {
+    if (requestedOperationId !== undefined && (typeof requestedOperationId !== 'string' || !requestedOperationId.trim() || requestedOperationId.length > 4096 || requestedOperationId.includes('\0')))
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'A Goal operation ID must be a non-empty string.')
     let context: DemandNameChangeRecord['context'] | undefined
     if (titleAttempt) {
       try { context = demandNameContext(titleAttempt.context) } catch (error) {
@@ -538,7 +552,7 @@ export class DemandStore {
       const release = await this.acquireLock()
       try {
         let snapshot = await this.readSnapshot()
-        const operationId = titleAttempt?.operationId ?? `demand-op-${snapshot.revision + 1}-${randomUUID()}`
+        const operationId = titleAttempt?.operationId ?? requestedOperationId ?? `demand-op-${snapshot.revision + 1}-${randomUUID()}`
         const original = titleAttempt ? findDemand(snapshot, titleAttempt.targetId, this.storePath) : undefined
         const previous = titleAttempt ? snapshot.nameHistory.find(change => change.operationId === operationId) : undefined
         if (previous) {
@@ -583,7 +597,7 @@ export class DemandStore {
           snapshot.nameHistory.push(nameChange)
           demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'name-change', message: failure ? 'Title change failed.' : nameChange.reason === 'unchanged' ? 'Title unchanged.' : 'Title changed.',
             createdAt: nameChange.settledAt, actorId: context!.actor.verified ? context!.actor.id : null, nameChangeId: nameChange.id })
-          demand.updatedAt = snapshot.updatedAt
+          demand.updatedAt = Math.max(snapshot.updatedAt, original!.updatedAt + 1, demand.updatedAt)
         }
         try { await this.writeSnapshot(snapshot) } catch (error) {
           if (!nameChange || !(error instanceof SnapshotWriteError)) throw error

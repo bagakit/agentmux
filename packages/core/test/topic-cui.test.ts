@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, symlink } from 'node:fs/promises'
@@ -16,7 +16,7 @@ import { AgentMuxRpcService as SourceRpcService, type AgentMuxRpcCallContext } f
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 const RpcService: typeof SourceRpcService = process.env.AGENTMUX_TEST_TOPIC_FORWARD_ENTRY
   ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_TOPIC_FORWARD_ENTRY).href)).AgentMuxRpcService : SourceRpcService
-const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId: 'local', spaceId: JSON.stringify(['local', upstreamFixturePath('topics/category')]), directoryPath: upstreamFixturePath("topics/category"), title: '工作', revision: 'sha256:' + 'a'.repeat(64) }
+const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId: 'local', spaceId: ("[\"local\",\"" + (fixturePath("topics/category")) + "\"]"), directoryPath: fixturePath("topics/category"), title: '工作', revision: 'sha256:' + 'a'.repeat(64) }
 describe('Topic typed public contract', () => {
   it('rejects spoofed envelopes, malformed revisions and inexact content identities before mutation', () => {
     for (const params of [{ categoryId: category.categoryId, title: 'Valid', caller: { id: 'spoof' } }, { categoryId: '../escape', title: 'Valid' }])
@@ -59,7 +59,26 @@ describe('Topic typed public contract', () => {
     expect(() => parseTopicResult('topic.knowledge.read', { entry: { ...entry, topicId: 'view:different' } }, input)).toThrow()
     expect(() => parseTopicResult('topic.knowledge.read', { entry: { ...entry, entryId: '22222222-2222-4222-8222-222222222222' } }, input)).toThrow()
     expect(() => parseTopicResult('topic.knowledge.write', { entry, diskDurability: 'unknown' }, input)).toThrow()
-    expect(() => parseTopicResult('topic.knowledge.ls', { entries: [entry, entry], unavailable: [] }, { topicId: input.topicId, limit: 1 })).toThrow()
+    expect(() => parseTopicResult('topic.knowledge.ls', { entries: [entry, entry], documents: [], unavailable: [] }, { topicId: input.topicId, limit: 1 })).toThrow()
+  })
+  it('separates bounded exact original documents from authored UUID entries and validates every preview receipt', () => {
+    const target = { zoneId: 'original-topic-zone', path: 'outcome/result.md', expectedResource: { hostId: 'local', workspaceId: 'scratch', workspacePath: fixturePath("scratch") }, maxBytes: 131072 }
+    const name = { topicId: 'view:topic', target, title: 'result.md', snippet: null, revision: null, readScope: 'name' }
+    const listed = { entries: [], documents: [name], unavailable: [] }, input = { topicId: 'view:topic', limit: 2 }
+    expect(parseTopicResult('topic.knowledge.ls', listed, input)).toEqual(listed)
+    const full = { ...name, snippet: 'A bounded body match', revision: category.revision, readScope: 'full' }
+    const query = { ...input, query: 'body' }
+    const searched = { ...listed, documents: [full], observation: { history: 'saved', unavailable: [], record: { searchId: category.categoryId, query: query.query, topicId: input.topicId, limit: input.limit, startedAt: 1, finishedAt: 2, durationMs: 1, outcome: 'complete', counters: { topicsVisited: 1, candidates: 1, readBytes: 20, chargedBytes: 20, unconfirmedReads: 0, entryMatches: 0, documentMatches: 1 }, stopReason: null, issues: [], omittedIssueCount: 0 } } }
+    expect(parseTopicResult('topic.knowledge.search', searched, query)).toEqual(searched)
+    for (const document of [{ ...full, topicId: 'view:other' }, { ...full, target: { ...target, maxBytes: undefined } },
+      { ...full, target: { ...target, path: '../foreign.md' } }, { ...full, target: { ...target, path: 'outcome//file.md' } },
+      { ...full, entryId: category.categoryId }, { ...full, certainty: 'fact' }, { ...full, revision: 'latest' }, { ...full, snippet: null }])
+      expect(() => parseTopicResult('topic.knowledge.search', { ...searched, documents: [document] }, query)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+    expect(() => parseTopicResult('topic.knowledge.search', listed, query)).toThrow()
+    expect(() => parseTopicResult('topic.knowledge.ls', searched, input)).toThrow()
+    expect(() => parseTopicResult('topic.knowledge.ls', { ...listed, documents: [name, name] }, input)).toThrow()
+    expect(() => parseTopicResult('topic.knowledge.search', { ...searched, documents: [full, { ...full, target: { ...target, path: 'different.md' } }] }, { ...query, limit: 1 })).toThrow()
+    expect(agentMuxCommandHelp('file.read')).toContain('--max-bytes')
   })
   it('rejects malformed Notebook locators and copied resource fields in both request and response sources', () => {
     const input: TopicKnowledgeWrite = { topicId: 'view:topic', entryId: category.categoryId, title: 'Original notebook', content: '',

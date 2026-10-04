@@ -9,14 +9,19 @@ const root = resolve(import.meta.dirname, '../../..')
 const evidence = process.env.AGENTMUX_TOOLKIT_EVIDENCE ?? resolve(root, '.bagakit/toolkit-custom-core-test')
 const mutant = process.env.AGENTMUX_TOOLKIT_CORE_MUTANT ?? 'baseline'
 const changes: Record<string, [string, string, string]> = {
-  budget: ['packages/core/src/toolkit.ts', 'if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)', 'void r'],
+  budget: ['packages/core/src/toolkit.ts', 'if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)\n  for (const key of Object.keys(r)) field', 'void r\n  for (const key of Object.keys(r)) field'],
   descriptor: ['packages/core/src/toolkit.ts', "if (key === 'name') encodedText(value, 768, code)\n  if (key === 'icon') encodedText(value, 192, code)", 'void key'],
   header: ['packages/core/src/control-codec.ts', 'if (isToolkitOperation(operation?.value)) return parseToolkitRequest(source)', 'void operation'],
   target: ['packages/core/src/toolkit.ts', 'if (toolId !== request.toolId) throw', 'if (false) throw'],
   input: ['packages/core/src/toolkit.ts', "case 'toolkit.run': record(source, source.toolId === 'performance' ? base : [...base, 'input'], [], code); if (source.toolId !== 'performance') parseToolkitRunInput(source.input, code); break", "case 'toolkit.run': record(source, base, ['input'], code); break"],
   utf8: ['packages/core/src/cli-json-input.ts', "new TextDecoder('utf-8', { fatal: true }).decode", "new TextDecoder('utf-8', { fatal: false }).decode"],
   'action-count': ['packages/core/src/toolkit.ts', 'value.length > TOOLKIT_MAX_ACTIONS', 'value.length > 32'],
-  'action-input': ['packages/core/src/toolkit.ts', 'identity(source.actionId, code); parseToolkitActionInput(source.input, code); break', 'identity(source.actionId, code); void source.input; break']
+  'action-input': ['packages/core/src/toolkit.ts', 'identity(source.actionId, code); parseToolkitActionInput(source.input, code); break', 'identity(source.actionId, code); void source.input; break'],
+  'package-fields': ['packages/core/src/toolkit.ts', 'parseToolkitConfigurationFields(source.value, false, code, true)', 'parseToolkitToolFields(source.value, false, code)'],
+  'package-config': ['packages/core/src/toolkit.ts', "if (Object.hasOwn(r, 'package')) invalid(code)", 'void r.package'],
+  'package-source': ['packages/core/src/toolkit.ts', "!/^[a-f0-9]{64}$/u.test(r.contentSHA256)", 'false'],
+  'package-install': ['packages/core/src/agentmux-cli-commands.ts', "...(action === 'install' ? { rpcMethod: 'toolkit.create' } : {}),", '...{},'],
+  'package-receipt-depth': ['packages/core/src/control-codec.ts', "settingsResourceRecord(header, 'CONTROL_PROTOCOL_ERROR')", "settingsResourceRecord(source, 'CONTROL_PROTOCOL_ERROR')"]
 }
 assert.ok(mutant === 'baseline' || changes[mutant], 'The Core mutation must name an actual owning Source change.')
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -33,4 +38,4 @@ export default defineConfig({ ...owning, plugins: [...(owning.plugins ?? []), {
     return { code: consumed, map: null }
   }
 }], test: { ...owning.test,
-  include: ['packages/core/test/toolkit-control.test.ts', 'packages/core/test/toolkit-custom.test.ts'] } })
+  include: ['packages/core/test/toolkit-control.test.ts', 'packages/core/test/toolkit-custom.test.ts', 'packages/core/test/toolkit-package.test.ts'] } })

@@ -126,6 +126,21 @@ describe('Core-owned durable A2A global message queue', () => {
     } finally { release(); await Promise.allSettled([first, other]) }
   })
 
+  it('freezes channel and device on the existing journal without rewriting old origin facts', async () => {
+    const durable = await queue()
+    const sourceDevice = { hostId: 'host', deviceId: 'device', name: 'Approved device' }
+    const original = input({ messageId: 'frozen-origin', sourceChannel: 'cli', sourceDevice })
+    const receipt = await durable.append(original)
+    sourceDevice.name = 'Edited outside the queue'
+    const reopened = new DurableAgentMuxMessageQueue(durable.path)
+    const restored = (await reopened.listAfter())[0]!
+    expect(restored.sourceChannel).toBe('cli')
+    expect(restored.sourceDevice).toEqual({ hostId: 'host', deviceId: 'device', name: 'Approved device' })
+    expect(receipt.sourceDevice).toEqual(restored.sourceDevice)
+    await expect(reopened.append({ ...original, sourceChannel: 'api' })).rejects.toMatchObject({ code: 'MESSAGE_ID_CONFLICT' })
+    expect(await reopened.listAfter()).toHaveLength(1)
+  })
+
   it('preserves original intent and the last proven state across unknown Control outcomes', async () => {
     const durable = await queue()
     const message = await durable.append(input({ messageId: 'control-uncertain' }))
@@ -134,7 +149,7 @@ describe('Core-owned durable A2A global message queue', () => {
     await durable.recordDeliveryIssue(message.messageId, 'Retry result unknown\nControl reply closed', 200)
     const reopened = new DurableAgentMuxMessageQueue(durable.path)
     expect(await reopened.listAfter()).toEqual([{ sequence: message.sequence, envelope: message.envelope,
-      promptCondition: condition, delivery: { state: 'queued', at: message.envelope.createdAt, reason: 'Retry result unknown\nControl reply closed' } }])
+      promptCondition: condition, execution: 'default', delivery: { state: 'queued', at: message.envelope.createdAt, reason: 'Retry result unknown\nControl reply closed' } }])
     expect((await reopened.readJournal()).filter(record => record.kind === 'delivery-issue')).toEqual([
       { kind: 'delivery-issue', sequence: 3, messageId: message.messageId, at: 100, reason: 'Control ACK missing' },
       { kind: 'delivery-issue', sequence: 4, messageId: message.messageId, at: 200, reason: 'Retry result unknown\nControl reply closed' }
@@ -267,7 +282,7 @@ describe('Core-owned durable A2A global message queue', () => {
   it('serializes concurrent OS processes on one durable path', async () => {
     const first = await queue()
     const modulePath = fileURLToPath(new URL('../dist/agent-global-message-queue.js', import.meta.url))
-    const script = `import { DurableAgentMuxMessageQueue } from ${JSON.stringify(modulePath)}; const q = new DurableAgentMuxMessageQueue(process.env.QUEUE_PATH); await q.append(JSON.parse(process.env.QUEUE_INPUT));`
+    const script = `import { DurableAgentMuxMessageQueue } from ${JSON.stringify(modulePath)}; const q = new DurableAgentMuxMessageQueue(process.env.QUEUE_PATH); const original = JSON.parse(process.env.QUEUE_INPUT); for (let attempt = 0; ; attempt++) { try { await q.append(original); break } catch (error) { if (error.code !== 'MESSAGE_QUEUE_BACKPRESSURE' || attempt >= 199) throw error; await new Promise(resolve => setTimeout(resolve, 5)) } }`
     const launch = (suffix: string) => exec(process.execPath, ['--input-type=module', '--eval', script], {
       env: { ...process.env, QUEUE_PATH: first.path, QUEUE_INPUT: JSON.stringify(input({ operationId: `process-${suffix}-op`, messageId: `process-${suffix}` })) }
     })
@@ -281,7 +296,7 @@ describe('Core-owned durable A2A global message queue', () => {
     await mkdir(dirname(lockPath), { recursive: true })
     await writeFile(lockPath, JSON.stringify({ pid: 99_999_999, acquiredAt: Date.now() - 60_000 }))
     const modulePath = fileURLToPath(new URL('../dist/agent-global-message-queue.js', import.meta.url))
-    const script = `import { DurableAgentMuxMessageQueue } from ${JSON.stringify(modulePath)}; const q = new DurableAgentMuxMessageQueue(process.env.QUEUE_PATH); await q.append(JSON.parse(process.env.QUEUE_INPUT));`
+    const script = `import { DurableAgentMuxMessageQueue } from ${JSON.stringify(modulePath)}; const q = new DurableAgentMuxMessageQueue(process.env.QUEUE_PATH); const original = JSON.parse(process.env.QUEUE_INPUT); for (let attempt = 0; ; attempt++) { try { await q.append(original); break } catch (error) { if (error.code !== 'MESSAGE_QUEUE_BACKPRESSURE' || attempt >= 199) throw error; await new Promise(resolve => setTimeout(resolve, 5)) } }`
     const launch = (index: number) => exec(process.execPath, ['--input-type=module', '--eval', script], {
       env: { ...process.env, QUEUE_PATH: first.path, QUEUE_INPUT: JSON.stringify(input({ operationId: `stale-${index}-op`, messageId: `stale-${index}`, sender: { kind: 'agent-session', agentSessionId: `sender-${index}` } })) }
     })

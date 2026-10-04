@@ -10,6 +10,29 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 `connectLocalAgentMux` 不提供逐调用 socket/state 参数。[runtime-paths.ts](src/runtime-paths.ts) 持有进程级路径策略：默认 Endpoint 与持久状态使用稳定宿主 namespace，持久状态在用户目录；`AGENTMUX_RUNTIME_DIRECTORY` 与 `AGENTMUX_STATE_DIRECTORY` 可指定绝对路径。产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
 
+`defaultLocalHostLabel(platform?)` 为新本机 Host 提供显示默认值，`LocalExecutionHost` 与宿主的新配置共同消费；传入或保存的 `label` 继续优先。该函数沿 [execution-host.ts](src/execution-host.ts) 导出，只处理名称，不探测能力或启动 Runtime；默认名称的系统规则见[机器目录分区合同](../../docs/design/behavior/spaces-and-layout.md#跨设备关联项目组)。
+
+
+## 原生对话读取
+
+`sessionHistoryPage(agentSessionId, { limit, cursor?, signal? })` 读取原 Session 的 Provider 原生记录；`observeSessionHistory(agentSessionId, onChange)` 观察该原生来源的变化，消费者据此重读最新页。两者独立于 Hook timeline，读取不向 Agent 输入内容或改变 Run。历史 cursor 是 Provider 生成的 opaque 值，不能用数组下标、正文或时间重新生成。
+
+| Provider | 原生来源与身份 | 更新观察 | Native Resume |
+| --- | --- | --- | --- |
+| Grok | `chat_history.jsonl`；原 Session ID、Workspace 与 `summary.info` 一致 | 同一经过核验的 JSONL，包含第一次落盘 | Session ID |
+| Pi | 原 `session_file` 的分支 JSONL；身份来自原生 session header 与受信 Hook binding | 同一 JSONL | 原 session file |
+| Antigravity | 主 CLI 持有的 `presence/<UUID>.lock`；同 UUID 的 compact/full transcript | 两个精确 transcript，共同清理 | Conversation UUID |
+| Cursor | 当前 Run 打开的原 `store.db` 与 native metadata；canonical conversation protobuf | DB/WAL/journal 原生 commit 的实际 revision | Conversation UUID |
+| TraeX | 当前 Run 打开的 rollout 与 `session_meta`；由原生 app-server 解释 indexed history | 同一 rollout | Session ID |
+
+上述是源码能力，不代表任意厂商版本、当前安装或所有真实运行场景已验收。Client 共同消费 `AgentSessionHistoryPage`，不按 Provider 另建阅读界面、轮询或消息账本。保存的用户输入、Agent 回复与过程记录保留各自原顺序、ID 和 content parts；未提供的作者、渠道、设备、时间与状态保持未知。终端输入须等原生 CLI 保存为记录后才能由原生读取接口取得，不能把尚未保存的终端编辑缓冲当成已提交消息。
+
+同一 SQLite 身份的写入竞争返回 `AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED`，本次页不发布；观察保留，后续原生提交可恢复。主来源被替换或 native identity 不一致返回 `AGENT_SESSION_HISTORY_SOURCE_CHANGED`，只停止这个来源的观察。两种情况都不删除已有正文、原 Session 或健康 Run；调用者保留旧阅读窗口并显示明确的读取状态。无 WAL 的已关闭数据库沿同一只读 VFS 读取，不创建 native WAL/SHM。JSONL 来源替换按原来源边界处理，不能以相同路径或新 mtime 推断仍是原会话。
+
+`sessionHistoryResource(agentSessionId, request)` 读取原生记录中准确声明的图片。request 包含原 source、turnId（存在时）、recordId、partIndex 和 required expectedReference；Provider 必须经既有 native reader 准确重读 record，引用比对后才读 file／raster data。返回 `read`（MIME/base64/byteLength）或带 reason 的 `unavailable`；错 source／record／part／reference 拒绝本次操作。固定 16 MiB 原图上限只可通过 maxBytes 缩小，原生读取协议的独立预算继续有效。opaque／HTTP 不自动抓取，其他 Provider 未贡献准确 record 读取时明确 unavailable；不通过最新页重放、正文／时间或第二资源缓存授权。公共 RPC `agent.history.resource` 与 CLI `agent history resource --input FILE|-` 使用同一请求和准确回执，hostId／agentSessionId 指向原语义 Host，不连接或控制 Run。
+
+CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 仍通过 Core Session 生命周期完成。Hook、Permission、Usage 和问题回答是各自独立声明的能力，不能因 history reader 可用而冒充已接入。
+
 ## Runtime 边界
 
 `@agentmux/core` 是 ctxmux 的 Client，不是 ctxmux 的宿主。ctxmux 自己的 daemon、CLI、
@@ -191,3 +214,48 @@ await client.dispose()
 `hostname` 可以使用已有 SSH config 的 Host 别名；`user`、`port`、`identityFile`、`remoteCommand` 与 `remoteSocketPath` 按需覆盖默认值。连接采用非交互 SSH。Desktop 的 Hosts 设置保存这些连接参数，并展示已绑定的稳定 Runtime ID。
 
 连接中断时，原 Session、Tab、Region、布局和未发出的输入保持原身份。缓存只表示最后一次观察，服务窗说明失败步骤与恢复动作；只有 Core 明确确认原 Session 的终局事实才允许移除对应投影，观测 unknown / unavailable 保留原工作面。Owner 重启使用原持久目录恢复 Session，再附着同一 ctxmux Run。Provider-native Resume 保持 Session ID，并创建有 provenance 的新 Run。
+
+## Notebook 目录 API 与 CLI
+
+知识目录不需要 App。`@agentmux/core/notebook-store` 的 `AgentMuxNotebookStore` 负责
+`notebooks.json`，默认位于 `AGENTMUX_STATE_DIRECTORY` 所指的原状态目录。
+`@agentmux/core/notebook-catalog` 导出 `NotebookState`、`NotebookWrite`、`NotebookChange`
+和严格读取类型。正文由原资源 Host/Workspace 的文件能力持有，目录保存准确引用、
+页面层级、网页来源和真实变化轨迹。[Notebook 行为合同](../../docs/design/behavior/spaces-and-layout.md#notebook页面与持久目录)
+定义归属和关闭语义；这里列出实际公开调用方式。
+
+```sh
+amux notebook ls
+amux notebook inspect --notebook quick-notes
+amux notebook inspect --note NOTE_ID
+amux notebook inspect --operation-id ORIGINAL_OPERATION_ID
+amux notebook apply --revision CURRENT_REVISION --operation-id NEW_OPERATION_ID \
+  --change-json '{"kind":"create","notebookId":"research","name":"Research wiki"}'
+```
+
+`notebook.ls`、`notebook.inspect`、`notebook.apply` 是同一公共 RPC 的方法。
+`notebook.apply` 输入 `{ expectedRevision, operationId, change }`，返回完整确认目录。
+读写走已有 Endpoint；写入者由可信运输或 AgentSession 确认，不能在 `change` 中自报身份。
+
+| `change.kind` | 字段（除 kind） | 结果 |
+| --- | --- | --- |
+| `create` | `notebookId, name, workface?` | 新建 Notebook；默认 `quick-notes` 名称为“随手记” |
+| `rename` | `notebookId, name` | 改 Notebook 名；默认名称固定 |
+| `bind` | `notebookId, workface` | 绑定原工作面 `{ zoneId, workspaceId }` |
+| `register` | `noteId, title, resource, notebookId?, parentNoteId?, workface?, source?` | 登记已保存的原 Note；未指定 Notebook 时进入随手记 |
+| `move` | `noteId, notebookId, parentNoteId` | 移动页面及子树；根级用 `null`，循环明确拒绝 |
+| `rename-page` | `noteId, title` | 改页面标题，保原 Note/Block 与文件 |
+| `source` | `noteId, source` | 追加来源；不覆盖已有来源身份 |
+| `organize` | `noteId, topic` | 记录已确认的 Topic 整理；不是空间关系创建命令 |
+| `relocate` | `noteId, resource` | 记录原文件能力已确认的真实新位置；不是文件移动命令 |
+
+`resource` 为 `{ hostId, workspaceId, workspacePath, path }`，`path` 相对原 Workspace。
+`source` 为 `{ sourceId, url, title, recordedAt, operator?, position? }`；标题未知用 `null`，
+原展示可选地址为 `{ zoneId, tabId, regionId }`。来源 URL 不依赖该展示仍然存在。
+`topic` 为 `{ spaceId, topicId? }`。`inspect --note` 返回原页面与完整事件轨迹。
+
+丢回执时查询原 `operationId`，再以同一个 ID、原 payload 和同一操作者重试；成功不会重复。
+新意图使用新 ID 和最新 revision；并发冲突先读目录。损坏或未确认读取保原字节与页面，
+不创建空知识库覆盖它。与当前事实相同的改名、位置或资源操作不添加虚假的变化事件。
+
+For a confirmed file move, `relocate` accepts optional `from: NoteResource`. The catalog rejects a stale original resource rather than replacing a later location; the same operation ID still replays exactly. Desktop records only confirmed File/Zone outcomes and retains unresolved history writes in its existing presentation recovery receipts. These receipts contain no Note body and do not replace this Core catalog.

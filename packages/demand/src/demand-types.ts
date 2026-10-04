@@ -1,3 +1,4 @@
+import type { DemandContentReference } from './content-references.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from './goals.js'
 
 export const DEMAND_STORE_SCHEMA = 'agentmux.demand-store.v1' as const
@@ -47,6 +48,8 @@ export type DemandTitleMutationOptions = {
   operationId?: string
   /** CAS against this owner snapshot; callers may omit it for an unconditional update. */
   expectedRevision?: number
+  /** Compare this exact record before a content update. */
+  expectedUpdatedAt?: number
 }
 
 export type DemandActivity = {
@@ -84,6 +87,8 @@ export type Demand = {
   parentDemandId: string | null
   phaseIndex: number | null
   sessionIds: string[]
+  /** Append-only original content provenance, not execution or display ownership. */
+  contentRefs?: DemandContentReference[]
   activities: DemandActivity[]
   decisions: DemandDecision[]
   alignment?: DemandAlignment
@@ -116,11 +121,12 @@ export type CreateDemandInput = {
   parentDemandId?: string | null
   phaseIndex?: number | null
   sessionIds?: readonly string[]
+  contentRefs?: readonly DemandContentReference[]
 }
 
 export type UpdateDemandInput = Partial<Pick<
   Demand,
-  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'executorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex'
+  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'executorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'contentRefs'
 >> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
 
 export type DemandReceipt = {

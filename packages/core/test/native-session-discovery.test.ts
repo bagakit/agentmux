@@ -67,14 +67,14 @@ const data=${JSON.stringify(nativeInput)};createInterface({input:process.stdin})
     read: () => client.sessionHistoryPage(SID, options) }
 }
 
-it('discovers the exact open main independently of Hook and uses registered Reader/observer thereafter', async () => {
-  const f = await fixture(), os = vi.spyOn(runner, 'runProcess')
+it.each(['codex', 'traex'])('%s discovers the exact open main independently of Hook and uses registered Reader/observer thereafter', async providerId => {
+  const f = await fixture(new AgentProviderRegistry().get(providerId)), os = vi.spyOn(runner, 'runProcess')
   const page = await succeeds(f.read())
   expect(page.items.map(item => item.id)).toEqual(['user-1', 'progress-1', 'final-1', 'user-2'])
   expect(page.items[2]).toMatchObject({ kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: BODY }] })
   expect(page.nextCursor).toBe('actual-opaque-earlier')
   const stored = (await loadAgentSessions(f.store))[0]!
-  expect(stored.nativeHandle).toEqual({ kind: 'provider', providerId: 'codex', sessionId: NATIVE, transcriptPath: f.files[0] })
+  expect(stored.nativeHandle).toEqual({ kind: 'provider', providerId, sessionId: NATIVE, transcriptPath: f.files[0] })
   expect(stored.semanticStatus).toBeUndefined(); expect(f.events.some(event => event.type === 'agent-session')).toBe(true)
   const discoveredCalls = os.mock.calls.length; expect(discoveredCalls).toBeGreaterThan(0)
   const changes: unknown[] = []
