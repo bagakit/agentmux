@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { deliveryLogNotice, type ClientDeliveryLog } from '../lib/delivery-diagnostics'
+import { deliveryLogNotice, type ClientDeliveryLog } from '../lib/delivery-diagnostics.js'
 
 /** A diagnostic receipt, never a send receipt. Copy success follows the real clipboard result. */
 export function DeliveryLogDetails({ logId, log, copyText }: {
