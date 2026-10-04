@@ -143,11 +143,23 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 | 提升 Region 为 Tab、调整布局 | `space promote/arrange` |
 | 跨对象观察、Goal 和显式 Session 关系 | `app snapshot`、`goal`；方法手册 `mote playbook pmo` |
 | 已支持的偏好、诊断与资源观察 | `settings`、`system crash-log/metrics/doctor` |
+| 人工待发消息与准备退避 | `message pending ls/edit/send/stop/archive/restore` |
 | Session 消息、输出、生命周期 | `agent send/output/interrupt/resume/stop`、`message inbox/dispatch` |
 
 表中入口的能力边界与接线见[公共能力来源导航](../specs/public-capabilities.md#cli-与服务的当前来源)及[公共控制合同](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。源码、构建、安装与实际运行分别核对；入口清单不代签具体 UI 控件的可操作性，不在当前执行版本 help 中的能力不要猜命令。
 
 共享实体与展示关系由 Core 的同一持久空间 owner 提供；Desktop Store 消费并投影这些事实，CLI 接入同一公共服务，不另建一套空间模型。
+
+## 查看消息等待，停止本条退避
+
+Message Tool 的待发意图由原 Client owner 持有。先按原 Session 读取 `pendingId` 和等待进度，再停止这一条正在退避的消息：
+
+```sh
+agentmux message pending ls --session '<session-id>'
+agentmux message pending stop --session '<session-id>' --pending-id '<pending-id>'
+```
+
+`stop` 经公开 `message.pending.stop` 调用与界面「停止等待」相同的 owner，只结束本条自动准备退避；原文、操作号、目标 Run 和手动发送入口保留。回执的 `preparationWait.state: "stopped"` 与 `changed` 说明等待事实，不表示撤回已写入输入或停止 Agent。没有活跃退避、目标不存在或已进入提交时，拒绝这一次停止，保留消息、原会话与终端；对已停止的原记录再次调用返回 `changed: false`。修改、发送和停止人工待发意图需要服务认证的 user／device，managed Agent 不能借此操作人工草稿。具体参数与当前执行版本的 `--help`／`--skill` 保持一致。
 
 ## RPC 与远程调用
 
