@@ -6,6 +6,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from '../agent-native-locator.js'
 import { catalog } from './shared.js'
+import { hookDeliverySource } from '../agent-hook-delivery.js'
 import { readPiSessionHistoryPage } from './pi-native-history.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 
@@ -176,7 +177,7 @@ function piFamilyExtensionDir(
 function piExtensionSource(): string {
   return `// AgentMux managed extension. Generated — edits are overwritten on reinstall.
 import { existsSync } from 'node:fs'
-
+${hookDeliverySource()}
 export default function (pi) {
   // session_file 只有在 transcript **真的落盘之后**才上报。
   //
@@ -210,13 +211,8 @@ export default function (pi) {
     for (const key in session) payload[key] = session[key]
     if (extra) for (const key in extra) payload[key] = extra[key]
     // 不 await：Pi 会 await 每个 handler，投递挂在事件回路上会让用户的会话等我们的网络。
-    void fetch(url, {
-      method: 'POST',
-      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-      body: JSON.stringify({ receiptId: crypto.randomUUID(), eventName: eventName, payload: payload }),
-      signal: AbortSignal.timeout(2000)
-    }).catch(() => {
-      // 投递失败就丢这一条。绝不让状态上报打断用户的会话。
+    void sendHookReceipt(url, token, JSON.stringify({ receiptId: crypto.randomUUID(), eventName: eventName, payload: payload })).catch((error) => {
+      console.error('[AgentMux Hook] delivery unconfirmed; Agent remains available:', error)
     })
   }
 
