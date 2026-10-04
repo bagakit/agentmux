@@ -267,6 +267,7 @@ Mobile 消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，�
   - **Tab** 回答"**哪张完整工作面**"——只有其中恰好一个不同的 Agent Session ID 时才可用于语义发送；同一 SID 的多个 Region 投影仍是一个 Agent。既有 View 用语不形成另一层身份。
 
 - **对象分享直接复制 `amux://` 链接。** Agent、Region、Tab、Space、Zone 分别使用 `amux://agent/<SID>`、`amux://region/<RID>`、`amux://tab/<TID>`、`amux://space/<ID>`、`amux://zone/<ID>`；每份只包含原对象类型与一个准确身份，不再复制身份名片、执行器资料或重复命令说明。Agent 链接始终指向 Core SID，不以原生会话 ID、显示名、执行器、Run 或空间位置替代。右键菜单按真实动作命名 Copy Agent/Region/Tab/Category/Topic Link，同一目标只保一个复制入口；复制本身不发送、不导航、不改变焦点、展示、草稿或健康 Run。
+  - 新 Agent ID 的等长 Base58 生成与既有 ID／持久创建重试保全只定义在[Session、Run 与 View](session-recovery.md#sessionrun-与-view)；链接仍准确引用原 SID，不增加分享别名或另一种地址格式。
   - 生成与严格解析来自无 UI 依赖的同一 Core 公共出口；ID 按 URI path segment 编码并准确还原，不携带正文、命令、父位置暗示或自动执行参数。格式有效不证明对象存在、健康、已呈现、跨设备可达或内容作者可信。非法 URI 只拒绝这次打开，保留工作面与其他健康能力，并明确原因和重取链接的恢复动作。
   - Agent 链接定位为唯一现有 Region 时，原 focus owner 在提交导航前按预期 SID 原子核对该格当前 Agent，导航回执保留该条件。位置已更换只拒绝这次导航，后续异步呈现或持久确认期间变化只报告未确认、保留用户后来工作面，不回滚或操作替换者。相同条件由已有 `space focus --region … --expect-session …` 可用，空间身份与 Agent 身份仍分开。
   - 接收 Agent 在既有启动引导中知道 `amux://` 是对象引用，遇到链接先查 `amux --skill`，再按类型和原 ID 使用已有公开 inspect、send 或 focus 能力。用法在原 skill 按需发现，不在每次分享附带一份命令；短可执行名 `amux` 正式指向同一公开 CLI 程序，不依赖用户 shell alias。当前能力以实际构建的 `--help`／`--skill` 为准，没有相关工具或引导的外部 Agent 不被假定自动知道用法。
