@@ -4,25 +4,33 @@
 
 ## 唯一事实 owner
 
-Space, Zone, Tab, Group and Region identities, topology, ordering, split ratios, selections and all bindings are amux product data. Core owns these independently of Electron, React and any graphical frontend. Clients own screen geometry, DOM mounts, occlusion and input focus. Lookup maps and screen projections are derived; the underlying position relationships are durable.
+Core 持有 Space、Zone、Tab、Group、Region 的稳定身份、拓扑、顺序、分割比例、选择与全部绑定，独立于 Electron、React 和图形客户端。客户端持有屏幕几何、DOM 挂载、遮挡和输入焦点；地址索引与屏幕投影由持久关系派生。
 
-A remote host without an App must maintain, persist, query and manage the same graph through the public API and CLI. A Zone is loaded by stable identity and its original members and layout, not by whether one saved presentation address still exists. Multiple bindings are allowed; unbinding one location does not delete the entity or close its Run. AgentSession, Run and execution cwd remain with their original owners.
+没有 App 的远端 Host 仍通过同一公共 API／CLI 保存、查询与管理空间图。加载 Zone 使用稳定身份及原成员、布局，不以某一旧展示地址仍然存在为前提。解除一个绑定不删除实体或关闭 Run；AgentSession、Run 和执行 cwd 分别沿原 owner。
 
-事实模型由 [`AgentMuxSpatialGraph`](../../packages/core/src/spatial-graph.ts) 与 [`AgentMuxSpaceCatalog`](../../packages/core/src/space-control.ts) 定义。空间目录与地址是同一实体图的消费视角；没有独立的 Agent 组织 Space 注册表。内容资源、Session 和 Run 沿[系统职责地图](system-ownership.md#身份与位置分开)的原 owner。
+事实模型由 [`AgentMuxSpatialGraph`](../../packages/core/src/spatial-graph.ts) 与 [`AgentMuxSpaceCatalog`](../../packages/core/src/space-control.ts) 定义。空间目录与地址是同一实体图的消费视角，没有独立的 Agent 组织 Space 注册表。资源、Session 和 Run 的身份关系见[系统职责地图](system-ownership.md#身份与位置分开)。
 
 ## 持久化与跨进程观察
 
-The filesystem owner uses `spatial-state.json` in the Core state directory. `AGENTMUX_SPATIAL_STATE_STORE` may select an absolute path; hosts can inject that same path. Revision checks and a cross-process lock protect concurrent writes. Existing durable file writes commit atomically; the previous valid document is retained. Corrupt or unavailable reads never become an empty graph or authorize destructive replacement. Recovery from the retained document is explicit.
+Core 状态目录中的 `spatial-state.json` 保存同一空间图；`AGENTMUX_SPATIAL_STATE_STORE` 可指定绝对路径，宿主也可注入该路径。revision 校验和跨进程锁保护并发写入；原子提交保留此前有效文档。读取损坏或不可用不能变成空图，也不授权破坏性覆盖；从保留文档恢复须明确执行。
 
-来源：[`defaultAgentMuxSpatialStatePath` / `AgentMuxSpatialStateStore`](../../packages/core/src/spatial-state.ts) 负责路径、读取、revision 提交、锁与订阅；原子写入沿 [`durableWriteFile`](../../packages/core/src/durable-write.ts)。
+[`defaultAgentMuxSpatialStatePath` / `AgentMuxSpatialStateStore`](../../packages/core/src/spatial-state.ts) 负责路径、读取、revision 提交、锁与订阅；原子写入沿 [`durableWriteFile`](../../packages/core/src/durable-write.ts)。
 
 ## 实体图与 Desktop 投影
 
-The document keeps entity facts, every binding, original Group and Region trees and selections. Client resource metadata is preserved as JSON, interpreted by the original host; Core does not create Browser pages, files, PTYs or Runs. Public spatial management uses the existing JSON-RPC and remote transports. A persisted layout does not imply a Native surface is mounted.
+### 保存什么
 
-Desktop may import its old workbench only when the Core document is absent. Once present, the Core document and revision are authoritative; a stale client cannot overwrite it. UI preferences and drafts remain client concerns. Desktop reads and writes that same file through its trusted preload port. Its preferences contain no second entity or layout snapshot after the Core ACK. Disjoint edits retain both changes; overlapping edits keep the local work visible and unsaved. Clients observe commits from other processes through the filesystem owner. Missing Host resource metadata is reported without removing Core identities or current content. The package has no OS installation gate for these portable APIs; shipped Native Runtime availability is a separate Host capability. These contracts do not certify Native surfaces on an untested Host.
+Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择。客户端资源元数据作为 JSON 保留，由原宿主解释；Core 不创建 Browser 页面、文件、PTY 或 Run。已保存布局不证明 Native surface 已挂载。
 
-来源：[`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts) 在同一 Core 图与原宿主工作面之间转换、保存及合并；真实资源来源与屏幕展示位置分别保留。
+### 如何提交与合并
+
+仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 后，偏好文件不再保存第二份实体或布局快照。UI 偏好与草稿仍由客户端持有。
+
+不相交编辑保留双方增量；重叠编辑保留本地可见、未保存工作。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
+
+### 缺失资源与 Host 能力
+
+缺少 Host 资源元数据时如实报告，保 Core 身份与当前内容。资源来源和屏幕展示位置分别保留，不能用当前焦点补猜目录。空间管理复用既有 JSON-RPC 与远程传输；可移植 API 不以 OS 安装门禁判断可用性，随包 Native Runtime 的可用性是另一项 Host 能力。本页不为未验证 Host 的 Native surface 宣布完成。
 
 ## 准确选择与跨视图导航
 

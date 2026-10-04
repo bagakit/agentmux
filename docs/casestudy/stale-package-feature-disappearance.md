@@ -101,11 +101,8 @@ dangerous` 的原生框。这一次磁盘侧**每一项**校验都通过：`pack
 
 ### 改进动作（承接上面第 3 条，补上进程那一侧）
 
-6. **`--install` 的交付物是一个跑着新包的进程，不是一个被换掉的目录。** 热更新是产品的
-   设计前提，所以重装默认走完整条路：请旧实例优雅退出（`osascript … quit`，走 Cmd+Q 那条
-   路以便桌面端 flush 布局；直接 SIGKILL 会丢用户当前的 Tab/Region 布局）→ 等进程真的
-   消失（超时才升级到 SIGTERM/SIGKILL）→ 换目录 → `open -a` 重新拉起 → 断言此刻跑在
-   已装路径上的每一个进程都是这次拉起的。不留“要不要重启”这种由调用方决定的开关。
+6. **历史方案已废止：曾建议优雅退出超时后升级到 SIGTERM/SIGKILL。** 当时的完整方案是请求旧实例退出、等待进程消失、替换目录、重新拉起并核对进程身份；它包含强制升级，不能作为当前操作步骤。当前安装沿[Desktop 更新边界](../architecture/desktop-updates.md#restart-boundary)正常退出，超时停止安装，保原应用、工作面与健康 Run。仍须分别核对已装目录和实际加载身份，目录替换不代表新代码正在运行。
+
 7. **判据是执行顺序，不是文本在场。** 守卫见
    `apps/desktop/test/package-install-restart.test.ts`：解析 AST 求各步在
    `installApplication` 函数体里的位置，要求退出早于 `rename(next, destination)`、重新拉起

@@ -22,21 +22,9 @@
 
 ## 项目文档阅读与维护
 
-用户反馈「现在 Agents.md 写的有点糟糕」，要求「偏移你处理下，然后我们治理下文档质量和结构」「建立更好的文档规范」。先校正事实偏移，再收敛文档职责与入口；文档必须让读者分清当前约束、当前实现、已验证结果、待确认提案与历史证据。旧 commit、协议版本和测试结果保留原观察范围，不能改一个版本号就冒充当前行为已验证。
+文档职责、实体分析、指代消解、事实分层与原位替换只由[文档事实与维护规范](../../guides/document-truth-and-maintenance.md)定义。入口见[文档导航](../../README.md)，idea 与过程资料的保留沿[过程目录](../../process-directories.md)；本页不另存治理流程、批次状态或并发快照规则。
 
-每类事实只有一个 owning 文档或来源。根 AGENTS 提供短协作入口与硬边界，专题细则由对应文档持有，导航让相关来源可达；用户确认的约束在原 owning 章节合并，不继续按聊天记录追加同一要求。根 README 应随项目演进反映当前定位、产品与包入口、真实能力及上手和开发路径，并导向 owning 文档与源码合同，不扩成 API 字典，也不把目标设计写成已交付能力。文档规范唯一见[文档事实与维护](../../guides/document-truth-and-maintenance.md)。
-
-有价值的需求与思路以 idea 为原点，先记录整合；确认内容归 owning 需求或设计文档，决定执行后再登记 Tracker 并执行，具体顺序见[idea 的记录与整合](../../guides/document-truth-and-maintenance.md#以-idea-为原点记录和整合)。有价值但尚未执行的 idea 仍需保留，不自动成为执行 Task；idea 与过程资料不提交。
-
-治理保全既有 Core／ctxmux／Provider 分层、健康 Agent 与原工作面、按需恢复、相关成本和协作交付权责。冲突依据用户已确认的 owning SSOT 收敛；缩短入口不能扩大自动恢复范围，也不能把公共机制的泛化要求误用为禁止 Provider 解释其原生协议。
-
-纯文档任务以来源与链接核对、独立语义保全评审验收；代码变异和产品调用者证明用于对应实现任务，不为没有代码改动的任务制造假证据。静态来源核对不代表当前运行行为通过，历史证据不代签新候选。
-
-用户要求「优化结构欠账」，并明确「过程性文档不提交」。交互与视觉的两个 canonical 入口保持短且可导航，完整约束按稳定对象与行为归到唯一专题正文；入口不再承担所有主题的追加正文。当前引用随正文归属准确可达，不复制全文，也不因结构重组改变权限、恢复、健康 Run、相关成本和交付责任。
-
-本轮保全原文字句、标题语义与并发 HEAD / index / working 的原始内容和所属层，不大规模删旧需求。项目全貌与公共 API / CLI 的阅读入口说明事实 Owner，并到达实际源码合同，不另抄一套定义；参考项目只提供读者意图、事实 Owner 与单一来源的组织启发。
-
-过程资料的 Git 边界、原始研究与未批准建议的本机定位，以及分别保全 index / working 后退出 Git 且不删本机原字节，唯一遵循 [过程目录](../../process-directories.md)。复盘方法归指南，验证方法归 [测试策略](../../testing/strategy.md)。结构治理以实际源段落与标题保全、有效引用和独立语义评审证明；静态文档证据不代签产品运行行为。
+设计整理保全 Core／ctxmux／Provider 分层、健康能力、原身份与工作面、按需恢复和相关消费者成本。纯文档按来源、链接及独立语义保全 review 验收；产品实现沿[测试策略](../../testing/strategy.md#任务验收与假绿防护)，历史证据不代签新候选。
 
 ## 主题切换与样式真值
 
@@ -50,9 +38,9 @@
   其他产品事实，也不能为同一事实创建第二套状态。
 
 > 当前确认的导航、Tab、分屏和会话栏需求见
-> [顶部与项目栏](../presentation/spaces-and-layout.md#顶部与项目栏)；`agentmux-project-rail-navigation.md`（本机过程资料：`docs/plans/agentmux-project-rail-navigation.md`）。
+> [顶部与项目栏](../presentation/spaces-and-layout.md#顶部与项目栏)。
 > Scratch 的 Topic 与 Wiki 合同见
-> [Scratch 的交互与组织](spaces-and-layout.md#topic-的打开与默认终端)；`agentmux-wiki-first-scratch.md`（本机过程资料：`docs/plans/agentmux-wiki-first-scratch.md`）。
+> [Topic 的打开与默认终端](spaces-and-layout.md#topic-的打开与默认终端)。
 
 ## 设计哲学
 
@@ -89,7 +77,8 @@ fixture 只定义场景数据、操作、观察点与模拟边界，并引用当
 | --- | --- | --- |
 | PTY、进程、Run、ordered bytes、Replay、Gap、Attachment | ctxmux | 通过 Core 公共 API 消费 |
 | Provider、Agent Session、Hook、Permission、Prompt readiness、Agent status、semantic resume | `packages/core` | 投影状态并发起公共命令 |
-| Tab Group、View、Region、焦点、尺寸与空间组合 | Desktop Renderer | 保存和变更界面布局 |
+| Space／Zone／Tab／Group／Region 身份、拓扑、布局、选择与全部绑定 | Core Spatial owner | 消费同一持久图，投影屏幕与发起原操作 |
+| 屏幕几何、可见性、DOM 挂载与输入焦点 | Desktop／client | 不从屏幕观察改写空间或执行身份 |
 | Workspace Root、revision、写入、观察、move、Git、Browser WebContents 与原生系统能力 | Desktop Main | 提供 typed IPC 和最终磁盘事实 |
 | File tree、buffer、dirty、generation、冲突、路径映射与交互 | Desktop Renderer | 消费 Main 事实并原子投影视图状态 |
 | Topic 内容与协作者身份 | Scratch 文件系统 | 枚举、导航和绑定 View |
