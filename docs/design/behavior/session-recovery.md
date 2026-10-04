@@ -137,7 +137,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ## 恢复时机与明确操作
 
-### 冷启动按需恢复（P0 末位，）
+### 冷启动按需恢复（P0 末位）
 
 启动时的“缺少 Session 运行事实”告示只由原 Session 的当前事实结算。原 endpoint 的可信读取已经确认这些 Session 时，收起这项旧告示；Native 进程归属尚未核实仍沿独立服务窗如实保留，不能把已经取得的 Session 事实继续说成缺失。不可用 endpoint 的缓存、待恢复候选、其它 Host 的成功或后来的另一项错误均不能代签，也不据此启动、停止或重复输入。
 

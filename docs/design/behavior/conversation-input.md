@@ -16,7 +16,6 @@
 
 - Agent/Session 的单一身份位置归[《Agent Region 关闭与身份入口》](spaces-and-layout.md#agent-region-关闭与身份入口)：Region 顶部标明正在观察哪个 Agent，输入区不再复制名称与身份条。输入区继续表达输入模式与输入动作；Message Tools 保留现有 Agent 头像及其完整提示/可访问名称，让用户辨认消息接收者。
 - Terminal 与 Activity 只保留一个紧凑的图标切换按钮。按钮的图标、tooltip 和可访问名称说明点击后将进入的视图；切换沿用同一个 Session 的 `viewMode`，不创建第二个 Terminal、Activity 或 Session。
-- Scratch Topic 点击的成功条件是右侧存在可见的 Tab、Region 和内容面。若布局、会话或启动流程暂时不可用，原位置保留可操作的加载/失败表面与重试动作；不得以空白工作面表示正在加载或失败。
 
 ### 可收起的 Agent 快捷输入区
 
@@ -246,7 +245,7 @@ Command 与 Skill 的体验差异要求分别核对实际发现路径、目录�
 
 - 交付证据必须覆盖真实宿主调用、关键实现变异变红、浏览器交互及草稿恢复；已有归档状态不代替当前候选的实际验证。
 
-- **Browser 内嵌 frame 发起的应用交接也必须走同一条应用链接交接。** 页面把自定义应用 scheme 放在跨域 iframe 或其他子 frame 中时，Browser 不能因为它不是顶层导航就静默放行或吞掉。约束：顶层页面和子 frame 的应用链接都先拦截、按 scheme 询问一次并交给系统，普通 http(s) 子 frame 继续由页面自行加载，页面本身仍留在当前 Browser。
+- Browser 内嵌 frame 的应用链接与新页面交接统一沿[Browser 通用交接合同](browser-workface.md#browser-通用交接闭环)，不由输入工具另建协议。
 
 ## 共同对话与阅读
 
