@@ -184,7 +184,7 @@ describe('ComposerTextarea 真的把组字接到了这一层', () => {
   it('value 经过 composerRenderValue，且喂的就是那两个取值', () => {
     // 守的缺陷形状：`value={value}`（回到修复之前）——那时状态机全对而 React 照旧无条件赋值。
     // 判据不只问「函数名在场」，还钉住两个实参：漏掉 composition 那个会让镜像永不生效。
-    const attributes = attributesOfTag(SHELL, 'textarea')
+    const attributes = attributesOfTag(SHELL, 'Textarea')
     expect(attributes.size, '提取器没找到 textarea 的属性——提取器写错了或标签被换掉').toBeGreaterThan(0)
     expect(attributes.get('value')).toBe('composerRenderValue(value, composition)')
   })
@@ -193,7 +193,7 @@ describe('ComposerTextarea 真的把组字接到了这一层', () => {
     // 一次只错一个的形状：漏 onCompositionEnd → 输入框永久只读；漏 onCompositionStart → 镜像永不
     // 建立，缺陷原样；把 onChange 接成 compositionUpdate → 普通英文输入也进组字分支。逐条比对
     // 而不是「四个名字都出现过」，正是为了让这三种各自变红。
-    const attributes = attributesOfTag(SHELL, 'textarea')
+    const attributes = attributesOfTag(SHELL, 'Textarea')
     expect(attributes.get('onChange')).toBe('(event) => ime.change(event.target.value)')
     expect(attributes.get('onCompositionStart')).toBe(
       '(event) => ime.compositionStart(event.currentTarget.value)'
@@ -241,14 +241,14 @@ describe('ComposerTextarea 真的把组字接到了这一层', () => {
   it('壳把其余属性整份转发下去，所以调用方的 onKeyDown/placeholder 不会被静默吞掉', () => {
     // 守的形状：漏掉 `{...rest}` 时 Enter 提交、placeholder、disabled 全部静默失效，而组字照样对。
     // 这是这层壳自己引入的新风险（多一层就多一次「传下去了吗」），所以它自己带一条判据。
-    const attributes = attributesOfTag(SHELL, 'textarea')
+    const attributes = attributesOfTag(SHELL, 'Textarea')
     expect(attributes.size).toBeGreaterThan(0)
     const source = parse(SHELL)
     let spreadsRest = false
     const walk = (node: ts.Node): void => {
       if (
         (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) &&
-        node.tagName.getText() === 'textarea'
+        node.tagName.getText() === 'Textarea'
       ) {
         spreadsRest = node.attributes.properties.some(
           (property) => ts.isJsxSpreadAttribute(property) && property.expression.getText() === 'rest'
@@ -321,7 +321,7 @@ describe('每个受控 textarea 都走认识组字的那层壳', () => {
     expect(
       tagNamesIn(`${RENDERER_SRC}/${SOLE_RAW_TEXTAREA}`),
       '壳里没有 textarea：那条例外正在为一个已经坏掉的壳背书'
-    ).toContain('textarea')
+    ).toContain('Textarea')
 
     // 消费者侧的在场证明：至少要有若干文件在用这层壳。写成 `toBeGreaterThan(0)` 不够——那在
     // 「只剩某一个消费者、其余格被改回裸 textarea」时也成立，而上面那条会把它们逮到；
