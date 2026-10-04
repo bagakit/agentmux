@@ -27,6 +27,8 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { createFocusTimelineOrder, extendFocusTimelineOrder, focusTimelineOrderCandidates, focusTimelineTrackKey, groupFocusTimeline, observeFocusInputTracks, orderFocusTimelineProjects, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
+import { FocusTimelineEventPreview } from './FocusTimelineEventPreview'
+import { focusVisitFacts, focusWorkingFacts, focusLiveFacts, focusGapFacts, type FocusTimelineEventFacts } from '../lib/focus-timeline-event-facts'
 import { FocusTimelineRulerSettings, type FocusDateChoice } from './FocusTimelineRulerSettings'
 import { createFocusTimeFormatters, focusDateCandidates, focusRulerLabels, focusRulerTicks, focusUtcOffset, resolvedFocusTimeZone, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { useSessionUserMessages } from '../lib/session-user-messages'
@@ -290,8 +292,11 @@ function useFocusInputWindow(control: SessionHistoryReference | undefined, scope
   return { ...(window.partitions.get(scope) ?? EMPTY_NATIVE_WINDOW), window, observeWork, continueReading: () => void readBatch(), refresh: () => void readBatch(true) }
 }
 
-const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence }: {
+const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence, onEvent, onEventChanged, onCurrentPresence }: {
   track: FocusTimelineTrack; selected: boolean; window: FocusTimeWindow; now: number; scaleWidth: number
+  onEvent(trackKey: string, key: string, facts: FocusTimelineEventFacts, target: HTMLElement, immediate?: boolean): void
+  onEventChanged(trackKey: string): void
+  onCurrentPresence(present: boolean): void
   nativeMessages?: readonly ConversationRecord[] | undefined
   recordedMessageTracks?: ReadonlyMap<string, string> | undefined
   retainedWork?: FocusWorkFacts | undefined
@@ -346,14 +351,24 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
     const start = workItems.find(matchesStart) ?? ownWorkItems.find(matchesStart)
     if (start && retainedHere?.identities?.has(start.id) && focusTimelineTrackKey(sessionId, retainedHere.identities.get(start.id), track.inputReference?.hostId ?? context?.hostId ?? identity?.hostId) !== track.key) return []
     const clipped = clipFocusWorkInterval(segment, window, now)
-    return clipped ? [{ segment, ...clipped }] : []
+    return clipped ? [{ segment, identity: start ? retainedHere?.identities?.get(start.id) : undefined, ...clipped }] : []
   })
   const work = working && !workHistory.coverage.recorded && !workHistory.segments.some(segment => segment.end === 'current')
     ? focusWorkSegment(context.workingEnteredAt, window, now) : null
   const gapAt = workHistory.coverage.gaps && !workIntervals.length ? workItems.at(-1)?.createdAt : undefined
   const gapVisible = gapAt !== undefined && gapAt >= window.start && gapAt <= Math.min(now, window.end)
   const present = !!(segments.length || messages.length || liveNow || work || workIntervals.length || gapVisible)
-  useLayoutEffect(() => { onPresence(track.key, present); return () => onPresence(track.key, false) }, [track.key, present, onPresence])
+  useLayoutEffect(() => {
+    onPresence(track.key, present)
+    if (selected) onCurrentPresence(present)
+    return () => { onPresence(track.key, false); if (selected) onCurrentPresence(false) }
+  }, [track.key, present, selected, onPresence, onCurrentPresence])
+  // This track already owns these subscriptions. Expire its disposable event
+  // intent when its facts change; never change the fixed conversation Reader.
+  useLayoutEffect(() => {
+    onEventChanged(track.key)
+    return () => onEventChanged(track.key)
+  }, [track.key, runId, session?.processState, semantic?.state, semantic?.stateEnteredAt, activitySemantic, ownWorkItems, retainedWork?.items, segments, time.zone, onEventChanged])
   if (!present) return null
   const currentFact = `Run alive · ${currentStateLabel}${working && !work && !workIntervals.some(item => item.segment.end === 'current') ? ' · Work start unknown' : ''} · Run start unknown`
   const path = [identity?.branch, identity?.topicId].filter(Boolean).join(' / ')
@@ -377,6 +392,12 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
       <footer>{context?.lastActivityAt ? <span>Last activity <time>{dateClock(context.lastActivityAt)}</time></span> : !context ? <span>Observed identity · Current state not recorded</span> : <span>Current Context</span>}<span>{context ? 'Click to open' : segments.length ? 'Click to inspect' : 'Read-only history'}</span></footer>
     </>
   }
+  const hoverEvent = (key: string, facts: () => FocusTimelineEventFacts) => ({
+    onMouseEnter: (event: React.MouseEvent<HTMLElement>) => onEvent(track.key, key, facts(), event.currentTarget),
+    onMouseLeave: () => onDismiss(key),
+    onFocus: (event: React.FocusEvent<HTMLElement>) => onEvent(track.key, key, facts(), event.currentTarget, true),
+    onBlur: () => onDismiss(key)
+  })
   return <div className="recent-focus__track" data-focus-timeline-id={sessionId} data-focus-current={selected || undefined} data-history-only={!context ? 'true' : undefined}>
     <span ref={gutter} className="recent-focus__gutter" title={`${name} · ${identity?.workspacePath ? displayPath(identity.workspacePath, identity.hostId) : context?.workspacePath ? displayPath(context.workspacePath, context.hostId) : 'Historical identity not recorded'}${path ? ` · ${path}` : ''}`}>
       <AgentAvatar sessionId={context?.kind === 'agent' ? sessionId : undefined} label={name} providerId={context?.providerId ?? identity?.providerId ?? undefined} state={context?.state} size={14} disclosure={disclosure}
@@ -384,31 +405,31 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
           const anchor = gutter.current?.querySelector<HTMLElement>('.agent-avatar')
           if (anchor) onInspect(segments[0]!, anchor)
         } : undefined} />
-      <span>{name}{observedName ? <small>Observed as {observedName}</small> : path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}</span>
+      <span>{name}{observedName ? <small>Observed as {observedName}</small> : path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}{selected ? <span className="recent-focus__current" aria-label="Current Context"><LocateFixed size={10} aria-hidden="true" /></span> : null}</span>
     <div className="recent-focus__lane">
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
       {work && context ? <button type="button" className="recent-focus__working" data-working-entered-at={work.enteredAt} data-working-through={Math.min(now, window.end)} data-run-id={context.runId}
         style={{ left: `${work.left}%`, width: `${work.width}%` }}
         aria-label={`Return to ${name}, working since ${dateClock(work.enteredAt)}, Run start unknown`}
-        title={`${name} · Working since ${dateClock(work.enteredAt)} · Work state, not Run duration`}
+        {...hoverEvent(`work:${track.key}:${work.enteredAt}`, () => focusWorkingFacts({ startAt: work.enteredAt, startKnown: true, endAt: now, end: 'current' }, time, undefined, { name, project }, now))}
         onClick={() => onSelect(context.id)} /> : null}
-      {workIntervals.map(({ segment, left, width, through }) => <button key={`${segment.run.runId}:${segment.startAt}`} type="button"
+      {workIntervals.map(({ segment, identity: workIdentity, left, width, through }) => <button key={`${segment.run.runId}:${segment.startAt}`} type="button"
         className={`recent-focus__working recent-focus__working--history${segment.end === 'current' ? ' is-current' : ''}${!segment.startKnown ? ' has-unknown-start' : ''}${segment.end === 'unknown' || segment.end === 'observation-gap' ? ' has-unknown-end' : ''}`}
         data-work-end={segment.end} data-working-entered-at={segment.startAt} data-working-through={through} data-run-id={segment.run.runId}
         style={{ left: `${left}%`, width: `${width}%` }}
         aria-label={`${segment.end === 'current' && context ? 'Return to' : 'Inspect'} ${name} work observation, ${segment.startKnown ? 'started' : 'observed'} ${dateClock(segment.startAt)}, ${segment.endAt === null ? 'end not recorded' : segment.end === 'current' ? 'currently working' : `through ${dateClock(segment.endAt)}`}`}
-        title={`${name} · Observed work state · ${segment.startKnown ? 'Started' : 'Start unknown; observed'} ${dateClock(segment.startAt)} · ${segment.endAt === null ? 'End not recorded' : segment.end === 'current' ? 'Current working state' : `Through ${dateClock(segment.endAt)}`} · Click to ${segment.end === 'current' && context ? 'open; right-click for facts' : 'inspect facts'}`}
+        {...hoverEvent(`work:${track.key}:${segment.run.runId}:${segment.startAt}`, () => focusWorkingFacts(segment, time, workIdentity, context ? { name, ...(segment.end === 'current' ? { project } : {}) } : undefined, now))}
         onClick={event => segment.end === 'current' && context ? onSelect(context.id) : onInspectWork(segment, track, event.currentTarget)}
         onContextMenu={event => { event.preventDefault(); onInspectWork(segment, track, event.currentTarget) }} />)}
-      {gapVisible ? <span className="recent-focus__work-gap" tabIndex={0} role="img" style={{ left: `${focusTimePosition(gapAt!, window)}%` }} aria-label={`${name}, working history observation gap; working start and end not recorded`} title="Working state observations are incomplete. Start and end are not recorded; this does not prove inactivity.">?</span> : null}
+      {gapVisible ? <span className="recent-focus__work-gap" tabIndex={0} role="img" style={{ left: `${focusTimePosition(gapAt!, window)}%` }} aria-label={`${name}, working history observation gap; working start and end not recorded`} {...hoverEvent(`gap:${track.key}:${gapAt}`, () => focusGapFacts(name, gapAt, time))}>?</span> : null}
       {liveNow && context ? <button type="button" className={`recent-focus__live${working ? ' is-working' : ''}`} data-run-state="running" data-run-id={context.runId}
         style={{ left: `${position}%` }} aria-label={`Return to ${name}, ${currentFact}, current time ${clock(now)}`}
-        title={`${currentFact} · Current time ${dateClock(now)}`} onClick={() => onSelect(context.id)} /> : null}
+        {...hoverEvent(`live:${track.key}`, () => focusLiveFacts(name, currentStateLabel, project, now, time))} onClick={() => onSelect(context.id)} /> : null}
       {segments.map((item, index) => <button key={`${item.focusedAt}:${index}`} type="button" className={`recent-focus__segment${selected ? ' is-current' : ''}${item.end === undefined ? ' is-open' : ''}`}
         style={{ left: `${item.left}%`, width: item.width === undefined ? undefined : `${item.width}%` }}
         data-focused-at={item.focusedAt} data-known-end={item.end} aria-current={selected ? 'true' : undefined}
         aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${context ? name : item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
-        title={`${item.identity?.name ?? 'Historical name not recorded'} · ${item.identity?.project?.name ?? 'Project not recorded'} · Focused ${dateClock(item.focusedAt)}${item.end === undefined ? ' · Next focus not recorded' : ''}`}
+        {...hoverEvent(`focus:${track.key}:${item.focusedAt}`, () => focusVisitFacts(item, time))}
         onClick={event => context ? onSelect(sessionId) : onInspect(item, event.currentTarget)}><span>{clock(item.focusedAt)}</span></button>)}
       {messageGroups.map(({ records, startAt, endAt }) => {
         const message = records[0]!, multiple = records.length > 1
@@ -429,8 +450,11 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   </div>
 })
 
-const FocusTimeProject = memo(function FocusTimeProject({ project, registered, currentSessionId, messagesByTrack, messagesByReference, recordedMessageTracks, workByReference, observeWork, observing, window, now, scaleWidth, lanesByContext, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork }: {
-  project: FocusTimelineProject; registered: boolean; currentSessionId: string | null
+const FocusTimeProject = memo(function FocusTimeProject({ project, registered, currentContext, onCurrentPresence, onEvent, onEventChanged, messagesByTrack, messagesByReference, recordedMessageTracks, workByReference, observeWork, observing, window, now, scaleWidth, lanesByContext, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork }: {
+  project: FocusTimelineProject; registered: boolean; currentContext: Pick<FocusContext, 'id' | 'hostId'> | null
+  onCurrentPresence(present: boolean): void
+  onEvent(trackKey: string, key: string, facts: FocusTimelineEventFacts, target: HTMLElement, immediate?: boolean): void
+  onEventChanged(trackKey: string): void
   messagesByTrack: ReadonlyMap<string, readonly ConversationRecord[]>; messagesByReference: ReadonlyMap<string, readonly ConversationRecord[]>
   recordedMessageTracks: ReadonlyMap<string, ReadonlyMap<string, string>>
   workByReference: ReadonlyMap<string, FocusWorkFacts>
@@ -458,7 +482,7 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
     <div className="recent-focus__project-tracks" data-collapsed={collapsed} inert={collapsed} aria-hidden={collapsed || undefined}>
-      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentSessionId} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
+      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
     </div>
   </section>
 })
@@ -538,8 +562,10 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   </Dialog.Portal></Dialog.Root>
 }
 
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, contexts, lanes, hierarchy, onSelect, historyWindowRequest, catalogue: sharedCatalogue }: {
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, historyWindowRequest, catalogue: sharedCatalogue }: {
   entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
+  /** Pure main-Region presentation input; the Reader continues using currentSessionId. */
+  currentContext?: Pick<FocusContext, 'id' | 'hostId'> | null | undefined
   lanes?: readonly FocusProjectLane[]; hierarchy?: FocusHierarchyFacts; onSelect(sessionId: string): void
   historyWindowRequest?: { at: number; sequence: number } | undefined
   catalogue?: FocusHistoryCatalogue
@@ -568,11 +594,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== 'hidden')
   const [readingContextId, setReadingContextId] = useState<string | null>(null)
   const [readerOpen, setReaderOpen] = useState(false)
+  const [currentTrackPresent, setCurrentTrackPresent] = useState(false)
+  const onCurrentPresence = useCallback((present: boolean) => setCurrentTrackPresent(present), [])
   const readerOpenRef = useRef(readerOpen); readerOpenRef.current = readerOpen
   const [earlier, setEarlier] = useState(false)
-  const [preview, setPreview] = useState<{ message: ConversationRecord | undefined; interactive: boolean; anchor: HTMLElement; records?: readonly ConversationRecord[] | undefined } | null>(null)
+  const [preview, setPreview] = useState<{ message: ConversationRecord | undefined; interactive: boolean; anchor: HTMLElement; records?: readonly ConversationRecord[] | undefined; event?: FocusTimelineEventFacts; eventKey?: string; eventTrack?: string } | null>(null)
   const previewRef = useRef(preview); previewRef.current = preview
-  const previewTimers = useRef<{ open?: ReturnType<typeof setTimeout>; close?: ReturnType<typeof setTimeout>; messageId?: string }>({})
+  const previewTimers = useRef<{ open?: ReturnType<typeof setTimeout>; close?: ReturnType<typeof setTimeout>; messageId?: string; eventTrack?: string }>({})
   const cancelPreviewIntent = useCallback(() => {
     clearTimeout(previewTimers.current.open); clearTimeout(previewTimers.current.close)
     previewTimers.current = {}
@@ -683,10 +711,28 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     if (interactive || immediate) open()
     else { previewTimers.current.messageId = message.id; previewTimers.current.open = setTimeout(open, 180) }
   }, [cancelPreviewIntent])
+  const inspectEvent = useCallback((trackKey: string, key: string, facts: FocusTimelineEventFacts, target: HTMLElement, immediate = false) => {
+    cancelPreviewIntent()
+    if (previewRef.current?.interactive) return
+    const open = () => {
+      if (!target.isConnected || target.closest('[inert]') || document.visibilityState === 'hidden') return
+      setPreview(current => current?.interactive ? current : { message: undefined, interactive: false, anchor: target, event: facts, eventKey: key, eventTrack: trackKey })
+    }
+    if (immediate) open()
+    else { previewTimers.current.messageId = key; previewTimers.current.eventTrack = trackKey; previewTimers.current.open = setTimeout(open, 180) }
+  }, [cancelPreviewIntent])
+  const eventChanged = useCallback((trackKey: string) => {
+    if (previewTimers.current.eventTrack === trackKey) cancelPreviewIntent()
+    setPreview(current => current?.eventTrack === trackKey ? null : current)
+  }, [cancelPreviewIntent])
+  useEffect(() => {
+    cancelPreviewIntent()
+    setPreview(current => current?.event ? null : current)
+  }, [currentContext?.id, currentContext?.hostId, cancelPreviewIntent])
   const dismissMessage = useCallback((messageId: string) => {
     if (previewTimers.current.messageId === messageId) { clearTimeout(previewTimers.current.open); delete previewTimers.current.open }
     clearTimeout(previewTimers.current.close)
-    previewTimers.current.close = setTimeout(() => setPreview(current => current?.message?.id === messageId && !current.interactive ? null : current), 160)
+    previewTimers.current.close = setTimeout(() => setPreview(current => (current?.message?.id === messageId || current?.eventKey === messageId) && !current.interactive ? null : current), 160)
   }, [])
   useEffect(() => cancelPreviewIntent, [cancelPreviewIntent])
   useEffect(() => {
@@ -968,7 +1014,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         event.stopPropagation()
         if (control instanceof HTMLButtonElement) event.preventDefault()
       }}>
-        {mode !== 'collapsed' ? <><FocusTimelineLegend reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} latestIncomplete={!historical && latest.windowIncomplete} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentSessionId} onClick={locateCurrentTrack}><LocateFixed size={12} /></button><button type="button" className="icon-button" aria-label="View conversation records" aria-expanded={readerOpen} title={`Conversation records${inputSource ? ` · ${inputSource.name}` : ''}, including speech without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
+        {mode !== 'collapsed' ? <><FocusTimelineLegend reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} latestIncomplete={!historical && latest.windowIncomplete} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentContext || !currentTrackPresent} onClick={locateCurrentTrack}><LocateFixed size={12} /></button><button type="button" className="icon-button" aria-label="View conversation records" aria-expanded={readerOpen} title={`Conversation records${inputSource ? ` · ${inputSource.name}` : ''}, including speech without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
         <button data-focus-window-control type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ChevronLeft size={12} /></button>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><Minus size={12} /></button>
         <select data-focus-window-control aria-label="Focus window size" value={hours} onChange={event => setHours(Number(event.target.value))}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{focusWindowLabel(size)}</option>)}</select>
@@ -989,14 +1035,15 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
           return <span key={tick.instant} className="recent-focus__tick" data-tier={tick.tier} data-tick-at={tick.instant} title={time.detailed(tick.instant)} style={{ left: `${position}%`, '--focus-tick-x': `${position * scaleWidth / 100}px`, '--focus-time-scale-width': `${scaleWidth}px` } as CSSProperties}>{tickLabels.has(tick.instant) ? <time dateTime={new Date(tick.instant).toISOString()}>{time.ruler(tick.instant)}{tick.repeated ? <small>{focusUtcOffset(tick.offset)}</small> : null}</time> : null}</span>
         })}{position >= 0 && position <= 100 ? <span className="recent-focus__playhead recent-focus__playhead--ruler" data-now={now} style={{ left: `${position}%` }} aria-label={`Current time ${clock(now)}`} /> : null}</div></div>
         <div className="recent-focus__tracks">
-          {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentSessionId={currentSessionId} messagesByTrack={messagesByTrack} messagesByReference={messagesByReference} recordedMessageTracks={recordedMessageTracks} workByReference={workByReference} observeWork={nativeWindow.observeWork} observing={documentVisible} window={range} now={now} scaleWidth={scaleWidth} lanesByContext={lanesByContext} time={time} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} onInspectWork={inspectWorkObservation} />)}
+          {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentContext={currentContext} onCurrentPresence={onCurrentPresence} onEvent={inspectEvent} onEventChanged={eventChanged} messagesByTrack={messagesByTrack} messagesByReference={messagesByReference} recordedMessageTracks={recordedMessageTracks} workByReference={workByReference} observeWork={nativeWindow.observeWork} observing={documentVisible} window={range} now={now} scaleWidth={scaleWidth} lanesByContext={lanesByContext} time={time} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} onInspectWork={inspectWorkObservation} />)}
         </div>
         <p className="recent-focus__empty">No visible records in this window. Use meaning and coverage to see what has been read.</p>
       </div>
     </div> : null}
     {workObservation ? <FocusWorkingObservation {...workObservation} time={time} onClose={() => setWorkObservation(null)} /> : null}
     {observation ? <FocusHistoryObservation segment={observation.segment} anchor={observation.anchor} time={time} onClose={() => setObservation(null)} /> : null}
-    {preview ? <FocusMessagePreview describeSpeaker={describePreviewSpeaker} timeFormatters={time} message={preview.message} recipient={previewContext} recipientName={previewSource?.name} workspaceRoot={previewSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview} onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.message) dismissMessage(preview.message.id) }}
+    {preview?.event ? <FocusTimelineEventPreview facts={preview.event} anchor={preview.anchor} onClose={closePreview}
+      onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.eventKey) dismissMessage(preview.eventKey) }} /> : preview ? <FocusMessagePreview describeSpeaker={describePreviewSpeaker} timeFormatters={time} message={preview.message} recipient={previewContext} recipientName={previewSource?.name} workspaceRoot={previewSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview} onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.message) dismissMessage(preview.message.id) }}
       {...(preview.records ? { reader: {
         selectionOnly: true, messages: preview.records, loading: false,
         coverage: `${preview.records.length} records ${previewRecordStart === previewRecordEnd ? `at ${time.detailed(previewRecordStart!)}` : `from ${time.detailed(previewRecordStart!)} through ${time.detailed(previewRecordEnd!)}`}. Original source order; select a record to read it.`, error: null,
