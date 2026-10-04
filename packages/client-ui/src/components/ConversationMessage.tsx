@@ -136,6 +136,8 @@ export function ConversationMessage({
   const prefix = useMemo(() => (isIncoming || recordedIdentity && speaker?.role === 'unknown') && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
     [isIncoming, recordedIdentity, speaker?.role, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
   const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
+  // A declaration changes the reading label, never authenticates an unknown author.
+  const avatarSpeaker = isDeclaredSender ? recordedSpeaker : speaker
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
   const described = speaker?.role === 'agent' ? describeSpeaker?.(speaker) : undefined
@@ -235,7 +237,7 @@ export function ConversationMessage({
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
-        {speaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker, name: displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
+        {speaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
       </span>
       <div className="log-turn__head">
         {isSystemContext ? <button type="button" className="log-turn__system-toggle"
@@ -276,7 +278,7 @@ export function ConversationMessage({
           </button> : null}
         </span> : null}
         {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} executionHostId={executionHostId} speaker={recordedSpeaker}
-          declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
+          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
         {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div>
