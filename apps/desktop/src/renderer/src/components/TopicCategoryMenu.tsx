@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Copy, Link, MoreHorizontal, Pencil, Shapes } from 'lucide-react'
+import { Link, MoreHorizontal, Pencil, Shapes } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
@@ -10,7 +10,6 @@ type CategoryMenuActions = {
   target: SpaceIconTarget
   onChangeIcon(target: SpaceIconTarget): void
   onRename(): void
-  onCopyCard(): void
   onCopyLink(): void
 }
 
@@ -21,7 +20,6 @@ function categoryMenuItems(Item: typeof ContextMenu.Item, Separator: typeof Cont
     <Item className="tab-context-menu__item" onSelect={() => openDialog(() => actions.onChangeIcon(actions.target))}><Shapes size={14} /><span>Change avatar…</span></Item>
     <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><Pencil size={14} /><span>Rename category…</span></Item>
     <Separator className="tab-context-menu__separator" />
-    <Item className="tab-context-menu__item" onSelect={actions.onCopyCard}><Copy size={14} /><span>Copy Category card</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><Link size={14} /><span>Copy Category link</span></Item>
   </>
 }

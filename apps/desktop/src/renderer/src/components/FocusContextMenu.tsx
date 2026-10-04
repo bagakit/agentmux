@@ -3,7 +3,6 @@ import { useRef, type ReactNode } from 'react'
 import { Pencil, Square } from 'lucide-react'
 import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
-import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
@@ -18,7 +17,7 @@ export function FocusContextMenu({ context, children, onOpenChange, onRename, on
   const actionOwnsFocus = useRef(false)
   const origin = useRef<HTMLElement | null>(null)
   const stop = useFocusStopAgent()
-  const actions = agentRosterMenuActions({ sessionId, sharingMetadata: () => resolveAgentSharingMetadata(sessionId, useAppStore.getState()), writeClipboardText: async text => {
+  const actions = agentRosterMenuActions({ sessionId, writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
   } })
   return <><ContextMenu.Root modal={false} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>

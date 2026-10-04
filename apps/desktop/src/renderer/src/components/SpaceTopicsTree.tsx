@@ -12,7 +12,7 @@ import { useTopicSessions, useTopicSessionPaths } from '../lib/topic-session-sub
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import type { TopicCategory } from '@agentmux/core/control'
-import { formatSpaceAddress, formatAmuxSpatialLink } from '@agentmux/core/sharing'
+import { formatSpaceAddress } from '@agentmux/core/sharing'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { TopicCategoryContextMenu, TopicCategoryActionsMenu } from './TopicCategoryMenu'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
@@ -236,8 +236,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
         {matchingCategories.map(category => {
           const target = categorySpaceIconTarget(category)
           const actions = { target, onChangeIcon, onRename: () => editCategory(category),
-            onCopyCard: () => void copyTextToClipboard(formatSpaceAddress({ spaceId: category.spaceId, label: category.title }), reportError),
-            onCopyLink: () => void copyTextToClipboard(formatAmuxSpatialLink({ kind: 'space', spaceId: category.spaceId }), reportError) }
+            onCopyLink: () => void copyTextToClipboard(formatSpaceAddress({ spaceId: category.spaceId }), reportError) }
           return <nav className="space-topic-category" aria-label={category.title} key={category.categoryId}>
             <TopicCategoryContextMenu {...actions}>
               <div className="space-category-heading"><SpaceSectionHeader label={category.title} count={categoryTopics.get(category.spaceId)!.length}

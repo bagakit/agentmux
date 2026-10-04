@@ -1,4 +1,4 @@
-/** Desktop error guidance consumes the same public sharing commands as copied cards. */
+/** Desktop shares Core object links and uses Core commands for error recovery. */
 import {
   agentSessionSendCommand,
   AMUX_AGENT_LIST_COMMAND as LIST_SESSIONS
@@ -6,8 +6,7 @@ import {
 export {
   formatSessionAddress,
   formatRegionAddress,
-  formatTabAddress,
-  formatMessagingAddress
+  formatTabAddress
 } from '@agentmux/core/sharing'
 
 /**
@@ -22,7 +21,7 @@ export {
  * 命令形状的文字比不给更糟——它看起来像出路，粘贴过去只会撞 INVALID_CLI_ARGUMENT，把人引向
  * 第二次失败。这种分支给界面里的下一步，外加一条真能跑的旁路（按 Session 身份寻址）。
  *
- * 命令来自上面那三个地址出口，不另写一份拼接：两份拼接会各自演进，漂移时不会有测试变红。
+ * 恢复命令来自 Core 的公共命令 formatter，不在 Desktop 重新拼接。
  *
  * 入参是**未收窄的错误码**、返回 `string | null`，这是有意的：哪些码算"寻址失败"由本模块说了
  * 算。调用方（控制响应边界）拿到任何码都往这里问一次，不在边界处再列一份码表——两份码表一定会

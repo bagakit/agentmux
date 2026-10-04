@@ -259,6 +259,8 @@ export type AgentMuxControlSendRequest = RequestBase & {
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
+  /** Checked against the exact Region occupant before applying navigation. */
+  expectedAgentSessionId?: string
 }
 export type AgentMuxControlArrangeRequest = RequestBase & {
   operation: 'arrange'; target: AgentMuxTabAnchor; mode: AgentMuxArrangeMode; caller?: AgentMuxControlCaller

@@ -4684,6 +4684,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({ workbenchNavigationInputPolicy: request.inputPolicy })
         } else {
           const resolved = resolveDesktopSpaceSelection(get(), catalog, request.target)
+          if (request.expectedAgentSessionId !== undefined) {
+            const region = resolved.tabId && resolved.regionId ? get().tabs[resolved.tabId]?.regions[resolved.regionId] : null
+            if (!region || region.kind !== 'agent' || region.sessionId !== request.expectedAgentSessionId) throw new DesktopFocusFailure({
+              step: 'target', code: 'AGENT_LOCATION_CHANGED', message: 'The exact Region no longer contains the requested Agent Session.',
+              recovery: 'The original workface and healthy Agents are kept. Inspect the original Session and choose its current exact Region.' })
+          }
           // Establish the exact parent before local focus, while leaving the visible
           // surface/input policy in place until that focus has changed atomically.
           set({ workbenchSpaceSelection: resolved })
@@ -4716,11 +4722,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating') &&
             (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
       }, signal)
+      const save = navigationState === 'rejected' ? { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false,
+        diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
       const selection = desktopSelection(get(), catalog)
       if (navigationState !== 'rejected' && (signal?.aborted || JSON.stringify(selection) !== JSON.stringify(expected))) {
         navigationState = 'unconfirmed'
         issues.push({ step: 'navigation', code: 'NAVIGATION_CHANGED', message: 'Selection changed before this navigation was observed.',
           recovery: 'Inspect the current client. A later selection is kept and the old input intent is not repeated.' })
+      }
+      if (navigationState !== 'rejected' && request.expectedAgentSessionId !== undefined) {
+        const selected = selection.space
+        const region = selected?.tabId && selected.regionId ? get().tabs[selected.tabId]?.regions[selected.regionId] : null
+        if (!region || region.kind !== 'agent' || region.sessionId !== request.expectedAgentSessionId) {
+          navigationState = 'unconfirmed'
+          issues.push({ step: 'presentation', code: 'AGENT_LOCATION_CHANGED', message: 'The Region content changed before the original Agent navigation was confirmed.',
+            recovery: 'The later workface and healthy Agents are kept. Inspect the original Session before explicitly retrying its link.' })
+        }
       }
       const observed = readDesktopPresentation(selection, get().tabs)
       const after = captureDesktopInput(get().tabs)
@@ -4732,8 +4749,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (request.inputPolicy === 'target' && inputOutcome !== 'transferred' && caretIntentNonce !== undefined) {
         get().clearRegionCaretFocus(caretIntentNonce)
       }
-      const save = navigationState === 'rejected' ? { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false,
-        diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
       const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || observed.presentation.state !== 'main-visible' ||
         inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || !save.localStorageWritten
       if (partial && navigationState !== 'rejected') {
@@ -4745,7 +4760,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       } else if (!partial) {
         set({ desktopNavigationNotice: null })
       }
-      return { operation: 'focus', navigation: { state: navigationState, requested: request.target, selection },
+      return { operation: 'focus', navigation: { state: navigationState, requested: request.target, selection,
+        ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }) },
         presentation: observed.presentation, input: { policy: request.inputPolicy, outcome: inputOutcome, before: before.fact, after: after.fact },
         floating: observed.floating, overlays: observed.overlays,
         focus: { executionSessionId: get().agentFocus.execution.sessionId, pmoSessionId: get().agentFocus.pmo.sessionId }, partial, save, issues }

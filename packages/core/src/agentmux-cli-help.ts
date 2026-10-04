@@ -9,7 +9,21 @@ const syntax = (entry: AgentMuxCliCommand) => `agentmux ${entry.method.replaceAl
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
 
-const SPATIAL_GUIDE = `## Choose a split from the visible layout
+const SPATIAL_GUIDE = `## Read an amux object link
+An amux:// link carries one exact object identity, not a command, permission or sender credential.
+Use the public @agentmux/core/sharing parseAmuxObjectLink helper to decode its URI path segment
+without trimming or changing the original ID. Supported kinds are agent, region, tab, space and zone.
+For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.
+For the other kinds, use space inspect with --region, --tab, --space or --zone and the decoded ID.
+Discover current Agent display positions with space ls; keep all original location candidates.
+To navigate the Agent, choose an exact existing Region and display occurrence, then use
+space focus --region REGION --display-workspace WORKSPACE --group GROUP --expect-session SID.
+The expected Session is a condition on that Region, not a replacement for its spatial identity.
+Other object links use space focus with their exact selector; ambiguous references require
+an explicit location. Default input is preserve. Missing positions do not prove a Session ended.
+Inspect unknown results before another action; do not start a replacement Agent to open a link.
+
+## Choose a split from the visible layout
 Read the exact presentation with agentmux space inspect --region REGION before choosing
 where to open. Decide from the visible view so both the old and new content stay readable
 with the least disturbance. Use the registered --region and --split destination options:
