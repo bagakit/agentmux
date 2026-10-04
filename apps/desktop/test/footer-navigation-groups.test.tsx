@@ -29,18 +29,21 @@ beforeEach(async () => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); useAppStore.setState(original, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it('makes the three Work views one readable group, with independent Survey, settings and Mote entries', () => {
-  const work = container.querySelector('[role="group"][aria-label="Work surfaces"]')!, utilities = container.querySelector('[role="group"][aria-label="Survey and settings"]')!
+  const work = container.querySelector('[role="group"][aria-label="Work surfaces"]')!, utilities = container.querySelector('[role="group"][aria-label="Survey and Recall"]')!
   expect([...work.querySelectorAll('button')].map(item => item.getAttribute('aria-label')?.split(':')[0])).toEqual(['Space', 'Focus', 'Goals'])
   expect(work.textContent).not.toContain('Work')
   expect(work.querySelectorAll('[tabindex]')).toHaveLength(0)
-  expect([...utilities.querySelectorAll('button')].map(item => item.getAttribute('aria-label')?.split(':')[0])).toEqual(['Survey', 'Settings'])
+  expect([...utilities.querySelectorAll('button')].map(item => item.getAttribute('aria-label')?.split(':')[0])).toEqual(['Survey', 'Recall'])
+  const settings = container.querySelector('[role="group"][aria-label="App settings"]')!
+  expect([...settings.querySelectorAll('button')].map(item => item.getAttribute('aria-label'))).toEqual(['Settings'])
+  expect(utilities.nextElementSibling).toBe(settings)
   expect(work.contains(button('Survey'))).toBe(false); expect(work.contains(button('Settings'))).toBe(false)
   expect(document.querySelector('[aria-label="Open Mote coordination surface"]')?.closest('nav')).toBeNull()
   expect(container.querySelectorAll('nav[aria-label="Primary surfaces"]')).toHaveLength(1)
 })
 it('switches each original view without changing the Work address, Survey reference, Session or Run', async () => {
   const before = useAppStore.getState(); expect(before.workbenchSpaceSelection?.regionId).toBe('footer-region')
-  for (const [name, surface] of [['Focus', 'agents'], ['Goals', 'board'], ['Survey', 'survey'], ['Space', 'workbench']] as const) {
+  for (const [name, surface] of [['Focus', 'agents'], ['Goals', 'board'], ['Survey', 'survey'], ['Recall', 'recall'], ['Space', 'workbench']] as const) {
     await act(async () => button(name).click())
     const state = useAppStore.getState(); expect(state.mainSurface).toBe(surface)
     expect(state.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection); expect(state.surveyZoneSelection).toBe(before.surveyZoneSelection)
