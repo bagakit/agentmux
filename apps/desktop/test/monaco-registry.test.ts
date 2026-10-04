@@ -25,6 +25,7 @@ const MONACO_ENTRY = new URL('../src/renderer/src/monaco.ts', import.meta.url).p
  * 注册函数是否真的被 monaco.ts 调用则由 {@link registeredCustomLanguageIds} 走 binder 判定。
  */
 const CUSTOM_LANGUAGES = [
+  ...['toml', 'mermaid', 'dot', 'plantuml', 'latex', 'typst', 'csv', 'tsv'].map(id => ({ registrar: 'registerFileFormatLanguages', module: './lib/monaco-languages/register-file-formats', id })),
   { registrar: 'registerVueLanguage', module: './lib/monaco-languages/register-vue', id: VUE_LANGUAGE_ID },
   { registrar: 'registerSvelteLanguage', module: './lib/monaco-languages/register-svelte', id: SVELTE_LANGUAGE_ID },
   { registrar: 'registerAstroLanguage', module: './lib/monaco-languages/register-astro', id: ASTRO_LANGUAGE_ID },
