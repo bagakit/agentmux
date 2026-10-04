@@ -210,7 +210,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'inspect.region': if (request.target.kind === 'region' && (actual.region as Record<string, unknown>).regionId !== request.target.regionId) fail(); break
     case 'inspect.tab': case 'arrange': if (request.target.kind === 'tab' && (actual.tab as Record<string, unknown>).tabId !== request.target.tabId) fail(); break
     case 'send': if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail(); break
-    case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key) fail(); break
+    case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key || actual.requestId !== undefined && actual.requestId !== request.requestId) fail(); break
     case 'settings.hosts.upgrade-check': {
       const check = actual.check as { input: Record<string, unknown> }
       if (request.id !== undefined ? check.input.id !== request.id : !isDeepStrictEqual(check.input, request.input)) fail()

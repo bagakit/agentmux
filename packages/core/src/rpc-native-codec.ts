@@ -1,3 +1,4 @@
+import { parseNotesStorageOperation } from './notes-storage.js'
 import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
@@ -354,9 +355,11 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'notebook.inspect': {
-        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation'])
+        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation', 'storageOperation'])
         const state = parseNotebookState(p.state)
-        if (notebookFingerprint(p) !== notebookFingerprint(inspectNotebook(state, input))) fail()
+        const { storageOperation, ...knowledge } = p
+        if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
+        if (storageOperation !== undefined && storageOperation !== null && parseNotesStorageOperation(storageOperation).operationId !== input.operationId) fail()
         break
       }
 

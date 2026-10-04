@@ -1,3 +1,5 @@
+import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
+import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../shared/notes-library.js'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
@@ -1054,7 +1056,15 @@ export class ConfigStore {
     }
     const scratch = withScratchWorkspace(loaded)
     if (scratch.added) persist = true
-    const notifications = withNotificationDefault(scratch.config)
+    const existingNotes = scratch.config.workspaces.find(workspace => workspace.id === NOTES_WORKSPACE_ID)
+    let notesDirectory: string | undefined
+    try { notesDirectory = (await new AgentMuxNotesStorage().inspect()).directory }
+    catch (error) { process.stderr.write('The original Notes directory is unconfirmed; its saved resource and healthy workspaces are retained. Refresh Recall Settings after repairing the original locator: ' + String(error) + '\n') }
+    const occupiedNotesPath = notesDirectory !== undefined && !existingNotes && scratch.config.workspaces.some(workspace => workspaceLocationKey(workspace.hostId, workspace.path) === workspaceLocationKey('local', notesDirectory))
+    if (occupiedNotesPath) process.stderr.write('The Notes directory already belongs to another Workspace; its original identity is kept. Choose a separate directory in Recall Settings.\n')
+    const notesConfig = notesDirectory === undefined || occupiedNotesPath || existingNotes?.path === notesDirectory ? scratch.config : { ...scratch.config, workspaces: [...scratch.config.workspaces.filter(workspace => workspace.id !== NOTES_WORKSPACE_ID), { id: NOTES_WORKSPACE_ID, name: NOTES_WORKSPACE_NAME, hostId: 'local', path: notesDirectory, kind: 'folder' as const }] }
+    if (notesConfig !== scratch.config) persist = true
+    const notifications = withNotificationDefault(notesConfig)
     if (notifications.added) persist = true
     const browserAutomation = withBrowserAutomationDefault(notifications.config)
     if (browserAutomation.added) persist = true

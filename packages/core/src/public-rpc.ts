@@ -210,7 +210,7 @@ type NativeParams = TopicParameterMap & HostSettingsParameterMap & FileParameter
 }
 type NativeResult = TopicResultMap & HostSettingsResultMap & FileResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
-  'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null }
+  'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null }
   'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }

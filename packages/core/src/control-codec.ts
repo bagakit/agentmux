@@ -1174,9 +1174,10 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       result: { entries, partial: true } }
   }
   if (operation === 'settings.set') {
-    settingsFields(result, ['entry'], 'CONTROL_PROTOCOL_ERROR')
+    settingsFields(result, ['entry', 'requestId'], 'CONTROL_PROTOCOL_ERROR')
+    if (result.requestId !== undefined && (typeof result.requestId !== 'string' || !result.requestId.trim())) throw new AgentMuxError('Settings operation identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
-      result: { entry: settingEntry(result.entry) } }
+      result: { entry: settingEntry(result.entry), ...(result.requestId === undefined ? {} : { requestId: result.requestId as string }) } }
   }
   if (operation === 'inspect.tab') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }

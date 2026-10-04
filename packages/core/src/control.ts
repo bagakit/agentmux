@@ -704,7 +704,7 @@ export type AgentMuxControlResult =
   | { operation: 'list.projects'; projects: AgentMuxControlProject[] }
   | { operation: 'list.active-agents'; agents: AgentMuxControlActiveAgent[] }
   | { operation: 'settings.get'; entries: AgentMuxControlSettingEntry[]; partial: true }
-  | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry }
+  | { operation: 'settings.set'; entry: AgentMuxControlSettingEntry; requestId?: string }
   | { operation: 'settings.browser.links.list'; entries: AgentMuxControlSettingsBrowserLinkEntry[] }
   | { operation: 'settings.browser.links.forget'; scheme: string; changed: boolean }
   | { operation: 'settings.workspaces.add'; item: AgentMuxControlSettingsResourceItem; changed: boolean }
