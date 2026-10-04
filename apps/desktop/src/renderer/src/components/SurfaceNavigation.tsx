@@ -76,11 +76,6 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     surface: 'board'
   },
   {
-    id: 'recall', kind: 'surface', navigationContext: 'survey', label: 'Recall',
-    ariaLabel: 'Recall: keep and revisit knowledge', title: 'Recall — keep and revisit knowledge',
-    tooltip: 'Keep, connect and revisit what you learn', icon: BookOpen, surface: 'recall'
-  },
-  {
     id: 'survey',
     kind: 'surface',
     navigationContext: 'survey',
@@ -90,5 +85,10 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     tooltip: 'Explore the web and collect early results',
     icon: Search,
     surface: 'survey'
+  },
+  {
+    id: 'recall', kind: 'surface', navigationContext: 'survey', label: 'Recall',
+    ariaLabel: 'Recall: keep and revisit knowledge', title: 'Recall — keep and revisit knowledge',
+    tooltip: 'Keep, connect and revisit what you learn', icon: BookOpen, surface: 'recall'
   }
 ]
