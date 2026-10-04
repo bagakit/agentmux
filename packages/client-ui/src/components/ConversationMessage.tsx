@@ -9,6 +9,7 @@ import { describeConversationInputSource } from '../lib/conversation-input-sourc
 import { ConversationInputDetails } from './ConversationInputDetails.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
+import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationAnnotationSelection } from '../lib/conversation-annotation.js'
@@ -55,6 +56,8 @@ export type ConversationMessageProps = {
   homeDir?: string
   openWorkspaceFile?: OpenWorkspaceFile
   readPastedImage?: ReadPastedImage
+  readHistoryResource?: ConversationHistoryResourceReader
+  nativeResourceRecord?: ConversationNativeResourceRecord
   openHttpLink?: (url: string, event: LinkClickModifiers) => void
   onContinue?: () => void
   onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
@@ -112,7 +115,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 export function ConversationMessage({
   compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, inputSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
-  openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
+  openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
   const renderClock = timeFormatter ?? formatClock
@@ -325,6 +328,8 @@ export function ConversationMessage({
                 {...(readPastedImage ? { readPastedImage } : {})}
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
+            ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
+              <ConversationResourceImage key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
             ) : <div key={key} className="log-turn__resource">
               <span>{part.label ?? `${part.resourceType} resource`}</span>
               <code>{part.reference}</code>

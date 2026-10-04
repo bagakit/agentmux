@@ -1,7 +1,7 @@
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { ArrowLeft, ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -38,6 +38,8 @@ import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
+import type { ConversationHistoryResourceReader } from '@agentmux/client-ui/components/ConversationResourceImage'
+import { api } from '../lib/api'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
@@ -436,6 +438,12 @@ export function ActivityView({
       event.stopPropagation(); conversationReading.onClose()
     }
   }
+  const resourceHostId = conversationReading?.reference.hostId ?? executionHostId
+  const resourceSessionId = conversationReading?.reference.agentSessionId ?? sessionId
+  const readHistoryResource = useCallback<ConversationHistoryResourceReader>(input => {
+    if (!resourceHostId || !resourceSessionId) return Promise.reject(new Error('The source Host for this recorded resource is not known.'))
+    return api.sessions.historyResource({ hostId: resourceHostId, agentSessionId: resourceSessionId }, input)
+  }, [resourceHostId, resourceSessionId])
   const nativeHistoryPage = readingWindow.page
   const items = readingWindow.captured ?? observedItems
   useLayoutEffect(() => {
@@ -894,6 +902,7 @@ export function ActivityView({
       </div>
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
+        readHistoryResource={readHistoryResource}
         renderQuestionNotice={renderConversationQuestionNotice}
         {...(onReplyQuestion ? { onReplyQuestion } : {})}
         {...(renderMessageActions ? { renderMessageActions } : {})}

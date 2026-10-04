@@ -915,6 +915,9 @@ const mockApi: AgentMuxDesktopApi = {
     historyPage: async () => {
       throw new Error('Native conversation history is unavailable in the web preview.')
     },
+    historyResource: async () => {
+      throw new Error('Native conversation resources are unavailable in the web preview.')
+    },
     observeHistory: async () => {
       throw Object.assign(new Error('Automatic native observation is unavailable in the web preview; Refresh remains available.'),
         { code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED' })

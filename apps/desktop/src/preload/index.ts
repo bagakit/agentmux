@@ -337,6 +337,7 @@ const api: AgentMuxPreloadApi = {
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
+    historyResource: (session, input) => ipcRenderer.invoke('sessions:historyResource', session, input),
     observeHistory: async (session, listener, options) => {
       const token = crypto.randomUUID()
       let disposed = false

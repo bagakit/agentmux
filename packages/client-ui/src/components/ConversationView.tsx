@@ -11,7 +11,7 @@ import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyn
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
+  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
 export type ConversationQuestionReply = (input: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'answers' | 'operationId'>) => Promise<AgentSessionQuestionReplyReceipt>
 
@@ -52,6 +52,7 @@ export const ConversationView = memo(function ConversationView({
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
           {...(user && item.title ? { recordTitle: item.title } : {})}
+          nativeResourceRecord={{ source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
           content={record.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
           name={described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}

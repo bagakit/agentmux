@@ -40,7 +40,7 @@ function TextWithFileReferences({ text, context }: { text: string; context: Inli
   const { openWorkspaceFile, readPastedImage, workspaceRoot, homeDir } = context
   const images = readPastedImage ? splitPastedImageReferences(text) : [{ kind: 'text' as const, text }]
   return <>{images.map((image, imageIndex) => {
-    if (image.kind === 'image' && readPastedImage) return <ConversationImage key={imageIndex} text={image.text} path={image.path} readPastedImage={readPastedImage} />
+    if (image.kind === 'image' && readPastedImage) return <ConversationImage key={imageIndex} text={image.text} path={image.path} readImage={readPastedImage} />
     if (!openWorkspaceFile) return <Fragment key={imageIndex}>{image.text}</Fragment>
     return <Fragment key={imageIndex}>{splitMarkdownFileReferences(image.text, workspaceRoot, homeDir).map((segment, index) => segment.kind === 'text'
       ? <Fragment key={index}>{segment.text}</Fragment>

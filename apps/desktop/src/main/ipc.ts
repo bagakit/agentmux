@@ -968,6 +968,8 @@ export async function registerIpc(args: {
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
+  handle('sessions:historyResource', async (session: import('../shared/contracts.js').SessionHistoryReference, input: import('@agentmux/core').AgentSessionHistoryResourceRequest) =>
+    args.runtime.sessionHistoryResource(session, input, config))
   const historyObservations = new SessionHistoryObservationOwners((reference, listener, signal) =>
     args.runtime.observeSessionHistory(reference, listener, config, signal))
   handleWithEvent('sessions:observeHistory', async (event, token: string, session: import('../shared/contracts.js').SessionHistoryReference) => {

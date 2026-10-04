@@ -57,6 +57,8 @@ import type {
   AgentTimelineItem,
   AgentTimelineSnapshot,
   AgentSessionHistoryPage,
+  AgentSessionHistoryResourceRequest,
+  AgentSessionHistoryResourceReadResult,
   AgentSessionHistoryDescriptor,
   AgentSessionHistoryPageOptions,
   AgentSessionHistoryObservation,
@@ -1628,6 +1630,7 @@ export type AgentMuxDesktopApi = {
     historySources(): Promise<AgentSessionHistoryDescriptor[]>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
+    historyResource(session: SessionHistoryReference, input: AgentSessionHistoryResourceRequest): Promise<AgentSessionHistoryResourceReadResult>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
       options?: { signal?: AbortSignal }): Promise<AgentSessionHistoryObservationHandle>
     attach(session: SessionControl, afterByte?: number): Promise<SessionAttachResult>
