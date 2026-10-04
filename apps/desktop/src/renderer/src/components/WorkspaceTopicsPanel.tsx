@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { formatZoneAddress } from '@agentmux/core/sharing'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
@@ -344,7 +345,7 @@ export function WorkspaceTopicsPanel({
                       void commitRename(topic)
                     }}
                   >
-                    <input
+                    <TextInput
                       autoFocus
                       aria-label={`Rename ${topic.title}`}
                       value={editTitle}
