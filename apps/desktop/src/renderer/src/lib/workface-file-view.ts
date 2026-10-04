@@ -55,7 +55,7 @@ export async function executeWorkfaceFileView(ports: WorkfaceFileViewPorts,
     const diff = Object.hasOwn(current.editorRegionDiffs, id) ? current.editorRegionDiffs[id] : undefined
     base.content = mode === 'diff' ? { status: diff?.error ? 'failed' : diff?.loading ? 'loading' : diff?.diff ? 'available' : 'unconfirmed', reason: diff?.error ?? null }
       : currentReadonly ? { status: 'unconfirmed', reason: 'Preview bytes and decoding belong to the original visible File pane.' }
-      : mode === 'preview' && ['html', 'json', 'csv', 'tsv'].includes(format.sourcePreview ?? '') ? { status: 'unconfirmed', reason: 'The original source is available; rendering is confirmed by its visible File pane.' }
+      : mode === 'preview' && format.previewConfirmation === 'renderer' ? { status: 'unconfirmed', reason: 'The original source is available; rendering is confirmed by its visible File pane.' }
       : current.documents[key] ? { status: 'available', reason: null }
       : { status: current.documentIssues[key] ? 'failed' : 'unconfirmed', reason: current.documentIssues[key]?.kind === 'read-error' ? current.documentIssues[key].message : null }
   }
