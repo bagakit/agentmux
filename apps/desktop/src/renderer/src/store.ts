@@ -64,6 +64,7 @@ import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
 import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconChoice, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
+import { recordHistory, navigateHistory, restoreComposerHistory, type HistoryState } from './lib/composer-history'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
@@ -555,6 +556,8 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
+  agentComposerHistory: Record<string, readonly string[]>
+  agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'>>
   /** Launcher producer context shares the draft's durable Region owner; editing only changes body. */
   agentComposerNotes: Record<string, string>
   agentSteerInFlight: Record<string, string>
@@ -1023,6 +1026,8 @@ type AppState = {
   addBrowserAnnotation(annotation: BrowserAnnotation): void
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
   clearBrowserAnnotations(browserId: string): void
+  recordAgentComposerHistory(sessionId: string, text: string): void
+  recallAgentComposerHistory(sessionId: string, direction: 'older' | 'newer', draft: string): string | null
   setAgentComposerDraft(sessionId: string, text: string): void
   /**
    * 写启动对话框的一格名字。`field` 只有 'agentName' | 'tabName' 两种，两格共用一条 action：
@@ -2160,6 +2165,7 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   agentComposerDrafts?: Record<string, string>
+  agentComposerHistory?: Record<string, readonly string[]>
   launcherNameDrafts?: Record<string, LauncherNames>
   launcherOptionDrafts?: LauncherOptionDrafts
   agentComposerNotes?: Record<string, string>
@@ -2372,6 +2378,7 @@ function selectPersistedInputs(state: AppState) {
     spatialRequests: state.spatialRequests,
     retainedSpatialFocus: state.retainedSpatialFocus,
     agentComposerDrafts: state.agentComposerDrafts,
+    agentComposerHistory: state.agentComposerHistory,
     launcherNameDrafts: state.launcherNameDrafts,
     launcherOptionDrafts: state.launcherOptionDrafts,
     agentComposerNotes: state.agentComposerNotes,
@@ -2977,6 +2984,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
+  agentComposerHistory: {},
+  agentComposerHistoryNavigation: {},
   agentComposerNotes: {},
   agentSteerQueues: {},
   agentSteerInFlight: {},
@@ -8022,6 +8031,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { browserAnnotationsByBrowserId }
     })
   },
+  recordAgentComposerHistory(sessionId, text) {
+    if (!text.trim()) return
+    set(state => {
+      const entries = state.agentComposerHistory[sessionId] ?? []
+      const next = recordHistory({ entries, cursor: entries.length, stash: null }, text)
+      return {
+        agentComposerHistory: { ...state.agentComposerHistory, [sessionId]: next.entries },
+        agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
+          [sessionId]: { cursor: next.cursor, stash: next.stash } }
+      }
+    })
+  },
+  recallAgentComposerHistory(sessionId, direction, draft) {
+    const state = get(), entries = state.agentComposerHistory[sessionId] ?? []
+    const navigation = state.agentComposerHistoryNavigation[sessionId] ?? { cursor: entries.length, stash: null }
+    const result = navigateHistory({ entries, ...navigation }, direction, draft)
+    if (!result) return null
+    set({ agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
+      [sessionId]: { cursor: result.state.cursor, stash: result.state.stash } } })
+    return result.value
+  },
   setAgentComposerDraft(sessionId, text) {
     const state = get(), session = sessionPresentationById(state.sessions).get(sessionId)
     if (!state.agentComposerDrafts[sessionId]?.trim() && text.trim() && session?.kind === 'agent') {
@@ -9017,7 +9047,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       state.nameLabels = current.nameLabels
       state.nameAuthorityRevision = current.nameAuthorityRevision
     }
-    return { ...state, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
+    return { ...state, agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+      agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
   },
   partialize: partializeAppState
 }))
