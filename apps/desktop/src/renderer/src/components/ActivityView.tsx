@@ -475,6 +475,32 @@ export function ActivityView({
     return buildActivityEntries(items, observedMessages)
   }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical])
   const placed = useMemo(() => placeSegments(segments), [segments])
+  const nativeSupplement = (entry: Segment): boolean => entry.kind === 'user-message' && entry.message.source.kind === 'native'
+  const observations = placed.reduce((summary, { entry }) => {
+    if (nativeSupplement(entry)) return summary
+    if (entry.kind === 'user-message') {
+      summary.count++
+      if (entry.message.deliveryStatus === 'failed') summary.failed++
+      if (entry.message.deliveryStatus === 'unverified') summary.unconfirmed++
+    } else for (const item of entry.kind === 'run' ? entry.items : [entry.item]) {
+      summary.count++
+      if (item.status === 'failed') summary.failed++
+      if (item.kind === 'user_message' && item.status === 'streaming') summary.unconfirmed++
+    }
+    return summary
+  }, { count: 0, failed: 0, unconfirmed: 0 })
+  const observationRef = useRef<HTMLDetailsElement>(null)
+  const [observationDisclosure, setObservationDisclosure] = useState({ sessionId, open: false })
+  const observationOpen = observationDisclosure.sessionId === sessionId && observationDisclosure.open
+  const observationVisible = observationOpen && conversationReading?.enabled !== false
+  const readObservationImage = useCallback<ReadPastedImage>(path => observationVisible && readPastedImage
+    ? readPastedImage(path) : Promise.resolve(null), [observationVisible, readPastedImage])
+  const expandObservationFor = (target: Element): void => {
+    const disclosure = observationRef.current
+    if (!disclosure?.contains(target)) return
+    disclosure.open = true
+    setObservationDisclosure({ sessionId, open: true })
+  }
   const origin = useMemo(() => {
     for (const it of unifiedItems) {
       const t = 'createdAt' in it ? it.createdAt : it.recordedAt
@@ -579,6 +605,9 @@ export function ActivityView({
 
   useEffect(() => {
     if (!revealRequest || !feedEl) return
+    const target = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
+      .find(node => node.dataset.messageSourceKey === revealRequest.sourceKey)
+    if (target && revealRequest.isCurrent()) expandObservationFor(target)
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
       const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
@@ -612,6 +641,7 @@ export function ActivityView({
     const el = host ? segmentEls.current.get(host.key) : undefined
     // Reuse the same scroll primitive the rest of the app uses to bring a row into view; there is no
     // second scroll controller for the Activity log.
+    if (el) expandObservationFor(el)
     el?.scrollIntoView({ block: 'nearest' })
   }
 
@@ -795,6 +825,80 @@ export function ActivityView({
     }
   }
 
+  const renderPlaced = ({ entry, key }: PlacedSegment): JSX.Element => {
+  const readEntryImage = readPastedImage && (nativeSupplement(entry) ? readPastedImage : readObservationImage)
+  // Identity is resolved once here; the shared message only renders that verdict.
+  const speaker = entry.kind === 'run'
+    ? null
+    : entry.kind === 'user-message'
+      ? speakerOfUserMessage(entry.message)
+      : speakerOf(entry.item)
+  const described = speaker ? describeSpeaker?.(speaker) : undefined
+  return (
+    // One wrapper per segment carries the scroll target, the observer key, and the selection
+    // marker, so the three log registers below stay unaware of the ruler wiring.
+    <div
+      key={key}
+      className="activity-log__segment"
+      ref={registerSegment(key)}
+    >
+      {entry.kind === 'run' ? (
+        <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
+      ) : entry.kind === 'user-message' ? (
+        <ConversationMessage
+          compact={!nativeSupplement(entry)}
+          messageId={entry.message.id}
+          conversationSessionId={sessionId}
+          {...(executionHostId ? { executionHostId } : {})}
+          inputSource={entry.message.source}
+          located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
+          {...(describeSpeaker ? { describeSpeaker } : {})}
+          content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
+          {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
+          {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
+          origin={origin}
+          speaker={speaker!}
+          name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
+          workspaceRoot={workspaceRoot}
+          homeDir={homeDir}
+          {...(described?.providerId ? { providerId: described.providerId } : {})}
+          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+          {...(readEntryImage ? { readPastedImage: readEntryImage } : {})}
+          {...(openHttpLink ? { openHttpLink } : {})}
+          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
+          {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+        />
+      ) : speaker ? (
+        <CapturedConversationMessage
+          compact
+          item={entry.item}
+          {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
+            !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
+            ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
+          conversationSessionId={sessionId}
+          {...(executionHostId ? { executionHostId } : {})}
+          {...(entry.item.kind === 'user_message' || speaker.role === 'system' || entry.item.sourceDevice || entry.item.sourceChannel ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceChannel ? { channel: entry.item.sourceChannel } : {}), ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
+          located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
+          {...(describeSpeaker ? { describeSpeaker } : {})}
+          {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
+          origin={origin}
+          speaker={speaker}
+          workspaceRoot={workspaceRoot}
+          homeDir={homeDir}
+          {...(described ?? {})}
+          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+          {...(readEntryImage ? { readPastedImage: readEntryImage } : {})}
+          {...(openHttpLink ? { openHttpLink } : {})}
+          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
+          {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+        />
+      ) : (
+        <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot} />
+      )}
+    </div>
+  )
+  }
+
   return (
     <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.hasMore && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
@@ -826,80 +930,21 @@ export function ActivityView({
           ) : null
         }
       /> : null}
-      {placed.length > 0 ? <div className="activity-feed__observation-source">Submitted messages &amp; Hook observations · Separate recorded source</div> : null}
-
-      <div className="activity-log" ref={logRef}>
-        {placed.map(({ entry, key, from }) => {
-          // Identity is resolved once here; the shared message only renders that verdict.
-          const speaker = entry.kind === 'run'
-            ? null
-            : entry.kind === 'user-message'
-              ? speakerOfUserMessage(entry.message)
-              : speakerOf(entry.item)
-          const described = speaker ? describeSpeaker?.(speaker) : undefined
-          return (
-            // One wrapper per segment carries the scroll target, the observer key, and the selection
-            // marker, so the three log registers below stay unaware of the ruler wiring.
-            <div
-              key={key}
-              className="activity-log__segment"
-              ref={registerSegment(key)}
-            >
-              {entry.kind === 'run' ? (
-                <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
-              ) : entry.kind === 'user-message' ? (
-                <ConversationMessage
-                  messageId={entry.message.id}
-                  conversationSessionId={sessionId}
-                  {...(executionHostId ? { executionHostId } : {})}
-                  inputSource={entry.message.source}
-                  located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
-                  {...(describeSpeaker ? { describeSpeaker } : {})}
-                  content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
-                  {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
-                  {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
-                  origin={origin}
-                  speaker={speaker!}
-                  name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
-                  workspaceRoot={workspaceRoot}
-                  homeDir={homeDir}
-                  {...(described?.providerId ? { providerId: described.providerId } : {})}
-                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-                  {...(readPastedImage ? { readPastedImage } : {})}
-                  {...(openHttpLink ? { openHttpLink } : {})}
-                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
-                  {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-                />
-              ) : speaker ? (
-                <CapturedConversationMessage
-                  item={entry.item}
-                  {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
-                    !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
-                    ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
-                  conversationSessionId={sessionId}
-                  {...(executionHostId ? { executionHostId } : {})}
-                  {...(entry.item.kind === 'user_message' || speaker.role === 'system' || entry.item.sourceDevice || entry.item.sourceChannel ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceChannel ? { channel: entry.item.sourceChannel } : {}), ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
-                  located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
-                  {...(describeSpeaker ? { describeSpeaker } : {})}
-                  {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
-                  origin={origin}
-                  speaker={speaker}
-                  workspaceRoot={workspaceRoot}
-                  homeDir={homeDir}
-                  {...(described ?? {})}
-                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-                  {...(readPastedImage ? { readPastedImage } : {})}
-                  {...(openHttpLink ? { openHttpLink } : {})}
-                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
-                  {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-                />
-              ) : (
-                <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot} />
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {observations.count > 0 ? <details key={sessionId} ref={observationRef} className="activity-feed__observations"
+        open={observationOpen} onToggle={event => {
+          if (event.currentTarget === observationRef.current) setObservationDisclosure({ sessionId, open: event.currentTarget.open })
+        }}>
+        <summary className="activity-feed__observation-source">
+          <ChevronRight size={12} aria-hidden="true" />
+          <span>Submitted &amp; observed records</span>
+          <span className="activity-feed__observation-count">{observations.count}</span>
+          {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}
+          {observations.unconfirmed > 0 ? <span className="activity-feed__observation-issue">{observations.unconfirmed} submissions unconfirmed</span> : null}
+        </summary>
+        <div className="activity-feed__observation-scope">Submission receipts and runtime observations; native acceptance is separate.</div>
+        <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
+      </details> : null}
+      <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
         readHistoryResource={readHistoryResource}
