@@ -33,7 +33,7 @@ export function conversationReadingAnchor(viewport: HTMLElement): ReadingAnchor 
   }
   // Only a truly collapsed group may provide geometry while its real raw rows are hidden.
   for (const group of viewport.querySelectorAll<HTMLElement>('[data-native-record-ids]')) {
-    const head = group.querySelector<HTMLElement>(':scope > .wf-card--observation > .wf-head[aria-expanded="false"]')
+    const head = group.querySelector<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')
     if (!head) continue
     const rect = head.getBoundingClientRect()
     if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
@@ -71,7 +71,7 @@ export function protectsConversationWindow(viewport: HTMLElement | null, next: A
     if ((!sameSource(row) || !retained.has(row.dataset.nativeRecordId!)) && rangeIntersectsElement(selection.getRangeAt(0), row)) return true
   }
   for (const group of viewport.querySelectorAll<HTMLElement>('[data-native-record-ids]')) {
-    const head = group.querySelector<HTMLElement>(':scope > .wf-card--observation > .wf-head')
+    const head = group.querySelector<HTMLElement>('.wf-card--observation > .wf-head')
     if (head && rangeIntersectsElement(selection.getRangeAt(0), head)) return true
   }
   return false
@@ -185,6 +185,6 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   }, [key, reading?.enabled, reading?.opened])
   useEffect(() => () => { generation.current++; pending.current = false }, [])
   return { page, captured: captured?.key === key ? captured.items : null, capturedError: captured?.key === key ? captured.error : null, historical: Boolean(window), loading: state.key === key && state.loading, error: state.key === key ? state.error : null,
-    newerOutside: window?.newerOutside ?? false, hasMore: Boolean(window?.page.nextCursor),
+    newerOutside: window?.newerOutside ?? false, hasMore: Boolean(page?.nextCursor),
     readEarlier: () => void read('earlier'), retry: () => void read(retry.current), showCurrent }
 }
