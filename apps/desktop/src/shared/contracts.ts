@@ -89,6 +89,7 @@ import type {
   CreatePullRequestResult,
   GitAheadBehind,
   GitBranchComparisonApi,
+  GitCommitApi,
   GitHistoryApi,
   GitFileDiff,
   GitPullStrategy,
@@ -1921,7 +1922,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
    * before calling it — `workspaceRelativeGitPath` in the renderer does that, and returns null for the
    * changes a subfolder workspace cannot show at all.
    */
-  git: import('./git-contracts').GitProjectIdentityApi & GitBranchComparisonApi & GitHistoryApi & {
+  git: import('./git-contracts').GitProjectIdentityApi & GitBranchComparisonApi & GitHistoryApi & GitCommitApi & {
     status(workspaceId: string): Promise<GitStatusResult>
     stage(workspaceId: string, repoPath: string): Promise<void>
     commit(workspaceId: string, message: string): Promise<void>

@@ -140,6 +140,10 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('workspaces:keepOneOfFanOut', input)
   },
   git: {
+    commitDetails: (workspaceId: string, input: import('../shared/git-contracts').GitCommitDetailsInput) =>
+      ipcRenderer.invoke('git:commitDetails', workspaceId, input),
+    commitDiff: (workspaceId: string, descriptor: import('../shared/git-contracts').GitCommitDiffDescriptor) =>
+      ipcRenderer.invoke('git:commitDiff', workspaceId, descriptor),
     projectIdentity: (workspaceId: string) => ipcRenderer.invoke('git:projectIdentity', workspaceId),
     history: (workspaceId: string, input?: GitHistoryInput) =>
       ipcRenderer.invoke('git:history', workspaceId, input),
