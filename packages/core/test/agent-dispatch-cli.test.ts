@@ -222,7 +222,11 @@ describe('public durable Dispatch authority', () => {
     // A private retained-journal fixture expresses missing referenced data; this is not a new
     // production eviction/migration policy and does not touch any existing user's messages.
     const retained = (await f.queue.readJournal()).filter(record => record.kind !== 'message' || record.envelope.messageId !== 'source')
-    await writeFile(f.queue.path, retained.map(record => JSON.stringify(record)).join('\n') + '\n')
+    const retainedPath = join(f.root, 'retained-history.ndjson')
+    await writeFile(retainedPath, retained.map(record => JSON.stringify(record)).join('\n') + '\n')
+    // A pre-existing incomplete retained source, not replacement of an acknowledged database.
+    f.queue = new DurableAgentMuxMessageQueue(retainedPath)
+    f.inner.messageQueue = f.queue
     await expect(f.client.showDispatch({ ...f.input('owner'), sourceMessageId: 'source' })).rejects.toMatchObject({ code: 'DISPATCH_MESSAGE_UNAVAILABLE' })
     await expect(f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })).rejects.toMatchObject({ code: 'DISPATCH_MESSAGE_UNAVAILABLE' })
     const batch = await f.client.checkDeliveries({ ...f.input('worker'), limit: 3 })
@@ -239,7 +243,11 @@ describe('public durable Dispatch authority', () => {
     await f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })
     await f.client.recordDispatchEvent({ ...f.input('worker'), sourceMessageId: 'source', replyMessageId: 'reply', kind: 'question' })
     const retained = (await f.queue.readJournal()).filter(record => record.kind !== 'message' || record.envelope.messageId !== 'reply')
-    await writeFile(f.queue.path, retained.map(record => JSON.stringify(record)).join('\n') + '\n')
+    const retainedPath = join(f.root, 'retained-history.ndjson')
+    await writeFile(retainedPath, retained.map(record => JSON.stringify(record)).join('\n') + '\n')
+    // A pre-existing incomplete retained source, not replacement of an acknowledged database.
+    f.queue = new DurableAgentMuxMessageQueue(retainedPath)
+    f.inner.messageQueue = f.queue
     await expect(f.client.showDispatch({ ...f.input('owner'), sourceMessageId: 'source' }))
       .rejects.toMatchObject({ code: 'DISPATCH_MESSAGE_UNAVAILABLE' })
     expect((await f.client.checkDeliveries({ ...f.input('worker'), limit: 3 })).messages.map(item => item.envelope.messageId))

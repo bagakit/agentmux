@@ -27,12 +27,13 @@ function input(index: number, body = 'Original message 中🙂', recipient = 'ar
 
 it('completed message history does not bar new admission, idempotent retry or cold receipt reads', async () => {
   const f = await fixture()
-  const first = await f.queue.append(input(0))
+  const templateQueue = new DurableAgentMuxMessageQueue(join(f.root, 'template.ndjson'))
+  const first = await templateQueue.append(input(0))
   for (const [index, state] of ['delivered', 'accepted', 'replied'].entries()) {
-    await f.queue.recordDelivery(first.messageId, state as 'delivered' | 'accepted' | 'replied', 101 + index)
+    await templateQueue.recordDelivery(first.messageId, state as 'delivered' | 'accepted' | 'replied', 101 + index)
   }
   // Expand the actual owner's valid lifecycle. No active work or large individual envelope is required.
-  const template = await f.queue.readJournal()
+  const template = await templateQueue.readJournal()
   const records = Array.from({ length: 2048 }, (_, index) => template.map((record, offset) => record.kind === 'message'
     ? { ...record, sequence: index * 4 + offset + 1, envelope: { schema: 'agentmux.a2a.v1', ...input(index) } }
     : { ...record, sequence: index * 4 + offset + 1, messageId: `m-${index}` })).flat()
@@ -51,8 +52,9 @@ it('completed message history does not bar new admission, idempotent retry or co
 
 it('a large retained journal still records terminal facts, public send, consumption and Dispatch', async () => {
   const f = await fixture(), count = 700, oldBudget = 16 * 1024 * 1024
-  await f.queue.append(input(0, '', 'recipient'))
-  const template = (await f.queue.readJournal())[0]!
+  const templateQueue = new DurableAgentMuxMessageQueue(join(f.root, 'template.ndjson'))
+  await templateQueue.append(input(0, '', 'recipient'))
+  const template = (await templateQueue.readJournal())[0]!
   if (template.kind !== 'message') throw new Error('Expected actual owner message record')
   const records = Array.from({ length: count }, (_, index) => ({ ...template, sequence: index + 1,
     envelope: { schema: 'agentmux.a2a.v1', ...input(index, '', index === 0 ? 'recipient' : 'archive') } }))
