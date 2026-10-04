@@ -73,7 +73,7 @@ it('renders two independent public typed rounds even when the current semantic s
 
 it('the real removeSessionProjection retains already seen state-only history without opening Input records or controlling a Run', async () => {
   const h = await mounted(), before = h.bands().map(node => node.dataset.workingEnteredAt)
-  expect(h.element.querySelector('[aria-label="Input records Context"]')).toBeNull()
+  expect(h.element.querySelector('[aria-label="Conversation records Context"]')).toBeNull()
   await h.close()
   await h.wait(() => expect(h.bands()).toHaveLength(2))
   expect(useAppStore.getState().timelines[SID]).toBeUndefined()
@@ -100,7 +100,7 @@ it('work-only admission cannot overwrite the same Context captured input markers
   const next = observed('work-three', NOW - HOUR / 4, 'working', 'done-two')
   await h.store.applyTimelineMutation({ type: 'append', agentSessionId: SID, item: next }); await h.refresh()
   await h.wait(() => expect(h.bands()).toHaveLength(3))
-  expect(h.element.querySelectorAll('[data-message-id="captured:captured"]')).toHaveLength(1)
+  expect([...h.element.querySelectorAll<HTMLElement>('[data-message-id]')].filter(node => node.dataset.messageId === JSON.stringify(['private-host', SID, 'captured', 'captured']))).toHaveLength(1)
   expect(document.querySelector('.recent-focus__message-body')).toBe(before)
   expect(selection.rangeCount).toBe(1); expect(selection.toString()).toBe(selected)
 })
@@ -112,7 +112,7 @@ it('unknown ends and cross-Run observations do not synthesize a band to Now', as
   await h.wait(() => expect(h.bands()).toHaveLength(3))
   const unknown = h.bands().find(node => node.dataset.runId === 'another-run')!
   expect(unknown.dataset.workEnd).toBe('unknown'); expect(unknown.style.width).toBe('0%')
-  expect(unknown.title).toContain('End not recorded')
+  expect(unknown.getAttribute('aria-label')).toContain('end not recorded')
 })
 
 it('normalization/tool clones, unrelated Session output and 200 viewport operations do not call the work projector or issue history I/O', async () => {
@@ -207,7 +207,7 @@ it('bounds typed observations globally at 200 independently of the same holder c
   expect(Number(section.dataset.capturedRecordCount)).toBe(1)
   expect(Number(section.dataset.readBytes)).toBeLessThanOrEqual(12 * 1024 * 1024)
   expect(section.dataset.readingTrimmed).toBe('true')
-  expect(h.element.querySelectorAll('[data-message-id="captured:captured"]')).toHaveLength(1)
+  expect([...h.element.querySelectorAll<HTMLElement>('[data-message-id]')].filter(node => node.dataset.messageId === JSON.stringify(['private-host', SID, 'captured', 'captured']))).toHaveLength(1)
   expect(h.bands().length).toBeGreaterThan(0)
   // Controlled oversized raw observations qualify the holder's aggregate byte
   // bound, independently of T001's accepted producer/storage limits.
@@ -219,7 +219,7 @@ it('bounds typed observations globally at 200 independently of the same holder c
   expect(Number(section.dataset.readBytes)).toBeGreaterThan(1024 * 1024)
   expect(Number(section.dataset.workRecordCount)).toBeLessThan(200)
   expect(Number(section.dataset.capturedRecordCount)).toBe(1)
-  expect(h.element.querySelectorAll('[data-message-id="captured:captured"]')).toHaveLength(1)
+  expect([...h.element.querySelectorAll<HTMLElement>('[data-message-id]')].filter(node => node.dataset.messageId === JSON.stringify(['private-host', SID, 'captured', 'captured']))).toHaveLength(1)
 })
 
 it('the actual public native reader and typed history keep both original reader bodies after work-only admission', async () => {
@@ -235,7 +235,7 @@ it('the actual public native reader and typed history keep both original reader 
   expect(h.element.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1')
   expect(document.querySelector('.recent-focus__message-body')).toBe(body)
   expect(h.inputs().map(node => node.dataset.inputMessageId)).toEqual(expect.arrayContaining(['native:claude:native-archived-0:native-kept', 'captured:captured']))
-  expect(h.element.querySelectorAll('[data-message-id="native:claude:native-archived-0:native-kept"]')).toHaveLength(1)
+  expect([...h.element.querySelectorAll<HTMLElement>('[data-message-id]')].filter(node => node.dataset.messageId === JSON.stringify(['private-host', SID, 'native', 'claude', `native-${SID}`, 'native-kept']))).toHaveLength(1)
   h.noRuntime()
 })
 
@@ -447,17 +447,17 @@ it('actual native file growth reaches shared Hook incomplete window and visible 
   }, { timeout: 3000, interval: 10 }))
   expect(reading?.windowFrozen).toBe(false)
   expect(reading?.error).toBeNull(); expect(reading?.observationError).toBeNull()
-  expect(reading!.nativeHistoryPage!.items.find(item => item.id === original.id)).toBe(original)
+  expect(reading!.nativeContextItems.find(item => item.id === original.id)).toBe(original)
   expect(reading!.nativeHistoryPage!.items.some(item => item.id === 'incomplete-burst-90')).toBe(true)
   expect(h.element.querySelector<HTMLElement>('.recent-focus')!.dataset.readingTrimmed).not.toBe('true')
   const coverage = h.element.querySelector<HTMLButtonElement>('[aria-label="Timeline meaning and coverage"]')!
   expect(coverage.textContent).toContain('Partial history')
   expect(coverage.title).toContain('outside this bounded window')
   const statuses = [...document.querySelectorAll('.recent-focus__input-reader [role="status"]')].map(node => node.textContent).join(' ')
-  expect(statuses).toContain('Some latest input records are outside this bounded window')
+  expect(statuses).toContain('Some latest conversation records are outside this bounded window')
   expect(document.querySelector('.recent-focus__message-body')).toBe(body)
   expect(selection.rangeCount).toBe(1); expect(selection.toString()).toBe(selected)
-  expect(h.element.querySelectorAll('[data-message-id="native:claude:native-archived-0:native-kept"]')).toHaveLength(1)
+  expect([...h.element.querySelectorAll<HTMLElement>('[data-message-id]')].filter(node => node.dataset.messageId === JSON.stringify(['private-host', SID, 'native', 'claude', `native-${SID}`, 'native-kept']))).toHaveLength(1)
   expect(h.element.querySelectorAll('.recent-focus__live')).toHaveLength(1)
   expect(observe).toHaveBeenCalledTimes(1)
   expect(h.counts()[0]).toBe(before[0]); expect(h.counts()[2]).toBe(before[2])

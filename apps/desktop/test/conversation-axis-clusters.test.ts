@@ -13,16 +13,16 @@ describe('conversation axis density', () => {
     const groups = clusterConversationAxis(marks, 300)
     const members = groups.flatMap(group => group.members)
     expect(members.map(mark => mark.index)).toEqual([0, 1, 2, 3, 4])
-    expect(groups.map(group => group.members.length)).toEqual([3, 2])
+    expect(groups.map(group => group.members.length)).toEqual([1, 2, 1, 1])
     members.forEach(mark => expect(mark.item).toBe(items[mark.index]))
-    expect(groups.map(group => group.fraction)).toEqual([0.05, 0.95])
+    expect(groups.map(group => group.anchorFraction)).toEqual([0, .1, .9, 1])
   })
   it('uses the measured hit geometry without changing single event positions', () => {
     const wide = clusterConversationAxis(marks, 1000)
-    expect(wide.map(group => group.members.length)).toEqual([1, 2, 1, 1])
-    expect(wide[0]!.fraction).toBe(marks[0]!.fraction)
-    expect(wide.at(-1)!.fraction).toBe(marks.at(-1)!.fraction)
-    expect(clusterConversationAxis(marks, 300)).toHaveLength(2)
+    expect(wide.map(group => group.members.length)).toEqual([1, 1, 1, 1, 1])
+    expect(wide[0]!.anchorFraction).toBe(marks[0]!.fraction)
+    expect(wide.at(-1)!.anchorFraction).toBe(marks.at(-1)!.fraction)
+    expect(clusterConversationAxis(marks, 300)).toHaveLength(4)
   })
   it('keeps original record order within non-monotonic temporal clusters and never mutates input', () => {
     const shuffled: ConversationAxisMark[] = [marks[2]!, marks[0]!, marks[4]!, marks[1]!, marks[3]!]
@@ -37,6 +37,6 @@ describe('conversation axis density', () => {
       expect(clusterConversationAxis(marks, width).map(group => group.members)).toEqual(marks.map(mark => [mark]))
     }
     expect(clusterConversationAxis([], 300)).toEqual([])
-    expect(clusterConversationAxis([marks[0]!, marks[4]!], 300).map(group => group.fraction)).toEqual([0, 1])
+    expect(clusterConversationAxis([marks[0]!, marks[4]!], 300).map(group => group.anchorFraction)).toEqual([0, 1])
   })
 })

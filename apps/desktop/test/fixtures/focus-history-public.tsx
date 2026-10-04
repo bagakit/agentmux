@@ -103,9 +103,9 @@ export async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: N
   const wait = async (check: () => void) => { for (let i = 0; i < 150; i++) { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }); try { check(); return } catch (error) { if (i === 149) throw error } } }
   const click = (label: string) => act(async () => { const button = document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(button).not.toBeNull(); button!.click() })
   const selectSource = async (id = 'archived-0') => {
-    if (!document.querySelector('[aria-label="Input records Context"]')) await click('View input records')
-    await wait(() => expect(document.querySelector(`[aria-label="Input records Context"] option[value="${id}"]`)).not.toBeNull())
-    await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Input records Context"]')!; select.value = id; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    if (!document.querySelector('[aria-label="Conversation records Context"]')) await click('View conversation records')
+    await wait(() => expect(document.querySelector(`[aria-label="Conversation records Context"] option[value="${id}"]`)).not.toBeNull())
+    await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Conversation records Context"]')!; select.value = id; select.dispatchEvent(new Event('change', { bubbles: true })) })
   }
   const button = async (text: string) => act(async () => { const target = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(item => item.textContent === text); expect(target).not.toBeUndefined(); expect(target!.disabled).toBe(false); target!.click() })
   const inputs = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[data-input-message-id]'))

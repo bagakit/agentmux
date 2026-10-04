@@ -1,4 +1,4 @@
-import { TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
+import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -317,6 +317,17 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const userName = useAppStore(state => state.agentNames[sessionId])
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
   const timeline = useAppStore(state => state.timelines[sessionId])
+  const resyncTimeline = useAppStore(state => state.resyncTimeline)
+  const requestedHistory = useRef<string | null>(null)
+  const sessionHostId = session?.kind === 'agent' ? session.control.hostId : undefined
+  useEffect(() => {
+    if (timeline) { requestedHistory.current = null; return }
+    if (!observing || context?.kind !== 'agent' || sessionHostId !== context.hostId) return
+    const key = JSON.stringify([context.hostId, sessionId])
+    if (requestedHistory.current === key) return
+    requestedHistory.current = key
+    void resyncTimeline(sessionId, { observationOnly: true })
+  }, [observing, context?.kind, context?.hostId, sessionHostId, sessionId, timeline, resyncTimeline])
   const name = agentDisplayName({ userName,
     firstPrompt: session?.kind === 'agent' ? firstPromptFromTimeline(timeline) : undefined,
     fallbackLabel: session?.kind === 'agent' ? session.label : context?.name ?? identity?.name ?? sessionId,
@@ -408,7 +419,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
           if (anchor) onInspect(segments[0]!, anchor)
         } : undefined} />
       <span>{name}{observedName ? <small>Observed as {observedName}</small> : path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}{selected ? <span className="recent-focus__current" aria-label="Current Context"><LocateFixed size={10} aria-hidden="true" /></span> : null}</span>
-    <div className="recent-focus__lane" style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px` } as React.CSSProperties}>
+    <div className="recent-focus__lane" style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px`, '--timeline-marker-height': `${TIMELINE_MARKER_HEIGHT}px` } as React.CSSProperties}>
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
       {work && context ? <button type="button" className="recent-focus__working" data-working-entered-at={work.enteredAt} data-working-through={Math.min(now, window.end)} data-run-id={context.runId}
         style={{ left: `${work.left}%`, width: `${work.width}%` }}
@@ -433,19 +444,20 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${context ? name : item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
         {...hoverEvent(`focus:${track.key}:${item.focusedAt}`, () => focusVisitFacts(item, time))}
         onClick={event => context ? onSelect(sessionId) : onInspect(item, event.currentTarget)}><span>{clock(item.focusedAt)}</span></button>)}
-      {messageGroups.map(({ records, startAt, endAt, fraction }) => {
+      {messageGroups.map(({ records, startAt, endAt, fraction, anchorFraction }) => {
         const message = records[0]!, multiple = records.length > 1
         const inputs = records.filter(record => record.kind === 'user-message').length, replies = records.filter(record => record.kind === 'assistant-message').length
         const recordKind = inputs && replies ? 'mixed' : message.kind
         const recordedRange = startAt === endAt ? `at ${time.detailed(startAt)}` : `from ${time.detailed(startAt)} through ${time.detailed(endAt)}`
         const speaker = message.speaker!
         const described = describeMessageSpeaker(speaker)
+        const anchorOffset = (anchorFraction - fraction) * scaleWidth
         return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={startAt} data-message-through={endAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
-          style={{ left: `${fraction * 100}%` }} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${inputs} inputs and ${replies} replies. Open recorded messages.` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
+          style={{ left: `${fraction * 100}%` }} data-anchor-fraction={anchorFraction} data-display-fraction={fraction} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${inputs} inputs and ${replies} replies. Open recorded messages.` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
 
           onMouseEnter={event => { if (!multiple) onPreview(message, event.currentTarget, false) }} onMouseLeave={() => onDismiss(message.id)}
           onFocus={event => { if (!multiple && !(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false, true) }} onBlur={() => onDismiss(message.id)}
-          onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{multiple ? <><span className="recent-focus__message-count">{records.length > 99 ? '99+' : records.length}</span><span className="recent-focus__message-direction" aria-hidden="true">{recordKind === 'mixed' ? '↕' : replies ? <ArrowUpRight size={7} /> : <ArrowDownLeft size={7} />}</span></> : <><span className="recent-focus__message-avatar"><ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={16} /></span><span className="recent-focus__message-direction" aria-hidden="true">{replies ? <ArrowUpRight size={7} /> : <ArrowDownLeft size={7} />}</span></>}</button>
+          onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{Math.abs(anchorOffset) > .1 ? <span className="timeline-marker-stem" data-anchor-side={anchorOffset < 0 ? 'left' : 'right'} style={{ left: `calc(50% + ${Math.min(0, anchorOffset)}px)`, width: `${Math.abs(anchorOffset)}px` }} aria-hidden="true" /> : null}{multiple ? <><span className="recent-focus__message-count">{records.length > 99 ? '99+' : records.length}</span><span className="recent-focus__message-direction" aria-hidden="true">{recordKind === 'mixed' ? '↕' : replies ? <ArrowUpRight size={7} /> : <ArrowDownLeft size={7} />}</span></> : <><span className="recent-focus__message-avatar"><ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={16} /></span><span className="recent-focus__message-direction" aria-hidden="true">{replies ? <ArrowUpRight size={7} /> : <ArrowDownLeft size={7} />}</span></>}</button>
       })}
     </div>
   </div>
@@ -483,7 +495,7 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
     <div className="recent-focus__project-tracks" data-collapsed={collapsed} inert={collapsed} aria-hidden={collapsed || undefined}>
-      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
+      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing && !collapsed} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
     </div>
   </section>
 })
@@ -563,13 +575,14 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   </Dialog.Portal></Dialog.Root>
 }
 
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, historyWindowRequest, catalogue: sharedCatalogue }: {
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, historyWindowRequest, catalogue: sharedCatalogue, visible = true }: {
   entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
   /** Pure main-Region presentation input; the Reader continues using currentSessionId. */
   currentContext?: Pick<FocusContext, 'id' | 'hostId'> | null | undefined
   lanes?: readonly FocusProjectLane[]; hierarchy?: FocusHierarchyFacts; onSelect(sessionId: string): void
   historyWindowRequest?: { at: number; sequence: number } | undefined
   catalogue?: FocusHistoryCatalogue
+  visible?: boolean
 }) {
   const [mode, setMode] = useState<'compact' | 'expanded' | 'collapsed'>('compact')
   const [hours, setHours] = useState<number>(4)
@@ -592,7 +605,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const { clock, dateClock } = time
   useEffect(() => { setDateDraft(null); setDateError(null); setDateChoice(null) }, [time.zone])
   const [now, setNow] = useState(Date.now)
-  const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== 'hidden')
+  const [documentActive, setDocumentActive] = useState(document.visibilityState !== 'hidden')
+  const documentVisible = visible && documentActive
   const [readingContextId, setReadingContextId] = useState<string | null>(null)
   const [readerOpen, setReaderOpen] = useState(false)
   const [currentTrackPresent, setCurrentTrackPresent] = useState(false)
@@ -614,12 +628,12 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     let timer: ReturnType<typeof setInterval> | undefined
     const observe = () => {
       if (timer) clearInterval(timer)
-      const visible = document.visibilityState !== 'hidden'; setDocumentVisible(visible)
-      if (visible && mode !== 'collapsed') { setNow(Date.now()); timer = setInterval(() => setNow(Date.now()), 30_000) }
+      const active = document.visibilityState !== 'hidden'; setDocumentActive(active)
+      if (visible && active && mode !== 'collapsed') { setNow(Date.now()); timer = setInterval(() => setNow(Date.now()), 30_000) }
     }
     observe(); document.addEventListener('visibilitychange', observe)
     return () => { if (timer) clearInterval(timer); document.removeEventListener('visibilitychange', observe) }
-  }, [mode])
+  }, [mode, visible])
   const displayPath = usePathDisplay()
   const config = useAppStore(state => state.config)
   const registeredProjects = useMemo(() => new Set(config?.workspaces.map(workspace => JSON.stringify([workspace.hostId, workspace.id]))), [config])
@@ -1061,7 +1075,10 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         onContext: (id: string) => { setReadingContextId(id); setEarlier(false) },
         onMessage: (message: ConversationRecord) => setPreview(current => current ? { ...current, message } : current),
         onContinue: () => { if (!historical) setEarlier(true); else nativeWindow.continueReading() },
-        onRefresh: () => { if (historical) nativeWindow.refresh(); else void latest.refresh() }
+        onRefresh: () => {
+          if (inputContext && !inputTimeline) void useAppStore.getState().resyncTimeline(inputContext.id, { observationOnly: true })
+          if (historical) nativeWindow.refresh(); else void latest.refresh()
+        }
       } } : {})} /> : null}
   </section>
 })
