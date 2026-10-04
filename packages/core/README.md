@@ -56,9 +56,9 @@ Provider-native Resume 由 Core 从自己的 Session/provenance 物化新的通�
 Core 和 ctxmux 都不能把它暗中降为 Level A restart。
 
 ```ts
-import { connectLocalAgentMux } from '@agentmux/core'
+import { connectLocalAgentMuxRuntime } from '@agentmux/core'
 
-const client = await connectLocalAgentMux()
+const client = await connectLocalAgentMuxRuntime()
 const run = await client.createTerminal({ workspacePath: process.cwd() })
 const attachment = await client.attachTerminal(run.runId, 0)
 const secondViewReplay = await client.readRunReplay(run, 0)
@@ -70,6 +70,8 @@ await client.writeTerminal(run, {
 })
 await client.releaseRunAttachment(attachment.run)
 ```
+
+`connectLocalAgentMuxRuntime` 返回已连接原 Runtime 的 Client，终端控制不等待 Session 清单、Hook 或 Provider 观察。需要完整语义时，在同一 Client 上显式 `await client.connect()`；等待或失败期间仍保留终端能力，`runtimeDiagnostics()` 确认物理 Runtime，`onEvent` 提供观察失败阶段及后续恢复事实，修正原因后可再次 `connect()`。`connectLocalAgentMux` 仍等待完整观察成功才返回，适合直接需要 Agent 语义的调用者；两入口共用 Runtime、身份和生命周期。连接组合不新增同义 CLI，现有终端／Agent 命令继续使用原公开控制能力。
 
 Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTerminal(runId, afterByte)` 用累计 raw-output byte cursor 建立 retained Attachment，`readRunReplay(run, afterByte)` 在不新增 retained owner 的前提下为另一个 View 读取有界 Replay，`releaseRunAttachment(run)` 按 exact RunRef 释放。Input 调用方在 disposition 确定前保留 `ownerInstanceId + operationId + expectedByte + data`，新 Client 可以重试同一 operation，CtxMux 返回精确 applied byte range 且不会重复写 PTY。`signalTerminal(..., 'SIGINT')` 映射 CtxMux portable Interrupt，其他信号失败关闭。远程 Client 使用相同 API，连接方式见下文。
 
@@ -107,6 +109,7 @@ recoverable Input claim 收敛。
 `AGENT_PROMPT_INPUT_UNCONFIRMED`，保留后续事实与原生终端输入；这不代表 Agent 失效。
 
 ```ts
+await client.connect() // Load Session and Provider observation on the same Runtime.
 const session = await client.createAgent({
   providerId: 'codex',
   executorId: 'codex-full-auto',
