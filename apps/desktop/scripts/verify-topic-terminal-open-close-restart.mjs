@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
@@ -11,6 +12,8 @@ const desktop = path.resolve(import.meta.dirname, '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/topic-terminal-open-close-restart')
 const evidence = path.join(root, '.tmp/topic-terminal-open-close-restart/last')
+const workspaceMoveBuild = path.join(desktop, 'scripts/build-workspace-move-helper.mjs')
+const workspaceMoveHelper = path.join(desktop, 'resources/bin/agentmux-workspace-move')
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = require('electron')
@@ -24,6 +27,7 @@ const receipt = { schema: 'agentmux.topic-terminal-open-close-restart.v1', passe
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'),
+  workspaceMoveBuild, path.join(desktop, 'native/workspace-move.c'), workspaceMoveHelper,
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/dist')), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
@@ -31,7 +35,14 @@ const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STA
 let client
 await fs.mkdir(evidence, { recursive: true })
 try {
+  execFileSync(process.execPath, [workspaceMoveBuild], { cwd: root, stdio: 'inherit' })
   receipt.inputs = await hashes()
+  const privateHelper = path.join(privateRoot, 'resources/bin/agentmux-workspace-move')
+  await fs.mkdir(path.dirname(privateHelper), { recursive: true })
+  await fs.copyFile(workspaceMoveHelper, privateHelper)
+  receipt.workspaceMoveHelper = { source: path.relative(root, workspaceMoveHelper),
+    deployed: path.relative(privateRoot, privateHelper), sha256: hash(await fs.readFile(privateHelper)) }
+  assert.equal(receipt.workspaceMoveHelper.sha256, receipt.inputs[path.relative(root, workspaceMoveHelper)], 'Private deployment must use the exact native workspace helper')
   await fs.mkdir(path.join(privateRoot, 'topics'), { recursive: true })
   await fs.mkdir(path.join(privateRoot, 'node_modules/@agentmux'), { recursive: true })
   await fs.symlink(path.join(root, 'packages/core'), path.join(privateRoot, 'node_modules/@agentmux/core'))
@@ -41,7 +52,7 @@ try {
     resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
   await build({ configFile: false, root: fixture, logLevel: 'error',
-    build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
+    build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'out/main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
   // The ordinary Core daemon is shared by the two private Electron generations. Each Electron
   // watchdog owns only its own process group and phase directory; parent cleanup owns all Runs.
@@ -51,7 +62,7 @@ try {
     await fs.mkdir(phaseRoot)
     await fs.rm(path.join(evidence, `${phase}.json`), { force: true })
     const stderr = []
-    const exit = await runProbeProcess(electron, [path.join(privateRoot, 'main/main.mjs'), path.join(privateRoot, 'renderer/index.html'),
+    const exit = await runProbeProcess(electron, [path.join(privateRoot, 'out/main/main.mjs'), path.join(privateRoot, 'renderer/index.html'),
       privateRoot, phase, path.join(fixture, 'preload.cjs'), evidence, process.execPath, phaseRoot],
       { temporaryRoot: phaseRoot, cwd: root, env, timeoutMs: 75000, onLine: line => stderr.push(line.slice(0, 1800)) })
     const entry = { phase, exit, stderr }; receipt.phases.push(entry)
@@ -74,7 +85,8 @@ try {
     }
   }
   assert.equal(new Set(receipt.phases.map(phase => phase.native.pid)).size, 2)
-  assert.deepEqual(await hashes(), receipt.inputs, 'Source changed during native verification')
+  receipt.inputsAfter = await hashes()
+  assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source changed during native verification')
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {

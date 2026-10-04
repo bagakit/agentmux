@@ -8,6 +8,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { focusExecution } from '../../../src/renderer/src/lib/agent-focus'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { workbenchProjectionSlotId } from '../../../src/renderer/src/lib/workbench-projection'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import '../../../src/renderer/src/styles/index.css'
@@ -15,6 +16,8 @@ window.terminals = []
 const request = window.topicTerminalBoundary.request
 const setup = await request('setup')
 const workspace = setup.config.workspaces[0]
+window.topicTerminalMoteSlotId = prefix => workbenchProjectionSlotId(prefix,
+  { displayWorkspaceId: workspace.id, groupId: 'original-group', tabId: 'mote-tab' })
 const floatingStorageKey = 'agentmux.leader-topic-floating.v1'
 if (setup.phase === 'seed') window.localStorage.setItem(floatingStorageKey, JSON.stringify({
   open: true, targetTabId: 'mote-tab', maximized: false,
@@ -23,6 +26,10 @@ if (setup.phase === 'seed') window.localStorage.setItem(floatingStorageKey, JSON
 window.topicTerminalSavedFloating = () => JSON.parse(window.localStorage.getItem(floatingStorageKey) ?? 'null')
 window.topicTerminalFloatingAtStartup = window.topicTerminalSavedFloating()
 api.config.get = async () => setup.config
+api.spatial.read = () => request('spatial-read')
+api.spatial.commit = input => request('spatial-commit', input)
+api.spatial.retainLabels = values => request('spatial-labels', values)
+api.spatial.onChange = window.topicTerminalBoundary.onSpatialChange
 api.providers.list = async () => []
 api.demands.list = async () => []
 api.sessions.snapshot = async () => request('snapshot')
@@ -79,6 +86,13 @@ useAppStore.setState({ initialize: async () => {
   const dispose = await initialize()
   if (setup.phase === 'seed') {
     await api.scratch.ensureTopic(workspace.id, 'launcher:ordinary')
+    // Empty Topic selection only navigates. Explicit New Tab and Terminal actions own
+    // the original workface before rapid repeated navigation exercises its reuse.
+    await useAppStore.getState().openScratchTopic('launcher:ordinary', workspace.id, { newTab: true })
+    const born = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === 'launcher:ordinary')
+    if (!born) throw new Error('Explicit Topic New Tab required')
+    await useAppStore.getState().promoteWarmTerminal(useAppStore.getState().layouts[workspace.id].activeGroupId,
+      { tabId: born.id, regionId: born.layout.activeRegionId })
     await Promise.all([useAppStore.getState().openScratchTopic('launcher:ordinary'), useAppStore.getState().openScratchTopic('launcher:ordinary')])
     const ordinary = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === 'launcher:ordinary')
     if (!ordinary || Object.values(ordinary.regions).length !== 1) throw new Error('One default Topic Region required')
@@ -118,7 +132,7 @@ window.topicTerminalUi = () => ({
   sessionPanes: document.querySelectorAll('.agent-surface').length,
   close: [...document.querySelectorAll('.workbench-tab__close,.workbench-region__close')].map(button => ({ label: button.getAttribute('aria-label'), opacity: getComputedStyle(button).opacity })),
   floating: {
-    open: document.querySelector('[data-pmo-teams-topic-floating]')?.getAttribute('aria-hidden') === 'false',
+    open: document.querySelector('[data-pmo-teams-topic-floating]')?.matches(':popover-open') === true,
     saved: window.topicTerminalSavedFloating(),
     activeTabIds: [...document.querySelectorAll('[data-pmo-teams-topic-floating] .workbench-tab--active')].map(button => button.dataset.workbenchTabId)
   }

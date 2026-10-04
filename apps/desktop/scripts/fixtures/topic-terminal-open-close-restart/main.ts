@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 const [html, privateRoot, phase, preload, resultDirectory, nodeExecutable] = process.argv.slice(2)
@@ -18,8 +19,10 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, labe
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const topics = new ScratchTopics()
 const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')), localRuntimeConnector, topics)
+const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial-state.json'))
 const calls: { operation: string; args: any[]; at: number }[] = []
 let win: BrowserWindow
+let disposeSpatial: (() => void) | undefined
 const result: Record<string, any> = { passed: false, phase, pid: process.pid,
   boundary: 'Actual App/Store/SessionPane/TerminalView/xterm, Electron restart, filesystem Topic and public RuntimeController/Core/ctxmux private Terminal Runs. Private topology seed only; no user App/Run.' }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -27,6 +30,9 @@ ipcMain.handle('topic-terminal:request', async (event, operation, ...args) => {
   calls.push({ operation, args, at: Date.now() })
   switch (operation) {
     case 'setup': return { config, phase }
+    case 'spatial-read': return spatial.readForLayout()
+    case 'spatial-commit': return spatial.commit(args[0])
+    case 'spatial-labels': return spatial.retainDisplayLabels(args[0])
     case 'snapshot': return runtime.snapshot(config)
     case 'launch': return runtime.launchTerminal({ ...args[0], shellCommand: `'${nodeExecutable}' '${path.join(privateRoot, 'producer.cjs')}'` }, config)
     case 'attach': return runtime.attachSession(event.sender.id, args[0], args[1] ?? 0, config)
@@ -58,6 +64,9 @@ app.whenReady().then(async () => {
       webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer: ${message}\n`) })
     runtime.attach(win.webContents)
+    disposeSpatial = spatial.subscribe(state => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('topic-terminal:spatial-change', state)
+    })
     await win.loadFile(html)
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -88,10 +97,10 @@ app.whenReady().then(async () => {
     }
     await until(`window.topicTerminalUi().terminals.find(one => one.regionId === ${JSON.stringify(ids.regionId)})?.baseY > 800`)
     await win.webContents.executeJavaScript(`window.originalTopicTerminal = window.terminals.find(one => one.element?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === ${JSON.stringify(ids.regionId)}); window.originalMoteTerminal = window.terminals.find(one => one.element?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === 'mote-region'); true`)
-    await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element)')
+    await until('document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot"))?.contains(window.originalMoteTerminal.element)')
     assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll("[data-workbench-region-id=mote-launcher-region]").length'), 1, 'Earlier launcher is retained once; no healthy workface is removed')
     await win.webContents.executeJavaScript('topicTerminalCloseFloat()')
-    await until('document.getElementById("workbench-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element)')
+    await until('document.getElementById(topicTerminalMoteSlotId("workbench-tab-slot"))?.contains(window.originalMoteTerminal.element)')
     assert.deepEqual((await state()).focus.execution, result.initial.state.focus.execution, 'Closing saved-open floating target keeps original execution focus')
     await delay(300)
     await win.webContents.executeJavaScript('window.topicEventCounts.tracking = true; true')
@@ -111,18 +120,18 @@ app.whenReady().then(async () => {
     assert.equal(Object.keys(result.eventConsumers.raw).length, 4, 'All four private active Runs must publish observed bytes')
     assert.deepEqual(result.eventConsumers.delivered, result.eventConsumers.raw, 'Each fact reaches exactly its related terminal consumer, regardless of unrelated Runs')
     await win.webContents.executeJavaScript('topicTerminalBoard(); topicTerminalOpenFloat()')
-    await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element) && window.topicTerminalUi().terminals.find(one => one.regionId === "mote-region")?.visible')
+    await until('document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot"))?.contains(window.originalMoteTerminal.element) && window.topicTerminalUi().terminals.find(one => one.regionId === "mote-region")?.visible')
     assert.equal((await ui()).sessionPanes, 4)
     assert.deepEqual((await ui()).floating.activeTabIds, ['mote-tab'], 'Chrome and original View share the explicit target')
-    assert.equal(await win.webContents.executeJavaScript('window.terminals.filter(one => one.element?.isConnected).length === 4 && document.getElementById("mote-floating-tab-slot:mote-tab").contains(window.originalMoteTerminal.element)'), true)
+    assert.equal(await win.webContents.executeJavaScript('window.terminals.filter(one => one.element?.isConnected).length === 4 && document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot")).contains(window.originalMoteTerminal.element)'), true)
     assert.deepEqual((await state()).focus.execution, result.initial.state.focus.execution, 'Shortcut opening preserves the original execution focus and history')
     result.floating = await ui()
     await win.webContents.executeJavaScript('topicTerminalNoWorkspace()')
-    await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element)')
+    await until('document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot"))?.contains(window.originalMoteTerminal.element)')
     assert.equal((await ui()).sessionPanes, 4, 'Board with no active Project must retain the original floating owner')
     // Keep the floating terminal genuinely usable after a full cold-parking deadline.
     if (phase === 'seed') await delay(31000)
-    assert.equal(await win.webContents.executeJavaScript('window.originalMoteTerminal.element?.isConnected && document.getElementById("mote-floating-tab-slot:mote-tab").contains(window.originalMoteTerminal.element)'), true)
+    assert.equal(await win.webContents.executeJavaScript('window.originalMoteTerminal.element?.isConnected && document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot")).contains(window.originalMoteTerminal.element)'), true)
     await win.webContents.executeJavaScript(`(() => { const term = window.originalMoteTerminal; term.focus(); })()`)
     for (const text of 'private-input-still-works') await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'char', text })
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' })
@@ -130,17 +139,20 @@ app.whenReady().then(async () => {
     await until('window.terminals.some(one => Array.from({length:one.buffer.active.length},(_,n)=>one.buffer.active.getLine(n)?.translateToString()).some(line=>line?.includes("ACK:private-input-still-works")))')
     result.inputWrites = calls.filter(call => call.operation === 'write').length
     assert.ok(result.inputWrites > 0)
+    result.inputFocus = (await state()).focus.execution
+    assert.equal(result.inputFocus.sessionId, ids.moteId, 'Explicit native input selects the original Mote Run')
+    assert.deepEqual(result.inputFocus.reference, { displayWorkspaceId: '__scratch__', groupId: 'original-group', tabId: 'mote-tab', regionId: 'mote-region' }, 'Native input retains the exact original Mote occurrence')
     await win.webContents.executeJavaScript('topicTerminalCloseFloat()')
-    assert.deepEqual((await state()).focus.execution, result.initial.state.focus.execution, 'Shortcut closing preserves the original execution focus and history')
+    assert.deepEqual((await state()).focus.execution, result.inputFocus, 'Shortcut closing preserves the latest explicit input execution focus and history')
     await win.webContents.executeJavaScript('window.topicTerminalWorkbench()')
     await win.webContents.executeJavaScript('window.topicTerminalRestoreWorkspace()')
-    await until('document.getElementById("workbench-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element)')
+    await until('document.getElementById(topicTerminalMoteSlotId("workbench-tab-slot"))?.contains(window.originalMoteTerminal.element)')
     assert.equal((await ui()).sessionPanes, 4)
     assert.equal(await win.webContents.executeJavaScript('window.originalTopicTerminal.element?.isConnected'), true)
     result.originalViewportAfterFloat = await win.webContents.executeJavaScript('window.originalTopicTerminal.buffer.active.viewportY')
     assert.equal(result.originalViewportAfterFloat, result.reading.at(-1).after, 'Floating navigation preserves the original ongoing history reading position')
     assert.equal((await state()).layouts.__scratch__.groups[0].activeTabId, ids.tabId, 'Floating open/close must keep the original main Topic selected')
-    assert.equal((await state()).focus.execution.sessionId, result.initial.state.focus.execution.sessionId, 'Returning to Workbench keeps the original execution Session')
+    assert.deepEqual((await state()).focus.execution, result.inputFocus, 'Returning to Workbench keeps the latest explicit input execution Session and history')
     result.closeEntries = (await ui()).close
     assert.ok(result.closeEntries.length > 0)
     assert.ok(result.closeEntries.every((entry: any) => Number(entry.opacity) > 0), 'All actual close entries must be visible without hovering')
@@ -158,7 +170,7 @@ app.whenReady().then(async () => {
       assert.equal(result.afterClose.tabs[ids.tabId].regions[ids.regionId].sessionId, ids.sessionId)
     }
     await win.webContents.executeJavaScript('topicTerminalOpenFloat()')
-    await until('document.getElementById("mote-floating-tab-slot:mote-tab")?.contains(window.originalMoteTerminal.element) && window.topicTerminalUi().floating.activeTabIds[0] === "mote-tab"')
+    await until('document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot"))?.contains(window.originalMoteTerminal.element) && window.topicTerminalUi().floating.activeTabIds[0] === "mote-tab"')
     result.savedOpenForRestart = { state: await state(), ui: await ui() }
     assert.equal(result.savedOpenForRestart.ui.floating.saved.open, true)
     assert.equal(result.savedOpenForRestart.ui.floating.saved.targetTabId, 'mote-tab')
@@ -178,6 +190,7 @@ app.whenReady().then(async () => {
     result.calls = calls
     if (win && !win.isDestroyed()) result.observationAtFailure = await win.webContents.executeJavaScript('({ state: window.topicTerminalState?.(), ui: window.topicTerminalUi?.() })').catch(() => null)
   } finally {
+    disposeSpatial?.()
     await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
     await fs.writeFile(path.join(resultDirectory, `${phase}.json`), JSON.stringify(result, null, 2))
     if (win && !win.isDestroyed()) win.destroy()
