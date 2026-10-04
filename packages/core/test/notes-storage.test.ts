@@ -115,7 +115,7 @@ describe('one durable Notes directory operation', () => {
     if (damage === 'missing body') await rm(join(f.target, 'one.note.json'))
     if (damage === 'changed body') await writeFile(join(f.target, 'one.note.json'), 'damaged target')
     if (damage === 'missing catalog') await rm(join(f.target, 'notebooks.json'))
-    if (damage === 'changed catalog') { const catalog = JSON.parse(await readFile(join(f.target, 'notebooks.json'), 'utf8')); catalog.pages = {}; await writeFile(join(f.target, 'notebooks.json'), JSON.stringify(catalog)) }
+    if (damage === 'changed catalog') { const catalog = JSON.parse(await readFile(join(f.target, 'notebooks.json'), 'utf8')); catalog.pages['original-note'].resource.workspacePath = f.original; await writeFile(join(f.target, 'notebooks.json'), JSON.stringify(catalog)) }
     acknowledged = true; await expect(storage.change(operation)).rejects.toThrow()
     expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
     expect(await readFile(join(f.original, 'notebooks.json'), 'utf8')).toContain('original-note')
