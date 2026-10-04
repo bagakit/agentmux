@@ -79,10 +79,15 @@ it('a contributed module reaches Overview, sidebar, compact menu, search and its
     'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'mote', 'space', 'focus', 'goals', 'survey', 'notes', 'toolkit', 'agents', 'prompts', 'hosts', 'devices'
   ])
   const catalog = visibleSettingsSections('')
-  expect(catalog.map(module => module.id)).toEqual([...registration.originalIds, 'fixture-module'])
+  expect(catalog.map(module => module.id)).toEqual([
+    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
+    'hosts', 'devices', 'agents', 'prompts', 'fixture-module',
+    'space', 'focus', 'goals', 'survey', 'notes', 'mote', 'toolkit'
+  ])
   const navigation = settingsNavGroups('').flatMap(group => group.items)
   expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
   expect(navigation).toHaveLength(catalog.length)
+  expect(navigation.map(module => module.id)).toEqual(catalog.map(module => module.id))
   expect([...dom.container.querySelectorAll('[data-settings-overview] [data-settings-section]')]
     .map(node => node.getAttribute('data-settings-section'))).toEqual(navigation.map(module => module.id))
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')]
@@ -222,7 +227,7 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   const row = connected('[data-settings-target="toolkit"]', nav)
   expect(row.previousElementSibling!.textContent).toBe('Mods')
   const groups = settingsNavGroups('')
-  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Mote', 'Work', 'Mods', 'Resources', 'Connections'])
+  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Connections', 'Resources', 'Work', 'Mote', 'Mods'])
   expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
   await section('Toolkit Library')

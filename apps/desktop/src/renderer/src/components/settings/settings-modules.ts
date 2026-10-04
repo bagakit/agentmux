@@ -17,7 +17,7 @@ import { moteSettingsModule } from './modules/mote'
 import { surveySettingsModule } from './modules/survey'
 import { notesSettingsModule } from './modules/notes'
 
-/** The only Renderer composition point. Order is the product's navigation order. */
+/** The only Renderer composition point. Registration preserves order within each group. */
 export const settingsModules = [
   profileSettingsModule,
   appearanceSettingsModule,
