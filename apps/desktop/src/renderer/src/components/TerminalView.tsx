@@ -90,7 +90,7 @@ import {
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
-import { agentSessionServiceOutcome, nativeSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -1854,7 +1854,7 @@ export function TerminalView({
               attachment: JSON.stringify([attachmentFailure?.step, attachmentFailure ? errorIdentity(attachmentFailure.message) : null]),
               sessionObservation: JSON.stringify([session.kind === 'agent' ? session.terminalCapability?.reason : null,
                 session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
-                session.status.state === 'disconnected' ? session.status.detail : null]),
+                session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session)]),
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
             }}

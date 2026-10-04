@@ -4,6 +4,9 @@ import type { AgentMuxNativeService, AgentMuxAgentSession } from '@agentmux/core
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { projectRuntimeEvent, type SessionProjectionState } from '../src/renderer/src/lib/session-state'
 import { nativeSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../src/renderer/src/lib/service-window-notice'
+import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
+import { serviceNoticeFingerprint } from '../src/renderer/src/lib/use-service-notices'
+import { composerSubmitMode } from '../src/renderer/src/lib/composer-submit-mode'
 
 function service(revision: number): AgentMuxNativeService {
   return { revision, owner: { type: 'serving' }, output: { type: 'serving' },
@@ -16,6 +19,54 @@ function session(hostId = 'local', runId = 'original'): SessionSnapshot {
     status: { state: 'working', source: 'run-process', observedAt: 1 }, nativeService: service(1),
     control: { kind: 'terminal', hostId, runId, run: { runId } } }
 }
+it('shows output pressure in Terminal and Activity without changing input or identity, then clears only on current Serving', () => {
+  const original = session(), other = session('local', 'other')
+  const state: SessionProjectionState = { sessions: [original, other], timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
+  const pressured = { ...service(2), output: { type: 'backpressured' as const } }
+  const event = { type: 'core' as const, hostId: 'local', event: { type: 'run-service' as const,
+    run: { runId: 'original' }, nativeService: pressured,
+    evidence: { source: 'run-process' as const, observedAt: 2, run: { runId: 'original' } } } }
+  const reduced = projectRuntimeEvent(state, event).state
+  const current = reduced.sessions[0]!
+  expect(current.control).toBe(original.control)
+  expect(current.processState).toBe('running')
+  expect(current.nativeService?.input).toEqual(original.nativeService?.input)
+  expect(reduced.sessions[1]).toBe(other); expect(reduced.tabs).toBe(state.tabs); expect(reduced.layouts).toBe(state.layouts)
+  const terminal = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(current)))
+  expect(terminal?.kind).toBe('process-degraded')
+  expect(terminal?.notice.mode).toContain('resource pressure')
+  expect(terminal?.notice.mode).toContain('input is open')
+  expect(terminal?.notice.mode).not.toContain('disk is full')
+  expect(terminal?.notice.restore).toContain('do not resend unconfirmed input')
+  const unknown = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome({ ...current, processState: 'interrupted' })))
+  expect(unknown?.kind).toBe('indeterminate')
+  expect(unknown?.notice.step).toContain('resource pressure')
+  expect(unknown?.notice.mode).toContain('can’t confirm')
+  const inputFailed = { ...current, nativeService: { ...pressured, input: { ...pressured.input,
+    phase: { type: 'unavailable' as const, reason: 'write_failed' as const }, completedInputBytes: null } } }
+  expect(nativeSessionServiceOutcome(inputFailed)).toMatchObject({ completed: false, step: { degradedMode: expect.stringContaining('input unavailable') } })
+  expect(nativeSessionServiceOutcome(inputFailed)).toMatchObject({ completed: false, step: { degradedMode: expect.stringContaining('output under resource pressure') } })
+  const remainingFault = { ...current, nativeService: { ...service(4), terminalFault: { stage: 'export' as const, throughByte: 12 } } }
+  expect(sessionServiceNotices(remainingFault)[0]?.notice.notice.mode).toContain('terminal view export')
+  expect(sessionServiceNotices(remainingFault)[0]?.notice.notice.mode).not.toContain('resource pressure')
+  const agent: SessionSnapshot = { ...current, kind: 'agent', providerId: 'codex', executorId: 'codex', capabilities: {},
+    control: { kind: 'agent', hostId: 'local', agentSessionId: 'agent', run: { runId: 'original' } } }
+  const activity = sessionServiceNotices(agent)
+  expect(activity.map(item => item.id)).toEqual(['native-service'])
+  expect(activity[0]?.notice).toEqual(terminal)
+  expect(composerSubmitMode(agent)).toMatchObject({ canType: true, canSubmit: true })
+  const notices = sessionServiceNotices(current)
+  expect(notices).toHaveLength(1)
+  expect(serviceNoticeFingerprint(sessionServiceNotices({ ...current, nativeService: { ...pressured, revision: 3 } })[0]!))
+    .toBe(serviceNoticeFingerprint(notices[0]!))
+  expect(serviceNoticeFingerprint(sessionServiceNotices(inputFailed)[0]!)).not.toBe(serviceNoticeFingerprint(notices[0]!))
+  expect(sessionServiceNotices(other)).toEqual([])
+  const stale = projectRuntimeEvent(reduced, { ...event, event: { ...event.event, nativeService: service(1) } }).state
+  expect(sessionServiceNotices(stale.sessions[0]!)).toHaveLength(1)
+  const recovered = projectRuntimeEvent(stale, { ...event, event: { ...event.event, nativeService: service(4) } }).state
+  expect(sessionServiceNotices(recovered.sessions[0]!)).toEqual([])
+  expect(serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(recovered.sessions[0]!)))).toBeNull()
+})
 it('projects one Run-local service revision into the existing service window without changing process, layout or other Runs', () => {
   const original = session(), otherRun = session('local', 'other'), otherHost = session('remote')
   const state: SessionProjectionState = {

@@ -2,15 +2,21 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queue-drain'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
-import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
+import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
 import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './agent-lifecycle-feedback'
 
 /** Both inboxes project the same current owners; reading a notice never settles its cause. */
 export function sessionServiceNotices(session: SessionSnapshot | undefined, queue: readonly AgentSteerQueueEntry[] = [], sendingId?: string,
   lifecycleError?: { message: string | null; failure: AgentLifecycleFailure | undefined }): ServiceNoticeItem[] {
-  if (session?.kind !== 'agent') return []
   const notices: ServiceNoticeItem[] = []
+  if (session) {
+    const notice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session)))
+    if (notice) notices.push({ id: 'native-service',
+      occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId]),
+      cause: nativeSessionServiceCause(session), notice })
+  }
+  if (session?.kind !== 'agent') return notices
   if (session.creation?.initialPrompt === 'unconfirmed' || session.creation?.initialPrompt === 'unknown') notices.push({
     id: 'initial-prompt', occurrence: session.creation.createOperationId, notice: { kind: 'indeterminate', notice: {
       step: 'The original first prompt is unconfirmed', mode: 'The existing Agent Session remains available. Its first prompt will not be sent again automatically.',
