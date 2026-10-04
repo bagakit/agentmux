@@ -239,7 +239,7 @@ function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
       return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code) }
     })()
     return { tabId: spaceControlId(item.tabId, 'Tab', code, true), regionId: spaceControlId(item.regionId, 'Region', code, true),
-      kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'], 'Region kind', code),
+      kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git', 'git-diff', 'launcher'], 'Region kind', code),
       agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution,
       ...(Object.hasOwn(item, 'browserId') ? { browserId: spaceControlId(item.browserId, 'Browser', code, true) } : {}),
       ...(Object.hasOwn(item, 'file') ? { file: (() => { const file = fields(item.file, ['workspaceId', 'path', 'zoneRelativePath', 'issue'], code); return { workspaceId: spaceControlId(file.workspaceId, 'File Workspace', code), path: string(file.path, 'File path', code), ...(Object.hasOwn(file, 'zoneRelativePath') ? { zoneRelativePath: string(file.zoneRelativePath, 'Zone-relative file path', code) } : {}), ...(Object.hasOwn(file, 'issue') ? { issue: string(file.issue, 'File resource issue', code) } : {}) } })() } : {}) }

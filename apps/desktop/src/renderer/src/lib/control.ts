@@ -94,6 +94,7 @@ function projectSurface(
       return { ...base, kind: 'browser', browserId: surface.browserId }
     case 'file':
       return { ...base, kind: 'file', path: surface.path }
+    case 'git':
     case 'git-diff':
       return { ...base, kind: 'view' }
     case 'launcher':

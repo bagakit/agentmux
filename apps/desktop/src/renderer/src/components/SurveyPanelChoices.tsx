@@ -19,6 +19,7 @@ function contentKind(surface: WorkbenchSurface | undefined) {
     case 'agent': return { name: 'Agent', Icon: Bot }
     case 'terminal': return { name: 'Terminal', Icon: Terminal }
     case 'file': return { name: surface.path.endsWith('.note.json') ? 'Note' : 'File', Icon: FileText }
+    case 'git': return { name: 'Git history', Icon: FileText }
     case 'git-diff': return { name: 'Diff', Icon: FileText }
     case 'launcher': return { name: 'New Tab', Icon: Plus }
   }

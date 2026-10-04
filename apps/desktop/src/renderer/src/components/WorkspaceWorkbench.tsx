@@ -109,6 +109,11 @@ import {
 } from '../lib/surface-memory-budget-coordinator'
 import { DESKTOP_SESSION_ATTRIBUTE } from '../../../shared/desktop-actions'
 
+const GitWorkbenchPane = lazy(async () => {
+  const module = await import('./GitWorkbenchPane')
+  return { default: module.GitWorkbenchPane }
+})
+
 const GitBranchDiffPane = lazy(async () => {
   const module = await import('./GitBranchDiffPane')
   return { default: module.GitBranchDiffPane }
@@ -581,6 +586,11 @@ function SurfaceContent({
         }}
       />
     )
+  }
+  if (surface.kind === 'git') {
+    return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git" title="Loading history" detail="Opening the repository history." />}>
+      <GitWorkbenchPane surface={surface} visible={surfaceVisible} />
+    </Suspense>
   }
   if (surface.kind === 'git-diff') {
     return (

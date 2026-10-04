@@ -137,7 +137,7 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
     id(r.tabId);
     nullableId(r.agentSessionId);
     nullableId(r.runId);
-    if (!['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'].includes(String(r.kind)))
+    if (!['agent', 'terminal', 'browser', 'file', 'git', 'git-diff', 'launcher'].includes(String(r.kind)))
       invalid('Invalid Region kind.');
     if (r.execution !== null) {
       const e = record(r.execution);

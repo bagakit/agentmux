@@ -22,8 +22,14 @@ export function GitBranchDiffPane({ surface, released = false, visible = true }:
     if (visible && !released && !useAppStore.getState().editorRegionDiffs[surface.regionId]) void load(surface.regionId)
   }, [visible, released, surface.regionId, load])
   if (released) return <EditorReleasedState />
-  const { snapshot, file } = surface.comparison
-  const baseLabel = snapshot.mode === 'merge-base' ? `Merge base of ${snapshot.baseBranch} and ${snapshot.targetBranch}` : snapshot.baseBranch
+  const { file } = surface.comparison
+  const commit = 'kind' in surface.comparison && surface.comparison.kind === 'commit' ? surface.comparison : null
+  const branch = !commit ? surface.comparison as import('../../../shared/git-contracts').GitBranchDiffDescriptor : null
+  const baseLabel = commit ? (commit.snapshot.parentOid ? 'Parent' : 'Empty tree')
+    : branch!.snapshot.mode === 'merge-base' ? 'Merge base' : branch!.snapshot.baseBranch
+  const targetLabel = commit ? 'Commit' : branch!.snapshot.targetBranch
+  const baseOid = commit ? commit.snapshot.parentOid : branch!.snapshot.comparisonBaseOid
+  const targetOid = commit ? commit.snapshot.commitOid : branch!.snapshot.targetOid
   return (
     <section className="editor-pane git-branch-diff" data-git-diff-region={surface.regionId}>
       <header className="editor-header">
@@ -31,20 +37,22 @@ export function GitBranchDiffPane({ surface, released = false, visible = true }:
           {file.origPath ? `${file.origPath} → ${file.path}` : file.path}
         </span>
         <div className="editor-header__actions">
-          <button className="small-button" aria-pressed={wordWrap} title="Toggle word wrap (Alt+Z)" onClick={toggleWordWrap}>
-            <WrapText size={13} /> Wrap
+          <button className="small-button" aria-label="Toggle diff word wrap" aria-pressed={wordWrap} title="Toggle word wrap (Alt+Z)" onClick={toggleWordWrap}>
+            <WrapText size={13} /><span className="editor-header__label">Wrap</span>
           </button>
-          <button className="small-button" disabled={Boolean(diff?.loading)} title="Reread these fixed commits" onClick={() => void load(surface.regionId)}>
-            <RefreshCw size={13} /> {diff?.loading ? 'Loading…' : 'Reload'}
+          <button className="small-button" aria-label="Reload fixed diff" disabled={Boolean(diff?.loading)} title="Reread these fixed commits" onClick={() => void load(surface.regionId)}>
+            <RefreshCw size={13} /><span className="editor-header__label">{diff?.loading ? 'Loading…' : 'Reload'}</span>
           </button>
         </div>
       </header>
       <div className="git-branch-diff__commits" aria-label="Fixed comparison commits">
-        <span title={`${baseLabel}: ${snapshot.comparisonBaseOid}`}>{baseLabel} · {snapshot.comparisonBaseOid.slice(0, 8)}</span>
-        <span title={`${snapshot.targetBranch}: ${snapshot.targetOid}`}>{snapshot.targetBranch} · {snapshot.targetOid.slice(0, 8)}</span>
+        <span title={`${baseLabel}: ${baseOid ?? "no parent"}`}>{baseLabel}{baseOid ? ` · ${baseOid.slice(0, 8)}` : ""}</span>
+        <span title={`${targetLabel}: ${targetOid}`}>{targetLabel} · {targetOid.slice(0, 8)}</span>
       </div>
       {diff?.error && diff.diff ? <div className="branches-inline-error" role="alert">{diff.error}</div> : null}
-      <GitDiffCanvas diff={diff} wordWrap={wordWrap} language={detectLanguage(file.path)} theme={theme} />
+      <div className="git-branch-diff__canvas">
+        <GitDiffCanvas diff={diff} wordWrap={wordWrap} language={detectLanguage(file.path)} theme={theme} />
+      </div>
     </section>
   )
 }

@@ -7,6 +7,8 @@ import { firstPromptFromTimeline, tabDisplayName, titleWorkbenchSurface, type Ag
 function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[], metadata: Readonly<Record<string, AgentSessionNameMetadata>>): string {
   const surface = titleWorkbenchSurface(tab)
   switch (surface.kind) {
+    case 'git':
+      return 'Git history'
     case 'git-diff':
       return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':

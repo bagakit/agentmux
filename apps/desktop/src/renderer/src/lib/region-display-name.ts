@@ -17,6 +17,8 @@ export function regionSurfaceLabel(
   metadata: Readonly<Record<string, AgentSessionNameMetadata>> = {}
 ): string {
   switch (surface.kind) {
+    case 'git':
+      return 'Git history'
     case 'git-diff':
       return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':

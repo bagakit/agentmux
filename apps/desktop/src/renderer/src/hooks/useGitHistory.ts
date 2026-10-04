@@ -38,7 +38,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
   }, [])
 
   const read = useCallback(async (more: boolean) => {
-    if (!scope.current.enabled || (more && busy.current)) return false
+    if (!scope.current.enabled || scope.current.key !== key || scope.current.reference !== reference || (more && busy.current)) return false
     const previous = latest.current?.key === key && latest.current.reference === reference ? latest.current : null
     const cursor = more && previous?.result?.kind === 'ready' ? previous.result.nextCursor : null
     if (more && !cursor) return false
@@ -57,6 +57,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
       if (cursor && next.kind === 'ready' && previous?.result?.kind === 'ready') {
         const commits = [...previous.result.commits, ...next.commits]
         if (new Set(commits.map(commit => commit.oid)).size !== commits.length) throw new Error('History page repeated an already loaded commit. Refresh to read a new snapshot.')
+        if (next.nextCursor && (next.commits.length === 0 || next.nextCursor.offset <= cursor.offset)) throw new Error('History page did not advance. Retry or refresh to read a new snapshot.')
         result = { ...next, commits }
       }
       busy.current = false
