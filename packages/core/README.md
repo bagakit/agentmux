@@ -12,6 +12,8 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 `defaultLocalHostLabel(platform?)` 为新本机 Host 提供显示默认值，`LocalExecutionHost` 与宿主的新配置共同消费；传入或保存的 `label` 继续优先。该函数沿 [execution-host.ts](src/execution-host.ts) 导出，只处理名称，不探测能力或启动 Runtime；默认名称的系统规则见[机器目录分区合同](../../docs/design/behavior/spaces-and-layout.md#跨设备关联项目组)。
 
+`probeAgent`、`probeExecutorAvailability` 与本地 Host Executor owner 的配置／发现不要求 ctxmux 连接；它们读取该语义 Host 的 Provider 与文件系统。Hosted 调用仍在准确远端 owner 上执行，本地探测不代签远端。Executor 注册表保留原 schema、Host 身份、逐项校验与 durable CAS 写入，不以累计条数或文件字节预算拒绝合法增长；Control 回执消费完整清单，公开快照仍按调用方的分页 limit 返回。
+
 
 ## 原生对话读取
 
