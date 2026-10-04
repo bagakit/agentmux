@@ -28,7 +28,7 @@
 
 ## 范围与基础约束
 
-Agent 名片、Region／Tab 地址及 File／Browser 上下文分享的字段、命令与来源层次统一引用[交互合同《寻址与复制》](../behavior/spaces-and-layout.md#寻址与复制)。同族分享采用相同紧凑外框与文字层次，不叠概念说明或装饰徽标；代码／页面正文保持原阅读格式，普通路径、URL、选区及终端内容继续沿其原复制语汇。
+Agent／Region／Tab／Category／Topic 的对象分享直接复制链接，菜单使用清楚的 Copy … Link 名称，同一对象不并列重复的名片或消息复制动作；沿既有菜单密度、图标与键盘焦点，不新增装饰或说明面。File／Browser 上下文分享保留原紧凑外框与正文阅读格式；身份、链接、命令发现及来源唯一引用[交互合同《寻址与复制》](../behavior/spaces-and-layout.md#寻址与复制)。普通路径、URL、选区及终端内容继续沿原复制语汇。
 
 Provider 完整性（Session 分析、对话模式与 trace 观察）的行为与能力边界统一见 [交互合同《Provider 能力对齐与移植边界》](../behavior/agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)。同类消息、资源与观察事实沿既有公共组件呈现；缺口与流程降级沿既有服务窗表达，不能逐家制造另一套控件语言。 合法空或被遮蔽 reasoning 仍沿既有 trace 折叠可达，opaque 数据不铺成正文，不增加常驻控件；真实性只定义在该交互合同。
 

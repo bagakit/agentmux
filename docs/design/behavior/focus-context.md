@@ -47,7 +47,7 @@ Focus 的 Mote 待处理入口在窄栏仍能辨认当前 Mote、真实待处理
 
 指针可自然移入预览阅读、滚动和选择文字；预览内部滚动不关闭自身。Escape、外部泳道滚动、打开菜单或改名、原来源失效、隐藏及卸载废弃本次查看和迟到计时，不能复活旧对象。普通左键与 Enter／Space 仍执行原 Focus 导航。
 
-卡片右键、Shift+F10 与 ContextMenu 键打开同一准确 Agent 菜单，不改变当前选中；菜单头仅用单行名称确认本次对象，长名称省略且按需可读完整名称，不重复状态或 SID 说明。菜单保留 `Rename Agent` 与唯一 `Copy Session Address`，并在独立停止动作组提供 `Stop Agent`；打开沿原卡片左键与 Enter／Space，不重复为菜单动作；改名只调用该 SID 的既有命名 owner；复制仅选择原 `copy-session` action、唯一 formatter、clipboard 与错误出口，得到含发送与查看模板的准确 Session 地址名片，不发送消息。只有 SID 时现有 Message 入口与 Session 入口复制内容相同，Focus 不重复展示两项；不改公共 AgentRoster action 源或其他菜单。多位置或无确认 Region 时不猜空间地址，不继承 Region 关闭、重排或其他 Runtime 控制；复制失败仍沿原错误告知。行内改名的 Escape 取消、空值回既有派生、Enter／失焦提交保护输入法组合过程；退出编辑或菜单不得夺走用户后来选择的焦点。查看和复制保原输入、草稿与生命周期，显式改名仅改变命名事实。
+卡片右键、Shift+F10 与 ContextMenu 键打开同一准确 Agent 菜单，不改变当前选中；菜单头仅用单行名称确认本次对象，长名称省略且按需可读完整名称，不重复状态或 SID 说明。菜单保留 `Rename Agent` 与唯一 `Copy Agent Link`，并在独立停止动作组提供 `Stop Agent`；打开沿原卡片左键与 Enter／Space，不重复为菜单动作；改名只调用该 SID 的既有命名 owner；复制仅选择原 `copy-session` action、唯一 formatter、clipboard 与错误出口，得到准确 `amux://agent/<SID>`，不发送消息。各入口只保留一个 Agent Link，复用同一 formatter 与 clipboard；空间对象按[统一对象链接](spaces-and-layout.md#寻址与复制)提供独立链接。多位置或无确认 Region 时不猜空间地址，不继承 Region 关闭、重排或其他 Runtime 控制；复制失败仍沿原错误告知。行内改名的 Escape 取消、空值回既有派生、Enter／失焦提交保护输入法组合过程；退出编辑或菜单不得夺走用户后来选择的焦点。查看和复制保原输入、草稿与生命周期，显式改名仅改变命名事实。
 
 Focus 卡片 Agent 菜单与操作栏对明确选中的语义 Agent 共用 `Stop Agent` 动作和原确认框；停止本次准确 Host／SID／Run，不是当前 Tab、Region、Chat 收件 Mote 或后来替换的 Run。确认前沿原 owner 重新核对身份，缺失或改变只拒绝这次停止并给原 subject 服务说明；活动 unknown 不自行拿走已确认控制身份的显式停止能力。pending 防双点，确认取消与关闭保原键盘返回和较晚主动焦点优先。调用沿公共停止接口，未确认、失败或等待超时保原工作面与草稿并明确未知，不乐观删投影、不冒称已停止、不自动重试或停止其他 Session。Core 确认准确 Run 终局后，沿原退休／run-removed owner 移除已停止投影，保原 Session、native conversation 与历史退休资料供原显式恢复；不承诺成功后旧 Tab 仍在，也不因查询或重启恢复退休 Run。旁边健康工作面、草稿和 Run 不受影响。Focus 收起仍只改变呈现，不与停止混名。
 

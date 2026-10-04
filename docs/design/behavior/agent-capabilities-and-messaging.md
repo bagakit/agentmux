@@ -42,7 +42,7 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 | 可读格式 | 用途 | 唯一合同 | 当前公共出口 |
 | --- | --- | --- | --- |
 | `<amux from="amux">…</amux>` | 随请求附带或独立投递的平台说明 | [AgentMux 注入上下文](#agentmux-注入上下文) | [Core `composeAgentPrompt` / `composeOutboundMessage`](../../../packages/core/src/agent-outbound-message.ts) |
-| `--- amux : IDCard/Region/Tab/File/Browser ---` … `-----` | 可复制的对象地址与内容分享 | [寻址与复制](spaces-and-layout.md#寻址与复制) | [Core `formatAmuxSharing` 及对象格式器](../../../packages/core/src/sharing.ts) |
+| `amux://<kind>/<ID>`；`--- amux : File/Browser ---` … `-----` | 可复制的对象链接与内容分享 | [寻址与复制](spaces-and-layout.md#寻址与复制) | [Core `formatAmuxObjectLink`／`parseAmuxObjectLink` 及内容格式器](../../../packages/core/src/sharing.ts) |
 | `[Message from Agent <canonical Session ID>]` 加原正文 | Core 核验作者后的跨 Session 消息可读来源 | [A2A 身份信封与持久化全局消息队列](#a2a-身份信封与持久化全局消息队列) | [Core `renderAgentMuxMessageEnvelope`](../../../packages/core/src/agent-message-render.ts)，作者核验与持久投递仍归 Core |
 
 ## AgentMux 注入上下文
