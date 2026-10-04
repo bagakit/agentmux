@@ -20,7 +20,7 @@ import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-r
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
-import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { agentSessionIdsOfUserMessages, createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -358,11 +358,10 @@ export function SessionPane({
     : undefined
   // Observe only identity facts for the Agents actually represented in this reading surface.
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
-  const speakerIds = useMemo(() => [...new Set([sessionId, ...userMessages.flatMap(message =>
-    message.author.kind === 'agent' ? [message.author.agentSessionId] : [])])], [sessionId, userMessages])
+  const speakerIds = useMemo(() => [...new Set([sessionId, ...agentSessionIdsOfUserMessages(userMessages)])], [sessionId, userMessages])
   const speakerFacts = useObservedAppStore('sessionPane', observationVisible, useShallow(state => activityDemand ? speakerIds.flatMap(id => {
     const sender = sessionPresentationById(state.sessions).get(id)
-    if (!sender || sender.kind !== 'agent') return [id]
+    if (!sender || sender.kind !== 'agent') return [id, state.agentNames[id]]
     const workspaces = state.config?.workspaces ?? []
     const workspace = workspaces.find(item => item.hostId === sender.hostId && item.path === sender.workspacePath)
     const projectRoot = workspace ? workspaces.find(item => item.hostId === workspace.hostId &&
@@ -390,7 +389,7 @@ export function SessionPane({
               agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
             })
           }
-        } : undefined
+        } : state.agentNames[id] ? { label: state.agentNames[id] } : undefined
       },
       ...(session?.kind === 'agent' ? { currentSession: session } : {})
     })

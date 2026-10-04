@@ -1,10 +1,10 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
-import { ChevronRight, Copy } from 'lucide-react'
+import { Check, ChevronRight, Copy } from 'lucide-react'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useClientUiPlatform } from '../platform.js'
-import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
@@ -125,14 +125,21 @@ export function ConversationMessage({
   const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
-  const described = speaker?.role === 'agent' ? describeSpeaker?.(speaker) : undefined
-  const displayProvider = described?.providerId ?? providerId
+  const agentReference = conversationAgentReference(recordedSpeaker, prefix)
+  const described = agentReference ? describeSpeaker?.(agentReference.speaker) : undefined
+  const referenceName = described?.name && described.name !== agentReference?.speaker.id ? described.name : undefined
+  const senderName = referenceName ?? (agentReference?.declared ? prefix?.packet?.name : name && name !== agentReference?.speaker.id ? name : undefined) ?? 'Agent'
+  const avatarSpeaker = agentReference?.speaker ?? (isDeclaredSender ? recordedSpeaker : speaker)
+  const displayProvider = agentReference
+    ? described?.providerId ?? (!agentReference.declared && agentReference.speaker.id === conversationSessionId ? providerId : undefined)
+    : providerId
   const displayName = recordedSpeaker?.role === 'unknown'
     ? recordedIdentity ? 'Author unknown' : 'You'
     : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [idCopyState, setIdCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const activeCopyActionRef = useRef(0)
   const copyTimerRef = useRef<number | null>(null)
 
@@ -160,18 +167,20 @@ export function ConversationMessage({
     onSelectAnnotation({ messageId, quote, range: range.cloneRange(), contextElement: start })
   }
 
-  async function copyMessage(): Promise<void> {
+  async function copyValue(text: string, target: 'message' | 'agent-id'): Promise<void> {
+    const setResult = target === 'agent-id' ? setIdCopyState : setCopyState
+    setCopyState('idle')
+    setIdCopyState('idle')
     const actionId = ++activeCopyActionRef.current
     if (copyTimerRef.current !== null) {
       window.clearTimeout(copyTimerRef.current)
       copyTimerRef.current = null
     }
-    const text = copyText ?? parts.map(partText).filter((t) => t.length > 0).join('\n')
     if (!text) return
     let accepted = false
     try {
-      accepted = (onCopy ? await onCopy(text) : await platform.copyText(text, () => {
-        if (activeCopyActionRef.current === actionId) setCopyState('failed')
+      accepted = (target === 'message' && onCopy ? await onCopy(text) : await platform.copyText(text, () => {
+        if (activeCopyActionRef.current === actionId) setResult('failed')
       })) === true
     } catch {
       // The client owns error feedback; an unknown clipboard result never becomes success.
@@ -179,17 +188,29 @@ export function ConversationMessage({
     }
     if (activeCopyActionRef.current !== actionId) return
     if (accepted) {
-      setCopyState('copied')
+      setResult('copied')
       copyTimerRef.current = window.setTimeout(() => {
         if (activeCopyActionRef.current === actionId) {
-          setCopyState('idle')
+          setResult('idle')
           copyTimerRef.current = null
         }
       }, 1600)
     } else {
-      setCopyState('failed')
+      setResult('failed')
     }
   }
+
+  function copyMessage(): Promise<void> {
+    return copyValue(copyText ?? parts.map(partText).filter((t) => t.length > 0).join('\n'), 'message')
+  }
+
+  useEffect(() => {
+    ++activeCopyActionRef.current
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = null
+    setCopyState('idle')
+    setIdCopyState('idle')
+  }, [messageId, agentReference?.speaker.id])
 
   useEffect(() => { setSystemContextOpen(false) }, [messageId])
 
@@ -222,10 +243,21 @@ export function ConversationMessage({
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
-        {speaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker, name: displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
+        {avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
       </span>
       <div className="log-turn__head">
-        <span className="log-turn__who">{isDeclaredSender ? <><span className="log-turn__source-caption">Message from </span>{prefix.sourceLabel}</> : displayName}</span>
+        <span className="log-turn__sender">
+          <span className="log-turn__who">{agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
+          {agentReference ? <span className="log-turn__sender-id" data-copy-state={idCopyState}>
+            <code>{agentReference.speaker.id}</code>
+            <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
+              aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
+              onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
+              {idCopyState === 'copied' ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+            </button>
+            {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
+          </span> : null}
+        </span>
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {isPeerAgent || isSystemContext ? <span className="log-turn__sender-kind">{isSystemContext ? 'System' : 'Agent'}</span> : null}
@@ -258,7 +290,7 @@ export function ConversationMessage({
         {isIncoming || speaker?.role === 'agent' || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
           declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
         {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
-        {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
+        {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div>
       {isSystemContext && hasContent ? <button type="button" className="log-turn__system-toggle"
         aria-expanded={systemContextOpen} aria-controls={systemContentId}
