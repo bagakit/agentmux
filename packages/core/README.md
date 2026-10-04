@@ -79,7 +79,7 @@ Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应�
 
 Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live 和 complete stubborn-tree Stop。源码与历史通过记录不代签当前候选；oracle 和证据范围见[测试策略](../../docs/testing/strategy.md)。
 
-Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core 生成 Launch/Resume Plan、归一化 Hook/Permission，并在 daemon-issued RunId 返回后把每次 Hook binding 锁定到 exact Run。Core File Store/Resolver 独占 `agentSessionId`、当前 RunId、Provider native session id/ACP handle 与有界 retired Run tombstone；旧 Run、未知 native id 和冲突绑定失败关闭。Desktop 与 CLI 共用该 Store，不再维护第二份身份文件。
+Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core 生成 Launch/Resume Plan、归一化 Hook/Permission，并在 daemon-issued RunId 返回后把每次 Hook binding 锁定到 exact Run。Core File Store/Resolver 独占 `agentSessionId`、当前 RunId、Provider native session id/ACP handle 与完整保留的 retired Run 身份事实；旧 Run、未知 native id 和冲突绑定失败关闭。Desktop 与 CLI 共用该 Store，不再维护第二份身份文件。
 
 Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` 的 Stored Session；`createAgent`、`agentSessions`、Resolver、Status、事件和 View 投影都会删除这两个控制字段。`client.onEvent` 只接受同步观察 callback；异步 Consumer 必须先复制到自己的有界队列，类型会拒绝返回 Promise 的 callback。绕过类型的调用若返回 Promise，仅该 Consumer 会退订；可用 `onEvent(callback, { onError })` 接收诊断，未提供时写入 console，其他观察者收到 `agent-error`。修正 callback 后显式重新订阅，原 Agent 与 Runtime 能力保留。监听数量随实际订阅增长，释放函数与 `dispose` 回收订阅，不以固定对象数阻断。完整终端字节使用 Attachment/Replay。
 
@@ -141,7 +141,7 @@ console.log(session.agentSessionId, creation.initialPrompt)
 
 空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的稳定身份与持久布局由 Core 的 Spatial owner 持有，client 持有可见表面与焦点；实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
 
-Agent 生命周期通过公开 Core API 和 `agentmux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
+Agent 生命周期通过公开 Core API 和 `agentmux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 的身份与退役事实继续保留，不能再被操作或投影成 Raw Terminal。
 
 浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。只需要合并 Session Timeline snapshot 与 committed revision 时，从 `@agentmux/core/timeline` 导入。结构化回答的可用性判断从 `@agentmux/core/agent-interaction-state` 导入。这些子路径都不会加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
 

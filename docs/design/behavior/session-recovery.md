@@ -135,7 +135,7 @@
 - **投影可以被显式移动到另一个 Workspace 的 View**，这只搬动展示身份、不动 Agent 事实。cwd 归 Core（`session.workspacePath`，一个已在运行的进程的工作目录），移动**绝不改变** `session.workspacePath`——没有任何通道能让运行中的进程改换工作目录，所以移动后这条 Session 的 Tab **仍**如实显示它自己的工作目录（cwd），不冒用目标 Workspace 的磁盘路径或名字。移动是用户按 Region 显式发起的（Tab 菜单选目标 Workspace），落点复用既有的 selectSession 导航；新建 worktree **绝不**把任何 Session 的投影**自动移动**过去，创建 worktree 与移动投影是两个独立动作。
 - Core 持久化**空间身份与布局**，Desktop 消费原事实并负责屏幕呈现，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：持久布局由 Core 空间 owner 保存，Session 身份与 Provider-native resume token 由 Core 语义 owner 保存；任一恢复失败都不能把另一项静默删掉。
   - **判据是「这一面有没有可在冷启动复活的身份」，不是「它属于哪一类面」**。Agent/Terminal 面持久化 Session/Run 落在哪张 View 的哪个 Region；**文件面同样持久化，含它的路径原样**——一个文件面只有 `{regionId, kind, workspaceId, path}`，没有运行时内容可剥，而它的 Tab id 本就是 `file:<workspaceId>:<path>`，所以「存这一面」与「存这个路径」是同一件事，分不开。把文件面剥掉曾经让一个纯文件 Tab 整个消失、让 agent+文件的分屏塌成单面，这正是用户报的「重启后 tab 和分屏没了」。
-  - **Browser 面反过来整面不持久化**。它内嵌活体页面快照（url/title/navigationId 全是必填的运行时事实），浏览历史与文件路径是两类不同的敏感度；更关键的是冷启动**没有**一条能把持久化的 browser 结构复活成可用空白页的生命周期，硬存一个结构标识只会 ship 一个死面板。**以缺席表达，而不是画一个打不开的面**。
+  - **Browser 面保留可恢复的最小描述**。原 Browser 身份、Profile 和地址沿同一持久工作面保留，冷启动据此重新取得原页面 owner；不保存活体页面对象或瞬时 navigation/loading/driving 状态。恢复失败保留原 Region 和 Retry，不以缺席冒充用户关闭。恢复边界与验收沿[Browser 退出与恢复合同](browser-workface.md)，不从旧快照宣称当前页面事实。
   - **持久化了一个面，就必须有人在冷启动把它的内容装上**。文件面能存下来只是一半：若启动恢复不去加载那份文档，Tab 在、编辑器却报「不可用」——这比整个 Tab 消失更难诊断，因为看起来像文件坏了。**凡是新增一类可持久化的面，都要同时指明它冷启动时的加载入口**；没有加载入口的持久化是半成品，不许上线。
 - **重新打开项目要无缝接回原来的工作面**。切换 Workspace/Project 只是改变可见投影，不能销毁仍在使用中的 Workbench、xterm 实例或 ctxmux attachment；回到项目时应直接看到离开前的终端画面，不再闪 `Restoring terminal…`，也不因为 replay 起点变化把用户误导成“历史丢了”。真正发生 replay gap 时仍需显示 gap 的诚实提示，但项目切换本身不得制造 gap。
 - **应用重启与机器重启都先恢复布局，再恢复语义 Session**。启动时以持久化布局为索引；健康 Run 自动接回，已结束或丢失的 Run 是否立即续接按《冷启动按需恢复》执行。用户不需要先点 `Resume` 才能看到原工作面和可读记录。恢复成功沿用原 View/Region，Run id 可以变化但 Session id 不变。
@@ -448,6 +448,6 @@ Take over 是用户明确选择一位新 Agent，先理解原会话留下的工�
 
 - **恢复不能把旧进程的生命周期租约当成仍在运行**。启动新进程时必须回收 owner PID 已退出、租约已过期或属于本次重启的未完成 lifecycle reservation；只有能证明旧 owner 仍活着的租约才报告“运行在其他进程”。判断不清时保留 Session/Region，并明确提示正在等待归属核验，不得静默丢失或伪造新 Session。
 
-- **退役 Run 记满了，不能把整次启动判死。** 用户原话：「刚才打包以后启动就失败了」。新进程回收未完成的停止租约时，必须把这次停止落进账本：该 Session 记成用户退役，它的 Run 进入有上限的退役 Run 环。环满时丢掉最旧的 Run，并同时丢掉只指向这些 Run 的退役 Session——这是容量到顶，不是账本损坏。刚刚停下的这条 Session 的退役记录必须留下。不得因为挤掉了旧记录就让停止落账失败、整窗退出。同一身份仍在当前 Session 里，才是真冲突，继续拒绝。
+- **停止落账须保全原退役身份，不能因累计记录增长拒绝启动。** 新进程回收未完成的停止租约时，必须把这次停止准确落进账本：该 Session 记成用户退役，并保留它的 Run 退役事实。累计退役 Run 与 Session 按[Durable Runtime 健康](#durable-runtime-健康)保留，不按固定容量丢掉最旧身份或将正常增长误报为账本损坏；真实持久化失败如实表达，不删除旧记录换取成功。同一身份仍在当前 Session 里，才是真冲突，继续拒绝。
 
 - **界面就绪握手只证明新页面已挂上。** 用户原话：重启电脑后还是报 `Updated interface did not become ready`。打包启动要等渲染进程回报就绪，这个回报只表示页面已加载且 IPC 可用。恢复 Session、重绘终端这些启动工作在握手之后继续。不得把「全部恢复跑完」当作启动放行条件；恢复慢或超时走服务窗，不整窗退出。

@@ -63,9 +63,7 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
 
 Core 的 [Control 合同](../../packages/core/src/control.ts) 只表达类型化的
 `inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
-请求和 receipt；它不保存
-布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令在同一个持久 Workbench 中记录 Space/Zone 绑定和最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；Renderer 的空间归属独立于执行 cwd，恢复时保留布局并自动尝试原 Session。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计保存在本机过程资料，可用于追溯；当前空间命令以公开源码和实施合同为准，理解现机制不依赖该本机文件。布局变化最终只通过既有 viewport
-synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
+请求和 receipt；DTO 本身不持有持久空间图。[Core Spatial owner](spatial-state.md#唯一事实-owner) 持有 Space/Zone/Tab/Region 身份、绑定与 split tree，Renderer 的既有 Workbench/layout reducer 消费同一图并维护屏幕投影与本地操作意图。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令复用同一空间图与既有 Workbench 的最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；展示归属独立于执行 cwd；恢复时保留布局，Session 续接沿[冷启动按需恢复合同](../design/behavior/session-recovery.md#冷启动按需恢复p0-末位)。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计保存在本机过程资料，可用于追溯；当前空间命令以公开源码和实施合同为准，理解现机制不依赖该本机文件。布局变化最终只通过既有 viewport synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
 
 ## 2. 所有权矩阵
 
