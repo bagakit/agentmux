@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { parseMetricsObservation, type MetricsObservation } from './metrics.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION } from './control.js'
-import { settingsResourceRecord } from './settings-resource-json.js'
+import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 
 export const TOOLKIT_STATES = ['idle', 'starting', 'observing', 'paused', 'stopping', 'failed', 'unknown'] as const
 export type ToolkitState = typeof TOOLKIT_STATES[number]
@@ -122,6 +122,12 @@ function invalid(code = 'CONTROL_PROTOCOL_ERROR'): never { throw new AgentMuxErr
 function record(value: unknown, fields: readonly string[], optional: readonly string[] = [], code = 'CONTROL_PROTOCOL_ERROR'): Record<string, unknown> {
   const r = settingsResourceRecord(value, code)
   if (fields.some(key => !Object.hasOwn(r, key)) || Object.keys(r).some(key => !fields.includes(key) && !optional.includes(key))) invalid(code)
+  return r
+}
+// Typed children have their own schema; wrapper nesting is not arbitrary Settings JSON.
+function envelope(value: unknown, fields: readonly string[]): Record<string, unknown> {
+  const r = settingsResourceEnvelope(value, fields, 'CONTROL_PROTOCOL_ERROR')
+  if (fields.some(key => !Object.hasOwn(r, key))) invalid()
   return r
 }
 function count(v: unknown) { if (!Number.isSafeInteger(v) || (v as number) < 0) invalid() }
@@ -294,7 +300,9 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
   return { ...r, definition } as ToolkitAdmission | ToolkitConfirmedResult
 }
 export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
-  const source = settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR')
+  const source = settingsResourceEnvelope(value, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained',
+    'definition', 'state', 'admission', 'latestConfirmed', 'consumerCount', 'sequence',
+    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'manual', 'trend'], 'CONTROL_PROTOCOL_ERROR')
   if (source.schema !== 'agentmux.toolkit.v1') invalid()
   if (source.kind === 'package-unavailable') {
     const r = record(source, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained'])
@@ -319,7 +327,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     count(r.consumerCount); count(r.sequence); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096))
     return { ...r, definition, admission, latestConfirmed } as ToolkitScriptSnapshot
   }
-  const r = record(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'manual', 'consumerCount', 'sequence', 'trend'])
+  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'manual', 'consumerCount', 'sequence', 'trend'])
   if (r.kind !== 'metrics' || r.toolId !== 'performance' || !TOOLKIT_STATES.includes(r.state as ToolkitState) || typeof r.manual !== 'boolean') invalid()
   nullable(r.executionId, identity); nullable(r.reason, text); nullable(r.startedAt, time); nullable(r.observedAt, time)
   count(r.consumerCount); count(r.sequence); runRef(r.run)
@@ -327,11 +335,14 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     const obs = parseMetricsObservation(r.observation)
     if (r.observedAt !== obs.observedAt) invalid()
   } else if (r.observedAt !== null) invalid()
-  if (!Array.isArray(r.trend) || r.trend.length > 60) invalid()
-  for (const point of r.trend) {
+  // The small arbitrary trend subtree still uses the existing pure JSON guard.
+  const trend = record({ trend: r.trend }, ['trend']).trend
+  if (!Array.isArray(trend) || trend.length > 60) invalid()
+  for (const point of trend) {
     const p = record(point, ['observedAt', 'appCpuPercent', 'appRssKib'])
     time(p.observedAt); nullable(p.appCpuPercent, time); nullable(p.appRssKib, time)
   }
+  settingsResourceBudget(r, 'CONTROL_PROTOCOL_ERROR')
   return r as ToolkitMetricsSnapshot
 }
 export function parseToolkitResult(operation: ToolkitOperation, value: unknown): ToolkitResult {
@@ -385,8 +396,11 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
     return { operation, toolId: r.toolId as string, removed: true }
   }
   if (operation === 'toolkit.watch') { record(value, []); return { operation } }
-  const r = record(value, ['snapshot'])
-  return { operation, snapshot: parseToolkitSnapshot(r.snapshot) }
+  const r = envelope(value, ['snapshot'])
+  const snapshot = parseToolkitSnapshot(r.snapshot)
+  if (snapshot.kind !== 'metrics') record(value, ['snapshot'])
+  settingsResourceBudget(r, 'CONTROL_PROTOCOL_ERROR')
+  return { operation, snapshot }
 }
 /** A valid result must still belong to the tool the caller actually requested. */
 export function assertToolkitResultTarget(request: { operation: string; toolId?: string }, result: ToolkitResult): void {
