@@ -12,7 +12,7 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | --- | --- | --- |
 | Fast | `pnpm test:fast` | Pure domain、Store、Provider、Desktop owner 与 UI reducer；不启动 packaged native fixture。 |
 | Native package | `pnpm test:native` | checkout 外 `pnpm pack`、offline install、真实 CtxMux PTY、Control handshake、Codex fixture、crash recovery 与公共 Runtime 边界；真实 SSH 与 Linux 资格单独执行。 |
-| Security | `pnpm test:security` | ACP 默认拒绝、Hook 认证/Secret scope/队列上限、Store 上限、Control endpoint、Hook installer、Workspace 与 Browser 权限边界。 |
+| Security | `pnpm test:security` | ACP 默认拒绝、Hook 认证/Secret scope/在途背压、Store 格式与身份、Control endpoint、Hook installer、Workspace 与 Browser 权限边界。 |
 | Seeded fuzz | `pnpm test:fuzz` | 固定 seed/case 数的 Hook/Store/terminal byte 与 Workspace path 边界；失败可由测试名中的 seed 重放。 |
 | Reliability | `pnpm test:reliability` | 16 个真实 Run、并发 Attachment、attach/detach churn、stop/input race、slow/fast Consumer、5 MiB 输出、live daemon `SIGKILL`、恢复与 Core 资源斜率。 |
 | Desktop resources | `pnpm test:resources` | 隔离 runtime 中七轮 reusable Terminal claim、Terminal+Monaco 使用与 ready launcher 回归，另验证 Browser WebContents 释放和进程组 working-set 预算。 |
@@ -64,8 +64,8 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Agent-owned CLI discovery | fake Codex 复核 `AGENTMUX_ENV`、权威 `AGENTMUX_CLI` 与 Agent Session identity；Fast suite 固定逐级帮助、typed flags、子命令成功语义和 `--skill` 的 fail-closed Control 边界；Desktop package smoke 在 `PATH=/usr/bin:/bin` 下证明 launcher 使用 `.app` 自带 Node runtime |
 | Managed Agent 启动指南 | Core 验证开启、关闭、原任务与空任务的组装；Desktop 使用 [config-store.ts](../../apps/desktop/src/main/config-store.ts) 的当前 Executor 模型与默认配置，RuntimeController 把同一 Executor 交给 Core。历史 Config/Profile 版本不能充当现行合同。 |
 | Darwin endpoint bound | 默认 Unix endpoint 按 runtime-paths.ts 的稳定短 namespace 构造，并与 durable state 分离；绝对路径 override 仍需验证平台 socket 长度边界。Native package/LaunchServices oracle 使用真实随包 ctxmuxd。 |
-| bounded Consumer publication | Client 最多 64 个同步 listeners；callback 一旦返回 Promise 就立即自动退订，不建立隐式队列，也不在“忙碌期”静默漏掉仍注册 listener 的 lifecycle/permission 事件；永久 pending Promise 不保留 Client/Publisher。需要异步处理的 Consumer 必须在同步 callback 内复制到自己的有界队列；需要无损字节流则使用独立 Attachment/Replay |
-| bounded Hook/ACP ingress | Hook 最多 256 binding、每 binding 8 个 unbound event 和 8 个 bound delivery；超限返回 `429`；stable binding identity 与随机 bearer 分离，公共 Session/View 不含二者；bound callback 接受 AbortSignal，timeout 期间 token 返回 `503`，旧 owner 真正 settle 后同 token 才恢复 admission；取消只作用于本次排队或执行中的 Store write，不能中止同 Agent Session 的前序 lifecycle/readiness 持久化；close/stop 排空已接收 delivery；ACP/Hook body 均有 128 KiB 硬上限 |
+| bounded Consumer publication | 公共类型表达同步 callback 合同；运行时违规消费者获得可观察诊断与恢复入口，异常或永久 pending Promise 不阻断其他消费者和生命周期，永久 pending Promise 不保留 Client/Publisher。正常消费者不因无关观察者增加而失去事件；不建立隐式无界队列，也不在“忙碌期”静默漏掉仍注册 listener 的 lifecycle/permission 事件。需要异步处理的 Consumer 在同步 callback 内复制到自己的有界队列；需要无损字节流则使用独立 Attachment/Replay |
+| bounded Hook/ACP ingress | 在途队列与 body 边界按真实内存、协议和处理成本验证；背压明确区分未受理与已受理但回执未知，排队时间纳入 sender 等待与重试验证，重试保原 receipt 且不重复提交。stable binding identity 与随机 bearer 分离，公共 Session/View 不含二者；bound callback 接受 AbortSignal，旧 owner 真正 settle 后同 token 才恢复 admission，其他 binding 不受牵连；取消只作用于本次排队或执行中的 Store write，不能中止同 Agent Session 的前序 lifecycle/readiness 持久化；close/stop 排空已接收 delivery |
 | daemon activation ownership | readiness 与 public handshake 确认服务，owner.json 记录启动归属。[CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 中 receipt 保存失败不能终止兼容 daemon 或其健康 Run；归属不明应告知并限制清理。测试隔离进程的 cleanup 须证明精确 owner，不得外推为对用户 daemon 的强杀授权。 |
 
 主 Oracle：`packages/core/test/package-consumer.integration.test.ts` 与 `packages/core/test/fixtures/packed-consumer.mjs`。
@@ -159,6 +159,8 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 实现 task 判 done 须同时有变异测试和产品调用者证明。变异是改坏实际实现，确认对应测试变红；不能只改测试制造红灯。调用者检查从实际源码范围检索 symbol，排除测试、生成物和定义文件本身；命中都在定义文件即竖切未闭合，如实标 blocked。可用 `rg -n "<symbol>" packages apps` 定位，再核对生产调用路径。纯函数的测试覆盖、同文件内部调用或接口声明都不能代替接到产品的证据。
 
 新增或修改公共能力时，接口影响判断、原业务 owner 到 RPC／CLI 的真实接线及完成边界按[公共能力贡献约定](../guides/public-capability-contributions.md#同一任务交付和验收)核对；本节继续持有变异与调用者证明的方法，不另维护方法或命令全集。
+
+限制类改动按 [RED-LINES《时限与容量必须守真实边界》](../../RED-LINES.md#时限与容量必须守真实边界)验证依据与影响范围。测试从正常业务规模和保护的不变量选择输入，分别证明正常使用、真实越界或故障、其他健康能力以及原身份恢复；覆盖触发后的重试、取消和回执未知时，不能重新种入数据或换身份代签恢复。仅导入实现常量再断言第 `N + 1` 项拒绝，或把常量改大后测试仍绿，只能证明实现遵循自己的选择，不能证明该限制合理。拒绝分支的变异与资源成本检查仍保留，但不代替这些行为证据；按本次受影响的 owner 和消费者选场景，不增加全仓扫描或无关验收。
 
 扫描式契约测试必须先证明扫描有收获（如 `expect(found.size).toBeGreaterThan(0)`），再从来源反推约束，不维护与来源一起漂移的手写清单。豁免按具体选择器点名，不能全局放行某个数值。
 
