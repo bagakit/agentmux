@@ -77,7 +77,7 @@ Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented 
 
 Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core 生成 Launch/Resume Plan、归一化 Hook/Permission，并在 daemon-issued RunId 返回后把每次 Hook binding 锁定到 exact Run。Core File Store/Resolver 独占 `agentSessionId`、当前 RunId、Provider native session id/ACP handle 与有界 retired Run tombstone；旧 Run、未知 native id 和冲突绑定失败关闭。Desktop 与 CLI 共用该 Store，不再维护第二份身份文件。
 
-Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` 的 Stored Session；`createAgent`、`agentSessions`、Resolver、Status、事件和 View 投影都会删除这两个控制字段。`client.onEvent` 只接受同步观察 callback；异步 Consumer 必须先复制到自己的有界队列，返回 Promise 的 callback 会自动退订。完整终端字节使用 Attachment/Replay。
+Hook 的 stable binding identity 与随机 bearer 只存在于权限为 `0600` 的 Stored Session；`createAgent`、`agentSessions`、Resolver、Status、事件和 View 投影都会删除这两个控制字段。`client.onEvent` 只接受同步观察 callback；异步 Consumer 必须先复制到自己的有界队列，类型会拒绝返回 Promise 的 callback。绕过类型的调用若返回 Promise，仅该 Consumer 会退订；可用 `onEvent(callback, { onError })` 接收诊断，未提供时写入 console，其他观察者收到 `agent-error`。修正 callback 后显式重新订阅，原 Agent 与 Runtime 能力保留。监听数量随实际订阅增长，释放函数与 `dispose` 回收订阅，不以固定对象数阻断。完整终端字节使用 Attachment/Replay。
 
 Provider/ACP semantic status 与 pending Permission/Question 也是 Core-owned Session 事实。Client
 通过 `interaction` 事件和 `session.pendingInteraction` 公开 typed request；Consumer 用
