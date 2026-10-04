@@ -1,4 +1,4 @@
-import { fixturePath, fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -12,7 +12,7 @@ import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 
 const cli = process.env.AGENTMUX_TEST_DESKTOP_FOCUS_CLI ?? fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 const base = { schemaVersion: 5, requestId: 'desktop-navigation' }
-const spaceId = JSON.stringify(['local', upstreamFixturePath("repository literal $PATH/with spaces/") + 'long-directory/'.repeat(70)])
+const spaceId = JSON.stringify(['local', fixturePath("repository literal $PATH/with spaces") + '/' + 'long-directory/'.repeat(70)])
 const zoneId = JSON.stringify([spaceId, 'zone', 'existing-directory'])
 describe('public Desktop focus and client inspection', () => {
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[]
@@ -64,11 +64,11 @@ describe('public Desktop focus and client inspection', () => {
   })
   it('transports exact Goal and each existing Surface without an Agent launch/send', async () => {
     expect(await json(['goal', 'focus', '--goal', '--help'])).toMatchObject({ ok: true, operation: 'goal.focus', result: { partial: true } })
-    for (const surface of ['space', 'focus', 'goals', 'survey']) expect(await json(['app', 'focus', '--surface', surface])).toMatchObject({ ok: true, operation: 'app.focus', result: { partial: true } })
-    expect(seen.map(request => request.operation)).toEqual(['focus', 'focus', 'focus', 'focus', 'focus'])
+    for (const surface of ['space', 'focus', 'goals', 'survey', 'recall']) expect(await json(['app', 'focus', '--surface', surface])).toMatchObject({ ok: true, operation: 'app.focus', result: { partial: true } })
+    expect(seen.map(request => request.operation)).toEqual(['focus', 'focus', 'focus', 'focus', 'focus', 'focus'])
     expect(seen[0]).toMatchObject({ target: { kind: 'goal', goalId: '--help' }, inputPolicy: 'preserve' })
     expect(seen.slice(1).map(request => request.operation === 'focus' && request.target)).toEqual(
-      ['space', 'focus', 'goals', 'survey'].map(surface => ({ kind: 'surface', surface })))
+      ['space', 'focus', 'goals', 'survey', 'recall'].map(surface => ({ kind: 'surface', surface })))
   })
   it('allows explicit input target only for exact existing Tab/Region selectors', async () => {
     expect(await json(['space', 'focus', '--tab', 'tab', '--input', 'target'])).toMatchObject({ ok: true, result: { input: { policy: 'target', outcome: 'unconfirmed' } } })
