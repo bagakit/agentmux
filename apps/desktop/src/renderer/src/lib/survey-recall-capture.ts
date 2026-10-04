@@ -45,8 +45,7 @@ async function save(target: SurveyRecallCapture, notebookId: string, draft: stri
   }
   const state = useAppStore.getState(), workspace = state.config?.workspaces.find(item => item.id === NOTES_WORKSPACE_ID)
   if (!workspace) throw new Error('The Notes folder is unavailable. Your browser and capture draft are kept; reconnect it and retry.')
-  const groupId = state.layouts[workspace.id]?.activeGroupId
-  if (!groupId) throw new Error('The Notes work surface is restoring. Your capture draft is kept; retry here.')
+  const groupId = state.prepareWorkbenchLayout(workspace.id).activeGroupId
   if (!receipt) {
     receipt = { intentId: crypto.randomUUID(), createdAt: Date.now(), noteId: crypto.randomUUID(), blockIds: [crypto.randomUUID()],
       draft, path: '', status: 'pending', revealed: false, notebook: { notebookId, source: target.source },
