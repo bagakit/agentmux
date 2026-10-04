@@ -1361,7 +1361,13 @@ export class AgentMuxClient {
     this.hookTurnPhases.clear()
     this.agentInputCursors.clear()
     for (const lane of this.agentInputTails.values()) {
-      for (const observation of lane.renderObservations) observation.controller.abort()
+      for (const observation of lane.renderObservations) {
+        const cancellation = new AgentMuxError(
+          'Input observation cancelled because its Core client disconnected.', 'AGENT_INPUT_OBSERVATION_CANCELLED',
+          JSON.stringify({ source: 'client-disconnect' }))
+        if (observation.protocolInput) observation.protocolInput.cancelled ??= cancellation
+        observation.controller.abort(cancellation)
+      }
     }
     this.agentInputTails.clear()
     this.promptSubmission.cancelAllReadiness()
@@ -4236,7 +4242,7 @@ export class AgentMuxClient {
       responseDigest,
       plan.data
     )
-    this.cancelPromptRenderObservation(requestedSession)
+    this.cancelPromptRenderObservation(requestedSession, 'interaction-response')
     const deadline = Date.now() + 10_000
     const renderObservation = new AbortController()
     const prepared = await this.observeAgentInputPreparation(canonical, 10_000, async signal => {
@@ -5739,7 +5745,7 @@ export class AgentMuxClient {
       ? [...(this.agentInputTails.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
           .filter(observation => sameRun(observation.run, requestedSession.run) && observation.protocolInput)
       : []
-    this.cancelPromptRenderObservation(requestedSession, source === 'terminal-protocol')
+    this.cancelPromptRenderObservation(requestedSession, source)
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
@@ -5842,12 +5848,19 @@ export class AgentMuxClient {
     })
   }
 
-  private cancelPromptRenderObservation(session: AgentMuxAgentSession, preserveProtocolPreparation = false): void {
+  private cancelPromptRenderObservation(session: AgentMuxAgentSession,
+    source: AgentMuxAgentWriteInput['source'] | 'interaction-response'): void {
+    const preserveProtocolPreparation = source === 'terminal-protocol'
+    const cancellation = new AgentMuxError(
+      source === 'interaction-response' ? 'Input observation cancelled for a semantic interaction response.'
+        : source === 'terminal-protocol' ? 'Input observation yielded for a terminal protocol response.'
+          : 'Input observation cancelled for human terminal input.',
+      'AGENT_INPUT_OBSERVATION_CANCELLED', JSON.stringify({ source: source === 'user' ? 'terminal-user' : source }))
     const lane = this.agentInputTails.get(session.agentSessionId)
     for (const observation of lane?.renderObservations ?? []) {
       if (!sameRun(observation.run, session.run)) continue
       if (!preserveProtocolPreparation && observation.protocolInput) {
-        observation.protocolInput.cancelled ??= new DOMException('Human input cancelled the original preparation.', 'AbortError')
+        observation.protocolInput.cancelled ??= cancellation
       }
       if (preserveProtocolPreparation && observation.protocolInput) {
         const preclaim = observation.protocolInput.preclaim
@@ -5858,7 +5871,7 @@ export class AgentMuxClient {
         }
       }
       // Claimed render waits must release the lane for native query replies.
-      observation.controller.abort()
+      observation.controller.abort(cancellation)
     }
   }
 
@@ -5943,6 +5956,10 @@ export class AgentMuxClient {
       if (!sameRun(session.run, requestedSession.run)) {
         throw new AgentMuxError('Agent Session changed before Input was accepted.', 'STALE_AGENT_SESSION')
       }
+      // Preserve the original cancellation across a protocol yield, before a
+      // later transport read can replace it with an unrelated connection error.
+      if (protocolInput?.cancelled && protocolInput.preclaim && !protocolInput.preclaim.claimStarted &&
+          renderObservation?.signal.aborted) throw promptPreparationFailure(protocolInput.cancelled)
       const run = await this.requireCurrentAgentRun(session)
       if (run.state.type !== 'running') {
         throw new AgentMuxError(

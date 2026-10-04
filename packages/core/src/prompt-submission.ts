@@ -9,7 +9,7 @@ import {
   CtxmuxRunAdapter,
   type CtxmuxAdapterRun
 } from './ctxmux-run-adapter.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, agentMuxCancellationError } from './errors.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import type {
@@ -361,7 +361,7 @@ export class AgentPromptSubmissionCoordinator {
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     }
     const assertAdmission = (current: AgentMuxAgentSession): void => {
-      if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
+      if (signal?.aborted) throw agentMuxCancellationError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED', signal.reason)
       const preclaim = transportQualification?.protocolInput?.preclaim
       if (preclaim && !preclaim.claimStarted && renderSignal?.aborted && renderSignal.reason === preclaim.interruption) {
         throw preclaim.interruption
@@ -1012,7 +1012,7 @@ export class AgentPromptSubmissionCoordinator {
         if (prepared.context === 'interruptible' && prepared.nativeSourceId && provider.readPromptExecutionEvidence) {
           const deadline = Date.now() + TERMINAL_PROMPT_RENDER_TIMEOUT_MS
           for (;;) {
-            if (renderSignal?.aborted) throw new AgentMuxError('Immediate preparation observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED')
+            if (renderSignal?.aborted) throw agentMuxCancellationError('Immediate preparation observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED', renderSignal.reason)
             const observedSession = await this.deps.registry.refresh(session.agentSessionId, session.run)
             const evidence = await provider.readPromptExecutionEvidence({ ...nativeContext,
               ...(observedSession.nativeHandle ? { nativeHandle: observedSession.nativeHandle } : {}) })

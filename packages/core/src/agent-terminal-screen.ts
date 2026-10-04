@@ -3,7 +3,7 @@ import {
   AGENT_COMPOSER_SCAN_BACK_ROWS,
   AGENT_SCREEN_SCROLLBACK_ROWS
 } from './agent-prompt-budget.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, agentMuxCancellationError } from './errors.js'
 import { assertTerminalCheckpointRestore } from './terminal-continuation.js'
 import type { AgentMuxTerminalCheckpoint, AgentTerminalScreenSnapshot } from './types.js'
 
@@ -309,9 +309,9 @@ export class AgentTerminalScreenEvidence {
       let replayFlushed = false
       let timer: ReturnType<typeof setTimeout> | null = null
       let unsubscribe: () => void = () => {}
-      const abort = (): void => fail(new AgentMuxError(
+      const abort = (): void => fail(agentMuxCancellationError(
         'Terminal screen observation was cancelled.',
-        'AGENT_PROMPT_READINESS_CANCELLED'
+        'AGENT_PROMPT_READINESS_CANCELLED', options.signal?.aborted ? options.signal.reason : undefined
       ))
       const cleanup = (): void => {
         if (timer) clearTimeout(timer)
