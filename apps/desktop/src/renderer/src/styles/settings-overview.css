@@ -56,9 +56,11 @@
 .settings-overview[data-document-visible='false'] .settings-overview__sweep { animation-play-state: paused; }
 .settings-overview__groups { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-7); margin-top: var(--sp-7); }
 .settings-overview__group { min-width: 0; }
-.settings-overview__group > header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.settings-overview__group > header { display: flex; align-items: center; gap: var(--sp-4); min-height: 40px; margin-bottom: var(--sp-4); }
+.settings-overview__group-art { width: 48px; height: 40px; flex: 0 0 auto; object-fit: contain; pointer-events: none; }
+.settings-overview__group-art[hidden] { display: none; }
 .settings-overview__group h3 { margin: 0; font-size: var(--fs-title); font-weight: 600; }
-.settings-overview__group > header small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-overview__group > header small { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); text-align: right; }
 .settings-overview__entries { border-top: 1px solid var(--line-soft); }
 .settings-overview__entry {
   display: grid;
