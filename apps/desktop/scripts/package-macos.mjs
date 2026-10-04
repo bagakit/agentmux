@@ -861,8 +861,10 @@ async function awaitUiActivation(appPath, before, runtimePlan = null) {
 }
 
 export async function installApplication(appPath, { intent = installIntent, homeDirectory = homedir(),
-  quit = quitInstalledApplication, launch = relaunchInstalledApplication } = {}) {
+  quit = quitInstalledApplication, launch = relaunchInstalledApplication,
+  coldRuntime = process.argv.includes('--cold-runtime') } = {}) {
   assert(intent === 'full' || intent === 'ui-only', 'Unknown installation intent.')
+  assert(!coldRuntime || intent === 'full', '--cold-runtime requires a full installation.')
   const currentPath = canonicalInstallPath(homeDirectory)
   let runtimeReviewPath
   let runtimeChanged = false
@@ -910,7 +912,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     }
     if (running.length > 0) before = await qualifyUi(currentPath, null, { outgoing: true })
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
-    if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
+    if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next, { coldOnly: coldRuntime })
     if (intent === 'ui-only') native = { status: 'deferred', reason: uiRuntime
       ? 'Explicit UI-only transaction; the existing Runtime is retained without a Native upgrade.'
       : 'No existing listener was observed. No Native upgrade was attempted; ordinary GUI startup may start a Runtime.' }
@@ -940,7 +942,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     // A pending action in the old GUI could have started a Runtime after the
     // first absent-listener observation. Recheck that same owner after GUI exit.
     if (intent === 'full' && runtimeChanged && !runtimeUpgrade) {
-      try { runtimeUpgrade = await prepareRuntimeUpgrade(destination, next) }
+      try { runtimeUpgrade = await prepareRuntimeUpgrade(destination, next, { coldOnly: coldRuntime }) }
       catch (error) {
         if (quitOutcome.wasRunning) {
           await launch(destination)

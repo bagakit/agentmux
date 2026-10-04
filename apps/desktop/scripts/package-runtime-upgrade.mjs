@@ -403,13 +403,14 @@ export function assertUiRuntimeObservation(observation, confirmation, originalOb
 }
 
 /** Preflight before closing the GUI. Never signals or starts a Runtime. */
-export async function prepareRuntimeUpgrade(currentApp, candidateApp) {
+export async function prepareRuntimeUpgrade(currentApp, candidateApp, { coldOnly = false } = {}) {
   const old = await artifact(currentApp), candidate = await artifact(candidateApp)
   fail(old.socketPath === candidate.socketPath,
     'Runtime upgrade changes the host socket address. No application was changed.')
   const liveness = await probeSocketLiveness(old.socketPath)
   if (liveness === 'dead') return null
   fail(liveness === 'alive', 'Runtime listener liveness is unknown; no application was changed.')
+  fail(!coldOnly, 'Cold Runtime installation requires a dead listener; the existing Runtime and application were kept.');
   fail(old.stateDirectory === candidate.stateDirectory,
     'Runtime upgrade changes the durable host address. No application was changed.')
   const declarations = await Promise.allSettled([daemonDeclaration(old), daemonDeclaration(candidate)])
