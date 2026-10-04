@@ -11,7 +11,7 @@
 | 读者问题 | 唯一正文 |
 | --- | --- |
 | 主题 token、尺度、控件、样式归属及视觉验收 | [全局视觉、尺度与样式 Owner](presentation/shared-rules.md) |
-| 空间层次、导航、Tab/Region 几何和 Launcher 密度 | [空间与布局的呈现](presentation/spaces-and-layout.md) |
+| Mote／Work／Know 导航分组、对象层次、Tab／Region 几何和 Launcher 密度 | [空间与布局的呈现](presentation/spaces-and-layout.md) |
 | Survey 浏览起点与 Recall 目录、书写和来源层级 | [Survey 与 Recall 的呈现](presentation/spaces-and-layout.md#recall-的目录阅读与来源) |
 | Topics 分类与主题树、讨论和知识内容层级 | [Topics 知识库的导航与内容层级](presentation/spaces-and-layout.md#topics-知识库的导航与内容层级) |
 | Mote 身份、快捷面、浮窗及协调控件 | [Mote 与协调面的呈现](presentation/motes-and-coordination.md) |

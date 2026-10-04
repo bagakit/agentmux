@@ -154,6 +154,15 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 - SSH 管理连接远端已有语义 owner，按当前公共 SDK／服务合同验证；本机通过记录不代签真实 SSH、远端 Provider 或桌面验收；
 - 原生产物平台从 [artifact contract](../../packages/core/src/ctxmux-artifact-contract.json) 与对应 manifest 取得；每个平台必须有同源 Native proof，不能从本机结果推断。portable 空间 API 的可安装性与 Native Run 能力分别验证。
 
+## 界面规则与真实行为
+
+空间呈现的视觉约束归[空间与布局](../design/presentation/spaces-and-layout.md#工作面与注意力密度)。本节描述样式与输入的失效形态和 oracle；以下原事故样本及测试数量只说明当时的假绿边界，不代表当前候选已验收。静态扫描、类型检查和静态渲染各有证明范围，真实状态变化与输入写回仍按任务场景操作验证。
+
+- 失效的声明比错的声明更危险。`-var(--sp-2)` 这类写法不是合法 CSS，浏览器**静默丢弃整条声明**——它不报错、不回退、在样式表里看起来完全正常，而它想做的事从未发生（负外边距归零，靠它做居中或叠压的东西一直是错位的）。数值型契约测试抓不到这一族，因为压根没有数字字面值可扫。负值必须写成 `calc(-1 * var(--sp-2))`，或改用不依赖数值的手法（如 `translate(-50%)` 随自身尺寸走）。这条由 `apps/desktop/test/stylesheet-organisation.test.ts` 守住：它扫全表断言 `-var(` 出现零次并报出文件与行号。**这类失效还会掩盖第二层错误**——声明既然从未生效，写在里面的数值对不对也就从来没人验证过；修复时要重新核算那个值，而不是照抄进 `calc()`。
+- 圆角例外的来源与守护：这条由 `apps/desktop/test/surface-radius-contract.test.ts` 守住：它从 CSS 推出所有低于最小 token 的圆角并核对是否落在已声明的例外清单内，新增一个未声明的硬编码圆角会红。
+- **状态在场标志与规则必须成对，判定按元素而非按属性名。**`data-x={cond ? '' : undefined}`（只有空串与不在场两种取值）对 JS 携带零信息，它存在的唯一理由就是被 `[data-x]` 选中；因此渲染了它却没有 `.那个class[data-x]` 规则，要么是规则在重构里丢了，要么这个属性本就多余、该删。**没有例外清单**——这个记号和 BEM 一样按定义成立。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住，它逐元素配对：起因是那份测试原本只查选择器**名**在不在，于是删掉 `.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }` 之后折叠箭头永久不转，而它自己 3 条 + `stylesheet-organisation` 8 条全绿（实测）——`[data-open]` 因为 `.log-row__chevron[data-open]` 还在而"依然出现过"。按属性名判会漏掉的正是它自己那次事故的形状，所以判据必须落到"同一个元素上的 class × 该元素的标志"，并另有一条自证钉住这个区别（拿一对成对的与一对属性名存在但元素不对的当样本）。
+- **受控表单控件必须有写回口，或显式声明它永不接受输入。** 判据不是自拟清单，而是 React 运行时自己的规则：给了 `value`/`checked` 却既无 `onChange`/`onInput` 也无无条件的 `readOnly`/`disabled`，React 会报 "without an `onChange` handler … read-only"。受控取值与写回口按定义成对（单独一个 `value` 没有任何用途——用户敲不进去），与上一条的在场标志同一形状，故同样**没有例外清单**：`defaultValue`、`readOnly`、`disabled` 本身就是判据的另一半。这条由 `apps/desktop/test/controlled-input-is-writable.test.tsx` 守住，它静态扫每一个组件文件、并把 React 的那句告警接成断言钉住判据。起因：启动对话框那两格名字输入删掉 `onChange` 之后永久不可写（用户填什么都送不出去），涉及该组件的 23 条测试与 `tsc --noEmit` **全绿**（实测）——当时相关测试只用 `renderToStaticMarkup`，不跑 effect、不派发 DOM 事件，未覆盖这类实际交互失效。**只有无条件的 `disabled` 才算自洽**：事故现场那两格正带着 `disabled={busy !== null}`（忙时才禁用），把任何 `disabled` 都算过的话这次变异照旧全绿（实测）。
+
 ## 任务验收与假绿防护
 
 实现 task 判 done 须同时有变异测试和真实产品调用链证明。变异是改坏实际实现，确认对应测试变红；不能只改测试制造红灯。调用链从受影响实现追到 owning 入口及实际产品消费者，核对调用条件、参数和结果，而不是以文件边界或符号是否导出判断。私有 helper 经同文件 owner、原生 helper 协议或模块入口接到实际消费者，可以构成该链；不为取得跨文件命中额外导出、拆文件或增加包装。可用 `rg -n "<symbol>" packages apps` 定位，再沿入口核对生产路径；测试、生成物、接口声明或仅有内部自调用不能单独代替产品消费。没有真实产品路径时仍是竖切未闭合，如实标 blocked。

@@ -2,7 +2,7 @@
 
 先用 `agentmux --skill` 看当前公开合同，具体命令用 `--help`。命令经同一公开 JSON-RPC 服务调用各自业务 owner；Core 持有 AgentSession 语义与[持久空间图](../architecture/spatial-state.md)，Client 消费原位置，负责呈现、真实输入焦点及原宿主资源能力；Run 的进程事实由 ctxmux 持有。
 
-Space 是组织工作面的空间，Project 是仓库／目录归属；两者不等同。Zone 可以关联 worktree、普通目录或 Topic/Mote 工作面。Tab 是完整工作面，Region 是其中一格。Session 回答“哪个 Agent”，它可以有多个展示位置。ID 原样使用，不从名称、当前目录或第一处展示位置猜身份。
+CLI 的 Space 是[概念词典](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)中的持久实体；Agent 空间地址使用同一实体及展示绑定。Work 下的 Space 按钮是操作这些对象的视图，不是第二种 Space。Project 是仓库／目录归属，与 Space 不等同。Zone 可以关联 worktree、普通目录或 Topic/Mote 工作面。Tab 是完整工作面，Region 是其中一格。Session 回答“哪个 Agent”，它可以有多个展示位置。ID 原样使用，不从名称、当前目录或第一处展示位置猜身份。
 
 ## 给新 Agent 第一份任务
 
@@ -110,7 +110,7 @@ agentmux schedule cancel --data request.json
 
 `--data` 接受文件或 `-` 标准输入。创建包含 `target: {hostId, agentSessionId, providerId, workspacePath}`、非空 `prompt`、`operationId` 和 `calendar`。日历显式给出 IANA `timezone`、本地 `time`、`kind`（`once|daily|weekly|monthly|yearly`）及 `policies: {gap:'skip', fold:'earlier'|'later', monthEnd:'clamp', overdue:'latest'}`；各周期的日期字段以公共类型为准。检查在 `scheduleId` 与原 `operationId` 中选一个；暂停／恢复／取消包含 `scheduleId`、已读 `expectedRevision` 与本次 `operationId`。每次变更核真实 caller，不允许用 timer 冒人类作者。未知回执先检查原 operation；不自动重发。保存不等于已投递，投递不等于 Agent 完成；断开宿主时不会假装仍在云端执行。
 
-用户可在同一创建 JSON 中显式加入 `checkIn: {silenceMs:64800000, minIntervalMs:72000000, dailyBudget:1, quiet:{start:'<quiet-start-HH:mm>', end:'<quiet-end-HH:mm>'}}` 开启安静跟进；其中安静时段的两个占位符须替换为实际策略时刻，其中安静时段的两个占位符须替换为实际策略时刻，JSON 文件需使用双引号。省略即关闭，已鉴权 Agent 不能开启。两个间隔可明确设置为 5 分钟至 30 天，预算为每个保存时区的日历日 1–3 次；安静时段使用该时区的 `HH:mm`，开始与结束须不同。`inspect` 显示保存策略、已认领预算、未答状态与未知原因，暂停／继续／取消仍用上面的原操作。跟进要求可确认的本会话人工上下文；较晚未知输入或当前来源未确认时保原到期安排。问候内容由真实 Agent 依据保存主题生成，不能把 timer、Native 文本或 Agent 消息当人类答复。
+用户可在同一创建 JSON 中显式加入 `checkIn: {silenceMs:64800000, minIntervalMs:72000000, dailyBudget:1, quiet:{start:'<quiet-start-HH:mm>', end:'<quiet-end-HH:mm>'}}` 开启安静跟进；其中安静时段的两个占位符须替换为实际策略时刻，JSON 文件需使用双引号。省略即关闭，已鉴权 Agent 不能开启。两个间隔可明确设置为 5 分钟至 30 天，预算为每个保存时区的日历日 1–3 次；安静时段使用该时区的 `HH:mm`，开始与结束须不同。`inspect` 显示保存策略、已认领预算、未答状态与未知原因，暂停／继续／取消仍用上面的原操作。跟进要求可确认的本会话人工上下文；较晚未知输入或当前来源未确认时保原到期安排。问候内容由真实 Agent 依据保存主题生成，不能把 timer、Native 文本或 Agent 消息当人类答复。
 
 ## 改显示名，再读取当前值
 
