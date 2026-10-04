@@ -31,6 +31,20 @@ export function reconcileNotesStorageResources<T extends FileWorkbenchState>(sta
       ;(patch.dirtyDocuments as typeof next.dirtyDocuments)[toKey] = true
       // A retained buffer is not a disk observation. Normal read/write conflict facts stay intact.
     }
+    if (!conflict) {
+      const issues = patch.documentIssues as typeof next.documentIssues
+      const issue = issues[toKey]
+      if (issue?.kind === 'write-unknown' && issue.attempted.resource.hostId === change.from.hostId && issue.attempted.resource.path === change.from.workspacePath) {
+        issues[toKey] = { ...issue, attempted: { ...issue.attempted, resource: { hostId: change.to.hostId, path: change.to.workspacePath } } }
+      }
+      if (next.savingDocuments[fromKey]) {
+        // Store invalidates old write receipts at this resource boundary. Its busy flag must
+        // not survive that receipt; read the canonical file before making a new save attempt.
+        ;(patch.savingDocuments as typeof next.savingDocuments)[toKey] = false
+        if (!issue || issue.kind === 'write-error') issues[toKey] = { kind: 'read-error', code: 'NOTE_SAVE_RELOCATED',
+          message: 'The Note directory changed during this save. Its outcome is unconfirmed; retry reading the current file before saving again. Your draft is kept.' }
+      }
+    }
     next = { ...next, ...patch }
   }
   const bindings = (next as T & { spaceZoneBindings?: SpaceZoneBindings }).spaceZoneBindings
