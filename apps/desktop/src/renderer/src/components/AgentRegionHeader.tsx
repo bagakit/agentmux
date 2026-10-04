@@ -69,7 +69,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
         <MoreHorizontal size={14} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
-        data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={4} collisionPadding={8}
+        data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={0} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}
         onCloseAutoFocus={event => {
           if (handoffFocus.current) event.preventDefault()
