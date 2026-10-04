@@ -34,10 +34,16 @@ export class NotesStorageOwner {
     })
   }
   async confirmResources(snapshot: NotesStorageSnapshot) {
-    const state = await this.spatial.readForLayout()
-    if (state) {
+    for (let attempt = 0; ; attempt++) {
+      const state = await this.spatial.readForLayout()
+      if (!state) break
       const graph = reconcileNotesSpatialResources(state.graph, snapshot.resourceChanges, snapshot.directoryChanges)
-      if (graph !== state.graph) await this.spatial.commit({ expectedRevision: state.revision, graph })
+      if (graph === state.graph) break
+      try { await this.spatial.commit({ expectedRevision: state.revision, graph }); break }
+      catch (error) {
+        if ((error as { code?: string }).code !== 'SPATIAL_STATE_CONFLICT' || attempt >= 2) throw error
+        // Rebase only this resource mapping on the latest graph; keep concurrent layout edits.
+      }
     }
     await this.config.update(current => { const original = current.workspaces.find(w => w.id === NOTES_WORKSPACE_ID)
       if (original?.path === snapshot.directory) return current

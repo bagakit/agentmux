@@ -12,9 +12,10 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (action?.startsWith('-')) invalid('settings inspect accepts a target, not options.')
     return { method: 'settings.inspect', params: action === undefined ? {} : { target: action } }
   }
-  if (resource === 'set' && args.length === 3) {
+  if (resource === 'set' && (args.length === 3 || args.length === 5 && args[3] === '--operation-id')) {
     if (!action?.trim() || action.startsWith('-')) invalid('A setting key is required.')
-    return { method: 'settings.set', params: { key: action, value: id } }
+    if (args.length === 5 && !args[4]?.trim()) invalid('The original operation ID is required.')
+    return { method: 'settings.set', params: { key: action, value: id, ...(args.length === 5 ? { operationId: args[4] } : {}) } }
   }
   if (resource === 'executors' || resource === 'prompts') {
     const method = `settings.${resource}.${action}`

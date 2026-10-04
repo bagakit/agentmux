@@ -10,6 +10,12 @@ adjusts note body text; settings set goals.defaultView board applies to newly op
 Views already open keep their current choices. settings set goals.showFinished true includes
 finished goals by default. These preferences do not edit note files or change Goal lifecycle.
 
+settings inspect notes also reports the managed notes.directory. To move Note bodies and
+their Notebook catalog together, use settings set notes.directory <DIRECTORY> --operation-id ID.
+Keep that original ID. After an unknown or failed acknowledgement, inspect notebook inspect
+--operation-id ID, then explicitly retry the same directory and ID to finish its original move.
+Existing Note identities and original copies remain retained until the move is acknowledged.
+
 Resource input uses --input <file|->. Input is bounded UTF-8 JSON, read from a file or stdin (-). Create takes a field
 object; the ID occurs only in the positional argument. Update takes {"changes": {...},
 "expected": {...}} with nonempty changes and optional expected fields. Delete optionally
