@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { Check, Folder, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { usePathDisplay } from '../hooks/usePathDisplay'
@@ -23,7 +24,7 @@ export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled,
       {!hosts.some(host => host.id === hostId) ? <option value={hostId}>Host not configured</option> : null}
       {hosts.map(host => <option key={host.id} value={host.id}>{host.label} · {host.kind === 'local' ? 'Local' : 'Remote'}</option>)}
     </select></label>
-    <input type="search" className="launcher-target__filter" aria-label="Find a project on this machine"
+    <TextInput type="search" className="launcher-target__filter" aria-label="Find a project on this machine"
       placeholder="Find a project…" value={filter} onChange={event => setFilter(event.target.value)} />
     <div className="launcher-target__projects" aria-label="Registered projects">
       {projects.map(project => <button key={project.id} type="button" className="launcher-target__project"
