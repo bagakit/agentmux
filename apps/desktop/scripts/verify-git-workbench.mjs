@@ -114,6 +114,7 @@ async function click(cdp, expression, button = 'left') {
 }
 const selectors = selector => `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')`
 async function monaco(cdp, original, modified, regionId) {
+  await activate(cdp)
   // Monaco deliberately switches to inline at narrow split widths. Verify its actual rendered
   // presentation, retaining exact separate-side checks whenever both sides are displayed.
   return waitFor('visible readonly Monaco canvas and content', () => cdp.evaluate(`(() => { const pane = ${regionId ? `document.querySelector('[data-git-diff-region="${regionId}"]')` : `Array.from(document.querySelectorAll('.git-branch-diff')).find(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')`}; if (!pane || getComputedStyle(pane).visibility === 'hidden') return null; const canvas=pane.querySelector('.monaco-diff-editor');if(!canvas)return null; const rect=canvas.getBoundingClientRect();if(rect.width<80||rect.height<80)return null; const read = side => canvas.querySelector('.editor.'+side+' .view-lines')?.innerText.replace(/\u00a0/g,' ').trim(); const left=read('original'),right=read('modified');const presentation=canvas.classList.contains('side-by-side')?'side-by-side':'inline';const displayedLines=Array.from(canvas.querySelectorAll('.view-lines')).flatMap(e=>e.innerText.replace(/\u00a0/g,' ').split('\\n').map(line=>line.trim()).filter(Boolean));const valid=presentation==='side-by-side'?left===${JSON.stringify(original)}&&right===${JSON.stringify(modified)}:(${JSON.stringify(original)} === "" || displayedLines.includes(${JSON.stringify(original)})) && (${JSON.stringify(modified)} === "" || displayedLines.includes(${JSON.stringify(modified)}));return valid?{presentation,original:left,modified:right,displayedLines,viewportWidth:rect.width,viewportHeight:rect.height,canvases:pane.querySelectorAll('.monaco-diff-editor').length}:null })()`))
@@ -308,7 +309,11 @@ try {
 } catch (error) {
   failure = { phase, message: error.message, stack: error.stack }; receipt.failure = failure
   const active = second ?? first
-  if (active) { try { receipt.failureDom = await active.cdp.evaluate('document.body.innerText.slice(-6000)'); receipt.failureLayout=await active.cdp.evaluate(`Array.from(document.querySelectorAll('.git-branch-diff,.git-branch-diff > *,.monaco-diff-editor')).map(e=>({classes:e.className,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,display:getComputedStyle(e).display,gridRows:getComputedStyle(e).gridTemplateRows}))`); await capture(active.cdp, 'failure') } catch {} }
+  if (active) { try {
+    receipt.failureVisibility = await active.cdp.evaluate('({visibility:document.visibilityState,documentFocused:document.hasFocus()})')
+    receipt.failureNative = await active.main.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); const w = e.BrowserWindow.getAllWindows()[0]; return {visible:w.isVisible(),focused:w.isFocused()} })()`)
+    receipt.failureDom = await active.cdp.evaluate('document.body.innerText.slice(-6000)'); receipt.failureLayout=await active.cdp.evaluate(`Array.from(document.querySelectorAll('.git-branch-diff,.git-branch-diff > *,.monaco-diff-editor')).map(e=>({classes:e.className,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,display:getComputedStyle(e).display,gridRows:getComputedStyle(e).gridTemplateRows}))`); await capture(active.cdp, 'failure')
+  } catch {} }
 } finally {
   const errors = []
   for (const probe of [second, first]) if (probe && probe.child.exitCode === null && probe.child.signalCode === null) { try { await normalQuit(probe) } catch (error) { errors.push(error.message) } }
