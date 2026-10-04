@@ -9,13 +9,19 @@ This document describes the update mechanisms in the current source, not an inst
 | ctxmux fingerprint changed or fingerprint identity is unknown; ordinary update | Require runtime compatibility/resume review before installation | Review rejection leaves the current application and Agents running |
 | Explicit UI-only install intent | Install the application while retaining the existing compatible Runtime | UI and Native outcomes are reported separately; Native upgrade is deferred |
 
+## Build and route selection
+
 The first update needs `pnpm package:mac:install` to install the frontend loader. Subsequent compatible UI work can use `pnpm update:local` or explicitly `pnpm update:renderer`. The latter rejects host/runtime changes. Both build before selecting or activating a release. Packaging requires a clean committed checkout; a separate worktree can preserve unfinished work in the development tree.
+
+## Signing identity
 
 The `package-macos.mjs` entry point qualifies signing before its own build, candidate copy, signing or installation work. Set `AGENTMUX_MACOS_SIGN_IDENTITY` to the exact SHA1 of an available **Developer ID Application** certificate; [preflightMacosSigning](../../apps/desktop/scripts/macos-signing.mjs) validates that request at the start of [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs). Missing or mismatched identity rejects this candidate cheaply and keeps the installed App and healthy Runs.
 
 Development packaging must explicitly use `--ad-hoc`; it conflicts with a configured certificate and does not confirm permission continuity.
 
 The signing module owns exact configuration parsing and signed-output checks. Authorization continuity, the first identity transition and actual OS confirmation belong to the [Conversation Input screenshot contract](../design/behavior/conversation-input.md#message-tools-失败反馈与-browser-region-选中态); signing Source alone is not an OS authorization receipt.
+
+## UI-only installation and rollback
 
 `pnpm update:local --ui-only` selects application installation with UI-only intent. Direct packaging uses `pnpm package:mac:install --ui-only` (`--ui-only` requires `--install` on the packaging script). This is an explicit route, not permission to declare Native upgraded or to replace the daemon. [installApplication](../../apps/desktop/scripts/package-macos.mjs) compares the actual runtime trees and qualifies the existing listener. Without an outgoing workbench observation, an active candidate GUI still leaves complete workbench recovery `unknown`.
 
@@ -27,13 +33,21 @@ Main owns `renderer-updates/` beneath Electron userData. Immutable release direc
 
 The publisher atomically replaces `active.json`. Main serializes activation and rollback, validates the complete release, asks the current renderer to flush its checkpoint, and loads the candidate. A nonce-bound ready receipt follows renderer initialization. Only then does Main record success in `status.json`; the CLI waits for that receipt instead of treating staging as delivery. Failed checkpoints leave the current page loaded. Failed candidate startup restores the previous compatible page. Cold startup also validates and recovers staged candidates. Requests arriving during activation are not overwritten by the preceding request's completion.
 
+### Checkpoint scope
+
 The frontend uses the existing workbench persistence owner for composer drafts, dirty buffers and layout. Clean file content is re-read from disk. Core Sessions, PTY bytes, attachments, timelines and process state are never copied into this checkpoint. Electron file-origin storage continuity is verified in an isolated native profile.
 
 ## Restart boundary
 
+### Artifact identity
+
 Source releases and the installer fingerprint the actual ctxmux artifact directory for the current `platform-arch`. Adding or changing another platform's artifact does not request a Native upgrade on this host. Changes to the current artifact, including its manifest, binaries or SDK archive, still change the Native fingerprint; an absent artifact remains an error rather than a guessed match. Main and Core changes still require full application installation and semantic Host reload even when this fingerprint is unchanged.
 
+### Running application and Runtime continuity
+
 The installer compares the actual installed and candidate host artifacts before requesting quit. For an existing workbench, an unchanged Native fingerprint does not replace the public SDK's positive confirmation of the serving Runtime and original Runs. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
+
+### Native handoff
 
 Full installation with changed runtime trees requires a nonempty review artifact passed as `--runtime-reviewed=<path>` to the packaging script. The artifact does not prove continuity by itself: the installer also uses the public same-Runtime planned-exec path and confirms the handoff before starting the new GUI. UI-only intent defers that Native transaction and retains the compatible service. Neither route may treat missing startup provenance as proof that healthy Runs must be replaced.
 

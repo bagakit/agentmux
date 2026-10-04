@@ -8,7 +8,7 @@ palette 与 TUI 自身表现层的边界。
 
 # Terminal 运行时：CtxMux 内核与外观所有权
 
-本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)。
+本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 Core 持有的持久空间实体，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)。
 
 ctxmux 独立 Runtime 与 Core 的分层见 [Core 接入说明](../../packages/core/README.md#runtime-边界)。当前随包身份唯一取自 [manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)；不能从该身份推断正在服务的 daemon 已被更新。
 
@@ -61,9 +61,13 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
                                   RuntimeController → Core → ctxmuxd
 ```
 
-Core 的 [Control 合同](../../packages/core/src/control.ts) 只表达类型化的
-`inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
-请求和 receipt；DTO 本身不持有持久空间图。[Core Spatial owner](spatial-state.md#唯一事实-owner) 持有 Space/Zone/Tab/Region 身份、绑定与 split tree，Renderer 的既有 Workbench/layout reducer 消费同一图并维护屏幕投影与本地操作意图。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令复用同一空间图与既有 Workbench 的最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；展示归属独立于执行 cwd；恢复时保留布局，Session 续接沿[冷启动按需恢复合同](../design/behavior/session-recovery.md#冷启动按需恢复p0-末位)。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计保存在本机过程资料，可用于追溯；当前空间命令以公开源码和实施合同为准，理解现机制不依赖该本机文件。布局变化最终只通过既有 viewport synchronizer 把稳定后的 cols/rows 提交给 ctxmux；CtxMux 从不接收 Tab、Region 或 split direction。
+Core 的 [Control 合同](../../packages/core/src/control.ts) 表达类型化请求与回执，DTO 本身不持有空间图。持久实体、绑定和 split tree 由[Core Spatial owner](spatial-state.md#唯一事实-owner)持有；Renderer Workbench/layout reducer 消费同一图，维护屏幕投影与本地操作意图。
+
+Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycle。Agent／Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间创建先保存意图，再调用已有 Main Git/config 与公开 Core 创建能力；Core 记录同一次 Agent 创建的首次投递事实。展示归属不改变执行 cwd，Session 续接沿[冷启动恢复合同](../design/behavior/session-recovery.md#冷启动按需恢复p0-末位)。
+
+创建后投影或保存失败返回 partial／unknown，健康 Session 仍可发现。查询同一 request 不重启、不重发、不重新执行 Git。当前命令以公共源码与行为合同为准，理解机制不依赖本机历史设计。
+
+布局变更由既有 viewport synchronizer 将稳定后的 cols/rows 提交给 ctxmux。ctxmux 不接收 Tab、Region 或 split direction；PTY 的实际尺寸与客户端测量值分别表达。
 
 ## 2. 所有权矩阵
 
@@ -86,7 +90,7 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | [ctxmux-run-adapter.ts](../../packages/core/src/ctxmux-run-adapter.ts)，`decodeChunk` / `emitRunEvent` |
 | Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | 同一 adapter 的 `start` / `stop` / `interrupt` / `resize` |
 | Control transaction | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | [ipc.ts](../../apps/desktop/src/main/ipc.ts)、[control-host.ts](../../packages/core/src/control-host.ts) |
-| Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | [store.ts](../../apps/desktop/src/renderer/src/store.ts)、[control.ts](../../apps/desktop/src/renderer/src/lib/control.ts)、[Layout 公共合同](../../packages/layout/README.md) |
+| Tab/Region 持久布局与绑定 | Core Spatial owner；Renderer reducer 消费原图并投影屏幕 | [空间状态机制](spatial-state.md)、[store.ts](../../apps/desktop/src/renderer/src/store.ts)、[Layout 代数入口](../../packages/layout/README.md) |
 | Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
 | Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | [terminal-viewport-sync.ts](../../apps/desktop/src/renderer/src/lib/terminal-viewport-sync.ts)、TerminalView、RuntimeController |
 | Owner-confirmed live PTY size | CtxMux `RunInfo.current_size` 与 `RunEvent::Resized`；AgentMux 不用 `RunSpec.size` 冒充当前尺寸，unknown 保持 `null`。`null` 是「没有 owner 能确认」，不是缺省回启动尺寸；跨客户端 resize 按公开事件投影 | adapter 的 `snapshotCurrentSize` / `liveResizedSize`、[screen-evidence.ts](../../packages/core/src/screen-evidence.ts) |
