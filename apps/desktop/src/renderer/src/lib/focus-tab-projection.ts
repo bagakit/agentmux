@@ -1,14 +1,37 @@
 import { workbenchSurfaces, type WorkbenchTab } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
-import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { AgentMuxDesktopSpaceSelection, AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { AgentFocusContext } from './agent-focus'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { mainRegionReference } from './desktop-focus-navigation'
 import { selectSpatialCatalog } from './space-agent-control'
 
 export type ExecutionFocusPresentation = {
   projection: WorkbenchProjection | null
   issue: string | null
   references: readonly WorkbenchProjectionSelection[]
+}
+
+/** Main presentation consumes the durable Desktop choice, independently of Agent MRU. */
+export function mainFocusPresentation(
+  choice: AgentMuxDesktopSpaceSelection | null,
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  catalog: AgentMuxSpaceCatalog | null,
+  onSelect: WorkbenchProjection['onSelect'],
+  level: 'tab' | 'region' = 'tab'
+): ExecutionFocusPresentation {
+  if (!choice) return { projection: null, issue: null, references: [] }
+  const references = catalog?.locations.filter(location => location.displayWorkspaceId === choice.workspaceId &&
+    location.spaceId === choice.spaceId && location.zoneId === choice.zoneId).map(location => ({
+      displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId })) ?? []
+  const reference = mainRegionReference(choice)
+  if (!catalog || !reference || !tabs[reference.tabId]?.regions[reference.regionId] ||
+    !references.some(location => sameWorkbenchProjectionSelection(location, reference))) return { projection: null, references,
+    issue: 'The selected object has no confirmed Region occurrence. Its original workface and reference are kept; choose an exact existing location.' }
+  return { projection: { entity: level === 'region' ? { kind: 'region', regionId: reference.regionId } : { kind: 'tab', tabId: reference.tabId },
+    presentationId: 'focus-workbench', displayWorkspaceId: reference.displayWorkspaceId,
+    catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
+    selection: [reference], onSelect }, issue: null, references }
 }
 
 /** Resolve an occurrence from authoritative membership, never from the first Session Tab. */

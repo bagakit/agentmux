@@ -111,9 +111,16 @@ export function SessionPane({
 }) {
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const [takeoverSelection, setTakeoverSelection] = useState<string | null>(null)
-  const { reference: primaryReference } = useWorkbenchBrowserPresentation()
+  const primaryPresentation = useWorkbenchBrowserPresentation()
+  const primaryReference = primaryPresentation.reference
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
     tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
+  const selectOwnRegion = () => {
+    if (!linkOrigin.tabId || !linkOrigin.regionId) return
+    if (primaryPresentation.onSelectRegion) { primaryPresentation.onSelectRegion(linkOrigin.regionId); return }
+    useAppStore.getState().focusRegion(mailboxOrigin.workspaceId, mailboxOrigin.tabId!, linkOrigin.regionId,
+      primaryPresentation.surface === 'mote' ? 'floating-pointer' : 'pointer', mailboxOrigin.tabGroupId)
+  }
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
@@ -147,10 +154,10 @@ export function SessionPane({
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const autoFocus = useAppStore(state => {
     if (!visible || readOnly || state.retainedSpatialFocus || state.workbenchNavigationInputPolicy || state.mainSurface !== 'workbench' ||
-      state.activeWorkspaceId !== linkOrigin.workspaceId || !linkOrigin.tabId || !linkOrigin.regionId) return false
-    const layout = state.layouts[linkOrigin.workspaceId]
-    const group = layout?.groups.find(one => one.id === layout.activeGroupId)
-    return group?.activeTabId === linkOrigin.tabId && state.tabs[linkOrigin.tabId]?.layout.activeRegionId === linkOrigin.regionId
+      state.activeWorkspaceId !== mailboxOrigin.workspaceId || !mailboxOrigin.tabId || !linkOrigin.regionId) return false
+    const choice = state.workbenchSpaceSelection
+    return choice?.workspaceId === mailboxOrigin.workspaceId && choice.groupId === mailboxOrigin.tabGroupId &&
+      choice.tabId === mailboxOrigin.tabId && choice.regionId === linkOrigin.regionId
   })
   const terminalFontSize = useAppStore(
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
@@ -206,9 +213,7 @@ export function SessionPane({
     const target = historyReturnFocusRef.current
     const closingFocus = document.activeElement
     setHistoryOpen(false)
-    if (linkOrigin.tabId && linkOrigin.regionId) {
-      useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId, 'pointer')
-    }
+    selectOwnRegion()
     requestAnimationFrame(() => {
       if (!visibleRef.current || historyOpenRef.current || !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
       const active = document.activeElement
@@ -435,13 +440,13 @@ export function SessionPane({
   const activeWorkspaceRoot = useAppStore((state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
-  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, linkOrigin),
-    [sessionId, linkOrigin.workspaceId, linkOrigin.tabGroupId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.sessionId])
+  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, mailboxOrigin),
+    [sessionId, mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, mailboxOrigin.sessionId])
   const fileContext = useAppStore(selectFileContext)
   const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)
   useEffect(() => { setFileLinkIssue(null) }, [fileContext])
-  const fileOrigin = useMemo(() => ({ ...linkOrigin, sessionId }), [linkOrigin, sessionId])
-  const linkOpening = useSessionLinkOpening(fileOrigin, setFileLinkIssue)
+  const fileOrigin = useMemo(() => ({ ...mailboxOrigin, sessionId }), [mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, sessionId])
+  const linkOpening = useSessionLinkOpening(fileOrigin, setFileLinkIssue, selectOwnRegion)
   const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => {
     // Freeze the rendered scope and exact display occurrence. Never resolve again from focus.
     if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
@@ -993,9 +998,7 @@ export function SessionPane({
             {...(hasAgentComposer ? { onOpenTerminal: () => {
               useAppStore.getState().setViewMode(session.id, 'terminal')
               setHistoryOpen(false)
-              if (linkOrigin.tabId && linkOrigin.regionId) {
-                useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId)
-              }
+              selectOwnRegion()
             } } : {})}
             // A pending request outlives the process that asked it, so the card must go inert on the
             // same terms as the composer below it — otherwise a dead Run still shows live buttons and

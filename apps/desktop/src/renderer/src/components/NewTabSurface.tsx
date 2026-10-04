@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { currentHostCheck } from '../lib/host-check'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { configuredExecutors } from '../lib/executors'
@@ -113,9 +114,13 @@ export function NewTabSurface({
     state.workbenchSpaceSelection !== null && state.workbenchSpaceSelection.tabId === null)
   // A visible Tab can contain an unselected Launcher created by Control. Only its
   // selected Region may acquire input; the original empty-group Launcher has no Region.
-  const inputRegionActive = useAppStore(state => tabId && regionId
-    ? state.tabs[tabId]?.regions[regionId]?.kind === 'launcher' && state.tabs[tabId]?.layout.activeRegionId === regionId
-    : tabId === undefined && regionId === undefined)
+  const inputRegionActive = useAppStore(state => {
+    if (!tabId || !regionId) return tabId === undefined && regionId === undefined
+    if (state.tabs[tabId]?.regions[regionId]?.kind !== 'launcher') return false
+    const reference = presentation.surface === 'mote' ? presentation.reference : mainRegionReference(state.workbenchSpaceSelection)
+    return reference ? reference.tabId === tabId && reference.regionId === regionId
+      : !presentation.surface && state.tabs[tabId]?.layout.activeRegionId === regionId
+  })
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
   const terminalFontSize = useAppStore(
