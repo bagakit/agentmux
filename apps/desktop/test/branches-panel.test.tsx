@@ -110,12 +110,11 @@ function trailingOf(markup: string, branchName: string): string {
  * 「它出现在**对的**分组里」——必须按分组切片，否则对调谓词后断言照旧通过。
  */
 function group(markup: string, label: 'Worktrees' | 'Without worktree'): string {
-  const head = `<div class="branch-group"><span>${label}</span>`
-  const start = markup.indexOf(head)
-  expect(start, `没渲染出「${label}」分组——判据落空了，下面的断言会变成恒真`).toBeGreaterThanOrEqual(0)
-  const rest = markup.slice(start + head.length)
-  const next = rest.indexOf('<div class="branch-group">')
-  return next < 0 ? rest : rest.slice(0, next)
+  const root = document.createElement('div')
+  root.innerHTML = markup
+  const section = root.querySelector(`[data-branch-group="${label === 'Worktrees' ? 'worktrees' : 'branches'}"]`)
+  expect(section, `没渲染出「${label}」分组`).not.toBeNull()
+  return section!.innerHTML
 }
 
 afterEach(() => {
@@ -145,6 +144,24 @@ afterEach(() => {
  * 同一个结论」——而不是逐个抄一遍它们当下的取值。
  */
 describe('Branches 面板', () => {
+  it('计数有单位，比较与并行执行使用不同的图标，项目内路径相对仓库', () => {
+    const root = document.createElement('div')
+    root.innerHTML = render([
+      branch('inside', { worktreePath: _hygiene_fixturePath("repo/.worktrees/inside"), workspaceId: 'inside' }),
+      branch('outside', { worktreePath: _hygiene_fixturePath("repo-other/tree"), workspaceId: 'outside' }),
+      branch('loose')
+    ])
+    expect(root.querySelector('.source-control-count')?.textContent).toBe('3 branches')
+    const actions = [...root.querySelectorAll('.source-control-actions > button > svg')]
+    expect(actions).toHaveLength(3)
+    expect(actions[0]?.getAttribute('class')).not.toBe(actions[1]?.getAttribute('class'))
+    const paths = [...root.querySelectorAll('.selector-row__identity small')]
+    expect(paths.map(path => [path.textContent, path.getAttribute('title')])).toEqual([
+      ['./.worktrees/inside', _hygiene_fixturePath("repo/.worktrees/inside")], [_hygiene_fixturePath("repo-other/tree"), _hygiene_fixturePath("repo-other/tree")]
+    ])
+    expect([...root.querySelectorAll('.branch-group__heading')].map(group => group.textContent)).toEqual(['Worktrees2', 'Branches1'])
+  })
+
   it('有无 worktree 分到各自的组里', () => {
     const markup = render([
       branch('main', { worktreePath: _hygiene_fixturePath("repo"), workspaceId: 'ws-1' }),
@@ -510,6 +527,23 @@ describe('Branches 面板的 pin', () => {
         container.querySelector('.branch-row[aria-pressed="true"]'),
         '点 pin 连带打开了这一行'
       ).toBeNull()
+    })
+
+    it('两组独立收起且保留计数与重新展开入口', async () => {
+      fixture.snapshot = { kind: 'git-repository', hostId: 'local', repoPath: _hygiene_fixturePath("repo"), branches: [
+        branch('main', { worktreePath: _hygiene_fixturePath("repo"), workspaceId: 'ws-1' }), branch('loose')
+      ] }
+      await act(async () => root.render(createElement(BranchesPanel, { workspace })))
+      const heading = (kind: string) => container.querySelector<HTMLButtonElement>(`[data-branch-group="${kind}"] > button`)!
+      expect(heading('worktrees').getAttribute('aria-expanded')).toBe('true')
+      await act(async () => heading('worktrees').click())
+      expect(heading('worktrees').getAttribute('aria-expanded')).toBe('false')
+      expect(heading('worktrees').textContent).toBe('Worktrees1')
+      expect(container.querySelector('[data-branch-group="worktrees"] .branch-row')).toBeNull()
+      expect(container.querySelector('[data-branch-group="branches"] .branch-row strong')?.textContent).toBe('loose')
+      await act(async () => heading('worktrees').click())
+      expect(container.querySelector('[data-branch-group="worktrees"] .branch-row strong')?.textContent).toBe('main')
+      expect(fixture.state.activateWorkspaceSelection).not.toHaveBeenCalled()
     })
 
     /**
