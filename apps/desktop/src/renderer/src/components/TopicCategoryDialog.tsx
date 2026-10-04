@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { TopicCategory } from '@agentmux/core/control'
 import { useEffect, useRef, useState } from 'react'
@@ -36,7 +37,7 @@ export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: 
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">{target === 'create' ? 'New Topic category' : 'Rename Topic category'}</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Group related Topics under a shared theme.</Dialog.Description>
-        <form onSubmit={event => { event.preventDefault(); void save() }}><label>Name<input ref={input} value={name} maxLength={120} disabled={busy} autoComplete="off" onChange={event => setName(event.target.value)} /></label>
+        <form onSubmit={event => { event.preventDefault(); void save() }}><label>Name<TextInput ref={input} value={name} maxLength={120} disabled={busy} autoComplete="off" onChange={event => setName(event.target.value)} /></label>
           {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save category'}</button></footer>
         </form>
