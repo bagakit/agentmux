@@ -446,6 +446,11 @@ export function ActivityView({
     return api.sessions.historyResource({ hostId: resourceHostId, agentSessionId: resourceSessionId }, input)
   }, [resourceHostId, resourceSessionId])
   const nativeHistoryPage = readingWindow.page
+  const historyBoundary = readingWindow.historyBoundary
+  const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : historyBoundary.beforeRecordId === null
+    ? nativeHistoryPage.items.length : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
+  const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
+  const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
   const items = readingWindow.captured ?? observedItems
   useLayoutEffect(() => {
     if (conversationReading?.enabled && feedEl && anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
@@ -938,17 +943,22 @@ export function ActivityView({
         }}>
         <summary className="activity-feed__observation-source">
           <ChevronRight size={12} aria-hidden="true" />
-          <span>Submitted &amp; observed records</span>
-          <span className="activity-feed__observation-count">{observations.count}</span>
+          <span>投递与运行详情</span>
+          <span className="activity-feed__observation-count">· {observations.count} 项</span>
           {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}
           {observations.unconfirmed > 0 ? <span className="activity-feed__observation-issue">{observations.unconfirmed} submissions unconfirmed</span> : null}
         </summary>
-        <div className="activity-feed__observation-scope">Submission receipts and runtime observations; native acceptance is separate.</div>
+        <div className="activity-feed__observation-scope">包含发送回执和运行观察，不代表 Agent 已接纳的对话消息</div>
         <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
       </details> : null}
       <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
+        {...(historyBoundary && boundaryIndex > 0 ? {
+          recordBoundary: { ...historyBoundary, content: <div className="activity-feed__history-divider" role="separator">
+            以上是历史消息（{boundaryTime === undefined ? '时间未记录' : new Date(boundaryTime).toLocaleString()}）
+          </div> }
+        } : {})}
         readHistoryResource={readHistoryResource}
         renderQuestionNotice={renderConversationQuestionNotice}
         {...(onReplyQuestion ? { onReplyQuestion } : {})}
@@ -966,10 +976,6 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
-      {readingWindow.historical && nativeHistoryPage ? <div className="activity-feed__history-divider" role="separator">
-        以上是历史消息（{(() => { const last = nativeHistoryPage.items.at(-1); const time = last?.completedAt ?? last?.startedAt;
-          return time === undefined ? '时间未记录' : new Date(time).toLocaleString() })()}）
-      </div> : null}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump && !readingWindow.historical ? (
         <button

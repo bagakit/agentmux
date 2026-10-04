@@ -64,6 +64,8 @@ it('one native launch body is primary; its distinct captured receipt stays close
   const f = await fixture([raw('native-launch', body)], [captured('capture-launch', body)])
   await mount(f.page, f.timeline, async node => {
     expect(disclosure(node).open).toBe(false)
+    expect(disclosure(node).querySelector('summary')!.textContent).toContain('投递与运行详情· 1 项')
+    expect(disclosure(node).querySelector('.activity-feed__observation-scope')!.textContent).toBe('包含发送回执和运行观察，不代表 Agent 已接纳的对话消息')
     expect(visibleInputs(node).map(n => n.dataset.messageId)).toEqual(['native:claude:native-main:native-launch'])
     const receipt = node.querySelector<HTMLElement>('[data-message-id="captured:capture-launch"]')!
     expect(receipt).not.toBeNull()
@@ -97,7 +99,7 @@ it('pending/failed summaries count only disclosed facts, including captured inpu
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: 'private-agent', item: device })
   const full = await f.client.sessionTimeline('private-agent')
   await mount(f.page, full, async node => {
-    expect(disclosure(node).querySelector('.activity-feed__observation-count')!.textContent).toBe('2')
+    expect(disclosure(node).querySelector('.activity-feed__observation-count')!.textContent).toBe('· 2 项')
     expect(disclosure(node).querySelector('summary')!.textContent).toContain('1 failed records')
     expect(disclosure(node).querySelector('summary')!.textContent).toContain('1 submissions unconfirmed')
     expect(node.textContent).not.toContain('not conversation')
@@ -117,7 +119,7 @@ it('native unavailable keeps submitted original and Retry without implying nativ
   const retry = vi.fn()
   await mount(null, f.timeline, async node => {
     expect(node.querySelector('.activity-feed__read-notice')!.textContent).toContain(error!.message)
-    expect(node.querySelector('.activity-feed__observation-scope')!.textContent).toContain('native acceptance is separate')
+    expect(node.querySelector('.activity-feed__observation-scope')!.textContent).toBe('包含发送回执和运行观察，不代表 Agent 已接纳的对话消息')
     expect(visibleInputs(node)).toHaveLength(0)
     await toggle(node, true)
     const receipt = node.querySelector('[data-message-id="captured:capture-only"]')!
