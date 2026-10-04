@@ -110,7 +110,7 @@ describe('Hosted desired reading intent', () => {
     expect(client.runtimeOwnerIdentity()).toMatchObject({ runtimeId: 'original-runtime', ownerInstanceId: 'restarted-owner', availability: 'connected' })
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] }, { method: 'attachTerminal', args: ['retained-run', 2, 'terminal'] },
-      { method: 'runtimeProjection', args: [] }, { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }
+      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }, { method: 'runtimeProjection', args: [] }
     ])
     await client.dispose()
   })
@@ -182,14 +182,14 @@ describe('Hosted desired reading intent', () => {
     await client.attachTerminal('retained-run', 2, 'terminal')
     f.behavior.release = async () => { throw new AgentMuxError('The original release receipt is unavailable.', 'CONTROL_UNAVAILABLE') }
     await expect(client.releaseRunAttachment({ runId: 'closed-run' })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
-    f.disconnect(); await client.connect()
+    f.disconnect(true); await client.connect()
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] },
       { method: 'attachTerminal', args: ['closed-run', 0, 'raw'] },
       { method: 'attachTerminal', args: ['retained-run', 2, 'terminal'] },
       { method: 'releaseRunAttachment', args: [{ runId: 'closed-run' }] },
-      { method: 'runtimeProjection', args: [] },
-      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }
+      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] },
+      { method: 'runtimeProjection', args: [] }
     ])
     expect(events.filter(event => event.type === 'terminal-snapshot')).toEqual([
       { type: 'terminal-snapshot', ...attachment('retained-run'), afterByte: 4 }
@@ -204,7 +204,7 @@ describe('Hosted desired reading intent', () => {
     await client.attachTerminal('closed-run', 0, 'terminal')
     let finish!: (value: AgentMuxRunAttachment) => void
     f.behavior.refresh = vi.fn(async () => await new Promise<AgentMuxRunAttachment>(resolve => { finish = resolve }))
-    f.disconnect()
+    f.disconnect(true)
     const reconnect = client.connect()
     await vi.waitFor(() => expect(f.behavior.refresh).toHaveBeenCalledTimes(1))
     const release = client.releaseRunAttachment({ runId: 'closed-run' })
@@ -214,8 +214,8 @@ describe('Hosted desired reading intent', () => {
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] },
       { method: 'attachTerminal', args: ['closed-run', 0, 'terminal'] },
-      { method: 'runtimeProjection', args: [] },
       { method: 'refreshRunAttachment', args: [{ runId: 'closed-run' }, 4, 'terminal'] },
+      { method: 'runtimeProjection', args: [] },
       { method: 'releaseRunAttachment', args: [{ runId: 'closed-run' }] }
     ])
     f.disconnect(); await client.connect()

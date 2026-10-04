@@ -190,6 +190,19 @@ describe('continuous progress uses the public ingress and shared observation', (
     expect(manager.list()[0]).toMatchObject({ lastOutcome: 'skipped', nextCheckAt: 1010 })
   })
 
+  it('the Main future scheduler reads only its exact saved body from the Core public capability', async () => {
+    const f = await fixture()
+    await f.client.saveAgentFuturePromptIntent({ agentSessionId: f.session.agentSessionId, intentId: 'chosen', operationId: 'chosen-operation', prompt: 'this exact future task', active: true })
+    await f.client.saveAgentFuturePromptIntent({ agentSessionId: f.session.agentSessionId, intentId: 'unrelated', operationId: 'other-operation', prompt: 'unrelated retained body', active: false })
+    expect((await f.status()).session.futurePromptIntents).toBeUndefined()
+    const read = vi.spyOn(f.client, 'readAgentFuturePromptIntent')
+    const observed = await f.runtime.observeContinuousProgress({ hostId: f.session.hostId, agentSessionId: f.session.agentSessionId, providerId: f.session.providerId, workspacePath: f.session.workspacePath, futureIntentId: 'chosen' }, 'exact-future-tick', Date.now())
+    expect(read.mock.calls).toEqual([[f.session.agentSessionId, 'chosen']])
+    expect(observed.session.futurePromptIntents).toMatchObject({ chosen: { prompt: 'this exact future task', operationId: 'chosen-operation', active: true } })
+    expect(Object.keys(observed.session.futurePromptIntents!)).toEqual(['chosen'])
+    expect(f.writes).toEqual([])
+  })
+
   it('does not displace a manual prompt admitted between tick observation and automatic delivery', async () => {
     const f = await fixture()
     let manualSent = false

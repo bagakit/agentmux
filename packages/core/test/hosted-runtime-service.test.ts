@@ -116,10 +116,10 @@ describe('failed Hosted event lease release', () => {
       const old = bridge.leases[0]!
       corrupt(old.handlers, shape)
       expect(client.agentSessions()).toEqual([original])
-      expect(client.runtimeOwnerIdentity()?.availability).toBe('unverified')
+      expect(client.runtimeOwnerIdentity()?.availability, 'failed observation does not revoke the authenticated control owner').toBe('connected')
       await vi.waitFor(() => expect(old.dispose).toHaveBeenCalledTimes(1))
       await vi.waitFor(() => expect(client.runtimeOwnerIdentity()?.availability).toBe('connected'))
-      expect(bridge.leases).toHaveLength(3)
+      await vi.waitFor(() => expect(bridge.leases).toHaveLength(3))
       expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored'])
       expect(bridge.leases[1]!.dispose).not.toHaveBeenCalled()
       await expect(sibling.runtimeProjection()).resolves.toMatchObject({ hostId: 'local' })
@@ -269,7 +269,7 @@ describe('semantic Host observation consumers', () => {
     expect(f.core.handOff).toHaveBeenCalledTimes(1)
     await events.dispose(); await f.service.dispose()
   })
-  it('rejects a late business write if its request cancelled or original consumer closed while Core reconnect was pending', async () => {
+  it('cancels the exact request but retains invocation authority when only its event reader closes', async () => {
     for (const interruption of ['cancelled', 'closed'] as const) {
       const f = fixture(), events = await f.subscribe('consumer-a', f.eventsA), controller = new AbortController()
       let finish!: () => void
@@ -282,12 +282,28 @@ describe('semantic Host observation consumers', () => {
       if (interruption === 'cancelled') await expect(pending).rejects.toThrow('Original private request cancelled')
       else {
         const outcome = await pending.then(value => ({ value }), error => ({ error }))
-        expect(outcome, 'a closed consumer cannot admit a late SDK prompt').toMatchObject({ error: { code: 'CONTROL_UNAVAILABLE' } })
+        expect(outcome, 'closing observation does not cancel an independently authorized request').toHaveProperty('value')
       }
-      expect(f.core.submitAgentPrompt.mock.calls).toEqual([])
+      expect(f.core.submitAgentPrompt).toHaveBeenCalledTimes(interruption === 'cancelled' ? 0 : 1)
       expect(f.core.stopTerminal.mock.calls).toEqual([])
       await events.dispose(); await f.service.dispose()
     }
+  })
+  it('acquires an exact Agent attachment while general Session observation is unavailable', async () => {
+    const f = fixture(), bridge = rpcPort(f.service), subscribe = bridge.port.subscribe
+    const original = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("private-workspace"), run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
+    Object.assign(f.core, { agentSession: (id: string) => { expect(id).toBe(original.agentSessionId); return original } })
+    bridge.port.subscribe = (async (...args: Parameters<AgentMuxHostedRpcPort['subscribe']>) => {
+      if (args[0] === 'runtime.events') throw new Error('Private general observation unavailable')
+      return await subscribe(...args)
+    }) as AgentMuxHostedRpcPort['subscribe']
+    const client = await connectHostedAgentMux({ rpc: bridge.port, waitForReady: false })
+    try {
+      expect((await client.reattachAgent(original.agentSessionId)).attachment.run).toMatchObject({ runId: 'original-run', state: 'running' })
+      await client.releaseRunAttachment(original.run)
+      expect(f.core.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith(original.run)
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    } finally { await client.dispose(); await f.service.dispose() }
   })
   it('shares one Core attachment and releasing one viewer retains the other and the healthy Run', async () => {
     const f = fixture()
@@ -328,7 +344,7 @@ describe('semantic Host observation consumers', () => {
     await first.dispose(); expect(f.core.releaseRunAttachment).toHaveBeenCalledOnce()
     await f.service.dispose()
   })
-  it('closes invocation authority immediately while the disconnected consumer is still draining its last observation', async () => {
+  it('removes the closed destination while retaining control during its observation release', async () => {
     const f = fixture(), first = await f.subscribe('consumer-a', f.eventsA)
     await f.invoke('consumer-a', 'attachTerminal', ['original-run'])
     let finish!: () => void
@@ -336,8 +352,8 @@ describe('semantic Host observation consumers', () => {
     const draining = first.dispose()
     await vi.waitFor(() => expect(f.core.releaseRunAttachment).toHaveBeenCalledTimes(1))
     try {
-      await expect(f.invoke('consumer-a', 'submitAgentPrompt', [{}])).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
-      expect(f.core.submitAgentPrompt.mock.calls).toEqual([])
+      await expect(f.invoke('consumer-a', 'submitAgentPrompt', [{}])).resolves.toBeDefined()
+      expect(f.core.submitAgentPrompt).toHaveBeenCalledTimes(1)
       f.output('original-run'); expect(f.eventsA).toEqual([])
       expect(f.core.stopTerminal).not.toHaveBeenCalled()
     } finally { finish(); await draining; await f.service.dispose() }
@@ -491,9 +507,8 @@ describe('semantic Host observation consumers', () => {
     const observer = await client.observeSessionHistory('a123456789012345', value => observations.push(value), {})
     expect(observer.source).toEqual({ providerId: 'codex', nativeSessionId: 'original-native' })
     expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(1)
-    await bridge.connections[0]!.close()
-    await client.connect()
-    expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(2)
+    await bridge.connections.find(value => value.method === 'runtime.history-watch')!.close()
+    await vi.waitFor(() => expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(2))
     expect(observations).toContainEqual({ kind: 'invalidated', agentSessionId: 'a123456789012345', source: observer.source })
     expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
     observer.dispose(); await client.dispose(); await f.service.dispose()
@@ -507,7 +522,8 @@ describe('semantic Host observation consumers', () => {
     })
     const client = await connectHostedAgentMux({ rpc: bridge.port }), observations: unknown[] = []
     const observer = await client.observeSessionHistory('a123456789012345', value => observations.push(value), {})
-    await bridge.connections[0]!.close(); await client.connect()
+    await bridge.connections.find(value => value.method === 'runtime.history-watch')!.close()
+    await vi.waitFor(() => expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(2))
     expect(observer.source).toEqual({ providerId: 'codex', nativeSessionId: 'original-native' })
     expect(observations, 'a foreign native source cannot replace the original history window').toContainEqual(expect.objectContaining({ kind: 'unavailable',
       source: observer.source, code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' }))
@@ -516,7 +532,7 @@ describe('semantic Host observation consumers', () => {
     expect(f.core.submitAgentPrompt).not.toHaveBeenCalled(); expect(f.core.stopTerminal).not.toHaveBeenCalled()
     observer.dispose(); await client.dispose(); await f.service.dispose()
   })
-  it('disposes a late native observer exactly once when its original consumer closed during admission', async () => {
+  it('retains independent history admission when only the general reader closes', async () => {
     const f = fixture(), events = await f.subscribe('consumer-a', f.eventsA)
     let resolve!: (value: { source: { providerId: string; nativeSessionId: string }; dispose: ReturnType<typeof vi.fn> }) => void
     const source = { providerId: 'codex', nativeSessionId: 'original-native' }, release = vi.fn()
@@ -527,10 +543,11 @@ describe('semantic Host observation consumers', () => {
     expect(f.core.observeSessionHistory.mock.calls[0]![0]).toBe('a123456789012345')
     f.core.observeSessionHistory.mock.calls[0]![1]({ kind: 'invalidated', agentSessionId: 'a123456789012345', source })
     resolve({ source, dispose: release })
-    await expect(admitting).rejects.toMatchObject({ code: 'CONTROL_CANCELLED' })
+    const admitted = await admitting
     expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(1)
-    expect(release).toHaveBeenCalledTimes(1)
-    expect(historyEvents).toEqual([])
+    expect(release).not.toHaveBeenCalled()
+    await admitted.dispose(); expect(release).toHaveBeenCalledTimes(1)
+    expect(historyEvents).toEqual([{ type: 'end', data: { reason: 'consumer-released' } }])
     await f.service.dispose()
   })
   it('passes request cancellation into the existing Prompt contract without inventing read option fields', async () => {
@@ -631,8 +648,8 @@ describe('semantic Host observation consumers', () => {
         expect.objectContaining({ data: { event: expect.objectContaining({ type: 'terminal-resized', run: { runId: 'second-run' }, cols: 81, rows: 25 }) } }),
         expect.objectContaining({ data: { event: expect.objectContaining({ type: 'connection-state', state: 'lost' }) } })
       ]))
-      await vi.waitFor(() => expect(releaseConsumer).toHaveBeenCalledExactlyOnceWith('consumer-a'))
-      await releaseConsumer.mock.results[0]!.value
+      await vi.waitFor(() => expect((f.service as unknown as { consumers: Map<string, unknown> }).consumers.has('consumer-a')).toBe(false))
+      expect(releaseConsumer).not.toHaveBeenCalled()
       expect(await f.service.call('runtime.release-consumer', { fence, consumerId: 'consumer-a' })).toEqual({ released: false })
       expect(f.core.releaseRunAttachment.mock.calls).toEqual([])
       f.output('original-run')
@@ -661,9 +678,10 @@ describe('semantic Host observation consumers', () => {
     f.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 4 } })
     expect(f.eventsA).toEqual([{ type: 'snapshot', data: { event: { type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 4 } } } }])
     await broken.dispose(); await first.dispose()
-    expect(releases.map(release => release.mock.calls.length)).toEqual([1, 1])
-    expect(healthy[1]).toEqual({ type: 'end', data: { reason: 'consumer-released' } })
-    await second.dispose(); await f.service.dispose()
+    expect(releases.map(release => release.mock.calls.length)).toEqual([1, 0])
+    callbacks[1]!({ kind: 'invalidated', agentSessionId: 'b123456789012345', source: { providerId: 'codex', nativeSessionId: 'original-native' } })
+    await vi.waitFor(() => expect(healthy).toHaveLength(2))
+    await second.dispose(); expect(releases.map(release => release.mock.calls.length)).toEqual([1, 1]); await f.service.dispose()
   })
 })
 
