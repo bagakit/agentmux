@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { HostBadge, HostIcon } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
@@ -346,7 +347,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       </header>
       <div className="space-tree-search">
         <Search size={13} aria-hidden="true" />
-        <input
+        <TextInput
           ref={searchRef}
           type="search"
           aria-label="Find Spaces"

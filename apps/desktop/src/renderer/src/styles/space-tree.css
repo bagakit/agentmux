@@ -3,6 +3,7 @@
 .space-tree-search:focus-within { border-color: var(--focus-line); }
 .space-tree-search > svg { flex: 0 0 auto; }
 .space-tree-search input { width: 100%; min-width: 0; padding: var(--sp-2) 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: var(--fs-meta); }
+.space-tree-search input:focus-visible { outline: none; }
 .space-tree-search input::placeholder { color: var(--text-3); }
 .space-tree-search input::-webkit-search-cancel-button { display: none; }
 .space-tree-search .icon-button { flex: 0 0 20px; width: 20px; height: 20px; }
@@ -30,3 +31,5 @@
 .project-rail-folder-block { display: grid; align-content: start; gap: var(--sp-1); min-width: 0; border-radius: var(--radius); }
 .project-rail-folder-block--pinned { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
 .space-pin.icon-button > svg, .project-rail-row--pinned-child .project-rail-row__icon > svg { width: 11px; height: 11px; stroke-width: 1.6; }
+
+@media (forced-colors: active) { .space-tree-search:focus-within { border-color: Highlight; } }
