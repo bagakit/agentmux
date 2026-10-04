@@ -1,7 +1,8 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -19,6 +20,22 @@ import {
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
 } from '../src/runtime-paths.js'
+
+const { tryLock } = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
+
+async function holdStoreKernelLock(path: string): Promise<() => Promise<void>> {
+  const handle = await open(`${path}.lock`, 'a+', 0o600)
+  if (!tryLock(handle.fd)) {
+    await handle.close()
+    throw new Error('Test fixture could not acquire the Store kernel lock')
+  }
+  let released = false
+  return async () => {
+    if (released) return
+    released = true
+    await handle.close()
+  }
+}
 
 function storedSession() {
   return {
@@ -263,10 +280,7 @@ describe('semantic session persistence boundary', () => {
     ])
   })
 
-  it('a full retired-run ring still records the next Stop and forgets only sessions whose runs left', async () => {
-    // 一对一地再停一条，会话上限和 Run 环会一起丢掉最旧的那条，旧断言照样绿。
-    // 多带一条仍绑在 Session 上的旧 Run，环会多挤掉一条，而会话上限只丢掉一条——
-    // 被挤掉 Run、却还留在退役会话里的那条，就是启动时把整窗判死的形状。
+  it('growing retirement history records subsequent Stops without discarding original identities', async () => {
     const remembered = await withRetiredRing(async (store) => {
       const session = {
         ...storedSession(),
@@ -281,7 +295,7 @@ describe('semantic session persistence boundary', () => {
       }
     })
     const expectedRuns = [
-      ...Array.from({ length: 250 }, (_, index) => ({ runId: `run-${index + 6}` })),
+      ...Array.from({ length: 256 }, (_, index) => ({ runId: `run-${index}` })),
       { runId: 'bound-overflow' },
       { runId: 'daemon-1' },
       { runId: 'released-a' },
@@ -290,7 +304,7 @@ describe('semantic session persistence boundary', () => {
       { runId: 'retired-extra-b' }
     ]
     const expectedSessionIds = [
-      ...Array.from({ length: 250 }, (_, index) => `session-${index + 6}`),
+      ...Array.from({ length: 256 }, (_, index) => `session-${index}`),
       'semantic-1'
     ]
     expect(remembered).toHaveLength(2)
@@ -298,7 +312,7 @@ describe('semantic session persistence boundary', () => {
       expect(retiredRuns).toEqual(expectedRuns)
       expect(retiredSessions.map((session) => session.agentSessionId)).toEqual(expectedSessionIds)
       expect(retiredSessions.map((session) => session.run.runId)).toEqual([
-        ...Array.from({ length: 250 }, (_, index) => `run-${index + 6}`),
+        ...Array.from({ length: 256 }, (_, index) => `run-${index}`),
         'daemon-1'
       ])
     }
@@ -739,10 +753,11 @@ describe('semantic session persistence boundary', () => {
   it('does not commit a Timeline mutation after an aborted lock wait', async () => {
     const root = await mkdtemp(fixturePath("tmp/agentmux-store-abort-"))
     const path = join(root, 'sessions.json')
+    let releaseLock: (() => Promise<void>) | undefined
     try {
       const store = new AgentMuxFileAgentSessionStore(path)
       await store.compareAndSwap(null, storedSession())
-      await writeFile(`${path}.lock`, `${process.pid}\n`, { mode: 0o600 })
+      releaseLock = await holdStoreKernelLock(path)
       const controller = new AbortController()
       const pending = store.applyTimelineMutation(
         {
@@ -764,11 +779,12 @@ describe('semantic session persistence boundary', () => {
       setTimeout(() => controller.abort(), 20)
 
       await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
-      await unlink(`${path}.lock`)
+      await releaseLock()
       await new Promise((resolve) => setTimeout(resolve, 40))
       await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline('semantic-1'))
         .resolves.toEqual({ agentSessionId: 'semantic-1', revision: 0, items: [] })
     } finally {
+      await releaseLock?.()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -776,8 +792,9 @@ describe('semantic session persistence boundary', () => {
   it('does not commit a Session write after an aborted lock wait', async () => {
     const root = await mkdtemp(fixturePath("tmp/agentmux-store-abort-"))
     const path = join(root, 'sessions.json')
+    let releaseLock: (() => Promise<void>) | undefined
     try {
-      await writeFile(`${path}.lock`, `${process.pid}\n`, { mode: 0o600 })
+      releaseLock = await holdStoreKernelLock(path)
       const controller = new AbortController()
       const pending = new AgentMuxFileAgentSessionStore(path).compareAndSwap(
         null,
@@ -787,7 +804,10 @@ describe('semantic session persistence boundary', () => {
       setTimeout(() => controller.abort(), 20)
 
       await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+      await releaseLock()
+      await expect(new AgentMuxFileAgentSessionStore(path).load()).resolves.toEqual([])
     } finally {
+      await releaseLock?.()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -1058,12 +1078,14 @@ describe('并发写同一份 store 的锁竞争', () => {
     const lockPath = `${path}.lock`
     const timelineDirectory = join(root, 'agent-timelines')
     const orphan = join(timelineDirectory, 'orphan.jsonl')
+    let releaseLock: (() => Promise<void>) | undefined
     try {
       const writer = new AgentMuxFileAgentSessionStore(path)
       await writer.compareAndSwap(null, storedSession())
       await mkdir(timelineDirectory, { recursive: true })
       await writeFile(orphan, '{"orphan":true}\n', { mode: 0o600 })
-      await writeFile(lockPath, `${process.pid}\n`, { mode: 0o600 })
+      releaseLock = await holdStoreKernelLock(path)
+      const lockedInode = (await stat(lockPath)).ino
 
       const reader = new AgentMuxFileAgentSessionStore(path)
       const loaded = await Promise.race([
@@ -1074,44 +1096,46 @@ describe('并发写同一份 store 的锁竞争', () => {
       // 活 owner 仍在，维护旁路必须让出，不能为了删孤立文件抢走它的锁。
       await expect(readFile(orphan, 'utf8')).resolves.toContain('orphan')
 
-      await unlink(lockPath)
+      await releaseLock()
+      expect((await stat(lockPath)).ino).toBe(lockedInode)
       await reader.load()
       await expect(readFile(orphan, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     } finally {
+      await releaseLock?.()
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  it('回收进程崩溃留下的空锁，并允许新的 Session 写入', async () => {
+  it('空锁文件不代表活 owner，新写入保持同一个 inode', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-store-stale-lock-'))
     const path = join(root, 'agent-sessions.json')
     const lockPath = `${path}.lock`
     try {
       await writeFile(lockPath, '', { mode: 0o600 })
-      const staleAt = new Date(Date.now() - 5_000)
-      await utimes(lockPath, staleAt, staleAt)
+      const originalInode = (await stat(lockPath)).ino
 
       const store = new AgentMuxFileAgentSessionStore(path)
       await store.compareAndSwap(null, storedSession())
 
       await expect(store.load()).resolves.toHaveLength(1)
-      await expect(readFile(lockPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await stat(lockPath)).ino).toBe(originalInode)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  it('回收 owner 字段截断且已过 grace window 的锁', async () => {
+  it('残损 owner 字节不能占锁，新写入保持同一个 inode', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-store-truncated-lock-'))
     const path = join(root, 'agent-sessions.json')
     const lockPath = `${path}.lock`
     try {
       await writeFile(lockPath, 'not-a-pid', { mode: 0o600 })
-      const staleAt = new Date(Date.now() - 5_000)
-      await utimes(lockPath, staleAt, staleAt)
+      const originalInode = (await stat(lockPath)).ino
 
-      await new AgentMuxFileAgentSessionStore(path).compareAndSwap(null, storedSession())
-      await expect(readFile(lockPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      const store = new AgentMuxFileAgentSessionStore(path)
+      await store.compareAndSwap(null, storedSession())
+      await expect(store.load()).resolves.toHaveLength(1)
+      expect((await stat(lockPath)).ino).toBe(originalInode)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
