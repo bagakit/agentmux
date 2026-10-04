@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
+import { build } from 'esbuild'
+import { runInNewContext } from 'node:vm'
 import { AgentMuxHostedTransferReader, decodeBase64, encodeBase64, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from '../src/hosted-value.js'
 import { hostedCarrierPerformance } from '../src/performance-diagnostics.js'
 
-describe('bounded Hosted carrier native bytes', () => {
+describe('bounded Hosted carrier portable bytes', () => {
   it('accepts the exact existing logical UTF8 maximum and rejects the next byte', () => {
     const text = 'x'.repeat(AGENTMUX_HOSTED_TRANSFER_MAX_BYTES - 2)
     const reader = new AgentMuxHostedTransferReader(), chunks = hostedTransfer(text, 'legal-boundary')
@@ -37,7 +39,7 @@ describe('bounded Hosted carrier native bytes', () => {
     expect(after.decodedValues.count - before.decodedValues.count).toBe(1)
     after.encoded.count = 0; expect(hostedCarrierPerformance.snapshot().encoded.count).toBeGreaterThan(0)
   })
-  it('rejects a definitely oversized value before native base64 allocation, preserves exact final escaped UTF8 budget and rejects invalid frames', () => {
+  it('rejects a definitely oversized value before base64 allocation, preserves exact final escaped UTF8 budget and rejects invalid frames', () => {
     const native = vi.spyOn(Buffer.prototype, 'toString')
     try {
       const oversized = new Uint8Array(AGENTMUX_HOSTED_TRANSFER_MAX_BYTES)
@@ -48,7 +50,9 @@ describe('bounded Hosted carrier native bytes', () => {
     const rejectedBefore = hostedCarrierPerformance.snapshot().rejected
     expect(() => hostedTransfer('界'.repeat(12 * 1024 * 1024), 'escaped')).toThrowError(expect.objectContaining({ code: 'RUNTIME_READER_BUDGET_EXCEEDED' }))
     expect(hostedCarrierPerformance.snapshot().rejected).toBe(rejectedBefore + 1)
-    for (const value of ['A===', 'AA=A', '%%==', 'abc']) expect(() => decodeBase64(value)).toThrow()
+    for (const value of ['A===', 'AA=A', '%%==', 'abc', 'AA\n=', 'AB==']) {
+      expect(() => decodeBase64(value)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+    }
     const allocation = vi.spyOn(Buffer, 'from')
     try {
       expect(() => new AgentMuxHostedTransferReader().accept({ transferId: 'bad-frame', index: 0,
@@ -59,5 +63,37 @@ describe('bounded Hosted carrier native bytes', () => {
     const chunks = hostedTransfer({ bytes: new Uint8Array(100_000) }, 'ordered')
     reader.accept(chunks[0]!); expect(() => reader.accept(chunks[2]!)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
     expect(() => hostedTransfer(Symbol('unsupported'), 'invalid')).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+  })
+  it('uses the global Node fast path for exact byte views', () => {
+    const native = vi.spyOn(Buffer, 'from')
+    try {
+      const bytes = Uint8Array.of(9, 0, 128, 255, 8).subarray(1, 4)
+      expect(encodeBase64(bytes)).toBe('AID/')
+      expect(native).toHaveBeenCalledWith(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      expect(decodeBase64('AID/')).toEqual(Uint8Array.of(0, 128, 255))
+      expect(native).toHaveBeenCalledWith('AID/', 'base64')
+    } finally { native.mockRestore() }
+  })
+  it('consumes the actual compiled codec in a browser context without Buffer', async () => {
+    const bundled = await build({ entryPoints: [new URL('../dist/hosted-value.js', import.meta.url).pathname],
+      bundle: true, platform: 'browser', format: 'cjs', write: false, metafile: true, logLevel: 'silent' })
+    const inputs = Object.values(bundled.metafile!.inputs)
+    expect(inputs.length).toBeGreaterThan(2)
+    expect(inputs.flatMap(input => input.imports).some(input => input.path.startsWith('node:'))).toBe(false)
+    expect(bundled.outputFiles[0]!.contents.byteLength).toBeGreaterThan(100)
+    const context = { module: { exports: {} }, Buffer: undefined, performance, TextEncoder, TextDecoder, Uint8Array }
+    runInNewContext(bundled.outputFiles[0]!.text, context)
+    const browser = context.module.exports as typeof import('../src/hosted-value.js')
+    const bytes = Uint8Array.of(9, 0, 128, 255, 8).subarray(1, 4)
+    expect(browser.encodeBase64(bytes)).toBe('AID/')
+    expect(browser.decodeBase64('AID/')).toEqual(bytes)
+    const value = { bytes, text: '中文', tuple: [undefined, 'fixed'] }
+    const reader = new browser.AgentMuxHostedTransferReader()
+    let result: unknown
+    for (const frame of browser.hostedTransfer(value, 'no-node-buffer')) result = reader.accept(frame)
+    expect(result).toEqual(value)
+    for (const invalid of ['A===', 'AA=A', '%%==', 'abc', 'AA\n=', 'AB==']) {
+      expect(() => browser.decodeBase64(invalid)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+    }
   })
 })

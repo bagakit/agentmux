@@ -166,7 +166,8 @@ async function identity() {
     'packages/git/src/git-repository.ts', 'packages/git/dist/git-repository.js', 'packages/git/package.json',
     'packages/git/src/types.ts', 'packages/git/dist/types.d.ts', 'packages/core/package.json',
     'packages/core/dist/public-rpc-service.js', 'packages/core/dist/public-rpc-git.js',
-    'packages/core/dist/agentmux-cli-commands.js', 'apps/desktop/src/main/git-public-control.ts',
+    'packages/core/dist/agentmux-cli-commands.js', 'packages/core/src/hosted-value.ts', 'packages/core/dist/hosted-value.js',
+    'apps/desktop/src/main/git-public-control.ts',
     'apps/desktop/out/renderer/index.html']
   async function bundles(directory) {
     for (const entry of await readdir(join(repositoryRoot, directory), {withFileTypes:true})) {
@@ -191,6 +192,7 @@ async function type(cdp, selector, value) {
   assert.equal(selected, true); await cdp.call('Input.insertText', { text: value })
 }
 try {
+  receipt.sourceRevision = (await exec('git', ['-C', repositoryRoot, 'rev-parse', 'HEAD'])).stdout.trim()
   await Promise.all([mkdir(userData, { recursive: true }), mkdir(workspacePath, { recursive: true }), mkdir(codexHome, { recursive: true }), mkdir(runtimeDirectory, { recursive: true }), mkdir(artifacts, { recursive: true })])
   receipt.identityBefore = await identity()
   await git('init', '--initial-branch=main'); await git('config', 'user.name', 'Private Author'); await git('config', 'user.email', 'private@example.invalid')
