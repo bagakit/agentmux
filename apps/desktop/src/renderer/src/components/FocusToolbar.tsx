@@ -169,9 +169,11 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
           <DropdownMenu.RadioGroup value={topicId ?? ''} aria-label="Chat Mote">
             {motes.map(mote => { const icon = scratch && !mote.readError ? topicSpaceIconTarget(scratch, mote) : null
               return <DropdownMenu.RadioItem key={mote.id} value={mote.id} data-chat-mote-id={mote.id} className="tab-context-menu__item focus-chat-mote-menu__item" disabled={mote.id !== PMO_TEAMS_TOPIC_ID && Boolean(mote.readError)} onSelect={() => setFloating({ focusChatTopicId: mote.id })}>
-                <span className="focus-chat-mote-menu__check"><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></span>
+                <span className="focus-chat-mote-menu__icon">
                 <SpaceObjectIcon kind="mote" name={mote.title || 'Mote'} manualIcon={icon ? icons[icon.key] ?? null : null} avatarWorkspaceId={icon?.avatarTarget?.workspaceId} avatarTopicId={icon?.avatarTarget?.topicId} avatarObjectKey={icon?.key} />
-                <span>{mote.title || 'Mote'}{mote.moteArchive?.state === 'archived' ? <small>Archived</small> : null}{mote.readError ? <small>{mote.id === PMO_TEAMS_TOPIC_ID ? 'Details unavailable' : 'Identity unconfirmed'}</small> : null}</span>
+                </span>
+                <span className="focus-chat-mote-menu__name">{mote.title || 'Mote'}{mote.moteArchive?.state === 'archived' ? <small>Archived</small> : null}{mote.readError ? <small>{mote.id === PMO_TEAMS_TOPIC_ID ? 'Details unavailable' : 'Identity unconfirmed'}</small> : null}</span>
+                <span className="focus-chat-mote-menu__check"><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></span>
               </DropdownMenu.RadioItem> })}
           </DropdownMenu.RadioGroup>
           {!motes.length ? <p className="focus-chat-mote-menu__notice">No confirmed Mote directory yet.</p> : null}
