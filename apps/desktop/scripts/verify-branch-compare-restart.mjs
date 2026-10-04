@@ -77,6 +77,7 @@ async function identity() {
   assert.ok(coreFiles.length > 0, 'Compiled Core collection must be nonempty')
   const files = ['apps/desktop/out/main/index.js', 'apps/desktop/out/preload/index.cjs', 'apps/desktop/out/renderer/index.html',
     ...rendererFiles.map(name => `apps/desktop/out/renderer/assets/${name}`), ...coreFiles.map(name => `packages/core/dist/${name}`),
+    'packages/git/src/git-repository.ts', 'packages/git/src/types.ts', 'packages/git/dist/git-repository.js', 'packages/git/package.json',
     'apps/desktop/src/main/git-service.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/preload/index.ts',
     'apps/desktop/src/shared/git-contracts.ts', 'apps/desktop/src/shared/contracts.ts',
     'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/BranchComparisonPanel.tsx',

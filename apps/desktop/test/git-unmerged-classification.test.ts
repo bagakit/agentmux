@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, appendFileSync, symlinkSync, unlink
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { parseGitStatusPorcelain } from '../src/main/git-service.js'
+import { parseGitStatusPorcelain } from '@agentmux/git'
 import {
   GIT_UNMERGED_CODES,
   GIT_UNMERGED_DESCRIPTION,

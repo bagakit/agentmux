@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts'
-import { GitService, GIT_NONINTERACTIVE_ENV } from '../src/main/git-service'
-import { normalizeGitProjectRemote } from '../src/shared/git-project-identity'
+import { GitService } from '../src/main/git-service.js'
+import { GIT_NONINTERACTIVE_ENV } from '@agentmux/git'
+import { normalizeGitProjectRemote } from '@agentmux/git'
 
 const roots: string[] = []
 const options = { env: GIT_NONINTERACTIVE_ENV, timeoutMs: 20_000, maxOutputBytes: 2 * 1024 * 1024 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseGitStatusPorcelain, scrubGitCredentials } from '../src/main/git-service'
+import { parseGitStatusPorcelain, scrubGitCredentials } from '@agentmux/git'
 
 // These fixtures are the exact byte shapes of `git status --porcelain=v1 -z --branch
 // --untracked-files=all`, verified against real git: entries are NUL-separated, `-z` disables

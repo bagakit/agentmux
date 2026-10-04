@@ -131,7 +131,7 @@ describe('staleDistComplaint：两个纯函数之间的接线', () => {
 it('checks the nested Demand artifacts consumed by Core even when Core itself is fresh', async () => {
   const root = await scratch()
   try {
-    for (const directory of ['core', 'demand']) {
+    for (const directory of ['core', 'demand', 'git']) {
       await mkdir(join(root, 'packages', directory, 'src'), { recursive: true })
       await mkdir(join(root, 'packages', directory, 'dist', directory === 'demand' ? 'src' : ''), { recursive: true })
       await fileAt(join(root, 'packages', directory, 'src'), 'index.ts', 1000)

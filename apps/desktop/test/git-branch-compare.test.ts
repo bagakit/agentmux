@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
 import type { GitBranchComparisonResult, GitBranchComparisonSnapshot } from '../src/shared/git-contracts.js'
-import { GitService, GIT_NONINTERACTIVE_ENV } from '../src/main/git-service.js'
+import { GitService } from '../src/main/git-service.js'
+import { GIT_NONINTERACTIVE_ENV } from '@agentmux/git'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -154,7 +155,7 @@ describe('Git comparison bounded failures at the ExecutionHost boundary', () => 
     const result = ready(await new GitService(() => host).compareBranches('repo', input, configuration(_hygiene_fixturePath("private-repo"))))
     expect(result.entries).toEqual([{ path: 'x.txt', origPath: null, change: 'modified' }]); expect(result.warnings).toEqual(['warning: read https://***@example.invalid/info'])
     const calls = vi.mocked(host.run).mock.calls.filter(([, args]) => args.includes('diff'))
-    expect(calls).toHaveLength(1); expect(calls[0]![1]).toEqual(['-C', _hygiene_fixturePath("private-repo"), 'diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', '-l1000', oid, targetOid, '--'])
+    expect(calls).toHaveLength(1); expect(calls[0]![1]).toEqual(['--no-replace-objects', '-C', _hygiene_fixturePath("private-repo"), 'diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', '-l1000', oid, targetOid, '--'])
   })
 
   it('treats bounded blob output as present/unrenderable, while list output limits remain errors', async () => {

@@ -43,7 +43,7 @@ import '../src/preload/index'
 import { LocalExecutionHost } from '@agentmux/core'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
-import { GIT_NONINTERACTIVE_ENV } from '../src/main/git-service'
+import { GIT_NONINTERACTIVE_ENV } from '@agentmux/git'
 
 let root: string, dispose: (() => Promise<void>) | undefined, host: LocalExecutionHost
 async function git(...args: string[]) {
@@ -59,10 +59,10 @@ beforeEach(async () => {
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {},
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     executionHost: (id: string) => { expect(id).toBe('original-host'); return host } } as unknown as RuntimeController
-  dispose = await registerIpc({ window: { webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }) } as unknown as ConfigStore,
-    scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles,
+    scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles,
     progressLoops: { subscribe: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'] })
   expect(fixture.handlers.has('git:projectIdentity')).toBe(true)
 })
