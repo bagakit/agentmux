@@ -163,25 +163,13 @@ type PresentationCapture = {
   trackIds: readonly string[] | null
 }
 
-/** 本轮运行有没有被人接管，以及是被哪一下、什么时候。`at` 为 null 表示还没有。 */
-type BrowserTakeover = { at: number | null; kind: string }
 type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep }
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 
 
-/**
- * 哪些 `input-event` 算「人伸手了」。
- *
- * **按白名单不按黑名单**，因为这个枚举里有 `mouseMove` / `mouseEnter` / `mouseLeave` /
- * `pointerMove` / `pointerRawUpdate`——**指针只是从这一格上飘过去**就会连发一串。黑名单漏掉
- * 其中一个，结果是人挪一下鼠标 Agent 就停，而且没人会注意到这是个 bug（只会觉得"这功能很吵"）；
- * 白名单漏掉一个，结果只是少认一种接管方式——保守、可发现。Electron 往枚举里加新成员时，
- * 这两个方向的代价差着一个数量级（MEMORY「禁止清单必漏」是同一族）。
- *
- * 为什么不用 `before-input-event`：那个只有键盘，而「人伸手抢方向盘」最常见的动作就是点一下。
- */
-const HUMAN_INPUT_EVENT_TYPES = new Set([
+// Native input clears visual feedback only; control changes require an explicit action.
+const BROWSER_FEEDBACK_CLEAR_INPUT_TYPES = new Set([
   'mouseDown',
   'mouseUp',
   'mouseWheel',
@@ -192,43 +180,7 @@ const HUMAN_INPUT_EVENT_TYPES = new Set([
   'pointerDown'
 ])
 
-/**
- * 人工接管之后要拒绝的那些页面调用——**取自 core 的能力表，不在这里手抄**。
- *
- * 此前这是本文件里一个手写的 9 个名字的 Set。它与真正注入的那份清单
- * （`BROWSER_PAGE_FUNCTION_NAMES`）是同一份事实的两个副本，而副本漂移时**没有任何东西会红**：
- * 新增一个动作类能力却忘了往这个 Set 里加，意味着人拿回页面之后 Agent 仍然能改它——一个
- * 悄悄放宽了的闸门，不是一次报错。
- *
- * 现在按 `effect` 从能力表派生（`act` ∪ `navigate`）。放行观察不是宽容，是诚实：程序被打断
- * 之后最该做的事就是「看一眼现在页面什么样」再决定怎么报告。把 snapshot 也拦掉，它只能瞎猜
- * 着退出；而观察不改页面，跟人不会打架。
- *
- * `js` 和 `cdp` 在表里按 `act` 计，所以自动在内——它们能做任何事，漏掉任何一个都等于没拦。
- * `cdp` 还有一层：它把方法名原样透传，所以 `cdp('Input.dispatchMouseEvent', …)` 能发出真的
- * 原生输入，从而让程序**触发自己的接管判据**。这不是安全问题（程序本来就能为所欲为），
- * 代价也可接受：它踩的是自己，结局是一个 `stopped` 加一句说明，不是静默乱点。
- */
 const BROWSER_ACTION_PAGE_CALLS = BROWSER_PAGE_MUTATING_CAPABILITY_NAMES
-
-/**
- * 被接管之后说给 Agent 听的那句话。说到**下一步**为止，而且那一步真能走通。
- *
- * 点名的恢复动作是「页面空出来之后再跑一次」，不是去 Settings 关自动化总开关——后者不成比例
- * （人从没要求禁用自动化），而且接管本来就是按次运行、自清的：下一次 `browser.run` 是干净的。
- *
- * 「之后的没跑」而不是「接管那一刻起什么都没跑」：输入到达时可能已经有一个页面调用在途，
- * 那一个会正常跑完——CDP 已经发出去了，拦不住也不该硬拦。承诺一个做不到的精确度比不承诺更糟。
- */
-function takeoverMessage(takeover: BrowserTakeover, refused?: string): string {
-  const what = refused === undefined ? 'the rest of the program' : `${refused}()`
-  return (
-    `Someone took control of this Browser (a real ${takeover.kind}) — the page is theirs now, so ${what} ` +
-    'was refused. A page call already in flight when they reached in still finished; nothing after that ' +
-    'ran. Your earlier actions did happen. Take a fresh snapshot() to see where things stand, and ' +
-    'run the program again once the page is free.'
-  )
-}
 
 /** Metadata retained while a hidden Browser native owner is released. */
 type ReleasedBrowser = {
@@ -1204,7 +1156,6 @@ export class BrowserViewManager {
     // 本轮自愈过的 ref 都记在这里。自愈按外观匹配，可能落在一个长得一样的**另一个**元素上，
     // 所以它不能只活在主进程的日志里——必须跟着结局回到 Agent 手上。
     const notes: string[] = []
-    const takeover: BrowserTakeover = { at: null, kind: '' }
     const stopController = new AbortController()
     let stopRequested = false
     const localOperation: BrowserOperation = {
@@ -1258,22 +1209,6 @@ export class BrowserViewManager {
         this.emit(entry)
       } })
     entry.feedback = feedback
-    const contents = entry.view.webContents
-    const onInput = (_event: unknown, input: { type: string }): void => {
-      // 只记第一次：要报的是「什么时候被接管的」，后来的每一下都不改变这个答案。
-      if (takeover.at !== null || !HUMAN_INPUT_EVENT_TYPES.has(input.type)) return
-      takeover.at = Date.now()
-      takeover.kind = input.type
-      entry.humanControl = true
-      operation.phase = 'human'
-      operation.summary = 'Human took control of the Browser'
-      operation.warning = takeoverMessage(takeover)
-      entry.driving = false
-      entry.activity = { operation, control: 'human', warning: operation.warning }
-      void this.operationJournal?.setPhase(operation.id, 'human', { summary: operation.summary, warning: operation.warning })
-      this.emit(entry)
-    }
-    contents.on('input-event', onInput)
     entry.driving = true
     entry.activeRun = {
       operationId: operation.id,
@@ -1283,9 +1218,9 @@ export class BrowserViewManager {
         entry.humanControl = true
         entry.driving = false
         operation.phase = 'stopped'
-        operation.summary = 'Stopped by the person using the Browser'
+        operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = Date.now()
-        operation.warning = 'The Browser operation was stopped. Review the page before running another program.'
+        operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the page, explicitly return control, then decide whether to start a fresh program.'
         entry.activity = { operation, control: 'human', warning: operation.warning }
         stopController.abort()
         void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
@@ -1313,7 +1248,7 @@ export class BrowserViewManager {
       if (remainingMillis !== undefined && (!Number.isFinite(remainingMillis) || remainingMillis <= 0)) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
         ...(remainingMillis === undefined ? {} : { timeoutMs: Math.min(30_000, remainingMillis) }),
-        onPageCall: this.pageCallHandler(entry, session, notes, takeover, operation, privateTaskParameters, stopController.signal, taskPage),
+        onPageCall: this.pageCallHandler(entry, session, notes, operation, privateTaskParameters, stopController.signal, taskPage),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) =>
           await this.resultArtifacts!.import(resultContext, sourcePath) } : {})
       })
@@ -1324,10 +1259,10 @@ export class BrowserViewManager {
       const ended = session.endedReason
       if (stopRequested) {
         operation.phase = 'stopped'
-        operation.summary = 'Stopped by the person using the Browser'
+        operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = operation.finishedAt ?? Date.now()
-        operation.warning = operation.warning ?? 'The Browser operation was stopped. Review the page before running another program.'
-        entry.activity = { operation, control: 'human', warning: operation.warning }
+        operation.warning = operation.warning ?? 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the page, explicitly return control, then decide whether to start a fresh program.'
+        entry.activity = { operation, control: entry.humanControl ? 'human' : 'agent', warning: operation.warning }
         return {
           result: undefined,
           logs: run.logs,
@@ -1350,34 +1285,6 @@ export class BrowserViewManager {
               `The debugging session ended mid-run (${ended}) — opening DevTools on the page does that. ` +
               'An action may have half-completed. Look at the page before running anything again.'
           },
-          runOperation: operation
-        }
-      }
-      // 被人接管过，同样压过程序自己的结局，而且**判在 `run.completed` 分叉之前**。
-      //
-      // 这个位置是承重的。放进 `run.completed` 分支里，只有「程序把拒绝 try/catch 吞了、照常
-      // 跑完」的那一次会被降级；而程序**没有**吞的时候，拒绝是抛着出来的，落进
-      // `browserRunOutcomeFromFailure` 报成 `script-failed`——**把人的动作记到 Agent 程序头上**，
-      // 还叫 Agent 去改一段本来没错的代码。两条路必须汇到同一个结局。
-      //
-      // 为什么是 `stopped` 不是 `indeterminate`：我们精确地知道它做到哪一步了。拦在 onPageCall
-      // 这道必经之路上，接管之前的动作都发生了，之后一个都没有。`indeterminate` 说的是"做到
-      // 哪一步不知道"，而这里知道——报错了会让 Agent 以为页面处于未知状态，其实它 snapshot
-      // 一下就看得清楚。
-      if (takeover.at !== null) {
-        operation.phase = 'stopped'
-        operation.summary = 'Stopped after human takeover'
-        operation.finishedAt = Date.now()
-        operation.warning = takeoverMessage(takeover)
-        entry.activity = { operation, control: 'human', warning: operation.warning }
-        // 返回值照常带回去，与自愈那一支同理：程序如果吞掉拒绝、拿观察看清了页面再 return，
-        // 那份东西正是这次运行**唯一**还有价值的产出。丢掉它就是在逼 Agent 再跑一遍——而"再跑
-        // 一遍"恰恰是我们刚刚告诉它现在不要做的事。程序没跑完时 `run.value` 不存在，这里就是
-        // undefined，与其它失败支一致。
-        return {
-          result: run.completed ? run.value : undefined,
-          logs: run.logs,
-          outcome: { kind: 'stopped', message: takeoverMessage(takeover) },
           runOperation: operation
         }
       }
@@ -1475,9 +1382,6 @@ export class BrowserViewManager {
         operation.warning ??= cleanupWarning
         entry.activity = { ...entry.activity, warning: entry.activity.warning ?? cleanupWarning }
       }
-      // 监听器跟着这一次运行走，不跟着 entry 走。挂在整个 entry 生命周期上的话，人平时正常
-      // 用这个浏览器就一直在写 `takeover`，下一次 run 一启动就以为自己被接管了。
-      contents.removeListener('input-event', onInput)
       entry.driving = false
       if (entry.activeRun?.operationId === operation.id) entry.activeRun = undefined
       entry.runInFlight = false
@@ -2064,7 +1968,6 @@ export class BrowserViewManager {
     entry: BrowserEntry,
     session: BrowserCdpSession,
     notes: string[],
-    takeover: BrowserTakeover,
     operation: BrowserOperation,
     privateTaskParameters = false,
     signal?: AbortSignal,
@@ -2084,10 +1987,10 @@ export class BrowserViewManager {
     }
     const beforeAction = (step = activeStep): void => {
       if (requireLive() !== observingView || entry.activeRun?.operationId !== operation.id) throw new Error('The original Browser operation changed before dispatch.')
-      // elementContext also resolves a handle; observation remains available after human takeover.
+      // Only the Main control owner or this operation's cancellation can revoke dispatch.
       if (!step || !BROWSER_ACTION_PAGE_CALLS.has(step.method)) return
       if (signal?.aborted) throw new Error('This Browser operation stopped before dispatch.')
-      if (takeover.at !== null || entry.humanControl) throw new Error(takeoverMessage(takeover))
+      if (entry.humanControl) throw new Error('Human control is active. Return control explicitly before running a fresh program.')
       if (activeRecoveryMayDispatch && !activeRecoveryMayDispatch()) throw new Error('This recovery attempt no longer has dispatch authority.')
       if (taskPage?.cursor.expectedNavigationId && entry.navigationId !== taskPage.cursor.expectedNavigationId) throw new Error('The selected condition document changed before dispatch.')
       if (taskPage?.cursor.deadlineMillis !== undefined && performance.now() >= taskPage.cursor.deadlineMillis) throw new Error('Task execution budget reached before page dispatch.')
@@ -2110,7 +2013,6 @@ export class BrowserViewManager {
             const currentView = requireLive()
             if (currentView !== observingView) throw new Error('The Browser view changed during upload.')
             if (signal?.aborted) throw new Error('This Browser operation stopped before file assignment could be confirmed.')
-            if (takeover.at !== null) throw new Error('Human took control before file assignment could be confirmed.')
             return entry.navigationId
           } }
       } } } : {}),
@@ -2166,11 +2068,6 @@ export class BrowserViewManager {
     })
     return async (name, args) => {
       requireLive()
-      // 人接管之后，动作停、观察放行。拦在这里是因为这是主进程唯一的介入点——`runBrowserScript`
-      // 不暴露 AbortSignal，程序跑在自己的子进程里；而每一次页面调用都要经过这道往返。
-      if (takeover.at !== null && BROWSER_ACTION_PAGE_CALLS.has(name)) {
-        throw new Error(takeoverMessage(takeover, name))
-      }
       const step = startBrowserOperationStep(operation, name, args)
       activeStep = step
       this.emit(entry)
@@ -2234,7 +2131,7 @@ export class BrowserViewManager {
             isCurrent: () => this.entries.get(entry.id) === entry && entry.view === observingView && !observingView.webContents.isDestroyed() &&
               entry.activeRun?.operationId === operation.id && (!taskPage.cursor.expectedNavigationId || entry.navigationId === taskPage.cursor.expectedNavigationId) &&
               this.taskAssets?.isExecutionCurrent(taskPage.cursor, operation.id) === true,
-            control: () => takeover.at !== null || entry.humanControl ? 'human' : 'agent',
+            control: () => entry.humanControl ? 'human' : 'agent',
             observe: async () => {
               if (entry.error) throw new Error('The original page reports a navigation or renderer error.')
               return await dispatch('snapshot', [{ maxNodes: 1000 }]) as BrowserScopedSnapshot
@@ -2278,7 +2175,7 @@ export class BrowserViewManager {
         this.emit(entry)
         return value
       } catch (error) {
-        step.status = takeover.at !== null ? 'stopped' : 'failed'
+        step.status = signal?.aborted ? 'stopped' : 'failed'
         step.finishedAt = Date.now()
         step.summary = privateTaskParameters
           ? 'Browser task page call did not report completion. Raw error text is withheld because this invocation contains private parameters; inspect the page before retrying.'
@@ -2286,7 +2183,7 @@ export class BrowserViewManager {
         await saveEvidence({
           kind: 'diagnostic', code: 'page-call-failed',
           message: `Step ${step.sequence} (${name}) did not report completion. Side effects may already have occurred.`,
-          nextAction: takeover.at !== null
+          nextAction: entry.humanControl
             ? 'Human control is active. Wait for the user to return control before continuing.'
             : 'Inspect the page and take a fresh snapshot before deciding whether this action can be retried.'
         }, entry.navigationId)
@@ -2303,7 +2200,7 @@ export class BrowserViewManager {
       } finally {
         activeStep = null
         if (waitingSteps.delete(step.sequence) && waitingSteps.size === 0) {
-          // Human takeover and Stop own the newer phase; finishing a wait must never overwrite them.
+          // Explicit Stop owns the newer phase; finishing a wait must never overwrite it.
           if (operation.phase === 'waiting' && beforeWaiting) {
             operation.phase = beforeWaiting.phase
             operation.summary = beforeWaiting.summary
@@ -2623,7 +2520,7 @@ export class BrowserViewManager {
       origin: () => view.getBounds()
     })
     contents.on('input-event', (_event, input) => {
-      if (this.owns(entry, view) && HUMAN_INPUT_EVENT_TYPES.has(input.type)) void entry.feedback?.clear()
+      if (this.owns(entry, view) && BROWSER_FEEDBACK_CLEAR_INPUT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
       const owner = this.nativeOwner(entry.id)
       if (owner) this.onNativeInput(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
