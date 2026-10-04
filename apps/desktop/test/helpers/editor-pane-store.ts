@@ -27,6 +27,7 @@ const EDITOR_PANE_SOURCE = new URL('../../src/renderer/src/components/EditorPane
 export function editorPaneStoreState(): Record<string, unknown> {
   return {
     documents: {},
+    retainedDocumentDrafts: {},
     dirtyDocuments: {},
     documentIssues: {},
     savingDocuments: {},
@@ -45,6 +46,7 @@ export function editorPaneStoreState(): Record<string, unknown> {
     updateDocument: vi.fn(),
     saveDocument: vi.fn(),
     reloadDocument: vi.fn(),
+    useRetainedDocumentDraft: vi.fn(),
     overwriteDocument: vi.fn(),
     clearDocumentRevealTarget: vi.fn(),
     clearRegionCaretFocus: vi.fn(),
@@ -93,7 +95,7 @@ export function monacoKeybindingConstants(): {
  * 叫 state 的东西取了什么属性」——这样 onMount 回调里那些延迟读取也算进来，它们同样会在按键时炸。
  */
 export function storeKeysReadByEditorPane(): Set<string> {
-  const source = [EDITOR_PANE_SOURCE, new URL('../../src/renderer/src/components/FileSourceEditor.tsx', import.meta.url)]
+  const source = [EDITOR_PANE_SOURCE, new URL('../../src/renderer/src/components/FileSourceEditor.tsx', import.meta.url), new URL('../../src/renderer/src/components/RetainedDocumentDraftNotice.tsx', import.meta.url)]
     .map(url => readFileSync(url, 'utf8')).join('\n')
   const keys = new Set<string>()
   for (const match of source.matchAll(/\bstate\.([A-Za-z_$][\w$]*)/g)) {
