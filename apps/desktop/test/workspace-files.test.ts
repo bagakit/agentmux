@@ -23,8 +23,10 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
     spawn: (...args: any[]) => {
       const child = (actual.spawn as (...values: any[]) => ReturnType<typeof actual.spawn>)(...args)
-      if (args[0] !== process.execPath) return child
-      const request = JSON.parse(args[1]?.[3] ?? 'null') as { action?: string } | null
+      const native = args[1]?.[0] === '--workspace-file'
+      if (args[0] !== process.execPath && !native) return child
+      const request = native ? { action: args[1][1] as string }
+        : JSON.parse(args[1]?.[3] ?? 'null') as { action?: string } | null
       const input = child.stdin
       if (!input) return child
       const originalEnd = input.end.bind(input)
@@ -170,6 +172,19 @@ describe('WorkspaceFiles root confinement', () => {
       }
     })
     await expect(readFile(join(race.outside, 'value.txt'), 'utf8')).resolves.toBe('outside-secret')
+    expect(localWorkerRace.beforeInput).toBeNull()
+  })
+
+  raceIt.each(['read', 'write'] as const)('refuses a leaf symlink replacement after the %s directory is pinned', async action => {
+    const { root, workspace, host } = await localFixture(`leaf-${action}`)
+    const original = join(root, 'value.txt'), outside = join(dirname(root), 'outside.txt')
+    await Promise.all([writeFile(original, 'inside'), writeFile(outside, 'outside-secret')])
+    localWorkerRace.beforeInput = async () => { await rm(original); await symlink(outside, original) }
+    const files = new WorkspaceFiles(() => host)
+    const result = action === 'read' ? await files.read(workspace, 'value.txt')
+      : await files.write(workspace, { path: 'value.txt', content: 'replacement', expectedRevision: revision('inside') })
+    expect(result).toMatchObject({ status: 'error', code: 'ELOOP' })
+    expect(await readFile(outside, 'utf8')).toBe('outside-secret')
     expect(localWorkerRace.beforeInput).toBeNull()
   })
 

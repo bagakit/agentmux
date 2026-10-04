@@ -12,19 +12,25 @@ const race = vi.hoisted(() => ({ beforeInput: null as null | (() => Promise<void
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => {
-    if (args[0] === process.execPath && race.beforePublish) {
-      const values = [...args[1]!]
-      const source = values[2]!
-      const anchor = '          if (request.exclusive) {'
-      expect(source.split(anchor)).toHaveLength(2)
-      // A controlled competitor creates the real target after the final revision check.
-      // The commit syscall and path confinement remain the actual production worker.
-      values[2] = source.replace(anchor, `          const competitor = await open(request.name, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600)\n          try { await competitor.writeFile(Buffer.from([77, 0, 255])) } finally { await competitor.close() }\n` + anchor)
-      args[1] = values
+    const native = args[1]?.[0] === '--workspace-file'
+    const beforePublish = native && race.beforePublish
+    if (beforePublish) {
+      const values = [...args[1]!]; values[7] = 'before-publish-barrier'; args[1] = values
+      args[2] = { ...args[2], stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'] }
       race.beforePublish = false
     }
     const child = actual.spawn(...args)
-    if (args[0] === process.execPath && child.stdin) {
+    if (beforePublish) {
+      // The actual helper waits immediately before its publication syscall.
+      // A separate writer creates the target after the final revision check.
+      const ready = child.stdio[3] as import('node:stream').Readable
+      const release = child.stdio[4] as import('node:stream').Writable
+      ready.once('data', () => {
+        void writeFile(join(String(args[2]?.cwd), args[1]![3]!), Buffer.from([77, 0, 255]))
+          .then(() => release.end('R'), error => release.destroy(error))
+      })
+    }
+    if ((args[0] === process.execPath || native) && child.stdin) {
       const end = child.stdin.end.bind(child.stdin)
       child.stdin.end = ((...values: Parameters<typeof end>) => {
         const hook = race.beforeInput
