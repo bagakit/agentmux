@@ -18,6 +18,7 @@ import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 const EditorPane = lazy(async () => ({ default: (await import('./EditorPane')).EditorPane }))
 const NoteFileSurfaceView = lazy(async () => ({ default: (await import('./NoteFileSurfaceView')).NoteFileSurfaceView }))
 const FileDataPreview = lazy(async () => ({ default: (await import('./FileDataPreview')).FileDataPreview }))
+const HtmlFilePreview = lazy(async () => ({ default: (await import('./HtmlFilePreview')).HtmlFilePreview }))
 
 function SourceImage({ content, name, visible }: { content: string; name: string; visible: boolean }) {
   const [loaded, setLoaded] = useState<{ content: string; url: string } | null>(null)
@@ -61,13 +62,13 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   useEffect(() => { if (note && noteReveal) void setRegionMode(surface.regionId, surface.workspaceId, surface.path, 'preview') },
     [note, noteReveal, setRegionMode, surface.regionId, surface.workspaceId, surface.path])
   const overBudget = useMemo(() => {
-    if (!visible || released || !previewing || !doc || !(markdown || svg || note)) return false
+    if (!visible || released || !previewing || !doc || !(markdown || svg || note || html)) return false
     if (doc.content.length > WORKSPACE_FILE_MAX_BYTES) return true
     // UTF-8 needs at most three bytes per UTF-16 unit. Encode only up to the preview ceiling.
     const bytes = new Uint8Array(Math.min(WORKSPACE_FILE_MAX_BYTES + 1, doc.content.length * 3))
     const result = new TextEncoder().encodeInto(doc.content, bytes)
     return result.written > WORKSPACE_FILE_MAX_BYTES || result.read < doc.content.length
-  }, [visible, released, previewing, doc?.content, markdown, svg, note])
+  }, [visible, released, previewing, doc?.content, markdown, svg, note, html])
 
   if (!format.sourceEditable || (!doc && binary)) {
     return <FilePreviewPane surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
@@ -116,6 +117,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     ? <SourceImage key={key} content={doc.content} name={surface.path} visible={visible} />
     : dataKind
     ? <FileDataPreview key={key} content={doc.content} kind={dataKind} comments={format.extension === 'jsonc'} />
+    : html
+    ? <HtmlFilePreview key={key} workspaceId={surface.workspaceId} path={surface.path} content={doc.content} />
     : <AgentMarkdown documentMode outline className="file-markdown-preview" content={doc.content} workspaceRoot={workspaceRoot} sourcePath={surface.path}
       renderWorkspaceImage={(path, alt, linked) => <WorkspaceImage key={`${surface.workspaceId}:${path}`} workspaceId={surface.workspaceId} path={path} alt={alt} linked={Boolean(linked)} openFile={() => openReference(path)} />}
       openWorkspaceFile={openReference}

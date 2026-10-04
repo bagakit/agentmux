@@ -6,6 +6,7 @@ import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from 
 import { homedir } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { FileReadOwner } from './file-read-owner.js'
+import { HtmlFilePreviews } from './html-file-previews.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
@@ -271,6 +272,13 @@ export async function registerIpc(args: {
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id), {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
+  const htmlPreviews = new HtmlFilePreviews(files, id => config.workspaces.find(item => item.id === id))
+  const releaseHtmlPreviews = () => htmlPreviews.releaseAll()
+  const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, _inPlace: boolean, mainFrame: boolean) => {
+    if (mainFrame) releaseHtmlPreviews()
+  }
+  args.window.webContents.on('render-process-gone', releaseHtmlPreviews)
+  args.window.webContents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
   const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts')) }
   const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
@@ -679,6 +687,16 @@ export async function registerIpc(args: {
   handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
     await files.readPreview(workspace(config, workspaceId), path, options)
   )
+  handleWithEvent('files:openHtmlPreview', async (event, workspaceId: string, path: string, content: string) => {
+    requireTrustedSender('files:openHtmlPreview', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')
+    return await htmlPreviews.open(workspace(config, workspaceId), path, content)
+  })
+  handleWithEvent('files:releaseHtmlPreview', async (event, id: string) => {
+    requireTrustedSender('files:releaseHtmlPreview', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')
+    htmlPreviews.release(id)
+  })
   handle('files:readBookmark', async (workspaceId: string, path: string) => {
     // 书签读这条走字节而不是 `files.read` 的 string：二进制 `.webloc` 过 utf8 会坏。种类由路径判，
     // 非书签返回 null。一次返回 {url, binary}：url 供 openFile 决定开 Browser 还是退回文本；binary
@@ -1590,6 +1608,11 @@ export async function registerIpc(args: {
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
+      { owner: 'html-previews', dispose: () => htmlPreviews.dispose() },
+      { owner: 'html-preview-listeners', dispose: () => {
+        args.window.webContents.off('render-process-gone', releaseHtmlPreviews)
+        args.window.webContents.off('did-start-navigation', releaseNavigatedHtmlPreviews)
+      } },
       { owner: 'workspace-files', dispose: () => files.dispose() },
       ...channels.map(channel => ({ owner: `ipc-handler:${channel}`, dispose: () => ipcMain.removeHandler(channel) }))
     ], 'Failed to dispose Desktop IPC owners.')
