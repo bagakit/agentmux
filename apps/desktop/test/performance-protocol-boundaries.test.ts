@@ -90,7 +90,7 @@ process.stdout.write = function(...args) {
   writeFileSync(path + '.tmp', JSON.stringify({ writes, blocked })); renameSync(path + '.tmp', path);
   return admitted;
 };`)
-  const child = spawn(process.execPath, ['--import', observer, process.env.AGENTMUX_PERFORMANCE_SCRIPT!, resolve('apps/desktop/scripts/fixtures/performance-protocol-boundaries/metrics-cli.mjs')], { env: { ...objectCliEnvironment(root), AGENTMUX_PROTOCOL_INPUT: input, AGENTMUX_PROTOCOL_PROGRESS: progress, AGENTMUX_PROTOCOL_PID: pid, AGENTMUX_PROTOCOL_OUTPUT_STATE: outputState }, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn(process.execPath, ['--import', observer, (process.env.AGENTMUX_PERFORMANCE_SCRIPT ?? resolve('apps/desktop/resources/toolkit/performance.mjs')), resolve('apps/desktop/scripts/fixtures/performance-protocol-boundaries/metrics-cli.mjs')], { env: { ...objectCliEnvironment(root), AGENTMUX_PROTOCOL_INPUT: input, AGENTMUX_PROTOCOL_PROGRESS: progress, AGENTMUX_PROTOCOL_PID: pid, AGENTMUX_PROTOCOL_OUTPUT_STATE: outputState }, stdio: ['pipe', 'pipe', 'pipe'] })
   cleanups.push(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') })
   let stderr = ''; child.stderr.on('data', bytes => { stderr += bytes.toString() })
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>(resolve => child.once('close', (code, signal) => resolve({ code, signal, stderr })))
@@ -107,7 +107,7 @@ it('runs the actual official script through real public metrics owner and compil
   expect(Buffer.byteLength(JSON.stringify(opening(data)))).toBeGreaterThan(256 * 1024)
   const owner = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: vi.fn(), metrics: { async subscribe(push) { push(data); return { dispose } } } })
   await owner.start(); cleanups.push(() => owner.stop())
-  const child = spawn(process.execPath, [process.env.AGENTMUX_PERFORMANCE_SCRIPT!, (process.env.AGENTMUX_PROTOCOL_PUBLIC_CLI ?? resolve('packages/core/bin/agentmux'))], { env: objectCliEnvironment(root), stdio: ['pipe','pipe','pipe'] })
+  const child = spawn(process.execPath, [(process.env.AGENTMUX_PERFORMANCE_SCRIPT ?? resolve('apps/desktop/resources/toolkit/performance.mjs')), (process.env.AGENTMUX_PROTOCOL_PUBLIC_CLI ?? resolve('packages/core/bin/agentmux'))], { env: objectCliEnvironment(root), stdio: ['pipe','pipe','pipe'] })
   cleanups.push(() => { if (child.exitCode === null) child.kill('SIGKILL') })
   const frames = await read(child), close = new Promise(resolve => child.once('close', resolve))
   await vi.waitFor(() => expect(frames()[0]?.payload, JSON.stringify(frames())).toEqual(data), { timeout: 5000 })
