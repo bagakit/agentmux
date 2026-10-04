@@ -1,10 +1,10 @@
 /**
- * Source Control 面板：Branches 与 Changes 两个视图，以及它们共用的那层壳。
+ * Source Control 面板与二级菜单共用的局部视图切换。
  *
  * 从 dock.css 拆出来（那个文件过了 400 行的上限）。拆分线选在「表面」而不是「组件」上：
  * `.branches-panel` / `.branches-header` / `.changes-repository-context` / `.branches-scroll` / `.branch-group`
  * 这几条是两个视图**共用**的壳——BranchesPanel 与 ChangesPanel 都挂在上面，所以它们不能跟
- * `.change-row` 分家。`.source-control-switch` 是那对切换键，它就是这个表面的边界本身。
+ * `.change-row` 分家。`.source-control-switch` 是局部视图切换键，它就是这个表面的边界本身。
  *
  * 层叠顺序即 index.css 里的 @import 顺序：紧跟 dock.css，因为这个面板长在 Tool Dock 里，
  * 要能覆盖 dock 的通用规则。
@@ -79,11 +79,12 @@
 .branch-create-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding:0 var(--sp-6) var(--sp-5); }
 .branch-create-dialog .primary-button { padding:var(--sp-3) var(--sp-4); }
 .branches-inline-error { padding:var(--sp-3) var(--sp-4); border-top: 1px solid var(--red-line); background: var(--red-bg); }
-.source-control-switch { position: relative; isolation: isolate; overflow: hidden; flex: 0 0 auto; display: flex; gap: var(--sp-1); margin: var(--sp-1) var(--sp-2) 0; padding: var(--sp-1); border: 0; border-radius: var(--radius); background: linear-gradient(145deg, var(--material-control-glint), transparent 48%), var(--material-control-surface); box-shadow: inset 0 0 0 1px var(--material-control-line); backdrop-filter: blur(var(--material-control-blur)) saturate(1.12); }
-.source-control-switch > .liquid-selection { --radius: var(--radius-sm); border: 0; border-radius: var(--radius-sm); box-shadow: var(--hl), inset 0 0 0 1px var(--material-control-line); }
+.source-control-switch { position: relative; isolation: isolate; overflow: hidden; flex: 0 0 auto; display: flex; gap: var(--sp-1); margin: var(--sp-1) var(--sp-2) 0; padding: var(--sp-1); border: 0; border-radius: var(--radius); background: transparent; box-shadow: none; }
+.source-control-switch > .liquid-selection { --radius: var(--radius-sm); border: 0; border-radius: var(--radius-sm); background: var(--surface-3); box-shadow: none; }
 .source-control-switch button { position: relative; z-index: 1; flex: 1; min-width: 0; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-meta); font-weight: 600; cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease; }
 .source-control-switch button:hover { color: var(--text-2); background: var(--surface-2); }
-.source-control-switch button.selected { color: var(--text); background: transparent; box-shadow: none; }
+.source-control-switch button.selected, .source-control-switch button.selected:hover { color: var(--text); background: transparent; box-shadow: none; }
+.source-control-switch button:active, .source-control-switch button.selected:active { background: var(--wash-2); }
 .source-control-switch button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 @media (prefers-reduced-motion: reduce) { .source-control-switch button { transition: none; } }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
@@ -95,7 +96,7 @@
   .source-control-switch { background: Canvas; backdrop-filter: none; box-shadow: none; outline: 1px solid ButtonText; outline-offset: -1px; }
   .source-control-switch > .liquid-selection { display: none; }
   .source-control-switch button { color: ButtonText; }
-  .source-control-switch button.selected { color: HighlightText; background: Highlight; forced-color-adjust: none; }
+  .source-control-switch button.selected, .source-control-switch button.selected:hover, .source-control-switch button.selected:active { color: HighlightText; background: Highlight; forced-color-adjust: none; }
   .source-control-switch button:focus-visible { outline: 1px solid ButtonText; outline-offset: 1px; }
 }
 .change-row { width: 100%; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px 45px; align-items: center; gap:var(--sp-1); min-height: 30px; padding:var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); color: var(--text-3); }

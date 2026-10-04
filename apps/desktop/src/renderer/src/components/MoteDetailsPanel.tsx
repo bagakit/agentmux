@@ -22,6 +22,7 @@ import { StatusDot } from './StatusDot'
 import { MoteIdeaControls } from './MoteIdeaControls'
 import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { MoteCurrentWork } from './MoteCurrentWork'
+import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 
 const NO_EXPANDED_PATHS: ReadonlySet<string> = new Set()
 type MoteSection = 'profile' | 'ideas'
@@ -86,7 +87,9 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
       event.preventDefault()
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + controls.length) % controls.length
       controls[next]!.click(); controls[next]!.focus()
-    }}>{(['profile', 'ideas'] as const).map(id => <button type="button" key={id} role="tab"
+    }}>
+      <LiquidSelectionSurface selected={section} active={active} targetAttribute="data-mote-section" />
+      {(['profile', 'ideas'] as const).map(id => <button type="button" key={id} role="tab" data-mote-section={id}
       aria-selected={section === id} tabIndex={section === id ? 0 : -1} className={section === id ? 'selected' : ''}
       onClick={() => setSection(id)}>{id === 'profile' ? 'Profile' : 'Ideas'}</button>)}</div>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
