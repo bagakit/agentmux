@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { NativeJsonlHistoryReader, readNativeHistoryBytes, type NativeHistoryReadBudget } from '../src/native-jsonl-history-reader.js'
+import { NativeText } from '../src/native-history-value.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
 import type { AgentProviderSessionHistoryContext } from '../src/types.js'
 
@@ -179,8 +180,11 @@ it.each(['replace', 'truncate', 'boundary-rewrite', 'source'] as const)('rejects
 it('keeps large strings out of materialization, rejects directories, and obeys cancellation before IO', async () => {
   const large = await fixture(JSON.stringify({ body: 'x'.repeat(4 * 1024 * 1024) }) + '\n')
   const entry = await (await open(large.context)).readPrevious()
-  expect(typeof entry?.value.body).toBe('string')
-  expect(Buffer.byteLength(JSON.stringify(entry?.value))).toBeLessThan(1024)
+  expect(entry?.value.body).toBeInstanceOf(NativeText)
+  const value = entry!.value.body as NativeText
+  expect(value.length).toBe(4 * 1024 * 1024)
+  expect(Buffer.byteLength(JSON.stringify(value.segments))).toBeLessThan(4096)
+  expect(() => JSON.stringify(entry?.value)).toThrow('nativeJsonStringify')
   const { context } = await fixture(lines('one'))
   await expect(open({ ...context, transcriptPath: context.workspacePath })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_INVALID_TRANSCRIPT' })
   const controller = new AbortController(); controller.abort(new Error('cancelled'))
