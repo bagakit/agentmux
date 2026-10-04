@@ -40,8 +40,8 @@ export function MoteFirstCooperation({ scope, reference }: {
   }
   return <section className="mote-cooperation-entry" aria-label="Start working together">
     <div className="mote-cooperation-entry__question">
-      <ComposerTextarea aria-label="A question for this Mote" rows={2} value={question}
-        placeholder="What would you like to work on together?"
+      <ComposerTextarea aria-label="A question for this Mote" rows={1} value={question}
+        placeholder="What’s on your mind?"
         onValueChange={value => useLauncherState.getState().setDraft(key, 'prompt', value)} />
       {question.trim() ? <MoteBehaviorAction label={pending ? 'Reading original materials' : 'Prepare this question in a new discussion'}
         onClick={() => void prepare()}><ArrowRight size={16} /></MoteBehaviorAction> : null}

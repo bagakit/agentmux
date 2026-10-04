@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, FileText, Pencil, Plus } from 'lucide-react'
+import { ArrowRight, ChevronDown, FileText, Pencil, Plus } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -76,7 +76,6 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
           }}><Pencil size={12} /></button></div><span className="mote-details__status">{status ? <><StatusDot status={status} />{status.state}</> : sessionId || reference === null ? 'Status not confirmed' : 'No Agent selected'}</span></div>
         </div>
-        {scope.topic.summary ? <p>{scope.topic.summary}</p> : null}
   </>
   return <section className="mote-details" data-mote-details={scope.topic.id}>
     <SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
@@ -130,6 +129,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
   const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && !['SOUL.md', 'topic.md'].includes(entry.name))
   const recent = notes.filter(entry => typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs))
     .sort((a, b) => b.mtimeMs! - a.mtimeMs!).slice(0, 3)
+  const emptyIdeas = !!tree.rootCache && !tree.rootCache.loading && !tree.rootError && notes.length === 0
   const notesIssue = <>
     {tree.rootError ? <div role="status" className="mote-details__issue">{tree.rootError}<button type="button" className="small-button" onClick={() => void tree.refreshTree()}>Retry notes</button></div> : null}
     {tree.rootCache?.loading ? <p role="status" className="mote-details__hint">Reading notes…</p> : null}
@@ -137,18 +137,18 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
   return <div key={section} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}>
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
-      <MoteFirstCooperation scope={scope} reference={reference} />
-      <MoteCurrentWork scope={scope} reference={reference} active={active} />
       <MoteBehaviorSummary scope={scope} active={active} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      <MoteCurrentWork scope={scope} reference={reference} active={active} />
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
       <div className="mote-details__recent">
-        <div className="mote-details__section-actions"><span>Recent ideas</span><MoteBehaviorAction label="View ideas and saved materials" onClick={onShowIdeas}><ArrowRight size={16} /></MoteBehaviorAction></div>
+        <div className="mote-details__section-actions">{emptyIdeas ? <button type="button" className="mote-details__navigation" aria-label="View ideas and saved materials" onClick={onShowIdeas}><span>Recent ideas<small className="mote-current-work__count">0</small></span><ArrowRight size={16} /></button> : <><span>Recent ideas<small className="mote-current-work__count">{recent.length || null}</small></span><MoteBehaviorAction label="View ideas and saved materials" onClick={onShowIdeas}><ArrowRight size={16} /></MoteBehaviorAction></>}</div>
         {notesIssue}
         {!tree.rootCache?.loading && recent.length > 0 && notes.some(entry => typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs)) ? <p role="status" className="mote-details__hint">Some recent updates are not confirmed. All notes remain in Ideas.</p> : null}
         <div className="mote-details__notes">{recent.map(entry => <button type="button" key={entry.path} className="mote-details__note" onClick={() => { setSelected(entry.path); onShowIdeas() }}><FileText size={13} /><span>{entry.name.replace(/\.(md|txt)$/i, '')}</span></button>)}</div>
-        {!tree.rootCache?.loading && !recent.length && !tree.rootError ? <p className="mote-details__hint">{notes.length ? 'Recent updates are not confirmed. All notes remain in Ideas.' : 'No ideas here yet.'}</p> : null}
+        {!tree.rootCache?.loading && !recent.length && !tree.rootError && notes.length > 0 ? <p className="mote-details__hint">{'Recent updates are not confirmed. All notes remain in Ideas.'}</p> : null}
       </div>
+      <MoteFirstCooperation scope={scope} reference={reference} />
     </> : <>
       <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} />
       <div className="mote-details__section-actions"><span>Notes in this folder</span><button type="button" className="small-button" onClick={onCreateNote}><Plus size={12} /> New note</button></div>
@@ -213,9 +213,11 @@ function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
   const summary = confirmed ? MOTE_BEHAVIOR_AXES.map(axis => axis.choices.find(choice => choice.value === confirmed.preferences[axis.id])!.title).join(' · ') : null
   return <div className="mote-details__self mote-behavior-summary">
     <div className="mote-details__section-actions"><span>Behavior</span><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><Pencil size={14} /></MoteBehaviorAction></div>
-    {confirmed ? <><span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span><p className="mote-behavior-summary__rules" title={summary!}>{summary}</p></> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : issue || documentIssue ? 'Saved behavior is unconfirmed.' : parsed?.status === 'unconfirmed' ? 'Original behavior needs review.' : 'Not set yet.'}</p>}
+    {confirmed ? <><span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span><p className="mote-behavior-summary__rules" title={summary!}>{summary}</p></> : !loading && !issue && !documentIssue && parsed?.status === 'absent' ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ArrowRight size={12} /></button> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : issue || documentIssue ? 'Saved behavior is unconfirmed.' : parsed?.status === 'unconfirmed' ? 'Original behavior needs review.' : 'Choose how we work together.'}</p>}
     {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry settings</button></div> : null}
-    <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary>Original SOUL</summary>
+    <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary><FileText size={12} />Original files<ChevronDown size={12} /></summary>
+      {soulOpen && scope.topic.summary ? <div className="mote-details__original-context"><span className="mote-details__hint">topic.md · saved context</span><p>{scope.topic.summary}</p><button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}>Open original context</button></div> : null}
+      {soulOpen ? <p className="mote-details__hint">SOUL.md · self instructions</p> : null}
       {active && soulOpen && (saved || scope.topic.soul) ? <AgentMarkdown content={saved?.content ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
         workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : soulOpen && !saved && !scope.topic.soul ? <p className="mote-details__hint">Open the original file to inspect it.</p> : null}
       <p className="mote-details__hint">Saved changes apply to new Sessions. Current discussions keep their context; your current directions take priority.</p>

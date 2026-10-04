@@ -61,7 +61,7 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="work-entry.css"></head><body><div id="root"></div><script type="module" src="work-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'work-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--affected-only') ? ['affected-only'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'work-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--affected-only') ? ['affected-only'] : []), ...(process.argv.includes('--profile-saved-only') ? ['profile-saved-only'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))

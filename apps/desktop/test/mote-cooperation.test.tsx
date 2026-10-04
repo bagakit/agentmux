@@ -83,7 +83,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     const original = '# My original SOUL\nKeep all custom content exactly.\n\n## Cooperation preferences\nOld preference remains.\n\n## Idea feedback\nOriginal note and revision remain.\n'; disk = original
 
     const write = vi.mocked(api.files.write)
-    await app.mount(); expect(details().querySelector('.mote-behavior-summary select, .mote-behavior-summary textarea')).toBeNull(); expect(details().textContent).toContain('Not set yet.')
+    await app.mount(); expect(details().querySelector('.mote-behavior-summary select, .mote-behavior-summary textarea')).toBeNull(); expect(details().textContent).toContain('Choose how we work together.')
     await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Use concrete examples.'); await moteClick(button('Review changes'))
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path), doc = state.documents[key]!
     expect(doc.content.startsWith(original)).toBe(true); expect(doc.content).toContain('Use concrete examples.'); expect(doc.revision).toBe(revision)
