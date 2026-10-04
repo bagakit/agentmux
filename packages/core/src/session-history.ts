@@ -94,8 +94,9 @@ function questionAnswers(value: unknown): AgentSessionHistoryQuestionAnswer[] {
   if (!Array.isArray(value) || !value.length) return invalid()
   return value.map(value => {
     const answer = object(value)
-    if (typeof answer.answer !== 'string') return invalid()
-    return { questionId: nonempty(answer.questionId), answer: answer.answer }
+    if (typeof answer.answer !== 'string' || answer.prompt !== undefined && typeof answer.prompt !== 'string') return invalid()
+    return { questionId: nonempty(answer.questionId), answer: answer.answer,
+      ...(answer.prompt === undefined ? {} : { prompt: answer.prompt }) }
   })
 }
 
