@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { DOMParser } from '@xmldom/xmldom'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
@@ -17,7 +18,7 @@ const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_GUIDANCE_
   ? (await import(process.env.AGENTMUX_TEST_GUIDANCE_CLIENT)).AgentMuxClient : DefaultClient
 const cli = process.env.AGENTMUX_TEST_GUIDANCE_CLI ?? fileURLToPath(new URL('../dist/agentmux.js', import.meta.url))
 const daemon = process.env.AGENTMUX_TEST_GUIDANCE_DAEMON ?? fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
-it('real whoami, skill and actual creation guide discover one cross Session messaging contract', async () => {
+it('real creation, whoami and compiled skill discover messaging and advisory opening guidance', async () => {
   const root = await mkdtemp(fixturePath("tmp/amux-messaging-guidance-")), storePath = join(root, 'sessions.json')
   for (const name of Object.keys(process.env)) {
     if (name.startsWith('AGENTMUX_') || name.startsWith('CTXMUX_')) vi.stubEnv(name, undefined)
@@ -44,19 +45,27 @@ it('real whoami, skill and actual creation guide discover one cross Session mess
     ownerPid = owners[0]!.pid
     expect(owners[0]!.command.startsWith(daemon + ' ')).toBe(true)
     const capture = join(root, 'issued.json'), agent = join(root, 'fixture-agent.mjs')
-    await writeFile(agent, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID, capability: process.env.AGENTMUX_AGENT_CAPABILITY })); setInterval(() => {}, 1000);\n`)
+    await writeFile(agent, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID, capability: process.env.AGENTMUX_AGENT_CAPABILITY, args: process.argv.slice(2) })); setInterval(() => {}, 1000);\n`)
     created = await client.createAgent({ agentSessionId: 'private-discovery-agent', createOperationId: 'private-discovery-create',
       executorId: 'private-fixture', providerId: 'traex', commandOverride: process.execPath, args: [agent], workspacePath: root, injectAgentMuxGuide: true })
-    let issued!: { agentSessionId: string; capability: string }
+    let issued!: { agentSessionId: string; capability: string; args: string[] }
     await vi.waitFor(async () => {
       issued = JSON.parse(await readFile(capture, 'utf8'))
-      expect(issued).toEqual({ agentSessionId: created!.agentSessionId, capability: expect.any(String) })
+      expect(issued).toEqual({ agentSessionId: created!.agentSessionId, capability: expect.any(String), args: expect.any(Array) })
       expect(issued.capability.length).toBeGreaterThan(0)
     }, { timeout: 5000, interval: 20 })
     const launched = await (client as unknown as { kernel: { status(id: string): Promise<{ args: string[] }> } }).kernel.status(created.run.runId)
     const guideArgs = launched.args.filter(arg => arg.includes('AgentMux runtime guide:'))
     expect(guideArgs).toHaveLength(1)
-    expect(guideArgs[0]).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(issued.args.filter(arg => arg.includes('AgentMux runtime guide:'))).toEqual(guideArgs)
+    const envelope = new DOMParser().parseFromString(guideArgs[0]!, 'text/xml').documentElement!
+    expect(envelope.tagName).toBe('amux')
+    expect(envelope.getAttribute('from')).toBe('amux')
+    const receivedContext = envelope.textContent!
+    expect(receivedContext).toBe(`\n${composeAgentLaunchPrompt(undefined, true).systemContext}\n`)
+    expect(receivedContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(receivedContext).toMatch(/Before delegating[\s\S]*Provider-native subagent[\s\S]*independent AgentMux Session/)
+    expect(receivedContext).toMatch(/opening an Agent or file[\s\S]*new Tab or directional Region[\s\S]*advisory opening playbook/)
     const output = JSON.parse((await exec(process.execPath, [cli, 'whoami'], { timeout: 15_000,
       env: { ...env, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: created.agentSessionId, AGENTMUX_AGENT_CAPABILITY: issued.capability } })).stdout)
     expect(output).toMatchObject({ ok: true, operation: 'whoami', result: {
@@ -68,11 +77,24 @@ it('real whoami, skill and actual creation guide discover one cross Session mess
     expect(JSON.stringify(output)).not.toContain(issued.capability)
     const skill = (await exec(process.execPath, [cli, '--skill'], { env })).stdout
     expect(skill).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    const openingStart = skill.indexOf('## Delegation and opening playbook (advisory)')
+    const openingEnd = skill.indexOf('## Read an amux object link', openingStart)
+    expect(openingStart).toBeGreaterThanOrEqual(0)
+    expect(openingEnd).toBeGreaterThan(openingStart)
+    const opening = skill.slice(openingStart, openingEnd).trim()
+    expect(opening).toMatch(/Provider-native delegation[\s\S]*independent AgentMux Session/)
+    expect(opening).toMatch(/Agent or file[\s\S]*same-Tab split[\s\S]*new Tab/)
+    expect(opening).toMatch(/real order[\s\S]*do not offer before\/after Tab flags/)
+    expect(opening).toContain('advisory strategies')
+    for (const object of ['agent', 'file']) {
+      const help = (await exec(process.execPath, [cli, '--help', object, 'open'], { env })).stdout
+      expect(help).toContain(opening)
+    }
     // This is the exact launch composition consumed by createAgentWithDelivery, with original body.
-    const launch = composeAgentLaunchPrompt('original request', true).text
-    expect(launch).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
-    expect(launch).toContain('"$AGENTMUX_CLI" whoami')
-    expect(launch.endsWith('</amux>\n\noriginal request')).toBe(true)
+    const launch = composeAgentLaunchPrompt('original request', true)
+    expect(launch.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(launch.text).toContain('"$AGENTMUX_CLI" whoami')
+    expect(launch.text.endsWith('</amux>\n\noriginal request')).toBe(true)
   } finally {
     await server.stop()
     if (created) await client.stopAgent(created.agentSessionId, created.run).catch(() => {})

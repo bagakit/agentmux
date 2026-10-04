@@ -9,7 +9,7 @@ import {
   AGENTMUX_CLI_SKILL,
   agentMuxCommandHelp
 } from '../../../packages/core/src/agentmux-cli-help.js'
-import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands.js'
+import { AGENTMUX_CLI_COMMANDS, agentMuxCliArguments, agentMuxCliMatch, parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands.js'
 import {
   directionalNeighbor,
   type DirectionalNeighborInput
@@ -36,10 +36,9 @@ function commandRegistry(): Map<string, string> {
 function taughtCommands() {
   return [...AGENTMUX_CLI_SKILL.matchAll(/^\s*agentmux ([^\n]+)/gm)].map(match => {
     const line = match[1]!
-    const command = AGENTMUX_CLI_COMMANDS.find(entry => {
-      const path = entry.method.replaceAll('.', ' ')
-      return line === path || line.startsWith(path + ' ')
-    })
+    // Discover the object path through the real global-option parser and registry matcher.
+    // Argument syntax is checked separately on the runnable spatial examples below.
+    const command = agentMuxCliMatch(agentMuxCliArguments(line.split(/\s+/)).args)?.command
     return { line, command }
   })
 }
@@ -205,7 +204,7 @@ describe('T-006 以方向、可读性、最小扰动决策并回读', () => {
     const splitGuide = skillSection('## Choose a split from the visible layout', '## Move a Region into its own Tab')
     expect(splitGuide.length).toBeGreaterThan(0)
     expect(splitGuide).toMatch(/visible view[\s\S]*readable[\s\S]*least disturbance/i)
-    for (const path of ['space', 'space.mv', 'space.promote', 'agent.open']) {
+    for (const path of ['space', 'space.mv', 'space.promote', 'agent.open', 'file.open']) {
       const help = agentMuxCommandHelp(path)
       expect(help, path).not.toBeNull()
       expect(help).toContain(section.trim())
