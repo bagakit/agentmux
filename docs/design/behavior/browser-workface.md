@@ -1,6 +1,6 @@
 # Browser 工作面
 
-本文集中本主题的交互与行为要求。已确认约束定义必须成立的结果，不代表当前实现通过验收；提案、历史与当轮授权状态按正文的明确范围阅读。
+本文定义 Browser 的操作控制、认证、记录与回放，以及多位置呈现和输入交接。Desktop Main 持有 Browser 与 operation 事实，Renderer 投影；Session／Run 与空间身份仍归各自 owner。本文描述已确认要求，不代签实现或安装验收。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/browser-workface.md)
 
@@ -11,6 +11,8 @@
 - [Browser RSI 记录与回放可达性](#browser-rsi-记录与回放可达性)
 - [原生 Browser 与 Agent 身份浮层](#原生-browser-与-agent-身份浮层)
 - [破坏性 Browser 操作的作用域与人工批准](#破坏性-browser-操作的作用域与人工批准)
+- [多位置呈现、局部遮挡与输入交接](#多位置呈现局部遮挡与输入交接)
+- [浮层让位与输入层级](#浮层让位与输入层级)
 
 ## Browser 工作面
 
