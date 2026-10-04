@@ -25,6 +25,7 @@ const nativeQuestion = { type: 'agentMessage', id: 'native-async-call', phase: '
   questions: [{ title: 'Choose a direction\n保留正文', options: ['Keep original', 'Revise'] }, { title: 'Free text answer' }] }
 const request = codexQuestionRequest(nativeQuestion)!
 const answers = [{ questionId: request.questions[0]!.id, answer: 'Keep original' }]
+const recordedAnswers = answers.map(answer => ({ ...answer, prompt: 'Choose a direction 保留正文' }))
 const raw = encodeCodexQuestionReply(request, answers)
 const closes: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(closes.splice(0).map(close => close())) })
@@ -257,7 +258,7 @@ describe('native asynchronous question facts and normal user replies', () => {
   it('preserves exact answer text and UTF-8 framing without manufacturing an answered status', () => {
     const text = '  Original answer\n中  '
     const wire = encodeCodexQuestionReply(request, [{ questionId: request.questions[0]!.id, answer: text }])
-    expect(codexQuestionAnswers([{ type: 'text', text: wire }])).toEqual([{ questionId: request.questions[0]!.id, answer: text }])
+    expect(codexQuestionAnswers([{ type: 'text', text: wire }])).toEqual([{ questionId: request.questions[0]!.id, answer: text, prompt: 'Choose a direction 保留正文' }])
     expect(JSON.parse(wire.slice(wire.indexOf('\n') + 1, wire.lastIndexOf('\n')))[0].question).toBe('Choose a direction 保留正文')
     const long = codexQuestionRequest({ ...nativeQuestion, questions: [{ title: '中'.repeat(200) }] })!
     expect(Buffer.byteLength(JSON.parse(encodeCodexQuestionReply(long, [{ questionId: long.questions[0]!.id, answer: 'answer' }]).split('\n')[1]!)[0].question)).toBe(510)
@@ -272,7 +273,7 @@ describe('native asynchronous question facts and normal user replies', () => {
   it('recognizes the native single-object and standard IDE context wrappers without upgrading authorship', () => {
     const reply = { questionItemId: 'opaque', question: 'Question', answer: 'Answer' }
     const wire = '<send_user_message_question_reply>' + JSON.stringify(reply) + '</send_user_message_question_reply>'
-    expect(codexQuestionAnswers([{ type: 'text', text: '# Context from my IDE setup:\ncontext\n## My request for Codex:\n' + wire }])).toEqual([{ questionId: 'opaque', answer: 'Answer' }])
+    expect(codexQuestionAnswers([{ type: 'text', text: '# Context from my IDE setup:\ncontext\n## My request for Codex:\n' + wire }])).toEqual([{ questionId: 'opaque', answer: 'Answer', prompt: 'Question' }])
   })
   it('rejects a duplicate, foreign or oversized reference while leaving ordinary input independent', () => {
     expect(() => encodeCodexQuestionReply(request, [...answers, ...answers])).toThrow()
@@ -307,7 +308,7 @@ describe('native asynchronous question facts and normal user replies', () => {
     expect(h.writes).toEqual([])
     await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('question-session')), agentSessionId: 'question-session', prompt: 'Ordinary input is still available', operationId: 'healthy-input-after-malformed-question' })
     expect(h.writes.map(write => write.data)).toEqual([buildPromptInputPayload('Ordinary input is still available'), '\r'])
-    expect(page.items[2]!.questionAnswers).toEqual(answers)
+    expect(page.items[2]!.questionAnswers).toEqual(recordedAnswers)
   })
   it('normalizer retains a question diagnostic on the original assistant record without manufacturing a request', () => {
     const diagnostic = { code: 'INVALID_AGENT_SESSION_HISTORY_PAGE', message: 'Native asynchronous question data is invalid.' }
