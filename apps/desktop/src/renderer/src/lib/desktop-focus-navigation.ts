@@ -102,7 +102,11 @@ export function projectWorkbenchSpaceSelection(layout: WorkspaceLayout | undefin
     binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId))) return { layout: null, confirmed: false,
       issues: ['The selected object or its original Zone position is not confirmed. Its workface and exact reference are kept.'] }
   const members = catalog.tabs.filter(tab => tab.zoneId === choice.zoneId)
-  if (!members.length && choice.tabId === null) return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], confirmed: true }
+  if (!members.length && choice.tabId === null) {
+    if (zone.kind === 'unknown') return { layout: null, confirmed: false,
+      issues: [zone.issue ?? 'The original Zone resource is still unconfirmed. Its reference is kept.'] }
+    return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], confirmed: true }
+  }
   const projected = projectWorkbenchProjection(layout, tabs, {
     entity: { kind: 'zone', zoneId: zone.zoneId }, presentationId: 'space-workbench', displayWorkspaceId: choice.workspaceId,
     catalog, selection: choice.tabId && choice.groupId && choice.regionId ? [{ displayWorkspaceId: choice.workspaceId,
