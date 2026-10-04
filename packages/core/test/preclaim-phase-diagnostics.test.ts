@@ -1,4 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
+import { runCompiledObjectCli, objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { readAgentPromptPreparationWait, type AgentPromptPreparationWaitReason } from '../src/prompt-preparation.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -21,7 +23,7 @@ const defer = () => { let resolve!: () => void; const promise = new Promise<void
 type Phase = 'handshake' | 'verify' | 'read' | 'current-run' | 'final-run-status' | 'pane-predicate' | 'input-lane' | 'payload' | 'none'
 
 // Actual public Client/Coordinator/FileStore/Screen and RPC; only Runtime bytes and Provider facts are controlled.
-async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immediate', memory = false) {
+async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immediate', memory = false, temporaryWait?: AgentPromptPreparationWaitReason) {
   const root = await mkdtemp(join(tmpdir(), 'amx-observation-continuity-'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
@@ -44,7 +46,8 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
     preparePromptExecutionTransport: preparation,
     verifyPromptExecutionTransport: async context => { verifyCount++; if (phase === 'verify') { verifying.resolve(); await release.promise }
       return fault !== 'verify' && context.nativeSourceId === source },
-    inspectPromptExecution: snapshot => { if (phase === 'pane-predicate') { entered.resolve(); return 'unavailable' }; return snapshot.lines[snapshot.cursor.row]?.text.trimEnd() === '>' ? 'idle' : 'unavailable' } })
+    inspectPromptPreparationWait: () => temporaryWait,
+    inspectPromptExecution: snapshot => { if (phase === 'pane-predicate' || temporaryWait) { entered.resolve(); return 'unavailable' }; return snapshot.lines[snapshot.cursor.row]?.text.trimEnd() === '>' ? 'idle' : 'unavailable' } })
   const client = new AgentMuxClient({ store, providers: [provider] }), owner = client as any
   await owner.registry.load('local'); owner.connected = true
   const entered = defer(), release = defer(), waiting = defer(), listeners: Array<(event: any) => void> = [], writes: string[] = []
@@ -97,6 +100,8 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
   const resize = async (changed = false) => { await client.resizeAgent(record.agentSessionId, record.run, changed ? 100 : 80, changed ? 30 : 24); release.resolve() }
   return { client, owner, root, store, record, request, entered: entered.promise, verifying: verifying.promise, reading: reading.promise, release, send, resize, writes, draw, preparation,
     readFailure: (read: () => Promise<void>) => { readFailure = read },
+    temporaryWait: (value?: AgentPromptPreparationWaitReason) => { temporaryWait = value },
+    nativeSource: (value: string) => { source = value; nativeEvidence.sourceId = value },
     change: (value: string) => { fault = value }, statistics: () => ({ readCount, verifyCount }),
     screenFacts: () => ({ output, revision }), allow: () => { ready = true }, listener: () => listeners.at(-1)!, counts: () => ({ observations, scans }),
     close: async () => { closed = true; release.resolve(); await client.dispose(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 }) } }
@@ -152,12 +157,13 @@ it.each([
     expect(f.writes).toEqual([])
     if (blocked === 'handshake') expect(facts.pane).toEqual({ predicateEvaluations: 0, predicateEvaluationsCapped: false,
       lastPredicateResult: null, frameObservedAt: null, outputThroughByte: null, geometryRevision: null,
-      evidenceGeneration: null, authoritative: null, completeFrameAvailable: null })
+      evidenceGeneration: null, authoritative: null, completeFrameAvailable: null, cols: null, rows: null, cursor: null })
     else expect(facts.pane).toMatchObject({ predicateEvaluations: expect.any(Number), predicateEvaluationsCapped: false,
       lastPredicateResult: blocked !== 'pane-predicate', frameObservedAt: expect.any(Number), outputThroughByte: expect.any(Number),
-      geometryRevision: 0, evidenceGeneration: expect.any(Number), authoritative: true, completeFrameAvailable: true })
+      geometryRevision: 0, evidenceGeneration: expect.any(Number), authoritative: true, completeFrameAvailable: true,
+      cols: 80, rows: 24, cursor: { row: 9, column: 2 } })
     expect(Object.keys(facts.pane).sort()).toEqual(['predicateEvaluations', 'predicateEvaluationsCapped', 'lastPredicateResult',
-      'frameObservedAt', 'outputThroughByte', 'geometryRevision', 'evidenceGeneration', 'authoritative', 'completeFrameAvailable'].sort())
+      'frameObservedAt', 'outputThroughByte', 'geometryRevision', 'evidenceGeneration', 'authoritative', 'completeFrameAvailable', 'cols', 'rows', 'cursor'].sort())
     expect(JSON.stringify(facts)).not.toContain(f.request.prompt)
   } finally { vi.useRealTimers(); await f.close() }
 })
@@ -352,3 +358,166 @@ it('aligns the last predicate result with its actual changed geometry and output
     expect(f.writes).toEqual([])
   } finally { vi.useRealTimers(); await f.close() }
 })
+
+
+it.each(['context-compaction', 'native-busy'] as const)('explains the complete current %s pane without input, retaining the original retry fence', async reason => {
+  const f = await fixture('none', 'immediate', true, reason)
+  try {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const before = structuredClone(f.request), sent = f.send().then(() => null, error => error as AgentMuxError)
+    await enteredWithClock(f.entered); await vi.advanceTimersByTimeAsync(8_000)
+    const error = (await sent)!, wait = readAgentPromptPreparationWait(error)!
+    expect(wait).toEqual({ reason, retrySafe: true, agentSessionId: before.agentSessionId, runId: before.expectedRun.runId,
+      operationId: before.operationId, inputByte: 0, nativeSourceId: 'original-source' })
+    expect(error.message).toContain(reason === 'context-compaction' ? 'compacting' : 'temporarily')
+    expect(f.writes).toEqual([]); expect(f.request).toEqual(before)
+    f.temporaryWait(); vi.useRealTimers()
+    await f.client.submitAgentPrompt({ ...before, preparationRetry: { inputByte: wait.inputByte, nativeSourceId: wait.nativeSourceId } })
+    expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+  } finally { vi.useRealTimers(); await f.close() }
+})
+
+it.each(['context-compaction', 'unknown'] as const)('retains the completed %s current-pane timeout when read-only store cleanup outlasts the original deadline', async reason => {
+  const f = await fixture(reason === 'unknown' ? 'pane-predicate' : 'none', 'immediate', true, reason === 'unknown' ? undefined : reason), cleaning = defer(), released = defer()
+  const originalWait = f.owner.screenEvidence.wait.bind(f.owner.screenEvidence), originalStore = f.store.withPromptSubmission.bind(f.store)
+  vi.spyOn(f.owner.screenEvidence, 'wait').mockImplementation((...args: any[]) => {
+    const options = args[4]
+    // The actual Screen owner times out first; the outer original budget stays 8s.
+    return originalWait(...args.slice(0, 4), { ...options, timeoutMs: Math.min(1_000, options.timeoutMs) })
+  })
+  vi.spyOn(f.store, 'withPromptSubmission').mockImplementation((id, call) => originalStore(id, async () => {
+    try { return await call() } finally { cleaning.resolve(); await released.promise }
+  }))
+  try {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const started = Date.now(), sent = f.send().then(() => null, error => error as AgentMuxError)
+    await enteredWithClock(f.entered); await vi.advanceTimersByTimeAsync(1_000); await cleaning.promise
+    await vi.advanceTimersByTimeAsync(started + 8_000 - Date.now())
+    const error = (await sent)!
+    if (reason === 'unknown') expect(readAgentPromptPreparationWait(error)).toBeUndefined()
+    else expect(readAgentPromptPreparationWait(error)).toMatchObject({ reason, retrySafe: true, operationId: f.request.operationId })
+    expect(observation(error).phase).toBe('current-pane'); expect(f.writes).toEqual([])
+    expect(observation(error).pane).toMatchObject({ cols: 80, rows: 24, cursor: { row: 9, column: 2 }, geometryRevision: 0 })
+    const frozen = error.detail
+    released.resolve(); vi.useRealTimers(); await f.resize(true)
+    expect(error.detail).toBe(frozen)
+    expect(observation(error).pane).toMatchObject({ cols: 80, rows: 24, cursor: { row: 9, column: 2 }, geometryRevision: 0 })
+    const record = await f.client.readDeliveryAttempt(error.logId!)
+    expect(record.record!.error.detail).toBe(frozen)
+    if (process.env.AGENTMUX_T005_EVIDENCE) await writeFile(join(process.env.AGENTMUX_T005_EVIDENCE, `cleanup-geometry-${reason}.json`), JSON.stringify({
+      original: observation(error), laterRunSize: { cols: 100, rows: 30 }, record, writes: f.writes }))
+  } finally { released.resolve(); vi.useRealTimers(); await f.close() }
+})
+
+it.each(['gap', 'cancel', 'raw-input'] as const)('drops the completed timeout retry receipt when %s arrives during read-only cleanup', async fault => {
+  const f = await fixture('none', 'immediate', true, 'context-compaction'), cleaning = defer(), released = defer()
+  const originalWait = f.owner.screenEvidence.wait.bind(f.owner.screenEvidence), originalStore = f.store.withPromptSubmission.bind(f.store)
+  vi.spyOn(f.owner.screenEvidence, 'wait').mockImplementation((...args: any[]) => originalWait(...args.slice(0, 4), { ...args[4], timeoutMs: 1_000 }))
+  vi.spyOn(f.store, 'withPromptSubmission').mockImplementation((id, call) => originalStore(id, async () => {
+    try { return await call() } finally { cleaning.resolve(); await released.promise }
+  }))
+  try {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const started = Date.now(), controller = new AbortController(), sent = f.send(controller.signal).then(() => null, error => error as AgentMuxError)
+    await enteredWithClock(f.entered); await vi.advanceTimersByTimeAsync(1_000); await cleaning.promise
+    if (fault === 'gap') f.listener()({ type: 'gap', runId: f.record.run.runId, firstAvailableByte: 99 })
+    else if (fault === 'cancel') controller.abort(new AgentMuxError('User stopped waiting', 'CONTROL_CANCELLED'))
+    else void f.client.writeAgent({ agentSessionId: f.record.agentSessionId, expectedRun: f.record.run, data: 'RAW', source: 'user' }).catch(() => {})
+    await vi.advanceTimersByTimeAsync(started + 8_000 - Date.now())
+    expect(readAgentPromptPreparationWait((await sent)!)).toBeUndefined()
+  } finally { released.resolve(); vi.useRealTimers(); await f.close() }
+})
+
+it.each(['gap', 'cancel', 'raw-input', 'geometry'] as const)('does not authorize retry from an earlier compact pane after %s', async fault => {
+  const f = await fixture('none', 'immediate', true, 'context-compaction')
+  try {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const controller = new AbortController(), sent = f.send(controller.signal).then(() => null, error => error as AgentMuxError)
+    await enteredWithClock(f.entered); await vi.advanceTimersByTimeAsync(50)
+    if (fault === 'gap') f.listener()({ type: 'gap', runId: f.record.run.runId, firstAvailableByte: 99 })
+    else if (fault === 'cancel') controller.abort(new AgentMuxError('User stopped waiting', 'CONTROL_CANCELLED'))
+    else if (fault === 'raw-input') await f.client.writeAgent({ agentSessionId: f.record.agentSessionId, expectedRun: f.record.run, data: 'RAW', source: 'user' })
+    else f.owner.screenEvidence.discard(f.record.agentSessionId)
+    await vi.advanceTimersByTimeAsync(8_000)
+    const error = (await sent)!
+    expect(readAgentPromptPreparationWait(error)).toBeUndefined()
+    expect(f.writes).toEqual(fault === 'raw-input' ? ['RAW'] : [])
+  } finally { vi.useRealTimers(); await f.close() }
+})
+
+it.each(['raw-input', 'native-source'] as const)('rejects preparation retry after original %s changed, preserving the healthy terminal', async changed => {
+  const f = await fixture('none', 'immediate', true, 'context-compaction')
+  try {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const sent = f.send().then(() => null, error => error as AgentMuxError)
+    await enteredWithClock(f.entered); await vi.advanceTimersByTimeAsync(8_000)
+    const wait = readAgentPromptPreparationWait((await sent)!)!
+    vi.useRealTimers(); f.temporaryWait()
+    if (changed === 'raw-input') await f.client.writeAgent({ agentSessionId: f.record.agentSessionId, expectedRun: f.record.run, data: 'RAW', source: 'user' })
+    else f.nativeSource('different-native-source')
+    await expect(f.client.submitAgentPrompt({ ...f.request, preparationRetry: { inputByte: wait.inputByte, nativeSourceId: wait.nativeSourceId } }))
+      .rejects.toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', detail: expect.stringContaining('AGENT_PROMPT_RETRY_FENCE_CHANGED') })
+    expect(f.writes).toEqual(changed === 'raw-input' ? ['RAW'] : [])
+    await f.client.writeAgent({ agentSessionId: f.record.agentSessionId, expectedRun: f.record.run, data: 'STILL_OPEN', source: 'user' })
+    expect(f.writes.at(-1)).toBe('STILL_OPEN')
+  } finally { vi.useRealTimers(); await f.close() }
+})
+
+
+it('the public Hosted SDK, Unix RPC and compiled CLI retain the typed compact reason and original never-input receipt', async () => {
+  const f = await fixture('none', 'immediate', false, 'context-compaction'), root = await mkdtemp(fixturePath("tmp/amux-compact-cli-"))
+  const service = new AgentMuxHostedRuntimeService(f.client, (f.store as AgentMuxFileAgentSessionStore).path, () => hostedTestOwner(f.client))
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [{ hostId: 'local', client: f.client }], hostedRuntime: () => service })
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined, hosted: Awaited<ReturnType<typeof connectHostedAgentMux>> | undefined
+  try {
+    await server.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); hosted = await connectHostedAgentMux({ rpc })
+    const error = await hosted.submitAgentPrompt(f.request).then(() => null, error => error as AgentMuxError)
+    expect(readAgentPromptPreparationWait(error), JSON.stringify({ code: error?.code, detail: error?.detail })).toMatchObject({ reason: 'context-compaction', retrySafe: true, operationId: f.request.operationId })
+    const record = await hosted.readDeliveryAttempt(error!.logId!)
+    const cli = await runCompiledObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'delivery', 'inspect', '--logid', error!.logId!], objectCliEnvironment(root))
+    expect(cli.code, cli.stderr).toBe(0)
+    const observed = JSON.parse(cli.stdout).result.record
+    expect(observed).toEqual(record.record)
+    expect(readAgentPromptPreparationWait(observed.error)).toEqual(readAgentPromptPreparationWait(error))
+    expect(f.writes).toEqual([])
+    if (process.env.AGENTMUX_T002_EVIDENCE) await writeFile(join(process.env.AGENTMUX_T002_EVIDENCE, 'compact-reason-public-consumer.json'), JSON.stringify({ record, cli }))
+  } finally { await hosted?.dispose(); await rpc?.dispose(); await server.stop(); await service.dispose(); await f.close(); await rm(root, { recursive: true, force: true }) }
+}, 20_000)
+
+
+it('a retry cannot rejoin an already admitted logical operation even when a former call wrote no bytes', async () => {
+  const f = await fixture('none', 'immediate', true)
+  try {
+    await f.send(); expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+    await expect(f.client.submitAgentPrompt({ ...f.request, preparationRetry: { inputByte: 0, nativeSourceId: 'original-source' } }))
+      .rejects.toMatchObject({ code: 'AGENT_PROMPT_RETRY_FENCE_CHANGED' })
+    expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+  } finally { await f.close() }
+})
+
+it('T005 keeps original pane geometry through the actual Hosted SDK, durable receipt and compiled inspect CLI', async () => {
+  const f = await fixture('pane-predicate'), root = await mkdtemp(fixturePath("tmp/amux-pane-geometry-"))
+  const service = new AgentMuxHostedRuntimeService(f.client, (f.store as AgentMuxFileAgentSessionStore).path, () => hostedTestOwner(f.client))
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [{ hostId: 'local', client: f.client }], hostedRuntime: () => service })
+  const originalWait = f.owner.screenEvidence.wait.bind(f.owner.screenEvidence)
+  vi.spyOn(f.owner.screenEvidence, 'wait').mockImplementation((...args: any[]) => originalWait(...args.slice(0, 4), { ...args[4], timeoutMs: 100 }))
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined, hosted: Awaited<ReturnType<typeof connectHostedAgentMux>> | undefined
+  try {
+    await server.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); hosted = await connectHostedAgentMux({ rpc })
+    const error = (await hosted.submitAgentPrompt(f.request).then(() => null, error => error as AgentMuxError))!
+    const original = observation(error)
+    expect(original).toMatchObject({ phase: 'current-pane', pane: { cols: 80, rows: 24, cursor: { row: 9, column: 2 }, geometryRevision: 0,
+      authoritative: true, completeFrameAvailable: true, lastPredicateResult: false } })
+    expect(readAgentPromptPreparationWait(error)).toBeUndefined(); expect(f.writes).toEqual([])
+    await f.resize(true)
+    const record = await hosted.readDeliveryAttempt(error.logId!)
+    expect(record.record!.error.detail).toBe(error.detail)
+    const cli = await runCompiledObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'delivery', 'inspect', '--logid', error.logId!], objectCliEnvironment(root))
+    expect(cli.code, cli.stderr).toBe(0)
+    const observed = JSON.parse(cli.stdout).result.record
+    expect(observed).toEqual(record.record)
+    expect(observation(observed.error)).toEqual(original)
+    expect(original.pane).toMatchObject({ cols: 80, rows: 24, cursor: { row: 9, column: 2 }, geometryRevision: 0 })
+    if (process.env.AGENTMUX_T005_EVIDENCE) await writeFile(join(process.env.AGENTMUX_T005_EVIDENCE, 'geometry-public-consumer.json'), JSON.stringify({ original, record, cli, laterRunSize: { cols: 100, rows: 30 }, writes: f.writes }))
+  } finally { await hosted?.dispose(); await rpc?.dispose(); await server.stop(); await service.dispose(); await f.close(); await rm(root, { recursive: true, force: true }) }
+}, 15_000)
