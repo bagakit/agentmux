@@ -36,26 +36,26 @@ const request = (kind: 'permission' | 'question'): AgentMuxInteractionRequest =>
     : { kind, questions: [{ id: 'original-question', title: 'Original question', prompt: 'Choose the original target', options: [{ id: 'first', label: 'First' }, { id: 'second', label: 'Second' }] }] })
 })
 let root: Root, container: HTMLElement, outside: HTMLInputElement, style: HTMLStyleElement
-let requestRect: DOMRect, terminalRect: DOMRect, hidden = false, inert = false
+let requestRect: DOMRect, sourceRect: DOMRect | undefined, terminalRect: DOMRect, hidden = false, inert = false
 const resizeObservers = new Set<{ targets: Set<Element>; callback: ResizeObserverCallback }>()
 const panel = () => document.querySelector<HTMLElement>('.composer-pending')!
 const body = () => container.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] .agent-body')!
 const interaction = () => body().querySelector<HTMLElement>('.agent-interaction')!
 const top = () => parseFloat(panel().style.top)
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }) }
-async function render(kind?: 'permission' | 'question', entries = queue, neighbor = false) {
+async function render(kind?: 'permission' | 'question', entries = queue, neighbor = false, notice = false, retainHost = false) {
   await act(async () => root.render(<>
     <section className="agent-surface" data-workbench-region-id="original-region">
       <div className="agent-body" hidden={hidden} inert={inert}>
         <div className="terminal-view__xterm"><div className="xterm"><textarea className="xterm-helper-textarea" aria-label="Original terminal" /></div></div>
-        {kind && !neighbor ? <AgentInteractionCard request={request(kind)} onRespond={respond} /> : null}
+        {!neighbor && (kind || retainHost) ? <div className="agent-interaction-source">{notice ? <p className="agent-interaction-source__notice">This current request belongs to the retained source.</p> : null}{kind ? <AgentInteractionCard request={request(kind)} onRespond={respond} /> : null}</div> : null}
       </div>
       <SessionMailbox queued={entries} pendingInteraction={Boolean(kind)} onSendQueued={send} onEditQueued={edit} onCopyQueued={copy} onArchiveQueued={archive}
         system={{ notices: [], unread: [], available: true, acknowledge() {} }}>
         {(mailbox, pending) => <AgentComposer value="Original draft" onChange={change} disabled={false} placeholder="Original" aboveInput={pending} mailbox={mailbox} />}
       </SessionMailbox>
     </section>
-    <section className="agent-surface" data-workbench-region-id="neighbor-region"><div className="agent-body">{kind && neighbor ? <AgentInteractionCard request={request(kind)} onRespond={respond} /> : null}</div><input defaultValue="Neighbor draft" /></section>
+    <section className="agent-surface" data-workbench-region-id="neighbor-region"><div className="agent-body">{kind && neighbor ? <div className="agent-interaction-source"><AgentInteractionCard request={request(kind)} onRespond={respond} /></div> : null}</div><input defaultValue="Neighbor draft" /></section>
   </>))
   await settle()
 }
@@ -66,7 +66,7 @@ async function resize(target: Element) {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   geometry.height = 40; geometry.width = 352; geometry.calls.length = 0; geometry.updates.length = 0
-  requestRect = new DOMRect(500, 500, 300, 70); terminalRect = new DOMRect(0, 0, 0, 0); hidden = false; inert = false
+  requestRect = new DOMRect(500, 500, 300, 70); sourceRect = undefined; terminalRect = new DOMRect(0, 0, 0, 0); hidden = false; inert = false
   resizeObservers.clear(); for (const fn of [respond, send, edit, copy, archive, change]) fn.mockClear()
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0))
   vi.stubGlobal('cancelAnimationFrame', clearTimeout)
@@ -77,6 +77,7 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value() {} })
   Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value(this: HTMLElement) {
+    if (this.classList.contains('agent-interaction-source')) return sourceRect ?? requestRect
     if (this.classList.contains('agent-interaction')) return requestRect
     if (this.classList.contains('composer')) return new DOMRect(100, 600, 700, 50)
     if (this.hasAttribute('data-workbench-region-id')) return new DOMRect(100, 80, 700, 570)
@@ -147,4 +148,60 @@ it('rechecks the final footprint when avoiding a request moves onto the original
   expect(top() + geometry.height).toBeLessThanOrEqual(terminalRect.top - 2)
   expect(top() + geometry.height).toBeLessThanOrEqual(requestRect.top - 2)
   expect(send).not.toHaveBeenCalled(); expect(respond).not.toHaveBeenCalled()
+})
+
+it('observes request insertion and replacement inside a retained current source host', async () => {
+  await render(undefined, queue, false, false, true)
+  const host = body().querySelector('.agent-interaction-source')!
+  expect(top()).toBe(558)
+  await render('permission', queue, false, false, true)
+  expect(body().querySelector('.agent-interaction-source')).toBe(host)
+  expect(interaction().dataset.requestId).toBe('original-permission')
+  expect(top()).toBe(458)
+  await render('question', queue, false, false, true)
+  expect(body().querySelector('.agent-interaction-source')).toBe(host)
+  expect(interaction().dataset.requestId).toBe('original-question')
+  expect(top()).toBe(458)
+  await render(undefined, queue, false, false, true)
+  expect(top()).toBe(558)
+})
+
+it.each(['hidden', 'inert', 'display', 'visibility'] as const)('releases and restores the current %s source wrapper', async state => {
+  await render('permission')
+  const host = body().querySelector<HTMLElement>('.agent-interaction-source')!
+  await act(async () => {
+    if (state === 'display') host.style.display = 'none'
+    else if (state === 'visibility') host.style.visibility = 'hidden'
+    else host.setAttribute(state, '')
+  })
+  await settle()
+  expect(top()).toBe(558)
+  await act(async () => { host.removeAttribute(state); host.style.display = ''; host.style.visibility = '' })
+  await settle()
+  expect(top()).toBe(458)
+})
+
+it('protects the visible source notice when the inner request card alone does not intersect', async () => {
+  requestRect = new DOMRect(500, 610, 300, 70)
+  sourceRect = new DOMRect(500, 500, 300, 180)
+  await render('permission', queue, false, true)
+  expect(body().querySelector('.agent-interaction-source__notice')).not.toBeNull()
+  expect(top() + geometry.height).toBeLessThanOrEqual(sourceRect.top - 2)
+  sourceRect = new DOMRect(500, 440, 300, 240)
+  await resize(body().querySelector('.agent-interaction-source')!)
+  expect(top() + geometry.height).toBeLessThanOrEqual(sourceRect.top - 2)
+  expect(respond).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
+})
+
+it('ignores historical request descendants and their mutations in the same body', async () => {
+  await render()
+  const history = document.createElement('div')
+  history.className = 'activity-feed'
+  history.innerHTML = '<section class="agent-interaction" data-request-id="historical-request"></section>'
+  await act(async () => { body().append(history) }); await settle()
+  expect(top()).toBe(558)
+  const calls = geometry.calls.length
+  await act(async () => { history.firstElementChild!.setAttribute('style', 'height:200px'); history.append(document.createElement('p')) }); await settle()
+  expect(geometry.calls).toHaveLength(calls)
+  expect(top()).toBe(558); expect(send).not.toHaveBeenCalled()
 })
