@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile } from 'node:fs/promises'
+import { chmod, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
@@ -12,7 +12,7 @@ import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
 import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOperationDevice } from './types.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { durableWriteFile } from './durable-write.js'
+import { configureMessageJournal, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
 
 export type AgentMuxMessageIdentity =
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
@@ -130,12 +130,14 @@ type DispatchProjection = { readonly sourceMessageId: string; readonly openedAt:
 function storageCause(error: unknown, depth = 0): Record<string, unknown> {
   if (!error || typeof error !== 'object') return { message: String(error) }
   const value = error as { name?: unknown; message?: unknown; code?: unknown; detail?: unknown;
-    phase?: unknown; errcode?: unknown; cause?: unknown }
+    phase?: unknown; errcode?: unknown; cause?: unknown; cleanup?: unknown }
   return { name: String(value.name ?? 'Error').slice(0, 128), message: String(value.message ?? error).slice(0, 2048),
     ...(typeof value.code === 'string' ? { code: value.code.slice(0, 128) } : {}),
     ...(typeof value.detail === 'string' ? { detail: value.detail.slice(0, 8192) } : {}),
     ...(typeof value.phase === 'string' ? { phase: value.phase.slice(0, 128) } : {}),
     ...(typeof value.errcode === 'number' ? { errcode: value.errcode } : {}),
+    ...(depth >= 3 || !Array.isArray(value.cleanup) || !value.cleanup.length ? {} : {
+      cleanup: value.cleanup.slice(0, 4).map(error => storageCause(error, depth + 1)) }),
     ...(depth >= 3 || value.cause === undefined ? {} : { cause: storageCause(value.cause, depth + 1) }) }
 }
 
@@ -221,27 +223,6 @@ function queueIdFor(path: string): string {
   return `queue:${createHash('sha256').update(path).digest('hex').slice(0, 24)}`
 }
 
-function addressedTo(message: DurableAgentMuxMessage, consumerId: string): boolean {
-  return message.envelope.recipient.kind === 'agent-session' &&
-    message.envelope.recipient.agentSessionId === consumerId &&
-    message.envelope.recipientSessionId === consumerId
-}
-
-function deliveryQueue(
-  messages: ReadonlyMap<string, DurableAgentMuxMessage>,
-  consumers: ReadonlyMap<string, DurableConsumerCursor>,
-  consumerId: string
-): DeliveryQueue {
-  return {
-    // Delivery is mutable; filtering on it would make an acknowledged numeric position skip mail.
-    pending: [...messages.values()].filter((item) => addressedTo(item, consumerId))
-      .sort((left, right) => left.sequence - right.sequence).map((item) => item.envelope.messageId),
-    consumers: Object.fromEntries([...consumers].map(([id, cursor]) => [id, {
-      acked: cursor.acked, generation: cursor.generation, inFlight: cursor.deliveryIds.length
-    }]))
-  }
-}
-
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
@@ -259,17 +240,16 @@ function assertGeneration(value: number): void {
 
 export class DurableAgentMuxMessageQueue {
   readonly queueId: string
-  private loaded = false
-  private bytes = 0
-  private content = ''
-  private durabilityAcknowledged = false
-  private nextSequence = 1
-  private readonly messages = new Map<string, DurableAgentMuxMessage>()
-  private readonly operations = new Map<string, string>()
-  private readonly consumers = new Map<string, DurableConsumerCursor>()
-  private readonly dispatches = new Map<string, DispatchProjection>()
-  private readonly journal: JournalRecord[] = []
-  private tail: Promise<unknown> = Promise.resolve()
+  private database: DatabaseSync | undefined
+
+  private get db(): DatabaseSync {
+    if (!this.database) throw new Error('Message journal transaction is not open.')
+    return this.database
+  }
+
+  private get nextSequence(): number {
+    return Number(this.db.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM records').get()!.next)
+  }
 
   constructor(readonly path = defaultAgentMuxMessageQueuePath()) {
     this.queueId = queueIdFor(path)
@@ -278,10 +258,11 @@ export class DurableAgentMuxMessageQueue {
   private withLock<T>(operation: () => Promise<T>, durableReceipt = false): Promise<T> {
     const key = `${this.path}.mutex.sqlite`
     const processTail = processQueueTails.get(key) ?? Promise.resolve()
-    const instanceTail = this.tail
-    const result = processTail.then(() => instanceTail.then(() => this.withFileLock(operation, durableReceipt), () => this.withFileLock(operation, durableReceipt)), () => this.withFileLock(operation, durableReceipt))
-    this.tail = result.then(() => undefined, () => undefined)
-    processQueueTails.set(key, result.then(() => undefined, () => undefined))
+    const result = processTail.then(() => this.withFileLock(operation, durableReceipt))
+    const tail = result.then(() => undefined, () => undefined)
+    processQueueTails.set(key, tail)
+    // Do not retain a settled queue path forever; concurrent callers already hold this tail.
+    void tail.then(() => { if (processQueueTails.get(key) === tail) processQueueTails.delete(key) })
     return result
   }
 
@@ -307,25 +288,23 @@ export class DurableAgentMuxMessageQueue {
       await chmod(mutexPath, 0o600)
       // A separate writer must not synchronously stall this Core's terminal/Hook event loop.
       // The caller can retry its original operation after the positively busy owner releases it.
-      mutex.exec('PRAGMA busy_timeout = 0')
+      configureMessageJournal(mutex)
       stage = 'mutex-acquire'
       mutex.exec('BEGIN IMMEDIATE'); acquired = true
-      this.loaded = false
-      this.bytes = 0
-      this.content = ''
-      this.durabilityAcknowledged = false
-      this.nextSequence = 1
-      this.messages.clear()
-      this.operations.clear()
-      this.consumers.clear()
-      this.dispatches.clear()
-      this.journal.length = 0
-      stage = 'journal-read'
-      await this.ensureLoaded()
-      // Operation failures already carry their business or precise storage provenance.
+      stage = 'journal-open'
+      this.database = await openMessageJournal(this.path, mutex, (db, record) => {
+        this.database = db
+        try { this.applyRecord(record) } finally { this.database = undefined }
+      })
+      stage = 'journal-acquire'
+      this.db.exec('BEGIN IMMEDIATE')
       stage = 'operation'
       result = await operation()
-      if (durableReceipt && this.bytes > 0 && !this.durabilityAcknowledged) await this.confirmDurability()
+      stage = 'journal-commit'
+      this.db.exec('COMMIT')
+      // An idempotent return also confirms a previous lost durability ACK. Reading a row
+      // alone cannot establish that the prior file or directory sync succeeded.
+      if (durableReceipt) { stage = 'journal-confirm'; await syncMessageJournal(this.path) }
       stage = 'mutex-commit'
       mutex.exec('COMMIT')
       acquired = false
@@ -336,9 +315,16 @@ export class DurableAgentMuxMessageQueue {
       // be published: retain that stage and never attach a not-applied input claim to this retry.
       failure = sqlite?.code === 'ERR_SQLITE_ERROR' && sqlite.errcode === 5
         ? storageFailure(stage, error, [], 'Message queue lock is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
-        : stage === 'operation' || error instanceof AgentMuxError ? error : storageFailure(stage, error)
+        : error instanceof AgentMuxError || stage === 'operation' && sqlite?.code !== 'ERR_SQLITE_ERROR' ? error : storageFailure(stage, error)
     } finally {
       const cleanup: { stage: string; error: unknown }[] = []
+      if (this.database) {
+        try {
+          if (this.database.isTransaction) this.database.exec('ROLLBACK')
+        } catch (error) { cleanup.push({ stage: 'journal-rollback', error }) }
+        try { this.database.close() } catch (error) { cleanup.push({ stage: 'journal-close', error }) }
+        this.database = undefined
+      }
       if (acquired) {
         try { mutex?.exec('ROLLBACK') } catch (error) { cleanup.push({ stage: 'mutex-rollback', error }) }
       }
@@ -353,168 +339,160 @@ export class DurableAgentMuxMessageQueue {
     return result
   }
 
-  private async ensureLoaded(): Promise<void> {
-    if (this.loaded) return
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    let raw = Buffer.alloc(0)
-    try { raw = await readFile(this.path) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw storageFailure('journal-read', error)
-    }
-    const content = raw.toString('utf8')
-    if (!Buffer.from(content).equals(raw)) throw storageFailure('journal-encoding',
-      new Error('Message journal is not valid UTF-8.'), [], 'Message queue journal is invalid.')
-    this.content = content
-    this.bytes = Buffer.byteLength(content)
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue
-      let record: JournalRecord
-      try { record = JSON.parse(line) as JournalRecord } catch (error) {
-        throw storageFailure('journal-parse', error, [], 'Message queue journal is invalid.')
-      }
-      this.journal.push(record)
-      this.replay(record)
-    }
-    this.loaded = true
+  private message(messageId: string): DurableAgentMuxMessage | undefined {
+    const row = this.db.prepare(`SELECT m.message_sequence AS sequence, original.json AS original,
+      condition.json AS condition, delivery.json AS delivery FROM messages m
+      JOIN records original ON original.sequence = m.message_sequence
+      LEFT JOIN records condition ON condition.sequence = m.condition_sequence
+      LEFT JOIN records delivery ON delivery.sequence = m.delivery_sequence
+      WHERE m.message_id = ?`).get(messageId)
+    if (!row) return undefined
+    const original = JSON.parse(String(row.original)) as JournalMessage
+    const envelope = validateAgentMuxMessageEnvelope(original.envelope)
+    const condition = row.condition === null ? null : JSON.parse(String(row.condition)) as Extract<JournalRecord, {kind: 'prompt-condition'}>
+    const last = row.delivery === null ? null : JSON.parse(String(row.delivery)) as Extract<JournalRecord, {kind: 'delivery' | 'delivery-issue'}>
+    const delivery: AgentMuxMessageDeliveryState = last?.kind === 'delivery'
+      ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
+      : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
+    return { sequence: Number(row.sequence), envelope, delivery,
+      ...(condition ? { promptCondition: validateAgentPromptCondition(condition.condition) } : original.promptCondition === null ? { promptCondition: null } : {}),
+      ...(original.execution === undefined ? {} : { execution: original.execution }),
+      ...(original.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(original.sourceChannel) }),
+      ...(original.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(original.sourceDevice) }) }
   }
 
-  private replay(record: JournalRecord): void {
-    this.nextSequence = Math.max(this.nextSequence, record.sequence + 1)
+  private operationMessageId(operationId: string): string | undefined {
+    return this.db.prepare('SELECT message_id FROM messages WHERE operation_id = ?').get(operationId)?.message_id as string | undefined
+  }
+
+  private consumer(consumerId: string): DurableConsumerCursor | undefined {
+    const row = this.db.prepare('SELECT acked, generation, reader_run, delivery_ids FROM consumers WHERE consumer_id = ?').get(consumerId)
+    return row ? { acked: Number(row.acked), generation: Number(row.generation),
+      readerRun: { runId: String(row.reader_run) }, deliveryIds: JSON.parse(String(row.delivery_ids)) as string[] } : undefined
+  }
+
+  private saveConsumer(consumerId: string, cursor: DurableConsumerCursor): void {
+    this.db.prepare(`INSERT INTO consumers VALUES (?, ?, ?, ?, ?) ON CONFLICT(consumer_id)
+      DO UPDATE SET acked=excluded.acked, generation=excluded.generation,
+      reader_run=excluded.reader_run, delivery_ids=excluded.delivery_ids`).run(
+      consumerId, cursor.acked, cursor.generation, cursor.readerRun.runId, JSON.stringify(cursor.deliveryIds))
+  }
+
+  private inboxIds(consumerId: string, acked: number, limit: number): string[] {
+    return this.db.prepare(`SELECT message_id FROM messages
+      WHERE recipient_id = ? AND recipient_ordinal > ? ORDER BY recipient_ordinal LIMIT ?`)
+      .all(consumerId, acked, limit).map(row => String(row.message_id))
+  }
+
+  /** Pure batch arithmetic only receives this consumer's current slice, never unrelated history. */
+  private batchQueue(consumerId: string, cursor: DurableConsumerCursor | undefined, pending: readonly string[]): DeliveryQueue {
+    return { pending, consumers: cursor ? { [consumerId]: {
+      acked: 0, generation: cursor.generation, inFlight: cursor.deliveryIds.length } } : {} }
+  }
+
+  private dispatchFacts(sourceMessageId: string): DispatchProjection | undefined {
+    const row = this.db.prepare(`SELECT r.json FROM dispatches d JOIN records r
+      ON r.sequence=d.open_sequence WHERE d.source_message_id=?`).get(sourceMessageId)
+    if (!row) return undefined
+    const original = JSON.parse(String(row.json)) as Extract<JournalRecord, {kind: 'dispatch-open'}>
+    const events = this.db.prepare(`SELECT r.json FROM dispatch_events e JOIN records r
+      ON r.sequence=e.event_sequence WHERE e.source_message_id=? ORDER BY e.event_sequence`).all(sourceMessageId)
+      .map(value => JSON.parse(String(value.json)) as Extract<JournalRecord, {kind: 'dispatch-event'}>)
+      .map(event => ({ kind: event.eventKind, replyMessageId: event.replyMessageId, at: event.at }))
+    return { sourceMessageId, openedAt: original.at, events }
+  }
+
+  /** Admission and projection update are the same code for the one import and every new fact. */
+  private applyRecord(record: JournalRecord): void {
+    if (!Number.isSafeInteger(record.sequence) || record.sequence < this.nextSequence) {
+      throw new AgentMuxError('Message journal sequence is invalid or out of order.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    }
     if (record.kind === 'message') {
       if (record.execution !== undefined && record.execution !== 'default' && record.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
-      const message = { sequence: record.sequence, envelope, delivery: Object.freeze({ state: 'queued' as const, at: envelope.createdAt }),
-        ...(record.promptCondition === null ? { promptCondition: null } : {}),
-        ...(record.execution === undefined ? {} : { execution: record.execution }),
-        ...(record.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(record.sourceChannel) }),
-        ...(record.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(record.sourceDevice) }) }
-      this.messages.set(envelope.messageId, message)
-      this.operations.set(envelope.operationId, envelope.messageId)
-      return
-    }
-    if (record.kind === 'prompt-condition') {
-      const current = this.messages.get(record.messageId)
-      if (!current || current.promptCondition !== null) throw new AgentMuxError(
-        'Message prompt condition is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      if (record.promptCondition !== undefined && record.promptCondition !== null) throw new AgentMuxError('Message initial condition is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      if (record.sourceChannel !== undefined) normalizeMessageChannel(record.sourceChannel)
+      if (record.sourceDevice !== undefined) normalizeOperationDevice(record.sourceDevice)
+      const consumerId = envelope.recipient.kind === 'agent-session' && envelope.recipient.agentSessionId === envelope.recipientSessionId
+        ? envelope.recipient.agentSessionId : null
+      const ordinal = consumerId === null ? null : Number(this.db.prepare(
+        'SELECT COALESCE(MAX(recipient_ordinal), 0) + 1 AS next FROM messages WHERE recipient_id = ?').get(consumerId)!.next)
+      this.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, NULL, NULL)').run(
+        envelope.messageId, envelope.operationId, record.sequence, consumerId, ordinal)
+    } else if (record.kind === 'prompt-condition') {
+      const current = this.message(record.messageId)
+      if (!current || current.promptCondition !== null) throw new AgentMuxError('Message prompt condition is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const condition = validateAgentPromptCondition(record.condition)
       if (current.envelope.recipientRunId !== null && current.envelope.recipientRunId !== condition.expectedRun.runId) {
         throw new AgentMuxError('Message prompt targets another Run.', 'MESSAGE_RECIPIENT_MISMATCH')
       }
-      this.messages.set(record.messageId, { ...current, promptCondition: condition })
-      return
-    }
-    if (record.kind === 'delivery-issue') {
-      const current = this.messages.get(record.messageId)
-      if (!current || current.delivery.state !== 'queued') throw new AgentMuxError(
-        'Message delivery issue contradicts its confirmed receipt.', 'MESSAGE_QUEUE_UNAVAILABLE')
-      this.messages.set(record.messageId, { ...current, delivery: { ...current.delivery, reason: record.reason } })
-      return
-    }
-    if (record.kind === 'delivery') {
-      const current = this.messages.get(record.messageId)
+      this.db.prepare('UPDATE messages SET condition_sequence=? WHERE message_id=?').run(record.sequence, record.messageId)
+    } else if (record.kind === 'delivery' || record.kind === 'delivery-issue') {
+      const current = this.message(record.messageId)
       if (!current) throw new AgentMuxError('Message queue delivery references an unknown message.', 'MESSAGE_QUEUE_UNAVAILABLE')
-      const delivery = advanceDelivery(current.delivery, record.state, record.at)
-      this.messages.set(record.messageId, { ...current, delivery: { ...delivery, ...(record.reason === undefined ? {} : { reason: record.reason }) } })
-      return
-    }
-    if (record.kind === 'dispatch-open' || record.kind === 'dispatch-event') {
+      if (record.kind === 'delivery') advanceDelivery(current.delivery, record.state, record.at)
+      else if (current.delivery.state !== 'queued') throw new AgentMuxError('Message delivery issue contradicts its confirmed receipt.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      finiteTimestamp(record.at, 'Delivery time')
+      if (record.reason !== undefined && typeof record.reason !== 'string') throw new AgentMuxError('Message delivery reason is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      this.db.prepare('UPDATE messages SET delivery_sequence=? WHERE message_id=?').run(record.sequence, record.messageId)
+    } else if (record.kind === 'dispatch-open' || record.kind === 'dispatch-event') {
       const sourceMessageId = nonEmpty(record.sourceMessageId, 'Dispatch source message id')
       finiteTimestamp(record.at, 'Dispatch time')
-      const previous = this.dispatches.get(sourceMessageId)
-      // References may outlive retained message bodies. Replaying those facts must not break
-      // unrelated mail; only a Dispatch read/report requires the actual referenced envelopes.
       if (record.kind === 'dispatch-open') {
-        if (!previous) this.dispatches.set(sourceMessageId, { sourceMessageId, openedAt: record.at, events: [] })
+        this.db.prepare('INSERT OR IGNORE INTO dispatches VALUES (?, ?)').run(sourceMessageId, record.sequence)
       } else {
-        if (!previous) throw new AgentMuxError('Dispatch event has no open fact.', 'MESSAGE_QUEUE_UNAVAILABLE')
-        const replyMessageId = nonEmpty(record.replyMessageId, 'Dispatch reply message id')
-        assertDispatchEventKind(record.eventKind)
-        const existing = previous.events.find((event) => event.replyMessageId === replyMessageId)
-        if (existing && existing.kind !== record.eventKind) {
+        if (!this.db.prepare('SELECT 1 FROM dispatches WHERE source_message_id=?').get(sourceMessageId)) {
+          throw new AgentMuxError('Dispatch event has no open fact.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        }
+        nonEmpty(record.replyMessageId, 'Dispatch reply message id'); assertDispatchEventKind(record.eventKind)
+        const previous = this.db.prepare(`SELECT r.json FROM dispatch_events e JOIN records r
+          ON r.sequence=e.event_sequence WHERE e.source_message_id=? AND e.reply_message_id=?`).get(sourceMessageId, record.replyMessageId)
+        if (previous && (JSON.parse(String(previous.json)) as Extract<JournalRecord, {kind: 'dispatch-event'}>).eventKind !== record.eventKind) {
           throw new AgentMuxError('Dispatch journal event identity conflicts.', 'MESSAGE_QUEUE_UNAVAILABLE')
         }
-        if (!existing) this.dispatches.set(sourceMessageId, { ...previous,
-          events: [...previous.events, { kind: record.eventKind, replyMessageId, at: record.at }] })
+        this.db.prepare('INSERT OR IGNORE INTO dispatch_events VALUES (?, ?, ?)').run(sourceMessageId, record.replyMessageId, record.sequence)
       }
-      return
-    }
-    if (record.kind !== 'consumer-check' && record.kind !== 'consumer-ack') {
-      throw new AgentMuxError('Message queue journal record is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
-    }
-    const identity = reader(record)
-    assertGeneration(record.generation)
-    if (!Array.isArray(record.deliveryIds) || record.deliveryIds.some((id) => typeof id !== 'string') ||
-      new Set(record.deliveryIds).size !== record.deliveryIds.length) {
-      throw new AgentMuxError('Message consumer batch is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
-    }
-    const previous = this.consumers.get(identity.consumerId)
-    const arithmetic = deliveryQueue(this.messages, this.consumers, identity.consumerId)
-    const exact = arithmetic.pending.slice(previous?.acked ?? 0, (previous?.acked ?? 0) + record.deliveryIds.length)
-    if (!sameIds(record.deliveryIds, exact)) {
-      throw new AgentMuxError('Message consumer batch is not in its recipient domain.', 'MESSAGE_QUEUE_UNAVAILABLE')
-    }
-    if (record.kind === 'consumer-check') {
-      const replacement = previous !== undefined && previous.readerRun.runId !== identity.readerRun.runId
-      const expectedGeneration = previous ? previous.generation + (replacement ? 1 : 0) : 1
-      if (record.generation !== expectedGeneration ||
-        (previous && previous.deliveryIds.length > 0 && !sameIds(previous.deliveryIds, record.deliveryIds))) {
-        throw new AgentMuxError('Message consumer check is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    } else if (record.kind === 'consumer-check' || record.kind === 'consumer-ack') {
+      const identity = reader(record); assertGeneration(record.generation)
+      if (!Array.isArray(record.deliveryIds) || record.deliveryIds.some(id => typeof id !== 'string') ||
+        new Set(record.deliveryIds).size !== record.deliveryIds.length) throw new AgentMuxError('Message consumer batch is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      const previous = this.consumer(identity.consumerId)
+      if (!sameIds(record.deliveryIds, this.inboxIds(identity.consumerId, previous?.acked ?? 0, record.deliveryIds.length))) {
+        throw new AgentMuxError('Message consumer batch is not in its recipient domain.', 'MESSAGE_QUEUE_UNAVAILABLE')
       }
-      this.consumers.set(identity.consumerId, { acked: previous?.acked ?? 0,
-        generation: record.generation, readerRun: identity.readerRun, deliveryIds: [...record.deliveryIds] })
-    } else {
-      this.consumers.set(identity.consumerId, this.cursorAfterAck(record))
-    }
+      if (record.kind === 'consumer-check') {
+        const replacement = previous !== undefined && previous.readerRun.runId !== identity.readerRun.runId
+        const expectedGeneration = previous ? previous.generation + (replacement ? 1 : 0) : 1
+        if (record.generation !== expectedGeneration ||
+          (previous && previous.deliveryIds.length > 0 && !sameIds(previous.deliveryIds, record.deliveryIds))) {
+          throw new AgentMuxError('Message consumer check is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        }
+        this.saveConsumer(identity.consumerId, { acked: previous?.acked ?? 0,
+          generation: record.generation, readerRun: identity.readerRun, deliveryIds: [...record.deliveryIds] })
+      } else this.saveConsumer(identity.consumerId, this.cursorAfterAck(record))
+    } else throw new AgentMuxError('Message queue journal record is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
   }
 
   private cursorAfterAck(record: JournalAck): DurableConsumerCursor {
-    const current = this.consumers.get(record.consumerId)
-    if (!current || current.readerRun.runId !== record.readerRun.runId ||
-      !sameIds(current.deliveryIds, record.deliveryIds)) {
+    const current = this.consumer(record.consumerId)
+    if (!current || current.readerRun.runId !== record.readerRun.runId || !sameIds(current.deliveryIds, record.deliveryIds)) {
       throw new AgentMuxError('Message consumer reader is stale.', 'MESSAGE_ACK_GENERATION_STALE')
     }
-    const next = ackDeliveryBatch(deliveryQueue(this.messages, this.consumers, record.consumerId),
+    const next = ackDeliveryBatch(this.batchQueue(record.consumerId, current, current.deliveryIds),
       record.consumerId, record.generation).consumers[record.consumerId]!
-    return { acked: next.acked, generation: next.generation,
+    return { acked: current.acked + next.acked, generation: next.generation,
       readerRun: { ...current.readerRun }, deliveryIds: [] }
   }
 
   private async appendRecord(record: JournalRecord): Promise<void> {
-    const line = `${JSON.stringify(record)}\n`
-    const separator = this.content && !this.content.endsWith('\n') ? '\n' : ''
-    const bytes = this.bytes + Buffer.byteLength(separator) + Buffer.byteLength(line)
-    const content = this.content + separator + line
-    try { await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true }) }
-    catch (error) { throw storageFailure('journal-publish', error) }
-    this.content = content
-    this.bytes = bytes
-    this.durabilityAcknowledged = true
-    this.journal.push(record)
-    this.replay(record)
-  }
-
-  /** Reading an existing idempotent result is not a file/directory durability ACK. */
-  private async confirmDurability(): Promise<void> {
-    for (const [path, stage] of [[this.path, 'journal-confirm-file'], [dirname(this.path), 'journal-confirm-directory']] as const) {
-      let handle: Awaited<ReturnType<typeof open>> | undefined
-      let failure: unknown
-      let failed = false
-      try { handle = await open(path, 'r'); await handle.sync() }
-      catch (error) { failure = storageFailure(stage, error); failed = true }
-      finally {
-        try { await handle?.close() } catch (error) {
-          failure = failed ? storageFailure(stage, failure, [{ stage: `${stage}-close`, error }])
-            : storageFailure(`${stage}-close`, error)
-          failed = true
-        }
-      }
-      if (failed) throw failure
+    try { this.applyRecord(record) } catch (error) {
+      throw error instanceof AgentMuxError ? error : storageFailure('journal-write', error)
     }
-    this.durabilityAcknowledged = true
   }
 
   async append(input: AgentMuxMessageAppendInput): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
-      await this.ensureLoaded()
       const messageId = input.messageId ?? randomUUID()
       if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'INVALID_CONTROL_REQUEST')
       const execution = input.execution ?? 'default'
@@ -523,13 +501,13 @@ export class DurableAgentMuxMessageQueue {
       const sameOrigin = (existing: DurableAgentMuxMessage) => existing.sourceChannel === sourceChannel &&
         JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice)
       const envelope = validateAgentMuxMessageEnvelope({ ...input, schema: 'agentmux.a2a.v1', messageId })
-      const existingId = this.operations.get(envelope.operationId)
+      const existingId = this.operationMessageId(envelope.operationId)
       if (existingId) {
-        const existing = this.messages.get(existingId)!
+        const existing = this.message(existingId)!
         if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message operation already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
-      const existing = this.messages.get(messageId)
+      const existing = this.message(messageId)
       if (existing) {
         if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message id already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
@@ -537,39 +515,38 @@ export class DurableAgentMuxMessageQueue {
       const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       await this.appendRecord(record)
-      return this.receipt(this.messages.get(messageId)!)
+      return this.receipt(this.message(messageId)!)
     }, true)
   }
 
   async recordDelivery(messageId: string, state: Exclude<AgentDeliveryState, 'queued'>, at = Date.now(), reason?: string): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
-      await this.ensureLoaded()
-      const current = this.messages.get(nonEmpty(messageId, 'Message id'))
+      const current = this.message(nonEmpty(messageId, 'Message id'))
       if (!current) throw new AgentMuxError('Message is unknown.', 'MESSAGE_NOT_FOUND')
       if (current.delivery.state === state) return this.receipt(current)
       advanceDelivery(current.delivery, state, at)
       const record: JournalDelivery = { kind: 'delivery', sequence: this.nextSequence, messageId, state, at, ...(reason === undefined ? {} : { reason }) }
       await this.appendRecord(record)
-      return this.receipt(this.messages.get(messageId)!)
+      return this.receipt(this.message(messageId)!)
     }, true)
   }
 
   /** An unavailable Control receipt does not establish terminal failure or erase a known delivery. */
   async recordDeliveryIssue(messageId: string, reason: string, at = Date.now()): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
-      const current = this.messages.get(nonEmpty(messageId, 'Message id'))
+      const current = this.message(nonEmpty(messageId, 'Message id'))
       if (!current) throw new AgentMuxError('Message is unknown.', 'MESSAGE_NOT_FOUND')
       if (current.delivery.state !== 'queued') return this.receipt(current)
       await this.appendRecord({ kind: 'delivery-issue', sequence: this.nextSequence, messageId,
         at: finiteTimestamp(at, 'Delivery issue time'), reason })
-      return this.receipt(this.messages.get(messageId)!)
+      return this.receipt(this.message(messageId)!)
     }, true)
   }
 
   /** The existing journal owns the first condition even if a Control response is lost. */
   async preparePrompt(messageId: string, capture: (envelope: AgentMuxMessageEnvelope) => Promise<AgentPromptCondition>): Promise<AgentPromptCondition> {
     const original = await this.withLock(async () => {
-      const current = this.messages.get(nonEmpty(messageId, 'Message id'))
+      const current = this.message(nonEmpty(messageId, 'Message id'))
       if (!current) throw new AgentMuxError('Message is unknown.', 'MESSAGE_NOT_FOUND')
       if (current.promptCondition === undefined) throw new AgentMuxError(
         'This message has no original prompt delivery condition. Its delivery is unknown; it will not be prepared as a new message.',
@@ -582,7 +559,7 @@ export class DurableAgentMuxMessageQueue {
     // writer while unrelated messages append; the second scope keeps the first binding.
     const candidate = validateAgentPromptCondition(await capture(original.envelope))
     return this.withLock(async () => {
-      const current = this.messages.get(messageId)
+      const current = this.message(messageId)
       if (!current || current.promptCondition === undefined) throw new AgentMuxError(
         'The original message condition can no longer be confirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
       if (current.promptCondition !== null) return structuredClone(current.promptCondition)
@@ -594,27 +571,23 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
-  /** Read the original operation binding through the journal owner's existing index. */
+  /** Read the first original operation binding without replaying unrelated communication. */
   async readByOperationId(operationId: string): Promise<DurableAgentMuxMessage | null> {
     return this.withLock(async () => {
-      await this.ensureLoaded()
-      const messageId = this.operations.get(nonEmpty(operationId, 'Message operation id'))
-      return messageId ? structuredClone(this.messages.get(messageId)!) : null
+      const messageId = this.operationMessageId(nonEmpty(operationId, 'Message operation id'))
+      return messageId ? this.message(messageId)! : null
     })
   }
 
   async listAfter(sequence = 0): Promise<readonly DurableAgentMuxMessage[]> {
-    return this.withLock(async () => {
-      await this.ensureLoaded()
-      return [...this.messages.values()].filter((item) => item.sequence > sequence).sort((left, right) => left.sequence - right.sequence).map((item) => structuredClone(item))
-    })
+    return this.withLock(async () => this.db.prepare(
+      'SELECT message_id FROM messages WHERE message_sequence > ? ORDER BY message_sequence').all(sequence)
+      .map(row => this.message(String(row.message_id))!))
   }
 
   async readJournal(): Promise<readonly AgentMuxMessageJournalRecord[]> {
-    return this.withLock(async () => {
-      await this.ensureLoaded()
-      return structuredClone(this.journal)
-    })
+    return this.withLock(async () => this.db.prepare('SELECT json FROM records ORDER BY sequence').all()
+      .map(row => JSON.parse(String(row.json)) as JournalRecord))
   }
 
   async check(
@@ -627,19 +600,19 @@ export class DurableAgentMuxMessageQueue {
     }
     return this.withLock(async () => {
       await reauthorize()
-      const previous = this.consumers.get(identity.consumerId)
+      const previous = this.consumer(identity.consumerId)
       const replacement = previous !== undefined && previous.readerRun.runId !== identity.readerRun.runId
-      const queue = deliveryQueue(this.messages, this.consumers, identity.consumerId)
-      const arithmetic = replacement ? { ...queue, consumers: { ...queue.consumers,
-        [identity.consumerId]: { ...queue.consumers[identity.consumerId]!, generation: previous.generation + 1 } } } : queue
-      const batch = checkDeliveries(arithmetic, identity.consumerId, input.limit)
+      const pending = previous?.deliveryIds.length ? previous.deliveryIds
+        : this.inboxIds(identity.consumerId, previous?.acked ?? 0, input.limit)
+      const current = replacement ? { ...previous, generation: previous.generation + 1 } : previous
+      const batch = checkDeliveries(this.batchQueue(identity.consumerId, current, pending), identity.consumerId, input.limit)
       const changed = replacement || (previous?.deliveryIds.length ?? 0) === 0 && batch.deliveryIds.length > 0
       if (changed) {
         await this.appendRecord({ kind: 'consumer-check', sequence: this.nextSequence,
           ...identity, generation: batch.generation, deliveryIds: batch.deliveryIds })
       }
       return { ...identity, generation: batch.generation,
-        messages: batch.deliveryIds.map((messageId) => structuredClone(this.messages.get(messageId)!)) }
+        messages: batch.deliveryIds.map((messageId) => structuredClone(this.message(messageId)!)) }
     }, true)
   }
 
@@ -651,7 +624,7 @@ export class DurableAgentMuxMessageQueue {
     assertGeneration(input.generation)
     return this.withLock(async () => {
       await reauthorize()
-      const current = this.consumers.get(identity.consumerId)
+      const current = this.consumer(identity.consumerId)
       const record: JournalAck = { kind: 'consumer-ack', sequence: this.nextSequence,
         ...identity, generation: input.generation, deliveryIds: current?.deliveryIds ?? [] }
       const next = this.cursorAfterAck(record) // Validate before writing, including the pure generation fence.
@@ -661,7 +634,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private dispatchMessage(messageId: string): AgentMuxMessageEnvelope {
-    const message = this.messages.get(nonEmpty(messageId, 'Dispatch message id'))
+    const message = this.message(nonEmpty(messageId, 'Dispatch message id'))
     if (!message) {
       throw new AgentMuxError('A referenced Dispatch message is not retained in this journal.', 'DISPATCH_MESSAGE_UNAVAILABLE')
     }
@@ -673,8 +646,7 @@ export class DurableAgentMuxMessageQueue {
     return envelope
   }
 
-  private dispatchProjection(sourceMessageId: string): { dispatch: Dispatch; messages: readonly AgentMuxMessageEnvelope[] } {
-    const facts = this.dispatches.get(nonEmpty(sourceMessageId, 'Dispatch source message id'))
+  private dispatchProjection(sourceMessageId: string, facts = this.dispatchFacts(nonEmpty(sourceMessageId, 'Dispatch source message id'))): { dispatch: Dispatch; messages: readonly AgentMuxMessageEnvelope[] } {
     if (!facts) throw new AgentMuxError('This source message has no open Dispatch.', 'DISPATCH_NOT_FOUND')
     const source = this.dispatchMessage(sourceMessageId)
     let dispatch = openDispatch(source, facts.openedAt)
@@ -693,7 +665,8 @@ export class DurableAgentMuxMessageQueue {
   ): Promise<Dispatch> {
     return this.withLock(async () => {
       const source = this.dispatchMessage(input.sourceMessageId)
-      const existing = this.dispatches.has(input.sourceMessageId) ? this.dispatchProjection(input.sourceMessageId) : null
+      const facts = this.dispatchFacts(input.sourceMessageId)
+      const existing = facts ? this.dispatchProjection(input.sourceMessageId, facts) : null
       const dispatch = existing?.dispatch ?? openDispatch(source, Date.now())
       await reauthorize(existing?.messages ?? [source])
       if (input.callerAgentSessionId !== dispatch.ownerAgentSessionId) {
