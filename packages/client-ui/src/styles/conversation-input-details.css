@@ -18,8 +18,3 @@
 .conversation-input-details__identity small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-input-details__goals { margin-top: var(--sp-3); }
 .conversation-input-details__notice { color: var(--text-3); font-size: var(--fs-micro); }
-
-/* One quiet origin line; full device identity remains in Message details. */
-.log-turn__input-source { display: inline-flex; align-items: center; gap: 4px; order: 1; flex-basis: 100%; min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
-.log-turn__input-source > svg { flex: none; }
-.log-turn__input-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

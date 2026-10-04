@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path'
 import { AgentMuxClient, type AgentMuxClientOptions } from './client.js'
 import { AgentMuxFileAgentSessionStore, defaultAgentMuxAgentSessionStorePath } from './agent-session-store.js'
 import { AgentMuxError } from './errors.js'
-import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { durableWriteFile } from './durable-write.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxStateDirectory, defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory, defaultAgentMuxHookPort } from './runtime-paths.js'
@@ -77,7 +76,6 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     })()
     // Reserve the endpoint before loading Store/Hook/Core. A workflow probe never displaces an old owner.
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
-      deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts')) },
       coreClients: async () => [{ hostId: 'local', client: await ready }],
       hostedRuntime: async () => { await ready; return hosted! } })
     await server.start()

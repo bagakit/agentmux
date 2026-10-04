@@ -1,4 +1,4 @@
-import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
 
 /** Latest filesystem read; never persisted or copied into Tab/Session identity. */
@@ -41,9 +41,4 @@ export function scratchTopicKind(topicId: string, topics: readonly ScratchTopicS
   if (!topic) return 'unknown'
   if (topic.soul !== undefined || topic.moteArchive !== undefined) return 'mote'
   return topic.readError ? 'unknown' : 'topic'
-}
-
-/** Consume the current original Scratch observation, including its exact address facts. */
-export function scratchTopicsForConfig(config: AppConfig | null | undefined, snapshots: Readonly<Record<string, ScratchTopicsSnapshot>> | undefined): readonly ScratchTopicSnapshot[] | null {
-  return snapshots ? scratchTopicsForWorkspace(snapshots, config?.workspaces.find(workspace => workspace.id === '__scratch__')) : null
 }

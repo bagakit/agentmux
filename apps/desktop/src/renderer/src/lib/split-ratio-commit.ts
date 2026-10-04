@@ -93,14 +93,3 @@ export class SplitRatioCommitter {
     this.commit(this.latestRatio)
   }
 }
-
-/** Apply the accepted ratio only after the original two Panels have registered. */
-export function synchronizeSplitLayout(group: { getLayout(): number[]; setLayout(sizes: number[]): void }, ratio: number): void {
-  const current = group.getLayout()
-  // During mount/replacement the library has no two-Panel geometry. The original
-  // Panels retain the accepted defaultSize; this is never a Session/Run gate.
-  if (current.length !== 2) return
-  const sizes = [ratio * 100, (1 - ratio) * 100]
-  if (current.every((size, index) => Math.abs(size - sizes[index]!) < 1e-6)) return
-  group.setLayout(sizes)
-}

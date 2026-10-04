@@ -90,7 +90,6 @@ export function projectSessionUserMessages(params: {
       const source: AgentSessionUserMessageSource = {
         kind: 'captured',
         submissionId: item.id,
-        ...(item.sourceChannel ? { channel: item.sourceChannel } : {}),
         ...(item.sourceDevice ? { device: { ...item.sourceDevice } } : {})
       }
 

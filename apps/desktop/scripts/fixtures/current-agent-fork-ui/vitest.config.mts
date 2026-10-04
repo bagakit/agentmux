@@ -8,16 +8,11 @@ const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any
   find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
   replacement: resolve(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
-const clientUiExports = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
-for (const [key, value] of Object.entries(clientUiExports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
-  const target = typeof value === 'string' ? value : (value as { browser: string }).browser
-  const name = key === '.' ? '@agentmux/client-ui' : '@agentmux/client-ui/' + key.slice(2)
-  const pattern = name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
-  aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: resolve(root, 'packages/client-ui', target).replace('*', '$1') })
-}
 aliases.push({ find: /^@agentmux\/layout$/, replacement: resolve(root, 'packages/core/src/spatial-layout.ts') })
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'] },
   plugins: [{ name: 'fork-ui-current-source', enforce: 'pre',
+    resolveId(id) { if (/(^|\/)ConversationView(?:\.js)?$/.test(id)) return '\0fork-unused-conversation' },
+    load(id) { if (id === '\0fork-unused-conversation') return 'export function ConversationView(){throw new Error("Unrelated ConversationView invoked in current-fork UI proof")}' },
     transform(source, id) {
     const file = relative(root, id.split('?')[0]!)
     if (!file.startsWith('apps/desktop/src/') && !file.startsWith('packages/core/src/')) return

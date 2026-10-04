@@ -16,10 +16,8 @@
 
 ## Explorer 与 Editor
 
-- **首次文件加载必须有有限进展**。文件身份、文档与草稿归既有 owner，编辑器实例可以延迟创建和释放。内容尚未到达的新 File Region 仍须保持界面、选择与取消可响应；不能由加载占位面、重复无变化快照或同步测量自我触发持续渲染。相同读取合并到同一请求，迟到结果守原资源与代次，不抢回后来选择或改掉草稿；失败保留原工作面并给准确原因与显式重试。验证覆盖尚无文档的首次入口与已加载入口，完整字节及同一触发下的成本均须成立，不能用另一页正常代签。同项目在侧栏新建项目分组后再切 Space 也须保持有限进展与原 Tab、Region、Session、Run 和未提交草稿；工作面更新不授权重建执行身份。
-
 - 用户要求「完整重新设计 Explorer」：当前项目标题与 Explorer 标题合并以节省空间，项目路径去重，名称双击就能编辑，不再依赖行右侧老式 Edit／Delete；同时检查其他交互。文件树的共用项目头在收起后仍可读、可展开；文件、Branches、Changes 与新增 Git History 共享准确的 Selected Worktree／Host 上下文，不因整理 chrome 改变原选择、Tab／Region、草稿、执行焦点、布局或健康 Run。路径表示唯一沿[《寻址与复制》](spaces-and-layout.md#寻址与复制)，视觉与液态玻璃约束唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。
-- 名称、文件图标及行空白的普通单击沿同一激活：文件打开并显示、聚焦原 File Tab／Region，目录展开／收起；已打开文件也须切到准确原位置，不因当前在 Focus 等其它主工作面而只后台读取。名称双击继续既有行内 Rename，第二次 click 不重复打开／展开，F2、Enter 和键盘／右键菜单继续可达。范围／切换多选仍只改选择，拖拽沿原单项 Move。较晚导航或原资源变化后，旧读取不抢回显示及输入；原草稿和健康 Run 保留。移除名称右侧重复 Edit／Delete 动作，Rename／Delete 留在同一菜单与键盘入口；删除仍有准确对象与后果确认。改名开始即选中文件名主体，保留末尾扩展名；目录和无末尾扩展名文件（含 .env 这类单点前缀文件）选中全名，长名称从开头可读。行内名称编辑由可复用的通用输入控件承载选择、IME、Enter／Escape、失焦及等待／错误反馈，业务调用者继续持有准确对象、draft、提交与取消意图；Reusable 参考面提供实际可操作的同组件示例。Enter 与紧随的失焦只提交一次，组字确认不提交，等待中不重复写入；失败保留草稿，在仍属当前编辑意图时保留或返回输入焦点，新作用域／新意图不被旧失败抢回。通用控件不持有文件路径解析或写入，磁盘成功与原路径投影事务边界不变。
+- 名称单击选择、双击进入既有行内 Rename；文件图标／名称外的明确打开命中区与 Enter 打开文件，目录 disclosure 展开／收起，F2 和键盘／右键菜单继续可达。双击名称不能顺带重复打开、展开或启动拖拽；范围／切换多选仍只改选择，拖拽沿原单项 Move。移除名称右侧重复 Edit／Delete 动作，Rename／Delete 留在同一菜单与键盘入口；删除仍有准确对象与后果确认。改名开始即选中文件名主体，保留末尾扩展名；目录和无末尾扩展名文件（含 .env 这类单点前缀文件）选中全名，长名称从开头可读。行内名称编辑由可复用的通用输入控件承载选择、IME、Enter／Escape、失焦及等待／错误反馈，业务调用者继续持有准确对象、draft、提交与取消意图；Reusable 参考面提供实际可操作的同组件示例。Enter 与紧随的失焦只提交一次，组字确认不提交，等待中不重复写入；失败保留草稿，在仍属当前编辑意图时保留或返回输入焦点，新作用域／新意图不被旧失败抢回。通用控件不持有文件路径解析或写入，磁盘成功与原路径投影事务边界不变。
 
 - Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。Move 当前明确为单项操作：Pointer drag 在开始时收敛到被拖动项；Context Menu/`Shift+F10` 使用 `Move This Item to` 子菜单，并在执行时收敛到该项，不用多选外观暗示尚未实现的批量移动。
 - Stale response 不能覆盖新 Workspace 或新目录 revision；刷新期间保留现有内容，直到新结果原子替换。
@@ -33,7 +31,7 @@
   revision；有本地草稿的 Document 保留草稿并进入明确冲突状态，不能假装保存成功或悄悄回退内容。
 - 文件 Rename 和删除先由 Desktop Main 完成磁盘操作；成功后，Renderer 用一次纯 reducer 原子更新 Document、Dirty、Last Active、Tab Group、View/Region 路径以及当前 Workspace 的 Explorer Selection/Expanded 投影。路径映射若会占用已有 Tab、Document 或 Region owner，Renderer 会在请求磁盘操作前拒绝。
 - 路径映射使用 segment-aware 子树判断。受影响保存先被 mutation admission 阻止并等待静止；磁盘失败或最终位置未知时不提交 Renderer 映射。active-file auto-reveal 若 Selection 已含该路径且 ancestors 已展开，必须原样返回并跳过 Store 写；确需 Reveal 时只原子补齐 ancestors，并保留包含 active path 的现有多选。
-- Drag 与菜单从同一份已加载文件树 facts 得出 Move plan；菜单未打开时不为所有文件行枚举移动目标。已加载树改变时只建立一次目录与占用索引，打开菜单只枚举该项的可用目录，不按每行、每个目录重扫整树；同 parent、自身或后代目标、已加载的 destination collision 不显示为可提交目标，也不依赖 Main 最终拒绝来代替交互计划。
+- Drag 与菜单从同一份已加载文件树 facts 预计算 Move plan；同 parent、自身或后代目标、已加载的 destination collision 不显示为可提交目标，也不依赖 Main 最终拒绝来代替交互计划。
 - Darwin Local move 使用同一 Desktop owner 构建和分发的原子 no-replace helper，同时执行 Workspace Root-relative、no-follow 和 no-clobber 约束。Renderer 的 Rename、Drag 和菜单入口使用同一 move transaction；helper 缺失或平台无法满足合同会明确返回 typed unsupported，不回退到普通 `rename`、`mv`、重试或事后回滚。
 - Main 只有在 helper 明确成功时返回 `moved`，明确未提交时返回 `finalLocation: source`；commit 后回执缺失始终返回 `finalLocation: unknown`，不得用 source/destination pathname occupancy 猜对象身份。Renderer 对成功或 unknown 并发、去重重读恰好 source/destination 两个 parent，对确认留在 source 的失败不刷新；unknown 仍不提交路径投影。
 - 内置 Editor 保存 Topic 的 `topic.md` 后使 Topics 文件系统快照失效并重读，不建立第二份 watcher 或 Renderer Topic Registry。
@@ -43,7 +41,7 @@
 
 ### Revision-aware 保存与外部冲突
 
-- Desktop Main 的 `WorkspaceFiles` 独占 Workspace Root confinement、磁盘 revision、同目录临时写入、同步、mode 保留、原子替换、单文件观察和磁盘错误事实。Shared contract 与 preload 暴露类型化文件合同，读取、发现、保存与观察均沿同一 `WorkspaceFiles` 所有者。
+- Desktop Main 的 `WorkspaceFiles` 独占 Workspace Root confinement、磁盘 revision、同目录临时写入、同步、mode 保留、原子替换、单文件观察和磁盘错误事实。Shared contract 与 preload 只暴露 typed read、write、observe 和 move 能力。
 - Read 返回内容和不透明 revision。Write 必须携带 expected revision，返回 `written | conflict | error | unknown`；替换后回执缺失是 unknown，不能解释成明确未写入。Remote workspace 无法满足同一原子保存合同时返回 typed unsupported。
 - 临时写入或替换失败会清理临时文件并保持原文件字节不变。普通文件系统 revision 是 optimistic concurrency signal；最终 revision 复核与原子替换之间仍存在外部进程竞争窗口，不宣称强跨进程 compare-and-swap。
 - Renderer 持有 Monaco buffer、dirty、保存 generation、observation generation、document lifetime 和冲突交互。每文件保存串行化；保存期间继续输入时旧 written 回执只更新落盘 revision，不清除更新后的 buffer 或 dirty。
@@ -93,28 +91,22 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 ## Explorer 的真实文件与快捷键入口
 
 - 键盘快捷键入口属于全局工具，应在项目栏最底部设置按钮右边；顶部只承载视图开关。项目栏收起后仍能访问。
-- Explorer 默认能看到隐藏项及被 `.gitignore` 忽略的文件与目录，提供彼此独立的显隐选择，并明确区分忽略状态；不按 node_modules、dist 等固定名字静默过滤。隐藏项按原路径的点前缀名称识别，忽略事实来自 Git 自身规则，包括嵌套规则与否定规则；两者不能互相冒充。显隐只改变当前树的呈现，不改磁盘、已打开 File、草稿或原展开事实，不能让不可见项成为含混的操作目标。
-- Collapse All 只收起当前 Explorer 根内的展开目录；根外投影、原 File Tab／Region、草稿与健康 Run 保留。收起后键盘焦点仍落在可见树位置，后续显式 Reveal 或展开仍沿原路径可达，不清掉目录事实或把收起当成空目录。
-- 全项目文件 quick-open 按当前 Selected Worktree／Workspace 与原 ExecutionHost 查找文件名和相对路径，涵盖尚未展开的目录，不用树中已加载行冒充全项目结果。路径范围、链接及忽略规则由原文件 owner 判定；只读取有界名称与路径事实，不为了匹配加载正文或在 Renderer 递归读取目录。结果受预算截断、读取失败或资源未确认时如实表达，不能用零结果冒充完整搜索成功。
-- quick-open 提供键盘选择、确认与取消；选中结果使用既有文件打开入口，已打开文件显示并聚焦准确原位置。查找期间不改变原工作面，取消返回原输入焦点；切换查询、Workspace／Host／根或关闭后，迟到结果不重开旧列表、不抢走后来导航。树显隐与搜索范围可辨，不因树目录尚未展开而遗漏可查找的文件。
+- Explorer 默认能看到被 `.gitignore` 忽略的文件与目录，并明确区分忽略状态；不按 node_modules、dist 等固定名字静默过滤。忽略事实来自 Git 自身规则，包括嵌套规则与否定规则。
 - 软链接同时表现目标类型与链接身份，使用图标而不是 `link` 文字。目录链接应能在链接所在位置按需展开；文件链接应能打开；失效链接如实显示。显示路径保留链接路径，禁止循环展开。浏览链接不意味着允许把已有工作区写入约束放宽。
 
 ## 本地文件预览与按格式编辑
 
-- 文件格式识别和可用 Source / Diff / Preview 模式使用同一份分类事实；具体格式解析与渲染在自己的模块内实现，复用已有编辑器、文件读取、路径解析和菜单。格式渲染只消费原 FileDocument 或原预览字节，不建立第二份 File 身份、草稿、revision、watcher 或保存生命周期；Desktop 文件事实不移入 Core。
-- 文件工具栏、保存与冲突状态复用同一轻量呈现壳。预览不等待未使用的源码或差异编辑引擎；必要模块的准备可与原读取并行，但不冒充字节、解码或导航成功。切换模式保留同 Region 的阅读位置与原草稿。再次打开已加载文件不重读、不复制未变化的文档事实；无关 Session 更新不为每个保留文件重新扫描项目目录。
-- 已支持格式保持其真实语义和可操作的内容：Markdown 保全标准与 GFM 的列表、引用、链接、表格等结构；结构数据的预览只读当前内容，解析失败或预算不足保留完整 Source；图片、媒体和 PDF 的加载、解码、页码与失败由实际引擎事实表达，不能把收到字节冒充渲染成功。
-- Markdown 文件预览提供可按需展开、收起的标题目录（TOC）。目录与正文消费同一次语法解析及同一 heading anchor，保真实标题顺序、层级和重复标题的准确目标；代码块中的 `#` 不冒充标题。目录反映同一文档的当前正文，包括未保存草稿，不另读磁盘或维护第二份正文。标题跳转只定位当前 Markdown Region 的正文，键盘操作可达，不改变 Browser 地址、不跳到相邻文档或重建 File；无标题时不制造空目录面。
-- Source Editor 的 minimap 直接使用 Monaco 的当前模型能力，提供可记住选择的开关，缺省关闭；仅在需要的源码编辑器中消费，不为 Markdown 预览、图片或媒体加载另一份编辑引擎。切换偏好就地更新原编辑器，保留选择、阅读位置、草稿与保存状态；窄 Region 中仍可关闭，不因辅助导航拿走正文输入或关闭操作。
-- 目录渲染和热路径成本随实际可见行及相关目录事实增长。窗口化必须保留原路径、展开、选择、键盘导航、内联编辑、菜单与移动事务；用户滚动和键盘移动均能到达整棵已加载树，不因行未挂载失去动作资格。
-
-- 内置 Browser 支持打开本地文件进行预览；HTML 与相对资源沿原隔离 Browser，格式与目标边界见[本地链接的真实格式预览与二进制保全](#本地链接的真实格式预览与二进制保全)。
+- 用户要求「内置的 browser 应该要支持打开本地文件进行预览」，不能只接收网络 URL。
+- 对能识别的网页、图片、文本等常见格式，应提供适合该格式的预览与编辑体验，而不是都落到同一种通用显示。
+- 具体编辑能力与格式边界先参考成熟产品，再形成对应 Feature 的评审任务；`local-file-preview-editors` 保留历史需求与验收记录，后续格式预览维护沿本节的同一 File / Browser 所有者闭合，不混入既有版本安装验收。
 
 ### Terminal 本机临时产物预览
 
-用户反馈系统临时目录下的 html 链接 hover 无浮窗，点击无反应。本 Pane 所属资源 Host 确认是本机时，系统真实临时目录中的文件产物应有可辨链接和被动目标读出，点击后可在现有隔离 Browser 中真实预览 HTML 及其相对资源；Browser 已有可呈现格式沿原能力和诚实失败使用，不制造假 Workspace、第二 FileSurface 或另一套 Browser。该能力只补本机临时产物，普通源码、书签、正文 `file:` URI 与远端路径仍遵守各自原入口。
+用户反馈系统临时目录下的 html 链接 hover 无浮窗，点击无反应。本 Pane 展示的 Session 的资源 Host 确认是本机时，系统真实临时目录中的文件产物应有可辨链接和被动目标读出，点击后可在现有隔离 Browser 中真实预览 HTML 及其相对资源；Browser 已有可呈现格式沿原能力和诚实失败使用，不制造假 Workspace、第二 FileSurface 或另一套 Browser。该能力只补本机临时产物，普通源码、书签、正文 `file:` URI 与远端路径仍遵守各自原入口。
 
-临时范围来自系统通用临时目录的本机事实，包括用户所指临时目录别名的系统真实归属；不能把任意根外绝对路径、其他 Host 或用户目录名当作临时目录。打开时须确认原 Workspace / Host 与目标文件未漂移，目标为实际存在的普通文件，词法路径和实际文件位置均在已确认的临时范围内，指向范围外的链接与非文件不能借临时入口通过。存在、文件种类与实际位置由 Main 的原本地文件边界持有；悬停和命中仍只消费本次相关终端字符与已知 Host / 路径事实，不做文件读取、存在探测、IPC 或全历史扫描。
+资源资格及传给 Main 的源 Workspace 按该 Session 的真实 Host 与执行 cwd 确认，沿原同 Host 路径包含关系定位资源 Workspace，子目录终端保有相同能力。移动 Session 的展示位置不改变执行资源：本机 Session 展示到 SSH Workspace 后仍消费已确认的本机临时目录与 home 事实；SSH 或 Host 未确认的 Session 展示到本机 Workspace 后仍不能借用本机资源。Browser 的目的地和布局继续按原展示位置操作，不把资源 Workspace 当作新的展示目标；资源归属无法确认时只明确拒绝该次打开，保留健康 Run 和原工作面。
+
+临时范围来自系统通用临时目录的本机事实，包括用户所指临时目录别名的系统真实归属；不能把任意根外绝对路径、其他 Host 或用户目录名当作临时目录。打开时须确认原资源 Workspace / Host 与目标文件未漂移，目标为实际存在的普通文件，词法路径和实际文件位置均在已确认的临时范围内，指向范围外的链接与非文件不能借临时入口通过。存在、文件种类与实际位置由 Main 的原本地文件边界持有；悬停和命中仍只消费本次相关终端字符与已知 Host / 路径事实，不做文件读取、存在探测、IPC 或全历史扫描。
 
 预览使用原 Browser 的隔离与目的地 / 布局 owner；页面不能获得 App Renderer 权限。原源 Pane、Workspace / Host、Tab / Group / Region、阅读位置、草稿与健康 Run 保留，较晚结果不替换新选择或错投其他工作面。临时文件消失、类型不支持、Host 未确认或校验失败应通过原可达错误面说明真实原因与恢复动作，不能静默无反应或伪称预览成功；不自动改写原文件、扩大文本编辑 / 写入边界或重启 Agent。重启恢复原 Browser / 布局引用；临时文件已消失时保留原引用并诚实说明，不能把持久工作面清空。
 
@@ -124,7 +116,7 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 
 - 正文、Terminal 和文件树的打开动作沿同一文件入口，目标始终来自来源 Workspace / Host 与真实路径；切项目、切 Region 或较晚操作发生后，旧读取不能把结果投给新目标或抢回焦点。图片、媒体、Markdown 预览与源码沿原 File 身份，不额外复制 Tab、布局或文件内容所有者。SVG 换 File 的首个呈现也不得把旧文件图像标为新文件内容，不能等异步清理后才恢复身份正确。
 - PNG、JPEG、GIF、WebP、BMP、ICO、AVIF 与 SVG 在当前引擎实际能解码时显示内容；图片有 Fit、原尺寸与缩放，小图默认不强行放大，放大后能连续查看完整图片。格式识别、字节读取成功与解码成功是不同事实；损坏或不支持的内容不能用空白面冒充预览成功。
-- 音频与视频使用当前引擎真实可解码能力，有播放控制，不自动播放；离开可见工作面后暂停。PDF 只有实际阅读引擎完成页面渲染才宣称可预览，加载 / 解码不可用时明确说明并保留外部打开动作，不以文件扩展名保证支持。
+- 音频与视频使用当前引擎真实可解码能力，有播放控制，不自动播放；离开可见工作面后暂停。PDF 只有实际原生预览显示成功才宣称可预览，插件 / 解码不可用时明确说明并保留外部打开动作，不以文件扩展名保证支持。
 - Markdown 与 SVG 在同一 File 内切源码 / 预览，预览反映同一正文所有者的当前内容，包括未保存草稿；保存、冲突与回到源码沿原文件动作，不以磁盘旧版冒充当前效果。同 File 出现在多个 Region 时，任一视图切预览或关闭不能使其他 Source 模型消失；原 dirty 正文与各视图的选择、阅读位置保持，退出或换文件释放各自临时编辑资源。Markdown File Preview 的相对 href 按当前文件所在目录解析，仍限于原 Workspace 根边界；不能把嵌套文件的同目录链接错开到项目根，也不改变 Terminal / Agent 普通正文的原路径规则。显式 Markdown 图片与文件链接里的 URI 百分号编码目标须按一次解码打开实际文件，中文与 emoji 文件名同样可达；编码的空格不能让已明确的目标失去预览入口。原 Workspace / Host 与文档目录、越根拒绝和既有 scheme 边界保持，畸形编码不能绕过边界，不重复解码；未编码空格的含混 href、普通正文与裸 Terminal 的原严格识别不因此放宽。Markdown 不执行嵌入 HTML。HTML 的预览沿既有隔离 Browser 打开真实本地文件与相对资源，明确表示预览已保存文件，不能注入带 App 权限的 Renderer；未保存源码保持原状，不自动写盘或假称 Browser 已显示该草稿。显式 Save & Preview 才执行原保存，保存失败不宣称成功。
 - 未知二进制由实际字节事实判定，不转换成损坏 UTF-8 文本或伪造空正文；保留原 File 身份并提供既有系统打开 / Reveal 入口，不出现会覆写原字节的文本保存动作。已知不可文本编辑的格式即使已有旧 Doc 或改名后遗留正文，也不能暴露文字编辑 / 保存入口；遗留 dirty 缓冲事实保留，呈现仍按真实格式预览或诚实说明不可预览。文件已删除、目录、读取失败、超出预览预算、内容变更、远程读取不可用与解码失败分别给出真实原因和可达动作，不以这些失败清空原工作面或阻断健康 Agent。
 - 预览只为真正可见、相关的文件读取有界内容；字节不进入持久化工作面，不为无关 Session / 隐藏文件反复读取整份内容。采用现有字节边界与文件修订事实，不扩张已有远程能力或削减原可用文本能力。退出或换文件释放临时资源，重启从原 File / Workspace / 布局恢复可查看内容，原草稿、焦点与健康 Run 保留。
@@ -138,7 +130,6 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 ### 书签文件（.webloc / .url，）
 
 - 存书签「不要整页打包 就是保存个 link」：把当前页存成一个书签文件，不做整页归档。
-- 保存成功在原 Browser 就近确认实际写入的相对路径，并有明确动作沿原文件打开逻辑再次打开该书签。保存本身不转移当前焦点；人明确点击打开动作才导航。结果绑定发起的 Browser 与原网页，较晚完成不得把旧 Saved 贴到后导航；已经写入的文件仍保留。错误或未确认写入不显示 Saved，不盲重放，不新增书签库或目录选择合同。
 - 打开书签「应该是默认 browser」：双击 `.webloc` / `.url` 在 AgentMux 自己的 Browser 里打开那个地址，不跳去系统浏览器。
 - 「查看源码指的是书签文件本身的源码」，不是网页 HTML——网页源码 DevTools 已覆盖。所以这个入口回到文本路径打开那份书签文件。
 - 「如果是 binary 就不支持切换到编辑, 如果是文件就支持」。二进制 plist 那一档的提示「绝对要极简, 比如就是按钮灰掉, hover 告知」——不弹框、不 toast、不加警告条。
@@ -151,7 +142,7 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 - Netscape bookmark HTML 批量导入导出本轮不做：今天没有书签库，导进来无处安放。
 
 ## 文件打开目的地
-通用文件点击进入统一的打开目的地选择器；Focus 中明确人类点击的默认打开例外见[《Focus 执行上下文》](focus-context.md#focus-执行上下文项目泳道与底部时间音轨)；目录点击保持 Explorer 导航语义。目的地目前使用有明确布局语义的四个基数方向与新 Tab，斜向按钮只有在布局 owner 能提供真实语义时才增加，不为凑齐九宫格制造无效动作；不可行目的地置灰并说明原因。
+文件点击也应进入统一的打开目的地选择器；目录点击保持 Explorer 导航语义。目的地目前使用有明确布局语义的四个基数方向与新 Tab，斜向按钮只有在布局 owner 能提供真实语义时才增加，不为凑齐九宫格制造无效动作；不可行目的地置灰并说明原因。
 
 ## Branch Pin 的层级与操作位
 

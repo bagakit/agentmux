@@ -67,8 +67,8 @@ describe('regionSurfaceLabel：一格的表面短名', () => {
     expect(regionSurfaceLabel(browserSurface('r', 'about:blank', 'about:blank'), [])).toBe('New Tab')
   })
 
-  it('取不到元信息时明确名称未确认，而不是裸 ID', () => {
-    expect(regionSurfaceLabel(agentSurface('r', 'missing'), [])).toBe('Agent · name unconfirmed')
+  it('取不到 session 时退回 sessionId，而不是抛错', () => {
+    expect(regionSurfaceLabel(agentSurface('r', 'missing'), [])).toBe('missing')
   })
 })
 

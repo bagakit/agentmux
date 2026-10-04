@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -27,7 +27,7 @@ function storedSession(pending?: AgentMuxInteractionRequest, providerId: 'codex'
     providerId,
     executorId: providerId,
     hostId: 'local',
-    workspacePath: fixturePath("tmp/lifecycle-agent"),
+    workspacePath: upstreamFixturePath("tmp/lifecycle-agent"),
     run: { runId: RUN_ID },
     retiredRuns: [],
     hookBindingId: 'binding-lifecycle',
@@ -46,8 +46,6 @@ function permission(id: string): AgentMuxInteractionRequest {
     id,
     agentSessionId: AGENT_SESSION_ID,
     title: 'Allow Edit?',
-    nativeToolCallId: `lifecycle-call-${id}`,
-    toolName: 'exec_command', toolInput: '{"cmd":"printf lifecycle"}',
     options: [
       { id: 'allow-once', label: 'Allow once', kind: 'allow-once' },
       { id: 'reject-once', label: 'Reject', kind: 'reject-once' }
@@ -63,9 +61,9 @@ function runProjection(acceptedInputBytes: number | null) {
     lifecycleOperationId: null,
     program: 'codex',
     args: [] as string[],
-    cwd: fixturePath("tmp/lifecycle-agent"),
+    cwd: upstreamFixturePath("tmp/lifecycle-agent"),
     env: {},
-    workspacePath: fixturePath("tmp/lifecycle-agent"),
+    workspacePath: upstreamFixturePath("tmp/lifecycle-agent"),
     pid: 999,
     state: { type: 'running' as const },
     cols: 80,
@@ -104,29 +102,7 @@ async function connectedClient(pending?: AgentMuxInteractionRequest, providerId:
     return { run: runProjection(cursor), appliedByteRange: { startByte: operation.expectedByte, endByte: cursor } }
   }
   ;(client as unknown as { connected: boolean }).connected = true
-  // Explicit synthetic native target contribution for lifecycle units only.
-  const provider = client.providers.get(providerId)
-  provider.prepareInteractionResponse = async (context, request, response) => ({
-    plan: provider.planInteractionResponse(request, response),
-    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
-      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'lifecycle-synthetic-source', inputByte: context.inputByte,
-      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
-    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
-  })
-  ;(client as unknown as { screenEvidence: { currentCompleteFrame: () => unknown } }).screenEvidence.currentCompleteFrame = () => ({
-    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] }, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 })
   return { client, writes, store, state }
-}
-
-/** Real Core Hook completion owner, synthetic authenticated envelope in this unit fixture. */
-async function completeNativeRequest(client: AgentMuxClient): Promise<void> {
-  const request = client.agentSession(AGENT_SESSION_ID).pendingInteraction!.request
-  await (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
-    receiptId: 'lifecycle-completed-' + request.id, agentSessionId: AGENT_SESSION_ID,
-    providerId: client.agentSession(AGENT_SESSION_ID).providerId, runId: RUN_ID,
-    payload: { hook_event_name: 'PostToolUse', tool_name: request.kind === 'question' ? 'request_user_input' : 'exec_command',
-      tool_call_id: request.nativeToolCallId }
-  }, new AbortController().signal)
 }
 
 describe('respondAgentInteraction: the answer must bind to this Session/Run/request', () => {
@@ -172,7 +148,6 @@ describe('respondAgentInteraction: the answer must bind to this Session/Run/requ
     // codex 的 allow-once 解析成 '1'（provider 私有知识，client 从不生成字节）。这条正向控制在，
     // 是为了让下面两条不会被一个「永远抛」的实现骗过：真闸门放行合法回答。
     expect(writes, 'the resolved provider byte never reached the PTY').toEqual(['1'])
-      await completeNativeRequest(client)
     expect(client.agentSessions()[0]!.pendingInteraction, 'answering did not clear the pending interaction').toBeUndefined()
     await client.dispose()
   })
@@ -243,7 +218,6 @@ describe('typed response settlement and recoverable input disposition', () => {
       await client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
         response: { kind: 'permission', requestId: 'cancel-1', decision: { outcome: 'cancelled' } } })
       expect(writes).toEqual(['\u001b'])
-      await completeNativeRequest(client)
       expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await client.dispose() }
   })
@@ -254,9 +228,8 @@ describe('typed response settlement and recoverable input disposition', () => {
     try {
       const outcomes = await Promise.allSettled([client.respondAgentInteraction(input), client.respondAgentInteraction(input)])
       expect(outcomes[0]!.status).toBe('fulfilled')
-      expect(outcomes[1]!.status).toBe('fulfilled')
+      expect(outcomes[1]).toMatchObject({ status: 'rejected', reason: { code: 'UNKNOWN_AGENT_INTERACTION' } })
       expect(writes).toEqual(['\u001b'])
-      await completeNativeRequest(client)
       expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
       await expect(client.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
       expect(writes).toEqual(['\u001b'])
@@ -273,7 +246,6 @@ describe('typed response settlement and recoverable input disposition', () => {
     const input = { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('shared-1') }
     try {
       await h.client.respondAgentInteraction(input)
-      await completeNativeRequest(h.client)
       await expect(second.respondAgentInteraction(input)).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
       expect(h.writes).toEqual(['\u001b'])
       expect(second.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
@@ -296,7 +268,7 @@ describe('typed response settlement and recoverable input disposition', () => {
 
   it.each(['answered', 'cancelled'] as const)('question %s uses its semantic plan and settles the exact request', async outcome => {
     const request: AgentMuxInteractionRequest = {
-      kind: 'question', id: 'question-1', agentSessionId: AGENT_SESSION_ID, nativeToolCallId: 'lifecycle-question-call',
+      kind: 'question', id: 'question-1', agentSessionId: AGENT_SESSION_ID,
       questions: [{ id: 'choice-1', prompt: 'Which?', options: [{ id: 'first', label: 'First' }, { id: 'second', label: 'Second' }] }],
       evidence: { source: 'native-hook', observedAt: 1, run: { runId: RUN_ID }, hookReceiptId: 'question-1' }
     }
@@ -307,7 +279,6 @@ describe('typed response settlement and recoverable input disposition', () => {
         : { kind: 'question', requestId: request.id, outcome, answers: [{ questionId: 'choice-1', optionId: 'second' }] }
       await h.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response })
       expect(h.writes).toEqual([outcome === 'cancelled' ? '\u001b' : '2'])
-      await completeNativeRequest(h.client)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await h.client.dispose() }
   })
@@ -345,7 +316,6 @@ describe('typed response settlement and recoverable input disposition', () => {
       expect(calls).toHaveLength(2)
       expect(calls[1]).toEqual(calls[0])
       expect(h.writes).toEqual(['\u001b'])
-      await completeNativeRequest(h.client)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await h.client.dispose() }
   })
@@ -527,7 +497,6 @@ describe('typed response claims after another Core legally advances the same Run
       expect(h.calls.map(call => call.expectedByte)).toEqual([0, 4, before])
       expect(h.calls.at(-1)!.data).toBe(plan.data)
       expect(h.cursor()).toBe(before + Buffer.byteLength(plan.data))
-      await completeNativeRequest(h.client)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await h.dispose() }
   })
@@ -568,7 +537,6 @@ describe('typed response claims after another Core legally advances the same Run
       expect(h.calls.at(-1)).toEqual(originalCall)
       expect(h.cursor()).toBe(13)
       expect(h.writes).toEqual(['\u001b[0n', '\u001b[0n', '\u001b', '\u001b[0n'])
-      await completeNativeRequest(h.client)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await h.dispose() }
   })

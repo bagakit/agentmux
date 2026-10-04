@@ -1,5 +1,3 @@
-import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
-import { normalizeMessageChannel } from './message-origin.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
@@ -61,7 +59,6 @@ import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBro
 import { parseBrowserTargetsResult } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
-import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { isSplitDirection } from './split-direction-ssot.js'
 import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
@@ -270,17 +267,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const code = 'INVALID_CONTROL_REQUEST'
     const fields = ['schemaVersion', 'requestId', 'operation', 'agentSessionId',
       ...(source.operation === 'message.pending.ls' ? [] : ['pendingId']),
-      ...(source.operation === 'message.pending.edit' ? ['expectedText', 'text'] :
-        source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore' ? ['expectedText'] : [])]
+      ...(source.operation === 'message.pending.edit' ? ['expectedText', 'text'] : [])]
     settingsFields(source, fields, code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
       agentSessionId: identity(source.agentSessionId, 'Pending message Session ID is invalid.', code) }
     if (source.operation === 'message.pending.ls') return { ...base, operation: source.operation }
     const pendingId = identity(source.pendingId, 'Pending message ID is invalid.', code)
     if (source.operation === 'message.pending.send') return { ...base, operation: source.operation, pendingId }
-    if (source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore') {
-      return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code) }
-    }
     const edited = text(source.text, 'Edited message', code)
     if (!edited.trim() || edited.includes('\0')) throw new AgentMuxError('Edited message is invalid.', code)
     return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code), text: edited }
@@ -322,16 +315,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsResourceBudget(request, code)
     return request
   }
-  if (source.operation === 'settings.hosts.upgrade' || source.operation === 'settings.hosts.upgrade-inspect') {
+  if (source.operation === 'settings.hosts.list' || source.operation === 'settings.hosts.test') {
     const code = 'INVALID_CONTROL_REQUEST'
-    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', ...(source.operation === 'settings.hosts.upgrade' ? ['expected'] : [])], code)
-    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, id: text(source.id, 'Host ID', code) }
-    return source.operation === 'settings.hosts.upgrade' ? { ...base, operation: source.operation, expected: parseRemoteCoreUpgradeExpected(source.expected) }
-      : { ...base, operation: source.operation }
-  }
-  if (source.operation === 'settings.hosts.list' || source.operation === 'settings.hosts.test' || source.operation === 'settings.hosts.upgrade-check') {
-    const code = 'INVALID_CONTROL_REQUEST'
-    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation !== 'settings.hosts.list' ? ['id', 'input'] : [])], code)
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation === 'settings.hosts.test' ? ['id', 'input'] : [])], code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId }
     if (source.operation === 'settings.hosts.list') return { ...base, operation: source.operation }
     if (Object.hasOwn(source, 'id') === Object.hasOwn(source, 'input')) throw new AgentMuxError('Host Test requires exactly one ID or input.', code)
@@ -411,7 +397,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
         }
   }
   if (source.operation === 'send') {
-    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','execution','sourceChannel','caller','message'], 'INVALID_CONTROL_REQUEST')
+    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','execution','caller','message'], 'INVALID_CONTROL_REQUEST')
     if (source.execution !== undefined && source.execution !== 'default' && source.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
     }
@@ -430,7 +416,6 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
       text: text(source.text, 'Message text'), promptCondition: validateAgentPromptCondition(source.promptCondition),
       ...(source.execution === undefined ? {} : { execution: source.execution }),
-      ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
       ...(owner ? { caller: owner } : {}), message }
   }
   if (source.operation === 'list.agents') {
@@ -458,7 +443,6 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const sessionIds = source.sessionIds === undefined ? undefined : arrayOfIds(source.sessionIds, 'Demand Session ids')
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, title,
-      ...(source.demandId === undefined ? {} : { demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }),
       ...(source.description === undefined ? {} : { description: text(source.description, 'Demand description') }),
       ...(source.projectId === undefined ? {} : { projectId: spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }),
       ...(source.priority === undefined ? {} : { priority: demandPriority(source.priority) }),
@@ -494,36 +478,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Demand Session ids')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch, ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
   }
-  if (source.operation === 'demand.discuss' || source.operation === 'demand.confirm' || source.operation === 'demand.accept') {
-    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }
-    if (source.operation === 'demand.discuss') {
-      if (!['open', 'grill', 'grounding'].includes(source.mode as string)) throw new AgentMuxError('Goal discussion mode is invalid.', 'INVALID_CONTROL_REQUEST')
-      return { ...base, operation: source.operation, mode: source.mode as 'open' | 'grill' | 'grounding' }
-    }
-    const revision = source.operation === 'demand.confirm' ? source.expectedRevision : source.expectedAlignmentRevision
-    if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('The exact positive Goal alignment revision is required.', 'INVALID_CONTROL_REQUEST')
-    if (source.operation === 'demand.confirm') return { ...base, operation: source.operation, expectedRevision: revision as number }
-    if (typeof source.acceptGaps !== 'boolean') throw new AgentMuxError('Result gaps require an explicit acceptance choice.', 'INVALID_CONTROL_REQUEST')
-    return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps }
-  }
   if (source.operation === 'demand.assign') {
     if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }), ...(source.assigneeExecutorId === undefined ? {} : { assigneeExecutorId: source.assigneeExecutorId === null ? null : id(source.assigneeExecutorId, 'Demand assignee is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
   }
   if (source.operation === 'demand.start') {
-    let continuation: { intervalMs: number; alignmentRevision: number } | undefined
-    if (source.continuation !== undefined) {
-      const c = object(source.continuation, 'Goal continuation is invalid.', 'INVALID_CONTROL_REQUEST')
-      if (Object.keys(c).some(key => !['intervalMs', 'alignmentRevision'].includes(key)) || typeof c.intervalMs !== 'number' || !Number.isFinite(c.intervalMs) || c.intervalMs <= 0 || !Number.isSafeInteger(c.alignmentRevision) || (c.alignmentRevision as number) < 1 || source.sessionId === undefined) throw new AgentMuxError('Goal continuation needs an explicit Session, positive interval and confirmed alignment revision.', 'INVALID_CONTROL_REQUEST')
-      continuation = { intervalMs: c.intervalMs, alignmentRevision: c.alignmentRevision as number }
-    }
-    const owner = optionalCaller(source.caller)
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(continuation ? { continuation } : {}), ...(owner ? { caller: owner } : {}) }
-  }
-  if (source.operation === 'demand.continuation-action') {
-    if (!['pause', 'resume', 'stop', 'check'].includes(source.action as string) || !Number.isSafeInteger(source.expectedRevision) || (source.expectedRevision as number) < 1) throw new AgentMuxError('Goal continuation action or revision is invalid.', 'INVALID_CONTROL_REQUEST')
-    const owner = optionalCaller(source.caller)
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST'), loopId: id(source.loopId, 'Loop id is invalid.', 'INVALID_CONTROL_REQUEST'), action: source.action as 'pause' | 'resume' | 'stop' | 'check', expectedRevision: source.expectedRevision as number, ...(owner ? { caller: owner } : {}) }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }) }
   }
   if (source.operation === 'demand.handoff') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.assigneeExecutorId === undefined ? {} : { assigneeExecutorId: source.assigneeExecutorId === null ? null : id(source.assigneeExecutorId, 'Demand assignee is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }) }
@@ -885,17 +845,13 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
   const fields = operation === 'settings.resource.list' ? common : operation === 'settings.resource.add'
     ? [...common, 'id', 'value'] : operation === 'settings.resource.update'
       ? [...common, 'id', 'changes', 'expected'] : operation === 'settings.resource.remove'
-        ? [...common, 'id', 'expected'] : [...common, 'id', 'keyword']
+        ? [...common, 'id', 'expected'] : [...common, 'id']
   settingsResourceEnvelope(source, fields, code)
   const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     requestId: id(source.requestId, 'Control request ID is invalid.', code), resource: resourceKind(source.resource, code) }
   let request: AgentMuxControlSettingsResourceRequest
   if (operation === 'settings.resource.list') request = { ...base, operation }
-  else if (operation === 'settings.resource.get' && Object.hasOwn(source, 'keyword')) {
-    if (base.resource !== 'prompts' || Object.hasOwn(source, 'id')) throw new AgentMuxError(
-      'A Prompt lookup requires either its exact ID or its keyword, never both.', code)
-    request = { ...base, resource: 'prompts', operation, keyword: id(source.keyword, 'Prompt keyword is invalid.', code) }
-  } else {
+  else {
     const resourceId = id(source.id, 'Settings resource ID is invalid.', code)
     if (operation === 'settings.resource.get') request = { ...base, operation, id: resourceId }
     else if (operation === 'settings.resource.add') {
@@ -961,31 +917,25 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   const operation: AgentMuxControlRequest['operation'] = source.operation
   if (isToolkitOperation(operation)) {
     const parsed = parseToolkitResult(operation, result)
-    settingsResourceBudget(source, 'CONTROL_PROTOCOL_ERROR')
     const { operation: _operation, ...payload } = parsed
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: payload } as AgentMuxControlSuccessReceipt
   }
   if (isPendingMessageOperation(operation)) {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsFields(result, operation === 'message.pending.ls' ? ['agentSessionId', 'messages']
-      : operation !== 'message.pending.send' ? ['agentSessionId', 'message', 'changed']
+      : operation === 'message.pending.edit' ? ['agentSessionId', 'message', 'changed']
       : ['agentSessionId', 'pendingId', 'disposition', 'message'], code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const }
     const agentSessionId = identity(result.agentSessionId, 'Pending message Session ID is invalid.', code)
     if (operation === 'message.pending.ls') {
-      if (!Array.isArray(result.messages)) throw new AgentMuxError('Pending message list is invalid.', code)
+      if (!Array.isArray(result.messages) || result.messages.length > 100) throw new AgentMuxError('Pending message list is invalid.', code)
       const messages = result.messages.map(parsePendingMessage)
-      if (messages.filter(item => !item.archived).length > 100) throw new AgentMuxError('Active pending message list is invalid.', code)
       if (new Set(messages.map(item => item.pendingId)).size !== messages.length) throw new AgentMuxError('Pending message identities repeat.', code)
       return { ...base, operation, result: { agentSessionId, messages } }
     }
-    if (operation !== 'message.pending.send') {
+    if (operation === 'message.pending.edit') {
       if (typeof result.changed !== 'boolean') throw new AgentMuxError('Pending message edit result is invalid.', code)
-      const message = parsePendingMessage(result.message)
-      if (operation === 'message.pending.archive' && !message.archived || operation === 'message.pending.restore' && message.archived) {
-        throw new AgentMuxError('Pending message archive result does not match the action.', code)
-      }
-      return { ...base, operation, result: { agentSessionId, message, changed: result.changed } }
+      return { ...base, operation, result: { agentSessionId, message: parsePendingMessage(result.message), changed: result.changed } }
     }
     const pendingId = identity(result.pendingId, 'Pending message ID is invalid.', code)
     if (result.disposition !== 'submitted' && result.disposition !== 'unconfirmed') throw new AgentMuxError('Pending message send result is invalid.', code)
@@ -1063,18 +1013,6 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { item: resourceItem(result.item), changed: result.changed } })
-  }
-  if (operation === 'settings.hosts.upgrade-check' || operation === 'settings.hosts.upgrade' || operation === 'settings.hosts.upgrade-inspect') {
-    const code = 'CONTROL_PROTOCOL_ERROR'
-    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
-    settingsResourceBudget(source, code)
-    const fields = settingsResourceRecord(result, code)
-    if (operation === 'settings.hosts.upgrade-check') {
-      settingsResourceEnvelope(fields, ['check'], code)
-      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { check: parseRemoteCoreUpgradeCheck(fields.check) } }
-    }
-    settingsResourceEnvelope(fields, ['receipt'], code)
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt: fields.receipt === null ? null : parseRemoteCoreUpgradeReceipt(fields.receipt) } }
   }
   if (operation === 'settings.hosts.list' || operation === 'settings.hosts.test') {
     const code = 'CONTROL_PROTOCOL_ERROR'
@@ -1184,28 +1122,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'stop') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
   if (operation === 'demand.list') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demands: Array.isArray(result.demands) ? result.demands.map(parseDemand) : (() => { throw new AgentMuxError('Control demand list is invalid.', 'CONTROL_PROTOCOL_ERROR') })() } }
-  if (operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand: result.demand === null ? null : parseDemand(result.demand), goalContinuations: Array.isArray(result.goalContinuations) ? result.goalContinuations.map(parseGoalContinuationLoop) : (() => { throw new AgentMuxError('Goal continuations are unconfirmed.', 'CONTROL_PROTOCOL_ERROR') })() } }
+  if (operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand: result.demand === null ? null : parseDemand(result.demand) } }
   if (operation === 'demand.create' || operation === 'demand.update' || operation === 'demand.assign' || operation === 'demand.start' || operation === 'demand.handoff' || operation === 'demand.delete' || operation === 'demand.link-session' || operation === 'demand.link-project') {
     const demand = parseDemand(result.demand)
     const receipt = object(result.receipt, 'Control demand receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, ...(operation === 'demand.start' && result.continuation !== undefined ? { continuation: parseGoalContinuationLoop(result.continuation) } : {}), receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
-  }
-  if (operation === 'demand.discuss' || operation === 'demand.confirm' || operation === 'demand.accept') {
-    const demand = parseDemand(result.demand), r = object(result.receipt, 'Goal receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    const demandId = id(r.demandId, 'Goal id is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    if (operation === 'demand.discuss') {
-      if (!['open', 'grill', 'grounding'].includes(r.mode as string)) throw new AgentMuxError('Goal discussion receipt mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
-      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, requestId: id(r.requestId, 'Goal operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'), mode: r.mode as 'open' | 'grill' | 'grounding', tabId: id(r.tabId, 'Goal Tab is invalid.', 'CONTROL_PROTOCOL_ERROR'), agentSessionId: r.agentSessionId === null ? null : id(r.agentSessionId, 'Goal Session is invalid.', 'CONTROL_PROTOCOL_ERROR') } } }
-    }
-    const revision = operation === 'demand.confirm' ? r.confirmedRevision : r.alignmentRevision
-    if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('Goal receipt revision is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    if (operation === 'demand.confirm') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, confirmedRevision: revision as number, confirmedAt: finiteNumber(r.confirmedAt, 'Goal confirmation time is invalid.') } } }
-    if (typeof r.acceptedWithGaps !== 'boolean') throw new AgentMuxError('Goal gap receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, alignmentRevision: revision as number, submissionId: id(r.submissionId, 'Goal submission is invalid.', 'CONTROL_PROTOCOL_ERROR'), acceptedAt: finiteNumber(r.acceptedAt, 'Goal acceptance time is invalid.'), acceptedWithGaps: r.acceptedWithGaps } } }
-  }
-  if (operation === 'demand.continuation-action') {
-    if (result.diskDurability !== 'confirmed') throw new AgentMuxError('Continuation mutation durability is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Goal id is invalid.', 'CONTROL_PROTOCOL_ERROR'), continuation: parseGoalContinuationLoop(result.continuation), diskDurability: 'confirmed' } }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
   }
   if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
   if (operation === 'browser.targets') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserTargetsResult(result) }
@@ -1411,12 +1332,9 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   const operation = Object.getOwnPropertyDescriptor(source, 'operation')
   if (operation && !('value' in operation)) throw new AgentMuxError('Control receipt operation must be data.', 'CONTROL_PROTOCOL_ERROR')
   if (isToolkitOperation(operation?.value)) {
-    // Validate header descriptors before reads; the original typed result codec
-    // owns nested retained executions, independently of the generic JSON depth.
+    // Validate data descriptors before reading schemaVersion, ok or requestId.
+    settingsResourceRecord(source, 'CONTROL_PROTOCOL_ERROR')
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', source.ok === true ? 'result' : 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const { result: _result, ...header } = source
-    settingsResourceRecord(header, 'CONTROL_PROTOCOL_ERROR')
   }
   if (isSpaceControlOperation(operation?.value)) {
     const ok = Object.getOwnPropertyDescriptor(source, 'ok')

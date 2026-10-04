@@ -1,4 +1,3 @@
-import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { ArrowUpRight } from 'lucide-react'
 import { memo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -18,14 +17,13 @@ export const SessionObservationRegions = memo(function SessionObservationRegions
   arrangement?: DemandArrangement
 }) {
   const sessions = useAppStore(useShallow(state => sessionIds.map(id => sessionPresentationById(state.sessions).get(id))))
-  const topicFacts = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
   const config = useAppStore((state) => state.config)
   const selectSession = useAppStore((state) => state.selectSession)
   return <SessionRegionHost arrangement={arrangement} className={`global-session-workspace__regions global-session-workspace__regions--${arrangement}`}>
     {sessionIds.map((id, index) => {
       const session = sessions[index]
       if (!session) return <section key={id} className="global-session-workspace__empty" data-session-id={id}><strong>Session awaiting recovery</strong><span>{id}</span><span>The link is preserved. Open Session to inspect recovery.</span><button type="button" onClick={() => selectSession(id)}>Open Session</button></section>
-      const workspaceId = workspaceForSession(config, session, topicFacts)?.id ?? SCRATCH_WORKSPACE_ID
+      const workspaceId = workspaceForSession(config, session)?.id ?? SCRATCH_WORKSPACE_ID
       return <section key={id} className="global-session-region" data-session-id={id}>
         <header className="global-session-region__header"><span className="global-session-region__name"><StatusDot status={session.status} />{session.label}</span><button type="button" className="global-session-region__jump" onClick={() => selectSession(id)}><ArrowUpRight size={12} />Open Session</button></header>
         <div className="global-session-region__body"><SessionPane sessionId={id} surfaceKind={session.kind} interactiveResize={false} readOnly visible linkOrigin={{ workspaceId, tabGroupId: `observe:${contextId}`, tabId: `observe:${contextId}`, regionId: `observe:${contextId}:${id}` }} /></div>

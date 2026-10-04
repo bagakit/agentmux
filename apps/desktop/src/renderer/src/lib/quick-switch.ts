@@ -122,7 +122,6 @@ export function rankQuickSwitchItems(
 // becomes its own row (files, browsers, launchers), because those have no session to route through.
 export function buildQuickSwitchIndex(input: {
   config: AppConfig | null
-  topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
   sessions: readonly SessionSnapshot[]
   tabs: Readonly<Record<string, WorkbenchTab>>
   tabGroupOf: (workspaceId: string, tabId: string) => string | null
@@ -131,7 +130,7 @@ export function buildQuickSwitchIndex(input: {
   const items: QuickSwitchItem[] = []
 
   for (const session of sessions) {
-    const workspace = workspaceForSession(config, session, input.topics)
+    const workspace = workspaceForSession(config, session)
     const branch = workspace?.branch
     const workspaceName = workspace?.name ?? session.workspacePath.split('/').at(-1) ?? session.workspacePath
     items.push({

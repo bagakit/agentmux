@@ -372,8 +372,8 @@ export function documentKey(workspaceId: string, path: string): string {
   return `${workspaceId}\0${path}`
 }
 
-export function workspaceForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null) {
-  return config?.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, session, topics))
+export function workspaceForSession(config: AppConfig | null, session: SessionSnapshot) {
+  return config?.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, session))
 }
 
 /**
@@ -406,9 +406,9 @@ export function workspaceRootForPath(config: AppConfig | null, session: SessionS
   return best
 }
 
-export function topicIdForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null): string | null {
-  const workspace = workspaceForSession(config, session, topics)
-  return workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics) : null
+export function topicIdForSession(config: AppConfig | null, session: SessionSnapshot): string | null {
+  const workspace = workspaceForSession(config, session)
+  return workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) : null
 }
 
 /**

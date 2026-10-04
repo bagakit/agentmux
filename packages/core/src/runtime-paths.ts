@@ -28,13 +28,6 @@ export function ctxmuxManifestSha256(
 
 export const CTXMUX_MANIFEST_SHA256 = ctxmuxManifestSha256()
 
-/** Each qualified platform retains the exact source of its own Native and SDK bundle. */
-export function ctxmuxArtifactSource(platform: string = process.platform, architecture: string = process.arch): { commit: string; tree: string } {
-  const artifactPlatform = supportedCtxmuxArtifactPlatform(platform, architecture)
-  if (artifactPlatform === null) throw new Error(`AgentMux has no qualified ctxmux artifacts for ${platform}-${architecture}.`)
-  return ctxmuxArtifacts.sources[artifactPlatform as keyof typeof ctxmuxArtifacts.sources]
-}
-
 // A stable host namespace, independent of artifact identity. The short endpoint can be
 // recreated; persistent state uses the same namespace under the user's durable directory.
 const CTXMUX_RUNTIME_ID = '1e19b1caf5c6ddd1aa8b5cac'

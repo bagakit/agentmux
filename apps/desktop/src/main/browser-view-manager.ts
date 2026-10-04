@@ -237,8 +237,6 @@ type ReleasedBrowser = {
   profileId: string
   requestedUrl: string
   viewport: BrowserViewport
-  pendingSwitch?: PendingProfileSwitch
-  detachedView?: WebContentsView
 }
 
 type BrowserRestoreInput = {
@@ -254,7 +252,6 @@ type PendingProfileSwitch = {
   rejectCancellation(error: Error): void
   attached: boolean
   released: boolean
-  cleanupWarning?: string
 }
 
 export interface BrowserProfileResolver {
@@ -819,12 +816,7 @@ export class BrowserViewManager {
    */
   async release(id: string): Promise<void> {
     const entry = this.entries.get(id)
-    if (!entry) {
-      const released = this.releasedEntries.get(id)
-      if (released) this.cleanupReleasedOwner(released)
-      return
-    }
-    this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
+    if (!entry) return
     this.revokePresentationCapture(entry, 'source-released')
     if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
     entry.captureId = null
@@ -832,6 +824,7 @@ export class BrowserViewManager {
     this.releaseUploadFiles(entry)
     void entry.feedback?.clear()
     void this.releaseDemonstrationCapture(entry)
+    this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
     const contents = entry.view.webContents
     // `getURL()` is the last committed document. During an in-flight navigation it can still
     // point at the previous page, which would make a release/restore silently rewind the Browser
@@ -875,7 +868,6 @@ export class BrowserViewManager {
     // Validate the profile before removing the retained descriptor. A failed restore must leave the
     // original profile ownership intact so deleting/repairing a profile cannot orphan this Region.
     this.resolvePartition(profileId)
-    this.cleanupReleasedOwner(released)
     this.releasedEntries.delete(id)
     try {
       const snapshot = await this.createEntry(id, url, profileId, viewport, released.workspaceId)
@@ -974,7 +966,7 @@ export class BrowserViewManager {
   /** One navigation owner; page programs await the actual load promise, UI returns its projection. */
   private startNavigation(entry: BrowserEntry, rawUrl: string): Promise<void> {
     const url = normalizeBrowserUrl(rawUrl)
-    this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
+    this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
     const view = entry.view
     entry.requestedUrl = url
     entry.error = null
@@ -990,7 +982,7 @@ export class BrowserViewManager {
 
   async back(id: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
-    this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
+    this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
     if (entry.view.webContents.navigationHistory.canGoBack()) {
       entry.view.webContents.navigationHistory.goBack()
     }
@@ -999,7 +991,7 @@ export class BrowserViewManager {
 
   async forward(id: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
-    this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
+    this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
     if (entry.view.webContents.navigationHistory.canGoForward()) {
       entry.view.webContents.navigationHistory.goForward()
     }
@@ -1008,7 +1000,7 @@ export class BrowserViewManager {
 
   async reload(id: string): Promise<BrowserSnapshot> {
     const entry = this.require(id)
-    this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by reload'))
+    this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by reload'))
     entry.error = null
     entry.view.webContents.reload()
     return this.snapshot(entry)
@@ -1081,17 +1073,12 @@ export class BrowserViewManager {
       this.emit(entry)
       return this.snapshot(entry)
     } finally {
-      // Cancellation already attempted cleanup at its original entry point. Keep its failed
-      // candidate reference instead of silently retrying or losing it in this late continuation.
-      if (!committed && entry.switchRevision === pending.token) {
+      if (!committed) {
         if (entry.pendingSwitch === pending) {
           entry.pendingSwitch = null
           entry.switchRevision += 1
         }
-        try { this.releasePendingSwitch(pending) } catch (error) {
-          if (this.entries.get(id) === entry && !entry.pendingSwitch) entry.pendingSwitch = pending
-          throw error
-        }
+        this.releasePendingSwitch(pending)
       }
     }
   }
@@ -1103,9 +1090,7 @@ export class BrowserViewManager {
   usesProfile(profileId: string): boolean {
     return [...this.entries.values()].some((entry) => (
       entry.profileId === profileId || entry.pendingSwitch?.profileId === profileId
-    )) || [...this.releasedEntries.values()].some((entry) => (
-      entry.profileId === profileId || entry.pendingSwitch?.profileId === profileId
-    ))
+    )) || [...this.releasedEntries.values()].some((entry) => entry.profileId === profileId)
   }
 
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
@@ -2524,13 +2509,7 @@ export class BrowserViewManager {
   /** Native teardown has no authority to retire the Renderer Region. */
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
-    if (!entry) {
-      const released = this.releasedEntries.get(id)
-      if (!released) return false
-      this.cleanupReleasedOwner(released)
-      return this.releasedEntries.delete(id)
-    }
-    this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
+    if (!entry) return this.releasedEntries.delete(id)
     cancelBrowserWebAuthnAccounts(entry.view.webContents)
     cancelBrowserWebAuthnAccess(entry.view.webContents)
     this.revokePresentationCapture(entry, 'source-released')
@@ -2540,6 +2519,7 @@ export class BrowserViewManager {
     this.releaseUploadFiles(entry)
     void entry.feedback?.clear()
     void this.releaseDemonstrationCapture(entry)
+    this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
     if (!entry.view.webContents.isDestroyed()) {
       entry.selectionOperation = null
       const selectionRevision = ++entry.selectionRevision
@@ -2578,7 +2558,7 @@ export class BrowserViewManager {
   /** Staging IO never blocks a healthy Browser; only this document's selected files are released. */
   private releaseUploadFiles(entry: BrowserEntry): void {
     void this.uploads?.releaseBrowser(entry.id).catch(() => {
-      if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
+      if (this.entries.get(entry.id) !== entry) return
       entry.activity = { ...entry.activity, warning: 'Selected-file staging could not be fully released. The Browser remains usable; navigate or close it to retry cleanup.' }
       this.emit(entry)
     })
@@ -2655,11 +2635,7 @@ export class BrowserViewManager {
         // known-good projection with an unsupported target if an embedder emits this callback first.
         return
       }
-      // The originating explicit operation already attempted cleanup of a canceled candidate.
-      // Its late native navigation fact must not retry cleanup or stop this healthy page.
-      if (entry.pendingSwitch?.token === entry.switchRevision) {
-        this.cancelPendingSwitchForNavigation(entry, new Error('Browser profile switch was superseded by navigation'))
-      }
+      this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
       entry.selectionOperation = null
       void entry.feedback?.clear()
       const selectionRevision = ++entry.selectionRevision
@@ -2719,45 +2695,24 @@ export class BrowserViewManager {
     })
     contents.once('destroyed', () => {
       if (entry.pendingSwitch?.view === view) {
-        try { this.cancelPendingSwitch(entry, new Error('Browser profile candidate was destroyed')) } catch (error) {
-          if (!this.owns(entry, entry.view) || entry.view.webContents.isDestroyed()) return
-          const warning = error instanceof Error ? error.message : String(error)
-          if (entry.pendingSwitch) entry.pendingSwitch.cleanupWarning = warning
-          entry.activity = { ...entry.activity, warning }
-          this.emit(entry)
-        }
+        this.cancelPendingSwitch(entry, new Error('Browser profile candidate was destroyed'))
         return
       }
       if (!this.owns(entry, view)) return
-      // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
-      // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
-      const released: ReleasedBrowser = {
-        id: entry.id, workspaceId: entry.workspaceId, profileId: entry.profileId, requestedUrl: entry.requestedUrl, viewport: entry.viewport
-      }
-      this.releasedEntries.set(entry.id, released)
-      const cleanupErrors: unknown[] = []
-      try { this.revokePresentationCapture(entry, 'source-released') } catch (error) { cleanupErrors.push(error) }
+      this.revokePresentationCapture(entry, 'source-released')
       if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
       entry.captureId = null
-      for (const leaseId of [...entry.presentationLeaseIds]) {
-        try { this.removePresentationLease(this.presentationLeases.get(leaseId)!) } catch (error) { cleanupErrors.push(error) }
-      }
-      try { void this.releaseDemonstrationCapture(entry) } catch (error) { cleanupErrors.push(error) }
-      try { this.releaseUploadFiles(entry) } catch (error) { cleanupErrors.push(error) }
-      try { this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch')) } catch (error) {
-        cleanupErrors.push(error)
-        if (entry.pendingSwitch) released.pendingSwitch = entry.pendingSwitch
-      }
+      for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
+      void this.releaseDemonstrationCapture(entry)
+      this.releaseUploadFiles(entry)
+      this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch'))
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
-      if (!this.window.isDestroyed()) {
-        try { this.window.contentView.removeChildView(view) } catch (error) {
-          released.detachedView = view
-          cleanupErrors.push(error)
-        }
-      }
-      const reason = cleanupErrors.map(error => error instanceof Error ? error.message : String(error)).join('; ')
-      this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
+      this.releasedEntries.set(entry.id, {
+        id: entry.id, workspaceId: entry.workspaceId, profileId: entry.profileId, requestedUrl: entry.requestedUrl, viewport: entry.viewport
+      })
+      if (!this.window.isDestroyed()) this.window.contentView.removeChildView(view)
+      this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' })
     })
   }
 
@@ -2826,68 +2781,23 @@ export class BrowserViewManager {
     return this.entries.get(entry.id) === entry && entry.view === view
   }
 
-  private cancelPendingSwitchForNavigation(entry: BrowserEntry, error: Error): void {
-    const view = entry.view
-    try { this.cancelPendingSwitch(entry, error) } catch (cleanupError) {
-      // A broken candidate cannot take away an independently healthy original page. Cancellation
-      // has fenced the candidate and retained its cleanup reference; only explicit operations retry.
-      if (!this.owns(entry, view) || view.webContents.isDestroyed()) throw cleanupError
-      const warning = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
-      if (entry.pendingSwitch) entry.pendingSwitch.cleanupWarning = warning
-      entry.activity = { ...entry.activity, warning }
-      this.emit(entry)
-    }
-  }
-
   private cancelPendingSwitch(entry: BrowserEntry, error: Error): void {
     entry.switchRevision += 1
     const pending = entry.pendingSwitch
     if (!pending) return
     entry.pendingSwitch = null
-    try {
-      this.releasePendingSwitch(pending)
-      if (pending.cleanupWarning && entry.activity.warning === pending.cleanupWarning) {
-        const { warning: _warning, ...activity } = entry.activity
-        entry.activity = activity
-      }
-      delete pending.cleanupWarning
-    } catch (cleanupError) {
-      if (!pending.released) entry.pendingSwitch = pending
-      error = new AggregateError([error, cleanupError], `${error.message}; ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
-      throw error
-    } finally { pending.rejectCancellation(error) }
+    pending.rejectCancellation(error)
+    this.releasePendingSwitch(pending)
   }
 
   private releasePendingSwitch(pending: PendingProfileSwitch): void {
     if (pending.released) return
-    const errors: unknown[] = []
-    if (pending.attached) {
-      try {
-        if (!this.window.isDestroyed()) this.window.contentView.removeChildView(pending.view)
-        pending.attached = false
-      } catch (error) { errors.push(error) }
+    pending.released = true
+    if (pending.attached && !this.window.isDestroyed()) {
+      this.window.contentView.removeChildView(pending.view)
+      pending.attached = false
     }
-    try { if (!pending.view.webContents.isDestroyed()) pending.view.webContents.close() } catch (error) { errors.push(error) }
-    pending.released = !pending.attached && pending.view.webContents.isDestroyed()
-    if (!pending.released && !errors.length) errors.push(new Error('Browser profile candidate cleanup is not confirmed. Its original cleanup reference is kept.'))
-    if (errors.length) throw new AggregateError(errors, 'Browser profile candidate cleanup failed: ' + errors.map(error => error instanceof Error ? error.message : String(error)).join('; '))
-  }
-
-  private cleanupReleasedOwner(released: ReleasedBrowser): void {
-    const errors: unknown[] = []
-    if (released.pendingSwitch) {
-      try {
-        this.releasePendingSwitch(released.pendingSwitch)
-        delete released.pendingSwitch
-      } catch (error) { errors.push(error) }
-    }
-    if (released.detachedView) {
-      try {
-        if (!this.window.isDestroyed()) this.window.contentView.removeChildView(released.detachedView)
-        delete released.detachedView
-      } catch (error) { errors.push(error) }
-    }
-    if (errors.length) throw new AggregateError(errors, 'Browser native cleanup failed: ' + errors.map(error => error instanceof Error ? error.message : String(error)).join('; '))
+    if (!pending.view.webContents.isDestroyed()) pending.view.webContents.close()
   }
 
   private applyViewport(entry: BrowserEntry, view = entry.view): void {

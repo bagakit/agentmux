@@ -101,7 +101,7 @@ describe('pending text is edited by its original queue owner',()=>{
   const before=seed(), target=before[1]!
   vi.spyOn(api.sessions,'submitPrompt').mockRejectedValue(new Error('delivery unknown'))
   const dispose=useAppStore.subscribe((state,previous)=>{
-   if(previous.agentSteerInFlight[agent.id]===target.operationId && !state.agentSteerInFlight[agent.id]) useAppStore.setState(state => ({agentSteerQueues:{...state.agentSteerQueues,[agent.id]:(state.agentSteerQueues[agent.id] ?? []).filter(entry=>entry.operationId!==target.operationId)}}))
+   if(previous.agentSteerInFlight[agent.id]===target.operationId && !state.agentSteerInFlight[agent.id]) useAppStore.getState().removeAgentSteer(agent.id,target.operationId)
   })
   try {
    const result=await useAppStore.getState().executeControl({schemaVersion:5,requestId:'send-race',operation:'message.pending.send',agentSessionId:agent.id,pendingId:target.operationId})

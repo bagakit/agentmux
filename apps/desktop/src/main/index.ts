@@ -1,4 +1,3 @@
-import { openDemandStore } from '@agentmux/demand'
 import { readLoadedPackageIdentity } from './client-observation.js'
 import { randomUUID } from 'node:crypto'
 import { RendererUpdates } from './renderer-updates.js'
@@ -32,7 +31,6 @@ import { liveVisibleAreas } from './window-visible-area.js'
 import { prepareWindowWorkbenchForQuit, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
-import { SpatialLinkIngress, receiveSpatialLinkArguments } from './spatial-link-ingress.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
@@ -82,9 +80,6 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock()).role === 'secondary') 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
-  const spatialLinks = new SpatialLinkIngress()
-  // macOS declares its scheme in the packaged Info.plist; development never takes the user's handler.
-  if (app.isPackaged && process.platform !== 'darwin') app.setAsDefaultProtocolClient('amux')
   const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
   const scratchTopics = new ScratchTopics()
   const runtime = new RuntimeController(
@@ -92,19 +87,14 @@ function startPrimaryInstance(): void {
     connectDesktopAgentMuxHost,
     scratchTopics
   )
-  const configStore = new ConfigStore()
-  const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const progressLoops = new ContinuousProgressLoopManager(
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     undefined,
-    (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal),
-    { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
-      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context),
-      observeCheckIn: async (target, now, signal) => runtime.observeCheckIn(target, now, signal, await configStore.get()) },
-    { read: goalId => demands.get(goalId), subscribe: listener => demands.subscribe(snapshot => listener(snapshot.demands)), inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) }
+    (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal)
   )
   void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
+  const configStore = new ConfigStore()
   const windowGeometryStore = new WindowGeometryStore()
   let disposeIpc: (() => Promise<void>) | null = null
   let ownerDisposal: Promise<void> | null = null
@@ -194,8 +184,7 @@ function startPrimaryInstance(): void {
     workbenchWindow = window
     recoverInterface = registerRendererCrashRecovery(window, dialog, () => app.quit(), () => ownerDisposal !== null)
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
-    window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); workbenchWindow = null; recoverInterface = null } })
-    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) spatialLinks.unavailable() })
+    window.once('closed', () => { if (workbenchWindow === window) { workbenchWindow = null; recoverInterface = null } })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
@@ -257,7 +246,7 @@ function startPrimaryInstance(): void {
     let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks,
+    disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, scratchTopics, workspaceFiles,
       loadedPackage: await loadedPackage, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')
@@ -453,8 +442,7 @@ function startPrimaryInstance(): void {
 
   // 第二实例来敲门时把已有窗口带到用户眼前。最小化的先还原再聚焦，否则聚焦一个最小化窗口用户还是
   // 看不见；窗口全关了（macOS 上 app 还活着）则新开一个。决策在纯函数里，这里只执行动作。
-  app.on('second-instance', (_event, argv) => {
-    receiveSpatialLinkArguments(spatialLinks, argv)
+  app.on('second-instance', () => {
     const [existing] = BrowserWindow.getAllWindows()
     const actions = foregroundActionsForSecondInstance({
       exists: existing !== undefined,
@@ -466,17 +454,6 @@ function startPrimaryInstance(): void {
       else if (action === 'focus') existing?.focus()
     }
   })
-
-  app.on('open-url', (event, url) => {
-    event.preventDefault()
-    spatialLinks.receive(url)
-    void app.whenReady().then(async () => {
-      const window = workbenchWindow
-      if (!window) await createWindow()
-      else { if (window.isMinimized()) window.restore(); window.focus() }
-    })
-  })
-  receiveSpatialLinkArguments(spatialLinks, process.argv)
 
   app.whenReady().then(async () => {
     const appReadyAtMs = Date.now()

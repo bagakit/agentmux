@@ -41,12 +41,9 @@ async function menu() {
   expect(item).toBeDefined(); await moteClick(item!)
   expect(document.querySelector('.space-icon-picker[role="dialog"]')).not.toBeNull()
 }
-function quiet(before: ReturnType<typeof useAppStore.getState>, navigated = false) {
+function quiet(before: ReturnType<typeof useAppStore.getState>) {
   const after = useAppStore.getState()
-  expect(after.sessions).toBe(before.sessions)
-  // The original public Space focus may reproject the same Tab records.
-  if (navigated) expect(after.tabs).toEqual(before.tabs)
-  else expect(after.tabs).toBe(before.tabs)
+  expect(after.sessions).toBe(before.sessions); expect(after.tabs).toBe(before.tabs)
   expect(after.agentFocus.execution).toEqual(before.agentFocus.execution); expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled()
 }
@@ -68,7 +65,7 @@ it('same selected custom and primary real Footer, cards, avatars and full Space 
   expect(app.panel().querySelector(`[data-mote-topic-id="${customMoteId}"] img`)?.getAttribute('src')).toContain('CUSTOM')
   await moteClick(button('Show Mote avatars only'))
   expect(app.panel().querySelector(`[data-mote-topic-id="${customMoteId}"] img`)?.getAttribute('src')).toContain('CUSTOM')
-  await moteClick(button('Open in Space'))
+  await moteClick(button('Open Mote Space'))
   await act(async () => useAppStore.setState({ projectRailOpen: true })); await settleMoteApp()
   const space = [...app.container.querySelectorAll<HTMLElement>('[data-space-icon-target]')].filter(node => node.dataset.spaceIconTarget === custom.key)
   expect(space).toHaveLength(1)
@@ -78,7 +75,7 @@ it('same selected custom and primary real Footer, cards, avatars and full Space 
   const restored = [...app.container.querySelectorAll<HTMLElement>('[data-space-icon-target]')].filter(node => node.dataset.spaceIconTarget === custom.key)
   expect(restored).toHaveLength(1)
   for (const node of restored) expect(node.querySelector('[data-space-icon-source="image"]')).toBeNull()
-  quiet(before, true)
+  quiet(before)
 })
 it('unknown exact saved Tab without a confirmed Topic cannot borrow the primary choice or its edit target', async () => {
   await useAppStore.getState().setSpaceObjectIcon(primary.key, primaryRef)
@@ -129,13 +126,10 @@ it('a failing latest local write after the request keeps confirmed choice and cu
   expect(durable.state.pinnedItems.scope).toEqual(['retained-pin'])
 })
 it('old same-object A rejection cannot replace the later confirmed B choice or latest Workbench data', async () => {
-  let reject!: (cause: Error) => void, entered!: () => void, phase = 'A'
+  let reject!: (cause: Error) => void, phase = 'A'
   const pending = new Promise<void>((_resolve, failure) => { reject = failure })
-  const firstFlush = new Promise<void>(resolve => { entered = resolve })
-  vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => { if (phase === 'A') { entered(); return pending } return Promise.resolve() })
+  vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => phase === 'A' ? pending : Promise.resolve())
   const first = useAppStore.getState().setSpaceObjectIcon(primary.key, primaryRef)
-  // Capture A at the actual platform boundary before starting later intent B.
-  await firstFlush
   phase = 'B'; useAppStore.getState().togglePinnedItem('scope', 'later')
   await useAppStore.getState().setSpaceObjectIcon(primary.key, customRef)
   reject(new Error('old A rejected')); await expect(first).rejects.toThrow('old A rejected')

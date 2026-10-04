@@ -4,8 +4,6 @@ import type {
   AgentSessionHistoryContentPart,
   AgentSessionHistoryCollaboration,
   AgentSessionHistoryItem,
-  AgentSessionHistoryQuestionRequest,
-  AgentSessionHistoryQuestionAnswer,
   AgentSessionHistorySource
 } from './types.js'
 
@@ -70,35 +68,6 @@ function collaboration(value: unknown): AgentSessionHistoryCollaboration {
     }) }
 }
 
-function questionRequest(value: unknown): AgentSessionHistoryQuestionRequest {
-  const request = object(value)
-  if (request.delivery !== 'async' || !Array.isArray(request.questions) || !request.questions.length) return invalid()
-  const ids = new Set<string>()
-  return { delivery: 'async', questions: request.questions.map(value => {
-    const question = object(value), id = nonempty(question.id)
-    if (ids.has(id) || !Array.isArray(question.options) || typeof question.acceptsText !== 'boolean') return invalid()
-    ids.add(id)
-    const optionIds = new Set<string>()
-    const options = question.options.map(value => {
-      const option = object(value), id = nonempty(option.id)
-      if (optionIds.has(id)) return invalid()
-      optionIds.add(id)
-      return { id, label: nonempty(option.label) }
-    })
-    if (!options.length && !question.acceptsText) return invalid()
-    return { id, prompt: nonempty(question.prompt), options, acceptsText: question.acceptsText }
-  }) }
-}
-
-function questionAnswers(value: unknown): AgentSessionHistoryQuestionAnswer[] {
-  if (!Array.isArray(value) || !value.length) return invalid()
-  return value.map(value => {
-    const answer = object(value)
-    if (typeof answer.answer !== 'string') return invalid()
-    return { questionId: nonempty(answer.questionId), answer: answer.answer }
-  })
-}
-
 export function normalizeSessionHistoryPage(
   source: AgentSessionHistorySource,
   value: unknown,
@@ -158,17 +127,8 @@ export function normalizeSessionHistoryPage(
     const completedAt = optionalTime(item.completedAt)
     if (item.messagePhase !== undefined && item.kind !== 'assistant-message') return invalid()
     if (item.collaboration !== undefined && item.kind !== 'activity') return invalid()
-    if (item.questionRequest !== undefined && item.kind !== 'assistant-message') return invalid()
-    if (item.questionAnswers !== undefined && item.kind !== 'user-message') return invalid()
-    const questionDiagnostic = item.questionDiagnostic === undefined ? undefined : object(item.questionDiagnostic)
-    if (questionDiagnostic && item.kind !== 'assistant-message') return invalid()
     return { id, kind: item.kind, contentParts,
       ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
-      ...(item.questionRequest === undefined ? {} : { questionRequest: questionRequest(item.questionRequest) }),
-      ...(item.questionAnswers === undefined ? {} : { questionAnswers: questionAnswers(item.questionAnswers) }),
-      ...(questionDiagnostic === undefined ? {} : { questionDiagnostic: {
-        code: nonempty(questionDiagnostic.code), message: nonempty(questionDiagnostic.message)
-      } }),
       ...(item.collaboration === undefined ? {} : { collaboration: collaboration(item.collaboration) }),
       ...(item.turnId === undefined ? {} : { turnId: nonempty(item.turnId) }),
       ...(item.title === undefined ? {} : { title: item.title }),

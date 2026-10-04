@@ -15,14 +15,14 @@ import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-mes
 // Caller qualification with controlled leaf props and history I/O. Store, hook and projector are real.
 // Shared body/axis rendering is covered by conversation-native-user-messages.integration.test.tsx;
 // this suite does not claim a Provider writer, physical geometry or a live Run.
-type ActivityBoundary = { conversationReading?: { reference: import('../src/shared/contracts').SessionHistoryReference; enabled: boolean; opened?: boolean; onClose?: () => void }; sessionId?: string; userMessages?: readonly AgentSessionUserMessage[]; items: readonly unknown[]; describeSpeaker?: DescribeSpeaker }
-const captured = vi.hoisted(() => ({ activities: [] as ActivityBoundary[], terminalSessions: [] as SessionSnapshot[], witness: null as ReturnType<typeof useSessionUserMessages> | null }))
+type ActivityBoundary = { sessionId?: string; userMessages?: readonly AgentSessionUserMessage[]; items: readonly unknown[]; describeSpeaker?: DescribeSpeaker }
+const captured = vi.hoisted(() => ({ activities: [] as ActivityBoundary[], terminalSessions: [] as SessionSnapshot[], histories: [] as AgentSessionControl[], historyResolvers: [] as (DescribeSpeaker | undefined)[], witness: null as ReturnType<typeof useSessionUserMessages> | null }))
 vi.mock('../src/renderer/src/components/ActivityView', () => ({ ActivityView: (props: ActivityBoundary) => {
   captured.activities.push(props)
-  return <div data-leaf="activity" data-session={props.sessionId ?? 'absent'}>{props.conversationReading?.opened ? <nav data-leaf="reading"><button type="button" onClick={props.conversationReading.onClose}>Return</button></nav> : null}{props.userMessages?.map(item => <span key={item.id} data-record-id={item.id}>{item.content}</span>)}</div>
+  return <div data-leaf="activity" data-session={props.sessionId ?? 'absent'}>{props.userMessages?.map(item => <span key={item.id} data-record-id={item.id}>{item.content}</span>)}</div>
 } }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({session}: {session: SessionSnapshot}) => { captured.terminalSessions.push(session);return <div data-leaf="terminal" /> } }))
-
+vi.mock('../src/renderer/src/components/SessionHistoryView', () => ({ SessionHistoryView: ({control, describeSpeaker, onClose, visible}: {control: AgentSessionControl;describeSpeaker?:DescribeSpeaker;onClose?:()=>void;visible:boolean}) => { captured.histories.push(control);captured.historyResolvers.push(describeSpeaker);return visible ? <div data-leaf="history"><button type="button" onClick={onClose}>Return</button></div> : null } }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({ AgentSessionComposer: ({sessionId,disabled=false}: {sessionId:string;disabled?:boolean}) => <div data-leaf="composer" data-session={sessionId} data-disabled={String(disabled)} /> }))
 vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegionHeader: ({sessionId,onHistory}: {sessionId:string;onHistory?:()=>void}) => <header data-leaf="header" data-session={sessionId}>{onHistory ? <button type="button" onClick={onHistory}>History</button> : null}</header> }))
 vi.mock('../src/renderer/src/components/SessionConnectingSurface', () => ({ SessionConnectingSurface: () => <div data-leaf="connecting" /> }))
@@ -46,7 +46,7 @@ async function render(node:ReactNode){await act(async()=>root.render(node));awai
 function seed(session:SessionSnapshot,mode:'activity'|'terminal'='activity'){useAppStore.setState({config,sessions:[session],pendingAgentLaunches:{},recoveryCandidates:[],runtimeOwnershipWarnings:[],viewModes:{[session.id]:mode},timelines:{[session.id]:timeline(session.id)},agentNames:{},agentComposerDrafts:{[session.id]:'UNSENT_REAL_STORE_DRAFT'},agentSteerQueues:{}})}
 function currentActivity(){expect(captured.activities.length).toBeGreaterThan(0);const props=captured.activities.at(-1);expect(props).toBeDefined();return props!}
 function assertHealthy(id:string){expect(useAppStore.getState().sessions.map(s=>[s.id,s.control,s.processState])).toEqual([[id,agent(id).control,'running']]);expect(useAppStore.getState().agentComposerDrafts[id]).toBe('UNSENT_REAL_STORE_DRAFT');expect(container.querySelector('[data-leaf="composer"]')?.getAttribute('data-disabled')).toBe('false')}
-beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();container=document.createElement('div');document.body.append(container);root=createRoot(container);captured.activities=[];captured.terminalSessions=[];captured.witness=null;read=vi.spyOn(api.sessions,'historyPage').mockImplementation(async control=>page(control.agentSessionId));seed(agent('a'))})
+beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();container=document.createElement('div');document.body.append(container);root=createRoot(container);captured.activities=[];captured.terminalSessions=[];captured.histories=[];captured.historyResolvers=[];captured.witness=null;read=vi.spyOn(api.sessions,'historyPage').mockImplementation(async control=>page(control.agentSessionId));seed(agent('a'))})
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();localStorage.clear()})
 
 describe('Shared-hook and public-projector positive witnesses',()=>{
@@ -65,7 +65,7 @@ describe('SessionPane native-message demand boundaries',()=>{
  it('Agent Terminal renders real control without Activity reader I/O',async()=>{seed(agent('a'),'terminal');await render(pane('a'));expect([...new Set(captured.terminalSessions)]).toEqual([agent('a')]);expect(container.querySelectorAll('[data-leaf="terminal"]')).toHaveLength(1);expect(read.mock.calls).toEqual([]);assertHealthy('a')})
  it('ordinary shell Terminal never manufactures Agent control or composer',async()=>{const shell:Extract<SessionSnapshot,{kind:'terminal'}>={id:'shell',kind:'terminal',hostId:'local',workspacePath:_hygiene_fixturePath("fixture"),label:'Shell',createdAt:1,updatedAt:1,processState:'running',status:{state:'running',source:'run-process',observedAt:1},latestOutputBytes:0,providerId:null,control:{kind:'terminal',hostId:'local',runId:'shell-run',run:{runId:'shell-run'}}};seed(shell);await render(pane('shell',{surfaceKind:'terminal'}));expect([...new Set(captured.terminalSessions)]).toEqual([shell]);expect(container.querySelectorAll('[data-leaf="composer"]')).toHaveLength(0);expect(read.mock.calls).toEqual([])})
  it('never-opened hidden Activity keeps its Session without mounting a reader or making reads',async()=>{await render(pane('a',{visible:false}));expect(container.querySelectorAll('[data-leaf="activity"]')).toHaveLength(0);expect(read.mock.calls).toEqual([]);assertHealthy('a')})
- it('cold over-day inline History uses exact original control and no new Activity reader/resume',async()=>{const cold:Extract<SessionSnapshot,{kind:'agent'}>={...agent('a'),processState:'exited',semanticStatus:{state:'done',source:'native-hook',observedAt:1,stateEnteredAt:1}};seed(cold);const recover=vi.spyOn(useAppStore.getState(),'recoverSession');const refresh=vi.spyOn(useAppStore.getState(),'refreshSession');await render(pane('a'));expect([...new Set(captured.activities.map(props => props.conversationReading?.reference))]).toEqual([cold.control]);expect(container.querySelectorAll('[data-leaf="reading"]')).toHaveLength(1);expect(container.querySelectorAll('[data-leaf="activity"]')).toHaveLength(1);expect(read.mock.calls).toEqual([]);expect(recover.mock.calls).toEqual([]);expect(refresh.mock.calls).toEqual([])})
+ it('cold over-day inline History uses exact original control and no new Activity reader/resume',async()=>{const cold:Extract<SessionSnapshot,{kind:'agent'}>={...agent('a'),processState:'exited',semanticStatus:{state:'done',source:'native-hook',observedAt:1,stateEnteredAt:1}};seed(cold);const recover=vi.spyOn(useAppStore.getState(),'recoverSession');const refresh=vi.spyOn(useAppStore.getState(),'refreshSession');await render(pane('a'));expect([...new Set(captured.histories)]).toEqual([cold.control]);expect(container.querySelectorAll('[data-leaf="history"]')).toHaveLength(1);expect(container.querySelectorAll('[data-leaf="activity"]')).toHaveLength(0);expect(read.mock.calls).toEqual([]);expect(recover.mock.calls).toEqual([]);expect(refresh.mock.calls).toEqual([])})
  it('missing Session keeps connecting and disabled Composer without a read',async()=>{useAppStore.setState({sessions:[],pendingAgentLaunches:{},timelines:{}});await render(pane('missing'));expect(container.querySelectorAll('[data-leaf="connecting"]')).toHaveLength(1);expect(container.querySelector('[data-leaf="composer"]')?.getAttribute('data-disabled')).toBe('true');expect(read.mock.calls).toEqual([])})
 })
 
@@ -84,28 +84,28 @@ describe('SessionPane identity, generations and related-consumer cost', () => {
   const trigger = container.querySelector<HTMLButtonElement>('[data-leaf="header"] button')
   expect(trigger).not.toBeNull()
   await act(async () => trigger?.click())
-  expect(container.querySelectorAll('[data-leaf="reading"]')).toHaveLength(1)
-  expect(captured.activities.at(-1)?.describeSpeaker).toBeTypeOf('function')
-  expect(captured.activities.at(-1)?.describeSpeaker?.({ role: 'unknown', id: 'unknown' })).toEqual({ name: 'You' })
-  expect(captured.activities.at(-1)?.describeSpeaker?.({ role: 'agent', id: 'known-sender' })).toMatchObject({ name: 'Design peer', providerId: 'claude', project: { name: 'Private typed project', path: _hygiene_fixturePath("fixture"), workspaceId: 'ws' }, readDetails: expect.any(Function) })
+  expect(container.querySelectorAll('[data-leaf="history"]')).toHaveLength(1)
+  expect(captured.historyResolvers.at(-1)).toBeTypeOf('function')
+  expect(captured.historyResolvers.at(-1)?.({ role: 'unknown', id: 'unknown' })).toEqual({ name: 'You' })
+  expect(captured.historyResolvers.at(-1)?.({ role: 'agent', id: 'known-sender' })).toMatchObject({ name: 'Design peer', providerId: 'claude', project: { name: 'Private typed project', path: _hygiene_fixturePath("fixture"), workspaceId: 'ws' }, readDetails: expect.any(Function) })
  })
 
- it('uses the same Activity and input facts through Header reading and Return without duplicating the recent acquisition', async () => {
+ it('retains current records while covered and revalidates once on Return after demand paused', async () => {
   await render(pane('a'))
   expect(currentActivity().userMessages).toEqual(expected('a'))
   const before = read.mock.calls.length
   expect(before).toBe(1)
   const trigger = container.querySelector<HTMLButtonElement>('[data-leaf="header"] button')!
   await act(async () => trigger.click())
-  expect(container.querySelectorAll('[data-leaf="reading"]')).toHaveLength(1)
+  expect(container.querySelectorAll('[data-leaf="history"]')).toHaveLength(1)
   expect(currentActivity().userMessages).toEqual(expected('a'))
   await act(async () => useAppStore.setState({ timelines: { a: { ...timeline('a'), revision: 2 } } }))
   await flush()
   expect(read.mock.calls.length).toBe(before)
-  const close = container.querySelector<HTMLButtonElement>('[data-leaf="reading"] button')!
+  const close = container.querySelector<HTMLButtonElement>('[data-leaf="history"] button')!
   await act(async () => close.click())
   await flush()
-  expect(read.mock.calls.map(([control]) => control)).toEqual([agent('a').control])
+  expect(read.mock.calls.map(([control]) => control)).toEqual([agent('a').control, agent('a').control])
   expect(currentActivity().userMessages).toEqual(expected('a'))
   assertHealthy('a')
  })
@@ -131,7 +131,7 @@ describe('SessionPane identity, generations and related-consumer cost', () => {
   const old = new Promise<AgentSessionHistoryPage>((resolve) => { resolveOld = resolve })
   const current = agent('a', 'replacement-run')
   const replacementPage = { ...page('a'), items: [{ id: 'replacement-record', kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: 'Replacement input' }] }] }
-  read.mockImplementation((control) => JSON.stringify(control) === JSON.stringify(agent('a').control) ? old : Promise.resolve(replacementPage))
+  read.mockImplementation((control) => control.run.runId === 'run-a' ? old : Promise.resolve(replacementPage))
   await render(pane('a'))
   await act(async () => seed(current))
   await flush()

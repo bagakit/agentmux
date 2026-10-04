@@ -4,14 +4,14 @@ import { earlyExitConditionsBefore, findCallsToIdentifier, findCallsToMember, re
 
 // Supplemental terminal wiring proof; EditorPane's async lifecycle is exercised with React DOM.
 const terminal = new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url)
-const editor = new URL('../src/renderer/src/components/FileSourceEditor.tsx', import.meta.url)
+const editor = new URL('../src/renderer/src/components/EditorPane.tsx', import.meta.url)
 
 describe('caret consumer entry points', () => {
   for (const url of [terminal, editor]) {
     it(`${url.pathname.split('/').pop()} handles both mounted updates and late surface creation`, () => {
       const { sourceFile } = readAndParse(url.pathname)
       const calls = findCallsToIdentifier(sourceFile, 'consumeCaretFocus')
-      expect(calls).toHaveLength(url === editor ? 3 : 2)
+      expect(calls).toHaveLength(2)
       expect(calls.some((call) => {
         let parent: ts.Node | undefined = call.parent
         while (parent) {

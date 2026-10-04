@@ -1,4 +1,3 @@
-import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core'
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
@@ -13,10 +12,7 @@ import type {
   AgentCatalogEntry,
   AgentPromptCondition,
   AgentPromptExecution,
-  AgentMessageChannel,
   AgentMuxAgentMessageInput,
-  AgentMuxSessionQuestionReplyInput,
-  AgentSessionQuestionReplyReceipt,
   AgentMuxAgentCreateInput,
   AgentMuxAgentSession,
   AgentMuxNativeSessionConfirmationInput,
@@ -60,8 +56,6 @@ import type {
   AgentTimelineItem,
   AgentTimelineSnapshot,
   AgentSessionHistoryPage,
-  AgentSessionHistoryResourceRequest,
-  AgentSessionHistoryResourceReadResult,
   AgentSessionHistoryDescriptor,
   AgentSessionHistoryPageOptions,
   AgentSessionHistoryObservation,
@@ -404,14 +398,6 @@ export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact', 'dense'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
 export const PROJECT_RAIL_DENSITY_DEFAULT: ProjectRailDensity = 'default'
 
-/** The original Mote roster has two presentations, independent of its identities. */
-export const MOTE_DIRECTORY_VIEW_IDS = ['collaborators', 'list'] as const
-export type MoteDirectoryView = (typeof MOTE_DIRECTORY_VIEW_IDS)[number]
-export const MOTE_DIRECTORY_VIEW_DEFAULT: MoteDirectoryView = 'collaborators'
-export const MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT = 45
-export const MOTE_DIRECTORY_AVATAR_SIZE_MIN = 24
-export const MOTE_DIRECTORY_AVATAR_SIZE_MAX = 48
-
 /** Fixed Executor identity marks; arbitrary text does not belong in the avatar surface. */
 export const AGENT_AVATAR_BADGE_IDS = ['spark', 'bolt', 'shield', 'flame'] as const
 export type AgentAvatarBadge = (typeof AGENT_AVATAR_BADGE_IDS)[number]
@@ -516,8 +502,6 @@ export type ComposerShortcut = {
   body: string
   providerId?: AgentProviderId
   states?: AgentDisplayState[]
-  /** Optional binding on this same saved Prompt; keyword remains the reaction code. */
-  reactionIcon?: import('@agentmux/core/prompt-reaction').PromptReactionIcon
 }
 
 /** The directory owns order and visibility; a custom instruction stays in ComposerShortcut. */
@@ -534,11 +518,6 @@ export type AppConfig = {
   appearance: AppearanceConfig
   browser: BrowserConfig
   toolkit?: ToolkitPreferences
-  /** Local human presentation and explicitly shared context for new Agent launches. */
-  profile?: import('./user-profile').UserProfile
-  focus?: import('./focus-preferences').FocusPreferences
-  notes?: import('./notes-preferences').NotesPreferences
-  goals?: import('./goals-preferences').GoalsPreferences
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
   // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".
@@ -563,8 +542,6 @@ export type AppConfig = {
    * 真的切了档时发生。密度是看法不是数据，补一次盘只是白写。
    */
   projectRailDensity?: ProjectRailDensity
-  moteDirectoryView?: MoteDirectoryView
-  moteDirectoryAvatarSize?: number
   /**
    * 复制路径时是否给绝对地址。默认（缺席 / `false`）把当前用户家目录缩写成 `~`；`true` 是用户主动
    * 选择的「我要绝对路径」这一档。用户原话：「默认是波浪线，但也可以支持用户配置这种绝对地址」，
@@ -616,8 +593,6 @@ export type WorkspaceDirectoryEntry = {
   path: string
   isDirectory: boolean
   isSymlink: boolean
-  /** Confirmed regular-file modification time, in epoch milliseconds. Absent when unknown. */
-  mtimeMs?: number
   ignored?: boolean
   linkTarget?: string
   linkIssue?: 'unavailable'
@@ -1046,25 +1021,10 @@ export type RuntimeEndpointWarning = {
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
 export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
-  code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
+  code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure
 } }
 
-/** Reading identity only: `active` is a durable record state, never a process observation. */
-export type AgentSessionNameMetadata = {
-  agentSessionId: string
-  hostId: string
-  providerId: AgentProviderId
-  executorId: AgentExecutorId
-  workspacePath: string
-  label: string
-  state: 'active' | 'retired'
-}
-
 export type RuntimeSnapshot = {
-  /** Original local Core store metadata, independent of Runtime connection or recovery eligibility. */
-  sessionNameMetadata?: AgentSessionNameMetadata[]
-  /** A name read failed; this does not change any endpoint's connection or capabilities. */
-  sessionNameMetadataWarning?: { code: string; message: string; recovery: string }
   /** Connected hosts whose daemon launch provenance could not be verified. */
   runtimeOwnershipWarnings?: string[]
   /** These endpoints did not provide an authoritative complete projection. */
@@ -1131,7 +1091,7 @@ export type SessionReplayResult = Pick<SessionAttachResult, 'replay' | 'gap'>
 
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
-  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot; advisory?: string }
+  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
   | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' }>
 
 export type HostCheckResult = {
@@ -1460,7 +1420,6 @@ export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
 export const NATIVE_BROWSER_INPUT_CHANNEL = 'ui:nativeBrowserInput'
 export const NATIVE_OVERLAY_WARNING_CHANNEL = 'ui:nativeOverlayWarning'
 export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
-export const SCHEDULE_CHANGED = 'schedule:changed'
 /** Main -> renderer: Toolkit observation and execution lifecycle events. */
 export { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from './toolkit.js'
 /** Main -> renderer: a watched workspace file changed on disk; re-read it. */
@@ -1470,13 +1429,8 @@ export type WindowResizeEvent = {
   active: boolean
 }
 
-/** Manual question answer. The original Host owns author/device/channel and native invocation. */
-export type SessionQuestionReplyInput = Omit<AgentMuxSessionQuestionReplyInput,
-  'agentSessionId' | 'authorHuman' | 'sourceDevice' | 'sourceChannel' | 'signal' | 'commandOverride' | 'args' | 'env'>
-
 export type AgentMuxDesktopApi = {
   git: import('./git-contracts').GitProjectIdentityApi
-  notebooks: import('@agentmux/core/notebook-catalog').NotebookApi
   spatial: {
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
@@ -1493,9 +1447,6 @@ export type AgentMuxDesktopApi = {
   }
   hosts: {
     check(host: HostConfig): Promise<HostCheckResult>
-    upgradeCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreUpgradeCheck>
-    upgrade(host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt>
-    upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
   deviceManagement: {
     link(params: AgentMuxRpcParams<'device.link'>): Promise<AgentMuxRpcResult<'device.link'>>
@@ -1525,8 +1476,6 @@ export type AgentMuxDesktopApi = {
     keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome>
   }
   files: {
-    readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
-    list(workspaceId: string, path?: string, limit?: number): Promise<import('@agentmux/core').FileNameListing>
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
     /** One complete, revision-verified bytes snapshot within the shared preview budget. */
@@ -1552,18 +1501,12 @@ export type AgentMuxDesktopApi = {
   topics: {
     call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>
   }
-  spaceObjects: {
-    appearance(target: SpaceObjectImageTarget): Promise<SpaceObjectAppearance>
-    previewAvatar(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarImage>
-    saveAvatar(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarRef>
-    readAvatar(target: SpaceObjectImageTarget, ref: ObjectAvatarRef): Promise<ObjectAvatarImage>
-  }
   scratch: {
     setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<import('./scratch-topics').MoteArchiveState & { state: 'active' | 'archived' }>
     previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>
     saveMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef>
     readMoteAvatar(workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage>
-    listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicList>
+    listTopics(workspaceId: string): Promise<ScratchTopicSnapshot[]>
     readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
     ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
     ensureMote(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
@@ -1590,8 +1533,6 @@ export type AgentMuxDesktopApi = {
     /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
-    spatialLinksReady(): Promise<void>
-    onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(): Promise<string | null>
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
     listWorkspaceSkills(workspaceId: string, providerId: string): Promise<import('@agentmux/core').AgentSkill[]>
@@ -1652,25 +1593,14 @@ export type AgentMuxDesktopApi = {
     ) => DesktopControlResult | Promise<DesktopControlResult>): () => void
   }
   continuousProgress: ContinuousProgressApi
-  schedule: {
-    onChanged(listener: (loop: import('@agentmux/core').ContinuousProgressLoop) => void): () => void
-    list(params: AgentMuxRpcParams<'schedule.list'>): Promise<AgentMuxRpcResult<'schedule.list'>>
-    inspect(params: AgentMuxRpcParams<'schedule.inspect'>): Promise<AgentMuxRpcResult<'schedule.inspect'>>
-    create(params: AgentMuxRpcParams<'schedule.create'>): Promise<AgentMuxRpcResult<'schedule.create'>>
-    pause(params: AgentMuxRpcParams<'schedule.pause'>): Promise<AgentMuxRpcResult<'schedule.pause'>>
-    resume(params: AgentMuxRpcParams<'schedule.resume'>): Promise<AgentMuxRpcResult<'schedule.resume'>>
-    cancel(params: AgentMuxRpcParams<'schedule.cancel'>): Promise<AgentMuxRpcResult<'schedule.cancel'>>
-  }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
-    observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentSession>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     historySources(): Promise<AgentSessionHistoryDescriptor[]>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
-    historyResource(session: SessionHistoryReference, input: AgentSessionHistoryResourceRequest): Promise<AgentSessionHistoryResourceReadResult>
     confirmNativeSession(session: AgentSessionControl, input: AgentMuxNativeSessionConfirmationInput): Promise<AgentMuxNativeSessionConfirmation>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
       options?: { signal?: AbortSignal }): Promise<AgentSessionHistoryObservationHandle>
@@ -1684,9 +1614,7 @@ export type AgentMuxDesktopApi = {
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
-    recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }): Promise<void>
-    replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution }, authorHuman?: boolean, agentMuxNote?: string): Promise<void>
     submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
     respondInteraction(
       session: AgentSessionControl,
@@ -1837,20 +1765,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch'> & {
-  scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
-    listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
-  }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'write' | 'paste' | 'submitPrompt'> & {
-    /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
-    write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
-    paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
-    submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent'> & {
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void
-    /** Functions cross contextBridge; AbortSignal and its prototype stay in Renderer. */
-    observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
-      options?: { onAbort?: (abort: () => void) => () => void }): Promise<AgentSessionHistoryObservationHandle>
   }
   control: {
     onRequest(listener: (request: DesktopControlRequest) => void): () => void
@@ -1906,5 +1824,3 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   }
 }
 import type { MoteAvatarInput, MoteAvatarRef, MoteAvatarImage } from './mote-avatars.js'
-
-import type { SpaceObjectImageTarget, SpaceObjectAppearance, ObjectAvatarInput, ObjectAvatarImage, ObjectAvatarRef } from './object-avatars.js'

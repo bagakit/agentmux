@@ -40,10 +40,7 @@ function model(options: Options = {}) {
   const rail = document.querySelector('.browser-trace-rail')!, evidence = document.querySelector('.browser-step-evidence')!
   message.textContent = diagnostic.item.content.message
   nextAction.textContent = diagnostic.item.content.nextAction
-  const scrolls: unknown[] = [], captures: unknown[] = [], reads: string[] = [], clicks: string[] = [], captureFrames: number[] = []
-  let completedFrames = 0
-  const frame = window.requestAnimationFrame.bind(window)
-  Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => frame(at => { completedFrames++; callback(at) }) })
+  const scrolls: unknown[] = [], captures: unknown[] = [], reads: string[] = [], clicks: string[] = []
   const geometry = (element: typeof message, box: Box, count = 1) => {
     Object.defineProperty(element, 'getBoundingClientRect', { configurable: true, value: () => ({ ...box, right: box.x + box.width, bottom: box.y + box.height }) })
     Object.defineProperty(element, 'getClientRects', { configurable: true, value: () => Array.from({ length: count }, () => box) })
@@ -53,7 +50,7 @@ function model(options: Options = {}) {
   geometry(rail, options.railBounds ?? { x: 600, y: 80, width: 200, height: 440 })
   const stage = { x: 0, y: 80, width: 600, height: 440 }
   geometry(document.querySelector('[data-native-browser-stage]')!, stage)
-  Object.defineProperty(evidence, 'scrollIntoView', { value: (args: unknown) => scrolls.push(args) })
+  Object.defineProperty(message, 'scrollIntoView', { value: (args: unknown) => scrolls.push(args) })
   if (options.hidden) (options.hidden === 'message' ? message : nextAction).setAttribute('style', 'visibility: hidden')
   if (options.missing === 'evidence') evidence.remove()
   if (options.missing === 'message') message.remove()
@@ -80,17 +77,17 @@ function model(options: Options = {}) {
       }
       throw new Error(`Browser recovery timed out: ${label}`)
     },
-    capture: async (...args: unknown[]) => { captures.push(args.slice(1)); captureFrames.push(completedFrames) },
+    capture: async (...args: unknown[]) => { captures.push(args.slice(1)) },
     probe: { cdp: { evaluate: async (expression: string) => {
       reads.push(expression)
       // This is the exact emitted observation program, not a second geometry oracle.
       if (expression.includes("coordinateSpace:'renderer-css-px'")) options.beforeSample?.(sampleIndex++, result)
-      return JSON.parse(JSON.stringify(await window.eval(expression)))
+      return JSON.parse(JSON.stringify(window.eval(expression)))
     } }, main: { evaluate: async (expression: string) => runInNewContext(expression, {
       process: { getBuiltinModule: () => ({ createRequire: () => () => ({ BrowserWindow: { getAllWindows: () => [nativeWindow] } }) }) }
     }) } }
   }
-  const result = { ctx, window, message, nextAction, rail, geometry, scrolls, captures, captureFrames, reads, clicks,
+  const result = { ctx, window, message, nextAction, rail, geometry, scrolls, captures, reads, clicks,
     close: () => window.happyDOM.cancelAsync() }
   return result
 }
@@ -139,36 +136,22 @@ describe('local recovery diagnostic Source observation, without a Desktop', () =
     } finally { fixture.close() }
   })
 
-  it('keeps both complete paragraphs and the exact saved identity in the actual observation', async () => {
-    const fixture = model()
+  it('retains both clipped rectangles and the exact text when the original readability gate passes', async () => {
+    const fixture = model({ messageBounds: { x: 590, y: 70, width: 220, height: 80 }, nextActionBounds: { x: 620, y: 490, width: 200, height: 60 } })
     try {
       const { error, saved } = await runAndPersist(fixture)
       expect(error).toBeUndefined()
-      expect(saved.localRecovery.diagnosticUiSample).toMatchObject({ readable: true, reason: 'readable', operationId,
-        message: { bounds: { x: 620, y: 100, width: 160, height: 80 }, intersection: { x: 620, y: 100, width: 160, height: 80 } },
-        nextAction: { bounds: { x: 620, y: 190, width: 160, height: 40 }, intersection: { x: 620, y: 190, width: 160, height: 40 } } })
-      expect(saved.localRecovery.ui[0]).toMatchObject({ label: 'narrow', operationId,
-        text: diagnostic.item.content.message, nextAction: diagnostic.item.content.nextAction })
+      expect(saved.localRecovery.diagnosticUiSample).toMatchObject({ readable: true, reason: 'readable', operationId, observedOperationId: operationId,
+        message: { present: true, clientRects: 1, bounds: { x: 590, y: 70, width: 220, height: 80 }, intersection: { x: 600, y: 80, width: 200, height: 70 } },
+        nextAction: { present: true, clientRects: 1, bounds: { x: 620, y: 490, width: 200, height: 60 }, intersection: { x: 620, y: 490, width: 180, height: 30 } },
+        rail: { present: true, bounds: { x: 600, y: 80, width: 200, height: 440 } } })
+      expect(saved.localRecovery.ui).toEqual([{ label: 'narrow', operationId, text: diagnostic.item.content.message, nextAction: diagnostic.item.content.nextAction,
+        intersection: { x: 600, y: 80, width: 200, height: 70 }, bounds: { x: 590, y: 70, width: 220, height: 80 },
+        nextActionBounds: { x: 620, y: 490, width: 200, height: 60 }, nextActionIntersection: { x: 620, y: 490, width: 180, height: 30 } }])
       expect(saved.localRecovery.nativeOwners).toHaveLength(1)
       expect(fixture.captures).toEqual([['narrow-local-recovery-locator-diagnostic', 'operations', 'https://fixture.invalid/current']])
       expect(fixture.clicks).toEqual(['browser-rsi-history__item', 'browser-rsi-timeline__step-button'])
       expect(fixture.scrolls).toEqual([{ block: 'nearest' }])
-      expect(fixture.captureFrames).toHaveLength(1)
-      expect(fixture.captureFrames[0]).toBeGreaterThanOrEqual(2)
-    } finally { fixture.close() }
-  })
-
-  it.each([
-    [{ messageBounds: { x: 590, y: 70, width: 220, height: 80 } }, 'message-clipped'],
-    [{ nextActionBounds: { x: 620, y: 518, width: 160, height: 40 } }, 'next-action-clipped']
-  ] as const)('rejects a partially clipped paragraph instead of signing a few visible pixels: %j', async (options, reason) => {
-    const fixture = model(options)
-    try {
-      const { error, saved } = await runAndPersist(fixture)
-      expect(error).toBeInstanceOf(Error)
-      expect(saved.localRecovery.diagnosticUiSample).toMatchObject({ readable: false, reason })
-      expect(saved.localRecovery.ui).toBeUndefined()
-      expect(fixture.captures).toEqual([])
     } finally { fixture.close() }
   })
 

@@ -1,7 +1,0 @@
-# Bounded Markdown document layout
-
-`node apps/desktop/scripts/verify-file-markdown-layout.mjs` compiles the actual shared `AgentMarkdown`, its grammar projection, and the Desktop `file-preview.css` with production Vite settings. It mounts the same `file-markdown-preview` class in a bounded Region with a real decoded document image. This is the smallest real Chromium reproduction of the integration capture's three-column table collapsing to zero height: DOM-only tests still saw every row, while a flex column with bounded height and local overflow shrank the table and code blocks.
-
-Private ordinary Electron processes measure normal, narrow and short Regions. Every table row/cell must exist, its scroll container must retain the entire intrinsic table height, the next heading must follow the table, code must have no vertical clipping, and the document must scroll over its full content. A compiled-source mutation changes the production `flex-shrink: 0` rule to `1`; it must fail the same layout assertion. The next process compiles the unchanged candidate again and must pass. Source hashes and captured PNGs bind each phase; temporary profiles/build output are removed and user Sessions are never operated.
-
-The fixture injects a decoded local image presentation to create real content pressure. It does not claim Main byte authority, full Workbench identity/draft/restart behavior, or independent aesthetic approval. Those remain with the integration file-surface capture and an author-independent reviewer.

@@ -21,11 +21,6 @@ if (process.argv.includes('--pending-edit') && !process.env.AGENTMUX_PENDING_EDI
   process.exit(await runPendingEditRestart(process.argv.slice(2)))
 }
 
-if (process.argv.includes('--prompt-preparation-stage')) {
-  const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
-  process.exit(await runPendingEditRestart(process.argv.slice(2), 'prompt-preparation-stage'))
-}
-
 // Resolve legacy proof dependencies only after the isolated build dispatch.
 const { AgentMuxSpatialStateStore } = await import('../../../packages/core/dist/spatial-state.js')
 const { regionIds } = await import('../../../packages/core/dist/spatial-layout.js')

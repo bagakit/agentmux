@@ -194,28 +194,28 @@ describe('one Session owns one live queue drain', () => {
     expect(restored.pendingInteraction).toBeUndefined()
   })
 
-  it('does not send a tail archived while the head is in flight', async () => {
+  it('does not send a tail removed while the head is in flight', async () => {
     useAppStore.setState({ sessions: [agent()] })
-    const [head, tail] = enqueue('head', 'removed tail')
+    const [, tail] = enqueue('head', 'removed tail')
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined)
-    const drain = useAppStore.getState().sendQueuedAgentSteer('s', head!.operationId)
+    const drain = useAppStore.getState().flushAgentSteerQueue('s')
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
-    await useAppStore.getState().archiveAgentSteer('s', tail!.operationId, tail!.text, true)
+    useAppStore.getState().removeAgentSteer('s', tail!.operationId)
     gate.resolve()
     await drain
     expect(submit.mock.calls.map((call) => call[1])).toEqual(['head'])
-    expect(useAppStore.getState().agentSteerQueues.s).toEqual([expect.objectContaining({operationId:tail!.operationId,text:tail!.text,archived:true})])
+    expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined()
   })
 
-  it('refuses archiving an in-flight entry instead of pretending to cancel its accepted bytes', async () => {
+  it('does not pretend that removing an in-flight entry cancels its accepted bytes', async () => {
     useAppStore.setState({ sessions: [agent()] })
     const [head] = enqueue('in flight')
     const gate = deferred()
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(() => gate.promise)
-    const drain = useAppStore.getState().sendQueuedAgentSteer('s', head!.operationId)
+    const drain = useAppStore.getState().flushAgentSteerQueue('s')
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1)) // Race the actual submitted request.
-    await expect(useAppStore.getState().archiveAgentSteer('s', head!.operationId, head!.text, true)).rejects.toThrow('preparing or submitting')
+    useAppStore.getState().removeAgentSteer('s', head!.operationId)
     const retained = useAppStore.getState().agentSteerQueues.s
     gate.resolve()
     await drain
@@ -298,8 +298,8 @@ describe('one Session owns one live queue drain', () => {
     useAppStore.getState().enqueueAgentSteer('other', 'other message')
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
-      type: 'terminal-output', agentSessionId: 's', run: { runId: 's-run' }, data: 'output', dataBytes:new TextEncoder().encode('output'),
-      evidence: { source: 'terminal-output', observedAt: 2, run: { runId: 's-run' }, outputByteRange:{startByte:0,endByte:6} }
+      type: 'terminal-output', agentSessionId: 's', run: { runId: 's-run' }, data: 'output',
+      evidence: { source: 'terminal-output', observedAt: 2, run: { runId: 's-run' } }
     } })
     await Promise.resolve()
     expect(submit).not.toHaveBeenCalled()

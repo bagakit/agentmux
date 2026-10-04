@@ -1,5 +1,4 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -13,7 +12,7 @@ import type {
 } from '@agentmux/core'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-
+import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationReasoningTrace } from '@agentmux/client-ui/components/ConversationReasoningTrace'
 import { api } from '../src/renderer/src/lib/api'
@@ -192,7 +191,7 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(turn.querySelector('.log-turn__resource')).not.toBeNull()
   })
 
-  it('shares ConversationMessage in ActivityView with unified Markdown baseline', async () => {
+  it('shares ConversationMessage in SessionHistoryView with unified Markdown baseline', async () => {
     const historyParts: AgentSessionHistoryContentPart[] = [
       { kind: 'text', text: '## 历史回顾\n\n- 记录一\n- 记录二\n\n```bash\npnpm install\n```' }
     ]
@@ -214,11 +213,20 @@ describe('Conversation and History shared reading UI presentation', () => {
 
     await act(async () => {
       root.render(
-        <ActivityView {...activityReadingProps({ control: control, label: "Codex", visible: true, workspaceRoot: _hygiene_fixturePath("workspace"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
+        <SessionHistoryView
+          control={control}
+          label="Codex"
+          visible
+          themeId="graphite"
+          fontSize={12}
+          workspaceRoot={_hygiene_fixturePath("workspace")}
+          openWorkspaceFile={openFile}
+          openHttpLink={openHttp}
+        />
       )
     })
 
-    const turn = host.querySelector<HTMLElement>('.conversation-native-record .log-turn')
+    const turn = host.querySelector<HTMLElement>('.session-history__item .log-turn')
     expect(turn).not.toBeNull()
     expect(turn!.textContent).toContain('历史回顾')
     expect(turn!.querySelector('.md-heading')).not.toBeNull()
@@ -332,7 +340,7 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(copied).not.toContain('保密正文')
   })
 
-  it('mounts actual ActivityView and ActivityView with typed mixed parts and asserts exact DOM for all 4 parts categories', async () => {
+  it('mounts actual ActivityView and SessionHistoryView with typed mixed parts and asserts exact DOM for all 4 parts categories', async () => {
     const mixedParts: AgentSessionHistoryContentPart[] = [
       { kind: 'text', text: '**Mixed text body**' },
       { kind: 'reasoning', text: '**Mixed reasoning body**' },
@@ -358,7 +366,16 @@ describe('Conversation and History shared reading UI presentation', () => {
 
     await act(async () => {
       root.render(
-        <ActivityView {...activityReadingProps({ control: control, label: "Codex", visible: true, workspaceRoot: _hygiene_fixturePath("workspace"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
+        <SessionHistoryView
+          control={control}
+          label="Codex"
+          visible
+          themeId="graphite"
+          fontSize={12}
+          workspaceRoot={_hygiene_fixturePath("workspace")}
+          openWorkspaceFile={openFile}
+          openHttpLink={openHttp}
+        />
       )
     })
 

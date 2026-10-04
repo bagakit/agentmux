@@ -1,8 +1,8 @@
 import { mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError, durableWriteFile } from '@agentmux/core'
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, TOOLKIT_MAX_LISTED_TOOLS } from '@agentmux/core/control'
-const TOOLKIT_RECEIPT_LIMIT = TOOLKIT_MAX_LISTED_TOOLS
+import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
+const TOOLKIT_RECEIPT_LIMIT = TOOLKIT_MAX_USER_TOOLS + 1
 
 /** Latest facts only, in the existing durable writer; never an output log or Run registry. */
 export class ToolkitReceiptStore {

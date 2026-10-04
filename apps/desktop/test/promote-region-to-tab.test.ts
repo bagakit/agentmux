@@ -26,7 +26,8 @@ function agent(regionId: string, sessionId: string): WorkbenchSurface {
   return { regionId, kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId }
 }
 
-// File content is addressed by its resource document; a Region may have any Tab host.
+// 文件表面：它的宿主 Tab 由 fileTabId(path) 派生的 canonical id 寻址，故不能被促升进 view:… Tab
+// （见 promote-region-to-tab.ts 的豁免注释与 file-workbench-state.ts 那条不成文不变量）。
 function file(regionId: string, path: string): WorkbenchSurface {
   return { regionId, kind: 'file', workspaceId: 'workspace', path }
 }
@@ -288,16 +289,35 @@ describe('promoteRegionToTab（#487「单独变成一个 tab」）', () => {
     if (result.kind === 'promoted') expect(result.tabs['new-tab']).toBeUndefined()
   })
 
-  it('promotes the same File Region and preserves its Zone and resource context', () => {
-    let source = createWorkbenchTab('source', file('f0', 'research.note.json'))
-    source = addWorkbenchRegion(source, 'f0', 'right', launcher('r1'))
-    source.space = {spaceId:'topic-a',zoneId:'research-zone'}
-    const result = promoteRegionToTab({tabs:{source},layouts:{workspace:createWorkspaceLayout('g',['source'])},workspaceId:'workspace',tabId:'source',regionId:'f0',mint:{tabId:'new-tab'}})
-    expect(result.kind).toBe('promoted')
-    if(result.kind !== 'promoted') throw new Error('File promotion failed')
-    expect(result.tabs['new-tab']!.regions.f0).toBe(source.regions.f0)
-    expect(result.tabs['new-tab']!.space).toBe(source.space)
-    expect(result.tabs.source!.regions.f0).toBeUndefined()
-    expect(regionIds(result.tabs['new-tab']!.layout.root)).toEqual(['f0'])
+  it('文件格豁免：促升一个 file 格是 no-op，且非文件格仍能促升——豁免只挡 file 这一种', () => {
+    // 文件面的宿主 Tab 由 fileTabId(path) 这个 canonical id 寻址；把 file 面搬进 view:… Tab 会让
+    // reduceDocumentAttached / reduceDocumentLoadFailed 按 canonical id 找不到它（重开文件会造重复、
+    // 重载/失败会漏掉这一格）。所以 file 格不可促升——这正是 move-session-view 只搬 agent/terminal 的同一条理由。
+    // 用「同一张 Tab 里，file 格拒、相邻的非 file 格准」逼出判据：只挡 file，不误伤别的 kind。
+    let sourceTab = createWorkbenchTab('source', file('f0', 'a.txt'))
+    sourceTab = addWorkbenchRegion(sourceTab, 'f0', 'right', launcher('r1'))
+    const layouts = { workspace: createWorkspaceLayout('group-one', ['source']) }
+
+    // 促升 file 格：no-op。
+    const fileResult = promoteRegionToTab({
+      tabs: { source: sourceTab },
+      layouts,
+      workspaceId: 'workspace',
+      tabId: 'source',
+      regionId: 'f0',
+      mint: { tabId: 'new-tab' }
+    })
+    expect(fileResult.kind, 'file 格被促升进了 view:… Tab——破坏文件宿主 Tab 的 canonical-id 不变量').toBe('unchanged')
+
+    // 同一 fixture 里促升相邻的 launcher 格：照旧成功。若豁免写成「非 file 才 no-op」之类的取反，这一条会红。
+    const launcherResult = promoteRegionToTab({
+      tabs: { source: sourceTab },
+      layouts,
+      workspaceId: 'workspace',
+      tabId: 'source',
+      regionId: 'r1',
+      mint: { tabId: 'new-tab' }
+    })
+    expect(launcherResult.kind, '豁免误伤了非 file 格').toBe('promoted')
   })
 })

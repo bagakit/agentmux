@@ -105,7 +105,7 @@ export function composerExtensions(
     renderText({ node }) { return node.attrs.text },
     addNodeView() {
       return ReactNodeViewRenderer(({ node }) => <NodeViewWrapper as="span" className="composer-image" contentEditable={false}>
-        <ConversationImage text={node.attrs.text} path={node.attrs.path} readImage={readPastedImage} />
+        <ConversationImage text={node.attrs.text} path={node.attrs.path} readPastedImage={readPastedImage} />
       </NodeViewWrapper>)
     }
   }), keywordUnderlineExtension(keywords)]

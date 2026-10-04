@@ -21,16 +21,13 @@ function message(error: unknown): string {
  * checked before any state write, so a slow status for one workspace can never overwrite a newer one
  * after the user switches workspaces (the same request-id discipline the branches hook uses).
  */
-export function useGitStatus(workspaceId: string | null, active = true): GitStatusRequestState & {
+export function useGitStatus(workspaceId: string | null): GitStatusRequestState & {
   refresh: () => Promise<boolean>
 } {
   const [state, setState] = useState<GitStatusRequestState | null>(null)
   const requestId = useRef(0)
-  const autoRead = useRef<object | null>(null)
-  const scope = useRef<object>({})
 
   const refresh = useCallback(async () => {
-    autoRead.current = scope.current
     if (!workspaceId) {
       setState(null)
       return false
@@ -65,12 +62,9 @@ export function useGitStatus(workspaceId: string | null, active = true): GitStat
   }, [workspaceId])
 
   useEffect(() => {
-    scope.current = {}; autoRead.current = null
+    void refresh()
     return () => { requestId.current += 1 }
   }, [refresh])
-  useEffect(() => {
-    if (active && autoRead.current !== scope.current) void refresh()
-  }, [active, refresh])
 
   const visible = state?.workspaceId === workspaceId
     ? state

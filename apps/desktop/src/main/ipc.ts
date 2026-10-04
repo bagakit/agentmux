@@ -1,11 +1,5 @@
-import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
-import { SpaceObjectImages } from './space-object-images.js'
-import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
-import { TopicSearchHistoryOwner } from './topic-search-history.js'
-import type { SpatialLinkIngress } from './spatial-link-ingress.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
-import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
@@ -13,9 +7,8 @@ import { desktopNameHistory } from './name-history.js'
 import type { AgentMuxNameContext } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
-import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
-import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
+import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
@@ -59,7 +52,6 @@ import {
 } from 'electron'
 import {
   AgentMuxControlServer,
-  connectAgentMuxRpc,
   agentMuxRpcHttpOptions,
   AgentMuxError,
   type AgentPromptCondition,
@@ -142,8 +134,6 @@ import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
-import { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
-import { RemoteCoreUpgradeManager, type RemoteCoreUpgradeExpected } from '@agentmux/core'
 import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from './settings-executor-refresh-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
@@ -160,7 +150,6 @@ import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
-import { FileReadOwner } from './file-read-owner.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
 import { createSpaceZoneResource } from './space-zone-resources.js'
@@ -170,7 +159,7 @@ import { rebindLocalFolder } from './workspace-rebind.js'
 import { executeSettingsWorkspaceAddControl, registerWorkspace } from './settings-workspace-add-control.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
-import { openDemandStore, type DemandStore } from '@agentmux/demand'
+import { openDemandStore } from '@agentmux/demand'
 
 function workspace(config: AppConfig, id: string): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
@@ -192,12 +181,10 @@ export async function registerIpc(args: {
   configStore: ConfigStore
   runtime: RuntimeController
   progressLoops: ContinuousProgressLoopManager
-  demands?: DemandStore
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
   environmentWarning?: string
   onRendererUpdateReady?: (token: string) => void
-  spatialLinks?: SpatialLinkIngress
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
@@ -217,10 +204,6 @@ export async function registerIpc(args: {
     if (bound !== config) config = await args.configStore.save(bound)
   } catch (error) { initialBindingError = error }
   args.runtime.commit(initialRuntime)
-  // Directory metadata maintenance is advisory and never holds up the original Runtime/input.
-  const scratchForIdentity = config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
-  if (scratchForIdentity) void Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity, { shortenMotes: true }))
-    .catch(error => process.stderr.write(`Directory identity startup maintenance: ${String(error)}\n`))
   if (initialBindingError) args.runtime.reportBindingSaveFailure(initialRuntime, initialBindingError)
   let releaseExecutorConfigEdit: (() => void) | undefined
   let toolkit: ToolkitOwner
@@ -251,17 +234,13 @@ export async function registerIpc(args: {
       if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
-  const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({
-    stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades')
-  }), configOwner, args.runtime)
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id), {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
-  const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts')) }
-  const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
+  const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const git = new GitService((id) => args.runtime.executionHost(id))
   // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
@@ -269,11 +248,7 @@ export async function registerIpc(args: {
   // workspace's host differently.
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
-  void browserProfiles.initialize().catch(error => {
-    // Profile metadata is a Browser service failure, not authority to stop healthy Agents or
-    // prevent the host from loading. The manager retains the cause for Browser requests below.
-    process.stderr.write(`browser_profile_initialization_failed=${JSON.stringify(error instanceof Error ? error.message : String(error))}\n`)
-  })
+  await browserProfiles.initialize()
   const browserInputHistory = new BrowserInputHistoryStore(join(app.getPath('userData'), 'browser-input-history'))
   const browserOperationJournal = new BrowserOperationJournal(
     new BrowserOperationFileStore(join(app.getPath('userData'), BROWSER_OPERATION_JOURNAL_FILE))
@@ -374,9 +349,7 @@ export async function registerIpc(args: {
     return result.occupied
   })
   const disposeProgressChanges = args.progressLoops.subscribe((loop) => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) {
-      args.window.webContents.send(loop.calendar ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
-    }
+    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONTINUOUS_PROGRESS_CHANGED, loop)
   })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
     // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
@@ -386,7 +359,7 @@ export async function registerIpc(args: {
     controlBridge.accept(response)
   }
   const executeControlOwner = async (
-    request: AgentMuxControlRequest, signal?: AbortSignal
+    request: AgentMuxControlRequest
   ): Promise<AgentMuxControlResult> => {
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
       if(!request.presentation && !('requestId' in request.target)) {
@@ -415,7 +388,7 @@ export async function registerIpc(args: {
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
-    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
+    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test') return await executeSettingsHostsControl(request, configOwner, args.runtime)
     if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
@@ -423,11 +396,11 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
-    return projectBrowserControlResult(await controlBridge.execute(request, signal))
+    return projectBrowserControlResult(await controlBridge.execute(request))
   }
-  const executeControl = (request: AgentMuxControlRequest, context?: AgentMuxNameContext, signal?: AbortSignal): Promise<AgentMuxControlResult> =>
+  const executeControl = (request: AgentMuxControlRequest, context?: AgentMuxNameContext): Promise<AgentMuxControlResult> =>
     nameChangeRequests.run({ context: context ?? unknownNameContext(request.operation), operationId: request.requestId },
-      () => executeControlOwner(request, signal))
+      () => executeControlOwner(request))
   ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,
@@ -490,9 +463,6 @@ export async function registerIpc(args: {
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
-  handle('hosts:upgradeCheck', async (input: HostConfig) => await hostUpgrades.check(input))
-  handle('hosts:upgrade', async (input: HostConfig, expected: RemoteCoreUpgradeExpected, operationId: string) => await hostUpgrades.upgrade(input, expected, operationId))
-  handle('hosts:upgradeInspect', async (input: HostConfig, operationId: string) => await hostUpgrades.inspect(input, operationId))
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
   //
@@ -654,15 +624,6 @@ export async function registerIpc(args: {
   handle('files:readDirectory', async (workspaceId: string, path: string) =>
     await files.readDirectory(workspace(config, workspaceId), path)
   )
-  handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
-    await files.listFiles(workspace(config, workspaceId), path, limit)
-  )
-  const publicFiles = new FileReadOwner({ files, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
-    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
-  handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
-    requireTrustedSender('files:readPublic', event)
-    return await publicFiles.read(input)
-  })
   handle('files:read', async (workspaceId: string, path: string) => await files.read(workspace(config, workspaceId), path))
   handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
     await files.readPreview(workspace(config, workspaceId), path, options)
@@ -719,10 +680,9 @@ export async function registerIpc(args: {
   handle('scratch:readTopic', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.read(workspace(config, workspaceId), topicId)
   )
-  handle('scratch:listTopics', async (workspaceId: string) => {
-    const topics = await args.scratchTopics.list(workspace(config, workspaceId))
-    return { topics, issues: topics.issues ?? [] }
-  })
+  handle('scratch:listTopics', async (workspaceId: string) =>
+    await args.scratchTopics.list(workspace(config, workspaceId))
+  )
   handle('scratch:ensureTopic', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.ensure(workspace(config, workspaceId), topicId)
   )
@@ -762,38 +722,10 @@ export async function registerIpc(args: {
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
-  const notebookStore = new AgentMuxNotebookStore()
-  const disposeNotebook = notebookStore.subscribe(observation => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
-  })
-  handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); return notebookStore.read() })
-  handleWithEvent('notebook:apply', async (event, input: NotebookWrite) => {
-    requireTrustedSender('notebook:apply', event)
-    return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
-  })
-  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID),
-    new TopicSearchHistoryOwner(join(app.getPath('userData'), 'topic-search-history.json')))
-  topicKnowledge.setFileReadPort(publicFiles)
+  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
     workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),
     categories: () => topicKnowledge.listCategories(), ensureDefaultCategory: () => topicKnowledge.ensureDefaultCategoryContent() }))
-  const spaceObjectImages = new SpaceObjectImages(async target => {
-    if (target.kind === 'category') return topicKnowledge.categoryAppearanceDirectory(target.categoryId, target.objectKey)
-    return { hostId: workspace(config, target.workspaceId).hostId,
-      directoryPath: await topicKnowledge.topicAppearanceDirectory(target.workspaceId, target.topicId, target.objectKey) }
-  })
-  handleWithEvent('spaceObjects:appearance', async (event, target: SpaceObjectImageTarget) => {
-    requireTrustedSender('spaceObjects:appearance', event); return spaceObjectImages.appearance(target)
-  })
-  handleWithEvent('spaceObjects:previewAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => {
-    requireTrustedSender('spaceObjects:previewAvatar', event); return spaceObjectImages.preview(target, input)
-  })
-  handleWithEvent('spaceObjects:saveAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => {
-    requireTrustedSender('spaceObjects:saveAvatar', event); return spaceObjectImages.save(target, input)
-  })
-  handleWithEvent('spaceObjects:readAvatar', async (event, target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => {
-    requireTrustedSender('spaceObjects:readAvatar', event); return spaceObjectImages.read(target, ref)
-  })
   handleWithEvent('topics:call', async (event, method: import('@agentmux/core').TopicMethod, params: import('@agentmux/core').TopicParams<import('@agentmux/core').TopicMethod>) => {
     requireTrustedSender('topics:call', event)
     return topicKnowledge.call(method, params)
@@ -854,10 +786,6 @@ export async function registerIpc(args: {
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
     requireTrustedSender('ui:rendererUpdateReady', event)
     args.onRendererUpdateReady?.(token)
-  })
-  handleWithEvent('ui:spatialLinksReady', event => {
-    requireTrustedSender('ui:spatialLinksReady', event)
-    args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))
   })
   handle('ui:readClipboardText' , () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
@@ -963,15 +891,13 @@ export async function registerIpc(args: {
     }
     throw primary
   })
-  handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => sessionLaunchResult(() => args.runtime.launchTerminal(input, config)))
+  handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
   handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handle('sessions:historySources', async () => args.runtime.sessionHistorySources())
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
-  handle('sessions:historyResource', async (session: import('../shared/contracts.js').SessionHistoryReference, input: import('@agentmux/core').AgentSessionHistoryResourceRequest) =>
-    args.runtime.sessionHistoryResource(session, input, config))
   const historyObservations = new SessionHistoryObservationOwners((reference, listener, signal) =>
     args.runtime.observeSessionHistory(reference, listener, config, signal))
   handleWithEvent('sessions:observeHistory', async (event, token: string, session: import('../shared/contracts.js').SessionHistoryReference) => {
@@ -1004,60 +930,10 @@ export async function registerIpc(args: {
   })
   const progressTargetMatches = (loop: ContinuousProgressTarget, target: ContinuousProgressTarget): boolean =>
     loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
-  // The original Unix transport supplies the local user principal after the
-  // original trusted Renderer check; the request cannot assert human provenance.
-  const callSchedule = async <M extends import('@agentmux/core').ScheduleMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>) => {
-    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
-    try { return await client.call(method, input) }
-    finally { await client.dispose() }
-  }
-  handleWithEvent('schedule:list', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => {
-    requireTrustedSender('schedule:list', event)
-    return callSchedule('schedule.list', input)
-  })
-  handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => {
-    requireTrustedSender('schedule:inspect', event)
-    return callSchedule('schedule.inspect', input)
-  })
-  handleWithEvent('schedule:create', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => {
-    requireTrustedSender('schedule:create', event)
-    return callSchedule('schedule.create', input)
-  })
-  handleWithEvent('schedule:pause', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => {
-    requireTrustedSender('schedule:pause', event)
-    return callSchedule('schedule.pause', input)
-  })
-  handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => {
-    requireTrustedSender('schedule:resume', event)
-    return callSchedule('schedule.resume', input)
-  })
-  handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
-    requireTrustedSender('schedule:cancel', event)
-    return callSchedule('schedule.cancel', input)
-  })
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
     requireTrustedSender('continuousProgress:list', event)
     await args.progressLoops.start()
-    return args.progressLoops.list().filter(loop => !loop.calendar && progressTargetMatches(loop, target))
-  })
-  handleWithEvent('continuousProgress:goals', async (event, goalId: string) => {
-    requireTrustedSender('continuousProgress:goals', event)
-    return args.progressLoops.listGoals(goalId)
-  })
-  handleWithEvent('continuousProgress:prepareGoal', async (event, input: import('./continuous-progress-loop-manager.js').GoalProgressStart, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
-    requireTrustedSender('continuousProgress:prepareGoal', event)
-    if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
-    return args.progressLoops.prepareGoal(input, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)
-  })
-  handleWithEvent('continuousProgress:initialGoalInput', async (event, target: ContinuousProgressTarget, loopId: string, operationId: string, phase: 'begin' | 'confirm') => {
-    requireTrustedSender('continuousProgress:initialGoalInput', event)
-    if (phase !== 'begin' && phase !== 'confirm') throw new Error('Unknown original Goal input phase.')
-    return args.progressLoops.initialGoalInput(target, loopId, operationId, phase)
-  })
-  handleWithEvent('continuousProgress:goalAction', async (event, goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', revision: number, operationId: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
-    requireTrustedSender('continuousProgress:goalAction', event)
-    if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
-    return args.progressLoops.goalAction(goalId, loopId, action, revision, operationId, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)
+    return args.progressLoops.list().filter(loop => progressTargetMatches(loop, target))
   })
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
@@ -1068,7 +944,7 @@ export async function registerIpc(args: {
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => {
     requireTrustedSender('continuousProgress:action', event)
     await args.progressLoops.start()
-    const loop = args.progressLoops.list().find(loop => !loop.calendar && loop.loopId === loopId && progressTargetMatches(loop, target))
+    const loop = args.progressLoops.list().find(loop => loop.loopId === loopId && progressTargetMatches(loop, target))
     if (!loop) throw new Error('This loop does not belong to the requested target.')
     if (action === 'pause') return await args.progressLoops.pause(loopId)
     if (action === 'stop') return await args.progressLoops.stopLoop(loopId)
@@ -1092,15 +968,6 @@ export async function registerIpc(args: {
     if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
     return await sessionInputWriteResult(() => args.runtime.paste(session, text, terminalData))
   })
-  handleWithEvent('sessions:recordDeliveryFailure', async (event, input: DeliveryAttempt) => {
-    requireTrustedSender('sessions:recordDeliveryFailure', event)
-    const record = parseDeliveryAttempt(input)
-    if (record.source !== 'client' || record.observation !== undefined || record.reporter !== undefined) {
-      throw new AgentMuxError('Client reports cannot author Core Input or authenticated identity.', 'CONTROL_PERMISSION_DENIED')
-    }
-    return await deliveryAttempts.store.record({ ...record,
-      reporter: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}`, receivedAt: Date.now(), routeHostId: deliveryAttempts.hostId } })
-  })
   handleWithEvent('sessions:submitPrompt', async (
     event,
     session: AgentSessionControl,
@@ -1109,32 +976,16 @@ export async function registerIpc(args: {
     condition: AgentPromptCondition,
     choice?: Parameters<RuntimeController['submitPrompt']>[5],
     authorHuman?: boolean,
-    agentMuxNote?: string,
-    sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8],
-    goalContinuation?: { goalId: string; loopId: string }
-  ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
+    agentMuxNote?: string
+  ) => {
     let effectiveAuthorHuman = false
     if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     if (authorHuman === true) {
       assertManualPromptSenderTrusted(event.sender, args.window.webContents)
       effectiveAuthorHuman = true
     }
-    if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-    if (goalContinuation) {
-      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-      if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
-      await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
-        (isCurrent, signal) => args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel))
-    } else {
-      pauseUserProgress(session, 'Paused for your message.')
-      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
-    }
-  }))
-  handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
-    input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-    pauseUserProgress(session, 'Paused for your question reply.')
-    return await args.runtime.replyQuestion(session, input, config)
+    pauseUserProgress(session, 'Paused for your message.')
+    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote)
   })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => {
     await args.runtime.submitMessage(session, message)
@@ -1164,7 +1015,6 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
-  handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string) => await args.runtime.recoverSession(session, config, workspacePath, operationId))
   handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })
@@ -1210,11 +1060,8 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
-  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string) => {
-    const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
-    await browserProfiles.initialize()
-    return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId)
-  })
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string) =>
+    await browsers.create(id, url, verifiedBrowserWorkspace(config.workspaces, workspaceId), rememberedProfileId))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))
@@ -1223,9 +1070,8 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:switchProfile', event)
     return await browsers.switchProfile(id, profileId)
   })
-  handleWithEvent('browser:listProfiles', async (event) => {
+  handleWithEvent('browser:listProfiles', (event) => {
     requireTrustedSender('browser:listProfiles', event)
-    await browserProfiles.initialize()
     return browserProfiles.listProfiles()
   })
   handleWithEvent('browser:createProfile', async (event, label: string) => {
@@ -1466,23 +1312,15 @@ export async function registerIpc(args: {
   handle('browser:restore', async (
     id: string,
     input: { workspaceId: unknown; profileId: string; viewport: BrowserViewport }
-  ) => {
-    const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, input.workspaceId)
-    await browserProfiles.initialize()
-    return await browsers.restore(id, { ...input, workspaceId: verifiedWorkspaceId })
-  })
+  ) => await browsers.restore(id, { ...input, workspaceId: verifiedBrowserWorkspace(config.workspaces, input.workspaceId) }))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
-    deliveryAttempts,
     execute: executeControl,
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,
     topics: topicKnowledge,
-    files: publicFiles,
-    schedules: args.progressLoops,
-    notebookStore,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     ...(rpcHttp ? { http: rpcHttp } : {}),
@@ -1523,11 +1361,10 @@ export async function registerIpc(args: {
   await control.start()
   return async () => {
     await runOwnerDisposals([
-      async () => { acceptingControl = false; disposeSpatial(); disposeNotebook()
+      async () => { acceptingControl = false; disposeSpatial()
     disposeToolkitIpc(); await toolkit.dispose() },
       () => {
         acceptingControl = false
-        args.spatialLinks?.unavailable()
         args.window.webContents.off('destroyed', closeMetrics)
         metrics.dispose()
         ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)

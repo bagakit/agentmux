@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ComposerQueuedMessage } from './ComposerOutbox'
@@ -11,13 +11,11 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel }: {
   onSave: EditQueuedMessage
   onCancel: () => void
 }) {
-  const editorRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [original] = useState(entry.text)
   const [text, setText] = useState(entry.text)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  useLayoutEffect(() => { editorRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }) }, [error, entry.editable])
   const save = async () => {
     if (saving || !entry.editable || !text.trim()) return
     setSaving(true); setError(null)
@@ -25,7 +23,7 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel }: {
     catch (failure) { setError(presentError(failure)); textareaRef.current?.focus({ preventScroll: true }) }
     finally { setSaving(false) }
   }
-  return <div ref={editorRef} className="composer-queued-editor" data-editing-id={entry.id} onKeyDown={event => {
+  return <div className="composer-queued-editor" data-editing-id={entry.id} onKeyDown={event => {
     // Arrow/Home/End and Enter belong to this text draft, never floating queue navigation or Send.
     event.stopPropagation()
     if (!isImeOwnedKeyboardEvent(event) && event.key === 'Escape' && !saving) { event.preventDefault(); onCancel() }

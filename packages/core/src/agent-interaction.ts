@@ -268,8 +268,7 @@ function questionRequest(
 export function normalizeTerminalInteraction(
   envelope: NativeHookEnvelope,
   observedAt: number,
-  protocol: AgentTerminalInteractionDetection,
-  resolvedToolCallId?: string
+  protocol: AgentTerminalInteractionDetection
 ): AgentMuxInteractionRequest | undefined {
   const payload = envelope.payload ?? {}
   // 消费 adapter 已得到的 normalized.eventName（通过内部解析后的信封传递），不重新看 payload 字段猜名。
@@ -295,7 +294,7 @@ export function normalizeTerminalInteraction(
   // 拼法，不受影响），于是 Agent 一直停在等待、用户无从批准。与 7377272b 是同一个决定。
   if (canonicalHookLifecycleEvent(eventName ?? undefined) === 'permission-request') {
     const toolInput = serializedInput(payload.tool_input ?? payload.toolInput)
-    const nativeToolCallId = nativeHookToolCallId(payload) ?? resolvedToolCallId
+    const nativeToolCallId = nativeHookToolCallId(payload)
     return {
       kind: 'permission',
       id: envelope.receiptId,

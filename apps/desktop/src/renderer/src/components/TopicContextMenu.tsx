@@ -1,15 +1,13 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { ArrowRightLeft, Copy, Crosshair, Link, MoreHorizontal, NotebookText, Pencil, Pin, PinOff, RotateCcw, Shapes, ToggleLeft, ToggleRight } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { ArrowRightLeft, Copy, Crosshair, MoreHorizontal, NotebookText, Pencil, Pin, PinOff, RotateCcw, Shapes, ToggleLeft, ToggleRight } from 'lucide-react'
+import { useRef, type ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
+import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
 
 type TopicMenuActions = {
   pinned: boolean
   onCopyPath(): void
-  onCopyCard(): void
-  onCopyLink(): void
   onRename(): void
   onReveal(): void
   onTogglePin(): void
@@ -25,15 +23,13 @@ type TopicMenuActions = {
 function topicMenuItems(Item: typeof ContextMenu.Item, Separator: typeof ContextMenu.Separator, actions: TopicMenuActions, openDialog: (callback: () => void) => void) {
   return <>
     {actions.onMove ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onMove!)}><ArrowRightLeft size={14} /><span>Move to category…</span></Item> : null}
-    {actions.onChangeIcon ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onChangeIcon!)}><Shapes size={14} /><span>Change avatar…</span></Item> : null}
+    {actions.onChangeIcon ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onChangeIcon!)}><Shapes size={14} /><span>Change icon…</span></Item> : null}
     <Item className="tab-context-menu__item" onSelect={actions.onTogglePin}>
       {actions.pinned ? <PinOff size={14} /> : <Pin size={14} />}<span>{actions.pinned ? 'Unpin Topic' : 'Pin Topic'}</span>
     </Item>
     <Separator className="tab-context-menu__separator" />
     <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><Pencil size={14} /><span>Rename Topic</span></Item>
     <Separator className="tab-context-menu__separator" />
-    <Item className="tab-context-menu__item" onSelect={actions.onCopyCard}><Copy size={14} /><span>Copy Topic card</span></Item>
-    <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><Link size={14} /><span>Copy Topic link</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onReveal}><Crosshair size={14} /><span>Reveal in Files</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onCopyPath}><Copy size={14} /><span>Copy Topic Path</span></Item>
     <Separator className="tab-context-menu__separator" />
@@ -60,15 +56,18 @@ export function TopicContextMenu({ children, ...actions }: TopicMenuActions & { 
 
 /** Dialog actions wait until Radix releases the menu focus scope and restore its invoker. */
 export function TopicActionsMenu({ title, ...actions }: TopicMenuActions & { title: string }) {
-  const menu = useSpaceObjectActionsMenu()
-  return <DropdownMenu.Root onOpenChange={menu.onOpenChange}>
-    <DropdownMenu.Trigger asChild><button ref={menu.trigger} type="button" className="icon-button workspace-topic-entry__actions" aria-label={`Actions for ${title}`} title={`Actions for ${title}`}
+  const trigger = useRef<HTMLButtonElement>(null), pendingDialog = useRef<(() => void) | null>(null)
+  return <DropdownMenu.Root onOpenChange={open => { if (open) pendingDialog.current = null }}>
+    <DropdownMenu.Trigger asChild><button ref={trigger} type="button" className="icon-button workspace-topic-entry__actions" aria-label={`Actions for ${title}`} title={`Actions for ${title}`}
       onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
       onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><MoreHorizontal size={15} /></button></DropdownMenu.Trigger>
     <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
       <DropdownMenu.Content className="tab-context-menu topic-context-menu" align="end" collisionPadding={8}
-        onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onCloseAutoFocus={menu.onCloseAutoFocus}>
-        {topicMenuItems(DropdownMenu.Item, DropdownMenu.Separator, actions, menu.openDialog)}
+        onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onCloseAutoFocus={event => {
+          const callback = pendingDialog.current; pendingDialog.current = null
+          if (callback) { event.preventDefault(); trigger.current?.focus(); callback() }
+        }}>
+        {topicMenuItems(DropdownMenu.Item, DropdownMenu.Separator, actions, callback => { pendingDialog.current = callback })}
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
   </DropdownMenu.Root>

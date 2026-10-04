@@ -95,8 +95,8 @@ it('reveals held facts and scoped inputs after intent, allows reading transfer a
   const reads = [vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline'), vi.spyOn(api.workspaces, 'appearance')]
   destination.focus(); await pointer(card(), 'pointerover'); await advance(179); expect(preview()).toBeNull()
   expect(reads.every(read => read.mock.calls.length === 0)).toBe(true)
-  await advance(1); expect(preview()?.textContent).toContain(response); expect(preview()?.querySelector('.focus-context-hover__recap > small')?.getAttribute('title')).toContain('Last assistant message')
-  expect(preview()?.querySelector('footer')?.getAttribute('aria-label')).toContain(_hygiene_fixturePath("private/card-interaction")); expect(preview()?.querySelector('footer')?.getAttribute('aria-label')).toContain(second)
+  await advance(1); expect(preview()?.textContent).toContain(response); expect(preview()?.textContent).toContain('Last assistant message')
+  expect(preview()?.textContent).toContain(_hygiene_fixturePath("private/card-interaction")); expect(preview()?.textContent).toContain(second)
   expect(document.activeElement).toBe(destination)
   const panel = preview()!; await pointer(card(), 'pointerout', panel); await pointer(panel, 'pointerover', card()); await advance(170)
   await act(async () => panel.dispatchEvent(new Event('scroll', { bubbles: false }))); expect(preview()).toBe(panel)

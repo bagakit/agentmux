@@ -80,8 +80,6 @@ Do not create an empty Goal before the proposed requirement is understood and co
 
 Read "$AGENTMUX_CLI" --skill, "$AGENTMUX_CLI" mote playbook pmo and the relevant command help before acting. The public app snapshot, Settings workspace registration, Goal update/binding, Agent open/input and receipt inspection capabilities are the route; do not invent commands. Desktop goal start and goal assign --start can launch or deliver to an execution Agent, so inspect their actual Session and delivery facts before repeating. A domain-only metadata command or an assignment alone is not equivalent to that execution. Authorization to carry out a bounded attempt is separate from the person's goal confirmation and result acceptance; do not demand the latter as a replacement for authorization already given.
 
-For everyday collaboration, offer a few worthwhile ideas grounded in the user's current direction, confirmed original notes, linked Goals and the exact discussion context that is actually available. Explain relevance, source, scope and a concrete next step; distinguish proposals from facts and unknowns. Use explicit feedback and saved cooperation preferences for later suggestions without inferring global preferences from a passing remark. Keep follow-ups brief and timely; read relevant original materials before repeating a settled question. Discussion or read-only research does not authorize external messages, purchases, schedules or writes.
-
 Current user instructions and authoritative Runtime, permission, Session, Project, Goal and Run facts take precedence over this default role, saved personality and Topic history. Keep healthy Agents, existing files and work surfaces available. Do not invent an identity, capability, assignment or successful delivery.`
 
 export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# Mote Guide
@@ -112,8 +110,6 @@ export type ScratchTopicSnapshot = {
   physicalDirectoryPath?: string
   /** Original durable directory identity, independent of a home relocation. */
   identityDirectoryPath?: string
-  /** Live exact addresses confirmed by the original Main directory owner; not a registry. */
-  confirmedDirectoryPaths?: readonly string[]
   topicPath: string
   title: string
   summary: string
@@ -123,13 +119,6 @@ export type ScratchTopicSnapshot = {
   collaborators: ScratchTopicCollaborator[]
   wiki?: TopicWikiSnapshot
 }
-
-/** Read-only original directory authority; independent of Topic/SOUL sidecar contents. */
-export type ScratchDirectoryFact = Pick<ScratchTopicSnapshot, 'id' | 'identityDirectoryPath' | 'physicalDirectoryPath' | 'confirmedDirectoryPaths' | 'readError'>
-
-export type ScratchTopicList = ScratchTopicSnapshot[] & { issues?: string[] }
-/** Plain envelope survives Electron IPC and contextBridge; list attributes do not. */
-export type ScratchTopicListResponse = { topics: ScratchTopicSnapshot[]; issues: string[] }
 
 export type TopicWikiSnapshot = {
   path: string
@@ -206,34 +195,23 @@ export function scratchWorkspaceFilePath(workspace: { id: string; path: string }
 
 export function scratchTopicIdFromWorkspacePath(
   scratchRoot: string,
-  workspacePath: string,
-  topics?: readonly ScratchTopicSnapshot[] | null
+  workspacePath: string
 ): string | null {
-  if (topics) {
-    const matches = topics.filter(topic => topic.confirmedDirectoryPaths?.includes(workspacePath) || topic.identityDirectoryPath === workspacePath || topic.physicalDirectoryPath === workspacePath)
-    if (matches.length) return matches.length === 1 ? matches[0]!.id : null
-  }
   for (const root of Object.values(scratchTopicStorageRoots(scratchRoot))) {
     if (!workspacePath.startsWith(`${root}/`) && !workspacePath.startsWith(`${root}\\`)) continue
     const relative = workspacePath.slice(root.length + 1)
     if (!relative || relative.includes('/') || relative.includes('\\')) return null
-    const id = scratchTopicIdFromDirectoryName(relative)
-    if (topics) {
-      const topic = topics.find(item => item.id === id)
-      return topic && topic.confirmedDirectoryPaths === undefined && !topic.readError ? id : null
-    }
-    return id
+    return scratchTopicIdFromDirectoryName(relative)
   }
   return null
 }
 
 export function workspaceOwnsSessionPath(
   workspace: { id: string; hostId: string; path: string },
-  session: { hostId: string; workspacePath: string },
-  topics?: readonly ScratchTopicSnapshot[] | null
+  session: { hostId: string; workspacePath: string }
 ): boolean {
   if (workspace.hostId !== session.hostId) return false
   if (workspace.path === session.workspacePath) return true
   return workspace.id === SCRATCH_WORKSPACE_ID &&
-    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics) !== null
+    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) !== null
 }

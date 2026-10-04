@@ -11,8 +11,7 @@ import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { executeToolkitConfig, prepareToolkitConfig, findToolkitTool } from '../src/main/toolkit-config'
 import type { AppConfig } from '../src/shared/contracts'
 import { ToolkitSettingsPane } from '../src/renderer/src/components/settings/ToolkitSettingsPane'
-const accountUsageScript = 'console.log("User authored tool")\n'
-const editableTool = { ...definition('auth'), name: 'Auth', script: accountUsageScript, args: ['tool', 'current'] }
+import { accountUsageScript } from '../src/renderer/src/components/settings/account-usage-template'
 import { UserToolkitResult } from '../src/renderer/src/components/toolkit/UserToolkitResult'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { api } from '../src/renderer/src/lib/api'
@@ -25,7 +24,7 @@ vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ 
 const dom = composerDOM(), paths: string[] = []
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} }) })
 afterEach(async () => { for (const path of paths.splice(0)) await rm(path, { recursive: true }) })
-function definition(id: string): ToolkitToolDefinition { return ({ id, revision: `saved-${id}`, name: id, icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("fixed"), script: `console.log('${id}')`, args: [], actions: [] }) }
+const definition = (id: string): ToolkitToolDefinition => ({ id, revision: `saved-${id}`, name: id, icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("fixed"), script: `console.log('${id}')`, args: [], actions: [] })
 async function setup(tools: ToolkitToolDefinition[] = []) {
   const directory = await mkdtemp(join(tmpdir(), 'amx-custom-identity-')); paths.push(directory)
   const path = join(directory, 'config.json'); let config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools } }
@@ -81,9 +80,10 @@ describe('actual Toolkit custom identity', () => {
     expect(dom.container.querySelector('[data-tool-id="performance"]')?.getAttribute('aria-pressed')).toBe('false')
     expect(m.writer.add).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled()
   })
-  it('a saved inline user tool remains fully editable alongside packages', async () => {
-    const m = await setup([{ ...editableTool, revision: 'initial', workspacePath: _hygiene_fixturePath("fixed") }]); await dom.render(<m.View />)
-    expect(m.writer.add).not.toHaveBeenCalled()
+  it('a starting point can become an unrelated user tool with every authored field saved', async () => {
+    const m = await setup(); await dom.render(<m.View />); await button('Starting points')
+    expect(dom.container.querySelector('.toolkit-template__source')?.textContent).toBe(accountUsageScript)
+    expect(m.writer.add).not.toHaveBeenCalled(); await button('Use this starting point')
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-identity-script]')?.value).toBe(accountUsageScript)
     await fill('.toolkit-editor__name input', 'Workspace summary')
     await dom.click('.toolkit-icon-picker input[value="zap"]')
@@ -93,16 +93,16 @@ describe('actual Toolkit custom identity', () => {
     await button('Add action'); await fill('.toolkit-editor__action-heading input', 'Open report')
     await fill('[data-identity-script]', "console.log('Report ready')\n"); await button('Add argument')
     await fill('.toolkit-argument input', 'report.md'); await button('Main script'); await button('Save tool')
-    expect(m.writer.update).toHaveBeenCalledOnce(); await expect(m.writer.update.mock.results[0]!.value).resolves.toBeDefined(); const id = 'auth'
+    expect(m.writer.add).toHaveBeenCalledOnce(); await expect(m.writer.add.mock.results[0]!.value).resolves.toBeDefined(); const [id] = m.writer.add.mock.calls[0]!
     const saved = findToolkitTool(m.owner.current, id)
-    expect(saved).toEqual({ id, revision: expect.any(String), name: 'Workspace summary', icon: 'zap', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("workspace-notes"), script: "console.log('Workspace summary')\n", args: ['--project', 'current'], actions: [{ id: expect.any(String), label: 'Open report', script: "console.log('Report ready')\n", args: ['report.md'] }] })
+    expect(saved).toEqual({ id, revision: expect.any(String), name: 'Workspace summary', icon: 'zap', enabled: false, statusBar: 'icon', workspacePath: _hygiene_fixturePath("workspace-notes"), script: "console.log('Workspace summary')\n", args: ['--project', 'current'], actions: [{ id: expect.any(String), label: 'Open report', script: "console.log('Report ready')\n", args: ['report.md'] }] })
     expect(JSON.parse(await readFile(m.path, 'utf8')).toolkit.tools).toEqual([saved])
     expect(Object.keys(saved).sort()).toEqual(['actions', 'args', 'enabled', 'icon', 'id', 'name', 'revision', 'script', 'statusBar', 'workspacePath'].sort())
     expect(m.run).not.toHaveBeenCalled()
   })
-  it('preserves dirty fields across local and Built-in, then honors the exact changed deep link', async () => {
+  it('preserves dirty fields across starting points and Built-in, then honors the exact changed deep link', async () => {
     const m = await setup([definition('alpha'), definition('beta')]); await dom.render(<m.View />)
-    await fill('.toolkit-editor__name input', 'Authored alpha draft'); await dom.click('[data-tool-id="performance"]'); await dom.click('[data-tool-id="alpha"]')
+    await fill('.toolkit-editor__name input', 'Authored alpha draft'); await button('Starting points'); await dom.click('[data-tool-id="performance"]'); await dom.click('[data-tool-id="alpha"]')
     expect(dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')?.value).toBe('Authored alpha draft')
     await dom.render(<m.View toolId="beta" request={1} />)
     expect(dom.container.querySelector('[data-tool-editor]')?.getAttribute('data-tool-editor')).toBe('beta')
@@ -125,7 +125,8 @@ describe('actual Toolkit custom identity', () => {
     const tools = Array.from({ length: 128 }, (_, index) => definition(`custom-${index}`)), m = await setup(tools)
     await dom.render(<m.View />); expect(dom.container.querySelectorAll('[data-identity-script]')).toHaveLength(1)
     await dom.click('[data-tool-id="custom-127"]'); expect(dom.container.querySelector('[data-identity-script]')?.getAttribute('data-identity-script')).toBe('custom-127')
-    const create = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(item => item.textContent?.trim() === 'New custom tool')!
+    await button('Starting points'); expect(dom.container.querySelectorAll('[data-identity-script]')).toHaveLength(0)
+    const create = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(item => item.textContent?.trim() === 'Use this starting point')!
     expect(create.isConnected).toBe(true); expect(create.disabled).toBe(true)
     await dom.render(<m.View active={false} />); expect(dom.container.querySelectorAll('[data-identity-script]')).toHaveLength(0)
     expect(m.writer.add).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled()

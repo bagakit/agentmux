@@ -16,6 +16,7 @@ const productPaths = [
   "packages/client-ui/src/components/ConversationMessage.tsx",
   "apps/desktop/src/renderer/src/components/ConversationAxis.tsx",
   "apps/desktop/src/renderer/src/components/ActivityView.tsx",
+  "apps/desktop/src/renderer/src/components/SessionHistoryView.tsx",
   "packages/client-ui/src/styles/conversation-message.css"
 ]
 const sourcePaths = [...productPaths, owningTest, owningConfig, owningTypes]
@@ -24,7 +25,8 @@ const loadedPaths = [
   "packages/client-ui/src/lib/conversation-speaker.ts",
   "packages/client-ui/src/components/ConversationMessage.tsx",
   "apps/desktop/src/renderer/src/components/ConversationAxis.tsx",
-  "apps/desktop/src/renderer/src/components/ActivityView.tsx"
+  "apps/desktop/src/renderer/src/components/ActivityView.tsx",
+  "apps/desktop/src/renderer/src/components/SessionHistoryView.tsx"
 ]
 const mutants = {
   "unknown-appearance": "packages/client-ui/src/lib/conversation-speaker.ts",
@@ -57,7 +59,7 @@ const callers = [
   ],
   [
     "historyContext",
-    "apps/desktop/src/renderer/src/components/ActivityView.tsx",
+    "apps/desktop/src/renderer/src/components/SessionHistoryView.tsx",
     "conversationSessionId={control.agentSessionId}",
     1
   ]

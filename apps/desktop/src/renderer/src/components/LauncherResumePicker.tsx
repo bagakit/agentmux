@@ -1,4 +1,3 @@
-import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import * as Dialog from '@radix-ui/react-dialog'
 import { ArrowRight, Check, ChevronDown, Clock3, FolderOpen, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
@@ -39,11 +38,10 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   const requestOwner = useRef(0)
   const selectionOwner = useRef<string | undefined>(undefined)
   const listId = useId()
-  const topics = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
-  const rows = useMemo(() => open ? launcherResumeRows({ topics,
+  const rows = useMemo(() => open ? launcherResumeRows({
     candidates, config, workspace, timelines: facts.timelines, agentNames: facts.names, sessions: facts.sessions,
     nativeRecaps: Object.fromEntries(Object.entries(reads).map(([id, read]) => [id, read.recap]))
-  }) : EMPTY_ROWS, [open, candidates, config, workspace, facts, reads, topics])
+  }) : EMPTY_ROWS, [open, candidates, config, workspace, facts, reads])
   const filtered = useMemo(() => filterLauncherResumeRows(rows, scope, query), [rows, scope, query])
   const savedSelection = filtered.find(row => row.candidate.agentSessionId === selectedId) ?? filtered[0]
   const selectedSessionId = savedSelection?.candidate.agentSessionId
@@ -62,13 +60,13 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   }, [open, selectedSessionId])
   const selectedSession = useAppStore(selectedSessionSelector)
   const savedSession = useMemo(() => facts.sessions.find(session => session.id === selectedSessionId), [facts.sessions, selectedSessionId])
-  const selected = useMemo(() => savedSelection && selectedSessionId ? launcherResumeRows({ topics,
+  const selected = useMemo(() => savedSelection && selectedSessionId ? launcherResumeRows({
     candidates: [savedSelection.candidate], config, workspace,
     timelines: selectedTimeline ? { [selectedSessionId]: selectedTimeline } : facts.timelines,
     agentNames: selectedName === undefined ? {} : { [selectedSessionId]: selectedName },
     sessions: selectedSession ? [selectedSession] : savedSession ? [savedSession] : [],
     nativeRecaps: { [selectedSessionId]: reads[selectedSessionId]?.recap }
-  })[0] : undefined, [savedSelection, selectedSessionId, config, workspace, selectedTimeline, selectedName, selectedSession, savedSession, facts.timelines, reads, topics])
+  })[0] : undefined, [savedSelection, selectedSessionId, config, workspace, selectedTimeline, selectedName, selectedSession, savedSession, facts.timelines, reads])
   const selectedTimelineRecap = selectedSessionId ? launcherTimelineRecap(selectedTimeline ?? facts.timelines[selectedSessionId]) : null
   const projectCount = rows.filter(row => row.inProject).length
   const selectedHostConfigured = Boolean(config?.hosts.some(host => host.id === selectedHostId))

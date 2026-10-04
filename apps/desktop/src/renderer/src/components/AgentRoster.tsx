@@ -1,4 +1,3 @@
-import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, ShieldAlert } from 'lucide-react'
@@ -10,7 +9,6 @@ import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
 import { statusDotTier } from '../lib/attention-event'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { CONTEXT_PRESSURE_HINT } from '../lib/agent-usage'
 
 // The roster behind the attention bar's total.
 //
@@ -36,6 +34,22 @@ import { CONTEXT_PRESSURE_HINT } from '../lib/agent-usage'
 function stateFor(row: RosterRow): ReturnType<typeof statusDotTier> {
   return statusDotTier(row.state)
 }
+
+/**
+ * 每档上下文压力对应的**下一步**，给悬停提示和屏幕阅读器用。
+ *
+ * 写的是用户能做的事，不是形容词。"high" 只是把百分比换了个说法，用户读完仍不知道该干什么；
+ * "wrap up or start a fresh session" 说的是在压缩发生之前还来得及做的那件事。
+ *
+ * 刻意不写「即将压缩」或任何时间预测：各家 Provider 在什么阈值压缩我们不知道，也不猜
+ * （`AgentContextUsage` 的正文已明说这条）。这里说的是**我们的提醒时机**，不是对 Provider 行为的预报。
+ */
+// 导出而不是各写一份：Agents dock 的行也要念同一句「下一步该做什么」。两处若各抄一份，
+// 哪天改了措辞就有一处漏改，用户在两个面上读到两种建议。见 SurfaceToolDock 的 WorkspaceAgentsTool。
+export const CONTEXT_PRESSURE_HINT = {
+  caution: 'plan to wrap up or start a fresh session',
+  danger: 'wrap up now or start a fresh session'
+} as const
 
 export function RosterRowView({
   row,
@@ -208,8 +222,7 @@ function AgentTreeContents({ filter, heading }: { filter: AgentTreeFilter; headi
   const workspaces = useAppStore((state) => state.config?.workspaces)
   const selectSession = useAppStore((state) => state.selectSession)
   const reportError = useAppStore((state) => state.reportError)
-  const topics = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
-  const projects = buildAgentTree({ sessions, providerCatalog, workspaces: workspaces ?? [], filter, topics })
+  const projects = buildAgentTree({ sessions, providerCatalog, workspaces: workspaces ?? [], filter })
   return <>
     <div className="agent-roster__heading">
       <span>{heading}</span>

@@ -2,6 +2,7 @@ const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } =
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentTurnUsage } from '@agentmux/core'
 import type { AppConfig, RuntimeEvent, RuntimeSnapshot, SessionSnapshot } from '../src/shared/contracts'
@@ -28,12 +29,10 @@ vi.mock('electron', () => ({
       listeners.add(listener); transport.listeners.set(channel, listeners)
     },
     off: (channel: string, listener: (...args: unknown[]) => void) => transport.listeners.get(channel)?.delete(listener),
-    removeListener: (channel: string, listener: (...args: unknown[]) => void) => transport.listeners.get(channel)?.delete(listener),
     send: vi.fn()
   }
 }))
 import '../src/preload/index'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts'
 import { extractTurnUsage, parseTurnUsage } from '../../../packages/core/src/agent-usage-transcript'
 import { useAppStore } from '../src/renderer/src/store'
@@ -51,13 +50,12 @@ const config: AppConfig = {
     selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true
   } }
 }
-let renderedCalls: string[]
 let root: Root | undefined, container: HTMLDivElement, overlay: HTMLDivElement, dispose: (() => void) | undefined
 
 function agent(id: string): Agent {
   const providerId = id === 'unknown' ? 'claude' : 'codex'
   return { id, kind: 'agent', providerId, executorId: providerId, hostId: 'local', workspacePath: _hygiene_fixturePath("private/headroom"),
-    label: id, createdAt: 1, updatedAt: NOW - 100, agentSessionUpdatedAt: NOW - 100, processState: 'running', latestOutputBytes: 0,
+    label: id, createdAt: 1, updatedAt: NOW - 100, processState: 'running', latestOutputBytes: 0,
     status: { state: 'working', source: 'native-hook', observedAt: NOW - 100 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true,
       replyCorrelation: 'none', usage: { kind: 'native-transcript', transcriptFormat: providerId === 'codex' ? 'codex-rollout' : 'claude-jsonl' } },
@@ -143,9 +141,6 @@ beforeEach(async () => {
   const snapshot: RuntimeSnapshot = { sessions: IDS.map(agent), timelines: {}, recoveryCandidates: [] }
   transport.handlers.set('sessions:snapshot', () => structuredClone(snapshot))
   transport.handlers.set('ui:requestStorageFlush', () => undefined)
-  transport.handlers.set('schedule:list', () => ({ schedules: [] }))
-  transport.handlers.set('continuousProgress:list', () => [])
-  transport.handlers.set('continuousProgress:pauseForInput', () => undefined)
   useAppStore.persist.clearStorage(); window.localStorage.clear()
   useAppStore.setState({ ...initial, loading: true }, true)
   await useAppStore.persist.rehydrate()
@@ -153,16 +148,11 @@ beforeEach(async () => {
   dispose = await useAppStore.getState().initialize()
   expect(useAppStore.getState().loading).toBe(false)
   expect(useAppStore.getState().error).toBeNull()
-  expect(transport.calls).toEqual(['spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list'])
+  expect(transport.calls).toEqual(['config:get', 'sessions:snapshot', 'providers:list', 'demands:list'])
   container = document.createElement('div'); overlay = document.createElement('div'); overlay.dataset.overlayHost = ''
   document.body.append(container, overlay); root = createRoot(container)
   await act(async () => root!.render(<Workbench />))
   await openTree()
-  renderedCalls = [...transport.calls]
-  expect(renderedCalls).toEqual([
-    'spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list',
-    ...IDS.flatMap(() => ['schedule:list', 'continuousProgress:list'])
-  ])
 })
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
@@ -194,7 +184,7 @@ it('real preload publications reach the multi-Agent tree, workspace list and eac
   expect(unknown.details.textContent).not.toContain('0%')
   expect(document.querySelector('.agent-tree')!.textContent).toContain('70%')
   expect(document.querySelector('.agent-tree [data-pressure="danger"]')!.getAttribute('title')).toContain('start a fresh session')
-  expect(transport.calls).toEqual(renderedCalls)
+  expect(transport.calls).toEqual(['config:get', 'sessions:snapshot', 'providers:list', 'demands:list'])
 })
 
 it('a newer compacted reading reduces pressure while mid-turn publication keeps its original sample time', async () => {
@@ -262,8 +252,7 @@ it('a native turn without capacity remains unknown and does not lock the healthy
   expect(composer('unknown').details.textContent).toContain('never an estimate from lifetime billing')
   expect(composer('high').chip.textContent).toContain('90%')
   expect(useAppStore.getState().agentSteerQueues).toEqual({})
-  // Each explicit Composer input retains its existing continuous-progress pause; usage adds no reads.
-  expect(transport.calls).toEqual([...renderedCalls, 'continuousProgress:pauseForInput', 'continuousProgress:pauseForInput'])
+  expect(transport.calls).toEqual(['config:get', 'sessions:snapshot', 'providers:list', 'demands:list'])
 })
 
 it('the published native usage is owned by the Store rather than its mutable incoming envelope', async () => {

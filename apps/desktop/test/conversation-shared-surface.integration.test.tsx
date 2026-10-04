@@ -1,5 +1,4 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -8,10 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-
+import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { api } from '../src/renderer/src/lib/api'
 import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
-import * as markdown from '@agentmux/client-ui/agent-markdown'
+import * as markdown from '../src/renderer/src/lib/agent-markdown'
 
 type Entry = 'live' | 'history'
 
@@ -29,8 +28,8 @@ let root: Root
 let annotate: ReturnType<typeof vi.fn>
 let openFile: ReturnType<typeof vi.fn>
 let openHttp: ReturnType<typeof vi.fn>
-let clipboardSpy: import('vitest').MockInstance<typeof api.ui.writeClipboardText>
-let historyPageSpy: import('vitest').MockInstance<typeof api.sessions.historyPage>
+let clipboardSpy: ReturnType<typeof vi.spyOn>
+let historyPageSpy: ReturnType<typeof vi.spyOn>
 
 function page(parts: AgentSessionHistoryContentPart[]): AgentSessionHistoryPage {
   return {
@@ -103,7 +102,16 @@ async function mount(entry: Entry, content = SOURCE, parts?: AgentSessionHistory
           openHttpLink={openHttp}
         />}</ConversationAnnotationOwner>
       ) : (
-        <ActivityView {...activityReadingProps({ control: control, label: "Agent", visible: true, workspaceRoot: _hygiene_fixturePath("synthetic"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
+        <SessionHistoryView
+          control={control}
+          label="Agent"
+          visible
+          themeId="graphite"
+          fontSize={12}
+          workspaceRoot={_hygiene_fixturePath("synthetic")}
+          openWorkspaceFile={openFile}
+          openHttpLink={openHttp}
+        />
       )
     )
   )
@@ -432,7 +440,16 @@ it('renders a repeated readonly part reference without duplicate React keys', as
   try {
     await act(async () =>
       root.render(
-        <ActivityView {...activityReadingProps({ control: control, label: "Agent", visible: true, workspaceRoot: _hygiene_fixturePath("synthetic"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
+        <SessionHistoryView
+          control={control}
+          label="Agent"
+          visible
+          themeId="graphite"
+          fontSize={12}
+          workspaceRoot={_hygiene_fixturePath("synthetic")}
+          openWorkspaceFile={openFile}
+          openHttpLink={openHttp}
+        />
       )
     )
     expect(host.querySelectorAll('.log-turn__trace')).toHaveLength(2)
@@ -483,7 +500,16 @@ it('assigns distinct local keys to parts with duplicate callIds without key warn
   try {
     await act(async () =>
       root.render(
-        <ActivityView {...activityReadingProps({ control: control, label: "Agent", visible: true, workspaceRoot: _hygiene_fixturePath("synthetic"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
+        <SessionHistoryView
+          control={control}
+          label="Agent"
+          visible
+          themeId="graphite"
+          fontSize={12}
+          workspaceRoot={_hygiene_fixturePath("synthetic")}
+          openWorkspaceFile={openFile}
+          openHttpLink={openHttp}
+        />
       )
     )
     const traces = host.querySelectorAll<HTMLButtonElement>('.conversation-tool-trace__row')

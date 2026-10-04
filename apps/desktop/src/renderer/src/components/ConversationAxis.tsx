@@ -54,7 +54,7 @@ export function ConversationAxis({
   items: readonly RulerAxisItem[]
   /** Actual width of the shared ruler track. */
   width?: number
-  recentFraction?: number | null
+  recentFraction?: number
   conversationSessionId?: string | undefined
   /** 轴语义：哪些身份在这条轴上留标记。两条轴只有这个参数不同。 */
   belongs: SpeakerPredicate
@@ -147,7 +147,7 @@ function AxisMark({
   recentFraction = 0
 }: {
   mark: ConversationAxisMark
-  recentFraction?: number | null
+  recentFraction?: number
   size: number
   describe: DescribeSpeaker
   selected: boolean
@@ -168,7 +168,7 @@ function AxisMark({
     <button
       type="button"
       className="conversation-axis__mark"
-      data-era={recentFraction === null ? undefined : mark.fraction < recentFraction ? 'history' : 'recent'}
+      data-era={mark.fraction < recentFraction ? 'history' : 'recent'}
       // 位置来自全量 scale 的 fraction，与主刻度同一条时间基准。
       style={{ left: `${mark.fraction * 100}%` }}
       data-selected={selected ? '' : undefined}
@@ -195,7 +195,7 @@ function AxisMark({
 
 function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, conversationSessionId, recentFraction = 0 }: {
   cluster: ConversationAxisCluster
-  recentFraction?: number | null
+  recentFraction?: number
   conversationSessionId?: string | undefined
   size: number
   describe: DescribeSpeaker
@@ -213,7 +213,7 @@ function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, c
     <Menu.Trigger asChild>
       <button type="button" className="conversation-axis__mark conversation-axis__cluster"
         style={{ left: `clamp(32px, ${cluster.fraction * 100}%, calc(100% - 32px))` }} data-selected={selected ? '' : undefined}
-        data-era={recentFraction === null ? undefined : cluster.members.every(mark => mark.fraction < recentFraction) ? 'history' : cluster.members.every(mark => mark.fraction >= recentFraction) ? 'recent' : 'mixed'}
+        data-era={cluster.members.every(mark => mark.fraction < recentFraction) ? 'history' : cluster.members.every(mark => mark.fraction >= recentFraction) ? 'recent' : 'mixed'}
         aria-label={`${cluster.members.length} messages; choose a record`}>
         <span className="conversation-axis__participants" aria-hidden="true">
           {participants.slice(0, 3).map(speaker => <AxisAvatar key={JSON.stringify([speaker.role, speaker.id])}

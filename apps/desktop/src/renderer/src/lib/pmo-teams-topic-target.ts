@@ -5,7 +5,7 @@ import { useAppStore } from '../store'
 import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { sessionStatusLabel } from './session-presentation'
-import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from './workbench-session-subscriptions'
+import { recordForWorkbenchTab, useWorkbenchTabSessions } from './workbench-session-subscriptions'
 import { workbenchTabDisplayName } from './workbench-tab-presentation'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 import type { WorkbenchSurface } from './workbench-tabs'
@@ -41,7 +41,6 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
     return candidate?.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topicId ? candidate : undefined
   })
   const sessions = useWorkbenchTabSessions(tab)
-  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
   const names = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   // Unlike activeWorkbenchSurface, a missing active Region must stay unknown;
@@ -55,8 +54,8 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const moteName = useMemo(() => topics?.find(topic => topic.id === topicId)?.title ??
     (topicId === PMO_TEAMS_TOPIC_ID ? PMO_TEAMS_TOPIC_TITLE : 'Saved Mote'), [topics, topicId])
   const name = useMemo(() => tab
-    ? workbenchTabDisplayName(tab, sessions, names, timelines, sessionNameMetadata)
-    : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, sessionNameMetadata, moteName])
+    ? workbenchTabDisplayName(tab, sessions, names, timelines)
+    : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, moteName])
   const statusText = moteTargetStatus(tab, session, tabId)
   const label = name === moteName ? moteName : `${moteName} · ${name}`
   return { topicId, tabId, tab, region, session, name, moteName, label, statusText }

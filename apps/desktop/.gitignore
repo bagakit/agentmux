@@ -1,0 +1,8 @@
+# Brand bitmaps are derived from `brand/icon-source.png` on every `pnpm
+# predev` / `pnpm prebuild` by `scripts/build-brand-assets.mjs`. The source
+# icon is the single tracked image; the three consumer files below are
+# regenerated locally so the AppKit shell icon, the dock icon and the
+# renderer's `BrandIcon` cannot drift out of sync.
+resources/icon.icns
+resources/icon.png
+resources/icon-128.png

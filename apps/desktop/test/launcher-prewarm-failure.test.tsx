@@ -36,19 +36,19 @@ describe('original Launcher after speculative shell failure', () => {
     expect(input).not.toBeNull()
     await act(async () => { useAppStore.setState({ agentNames: { original: 'Still healthy' } }); await Promise.resolve() })
     expect(launch).toHaveBeenCalledOnce()
-    expect(useAppStore.getState().warmTerminal?.creation?.issue?.message).toBe('Host warm unavailable')
+    expect(useAppStore.getState().warmTerminal).toBeNull()
     expect(dom.container.querySelector('.composer__editor')).toBe(input)
     await dom.click('[aria-label="Open Terminal"]')
     expect(promote).toHaveBeenCalledWith('original-group', undefined)
     expect(useAppStore.getState().sessions[0]!.control).toEqual(composerSession().control)
     expect(dom.draft()).toBe('Keep my draft')
-    // A different target cannot displace the retained, unconfirmed original operation.
-    // Its ordinary explicit Terminal action remains available without stopping the old Run.
+    // A different actual host/cwd can attempt its own warm. No new render of the
+    // failed original target is used as authorization to retry it.
     launch.mockResolvedValue(shell('new-host-shell') as never)
     await act(async () => useAppStore.setState({ config: { ...composerConfig,
       workspaces: [{ ...composerConfig.workspaces[0]!, path: _hygiene_fixturePath("another-project") }] } }))
-    expect(launch).toHaveBeenCalledOnce()
-    expect(useAppStore.getState().warmTerminal?.creation?.request.workspacePath).toBe(_hygiene_fixturePath("repo"))
+    expect(launch).toHaveBeenCalledTimes(2)
+    expect(launch.mock.calls[1]![0].workspacePath).toBe(_hygiene_fixturePath("another-project"))
   })
 
   it('can fill an empty slot again after the original warm successfully became available', async () => {

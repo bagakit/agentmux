@@ -179,9 +179,8 @@ describe('WorkspaceFiles root confinement', () => {
       writeFile(join(race.requested, 'inside.txt'), 'inside'),
       writeFile(join(race.outside, 'outside.txt'), 'outside')
     ])
-    const listed = await race.files.readDirectory(race.workspace, 'list')
-    expect(listed).toEqual([
-      { name: 'inside.txt', path: 'list/inside.txt', isDirectory: false, isSymlink: false, mtimeMs: (await stat(join(race.held, 'inside.txt'))).mtimeMs }
+    await expect(race.files.readDirectory(race.workspace, 'list')).resolves.toEqual([
+      { name: 'inside.txt', path: 'list/inside.txt', isDirectory: false, isSymlink: false }
     ])
     expect(localWorkerRace.beforeInput).toBeNull()
   })
@@ -670,7 +669,7 @@ describe('WorkspaceFiles root confinement', () => {
     await expect(files.readDirectory(workspace, '')).resolves.toEqual([
       { name: 'escape', path: 'escape', isDirectory: true, isSymlink: true, linkTarget: outside },
       { name: 'src', path: 'src', isDirectory: true, isSymlink: false },
-      { name: 'README.md', path: 'README.md', isDirectory: false, isSymlink: false, mtimeMs: (await stat(join(root, 'README.md'))).mtimeMs }
+      { name: 'README.md', path: 'README.md', isDirectory: false, isSymlink: false }
     ])
     await files.create(workspace, { path: 'src/new.ts', kind: 'file' })
     await files.create(workspace, { path: 'src/lib', kind: 'directory' })
@@ -1057,7 +1056,7 @@ describe('WorkspaceFiles root confinement', () => {
         return { stdout: `${String(args.at(-1))}\n`, stderr: '', exitCode: 0 }
       }
       if (command === 'sh' && args[2] === 'agentmux-directory') {
-        return { stdout: _hygiene_fixturePath("srv/project\u0000src\u0000d\u0000\u0000README.md\u0000f\u0000\u0000link\u0000lf\u0000\u0000"), stderr: '', exitCode: 0 }
+        return { stdout: _hygiene_fixturePath("srv/project\u0000src\u0000d\u0000README.md\u0000f\u0000link\u0000lf\u0000"), stderr: '', exitCode: 0 }
       }
       return { stdout: '', stderr: '', exitCode: 0 }
     })

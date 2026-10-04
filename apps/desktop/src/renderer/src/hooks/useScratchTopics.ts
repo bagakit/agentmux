@@ -6,17 +6,17 @@ import { useAppStore } from '../store'
 /**
  * Every consumer reads the same raw filesystem snapshot and revision-owned request.
  */
-export function useScratchTopics(workspaceId: string | null, active = true): {
+export function useScratchTopics(workspaceId: string | null): {
   topics: readonly ScratchTopicSnapshot[] | null
   error: string | null
 } {
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === workspaceId))
-  const revision = useAppStore(state => active && workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : null)
+  const revision = useAppStore(state => workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : 0)
   const snapshot = useAppStore(state => workspaceId ? state.scratchTopicSnapshots[workspaceId] : undefined)
   const refresh = useAppStore(state => state.refreshScratchTopics)
   const scope = workspace ? scratchTopicsScope(workspace) : null
   useEffect(() => {
-    if (active && workspaceId && scope) void refresh(workspaceId)
-  }, [active, workspaceId, scope, revision, refresh])
+    if (workspaceId && scope) void refresh(workspaceId)
+  }, [workspaceId, scope, revision, refresh])
   return snapshot?.scope === scope ? { topics: snapshot.topics, error: snapshot.error } : { topics: null, error: null }
 }

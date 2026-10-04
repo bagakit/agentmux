@@ -1,7 +1,7 @@
 import { regionIds } from '@agentmux/layout'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialSave } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
 import type { EditorRegionDiffState } from '../store'
 import type { FileWorkbenchState } from './file-workbench-state'
 import { effectiveFileRegionMode, fileSupportsInlinePreview, publicFileRegionMode, storedFileRegionMode, type EditorRegionMode } from './file-region-presentation'
@@ -36,7 +36,7 @@ export async function executeWorkfaceFileView(ports: WorkfaceFileViewPorts,
   if (owners.length !== 1) return refuse('REGION_NOT_OPEN', 'The exact original Region entity is missing or ambiguous.')
   const tab = owners[0]!, surface = tab.regions[id]!
   if (surface.kind !== 'file') return refuse('SPACE_REGION_KIND', 'This command changes only a File Region presentation.')
-  const key = documentKey(surface.workspaceId, surface.path), format = workspaceFileFormat(surface.path)
+  const key = documentKey(surface.workspaceId, surface.path), format = workspaceFilePreviewFormat(surface.path)
   const topicWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicWorkspace) ?? []
   const catalog = spatialCatalog(state, topics)
@@ -44,18 +44,17 @@ export async function executeWorkfaceFileView(ports: WorkfaceFileViewPorts,
   base.locations = catalog.locations.filter(location => location.regionId === id && location.tabId === tab.id)
   const read = (current: ReturnType<WorkfaceFileViewPorts['get']>) => {
     const currentBinary = current.documentIssues[key]?.kind === 'binary'
-    const currentReadonly = Boolean(currentBinary || !format.sourceEditable)
+    const currentReadonly = Boolean(currentBinary || format && !format.sourceEditable)
     base.supportedModes = currentReadonly ? ['preview'] : current.documents[key]
       ? fileSupportsInlinePreview(surface.path) ? ['source', 'diff', 'preview'] : ['source', 'diff'] : null
     base.storedOverride = publicFileRegionMode(storedFileRegionMode(current.editorRegionModes, id))
     const mode = effectiveFileRegionMode(current.editorRegionModes, id, surface.path, current.documentIssues[key]?.kind === 'binary')
     base.effectiveMode = publicFileRegionMode(mode)
-    base.data = currentBinary ? 'binary-preview' : !format.sourceEditable ? 'media-preview' : current.documents[key] ? 'text'
+    base.data = currentBinary ? 'binary-preview' : format && !format.sourceEditable ? 'media-preview' : current.documents[key] ? 'text'
       : current.documentIssues[key] ? 'failed' : 'unconfirmed'
     const diff = Object.hasOwn(current.editorRegionDiffs, id) ? current.editorRegionDiffs[id] : undefined
     base.content = mode === 'diff' ? { status: diff?.error ? 'failed' : diff?.loading ? 'loading' : diff?.diff ? 'available' : 'unconfirmed', reason: diff?.error ?? null }
       : currentReadonly ? { status: 'unconfirmed', reason: 'Preview bytes and decoding belong to the original visible File pane.' }
-      : mode === 'preview' && ['json', 'csv', 'tsv'].includes(format.sourcePreview ?? '') ? { status: 'unconfirmed', reason: 'The original source is available; structured rendering is confirmed by its visible File pane.' }
       : current.documents[key] ? { status: 'available', reason: null }
       : { status: current.documentIssues[key] ? 'failed' : 'unconfirmed', reason: current.documentIssues[key]?.kind === 'read-error' ? current.documentIssues[key].message : null }
   }

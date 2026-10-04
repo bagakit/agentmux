@@ -6,7 +6,7 @@ import { executorDetectionLabel } from '../lib/executor-detection'
 import { AgentAvatar } from './AgentAvatar'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 
 /** The same configured, Host-scoped choices in the Launcher and an existing workface. */
 export function AgentExecutorPicker({ executors, selected, onSelect, active = true, disabled = false }: {

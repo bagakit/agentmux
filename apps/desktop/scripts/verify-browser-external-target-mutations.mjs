@@ -18,13 +18,6 @@ const ownerTests = ['apps/desktop/test/browser-external-target.test.ts']
 const mainTests = ['apps/desktop/test/browser-external-main-glue.test.ts']
 const cliTests = ['apps/desktop/test/browser-external-public-cli.test.ts']
 const blocks = [
-
-  { name: 'public-stop-neutral-operation', path: owner, tests: ownerTests, pattern: 'keeps explicit stop actor-neutral', edits: [['The shared-tab operation was stopped. Sharing must be granted explicitly before another action.', 'The person stopped the shared-tab operation. Sharing must be granted explicitly before another action.']] },
-  { name: 'public-stop-neutral-sharing', path: bridge, tests: ownerTests, pattern: 'keeps explicit stop actor-neutral', edits: [['Sharing of this original tab ended. Grant control explicitly before another action.', 'The person stopped sharing this original tab. Grant control explicitly before another action.']] },
-  { name: 'public-stop-sharing-disclosure', path: 'packages/core/src/agentmux-cli-commands.ts', tests: ownerTests, pattern: 'keeps explicit stop actor-neutral', edits: [['For an active operation on an external shared tab, explicit stop ends only that original tab', 'For an active operation on an external shared tab, explicit stop keeps that original tab']] },
-  { name: 'public-stop-original-rpc-route', path: 'packages/core/src/public-rpc.ts', tests: ownerTests, pattern: 'keeps explicit stop actor-neutral', edits: [["'browser.stop': 'browser.stop'", "'browser.stop': 'browser.operation'"]] },
-  { name: 'public-stop-other-target-retained', path: owner, tests: ownerTests, pattern: 'keeps explicit stop actor-neutral', edits: [['this.bridge.stopSharing(active.binding.id)', 'for (const target of this.bridge.list()) this.bridge.stopSharing(target.id)']] },
-
   { name: 'withdrawal-owned-feedback-worlds', path: worker, tests: ownerTests, pattern: 'clears only original recorded root/child', edits: [["if (clearFeedback && lease.feedbackWorlds.size)", "if (false && lease.feedbackWorlds.size)"]] },
   { name: 'withdrawal-feedback-world-record', path: worker, tests: ownerTests, pattern: 'clears only original recorded root/child', edits: [["message.params?.worldName === BROWSER_OPERATION_FEEDBACK_WORLD_NAME", "false"]] },
   { name: 'withdrawal-feedback-owner', path: protocol, tests: ['apps/desktop/test/browser-operation-feedback.test.ts'], pattern: 'clears only the recorded operation overlay', edits: [["if (!state || state.operationId !== operationId) return false", "if (!state) return false"]] },

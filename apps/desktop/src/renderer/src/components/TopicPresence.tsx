@@ -258,7 +258,7 @@ export function TopicWorkbenchTopology({ tabs, onSelectTab }: { tabs: readonly T
           <button
             type="button"
             className={`topic-workbench-topology__tab-chip${tab.active ? ' active' : ''}${inspectorOpen && tab.tabId === inspected?.tabId ? ' inspected' : ''}`}
-            key={`${tab.tabId}:${index}`}
+            key={tab.tabId}
             style={{ zIndex: index + 1 }}
             data-topic-tab-id={tab.tabId}
             aria-pressed={tab.active}

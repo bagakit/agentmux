@@ -1,4 +1,3 @@
-import { GoalContinuationControl } from './GoalContinuationControl'
 import { ArrowUpRight } from 'lucide-react'
 import { useState } from 'react'
 import { useAppStore } from '../store'
@@ -14,7 +13,6 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
   const [arrangementOpen, setArrangementOpen] = useState(false)
   const linked = sessions.filter((session) => demand.sessionIds.includes(session.id))
   return <>
-    <GoalContinuationControl demand={demand} />
     {demand.sessionIds.length && !linked.length ? <p className="goals-service">Linked Sessions are not yet available. Their identities are retained while recovery continues.</p> : null}
     {linked.map((session) => <div className="goals-execution__row" key={session.id}><StatusDot status={session.status} /><span className="goals-execution__name">{session.label}</span><button type="button" className="goals-button" onClick={() => selectSession(session.id)}><ArrowUpRight size={13} />Open in Space</button><button type="button" className="goals-button" aria-label={`Unlink ${session.label}`} onClick={() => onUpdate({ sessionIds: demand.sessionIds.filter((id) => id !== session.id) })}>Unlink</button></div>)}
     <div className="goals-execution__link"><select aria-label="Add Session to goal" value={sessionToAdd} onChange={(event) => setSessionToAdd(event.target.value)}><option value="">Link an existing Session…</option>{sessions.filter((session) => !demand.sessionIds.includes(session.id)).map((session) => <option key={session.id} value={session.id}>{session.label}</option>)}</select><button type="button" className="goals-button" disabled={!sessionToAdd} onClick={() => { onUpdate({ sessionIds: [...demand.sessionIds, sessionToAdd] }); setSessionToAdd('') }}>Link</button></div>

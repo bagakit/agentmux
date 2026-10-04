@@ -191,7 +191,7 @@ it('an unconfirmed Topic with no target keeps the preparation notice without cla
     topicId: 'launcher:not-confirmed', tabId: null, groupId: null, regionId: null
   } }) }); await settleMoteApp()
   expect(document.querySelector('[data-mote-empty-space]')).toBeNull()
-  expect(document.body.textContent).toContain('The selected object or its original Zone position is not confirmed')
+  expect(document.body.textContent).toContain('Topic or Tab placement is still being confirmed')
   expect(useAppStore.getState().tabs[defaultTab.id]).toBe(defaultTab)
 })
 

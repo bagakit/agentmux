@@ -4,15 +4,13 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 
 /** Selected, visible reading only. Closing releases this reader and never calls stop. */
 export function useToolkitScriptObservation(api: Pick<ToolkitDesktopApi, 'get' | 'observe'>, toolId: string, active: boolean) {
-  const [reading, setReading] = useState<{ toolId: string; snapshot: ToolkitScriptSnapshot | null; sourceReason: string }>({ toolId, snapshot: null, sourceReason: '' })
+  const [snapshot, setSnapshot] = useState<ToolkitScriptSnapshot | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const epoch = useRef(0)
   function accept(value: ToolkitSnapshot) {
-    if (value.toolId !== toolId || value.kind !== 'script' && value.kind !== 'package-unavailable') throw new Error('Another tool returned this result.')
-    const snapshot = value.kind === 'script' ? value : value.retained
-    setReading(current => ({ toolId, sourceReason: value.kind === 'package-unavailable' ? value.reason : '',
-      snapshot: snapshot && current.toolId === toolId && current.snapshot && current.snapshot.sequence > snapshot.sequence ? current.snapshot : snapshot }))
+    if (value.kind !== 'script' || value.toolId !== toolId) throw new Error('Another tool returned this result.')
+    setSnapshot(current => !current || current.toolId !== toolId || value.sequence >= current.sequence ? value : current)
   }
   useEffect(() => {
     const generation = ++epoch.current
@@ -42,5 +40,5 @@ export function useToolkitScriptObservation(api: Pick<ToolkitDesktopApi, 'get' |
     } catch (cause) { if (generation === epoch.current) setError(presentError(cause)) }
     finally { if (generation === epoch.current) setPending(false) }
   }
-  return { snapshot: reading.toolId === toolId ? reading.snapshot : null, sourceReason: reading.toolId === toolId ? reading.sourceReason : '', pending, error, check }
+  return { snapshot: snapshot?.toolId === toolId ? snapshot : null, pending, error, check }
 }

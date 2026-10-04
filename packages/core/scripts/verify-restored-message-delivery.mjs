@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import ts from 'typescript'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile, mkdir, copyFile, rename } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -8,109 +7,6 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
 import { qualifySharedMainSource } from './qualify-shared-main-source.mjs'
-function qualifyProviderTransportCaller(source) {
-  const file = ts.createSourceFile('codex.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  assert.equal(file.parseDiagnostics.length, 0, 'Malformed Provider source')
-  const factories = file.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === 'createCodexProvider')
-  assert.equal(factories.length, 1, 'Expected one actual Provider factory')
-  const factory = factories[0]; assert(factory.body, 'Provider factory has no body')
-  for (const [name, module] of [
-    ['createCodexPromptExecutionTransportVerifier', './codex-prompt-execution-evidence.js'],
-    ['createCodexPromptTransportPreparation', './codex-prompt-transport-preparation.js']
-  ]) {
-    const imported = file.statements.filter(node => ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text === module)
-      .flatMap(node => node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
-        ? node.importClause.namedBindings.elements : [])
-    assert.equal(imported.filter(node => node.name.text === name && (!node.propertyName || node.propertyName.text === name)).length, 1, 'Transport factory lost its owning import')
-    const shadowed = []; const visit = node => {
-      if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
-        node.name && ts.isIdentifier(node.name) && node.name.text === name) shadowed.push(node)
-      ts.forEachChild(node, visit)
-    }; visit(factory)
-    assert.equal(shadowed.length, 0, 'Transport factory import is shadowed')
-  }
-  const declarations = factory.body.statements.filter(ts.isVariableStatement)
-    .flatMap(statement => statement.declarationList.declarations.map(node => ({ statement, node })))
-    .filter(({ node }) => ts.isIdentifier(node.name) && node.name.text === 'verifyPromptExecutionTransport')
-  assert.equal(declarations.length, 1, 'Expected one verifier in the actual Provider scope')
-  const { statement, node } = declarations[0]
-  const bindingNames = new Set(['verifyPromptExecutionTransport', 'createCodexPromptExecutionTransportVerifier',
-    'createCodexPromptTransportPreparation', factory.parameters[0]?.name?.getText(file)])
-  const invalidBindings = []; const writes = []
-  const guard = current => {
-    if (current !== node && current !== factory.parameters[0] &&
-      (ts.isVariableDeclaration(current) || ts.isParameter(current) || ts.isFunctionDeclaration(current) || ts.isClassDeclaration(current)) &&
-      current.name && ts.isIdentifier(current.name) && bindingNames.has(current.name.text)) invalidBindings.push(current)
-    if (ts.isBinaryExpression(current) && current.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-      current.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(current.left) && bindingNames.has(current.left.text)) writes.push(current)
-    ts.forEachChild(current, guard)
-  }; guard(factory)
-  assert.equal(invalidBindings.length, 0, 'Actual Provider transport binding is shadowed')
-  assert.equal(writes.length, 0, 'Actual Provider transport binding is reassigned')
-  assert(statement.declarationList.flags & ts.NodeFlags.Const, 'Verifier binding must remain const')
-  assert(node.initializer && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) &&
-    node.initializer.expression.text === 'createCodexPromptExecutionTransportVerifier' && node.initializer.arguments.length === 0,
-    'Provider verifier is not initialized by its owning factory')
-  const returns = factory.body.statements.filter(ts.isReturnStatement)
-  assert.equal(returns.length, 1, 'Expected one actual returned Provider')
-  const call = returns[0].expression
-  assert(call && ts.isCallExpression(call) && ts.isIdentifier(call.expression) &&
-    ts.isIdentifier(factory.parameters[0]?.name) && call.expression.text === factory.parameters[0].name.text &&
-    call.arguments.length === 1 && ts.isObjectLiteralExpression(call.arguments[0]), 'Factory does not return its declared Provider definition')
-  const object = call.arguments[0]
-  const property = name => object.properties.filter(node => node.name && ts.isIdentifier(node.name) && node.name.text === name)
-  const verifier = property('verifyPromptExecutionTransport')
-  assert.equal(verifier.length, 1, 'Expected one Provider transport verifier contribution')
-  assert(ts.isShorthandPropertyAssignment(verifier[0]), 'Provider transport verifier does not reuse the exact declared const')
-  const preparation = property('preparePromptExecutionTransport')
-  assert.equal(preparation.length, 1, 'Expected one Provider transport preparation contribution')
-  const prepare = preparation[0]
-  assert(ts.isPropertyAssignment(prepare) && ts.isCallExpression(prepare.initializer) &&
-    ts.isIdentifier(prepare.initializer.expression) && prepare.initializer.expression.text === 'createCodexPromptTransportPreparation' &&
-    prepare.initializer.arguments.length === 1 && ts.isIdentifier(prepare.initializer.arguments[0]) &&
-    prepare.initializer.arguments[0].text === 'verifyPromptExecutionTransport', 'Preparation does not reuse the same exact transport verifier')
-  return { method: 'createCodexProvider -> transport verifier and read-only preparation', callCount: 1, sameVerifier: true }
-}
-function qualifyCoordinatorTransportCaller(source) {
-  const file = ts.createSourceFile('prompt-submission.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  assert.equal(file.parseDiagnostics.length, 0, 'Malformed Coordinator source')
-  const classes = file.statements.filter(node => ts.isClassDeclaration(node) && node.name?.text === 'AgentPromptSubmissionCoordinator')
-  assert.equal(classes.length, 1, 'Expected one actual prompt Coordinator')
-  const methods = classes[0].members.filter(node => ts.isMethodDeclaration(node) && node.name.getText(file) === 'submitOwnedInputPlan')
-  assert.equal(methods.length, 1, 'Expected the actual owned input method')
-  const method = methods[0]; assert(method.body, 'Owned input method has no body')
-  const declarations = body => body.statements.filter(ts.isVariableStatement).flatMap(statement =>
-    statement.declarationList.declarations.map(node => ({ statement, node })))
-  const transports = declarations(method.body).filter(({ node }) => ts.isIdentifier(node.name) && node.name.text === 'verifyTransport')
-  assert.equal(transports.length, 1, 'Expected one owned transport check')
-  const transport = transports[0]
-  assert(transport.statement.declarationList.flags & ts.NodeFlags.Const, 'Owned transport binding must remain const')
-  assert(transport.node.initializer && ts.isArrowFunction(transport.node.initializer) && ts.isBlock(transport.node.initializer.body), 'Owned transport check is not a direct function')
-  const body = transport.node.initializer.body
-  const contexts = declarations(body).filter(({ node }) => ts.isIdentifier(node.name) && node.name.text === 'context')
-  assert.equal(contexts.length, 1, 'Expected one exact transport context')
-  const context = contexts[0]
-  assert(context.statement.declarationList.flags & ts.NodeFlags.Const, 'Transport context must remain const')
-  assert(context.node.initializer && ts.isObjectLiteralExpression(context.node.initializer) &&
-    ts.isSpreadAssignment(context.node.initializer.properties[0]) && ts.isIdentifier(context.node.initializer.properties[0].expression) &&
-    context.node.initializer.properties[0].expression.text === 'nativeContext', 'Transport context lost its exact native context')
-  const calls = []; const invalid = []; const bindings = new Set(['context', 'provider', 'nativeContext', 'verifyTransport'])
-  const visit = node => {
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'provider' &&
-      node.expression.name.text === 'verifyPromptExecutionTransport') calls.push(node)
-    if (node !== context.node && (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isFunctionDeclaration(node)) &&
-      ts.isIdentifier(node.name) && bindings.has(node.name.text)) invalid.push(node)
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(node.left) && bindings.has(node.left.text)) invalid.push(node)
-    ts.forEachChild(node, visit)
-  }; visit(body)
-  assert.equal(invalid.length, 0, 'Owned transport context is shadowed or reassigned')
-  assert.equal(calls.length, 1, 'Expected one real Provider transport call in the owned check')
-  assert(calls[0].arguments.length === 1 && ts.isIdentifier(calls[0].arguments[0]) && calls[0].arguments[0].text === 'context', 'Provider call lost the exact transport context')
-  return { method: 'submitOwnedInputPlan -> verifyTransport -> provider.verifyPromptExecutionTransport', callCount: 1, nativeContext: true }
-}
 const execute = promisify(execFile), root = fileURLToPath(new URL('../../../', import.meta.url)), core = join(root, 'packages/core')
 const args = process.argv.slice(2)
 const resumeBoundary = args.includes('--resume-boundary'), expectedTests = resumeBoundary ? 21 : 12
@@ -124,9 +20,9 @@ try {
   report.sourceQualification = await qualifySharedMainSource(root, selectedSource)
   await run([join(core, 'scripts/build.mjs')]); report.build = true
   for (const [file, patterns] of [
-    ['packages/core/src/providers/codex.ts', []],
+    ['packages/core/src/providers/codex.ts', [/verifyPromptExecutionTransport: createCodexPromptExecutionTransportVerifier\(\)/u]],
     ['packages/core/src/providers/codex-prompt-execution-evidence.ts', [/openNativeProcessImage\(nativePid, signal\)/u, /nativeProcessBirth\(nativePid, verificationSignal\) === nativeBirth/u]],
-    ['packages/core/src/prompt-submission.ts', []],
+    ['packages/core/src/prompt-submission.ts', [/provider\.verifyPromptExecutionTransport\(\{ \.\.\.nativeContext/u]],
     ['packages/core/src/agentmux-cli-commands.ts', [/command\('agent\.send'/u, /execution/u]],
     ['packages/core/test/fixtures/immediate-native-worker.mjs', [/createCodexPromptExecutionTransportVerifier\(\)/u]],
     ...(resumeBoundary ? [
@@ -135,11 +31,8 @@ try {
       ['packages/core/src/agent-session-store.ts', [/run\.runId !== currentRun\.runId/u, /priorRuns\.at\(-1\)\?\.runId !== previousRun\.runId/u]]
     ] : [])
   ]) {
-    const text = await readFile(join(root, file), 'utf8')
-    if (file === 'packages/core/src/providers/codex.ts') report.providerTransportCaller = qualifyProviderTransportCaller(text)
-    else if (file === 'packages/core/src/prompt-submission.ts' && patterns.length === 0) report.coordinatorTransportCaller = qualifyCoordinatorTransportCaller(text)
-    else { assert(patterns.length > 0, `Empty production caller ${file}`); for (const pattern of patterns) assert(pattern.test(text), `Missing caller ${file} ${pattern}`) }
-    report.callers.push({ file, witnesses: patterns.length || 1 })
+    const text = await readFile(join(root, file), 'utf8'); for (const pattern of patterns) assert(pattern.test(text), `Missing caller ${file} ${pattern}`)
+    report.callers.push({ file, witnesses: patterns.length })
   }
   assert(report.callers.length >= 3)
   const types = join(evidence, 'typecheck.json'); await writeFile(types, JSON.stringify({ extends: join(core, 'tsconfig.json'), compilerOptions: { noEmit: true, composite: false, rootDir: root }, include: [join(core, 'test/restored-message-delivery.test.ts'), join(core, 'test/native-process-image.test.ts'), ...(resumeBoundary ? [join(core, 'test/restored-prompt-predecessor.test.ts')] : [])], exclude: [] }))

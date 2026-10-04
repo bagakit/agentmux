@@ -518,7 +518,7 @@ export type AgentCapabilities = {
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
   /** Declared native immediate semantics; absence keeps ordinary prompt input available. */
-  promptExecution?: { immediate: 'interrupt-before-input' | 'native-steer' }
+  promptExecution?: { immediate: 'interrupt-before-input' }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *
@@ -702,24 +702,11 @@ export type AgentHookReceipt = {
   eventName: string
   /** Provider-proven native turn identity; never inferred from terminal text. */
   nativeTurnId?: string
-  /** Provider-proven open main-tool facts retained by this one durable Hook owner. */
-  toolInvocation?: AgentHookToolInvocation
   /** Provider-normalized lifecycle; unknown stays absent and the raw eventName is retained. */
   /** Null explicitly withholds lifecycle; undefined retains native-name semantics. */
   lifecycleEvent?: AgentHookLifecycleEvent | null
   observedAt: number
   outputCursorBytes?: number
-}
-
-export type AgentHookToolInvocation = {
-  nativeSessionId: string
-  nativeToolCallId: string
-  nativeTurnId?: string
-  nativeTranscriptPath?: string
-  toolName: string
-  toolInput: string
-  /** Consecutive different tool starts in the same native turn cannot identify an ID-less request. */
-  ambiguous?: true
 }
 
 /**
@@ -802,32 +789,11 @@ export type AgentSessionHistoryDescriptor = {
   history?: AgentSessionHistoryMetadata
 }
 
-/** Structured native asynchronous questions; absence of an answer is not pending authority. */
-export type AgentSessionHistoryQuestion = {
-  /** Provider-owned opaque identity; clients must never construct or parse it. */
-  id: string
-  prompt: string
-  options: Array<{ id: string; label: string }>
-  acceptsText: boolean
-}
-
-export type AgentSessionHistoryQuestionRequest = {
-  delivery: 'async'
-  questions: AgentSessionHistoryQuestion[]
-}
-
-/** A native user record's exact reply reference; its original contentParts remain untouched. */
-export type AgentSessionHistoryQuestionAnswer = { questionId: string; answer: string }
-
 export type AgentSessionHistoryItem = {
   id: string
   turnId?: string
   kind: 'user-message' | 'assistant-message' | 'activity'
   messagePhase?: AgentSessionHistoryMessagePhase
-  questionRequest?: AgentSessionHistoryQuestionRequest
-  questionAnswers?: AgentSessionHistoryQuestionAnswer[]
-  /** A local native question parsing failure; original speech and adjacent history stay readable. */
-  questionDiagnostic?: { code: string; message: string }
   /** Original contentParts remain complete and copyable alongside this optional summary. */
   collaboration?: AgentSessionHistoryCollaboration
   title?: string
@@ -853,10 +819,6 @@ export type AgentSessionHistoryPageOptions = {
   limit?: number
   /** Explicitly confirm this healthy Run's current native source; never combines with an earlier cursor. */
   refreshNativeSource?: boolean
-  /** Require this read's current Run/Provider witness; an unchanged retained source cannot qualify it. */
-  requireCurrentSource?: true
-  /** Cancel this bounded read, independently of the healthy Run or other readers. */
-  signal?: AbortSignal
   /** Read the original records retained by the latest explicit source confirmation. Never controls the Run. */
   nativeSource?: 'previous'
   /** The host supplies its configured Executor invocation, as for create/resume. */
@@ -896,52 +858,6 @@ export type AgentProviderSessionHistoryContext = {
   signal: AbortSignal
 }
 
-/** An exact recorded image; expectedReference compares the re-read part and never authorizes a path. */
-export type AgentSessionHistoryResourceRequest = {
-  source: AgentSessionHistorySource
-  turnId?: string
-  recordId: string
-  partIndex: number
-  expectedReference: string
-  /** May only reduce the fixed 16 MiB image byte budget. */
-  maxBytes?: number
-}
-export type AgentSessionHistoryResourceReadOptions = AgentSessionHistoryResourceRequest & Pick<AgentSessionHistoryPageOptions,
-  'signal' | 'commandOverride' | 'args' | 'env'>
-export type AgentSessionHistoryResourceReadResult = {
-  agentSessionId: string
-  source: AgentSessionHistorySource
-  turnId?: string
-  recordId: string
-  partIndex: number
-  reference: string
-  label?: string
-  result: { status: 'read'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; dataBase64: string; byteLength: number }
-    | { status: 'unavailable'; code: string; message: string }
-}
-
-/** Provider-owned stable lookup through its original native reader, never a moving newest page. */
-export type AgentProviderSessionHistoryRecordContext = Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'> & {
-  turnId?: string
-  recordId: string
-}
-
-export type AgentProviderSessionQuestionReplyContext = Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'> & {
-  turnId: string
-  recordId: string
-  answers: AgentSessionHistoryQuestionAnswer[]
-}
-
-export type AgentSessionQuestionReplyReceipt = {
-  agentSessionId: string
-  source: AgentSessionHistorySource
-  recordId: string
-  questionIds: string[]
-  operationId: string
-  /** Normal input delivery completed; only an observed native user record proves an answer. */
-  outcome: 'submitted'
-}
-
 export type AgentProviderSessionHistoryPage = Omit<AgentSessionHistoryPage, 'agentSessionId'>
 
 /** A relevant native source changed; this is not a user message or an accepted input receipt. */
@@ -966,13 +882,9 @@ export type AgentProviderSessionHistoryObservationContext = Omit<AgentProviderSe
 /** Authenticated operation origin supplied by the Host, independent of message authorship. */
 export type AgentOperationDevice = { hostId: string; deviceId: string; name: string }
 
-/** Supplied by the actual input owner; a native user role does not establish this fact. */
-export const AGENT_MESSAGE_CHANNELS = ['terminal', 'message-tool', 'cli', 'api', 'agent-message', 'reaction', 'question-reply'] as const
-export type AgentMessageChannel = (typeof AGENT_MESSAGE_CHANNELS)[number]
-
 export type AgentSessionUserMessageSource =
   | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
-  | { kind: 'captured'; submissionId: string; channel?: AgentMessageChannel; device?: AgentOperationDevice }
+  | { kind: 'captured'; submissionId: string; device?: AgentOperationDevice }
 
 export type AgentSessionUserMessageAuthor =
   | { kind: 'human' }
@@ -1019,19 +931,14 @@ export type AgentMuxAgentSession = {
   terminalHandshake?: AgentTerminalHandshakeState
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
-  /** Host-saved future messages. Civil calendars remain Host facts; Core owns admission. */
-  futurePromptIntents?: Record<string, AgentFuturePromptIntent>
   /** Latest claimed prompt range; successful completion is consumed by the same admission. */
   promptCompletionAdmission?: {
     /** Logical identity when captured at admission; operationId always binds the Run and bytes. */
     submissionId?: string
     completionId?: string
-    futureIntent?: AgentFuturePromptOccurrence
     operationId: string
     startByte: number
     endByte: number
-    /** Original native output boundary retained for passive future-message idle confirmation. */
-    outputCursorBytes?: number
     /** Frozen before dispatch; missing input facts are unknown, never reconstructed. */
     intent?: {
       run: AgentMuxRunRef
@@ -1091,17 +998,6 @@ export type AgentPromptMessageContent = {
   authorAgentSessionId?: string
   authorHuman?: true
   sourceDevice?: AgentOperationDevice
-  sourceChannel?: AgentMessageChannel
-}
-
-export type AgentFuturePromptOccurrence = { intentId: string; occurrenceAt: number }
-export type AgentFuturePromptIntent = {
-  operationId: string
-  prompt: string
-  message: AgentPromptMessageContent
-  active: boolean
-  lastOccurrenceAt?: number
-  lastOperationId?: string
 }
 
 export type AgentTerminalHandshakeState = {
@@ -1645,7 +1541,6 @@ export type AgentTimelineItem = {
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
   sourceDevice?: AgentOperationDevice
-  sourceChannel?: AgentMessageChannel
   content?: string
   toolName?: string
   toolInput?: string
@@ -1767,7 +1662,6 @@ export type NormalizedHookEvent = {
   /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
   mainSubject: boolean
   nativeTurnId?: string
-  toolInvocation?: AgentHookToolInvocation
   subject?: AgentHookSubject
   childActivity?: boolean
   /**

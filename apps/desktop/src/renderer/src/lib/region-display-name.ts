@@ -1,4 +1,4 @@
-import type { AgentSessionNameMetadata, SessionSnapshot } from '../../../shared/contracts'
+import type { SessionSnapshot } from '../../../shared/contracts'
 import type { WorkbenchSurface } from './workbench-tabs'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 
@@ -13,8 +13,7 @@ import { assertUnreachableSurface } from './workbench-surface-kinds'
  */
 export function regionSurfaceLabel(
   surface: WorkbenchSurface,
-  sessions: readonly SessionSnapshot[],
-  metadata: Readonly<Record<string, AgentSessionNameMetadata>> = {}
+  sessions: readonly SessionSnapshot[]
 ): string {
   switch (surface.kind) {
     case 'git-diff':
@@ -30,7 +29,7 @@ export function regionSurfaceLabel(
       return 'Terminal'
     case 'agent': {
       const session = sessions.find((item) => item.id === surface.sessionId)
-      return session?.label ?? metadata[surface.sessionId]?.label ?? 'Agent · name unconfirmed'
+      return session?.label ?? surface.sessionId
     }
     default:
       return assertUnreachableSurface(surface)

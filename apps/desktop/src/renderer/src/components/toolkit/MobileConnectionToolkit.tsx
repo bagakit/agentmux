@@ -29,6 +29,6 @@ export const MobileConnectionToolkit = memo(function MobileConnectionToolkit(sel
   }, [active, enabled, layout])
   if (!enabled) return null
   return <ToolkitPopover {...selection} toolId={MOBILE_CONNECTION_TOOL_ID} name="Phone connection" icon={<Smartphone size={14} aria-hidden="true" />} label={layout === 'label'} onVisibleChange={changed}>
-    {close => definition ? <UserToolkitResult definition={definition} active={active} close={close} official runLabel="Generate & copy link" copyOnRun primaryActionId="link" entryLabel="Refresh devices" /> : <div className="performance-body"><p role="status">{error || 'Loading official tool…'}</p><button className="small-button" onClick={close}>Close</button></div>}
+    {close => definition ? <UserToolkitResult definition={definition} active={active} close={close} official title="Phone connection" runLabel="Generate & copy link" copyOnRun primaryActionId="link" entryLabel="Refresh devices" /> : <div className="performance-body"><p role="status">{error || 'Loading official tool…'}</p><button className="small-button" onClick={close}>Close</button></div>}
   </ToolkitPopover>
 })

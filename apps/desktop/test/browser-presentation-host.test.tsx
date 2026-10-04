@@ -1,6 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { previewMedia } from './helpers/browser-preview-media'
 import { act, createElement } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { expect, it, vi } from 'vitest'
@@ -121,7 +120,8 @@ it('keeps a positive-size parked stage invisible until its exact destination exi
   const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockResolvedValue({ captureId: 'original-capture', browserId: 'original-browser' })
   const ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined)
   const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
-  const { track, stream } = previewMedia('original-track'), stop = track.stop
+  const stop = vi.fn(), stream = new MediaStream()
+  Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'original-track', stop }] })
   const getDisplayMedia = vi.fn(async () => stream)
   const previousMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia } })

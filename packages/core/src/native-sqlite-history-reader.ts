@@ -87,8 +87,7 @@ export class NativeSqliteHistoryReader {
     }
     const named = await stat(path, { bigint: true })
     this.check()
-    if (identity.dev !== named.dev || identity.ino !== named.ino) failure(name === snapshotPath ? 'SOURCE_CHANGED' : 'SNAPSHOT_CHANGED', 'Native SQLite source changed while opening.')
-    if (!unchanged(identity, named)) failure('SNAPSHOT_CHANGED', 'Native SQLite changed while opening its read snapshot; read its current page again.')
+    if (!unchanged(identity, named)) failure('SOURCE_CHANGED', 'Native SQLite source changed while opening.')
     this.sources.set(name, { path, file, identity })
   }
 
@@ -113,9 +112,6 @@ export class NativeSqliteHistoryReader {
       reader.sqlite = SQLite.Factory(await initializeSqlite({ wasmBinary }))
       reader.check()
       reader.sqlite.vfs_register(reader.createVfs(), false)
-      // A closed WAL-mode native DB has no sidecars. SQLite must not try to
-      // create a WAL/SHM through this readonly VFS. The stable main-file snapshot
-      // is immutable for this page; verifyUnchanged still detects a new writer.
       reader.database = await reader.sqlite.open_v2(snapshotPath, SQLite.SQLITE_OPEN_READONLY, 'agentmux-history-page')
       reader.sqlite.limit(reader.database, SQLite.SQLITE_LIMIT_LENGTH, SESSION_HISTORY_MAX_PAGE_BYTES)
       reader.sqlite.progress_handler(reader.database, 1000, () => {
@@ -179,9 +175,6 @@ export class NativeSqliteHistoryReader {
         output.setInt32(0, reader.sources.has(name) ? 1 : 0, true)
         return SQLite.SQLITE_OK
       }
-      override xDeviceCharacteristics(): number {
-        return reader.sources.has(`${snapshotPath}-wal`) ? 0 : SQLite.SQLITE_IOCAP_IMMUTABLE
-      }
       override xCheckReservedLock(_id: number, output: DataView): number { output.setInt32(0, 0, true); return SQLite.SQLITE_OK }
       override xLock(): number { return SQLite.SQLITE_OK }
       override xUnlock(): number { return SQLite.SQLITE_OK }
@@ -216,25 +209,22 @@ export class NativeSqliteHistoryReader {
 
   async verifyUnchanged(): Promise<void> {
     this.check()
-    for (const [name, source] of this.sources) {
+    for (const source of this.sources.values()) {
       const current = await source.file.stat({ bigint: true })
       this.check()
       const named = await optionalStat(source.path)
       this.check()
-      if (name === snapshotPath && (!named || source.identity.dev !== named.dev || source.identity.ino !== named.ino)) {
-        failure('SOURCE_CHANGED', 'Native SQLite source changed during reading; reopen its newest page.')
-      }
       if (!named || !unchanged(source.identity, current) || !unchanged(source.identity, named)) {
-        failure('SNAPSHOT_CHANGED', 'Native SQLite changed during its read snapshot; read its current page again.')
+        failure('SOURCE_CHANGED', 'Native SQLite source changed during reading; reopen its newest page.')
       }
     }
     if (!this.sources.has(`${snapshotPath}-wal`) && await optionalStat(`${this.path}-wal`)) {
-      failure('SNAPSHOT_CHANGED', 'Native SQLite WAL appeared during its read snapshot; read its current page again.')
+      failure('SOURCE_CHANGED', 'Native SQLite WAL appeared during reading; reopen its newest page.')
     }
     const journal = await optionalStat(`${this.path}-journal`)
     this.check()
     if (journal && (!journal.isFile() || journal.size > 0n)) {
-      failure('SNAPSHOT_CHANGED', 'Native SQLite rollback journal appeared during its read snapshot; read its current page again.')
+      failure('SOURCE_CHANGED', 'Native SQLite rollback journal appeared during reading; reopen its newest page.')
     }
   }
 

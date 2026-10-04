@@ -5,14 +5,3 @@
 .conversation-native-thread__record { min-width: 0; }
 .activity-feed__observation-source { margin: var(--sp-3) var(--sp-4) var(--sp-1); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 @media (max-width: 560px) { .activity-feed__observation-source { margin-inline: var(--sp-3); } }
-
-/* Submission/Hook evidence remains readable outside the primary native conversation. */
-.activity-feed__observations { min-width: 0; }
-.activity-feed__observations > summary { align-items: center; cursor: pointer; list-style: none; padding-block: var(--sp-2); }
-.activity-feed__observations > summary::-webkit-details-marker { display: none; }
-.activity-feed__observations > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
-.activity-feed__observations[open] > summary > svg { transform: rotate(90deg); }
-.activity-feed__observation-count { color: var(--text-3); font-variant-numeric: tabular-nums; }
-.activity-feed__observation-issue { color: var(--text-2); }
-.activity-feed__observation-scope { margin: var(--sp-1) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.6; }
-@media (max-width: 560px) { .activity-feed__observation-scope { margin-inline: var(--sp-3); } }

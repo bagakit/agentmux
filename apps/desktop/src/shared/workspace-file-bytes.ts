@@ -8,13 +8,6 @@ export type WorkspaceFileByteReadOptions = {
   expectedRevision?: string
 }
 
-/** Internal read-only search budget; never serialized as a Files RPC parameter. */
-export type WorkspaceFileReadBudget = {
-  maxFileBytes: number
-  signal?: AbortSignal
-  onReadCost?: (cost: WorkspaceFileByteRead['readCost']) => void
-}
-
 export type WorkspaceFileByteRead = {
   bytes: Uint8Array
   totalBytes: number

@@ -3,7 +3,6 @@ import type { HostCheckResult, HostConfig } from '../shared/contracts.js'
 import { hostSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
 import type { RuntimeController } from './runtime-controller.js'
-import type { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
 
 /** IPC and public Control share this explicit diagnostic; no configuration transaction is held. */
 export async function checkSettingsHost(input: unknown, runtime: Pick<RuntimeController, 'checkHost'>): Promise<HostCheckResult> {
@@ -23,20 +22,13 @@ export async function checkSettingsHost(input: unknown, runtime: Pick<RuntimeCon
 export async function executeSettingsHostsControl(
   request: AgentMuxControlSettingsHostsRequest,
   owner: ConfigOwner,
-  runtime: Pick<RuntimeController, 'checkHost'>,
-  upgrades?: SettingsHostsUpgradeOwner
+  runtime: Pick<RuntimeController, 'checkHost'>
 ): Promise<AgentMuxControlSettingsHostsResult> {
   if (request.operation === 'settings.hosts.list') {
     return { operation: request.operation, hosts: structuredClone(owner.current.hosts) as AgentMuxControlSettingsResourceFields[] }
   }
-  const input = request.id !== undefined ? owner.current.hosts.find(host => host.id === request.id) : 'input' in request ? request.input : undefined
+  const input = Object.hasOwn(request, 'id') ? owner.current.hosts.find(host => host.id === request.id) : request.input
   if (input === undefined) throw Object.assign(new Error(`Host not found: ${request.id}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })
-  if (request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') {
-    if (!upgrades) throw Object.assign(new Error('The original service has no Core maintenance owner.'), { code: 'CONTROL_UNAVAILABLE' })
-    if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await upgrades.check(input) }
-    if (request.operation === 'settings.hosts.upgrade') return { operation: request.operation, receipt: await upgrades.upgrade(input, request.expected, request.requestId) }
-    if (request.operation === 'settings.hosts.upgrade-inspect') return { operation: request.operation, receipt: await upgrades.inspect(input, request.requestId) }
-  }
   const result = await checkSettingsHost(input, runtime)
   return { operation: request.operation, ...result, input: structuredClone(result.input) as AgentMuxControlSettingsResourceFields }
 }

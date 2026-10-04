@@ -34,7 +34,6 @@ vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: clas
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { RuntimeController } from '../../src/main/runtime-controller'
 import { registerIpc } from '../../src/main/ipc'
-import { ScratchTopics } from '../../src/main/scratch-topics'
 import { DEFAULT_CONFIG } from '../../src/main/config-store'
 import { useAppStore } from '../../src/renderer/src/store'
 import { api } from '../../src/renderer/src/lib/api'
@@ -84,7 +83,7 @@ export async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: N
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })
   const dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime: controller,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
-    scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as never })
+    scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
   bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)

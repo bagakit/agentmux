@@ -60,7 +60,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
       run: { runId: canonical.run.runId, state: 'running', pid: 123, observedAt: 3, latestOutputBytes: 0 } }),
     providers: { get: () => ({ catalog: { capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' } } }) } }
   runtime.commit({ hosts: [{ id: 'local', client: client as unknown as AgentMuxClient,
-    executionHost: { kind: 'local', dispose: vi.fn() } as never, config: actual?.config.hosts.find(host => host.id === 'local') ?? { id: 'local', kind: 'local', label: 'Private Host' } }],
+    executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = actual?.config ?? { ...structuredClone(DEFAULT_CONFIG), executors: {

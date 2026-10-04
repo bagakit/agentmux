@@ -328,8 +328,7 @@
    counts, so a two- or three-digit total never overlaps the next status. */
 .project-activity__metrics { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .project-activity__metric { display: inline-grid; align-items: center; min-width: var(--sp-6); height: var(--sp-6); color: var(--text-3); font-variant-numeric: tabular-nums; }
-/* The semantic glyph may be an SVG or its composited HTML motion carrier. */
-.project-activity__metric > :first-child { grid-area: 1 / 1; justify-self: start; }
+.project-activity__metric > svg { grid-area: 1 / 1; justify-self: start; }
 .project-activity__metric > strong { grid-area: 1 / 1; justify-self: end; align-self: start; min-width: 1em; margin-left: var(--sp-3); padding: 0 1px; transform: translate(1px, -2px); border-radius: var(--radius-sm); background: var(--surface-1); text-align: center; font-size: var(--fs-micro); line-height: 1; font-weight: 650; }
 .project-activity__metric--needs-you { color: var(--amber); }
 .project-activity__metric--error { color: var(--red-text); }

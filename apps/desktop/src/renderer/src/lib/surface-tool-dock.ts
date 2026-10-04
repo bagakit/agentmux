@@ -1,4 +1,5 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import { sessionBoardColumn } from './project-board'
 import { attentionAccentFor, type AttentionCategory } from './attention-event'
 import type { AgentDisplayState } from '@agentmux/core'
 import {
@@ -92,15 +93,37 @@ export function contentSlotPresentation(isScratch: boolean): ContentSlotPresenta
   return { label: 'Files + Branches', showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34, explorerCollapsedByDefault: false }
 }
 
+export const WORKSPACE_AGENT_GROUP_IDS = ['working', 'needs-you', 'recent'] as const
+
+export type WorkspaceAgentGroupId = (typeof WORKSPACE_AGENT_GROUP_IDS)[number]
 export type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
 
-/** Space owns membership; Focus's execution/PMO filtering is deliberately absent. */
-export function workspaceAgentSessions(
+export type WorkspaceAgentGroup = {
+  id: WorkspaceAgentGroupId
+  sessions: AgentSessionSnapshot[]
+}
+
+export function workspaceAgentGroups(
   sessions: readonly SessionSnapshot[],
-  workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>,
-  topics?: readonly ScratchTopicSnapshot[] | null
-): AgentSessionSnapshot[] {
-  return sessions.filter((session): session is AgentSessionSnapshot => session.kind === 'agent' && workspaceOwnsSessionPath(workspace, session, topics))
+  workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>
+): WorkspaceAgentGroup[] {
+  const grouped: Record<WorkspaceAgentGroupId, AgentSessionSnapshot[]> = {
+    working: [],
+    'needs-you': [],
+    recent: []
+  }
+  for (const session of sessions) {
+    if (
+      session.kind !== 'agent' ||
+      !workspaceOwnsSessionPath(workspace, session)
+    ) continue
+    const column = sessionBoardColumn(session)
+    grouped[column === 'done' ? 'recent' : column].push(session)
+  }
+  return WORKSPACE_AGENT_GROUP_IDS.map((id) => ({
+    id,
+    sessions: grouped[id].sort((left, right) => right.updatedAt - left.updatedAt)
+  }))
 }
 
 // One Agent as it appears under a Topic. `sessionId` is the stable identity used to dedupe the
@@ -127,8 +150,8 @@ export function topicsWithAgents(
 ): TopicWithAgents[] {
   const liveByTopic = new Map<string, Map<string, AgentSessionSnapshot>>()
   for (const session of sessions) {
-    if (session.kind !== 'agent' || !workspaceOwnsSessionPath(workspace, session, topics)) continue
-    const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
+    if (session.kind !== 'agent' || !workspaceOwnsSessionPath(workspace, session)) continue
+    const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
     if (!topicId) continue
     const bucket = liveByTopic.get(topicId) ?? new Map<string, AgentSessionSnapshot>()
     bucket.set(session.id, session)

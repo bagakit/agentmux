@@ -1,16 +1,20 @@
-import { AVATAR_INPUT_MAX_BYTES, AVATAR_MAX_DIMENSION, AVATAR_MAX_PIXELS, AVATAR_EDGE, AVATAR_OUTPUT_MAX_BYTES, AVATAR_PREVIEW_MAX_BYTES, isObjectAvatarRef } from './object-avatars.js'
-import type { ObjectAvatarRef, ObjectAvatarInput, ObjectAvatarImage } from './object-avatars.js'
-export const MOTE_AVATAR_INPUT_MAX_BYTES = AVATAR_INPUT_MAX_BYTES
-export const MOTE_AVATAR_MAX_DIMENSION = AVATAR_MAX_DIMENSION
-export const MOTE_AVATAR_MAX_PIXELS = AVATAR_MAX_PIXELS
-export const MOTE_AVATAR_EDGE = AVATAR_EDGE
-export const MOTE_AVATAR_OUTPUT_MAX_BYTES = AVATAR_OUTPUT_MAX_BYTES
-export const MOTE_AVATAR_PREVIEW_MAX_BYTES = AVATAR_PREVIEW_MAX_BYTES
+/** Ephemeral image payloads and a content reference; the existing Space override owns the choice. */
+export const MOTE_AVATAR_INPUT_MAX_BYTES = 8 * 1024 * 1024
+export const MOTE_AVATAR_MAX_DIMENSION = 4096
+export const MOTE_AVATAR_MAX_PIXELS = 16 * 1024 * 1024
+export const MOTE_AVATAR_EDGE = 256
+export const MOTE_AVATAR_OUTPUT_MAX_BYTES = 512 * 1024
+export const MOTE_AVATAR_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
 export type MoteAvatarTarget = { workspaceId: string; topicId: string; objectKey: string }
-export type MoteAvatarRef = ObjectAvatarRef
-export type MoteAvatarInput = ObjectAvatarInput
-export type MoteAvatarImage = ObjectAvatarImage
-export const isMoteAvatarRef = isObjectAvatarRef
+export type MoteAvatarRef = { kind: 'image'; fileName: string }
+export type MoteAvatarInput = { mimeType: 'image/png' | 'image/jpeg'; dataUrl: string }
+export type MoteAvatarImage = { dataUrl: string; width: number; height: number }
 
 /** Small, authored parts. No markup, executable text or remote resources are accepted. */
 export { MOTE_FACE_PARTS, DEFAULT_MOTE_FACE, isMoteFace, type MoteFace } from '@agentmux/client-ui/mote-face'
+export function isMoteAvatarRef(value: unknown): value is MoteAvatarRef {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const ref = value as Partial<MoteAvatarRef>
+  return ref.kind === 'image' && typeof ref.fileName === 'string' && /^[a-f0-9]{64}\.png$/.test(ref.fileName) &&
+    Object.keys(ref).length === 2
+}

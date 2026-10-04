@@ -5,8 +5,6 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { folderSpaceIconTarget, topicSpaceIconTarget, spaceObjectIdentityKey } from '../src/renderer/src/lib/space-object-appearance'
 import { projectWorkspaces } from '../src/renderer/src/lib/workspace-projects'
-import { desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
-import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 
 const storageName = 'agentmux-workbench-v1'
 const workspace = { id: 'folder', hostId: 'local', path: _hygiene_fixturePath("work/project"), repoPath: _hygiene_fixturePath("work/project"), name: 'Project', kind: 'folder' as const }
@@ -70,13 +68,11 @@ it('saves three real store selections and initializes from that same persisted p
   store.getState().togglePinnedItem(folder.key, 'feature')
   await store.getState().setSpaceObjectIcon(folder.key, 'code')
   await store.getState().setSpaceObjectIcon(topicTarget.key, 'book')
-  const face = { ...DEFAULT_MOTE_FACE, nose: 'bridge' as const, marking: 'freckles' as const, accessory: 'glasses' as const }
-  await store.getState().setSpaceObjectIcon(moteTarget.key, face)
-  const expected = { [folder.key]: 'code', [topicTarget.key]: 'book', [moteTarget.key]: face }
+  await store.getState().setSpaceObjectIcon(moteTarget.key, 'brain')
+  const expected = { [folder.key]: 'code', [topicTarget.key]: 'book', [moteTarget.key]: 'brain' }
   expect(saved().state.spaceObjectIcons).toEqual(expected)
   expect(saved().state.pinnedItems).toEqual({ [folder.key]: ['feature'] })
-  expect(saved().state.restoredWorkbench).toBeUndefined()
-  expect(Object.keys(desktopWorkbenchFromSpatial((await api.spatial.read())!.graph).tabs)).toEqual(['original-tab'])
+  expect(Object.keys(saved().state.restoredWorkbench.tabs)).toEqual(['original-tab'])
   dispose?.(); dispose = undefined
   store.setState({ spaceObjectIcons: {} })
   await store.persist.rehydrate()
@@ -85,7 +81,7 @@ it('saves three real store selections and initializes from that same persisted p
   expect(store.getState().pinnedItems).toEqual({ [folder.key]: ['feature'] })
   expect(Object.keys(store.getState().tabs)).toEqual(['original-tab'])
   await store.getState().setSpaceObjectIcon(topicTarget.key, null)
-  expect(saved().state.spaceObjectIcons).toEqual({ [folder.key]: 'code', [moteTarget.key]: face })
+  expect(saved().state.spaceObjectIcons).toEqual({ [folder.key]: 'code', [moteTarget.key]: 'brain' })
 })
 
 it('restores each metadata record independently and retains the original work surface', async () => {
@@ -105,7 +101,6 @@ it('interleaves awaited selections while concurrent pins/layout survive in the l
   let release!: () => void
   const pending = new Promise<void>(resolve => { release = resolve })
   vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => pending)
-  vi.mocked(api.ui.requestStorageFlush).mockClear()
   const first = store.getState().setSpaceObjectIcon(folder.key, 'code')
   store.getState().togglePinnedItem(folder.key, 'main')
   const layout = createWorkspaceLayout('another-group')
@@ -115,9 +110,7 @@ it('interleaves awaited selections while concurrent pins/layout survive in the l
   expect(store.getState().spaceObjectIcons).toEqual({})
   expect(saved().state.spaceObjectIcons).toEqual({ [moteTarget.key]: 'brain' })
   expect(saved().state.pinnedItems).toEqual({ [folder.key]: ['main'] })
-  await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalled())
-  expect(saved().state.restoredWorkbench).toBeUndefined()
-  expect(desktopWorkbenchFromSpatial((await api.spatial.read())!.graph).layouts[workspace.id]).toEqual(layout)
+  expect(saved().state.restoredWorkbench.layouts[workspace.id]).toEqual(layout)
   release(); await Promise.all([first, second, third])
   await store.getState().setSpaceObjectIcon(folder.key, 'folder')
   expect(saved().state.spaceObjectIcons).toEqual({ [folder.key]: 'folder', [topicTarget.key]: 'book', [moteTarget.key]: 'brain' })

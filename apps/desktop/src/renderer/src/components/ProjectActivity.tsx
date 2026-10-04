@@ -1,4 +1,3 @@
-import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ChevronRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -26,7 +25,6 @@ import { SemanticIcon } from './semantic-icons'
 
 /** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
 const NO_TIMELINE: readonly AgentTimelineItem[] = []
-const NO_CONTEXTS: readonly ActivityContextInput[] = []
 
 function sessionReason(
   session: SessionSnapshot,
@@ -89,33 +87,29 @@ function contextMeta(group: ActivityGroup, path: string | null): string | null {
 
 export function ProjectActivity({
   sessions,
-  contexts = NO_CONTEXTS,
-  compact = false,
-  visible = true
+  contexts = [],
+  compact = false
 }: {
   sessions: SessionSnapshot[]
   contexts?: readonly ActivityContextInput[]
   compact?: boolean
-  visible?: boolean
 }) {
-  const [open, setOpen] = useState(false)
   const displayPath = usePathDisplay()
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
-  const topicFacts = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
   const config = useAppStore((state) => state.config)
   const agentIds = useMemo(() => sessions.filter((session) => session.kind === 'agent').map((session) => session.id), [sessions])
   // Read only this consumer's facts. Another Session's output must not wake every Space row.
   const timelines = useAppStore(useShallow((state) => {
     const owned: Record<string, AgentTimelineSnapshot> = {}
-    if (!visible) return owned
     for (const id of agentIds) {
       const timeline = state.timelines[id]
       if (timeline) owned[id] = timeline
     }
     return owned
   }))
-  const agentNames = useAppStore(useShallow((state) => visible && open ? Object.fromEntries(agentIds.map((id) => [id, state.agentNames[id]])) : {}))
+  const agentNames = useAppStore(useShallow((state) => Object.fromEntries(agentIds.map((id) => [id, state.agentNames[id]]))))
+  const [open, setOpen] = useState(false)
   const [, setNow] = useState(Date.now)
   // A new observation can arrive between ticks. Sample once per actual render;
   // the visible timer only requests another render when the menu is silent.
@@ -138,7 +132,7 @@ export function ProjectActivity({
   const attentionMetrics = metrics.filter((metric) => metric.key === 'needs-you' || metric.key === 'error')
   const visibleMetrics = compact ? (attentionMetrics.length > 0 ? attentionMetrics : metrics.slice(0, 1)) : metrics
   useEffect(() => {
-    if (!visible || !open || !hasActivity) return
+    if (!open || !hasActivity) return
     let timer: ReturnType<typeof setInterval> | undefined
     const updateVisibility = () => {
       if (timer !== undefined) clearInterval(timer)
@@ -153,14 +147,14 @@ export function ProjectActivity({
       if (timer !== undefined) clearInterval(timer)
       document.removeEventListener('visibilitychange', updateVisibility)
     }
-  }, [visible, open, hasActivity])
+  }, [open, hasActivity])
+  if (!hasActivity) return null
   // 数量作为图标角标，完整状态名称与数量仍由外层 aria-label/title 提供。
   // 网格保留长数字的自然宽度；紧凑布局不截断计数，也不另存一份状态。
-  const groups = useMemo(() => visible ? buildActivityGroups(sessions, contexts) : [], [visible, sessions, contexts])
-  const details = useMemo(() => groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n'), [groups, timelines, config])
-  if (!hasActivity) return null
+  const groups = buildActivityGroups(sessions, contexts)
+  const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
   const metricLabel = metrics.map((metric) => `${metric.count} ${metric.label}`).join(' · ')
-  return <DropdownMenu.Root open={visible && open} onOpenChange={setOpen}>
+  return <DropdownMenu.Root onOpenChange={setOpen}>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={`${metricLabel} · ${details}`} aria-label={`${metricLabel}. ${details}`}>
       <span className="project-activity__metrics" aria-hidden="true">
         {visibleMetrics.map((metric) => (
@@ -174,7 +168,7 @@ export function ProjectActivity({
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu project-activity-menu" side="right" align="start" sideOffset={4}>
       <DropdownMenu.Label className="composer-menu__hint">Activity by work line · select a row to open</DropdownMenu.Label>
       {compact ? <DropdownMenu.Label className="composer-menu__hint">{metricLabel}</DropdownMenu.Label> : null}
-      {visible && open ? groups.map((group) => {
+      {groups.map((group) => {
         const first = group.sessions[0]
         if (!first) return null
         const rosterRows = buildAgentRoster({ sessions: group.sessions, providerCatalog })
@@ -225,7 +219,7 @@ export function ProjectActivity({
               //
               // 显示的**名字**取归属（这一格属于哪个 Project），缩路径的**根**取包含（路径落在哪个
               // 仓里）——子目录终端只有后者答得出，是两个问题，故取两次。
-              const workspace = session.kind === 'agent' ? workspaceForSession(config ?? null, session, topicFacts) : undefined
+              const workspace = session.kind === 'agent' ? workspaceForSession(config ?? null, session) : undefined
               const project = workspace?.name ?? (session.kind === 'agent' ? session.workspacePath.split(/[\\/]/).filter(Boolean).at(-1) : 'Terminal')
               const activity = projectActivityRow(
                 session,
@@ -239,7 +233,7 @@ export function ProjectActivity({
             })}
           </div> : null}
         </div>
-      }) : null}
+      })}
       {attention.category ? <div className="composer-menu__hint">Pending requests remain here until answered.</div> : null}
     </DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>

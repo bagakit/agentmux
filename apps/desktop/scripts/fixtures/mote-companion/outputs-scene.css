@@ -1,6 +1,0 @@
-.outputs-scene { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; background: var(--surface-0); color: var(--text); font-family: var(--font-sans); }
-.outputs-scene > header { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line-soft); font-size: var(--fs-body); font-weight: 600; }
-.outputs-scene > header > span { color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
-.outputs-scene__reading { flex: 1; min-height: 0; overflow: auto; }
-.outputs-scene__notice { padding: var(--sp-3) var(--sp-4); color: var(--amber-text); font-size: var(--fs-meta); }
-.outputs-scene > .composer { margin: var(--sp-3); }

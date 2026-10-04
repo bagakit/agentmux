@@ -24,9 +24,7 @@ export function desktopElementVisible(element: HTMLElement | null): boolean {
   if (!element?.isConnected || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false
   const style = window.getComputedStyle(element)
   const rect = element.getBoundingClientRect()
-  // Native text carriers may have no painted area while participating in the visible layout.
-  const laidOutText = Boolean((element as HTMLElement & { editContext?: unknown }).editContext) && element.getClientRects().length > 0
-  return style.display !== 'none' && style.visibility !== 'hidden' && (rect.width > 0 && rect.height > 0 || laidOutText)
+  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
 }
 function queryIdentity(attribute: string, id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[${attribute}=${CSS.escape(id)}]`)
@@ -57,8 +55,7 @@ export type DesktopInputCapture = { element: HTMLElement | null; fact: AgentMuxD
 export function captureDesktopInput(tabs: Readonly<Record<string, WorkbenchTab>>): DesktopInputCapture {
   if (typeof document === 'undefined') return { element: null, fact: unknownInput() }
   const element = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const acceptsText = element && (element.isContentEditable || element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ||
-    Boolean((element as HTMLElement & { editContext?: unknown }).editContext))
+  const acceptsText = element && (element.isContentEditable || element.tagName === 'INPUT' || element.tagName === 'TEXTAREA')
   if (!element || element === document.body || !acceptsText) return { element: null, fact: { ...unknownInput(), provenance: 'observed', scope: 'none' } }
   const regionId = element.closest<HTMLElement>('[data-workbench-region-id]')?.dataset.workbenchRegionId ?? null
   const tabId = element.closest<HTMLElement>('[data-workbench-tab-id]')?.dataset.workbenchTabId ??

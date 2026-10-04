@@ -5,8 +5,7 @@ import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 
 type ReadingRange = { start: Node; startOffset: number; end: Node; endOffset: number }
-type ReadingScroll = { element: HTMLElement; top: number; left: number }
-type ReadingSnapshot = { ranges: ReadingRange[]; scrolls: ReadingScroll[]; activeElement: Element | null; parent: Element | null; interrupted: boolean; dispose(): void }
+type ReadingSnapshot = { ranges: ReadingRange[]; activeElement: Element | null; parent: Element | null; interrupted: boolean; dispose(): void }
 function captureReadingRanges(host: HTMLElement): ReadingRange[] {
   const selection = document.getSelection()
   return selection ? Array.from({ length: selection.rangeCount }, (_, index) => {
@@ -15,20 +14,6 @@ function captureReadingRanges(host: HTMLElement): ReadingRange[] {
       ? { start: range.startContainer, startOffset: range.startOffset, end: range.endContainer, endOffset: range.endOffset }
       : null
   }).filter((range): range is ReadingRange => range !== null) : []
-}
-function captureReadingScrolls(host: HTMLElement, ranges: ReadingRange[], activeElement: Element | null): ReadingScroll[] {
-  const scrolls = new Map<HTMLElement, ReadingScroll>()
-  // Original reading containers can be scrolled without a text selection or
-  // focused input. Read only those actual containers in this one retained host.
-  const readers = host.querySelectorAll<HTMLElement>('[data-workbench-reading-scroll]')
-  for (const node of [...readers, ...ranges.flatMap(range => [range.start, range.end]), activeElement]) {
-    let element = node instanceof HTMLElement ? node : node?.parentElement
-    while (element && host.contains(element)) {
-      if (element.scrollTop || element.scrollLeft) scrolls.set(element, { element, top: element.scrollTop, left: element.scrollLeft })
-      element = element.parentElement
-    }
-  }
-  return [...scrolls.values()]
 }
 function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeElement: Element | null, active: boolean, reparentedWithoutInput = false): void {
   const selection = document.getSelection()
@@ -68,12 +53,11 @@ function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeE
 class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }> {
   private pending = new Set<ReadingSnapshot>()
   getSnapshotBeforeUpdate(): ReadingSnapshot {
-    const ranges = captureReadingRanges(this.props.host), activeElement = document.activeElement
-    const snapshot: ReadingSnapshot = { ranges, scrolls: captureReadingScrolls(this.props.host, ranges, activeElement), activeElement,
+    const snapshot: ReadingSnapshot = { ranges: captureReadingRanges(this.props.host), activeElement: document.activeElement,
       parent: this.props.host.parentElement, interrupted: false, dispose() {} }
-    if (snapshot.ranges.length || snapshot.scrolls.length) {
+    if (snapshot.ranges.length) {
       const interrupt = () => { snapshot.interrupted = true }
-      const events = ['pointerdown', 'keydown', 'beforeinput', 'wheel', 'touchmove'] as const
+      const events = ['pointerdown', 'keydown', 'beforeinput'] as const
       for (const event of events) document.addEventListener(event, interrupt, true)
       snapshot.dispose = () => { for (const event of events) document.removeEventListener(event, interrupt, true) }
       this.pending.add(snapshot)
@@ -81,24 +65,14 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
     return snapshot
   }
   componentDidUpdate(_previous: Readonly<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }>, _state: unknown, snapshot: ReadingSnapshot): void {
-    if (snapshot.ranges.length === 0 && snapshot.scrolls.length === 0) return
+    if (snapshot.ranges.length === 0) return
     const host = this.props.host
     // The parent layout effect reattaches this same host during this commit.
     queueMicrotask(() => {
       try {
         const reparentedWithoutInput = host.parentElement !== snapshot.parent && document.activeElement === snapshot.activeElement
-        if (this.props.visible && !snapshot.interrupted) {
-          if (host.parentElement !== snapshot.parent &&
-            (document.activeElement === snapshot.activeElement || document.activeElement === document.body)) {
-            for (const scroll of snapshot.scrolls) if (host.contains(scroll.element) && scroll.element.isConnected) {
-              // Repair only a DOM-induced reset. A valid position already
-              // committed by this reader, or a browser clamp, remains current.
-              if (scroll.element.scrollTop === 0) scroll.element.scrollTop = scroll.top
-              if (scroll.element.scrollLeft === 0) scroll.element.scrollLeft = scroll.left
-            }
-          }
+        if (this.props.visible && !snapshot.interrupted)
           restoreReadingRanges(host, snapshot.ranges, snapshot.activeElement, this.props.active, reparentedWithoutInput)
-        }
       } finally { snapshot.dispose(); this.pending.delete(snapshot) }
     })
   }

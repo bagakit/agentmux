@@ -10,7 +10,6 @@ const styleMoveTraceDiagnostic = process.env.AGENTMUX_SHARED_FRAME_STYLE_MOVE_TR
 const preMoveStyleReadDiagnostic = process.env.AGENTMUX_SHARED_FRAME_PRE_MOVE_STYLE_READ_DIAGNOSTIC === '1'
 const commitIntervalDiagnostic = process.env.AGENTMUX_SHARED_FRAME_COMMIT_INTERVAL_DIAGNOSTIC === '1'
 const noDisclosureOpenDiagnostic = process.env.AGENTMUX_SHARED_FRAME_NO_DISCLOSURE_OPEN_DIAGNOSTIC === '1'
-const floatSpaceShortcut = process.env.AGENTMUX_SHARED_FRAME_FLOAT_SPACE_SHORTCUT === '1'
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, pid: process.pid, phase, frames: [], checks: [], userRunTouched: false,
@@ -265,7 +264,7 @@ app.whenReady().then(async () => {
       await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
       // Capture the settled original finite button transitions; keep motion and
       // selection owned by product CSS. Never wait on perpetual avatar motion.
-      const functionalSelection = await read(`(async()=>{const controls=[...document.querySelectorAll('.mote-details .surface-mode-switch button')].filter(e=>!e.closest('[hidden],[inert]')&&e.getClientRects().length),transitions=controls.flatMap(e=>e.getAnimations()).filter(a=>a.playState==='running'&&a.effect?.getTiming().iterations!==Infinity),started=performance.now(),observed=transitions.map(a=>({property:a.transitionProperty??null,currentTime:a.currentTime,duration:a.effect?.getTiming().duration}));await Promise.all(transitions.map(a=>a.finished.catch(()=>undefined)));return{observed,elapsedMs:performance.now()-started,lists:[...new Set(controls.map(e=>e.parentElement))].map(list=>({topic:list.closest('[data-mote-details]')?.dataset.moteDetails,tabpanel:list.parentElement.querySelector('[role=tabpanel]')?.getAttribute('aria-label'),controls:[...list.querySelectorAll('button')].map(e=>({text:e.textContent,selected:e.getAttribute('aria-selected'),class:e.className,color:getComputedStyle(e).color}))}))}})()`)
+      const functionalSelection = await read(`(async()=>{const controls=[...document.querySelectorAll('.mote-details .source-control-switch button')].filter(e=>!e.closest('[hidden],[inert]')&&e.getClientRects().length),transitions=controls.flatMap(e=>e.getAnimations()).filter(a=>a.playState==='running'&&a.effect?.getTiming().iterations!==Infinity),started=performance.now(),observed=transitions.map(a=>({property:a.transitionProperty??null,currentTime:a.currentTime,duration:a.effect?.getTiming().duration}));await Promise.all(transitions.map(a=>a.finished.catch(()=>undefined)));return{observed,elapsedMs:performance.now()-started,lists:[...new Set(controls.map(e=>e.parentElement))].map(list=>({topic:list.closest('[data-mote-details]')?.dataset.moteDetails,tabpanel:list.parentElement.querySelector('[role=tabpanel]')?.getAttribute('aria-label'),controls:[...list.querySelectorAll('button')].map(e=>({text:e.textContent,selected:e.getAttribute('aria-selected'),class:e.className,color:getComputedStyle(e).color}))}))}})()`)
       const file = phase + '-' + name + '.png', png = (await bounded(win.webContents.capturePage(), 'Renderer capture')).toPNG()
       await fs.writeFile(path.join(evidence, file), png)
       const presentationGeometry=await read(`(()=>{const p=${panel},rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,clientRects:e.getClientRects().length}},visible=e=>!e.closest('[hidden],[inert]')&&e.getClientRects().length>0;return{viewport:{width:innerWidth,height:innerHeight},floating:p.matches(':popover-open')?{frame:rect(p),files:rect(p.querySelector('.mote-workface__files')),workbench:rect(p.querySelector('.workspace-workbench')),groups:[...p.querySelectorAll('.pane-group')].filter(visible).map(g=>({id:g.dataset.paneGroupId,bounds:rect(g),editor:rect(g.querySelector('.composer__editor')),text:g.innerText.slice(-160)}))}:null,space:{rail:rect(document.querySelector('.project-rail-shell')),tools:rect(document.querySelector('.surface-tool-dock')),main:rect(document.querySelector('.workspace-main-surface'))}}})()` )
@@ -322,12 +321,6 @@ app.whenReady().then(async () => {
     assert.ok(deniedWarm.every(call=>call.denied===true), 'The controlled API rejects this optional startup request and creates no Session/Run')
     assert.deepEqual(forbidden(result.initial), [])
     result.checks.push({name:'Original-initialize-exact-call-baseline-one-denied-optional-warm-no-created-Run-no-later-launch',passed:true,calls:result.ordinaryStartupCalls})
-    if (floatSpaceShortcut) {
-      await require('./float-space-shortcut.cjs')({ result, phase, evidence, win, read, until, facts, input, click, key, capture,
-        selector, button, panel, entry, size, visible, chooseMote, chooseSection, forbidden, reference, primary, target, custom })
-      result.passed = true
-      return
-    }
     if (phase === 'seed') {
       assert.equal(result.initial.initialization.seedApplied, true)
       await visible(primary, target)

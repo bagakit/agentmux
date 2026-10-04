@@ -2,13 +2,10 @@ import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/cont
 import { activateTab, addTab, addTabOccurrence, groupIds, removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
-  addWorkbenchRegion,
-  focusWorkbenchTabRegion,
   documentKey,
   fileTabId,
   initialWorkbenchRegionId,
   removeWorkbenchRegion,
-  replaceWorkbenchRegion,
   tabGroupForTab,
   remapLayoutTabIds,
   titleWorkbenchSurface,
@@ -90,10 +87,6 @@ export type FileOpenPlacement = {
   resource: { hostId: string; path: string }
   projection?: import('./workbench-projection').WorkbenchProjection
   reference?: import('./workbench-projection').WorkbenchProjectionSelection
-  /** Consume this exact empty Launcher; repeat reads may reuse the same File Region. */
-  launcher?: { tabId: string; regionId: string }
-  /** Insert beside this exact Region, or reuse the same resource in this Tab. */
-  split?: { tabId: string; regionId: string; direction: 'left' | 'right' | 'up' | 'down' }
   focus?: boolean
   fileOnly?: boolean
   selection?: import('@agentmux/core').AgentMuxDesktopSpaceSelection
@@ -102,33 +95,6 @@ export type FileOpenPlacement = {
 
 /** Current original-owner fact for this commit; never written back to the retained Tab. */
 export type ConfirmedExistingFileSpace = { tabId: string; space: FileOpenPlacement['space'] }
-
-/** File creation consumes its original Launcher without touching siblings or making a substitute Tab. */
-export function fileOpenLauncherMatches(
-  state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string,
-  groupId: string | undefined, placement: FileOpenPlacement
-): boolean {
-  if (!placement.launcher) return true
-  const tab = state.tabs[placement.launcher.tabId], surface = tab?.regions[placement.launcher.regionId]
-  const layout = state.layouts[placement.displayWorkspaceId]
-  return Boolean(tab && tab.workspaceId === workspaceId && (!tab.space || tab.space.zoneId === placement.space.zoneId) &&
-    layout && groupId && groupIds(layout.root).includes(groupId) && layout.groups.some(group => group.id === groupId && group.tabOrder.includes(tab.id)) &&
-    (surface?.kind === 'launcher' && surface.workspaceId === workspaceId || surface?.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))
-}
-
-/** A split is bound to the original resource, Zone and display occurrence. */
-export function fileOpenSplitMatches(
-  state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string,
-  groupId: string | undefined, placement: FileOpenPlacement, confirmedExistingSpace?: ConfirmedExistingFileSpace
-): boolean {
-  if (!placement.split) return true
-  const tab = state.tabs[placement.split.tabId], layout = state.layouts[placement.displayWorkspaceId]
-  const space = tab?.space ?? (confirmedExistingSpace?.tabId === tab?.id ? confirmedExistingSpace?.space : undefined)
-  return Boolean(tab && tab.workspaceId === workspaceId && space?.zoneId === placement.space.zoneId &&
-    space.spaceId === placement.space.spaceId && tab.regions[placement.split.regionId] &&
-    layout && groupId && groupIds(layout.root).includes(groupId) &&
-    layout.groups.some(group => group.id === groupId && group.tabOrder.includes(tab.id)))
-}
 
 /** An existing File Region is an exact address, not an instruction to create another Tab. */
 export function fileOpenReferenceMatches(
@@ -152,20 +118,6 @@ export function fileOpenReferenceMatches(
 }
 
 
-/** Reuse the original visible File, including one promoted out of its initial Tab. */
-export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string) {
-  const layout = state.layouts[workspaceId]
-  if (!layout) return undefined
-  const ids = [...new Set([fileTabId(workspaceId, path), ...layout.groups.flatMap(group => group.tabOrder)])]
-  for (const id of ids) {
-    const tab = state.tabs[id]
-    if (!tab || !tabGroupForTab(layout, id)) continue
-    const surface = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
-    if (surface) return { tab, surface }
-  }
-  return undefined
-}
-
 /** Place every format through the same durable File surface; content is a separate fact. */
 export function reduceFileSurfaceOpened(
   state: FileWorkbenchState,
@@ -179,24 +131,6 @@ export function reduceFileSurfaceOpened(
   const displayId = placement?.displayWorkspaceId ?? workspaceId
   const layout = state.layouts[displayId]
   if (!layout) return state
-  if (placement?.split) {
-    if (!fileOpenSplitMatches(state, workspaceId, preferredTabGroupId, placement, confirmedExistingSpace)) throw new Error('The original resource or Region is unavailable. No substitute Tab was created.')
-    const tab = state.tabs[placement.split.tabId]!
-    const existing = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
-    const opened = existing ? focusWorkbenchTabRegion(tab, existing.regionId) : addWorkbenchRegion(tab, placement.split.regionId, placement.split.direction,
-      { kind: 'file', workspaceId, path, regionId: `region:${crypto.randomUUID()}` })
-    const retained = placement.projection || placement.focus === false
-      ? { ...opened, layout: { ...opened.layout, activeRegionId: tab.layout.activeRegionId } } : opened
-    return { ...state, tabs: { ...state.tabs, [tab.id]: retained },
-      layouts: placement.projection || placement.focus === false ? state.layouts : { ...state.layouts, [displayId]: activateTab(layout, preferredTabGroupId!, tab.id) } }
-  }
-  if (placement?.launcher) {
-    if (!fileOpenLauncherMatches(state, workspaceId, path, preferredTabGroupId, placement)) throw new Error('The original Note pane is unavailable; its file is kept and no substitute was created.')
-    const { tabId, regionId } = placement.launcher, tab = state.tabs[tabId]!
-    const placed = tab.regions[regionId]?.kind === 'file' ? tab : replaceWorkbenchRegion(tab, regionId, { kind: 'file', regionId, workspaceId, path })
-    return { ...state, tabs: { ...state.tabs, [tabId]: placed },
-      layouts: placement.projection || placement.focus === false ? state.layouts : { ...state.layouts, [displayId]: activateTab(layout, preferredTabGroupId!, tabId) } }
-  }
   if (placement?.reference) {
     if (!fileOpenReferenceMatches(state, workspaceId, path, preferredTabGroupId, placement)) throw new Error('The original File Region reference is unconfirmed; no substitute Tab was created.')
     if (placement.projection || placement.focus === false) return state
@@ -206,20 +140,14 @@ export function reduceFileSurfaceOpened(
       lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
       layouts: { ...state.layouts, [displayId]: activateTab(layout, reference.groupId, reference.tabId) } }
   }
-  const original = placement ? undefined : findFileWorkbenchSurface(state, workspaceId, path)
-  const tabId = original?.tab.id ?? fileTabId(workspaceId, path)
+  const tabId = fileTabId(workspaceId, path)
   const existingTabGroupId = tabGroupForTab(layout, tabId)
   const targetTabGroupId = placement ? preferredTabGroupId : existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
   if (!targetTabGroupId) return state
   const existingTab = state.tabs[tabId]
-  const existingFile = existingTab && workbenchSurfaces(existingTab).some(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
   const existingSpace = existingTab?.space ?? (confirmedExistingSpace?.tabId === existingTab?.id ? confirmedExistingSpace?.space : undefined)
   if (placement && existingTab && (existingSpace?.zoneId !== placement.space.zoneId || existingSpace.spaceId !== placement.space.spaceId)) throw new Error('The existing file Tab has another Zone context; its original placement is retained.')
-  const placedTab = original ? focusWorkbenchTabRegion(original.tab, original.surface.regionId)
-    : existingFile ? existingTab! : existingTab ? addWorkbenchRegion(existingTab, existingTab.layout.activeRegionId, 'right', {
-      kind: 'file', workspaceId, path,
-      regionId: existingTab.regions[initialWorkbenchRegionId(tabId)] ? `region:${crypto.randomUUID()}` : initialWorkbenchRegionId(tabId)
-    }) : (() => {
+  const tab = existingTab ?? (() => {
     const surface: FileWorkbenchSurface = {
       regionId: initialWorkbenchRegionId(tabId),
       kind: 'file',
@@ -229,11 +157,9 @@ export function reduceFileSurfaceOpened(
     const createdTab = createWorkbenchTab(tabId, surface)
     return { ...createdTab, ...(topicId ? { topicId } : {}), ...(placement ? { space: placement.space } : {}) }
   })()
-  const tab = existingTab && placedTab.layout.activeRegionId !== existingTab.layout.activeRegionId && (placement?.projection || placement?.focus === false)
-    ? { ...placedTab, layout: { ...placedTab.layout, activeRegionId: existingTab.layout.activeRegionId } } : placedTab
   return {
     ...state,
-    tabs: state.tabs[tab.id] === tab ? state.tabs : { ...state.tabs, [tab.id]: tab },
+    tabs: { ...state.tabs, [tab.id]: tab },
     lastActiveFileByWorkspace: placement?.projection || placement?.focus === false ? state.lastActiveFileByWorkspace : { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
     layouts: {
       ...state.layouts,
@@ -257,7 +183,6 @@ export function reduceFileOpened(
   if (opened === state && !placement?.reference) return state
   const key = documentKey(workspaceId, path)
   const alreadyOpen = Boolean(state.documents[key])
-  if (alreadyOpen) return opened
   return {
     ...opened,
     documents: { ...state.documents, [key]: alreadyOpen ? state.documents[key]! : document },
@@ -318,7 +243,8 @@ export function reduceDocumentAttached(
  * same fact as one deleted while open, and it should reach the same failure state (which already
  * offers Reveal, falling back to the nearest surviving ancestor) rather than a second, restore-only one.
  *
- * The same actual File surfaces as successful attachment own the failure, including mixed and promoted Tabs.
+ * 这里的 canonical-tab 查法与 `reduceDocumentAttached` 完全同一条不成文不变量，理由与失效后果都写在
+ * 那个函数的注释里——两处必须一起改，否则失败态与成功态会按不同规则认宿主 tab。
  */
 export function reduceDocumentLoadFailed(
   state: FileWorkbenchState,
@@ -328,8 +254,7 @@ export function reduceDocumentLoadFailed(
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   if (state.documents[key]) return state
-  if (!Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
-    surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))) return state
+  if (!state.tabs[fileTabId(workspaceId, path)]) return state
   return { ...state, documentIssues: { ...state.documentIssues, [key]: issue } }
 }
 
@@ -572,7 +497,7 @@ export function reduceFileRename(
   workspaceId: string,
   path: string,
   nextPath: string
-): FileWorkbenchState & { tabIds: ReadonlyMap<string, string> } {
+): FileWorkbenchState {
   const affectedTabs = Object.values(state.tabs).flatMap((tab) => {
     const surfaces = workbenchSurfaces(tab).filter((surface): surface is FileWorkbenchSurface => (
       surface.kind === 'file' &&
@@ -664,7 +589,6 @@ export function reduceFileRename(
     savingDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = false
   }
   return {
-    tabIds: replacements,
     tabs,
     documents,
     dirtyDocuments,
@@ -675,7 +599,7 @@ export function reduceFileRename(
     layouts: Object.fromEntries(
       Object.entries(state.layouts).map(([id, layout]) => [
         id,
-        remapLayoutTabIds(layout, replacements)
+        id === workspaceId ? remapLayoutTabIds(layout, replacements) : layout
       ])
     ),
     lastActiveFileByWorkspace: {

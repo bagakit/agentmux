@@ -197,7 +197,7 @@ export class ExternalBrowserOwner {
       await ownedFeedback.end(run.completed && attached.endedReason === null && !active.stopped)
       feedbackEnded = true
       const uncertain = attached.endedReason ?? (binding.connection?.id !== connectionId || binding.status !== 'ready' ? binding.warning : undefined)
-      const outcome = active.stopped ? { kind: 'stopped' as const, message: 'The shared-tab operation was stopped. Sharing must be granted explicitly before another action.' } :
+      const outcome = active.stopped ? { kind: 'stopped' as const, message: 'The person stopped the shared-tab operation. Sharing must be granted explicitly before another action.' } :
         uncertain || notes.length ? { kind: 'indeterminate' as const, message: [uncertain, ...notes].filter(Boolean).join('\n') } :
           run.completed ? { kind: 'completed' as const } : browserRunOutcomeFromFailure(run.failure)
       operation.phase = browserOperationPhaseFromOutcome(outcome.kind); operation.finishedAt = Date.now()

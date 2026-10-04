@@ -1,5 +1,3 @@
-import type { SplitDirection } from './split-direction-ssot.js'
-
 /** Core spatial identities and relationships. Hosts retain Git, files, Native content and execution. */
 export type AgentMuxSpaceSelector = {
   spaceId?: string
@@ -221,9 +219,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
   | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
   | { operation: 'space.swap'; regionId: string; withRegionId: string }
-  | { operation: 'open.file'; path: string; zoneId: string; spaceId?: string; displayWorkspaceId?: string; groupId?: string;
-      /** Exact existing Tab and anchor Region; all three fields require the exact display occurrence. */
-      tabId?: string; regionId?: string; split?: SplitDirection; focus: boolean }
+  | { operation: 'open.file'; path: string; zoneId: string; spaceId?: string; displayWorkspaceId?: string; groupId?: string; focus: boolean }
   | { operation: 'agent.rename'; agentSessionId: string; name: string | null; expectedNameRevision: number }
   | { operation: 'agent.inspect'; agentSessionId: string }
   | { operation: 'space.rename'; tabId: string; name: string | null; expectedNameRevision: number }

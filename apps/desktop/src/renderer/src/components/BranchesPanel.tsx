@@ -26,7 +26,8 @@ import { buildFanOutRequest } from '../lib/fanout-request'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import {
-  createWorktreePresenceSelector
+  runningAgentPresenceByWorktree,
+  worktreePresenceKey
 } from '../lib/branch-agent-presence'
 import { defaultWorktreePath, workspaceProjectId } from '../lib/workspace-projects'
 import { partitionPinned } from '../lib/topic-order'
@@ -49,27 +50,12 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function WorktreeAgentPresence({ hostId, path }: { hostId: string; path: string }) {
-  const select = useMemo(() => createWorktreePresenceSelector(hostId, path), [hostId, path])
-  const runningAgents = useAppStore(state => select(state.sessions))
-  const config = useAppStore(state => state.config)
-  return <SelectorPresence agents={runningAgents.map((agent) => ({
-                    key: agent.executorId,
-                    providerId: agent.providerId,
-                    label: config?.executors[agent.executorId]?.label ?? agentProviderLabel(agent.providerId),
-                    executorId: agent.executorId,
-                    appearance: config?.executors[agent.executorId]?.avatar,
-                    // A stack uses the same urgency order as the roster; a live process is not always ready.
-                    state: agent.state,
-                    count: agent.count
-                  }))} />
-}
-
 export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const displayPath = usePathDisplay()
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const runFanOut = useAppStore((state) => state.runFanOut)
   const config = useAppStore((state) => state.config)
+  const sessions = useAppStore((state) => state.sessions)
   const removeWorktree = useAppStore((state) => state.removeWorktree)
   const pinnedItems = useAppStore((state) => state.pinnedItems)
   const togglePinnedItem = useAppStore((state) => state.togglePinnedItem)
@@ -122,7 +108,10 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       : [],
     [snapshot]
   )
-
+  const runningAgentsByWorktree = useMemo(
+    () => runningAgentPresenceByWorktree(sessions),
+    [sessions]
+  )
 
   // 置顶是**组内**的一次分区，不是重新分组：`partitionPinned` 只重排一段里的次序（置顶的靠前，
   // 两段各自的相对次序原样保留），绝不把一个没有 worktree 的分支提进「Worktrees」组——那会让
@@ -255,6 +244,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     const pinned = pinnedBranches.includes(branch.name)
     // 一次判断给出标志与取值。分开算两次是这一族缺陷的来源，所以这里也不许再判第二次。
     const worktree = branchWorktreePath(branch)
+    const runningAgents = worktree !== null && snapshot?.kind === 'git-repository'
+      ? runningAgentsByWorktree.get(worktreePresenceKey(snapshot.hostId, worktree)) ?? []
+      : []
     // 只有当前分支能带同步计数（见 syncFacts 处注释）。`label` 为空的两种状态（没 upstream / 已同步）
     // 不画徽标——它们没有数字可报，画一个空盒子只是噪声。
     // 代价要说清：`gitSyncBadge` 为这两种各准备了一句不同的 `title`，而这里两者都不渲染，于是那两句
@@ -325,9 +317,20 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               titleTooltip={worktree ? `${branch.name} · ${displayPath(worktree, workspace.hostId)}` : branch.name}
               subtitle={worktree && worktree !== workspace.path ? displayPath(worktree, workspace.hostId) : null}
               subtitleTooltip={worktree ? displayPath(worktree, workspace.hostId) : undefined}
-              presence={worktree !== null && snapshot?.kind === 'git-repository'
-                ? <WorktreeAgentPresence hostId={snapshot.hostId} path={worktree} />
-                : null}
+              presence={
+                <SelectorPresence
+                  agents={runningAgents.map((agent) => ({
+                    key: agent.executorId,
+                    providerId: agent.providerId,
+                    label: config?.executors[agent.executorId]?.label ?? agentProviderLabel(agent.providerId),
+                    executorId: agent.executorId,
+                    appearance: config?.executors[agent.executorId]?.avatar,
+                    // A stack uses the same urgency order as the roster; a live process is not always ready.
+                    state: agent.state,
+                    count: agent.count
+                  }))}
+                />
+              }
               trailing={
                 <>
                   {sync && sync.label ? (

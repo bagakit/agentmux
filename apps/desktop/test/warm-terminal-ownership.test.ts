@@ -67,7 +67,7 @@ describe('warmTerminalPreview：预览只属于槽的 owner', () => {
         warmKey: KEY,
         launcherId: 'launcher-a'
       })
-    ).toEqual({ session, pending: false, slotHeld: true, state: 'ready' })
+    ).toEqual({ session, pending: false, slotHeld: true })
   })
 
   it('同 key 但归属是别人时不给 session —— 这就是两个 view 抢一个 PTY 的那一刻', () => {
@@ -95,7 +95,7 @@ describe('warmTerminalPreview：预览只属于槽的 owner', () => {
           launcherId: 'launcher-b'
         }),
         `owner=${owner}`
-      ).toEqual({ session: null, pending: true, slotHeld: true, state: 'preparing' })
+      ).toEqual({ session: null, pending: true, slotHeld: true })
     }
   })
 
@@ -106,7 +106,7 @@ describe('warmTerminalPreview：预览只属于槽的 owner', () => {
         warmKey: KEY,
         launcherId: 'launcher-a'
       })
-    ).toEqual({ session: null, pending: false, slotHeld: false, state: 'other-target' })
+    ).toEqual({ session: null, pending: false, slotHeld: false })
   })
 
   it('没有 workspace（warmKey 为 null）时不能靠「两个都没有键」凑成相等', () => {
@@ -116,13 +116,13 @@ describe('warmTerminalPreview：预览只属于槽的 owner', () => {
         warmKey: null,
         launcherId: 'launcher-a'
       })
-    ).toEqual({ session: null, pending: false, slotHeld: false, state: 'idle' })
+    ).toEqual({ session: null, pending: false, slotHeld: false })
   })
 
   it('槽为空时 slotHeld 为假 —— promote 之后靠这个值重新预热', () => {
     expect(
       warmTerminalPreview({ warmTerminal: null, warmKey: KEY, launcherId: 'launcher-a' })
-    ).toEqual({ session: null, pending: false, slotHeld: false, state: 'idle' })
+    ).toEqual({ session: null, pending: false, slotHeld: false })
   })
 
   it('slotHeld 与归属无关 —— 否则同胞之间会无限 ping-pong 重新预热', () => {

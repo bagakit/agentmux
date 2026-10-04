@@ -13,11 +13,7 @@ const mutations: Record<string, [string, string, string]> = {
   'promote-claude-sidechain': ['packages/core/src/providers/claude-native-session.ts', 'p.isSidechain === false', 'p.isSidechain !== undefined'],
   'ignore-observation-version': ['packages/core/src/client.ts', 'stored.nativeSourceObservation.observedAt !== input.expectedObservationAt', 'false'],
   'keep-unknown-source': ['packages/core/src/client.ts', 'delete next.nativeSourceObservation\n              return next', 'return next'],
-  'forget-historical-source': ['packages/core/src/prompt-submission.ts', '...(session.nativeConfirmationHistory ?? [])', '...[]'],
-  'overwrite-confirmed-source-with-unknown': ['packages/core/src/client.ts', "if (!sameNativeHandle(value.nativeHandle, retained)) throw new AgentMuxError('The original failed source observation is stale.'", "if (false) throw new AgentMuxError('The original failed source observation is stale.'"],
-  'hide-history-save-failure': ['packages/core/src/client.ts', "code: persistenceFailure === undefined ? 'AGENT_NATIVE_SOURCE_UNCONFIRMED' : 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED'", "code: 'AGENT_NATIVE_SOURCE_UNCONFIRMED'"],
-  'skip-history-save-failure-source-fence': ['packages/core/src/client.ts', "throw saveError\n            await checkStored()", "throw saveError\n            // no source fence"],
-  'replay-old-prompt': ['packages/core/src/prompt-submission.ts', "if (promptBelongsToPreviousNativeSource(session, submissionId)) {", 'if (false) {'],
+  'replay-old-prompt': ['packages/core/src/prompt-submission.ts', "if (session.nativeConfirmation?.previousPromptSubmissionId === submissionId) {", 'if (false) {'],
   'disconnect-rpc': ['packages/core/src/public-rpc-service.ts', "if (method === 'agent.native.confirm') {", "if (method === '__disabled_native_confirm__') {"]
 }
 export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/native-session-change-vite'), plugins: [{

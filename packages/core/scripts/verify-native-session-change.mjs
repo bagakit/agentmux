@@ -33,7 +33,7 @@ try {
     bundle: true, platform: 'node', format: 'esm', packages: 'external', metafile: true })
   if (!Object.keys(storeBuild.metafile.inputs).some(input => input.endsWith('packages/core/src/agent-session-store.ts'))) throw new Error('Private restore did not load owning source')
   await writeFile(join(evidence, 'restart-source-inputs.json'), JSON.stringify({ inputs: Object.keys(storeBuild.metafile.inputs), artifactSHA256: sha(await readFile(join(privateBuild, 'dist/store.js'))) }, null, 2))
-  for (const mutation of ['', 'diagnose-before-source-fact', 'drop-source-save-diagnostic', 'mislabel-source-cas-stale', 'skip-candidate', 'promote-claude-sidechain', 'ignore-observation-version', 'keep-unknown-source', 'keep-old-interaction', 'discard-confirmation-history', 'replay-old-prompt', 'forget-historical-source', 'overwrite-confirmed-source-with-unknown', 'hide-history-save-failure', 'skip-history-save-failure-source-fence', 'disconnect-rpc', '']) {
+  for (const mutation of ['', 'diagnose-before-source-fact', 'drop-source-save-diagnostic', 'mislabel-source-cas-stale', 'skip-candidate', 'promote-claude-sidechain', 'ignore-observation-version', 'keep-unknown-source', 'keep-old-interaction', 'discard-confirmation-history', 'replay-old-prompt', 'disconnect-rpc', '']) {
     const name = mutation || (receipts.length ? 'control-after-mutants' : 'control'), loaded = join(evidence, name + '.loaded.jsonl')
     await writeFile(loaded, '')
     let result

@@ -1,7 +1,0 @@
-{
-  "schema": "agentmux.toolkit.package.v1",
-  "name": "Auth",
-  "icon": "key-round",
-  "entry": "query.mjs",
-  "actions": []
-}

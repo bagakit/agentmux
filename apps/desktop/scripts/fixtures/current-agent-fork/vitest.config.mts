@@ -22,6 +22,8 @@ const mutations: Record<string, [string, string, string]> = {
 }
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },
   plugins: [{ name: 'current-fork-owning-source', enforce: 'pre',
+    resolveId(id) { if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-fork-file-resource' },
+    load(id) { if (id === '\0unused-fork-file-resource') return 'export function zoneFileResource(){throw new Error("Unused unrelated file-resource leaf invoked in fork scene")}' },
     transform(source, id) {
       const path = relative(root, id.split('?')[0]!)
       if (!path.startsWith('packages/core/src/') && !path.startsWith('apps/desktop/src/')) return

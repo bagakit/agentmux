@@ -46,21 +46,15 @@
   align-items: center;
   gap:var(--sp-3);
   padding:0 var(--sp-3);
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--text-3);
-  background: var(--surface-0);
-  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+  background: var(--bg);
 }
 .file-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text-2); background: transparent; font-size: var(--fs-micro); }
-.file-search:focus-within { border-color: var(--focus-line); background: var(--bg); }
-@media (prefers-reduced-motion: reduce) { .file-search { transition: none; } }
-@media (forced-colors: active) { .file-search { border-color: ButtonText; } }
+.file-search:focus-within { border-color: var(--focus-line); }
 .explorer-header__actions button:focus-visible, .tree-row__label:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
-.file-tree { position: relative; min-height: 0; overflow: auto; padding:var(--sp-1) var(--sp-2) var(--sp-5); outline: none; }
-.file-tree__prefix { display: flow-root; }
-.file-tree__rows { position: relative; width: 100%; }
-.file-tree__virtual-row { position: absolute; top: 0; left: 0; width: 100%; }
+.file-tree { min-height: 0; overflow: auto; padding:var(--sp-1) var(--sp-2) var(--sp-5); outline: none; }
 .file-tree:focus-visible { box-shadow: inset 0 0 0 1px var(--focus-line); }
 .file-tree-root-target { height: 22px; display: flex; align-items: center; gap:var(--sp-2); margin-bottom:var(--sp-1); padding:0 var(--sp-3); border-radius: 4px; color: var(--text-3); font-size: var(--fs-micro); }
 .file-tree-root-target--over, .tree-row--drop-over { background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line); }

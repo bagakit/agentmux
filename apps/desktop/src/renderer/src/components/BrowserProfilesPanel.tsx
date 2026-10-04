@@ -106,10 +106,7 @@ export function BrowserProfilesPanel({
 }) {
   const mounted = useRef(true)
   const importRequest = useRef(0)
-  const profileRequest = useRef(0)
   const [profiles, setProfiles] = useState<BrowserProfileSummary[] | null>(null)
-  const [profilesLoading, setProfilesLoading] = useState(true)
-  const [profileError, setProfileError] = useState<string | null>(null)
   const [sources, setSources] = useState<BrowserProfileImportSourceSummary[] | null>(null)
   const [createLabel, setCreateLabel] = useState('')
   const [sourceToken, setSourceToken] = useState('')
@@ -118,28 +115,16 @@ export function BrowserProfilesPanel({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  async function loadProfiles(): Promise<void> {
-    const request = ++profileRequest.current
-    setProfilesLoading(true)
-    try {
-      const next = await api.browser.listProfiles()
-      if (!mounted.current || profileRequest.current !== request) return
-      setProfiles(next)
-      setProfileError(null)
-    } catch (cause) {
-      if (mounted.current && profileRequest.current === request) setProfileError(presentError(cause))
-    } finally {
-      if (mounted.current && profileRequest.current === request) setProfilesLoading(false)
-    }
-  }
-
   useEffect(() => {
     mounted.current = true
-    void loadProfiles()
+    void api.browser.listProfiles().then((next) => {
+      if (mounted.current) setProfiles(next)
+    }).catch((cause) => {
+      if (mounted.current) setError(presentError(cause))
+    })
     return () => {
       mounted.current = false
       importRequest.current += 1
-      profileRequest.current += 1
     }
   }, [])
 
@@ -253,9 +238,7 @@ export function BrowserProfilesPanel({
         <span><strong>Profiles</strong><small>Separate sign-ins</small></span>
       </header>
       {profiles === null ? (
-        <div className="browser-profiles__loading" role="status">
-          {profilesLoading ? <><LoaderCircle className="spin" size={13} /> Loading Profiles…</> : 'Profiles unavailable'}
-        </div>
+        <div className="browser-profiles__loading"><LoaderCircle className="spin" size={13} /> Loading Profiles…</div>
       ) : (
         <BrowserProfileCatalog
           profiles={profiles}
@@ -339,12 +322,6 @@ export function BrowserProfilesPanel({
           ))}
         </div>
       ) : null}
-      {profileError ? <div className="surface-tool-error" role="alert">
-        {profileError}{' '}
-        <button className="small-button" type="button" disabled={profilesLoading || busy !== null} onClick={() => void loadProfiles()}>
-          {profilesLoading ? 'Retrying Profile connection…' : 'Retry Profile connection'}
-        </button>
-      </div> : null}
       {error ? <div className="surface-tool-error" role="alert">{error}</div> : null}
     </section>
   )

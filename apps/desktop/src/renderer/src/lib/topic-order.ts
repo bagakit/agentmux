@@ -50,22 +50,19 @@ export function partitionPinned(
 /**
  * 一次拖拽产生的新顺序。
  *
- * shown 是当前可见目录。wholeOrder 是原持久偏好；分类内重排只替换其中的可见项，
- * 未展示的 Topic 保留原位置及相对次序。尚未排过的可见项补在末尾。
+ * 输入的是**当前展示序**（即 `orderTopics` 的输出），输出可直接存回用户顺序——
+ * 于是"拖到哪儿"和"存下什么"是同一件事，不需要第二次换算。
  */
 export function reorderTopics(
   shown: readonly string[],
   movedId: string,
-  targetId: string,
-  wholeOrder: readonly string[] = shown
+  targetId: string
 ): string[] {
   const from = shown.indexOf(movedId)
   const to = shown.indexOf(targetId)
-  if (from < 0 || to < 0 || from === to) return [...wholeOrder]
+  if (from < 0 || to < 0 || from === to) return [...shown]
   const next = [...shown]
   next.splice(from, 1)
   next.splice(to, 0, movedId)
-  const visible = new Set(shown)
-  let index = 0
-  return [...wholeOrder.map(id => visible.has(id) ? next[index++]! : id), ...next.slice(index)]
+  return next
 }

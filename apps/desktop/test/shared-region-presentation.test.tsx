@@ -99,7 +99,7 @@ async function presentationFixture({ file = false }: { file?: boolean } = {}) {
     async focus() { await act(async () => {
       useAppStore.getState().focusRegion(reference.displayWorkspaceId, reference.tabId, file ? 'exact-r1' : reference.regionId, 'pointer', reference.groupId)
       useAppStore.getState().setMainSurface('agents')
-      if (file) useAppStore.getState().selectMainRegion(reference, useAppStore.getState().workbenchSpaceSelection)
+      if (file) useAppStore.getState().selectExecutionFocusReference(reference, useAppStore.getState().agentFocus.execution)
     }) },
     async close() { await act(async () => root.unmount()); container.remove(); restorePopover()
       useAppStore.setState(initial, true); window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() } }

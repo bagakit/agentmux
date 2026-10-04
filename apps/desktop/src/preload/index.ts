@@ -1,11 +1,11 @@
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
-import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
+import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
-import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
+import { unwrapSessionInputWriteResult } from '../shared/session-input-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -75,15 +75,6 @@ import type {
 } from '../shared/git-contracts.js'
 
 const api: AgentMuxPreloadApi = {
-  notebooks: {
-    read: () => ipcRenderer.invoke('notebook:read'),
-    apply: input => ipcRenderer.invoke('notebook:apply', input),
-    onChange: listener => {
-      const receive = (_event: unknown, event: import('@agentmux/core/notebook-catalog').NotebookObservation) => listener(event)
-      ipcRenderer.on('notebook:changed', receive)
-      return () => ipcRenderer.removeListener('notebook:changed', receive)
-    }
-  },
   spatial: {
     read:()=>ipcRenderer.invoke('spatial:read'),
     commit:input=>ipcRenderer.invoke('spatial:commit',input),
@@ -103,10 +94,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   hosts: {
-    check: (host: HostConfig) => ipcRenderer.invoke('hosts:check', host),
-    upgradeCheck: (host: HostConfig) => ipcRenderer.invoke('hosts:upgradeCheck', host),
-    upgrade: (host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string) => ipcRenderer.invoke('hosts:upgrade', host, expected, operationId),
-    upgradeInspect: (host: HostConfig, operationId: string) => ipcRenderer.invoke('hosts:upgradeInspect', host, operationId)
+    check: (host: HostConfig) => ipcRenderer.invoke('hosts:check', host)
   },
   deviceManagement: {
     link: (params) => ipcRenderer.invoke('deviceManagement:link', params),
@@ -162,8 +150,6 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('gh:createPullRequest', workspaceId, input)
   },
   files: {
-    readPublic: (params: import('@agentmux/core').FileReadParams) => ipcRenderer.invoke('files:readPublic', params),
-    list: (workspaceId: string, path?: string, limit?: number) => ipcRenderer.invoke('files:list', workspaceId, path, limit),
     readDirectory: (workspaceId: string, path: string) =>
       ipcRenderer.invoke('files:readDirectory', workspaceId, path),
     read: (workspaceId: string, path: string) => ipcRenderer.invoke('files:read', workspaceId, path),
@@ -188,12 +174,6 @@ const api: AgentMuxPreloadApi = {
   },
   topics: {
     call: (method, params) => ipcRenderer.invoke('topics:call', method, params)
-  },
-  spaceObjects: {
-    appearance: (target: SpaceObjectImageTarget) => ipcRenderer.invoke('spaceObjects:appearance', target),
-    previewAvatar: (target: SpaceObjectImageTarget, input: ObjectAvatarInput) => ipcRenderer.invoke('spaceObjects:previewAvatar', target, input),
-    saveAvatar: (target: SpaceObjectImageTarget, input: ObjectAvatarInput) => ipcRenderer.invoke('spaceObjects:saveAvatar', target, input),
-    readAvatar: (target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => ipcRenderer.invoke('spaceObjects:readAvatar', target, ref)
   },
   scratch: {
     setMoteArchived: (workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string) =>
@@ -241,12 +221,6 @@ const api: AgentMuxPreloadApi = {
     },
     requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
-    spatialLinksReady: () => ipcRenderer.invoke('ui:spatialLinksReady'),
-    onSpatialLinkIssue(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, message: string): void => { if (typeof message === 'string') listener(message) }
-      ipcRenderer.on('ui:spatialLinkIssue', wrapped)
-      return () => ipcRenderer.off('ui:spatialLinkIssue', wrapped)
-    },
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
     listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
     listWorkspaceSkills: (workspaceId: string, providerId: string) => ipcRenderer.invoke('ui:listWorkspaceSkills', workspaceId, providerId),
@@ -301,10 +275,6 @@ const api: AgentMuxPreloadApi = {
     respond: (response: DesktopControlResponse) => ipcRenderer.send(CONTROL_RESPONSE_CHANNEL, response)
   },
   continuousProgress: {
-    goals: goalId => ipcRenderer.invoke('continuousProgress:goals', goalId),
-    prepareGoal: (input, caller) => ipcRenderer.invoke('continuousProgress:prepareGoal', input, caller),
-    initialGoalInput: (target, loopId, operationId, phase) => ipcRenderer.invoke('continuousProgress:initialGoalInput', target, loopId, operationId, phase),
-    goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
     list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
     create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource),
     action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => ipcRenderer.invoke('continuousProgress:action', target, loopId, action),
@@ -315,34 +285,20 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off(CONTINUOUS_PROGRESS_CHANGED, wrapped)
     }
   },
-  schedule: {
-    onChanged: listener => {
-      const wrapped = (_event: Electron.IpcRendererEvent, loop: ContinuousProgressLoop): void => listener(loop)
-      ipcRenderer.on(SCHEDULE_CHANGED, wrapped)
-      return () => ipcRenderer.off(SCHEDULE_CHANGED, wrapped)
-    },
-    list: (params: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => ipcRenderer.invoke('schedule:list', params),
-    inspect: (params: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => ipcRenderer.invoke('schedule:inspect', params),
-    create: (params: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => ipcRenderer.invoke('schedule:create', params),
-    pause: (params: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => ipcRenderer.invoke('schedule:pause', params),
-    resume: (params: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => ipcRenderer.invoke('schedule:resume', params),
-    cancel: (params: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => ipcRenderer.invoke('schedule:cancel', params)
-  },
   sessions: {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
-    launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input).then(unwrapSessionLaunchResult),
+    launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
     historySources: () => ipcRenderer.invoke('sessions:historySources'),
     confirmNativeSession: (session, input) => ipcRenderer.invoke('sessions:confirmNativeSession', session, input),
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
-    historyResource: (session, input) => ipcRenderer.invoke('sessions:historyResource', session, input),
     observeHistory: async (session, listener, options) => {
+      options?.signal?.throwIfAborted()
       const token = crypto.randomUUID()
       let disposed = false
-      let releaseAbort: (() => void) | undefined
       const receive = (_event: unknown, payload: SessionHistoryObservationEvent): void => {
         if (!disposed && payload.token === token && payload.observation.agentSessionId === session.agentSessionId) listener(payload.observation)
       }
@@ -350,18 +306,15 @@ const api: AgentMuxPreloadApi = {
         if (disposed) return
         disposed = true
         ipcRenderer.removeListener(SESSION_HISTORY_OBSERVATION_CHANNEL, receive)
-        try { releaseAbort?.() }
-        finally { void ipcRenderer.invoke('sessions:releaseHistoryObservation', token).catch(() => {}) }
+        options?.signal?.removeEventListener('abort', dispose)
+        void ipcRenderer.invoke('sessions:releaseHistoryObservation', token).catch(() => {})
       }
       ipcRenderer.on(SESSION_HISTORY_OBSERVATION_CHANNEL, receive)
+      options?.signal?.addEventListener('abort', dispose, { once: true })
       try {
-        releaseAbort = options?.onAbort?.(dispose)
-        if (disposed) {
-          releaseAbort?.()
-          throw new Error('History observation was cancelled before acquisition.')
-        }
         const ready: SessionHistoryObservationReady = await ipcRenderer.invoke('sessions:observeHistory', token, session)
         if (disposed) {
+          options?.signal?.throwIfAborted()
           throw new Error('History observation was released before ready.')
         }
         if ('error' in ready) throw Object.assign(new Error(ready.error.message), { code: ready.error.code })
@@ -375,12 +328,10 @@ const api: AgentMuxPreloadApi = {
     replay: (attachmentId: string, afterByte: number) =>
       ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
-    write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
-    paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
-    recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation),
-    replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
+    write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source).then(unwrapSessionInputWriteResult),
+    paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData).then(unwrapSessionInputWriteResult),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
@@ -395,7 +346,6 @@ const api: AgentMuxPreloadApi = {
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
-    observeStorage: (session: SessionControl) => ipcRenderer.invoke('sessions:observeStorage', session),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
     recover: (session: SessionControl, workspacePath?: string, operationId?: string) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId),
@@ -529,5 +479,3 @@ const api: AgentMuxPreloadApi = {
 
 contextBridge.exposeInMainWorld('agentmux', api)
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
-
-import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'

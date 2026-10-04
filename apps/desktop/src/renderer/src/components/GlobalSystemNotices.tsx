@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { Bell, X } from 'lucide-react'
 import { useAppStore } from '../store'
@@ -10,17 +10,13 @@ import { sessionServiceNotices } from '../lib/session-service-notices'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { desktopElementVisible } from '../lib/desktop-presentation'
-import { SettingsNavigation } from './SettingsNavigation'
-import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
   const warning = useAppStore((state) => state.environmentWarning)
-  const nameMetadataWarning = useAppStore(state => state.sessionNameMetadataWarning)
   const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)
   const endpointWarnings = useAppStore((state) => state.runtimeEndpointWarnings)
   const config = useAppStore((state) => state.config)
-  const settings = useContext(SettingsNavigation)
   const sessions = useAppStore((state) => state.sessions)
   const tabs = useAppStore((state) => state.tabs)
   const displacedIds = useAppStore((state) => state.displacedAgentSessionIds)
@@ -94,14 +90,14 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   // missing Session facts during recovery cannot prove that their placement problem resolved.
   const environmentInbox = useServiceNotices('global:environment', environment, warning !== undefined)
   const ownershipInbox = useServiceNotices('global:runtime-ownership', ownership, hosts !== undefined)
-  const nameMetadataInbox = useServiceNotices('global:session-names', nameMetadataWarning ? [{
-    id: 'metadata', cause: nameMetadataWarning.code, notice: {kind: 'indeterminate', notice: {
-      step: 'Reading saved Session names', mode: nameMetadataWarning.message, restore: nameMetadataWarning.recovery
-    }}
-  }] : [], !loading)
-  const endpoints: ServiceNoticeItem[] = (endpointWarnings ?? []).map((warning) => runtimeEndpointNotice(warning,
-    config?.hosts.find((host) => host.id === warning.hostId)?.label ?? warning.hostId,
-    hostId => settings?.openHost(hostId)))
+  const endpoints: ServiceNoticeItem[] = (endpointWarnings ?? []).map((warning) => ({
+    id: warning.hostId, cause: JSON.stringify([warning.step, warning.code]),
+    notice: { kind: 'indeterminate', notice: {
+      step: `${config?.hosts.find((host) => host.id === warning.hostId)?.label ?? warning.hostId}: ${warning.step}`,
+      mode: warning.message,
+      restore: warning.recovery
+    } }
+  }))
   const endpointInbox = useServiceNotices('global:runtime-endpoints', endpoints, endpointWarnings !== undefined)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
@@ -145,7 +141,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
   }] : [], true)
-  const inboxes = [environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
+  const inboxes = [environmentInbox, ownershipInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
@@ -180,7 +176,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       </div>
       {inboxes.map((inbox, index) => <div key={index}>
         {inbox.notices.map((item) => <div key={item.id} className="global-system-notices__item">
-          <ServiceWindowNotice notice={item.notice} {...(item.summary ? { summary: item.summary } : {})} {...(inbox === storageInbox && item.id === 'workbench-save' ? { summary: {
+          <ServiceWindowNotice notice={item.notice} {...(inbox === storageInbox && item.id === 'workbench-save' ? { summary: {
             step: 'Saving the workbench is unconfirmed',
             mode: 'Your window was kept. Agent input was not disabled by this save request.',
             restore: 'Restore storage access, then retry saving before quitting or updating.'

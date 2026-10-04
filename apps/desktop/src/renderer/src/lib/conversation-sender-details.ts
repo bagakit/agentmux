@@ -4,7 +4,7 @@ import type { DemandRecord } from './global-demand-board'
 import { agentDisplayName, firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
 import { projectWorkspaces, workspaceProjectId } from './workspace-projects'
 import { sessionPresentationById } from './session-presentation'
-import { scratchTopicKind, scratchTopicsForConfig, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
+import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
 import type { MoteConversationIdentity } from './mote-conversation-identity'
 
@@ -30,9 +30,8 @@ export function currentConversationSpeakerMetadata(sessionId: string, snapshot: 
     item.hostId === sender.hostId && item.path === sender.workspacePath)
   const project = workspace ? projectWorkspaces(snapshot.workspaces).find((item) =>
     item.id === workspaceProjectId(workspace)) : undefined
-  const sourceTopics = scratchTopicsForConfig(snapshot.config, snapshot.scratchTopicSnapshots)
-  const sourceWorkspace = workspaceForSession(snapshot.config ?? null, sender, sourceTopics)
-  const topicId = topicIdForSession(snapshot.config ?? null, sender, sourceTopics)
+  const sourceWorkspace = workspaceForSession(snapshot.config ?? null, sender)
+  const topicId = topicIdForSession(snapshot.config ?? null, sender)
   const topics = snapshot.scratchTopicSnapshots ? scratchTopicsForWorkspace(snapshot.scratchTopicSnapshots, sourceWorkspace) : null
   const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
   const target = sourceWorkspace && topicId && topic && !topic.readError && scratchTopicKind(topicId, topics) === 'mote'

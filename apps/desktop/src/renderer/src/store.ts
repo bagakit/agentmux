@@ -1,14 +1,8 @@
 import { rendererPerformance } from './lib/renderer-performance'
-import { startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
-import { deliveryFailure } from '@agentmux/core/delivery-attempt'
-import { recordMessageDeliveryFailure } from './lib/message-delivery-diagnostics'
-import { readAgentPresentation, readSpatialAppearance, readSurveyPresentation } from './lib/mobile-presentation'
-import { scratchTopicsForConfig } from './lib/scratch-topic-snapshots'
-import { conversationReplySourceKey, type ConversationReplySource } from '@agentmux/core/prompt-reaction'
+import { readAgentPresentation, readSpatialAppearance } from './lib/mobile-presentation'
+import { projectNativeSourceFacts } from '../../shared/agent-native-source'
 import type { AgentMuxPendingMessage } from '@agentmux/core/control'
 import type { AgentPromptExecution } from '@agentmux/core'
-import { changeNotebook, type NoteNotebookContext } from './lib/notebook-library'
-import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
@@ -23,28 +17,23 @@ import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
-import { warmLauncherId, type WarmTerminalCreation } from './lib/warm-terminal-preview'
+import { warmLauncherId } from './lib/warm-terminal-preview'
 import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
 import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
 import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } from './lib/file-workbench-state'
 import type { EditorRegionMode } from './lib/file-region-presentation'
-import { effectiveFileRegionMode } from './lib/file-region-presentation'
-import { prepareFileSurface } from './lib/file-surface-loading'
-import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
-import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
+import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
-import type { WorkbenchPresentation } from './lib/workbench-presentation'
-import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
-import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared/space-addresses'
@@ -58,19 +47,17 @@ import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from '
 import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRulerPreferences } from './lib/focus-timeline-ruler'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
-import { confirmedSteerDelivery, reconcileDeliveredSteers } from './lib/steer-queue-delivery'
+import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
 import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconChoice, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
-import { recordHistory, navigateHistory, restoreComposerHistory, type HistoryState } from './lib/composer-history'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
-import { sessionNameMetadataRecord, type SessionNameMetadata } from './lib/session-name-metadata'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   type AgentMuxArrangeMode,
@@ -110,7 +97,6 @@ import type {
   SessionControl,
   SessionRecoveryResult,
   SessionSnapshot,
-  TerminalLaunchInput,
   WorkspaceSelectionResult,
   RunFanOutInput,
   RunFanOutResult,
@@ -136,9 +122,8 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
-import { sessionLaunchFailure } from '../../shared/session-launch-result'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
-import { describeError, errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
+import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from './lib/idle-agent-restore-policy'
@@ -210,11 +195,8 @@ import {
   reduceFileOpened,
   reduceFileSurfaceOpened,
   fileOpenReferenceMatches,
-  fileOpenSplitMatches,
-  fileOpenLauncherMatches,
   reduceFileRename,
   findFileRenameProjectionCollision,
-  findFileWorkbenchSurface,
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
@@ -408,15 +390,10 @@ export type ErrorNoticeContext = {
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
 // a semantic resume from silently consuming messages addressed to its predecessor.
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
+const EXECUTION_NOT_REQUESTED = 'AGENT_EXECUTION_NOT_REQUESTED'
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
-const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
-type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
-// A click's diagnostic follows its one ordered consumer; it never grants input.
-const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
+const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string> }>()
 
-
-export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
-export type AgentSteerOptions = { execution?: AgentPromptExecution; reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
 
 export type AgentSteerQueueEntry = {
   operationId: string
@@ -428,18 +405,9 @@ export type AgentSteerQueueEntry = {
   text: string
   /** Explicit producer context, frozen with the original user body. */
   agentMuxNote?: string
-  /** Original reply reference, frozen in the existing durable intent, never inferred from text. */
-  reaction?: AgentSteerReaction
-  sourceChannel?: import('@agentmux/core').AgentMessageChannel
-  goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition }
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
-  logId?: string
-  /** Restart pauses execution authority independently of the original delivery failure. */
-  awaitingExplicitSend?: true
-  /** Retain this exact intent and its delivery facts outside active queue consumption. */
-  archived?: true
   origin?: 'manual'
   /** Frozen when explicitly selected, before awaits. Queue-only default leaves it absent;
    * known-null retains that original selection across recovery/wait, but boot pauses it. */
@@ -448,23 +416,14 @@ export type AgentSteerQueueEntry = {
 
 /** A missing or frozen condition is not evidence that this message was never submitted. */
 export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: string): boolean {
-  return !entry.archived && entry.promptCondition === null && entry.operationId !== inFlightId
-}
-
-function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, phase?: 'preparing' | 'submitting', confirmed = false): AgentMuxPendingMessage {
-  return { pendingId: entry.operationId, text: entry.text, runId: entry.runId ?? null,
-    enqueuedAt: entry.enqueuedAt ?? null, status: entry.status,
-    phase: entry.operationId === inFlightId ? phase ?? 'preparing' : null,
-    editable: !confirmed && agentSteerCanEdit(entry, inFlightId),
-    delivery: confirmed ? 'confirmed' : entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
-    errorCode: entry.errorCode ?? null, error: entry.error ?? null, ...(entry.logId ? { logId: entry.logId } : {}), archived: entry.archived === true }
+  return entry.promptCondition === null && entry.operationId !== inFlightId
 }
 
 /** One admission and its labels share the original execution choice, including unknown old input. */
 export function agentSteerExecution(entry: AgentSteerQueueEntry,
   capabilities: Extract<SessionSnapshot, { kind: 'agent' }>['capabilities']): AgentPromptExecution {
   return entry.execution ?? (entry.promptCondition === null &&
-    (capabilities.promptExecution?.immediate === 'interrupt-before-input' || capabilities.promptExecution?.immediate === 'native-steer') ? 'immediate' : 'default')
+    capabilities.promptExecution?.immediate === 'interrupt-before-input' ? 'immediate' : 'default')
 }
 
 type AppState = {
@@ -498,8 +457,6 @@ type AppState = {
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
   sessions: SessionSnapshot[]
-  sessionNameMetadata: SessionNameMetadata
-  sessionNameMetadataWarning: RuntimeSnapshot['sessionNameMetadataWarning'] | null
   /** Recovery candidates surfaced by Runtime reconciliation for launcher Resume. */
   recoveryCandidates: AgentSessionRecoveryCandidate[]
   // The create page can render this shell directly, but it stays outside the ordinary
@@ -556,8 +513,6 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
-  agentComposerHistory: Record<string, readonly string[]>
-  agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'>>
   /** Launcher producer context shares the draft's durable Region owner; editing only changes body. */
   agentComposerNotes: Record<string, string>
   agentSteerInFlight: Record<string, string>
@@ -588,10 +543,6 @@ type AppState = {
   nameAcknowledgementRevision: number
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
-  notebookRecoveries: NotebookRecovery[]
-  surveyNotebookId: string | null
-  surveyNoteId: string | null
-  setSurveyNotebook(notebookId: string | null, noteId?: string | null): void
   surveyZoneSelection: SurveyZoneSelection | null
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyCollectedZones: Record<string, true>
@@ -618,8 +569,8 @@ type AppState = {
   setFocusTimelineHeight(height: number): void
   focusTimelineRuler: FocusRulerPreferences
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
-  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection): boolean
-  selectMainRegion(reference: WorkbenchProjectionSelection, expected?: AgentMuxDesktopSpaceSelection | null): boolean
+  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection): void
+  selectExecutionFocusReference(reference: WorkbenchProjectionSelection, expected: Pick<AgentFocusContext['execution'], 'sessionId' | 'reference'>): void
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
   demandArrangement: DemandArrangement
@@ -720,10 +671,6 @@ type AppState = {
    * 与 toolsOpen 等表面偏好同一档：重开要还在。默认关（off），与 Monaco 默认一致，长行仍可横向滚。
    */
   editorWordWrap: boolean
-  /** Shared viewing preferences; they never alter a document or the Explorer cache. */
-  editorMinimap: boolean
-  explorerShowHidden: boolean
-  explorerShowIgnored: boolean
   /**
    * 每个文件 Region 当前是「编辑」还是「diff」显示模式，按 regionId 存。
    *
@@ -783,11 +730,10 @@ type AppState = {
     eligibility?: PrEligibilityInput
   }): Promise<CreatePullRequestResult>
   focusTabGroup(workspaceId: string, tabGroupId: string): void
-  activateTab(workspaceId: string, tabGroupId: string, tabId: string, intent?: 'local' | 'navigation'): void
+  activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
   executeControl(
     request: AgentMuxControlRequest,
-    signal?: AbortSignal,
-    options?: SpatialControlOptions
+    signal?: AbortSignal
   ): Promise<AgentMuxControlResult>
   selectSession(id: string, tabGroupId?: string): void
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
@@ -864,9 +810,6 @@ type AppState = {
   setViewMode(sessionId: string, mode: ViewMode, options?: { focus?: boolean }): void
   /** 翻转编辑器换行的全局位。 */
   toggleEditorWordWrap(): void
-  toggleEditorMinimap(): void
-  toggleExplorerShowHidden(): void
-  toggleExplorerShowIgnored(): void
   /**
    * 把一个文件 Region 切到 diff 模式并（若还没有）加载它的 diff；再次调用（mode 'edit'）切回编辑。
    * diff 两侧走既有 git.diff 桥，不新开 shell-out。regionId 承载模式，workspaceId+path 定位文件。
@@ -881,8 +824,6 @@ type AppState = {
    * 而不是让调用方各自推导 regionId（推错就切错 Region 的模式）。
    */
   openFileDiff(path: string, workspaceId?: string): Promise<void>
-  /** Explicit file navigation from an external control, through the original document owner. */
-  openFileAndReveal(path: string, tabGroupId?: string, location?: { line: number; column?: number }, workspaceId?: string, navigationSignal?: AbortSignal): Promise<boolean>
   openBranchDiff(workspaceId: string, comparison: GitBranchDiffDescriptor): void
   loadBranchDiff(regionId: string): Promise<void>
   setMainSurface(surface: MainSurface): void
@@ -960,7 +901,7 @@ type AppState = {
    * 所以解析必须只发生一次，然后把结果交给下游，而不是让下游自己再问一遍。
    */
   createPath(input: CreateWorkspacePathInput, workspaceId?: string): Promise<string>
-  createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string, notebook?: NoteNotebookContext): Promise<NoteCreationReceipt>
+  createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string): Promise<NoteCreationReceipt>
   revealCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   retryCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   renamePath(path: string, nextPath: string, workspaceId?: string): Promise<void>
@@ -1001,7 +942,6 @@ type AppState = {
   // 每个 group 的空占位），归属必须由槽记着、不能由各个 launcher 各自推断，否则它们会同时挂
   // TerminalView 到同一个 PTY 上并对着它轮流 resize。同 key 再请求会把归属**转移**过来（不重开 PTY）。
   prewarmTerminal(workspaceId: string, ownerLauncherId: string): void
-  retryWarmTerminal(workspaceId: string, ownerLauncherId: string, hostRestored?: boolean): Promise<SessionSnapshot | null>
   // Claims the exact warm shell or uses the ordinary Terminal launch path if none exists.
   promoteWarmTerminal(
     tabGroupId: string,
@@ -1012,10 +952,9 @@ type AppState = {
     launcher?: { tabId: string; regionId: string },
     url?: string,
     bookmarkOrigin?: { path: string; binary: boolean },
-    requestedWorkspaceId?: string,
-    requestedDisplayWorkspaceId?: string
+    requestedWorkspaceId?: string
   ): Promise<void>
-  openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination, presentation?: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'>): Promise<void>
+  openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination): Promise<void>
   /**
    * 把一个页面存成 `.webloc` 书签，落在 workspace 根下。文件名由标题派生并做撞名退避
    * （`Name.webloc`、`Name 2.webloc`…），返回落地的相对路径。取消（about:blank）或全部候选都撞名
@@ -1026,8 +965,6 @@ type AppState = {
   addBrowserAnnotation(annotation: BrowserAnnotation): void
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
   clearBrowserAnnotations(browserId: string): void
-  recordAgentComposerHistory(sessionId: string, text: string): void
-  recallAgentComposerHistory(sessionId: string, direction: 'older' | 'newer', draft: string): string | null
   setAgentComposerDraft(sessionId: string, text: string): void
   /**
    * 写启动对话框的一格名字。`field` 只有 'agentName' | 'tabName' 两种，两格共用一条 action：
@@ -1039,13 +976,13 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
-  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
-  archiveAgentSteer(sessionId: string, operationId: string, expectedText: string, archived: boolean): Promise<{ changed: boolean; entry: AgentSteerQueueEntry }>
+  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string): boolean
+  removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
-  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
+  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -1081,13 +1018,13 @@ function focusSessionContext(
   if (sessionId === null) return focusExecution(state.agentFocus, null)
   const session = observedSession ?? state.sessions.find((candidate) => candidate.id === sessionId)
   if (!session) return state.agentFocus
-  const lane = session ? focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
-    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))) : 'execution'
+  const lane = session ? focusLaneForSession(topicIdForSession(state.config, session),
+    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session))) : 'execution'
   if (lane === null) return state.agentFocus
   return lane === 'pmo'
     ? focusPmo(state.agentFocus, sessionId)
     : focusExecution(state.agentFocus, sessionId, Date.now(), session
-      ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id], scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
+      ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id])
       : undefined, reference && confirmedFocusReference(state, sessionId, reference) ? reference : undefined)
 }
 
@@ -1322,6 +1259,7 @@ export function recoveryCandidateSession(
     kind: 'agent',
     providerId: candidate.providerId,
     executorId: candidate.executorId,
+    ...projectNativeSourceFacts(candidate),
     ...(candidate.nativeSessionId === undefined ? {} : { nativeSessionId: candidate.nativeSessionId }),
     capabilities: candidate.capabilities,
     agentSessionUpdatedAt: candidate.updatedAt,
@@ -1522,104 +1460,122 @@ async function refreshFileDocument(
 }
 
 /**
- * Attach content to an existing visible File on demand, without opening, moving or revealing it.
- * EditorPane admits visibility; this owner deduplicates reads and preserves original resource,
- * document lifetime and failure facts. Source, preview and Retry use the same FileDocument.
+ * Load the document for a file Region that has one persisted but not loaded.
+ *
+ * A file surface is only `{regionId,kind,workspaceId,path}` — the restore path rebuilds the layout,
+ * but nothing in a surface holds content, and `EditorPane` renders its unavailable state for any
+ * surface whose `documents[key]` is missing. Every other way a file surface appears (Explorer click,
+ * terminal link, chat link) loads the document as part of opening it; restore was the one entrance
+ * that produced a surface with no document behind it, so the user saw a Tab that is present and
+ * reports "unavailable" — which reads as a broken file rather than an unloaded one.
+ *
+ * This is called by the pane that would otherwise render that unavailable state, rather than by a
+ * startup sweep, so that a file Region in a Workspace the user has not switched back to yet is
+ * covered too: a sweep can only resolve paths against the active Workspace, and would leave those
+ * Tabs broken until the next restart with no later trigger (`selectWorkspace` does not load).
+ *
+ * Do not read this as "only the visible Tab reads its file". Hidden Tabs stay mounted on purpose —
+ * that is what keeps a terminal instance alive across Tab switches (see hidden-tab-terminal-retention),
+ * and `ownerPresent: false` also keeps a document-less file surface out of the memory-budget parking
+ * set, so `released` is false and this does fire. So a cold start reads every persisted file Region in
+ * the Workspace's Tab group, not just the active one. That is affordable — one `files.read` per open
+ * file Region, the same read a click would do — and it is what makes every restored Tab work on first
+ * click instead of only the one that happened to be active. If that cost ever stops being affordable,
+ * the fix is to gate the read on real visibility, NOT to move it back into a startup sweep.
+ *
+ * It reads through the same `api.files` seam as a click, but must not reuse `openFile`: that one
+ * also *opens* — it targets the active group, can move the Tab, and writes reveal targets. Here the
+ * Tab already exists exactly where the user left it, so only the document is missing.
  */
 async function loadPersistedFileDocument(workspaceId: string, path: string, resource?: { hostId: string; path: string }): Promise<void> {
   const key = documentKey(workspaceId, path)
   const state = useAppStore.getState()
+  // Three ways this is already answered: the document is here, a read is in flight, or a previous read
+  // recorded why it cannot be loaded. The third is the one that has to live here rather than only in
+  // the calling pane — otherwise every caller would need to remember the stop condition, and a known
+  // unreadable path would be re-read once per caller.
   if (state.documents[key] || fileOpenRequests.has(key) || state.documentIssues[key]) return
-  const original = resource ?? state.config?.workspaces.find(workspace => workspace.id === workspaceId)
-  if (!original) {
-    useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
-      kind: 'read-error', code: 'WORKSPACE_FILE_RESOURCE_UNAVAILABLE', message: 'The original file Workspace is unavailable.'
-    }))
-    return
-  }
-  const originalResource = { hostId: original.hostId, path: original.path }
-  let resourceRebound = false, observedConfig = state.config
-  let releaseResource = () => {}
   const resourceCurrent = () => {
     const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
-    return !resourceRebound && current?.hostId === originalResource.hostId && current.path === originalResource.path
+    return !resource || current?.hostId === resource.hostId && current.path === resource.path
   }
   if (!resourceCurrent()) return
   const openedLifetime = advanceDocumentLifetime(key)
-  let observationRequested = false
-  const ownsRequest = () => documentLifetime(key) === openedLifetime && fileOpenRequests.get(key) === request
-  const admitted = () => ownsRequest() && resourceCurrent() && !useAppStore.getState().documents[key]
-  const releaseObservation = async () => {
-    // Close/new lifetime already owns disposal. Never dispatch an old unobserve to a new reader.
-    if (!ownsRequest() || !observationRequested) return
-    observationRequested = false
-    await api.files.unobserve(workspaceId, path)
-  }
-  const request: Promise<boolean> = Promise.resolve().then(async () => {
+  const request = Promise.resolve().then(async () => {
     try {
-      // Invalidation during this read must refresh the attached revision once it has an owner.
+      // Capture the invalidation counter BEFORE reading, the same way `openFile` does. A watcher can
+      // report the file changed while this read is in flight, and that report lands nowhere:
+      // `refreshFileDocument` early-returns while `documents[key]` is still absent. Without the
+      // comparison below, the pane would hold content one revision stale with no `changed` flag until
+      // the next disk change — the first save would still be caught by the revision check, but the
+      // user would be told "changed on disk" about a change that happened before they ever saw the file.
       const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
-      if (!admitted()) return false
-      observationRequested = true
+      if (!resourceCurrent()) return false
       await api.files.observe(workspaceId, path)
-      if (!admitted()) { await releaseObservation(); return false }
+      if (!resourceCurrent()) { await api.files.unobserve(workspaceId, path); return false }
       const result = await api.files.read(workspaceId, path)
-      if (!admitted()) { await releaseObservation(); return false }
+      if (!resourceCurrent()) { await api.files.unobserve(workspaceId, path); return false }
+      if (documentLifetime(key) !== openedLifetime) {
+        await api.files.unobserve(workspaceId, path)
+        return false
+      }
       if (result.status === 'binary') {
-        await releaseObservation()
-        if (!admitted()) return false
-        useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
+        await api.files.unobserve(workspaceId, path)
+        useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path, {
           kind: 'binary', revision: result.revision, byteLength: result.byteLength
         }))
         return true
       }
       if (result.status !== 'read') {
-        await releaseObservation()
-        if (!admitted()) return false
-        // Preserve the existing honest issue and its Retry/Reveal routes; do not move the Files dock.
-        useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path,
+        await api.files.unobserve(workspaceId, path)
+        // Say which failure it was. A file deleted while the app was closed is the same fact as one
+        // deleted while open, so it lands in the same existing issue kind — whose failure state already
+        // offers Reveal (falling back to the nearest surviving ancestor). Recording it also tells the
+        // pane to stop asking: without an issue there is nothing to distinguish "not loaded yet" from
+        // "cannot be loaded", and the pane would re-read a known-bad path on every dependency change.
+        useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path,
           result.status === 'deleted'
             ? { kind: 'deleted' }
             : result.status === 'directory'
+              // The persisted path is now a directory. Not a read error — the same "this is not a
+              // document" fact the click path reports, without hijacking the Files dock the way a
+              // deliberate click does: nothing the user just did warrants moving their tool panel.
               ? { kind: 'read-error', code: 'WORKSPACE_FILE_IS_DIRECTORY', message: `Not a file: ${path}` }
               : { kind: 'read-error', code: result.code, message: result.message }))
         return false
       }
-      useAppStore.setState(state => reduceDocumentAttached(state, workspaceId, path, result.document))
-      // The attached document now owns observation; refresh takes the same in-flight slot.
-      releaseResource()
+      // A Workspace removed from config between restarts, or a second load that won this race, must
+      // not install a document for a surface that is no longer there.
+      if (documentLifetime(key) !== openedLifetime || useAppStore.getState().documents[key]) {
+        await api.files.unobserve(workspaceId, path)
+        return false
+      }
+      useAppStore.setState((state) => reduceDocumentAttached(state, workspaceId, path, result.document))
+      // Only now can a refresh land: `refreshFileDocument` needs the document to already be here.
+      // Dropping the open request first is what lets it run — it takes the same in-flight slot.
       if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
       if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
         await refreshFileDocument(workspaceId, path, openedLifetime)
       }
       return true
     } catch (error) {
-      if (!admitted()) return false
-      await releaseObservation().catch(() => undefined)
-      if (!admitted()) return false
-      useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
-        kind: 'read-error', code: 'WORKSPACE_FILE_READ_FAILED',
+      // An IPC fault, not a read verdict. Record it as a read error for the same reason the verdict
+      // paths do: it is the pane's only stop condition, and without one this surface sits on the
+      // generic unavailable state with no way to tell the user what went wrong. Retry is the Retry
+      // button on that state, not a silent loop.
+      await api.files.unobserve(workspaceId, path).catch(() => undefined)
+      useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path, {
+        kind: 'read-error',
+        code: 'WORKSPACE_FILE_READ_FAILED',
         message: error instanceof Error ? error.message : String(error)
       }))
       useAppStore.getState().reportError(error)
       return false
     } finally {
-      releaseResource()
       if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
     }
   })
   fileOpenRequests.set(key, request)
-  releaseResource = useAppStore.subscribe(state => {
-    if (state.config === observedConfig) return
-    observedConfig = state.config
-    if (resourceCurrent()) return
-    resourceRebound = true
-    // Dispatch disposal before releasing the slot. Main removes its old observation synchronously
-    // and disposes that promise, so a subsequent current read can observe independently.
-    void releaseObservation().catch(() => undefined)
-    if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
-    releaseResource()
-  })
   await request
 }
 
@@ -1731,92 +1687,30 @@ async function enqueueFileSave(
   }
 }
 
-type BufferedSessionEvent = {
-  event: RuntimeEvent
-  pendingLaunchAgentSessionId: string | null
-  sequence: number
-}
-type SessionMembershipEventBuffer = {
-  events: BufferedSessionEvent[]
-  // Replacement facts are bounded by the Hosts/Sessions actually observed, not output
-  // volume or historical Run generations. Timeline mutations need their canonical reader.
-  retainedFacts: Map<string, BufferedSessionEvent>
-  timelineGaps: Set<string>
-  endpointWarnings: Map<string, { warning: RuntimeEndpointWarning | null; restored: boolean }>
+type SessionMembershipResync = {
+  events: Array<{
+    event: RuntimeEvent
+    pendingLaunchAgentSessionId: string | null
+  }>
   overflowed: boolean
-  sequence: number
-}
-type SessionMembershipResync = SessionMembershipEventBuffer & {
   recoverSavedAgents: boolean
   restoredHostIds: Set<string>
   startupNotice: ErrorNoticeContext | null
-  cancelDelay: (() => void) | null
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
 let regionCaretFocusNonce = 0
 let sessionMembershipResync: SessionMembershipResync | null = null
 let runtimeSubscriptionCount = 0
 
-function sessionMembershipEventBuffer(): SessionMembershipEventBuffer {
-  return { events: [], retainedFacts: new Map(), timelineGaps: new Set(), endpointWarnings: new Map(), overflowed: false, sequence: 0 }
-}
-
-function sessionEventAgentId(event: RuntimeEvent): string | null {
-  const core = event.event
-  if (core.type === 'agent-session') return core.session.agentSessionId
-  if (core.type === 'interaction') return core.request.agentSessionId
-  return 'agentSessionId' in core ? core.agentSessionId ?? null : null
-}
-
 function enqueueSessionMembershipEvent(
-  entry: SessionMembershipEventBuffer,
+  entry: SessionMembershipResync,
   event: RuntimeEvent,
   pendingLaunchAgentSessionId: string | null = null
 ): void {
-  if (event.endpointWarning !== undefined) entry.endpointWarnings.set(event.hostId, {
-    warning: event.endpointWarning, restored: event.event.type === 'connection-state' && event.event.state === 'restored'
-  })
-  entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence })
+  entry.events.push({ event, pendingLaunchAgentSessionId })
   if (entry.events.length <= MAX_SESSION_MEMBERSHIP_EVENTS) return
-  const dropped = entry.events.shift()!
-  const core = dropped.event.event
+  entry.events.shift()
   entry.overflowed = true
-  if (core.type === 'agent-timeline') {
-    entry.timelineGaps.add(core.agentSessionId)
-  } else if (core.type !== 'terminal-output' && core.type !== 'terminal-snapshot' && core.type !== 'terminal-resized') {
-    const identity = sessionEventAgentId(dropped.event) ?? ('run' in core ? core.run.runId : null)
-    entry.retainedFacts.set(JSON.stringify([dropped.event.hostId, identity, core.type]), dropped)
-  }
-}
-
-function resetSessionMembershipRead(entry: SessionMembershipEventBuffer): void {
-  // The next canonical cut covers facts received before the read. A dropped timeline
-  // mutation still needs explicit history compensation, even if its Agent went quiet.
-  entry.events.length = 0
-  entry.retainedFacts.clear()
-  entry.endpointWarnings.clear()
-  entry.overflowed = false
-}
-
-function drainSessionMembershipEvents(entry: SessionMembershipEventBuffer): BufferedSessionEvent[] {
-  const events = [...entry.retainedFacts.values(), ...entry.events].sort((a, b) => a.sequence - b.sequence)
-  entry.events.length = 0
-  entry.retainedFacts.clear()
-  return events
-}
-
-function cancelSessionMembershipResync(): void {
-  const entry = sessionMembershipResync
-  sessionMembershipResync = null
-  entry?.cancelDelay?.()
-}
-
-function delaySessionMembershipRead(entry: SessionMembershipResync, milliseconds: number): Promise<void> {
-  return new Promise(resolve => {
-    const finish = () => { clearTimeout(timer); entry.cancelDelay = null; resolve() }
-    const timer = setTimeout(finish, milliseconds)
-    entry.cancelDelay = finish
-  })
 }
 
 function runtimeEndpointWarningsAfterEvent(
@@ -1859,12 +1753,6 @@ function retiredHistoryReferenceIds(sources: readonly AgentSessionHistoryDescrip
   })))
 }
 
-/** Presentation of the original startup producer, never a second Runtime fact. */
-function startupNoticeSummary(remainingMessage: string | null, unconfirmedReferences = 0): string {
-  if (unconfirmedReferences) return `${unconfirmedReferences} saved Session reference(s) have unconfirmed Runtime state. Original Regions remain visible.${remainingMessage ? ' Other startup checks need review.' : ''} See Details for recovery.`
-  return 'Startup checks need attention. Original work surfaces remain visible; see Details for failures and recovery actions.'
-}
-
 function missingSavedRuntimeFactsNotice(count: number): string {
   return `${count} saved Session reference(s) have no current Runtime facts. Their Regions remain visible; retry recovery when the Runtime can confirm them.`
 }
@@ -1884,15 +1772,13 @@ function startSessionMembershipResync(
     return
   }
   const entry: SessionMembershipResync = {
-    ...sessionMembershipEventBuffer(),
-    cancelDelay: null,
+    events: event ? [{ event, pendingLaunchAgentSessionId: null }] : [],
+    overflowed: false,
     recoverSavedAgents: options.recoverSavedAgents === true,
     restoredHostIds: new Set(options.restoredHostId ? [options.restoredHostId] : []),
     startupNotice
   }
-  if (event) enqueueSessionMembershipEvent(entry, event)
   sessionMembershipResync = entry
-  let retryDelay = 50
   const attemptedStartupRecovery = new Set<string>()
   void (async () => {
     try {
@@ -1900,18 +1786,15 @@ function startSessionMembershipResync(
         // Everything already queued happened before this snapshot and is covered by its
         // canonical baseline. Only events that arrive while the snapshot is in flight
         // need ordered replay afterward.
-        resetSessionMembershipRead(entry)
+        entry.events.length = 0
+        entry.overflowed = false
         const snapshot = await api.sessions.snapshot()
-        if (sessionMembershipResync !== entry) return
+        if (entry.overflowed) continue
         let historySources: readonly AgentSessionHistoryDescriptor[] = []
         if (entry.startupNotice?.startupSessionSnapshot) {
           try { historySources = await api.sessions.historySources() }
           catch { /* A failed metadata read cannot settle the original unknown-facts notice. */ }
         }
-        if (sessionMembershipResync !== entry) return
-        // Recheck after the metadata await too. Loss requires another canonical cut,
-        // but cannot discard the useful facts from this completed read.
-        const readOverflowed = entry.overflowed
         // A cold-start observation may have contained no usable Session facts. The saved shell is
         // already visible now; admit its later canonical candidates through the same recovery
         // policy and action as ordinary startup, without another initialize or lifecycle owner.
@@ -1924,15 +1807,13 @@ function startSessionMembershipResync(
             ? [{ ...session, agentSessionId: session.id, run: session.control.run }]
             : [])
         ].filter((candidate) => savedSessionIds.has(candidate.agentSessionId)) : []
-        const events = drainSessionMembershipEvents(entry)
+        const events = entry.events.splice(0)
         const restoredDuringRead = new Set(events.flatMap(({ event }) => event.event.type === 'connection-state' && event.event.state === 'restored' ? [event.hostId] : []))
-        let membershipGap = readOverflowed
-        const timelineGaps = new Set(entry.timelineGaps)
-        entry.timelineGaps.clear()
+        let membershipGap = false
+        const timelineGaps = new Set<string>()
         useAppStore.setState((state) => {
           const protectedAgentSessionIds = new Set(events.flatMap((pending) => (
-            pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId]
-              : sessionEventAgentId(pending.event) ? [sessionEventAgentId(pending.event)!] : []
+            pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId] : []
           )))
           let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
           projected = reduceTerminalMembershipSnapshot(projected, snapshot)
@@ -1941,7 +1822,7 @@ function startSessionMembershipResync(
             const decision = agentStartupRecoveryDecision({
               runState: 'missing',
               ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-              canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
+              canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
               now: Date.now()
             })
             projected = { ...projected, sessions: [...projected.sessions, recoveryCandidateSession(candidate, {
@@ -1968,7 +1849,7 @@ function startSessionMembershipResync(
           const notice = entry.startupNotice
           const source = notice?.startupSessionSnapshot
           let resolvedStartupNotice: Partial<AppState> = {}
-          if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0 && !readOverflowed) {
+          if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0) {
             const currentReferences = persistedSessionSurfaceIds(projectPersistedWorkbench(projected))
             const retiredReferences = retiredHistoryReferenceIds(historySources, projected.tabs, state.config)
             const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id)
@@ -1977,10 +1858,10 @@ function startSessionMembershipResync(
               resolvedStartupNotice = {
                 error: source.remainingMessage,
                 lastError: source.remainingMessage,
-                errorNoticeContext: source.remainingMessage ? { kind: 'indeterminate', summary: startupNoticeSummary(source.remainingMessage) } : null
+                errorNoticeContext: null
               }
             } else if (source.missingRuntimeFacts && unresolved.length !== source.sessionIds.length) {
-              const updated = { ...notice, summary: startupNoticeSummary(source.remainingMessage, unresolved.length), startupSessionSnapshot: { ...source, sessionIds: unresolved } }
+              const updated = { ...notice, startupSessionSnapshot: { ...source, sessionIds: unresolved } }
               entry.startupNotice = updated
               const message = [source.remainingMessage, missingSavedRuntimeFactsNotice(unresolved.length)].filter(Boolean).join(' ')
               resolvedStartupNotice = { error: message, lastError: message, errorNoticeContext: updated }
@@ -1990,16 +1871,10 @@ function startSessionMembershipResync(
           for (const session of snapshot.sessions) {
             if (!runtimeSnapshotHostUnavailable(snapshot, session.hostId)) reconciled = reconcileDeliveredSteers(reconciled, session.id)
           }
-          let runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
+          const runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
             pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
               ? warnings : runtimeEndpointWarningsAfterEvent(warnings, pending.event), snapshot.runtimeEndpointWarnings ?? [])
-          for (const [hostId, { warning, restored }] of entry.endpointWarnings) {
-            if (restored && warning === null) continue
-            runtimeEndpointWarnings = (runtimeEndpointWarnings ?? []).filter(item => item.hostId !== hostId)
-            if (warning) runtimeEndpointWarnings.push(warning)
-          }
-          entry.endpointWarnings.clear()
-          return { ...reconciled, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          return { ...reconciled, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
         for (const pending of events) {
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
@@ -2013,26 +1888,25 @@ function startSessionMembershipResync(
           const decision = agentStartupRecoveryDecision({
             runState: current.processState,
             ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-            canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
+            canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
             now: Date.now()
           })
           if (decision.kind !== 'resume') continue
           attemptedStartupRecovery.add(candidate.agentSessionId)
           await useAppStore.getState().recoverSession(candidate.agentSessionId)
-          if (sessionMembershipResync !== entry) return
         }
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) {
           const current = useAppStore.getState(), session = current.sessions.find((item) => item.id === sessionId)
           if (session && restoredDuringRead.has(session.hostId)) continue
           if (!session || current.runtimeEndpointWarnings?.some(warning => warning.hostId === session.hostId && warning.availability !== 'connected')) continue
-          const pending = current.agentSteerQueues[sessionId]?.find((item) => !item.archived && !item.awaitingExplicitSend &&
+          const pending = current.agentSteerQueues[sessionId]?.find((item) => item.errorCode !== EXECUTION_NOT_REQUESTED &&
             (item.runId === undefined || steerEntryTargetsRun(item, session.control.run.runId)))
           if (entry.restoredHostIds.has(session.hostId) && pending && pending.promptCondition !== null) {
             // A fresh timeline can settle a delivery receipt. Its absence cannot prove that an
             // already prepared mutation never ran. Keep that original operation for inspection.
             useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues,
               [sessionId]: state.agentSteerQueues[sessionId]!.map((item) => item.operationId === pending.operationId
-                ? { ...item, status: 'deferred', error: item.error ?? 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' } : item) } }))
+                ? { ...item, status: 'deferred', error: 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' } : item) } }))
             continue
           }
           void current.flushAgentSteerQueue(sessionId)
@@ -2041,9 +1915,6 @@ function startSessionMembershipResync(
         // Recovery above can publish events while its public API call is pending. Drain those
         // queued facts before releasing this resync owner, just as events during snapshot reads.
         if (!membershipGap && entry.events.length === 0 && !entry.overflowed) return
-        // One owner/one read, with a yield and capped backoff under sustained pressure.
-        await delaySessionMembershipRead(entry, retryDelay)
-        retryDelay = Math.min(1000, retryDelay * 2)
       }
     } catch (error) {
       // A best-effort retry launched after an initial startup outage must not replace the richer
@@ -2078,10 +1949,6 @@ type WarmTerminal = {
   ownerLauncherId: string
   ready: Promise<SessionSnapshot | null>
   session: SessionSnapshot | null
-  /** Retained until its original creation is confirmed; absent on an already known Run. */
-  creation?: WarmTerminalCreation
-  /** One explicit opening owns the retained slot until its original receipt settles. */
-  claimingLauncherId?: string
 }
 
 export function warmTerminalKey(hostId: string, workspacePath: string): string {
@@ -2165,7 +2032,6 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   agentComposerDrafts?: Record<string, string>
-  agentComposerHistory?: Record<string, readonly string[]>
   launcherNameDrafts?: Record<string, LauncherNames>
   launcherOptionDrafts?: LauncherOptionDrafts
   agentComposerNotes?: Record<string, string>
@@ -2181,9 +2047,6 @@ type PersistedAppState = {
   viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
-  notebookRecoveries?: NotebookRecovery[]
-  surveyNotebookId?: string | null
-  surveyNoteId?: string | null
   surveyZoneSelection?: PersistedSurveyZoneSelection | null
   surveyCollectedZones?: Record<string, true>
   surveyExplorationNames?: Record<string, string>
@@ -2207,9 +2070,6 @@ type PersistedAppState = {
   projectRailWidth?: number
   toolDockWidth?: number
   editorWordWrap?: boolean
-  editorMinimap?: boolean
-  explorerShowHidden?: boolean
-  explorerShowIgnored?: boolean
 }
 
 export type RestoredUiState = Pick<
@@ -2217,9 +2077,6 @@ export type RestoredUiState = Pick<
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
-  | 'notebookRecoveries'
-  | 'surveyNotebookId'
-  | 'surveyNoteId'
   | 'surveyZoneSelection'
   | 'surveyCollectedZones'
   | 'surveyExplorationNames'
@@ -2239,9 +2096,6 @@ export type RestoredUiState = Pick<
   | 'focusTimelineHeight'
   | 'focusTimelineRuler'
   | 'editorWordWrap'
-  | 'editorMinimap'
-  | 'explorerShowHidden'
-  | 'explorerShowIgnored'
 >
 
 /**
@@ -2305,9 +2159,6 @@ export function restorePersistedUiState(
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
-    | 'notebookRecoveries'
-    | 'surveyNotebookId'
-    | 'surveyNoteId'
     | 'surveyZoneSelection'
     | 'surveyCollectedZones'
     | 'surveyExplorationNames'
@@ -2327,9 +2178,6 @@ export function restorePersistedUiState(
   | 'focusTimelineHeight'
   | 'focusTimelineRuler'
     | 'editorWordWrap'
-    | 'editorMinimap'
-    | 'explorerShowHidden'
-    | 'explorerShowIgnored'
   >
 ): RestoredUiState {
   return {
@@ -2339,9 +2187,6 @@ export function restorePersistedUiState(
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
-    notebookRecoveries: restoreNotebookRecoveries(persisted.notebookRecoveries),
-    surveyNotebookId: typeof persisted.surveyNotebookId === 'string' ? persisted.surveyNotebookId : null,
-    surveyNoteId: typeof persisted.surveyNoteId === 'string' ? persisted.surveyNoteId : null,
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
@@ -2361,10 +2206,7 @@ export function restorePersistedUiState(
         ? persisted.toolDockWidth
         : TOOL_DOCK_DEFAULT_WIDTH
     ),
-    editorWordWrap: restoredBoolean(persisted.editorWordWrap, false),
-    editorMinimap: restoredBoolean(persisted.editorMinimap, false),
-    explorerShowHidden: restoredBoolean(persisted.explorerShowHidden, true),
-    explorerShowIgnored: restoredBoolean(persisted.explorerShowIgnored, true)
+    editorWordWrap: restoredBoolean(persisted.editorWordWrap, false)
   }
 }
 
@@ -2378,7 +2220,6 @@ function selectPersistedInputs(state: AppState) {
     spatialRequests: state.spatialRequests,
     retainedSpatialFocus: state.retainedSpatialFocus,
     agentComposerDrafts: state.agentComposerDrafts,
-    agentComposerHistory: state.agentComposerHistory,
     launcherNameDrafts: state.launcherNameDrafts,
     launcherOptionDrafts: state.launcherOptionDrafts,
     agentComposerNotes: state.agentComposerNotes,
@@ -2406,8 +2247,6 @@ function selectPersistedInputs(state: AppState) {
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
-    notebookRecoveries: state.notebookRecoveries,
-    surveyNotebookId: state.surveyNotebookId, surveyNoteId: state.surveyNoteId,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
     surveyExplorationNames: state.surveyExplorationNames,
@@ -2435,10 +2274,7 @@ function selectPersistedInputs(state: AppState) {
     projectRailWidth: state.projectRailWidth,
     toolDockWidth: state.toolDockWidth,
     // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
-    editorWordWrap: state.editorWordWrap,
-    editorMinimap: state.editorMinimap,
-    explorerShowHidden: state.explorerShowHidden,
-    explorerShowIgnored: state.explorerShowIgnored
+    editorWordWrap: state.editorWordWrap
   }
 }
 
@@ -2454,7 +2290,6 @@ function partializeAppState(state: AppState): PersistedAppState {
   const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
   const projection: PersistedAppState = {
     ...presentation,
-    surveyNotebookId: presentation.surveyNotebookId, surveyNoteId: presentation.surveyNoteId,
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
     documents: Object.fromEntries(Object.entries(documents).filter(([key]) => dirtyDocuments[key])),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
@@ -2523,46 +2358,6 @@ async function commitDisplayName(target: AgentMuxNameTarget, value: string | nul
     throw error
   }
 }
-
-const agentRegionExecutionIndex = new WeakMap<readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][], Map<string, import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number]>>()
-
-export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string }
-
-/** The existing Core document owns execution identity; display placement never supplies a Host. */
-export function agentRegionExecution(reference: AgentRegionReference) {
-  const regions = coreSpatialPersistence?.current?.graph.regions
-  if (!regions) return null
-  let byRegion = agentRegionExecutionIndex.get(regions)
-  if (!byRegion) {
-    byRegion = new Map(regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
-    agentRegionExecutionIndex.set(regions, byRegion)
-  }
-  const region = byRegion.get(JSON.stringify([reference.tabId, reference.regionId]))
-  return region?.kind === 'agent' && region.agentSessionId === reference.agentSessionId ? region.execution ?? null : null
-}
-
-/** An explicit related reader refreshes the original owner, without applying or resaving the graph. */
-export async function rereadAgentRegionExecution(reference: AgentRegionReference) {
-  const owner = coreSpatialPersistence
-  if (!owner) throw new Error('The original Core spatial owner is not available. Its Region is retained.')
-  await owner.read()
-  if (coreSpatialPersistence !== owner) throw new Error('The original Core spatial owner changed during observation. Its Region is retained; re-read the current owner.')
-  return agentRegionExecution(reference)
-}
-
-/** Project only the exact observed Session through the existing launch reducer. */
-export function adoptAgentRegionObservation(reference: AgentRegionReference & { hostId: string }, result: AgentLaunchResult) {
-  useAppStore.setState(state => {
-    const region = state.tabs[reference.tabId]?.regions[reference.regionId]
-    const session = result.session
-    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, reference.tabId) ||
-      region?.kind !== 'agent' || region.sessionId !== reference.agentSessionId ||
-      session?.kind !== 'agent' || session.id !== reference.agentSessionId || session.control.hostId !== reference.hostId)
-      throw new Error('The original Region or Session changed during observation. Its work is retained.')
-    return reduceDetachedAgentLaunch(state, result).state
-  })
-}
-
 const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
   getItem: () => null,
   setItem: () => undefined,
@@ -2623,14 +2418,6 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
     storageFlushRequested = true
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
   return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
-}
-
-/** Admit only the chosen recipient's correlation to the existing intent owner before queue input. */
-export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding): Promise<AgentMuxSpatialSave | null> {
-  if (binding.operation !== 'agent.message' || binding.createAgent || !binding.recoveryRecipient || !binding.recovery) throw new Error('An exact recovery message reference is required.')
-  if (useAppStore.getState().spatialRequests[binding.requestId]) return null
-  useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [binding.requestId]: binding } }))
-  return await saveWorkbenchSelection(false)
 }
 function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
@@ -2725,22 +2512,18 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
   return typeof candidate === 'boolean' ? candidate : fallback
 }
 
-function reactionIntentKey(reaction?: AgentSteerReaction): string | undefined {
-  return reaction ? JSON.stringify([reaction.code, conversationReplySourceKey(reaction.replySource)]) : undefined
-}
-
-function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): string | false {
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual', agentMuxNote?: string): string | false {
   if (!text.trim() && !agentMuxNote?.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
-    ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content or an earlier execution choice. Your original message and draft are kept.'))
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote) return operationId
+    ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
     return false
   }
-  if ((useAppStore.getState().agentSteerQueues[sessionId]?.filter(entry => !entry.archived).length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
-    (onRejected ?? useAppStore.getState().reportError)(new Error(`The active message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Archive queued messages before adding another. Your draft is kept.`))
+  if ((useAppStore.getState().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+    (onRejected ?? useAppStore.getState().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
     return false
   }
   // The shared Core formatter owns byte accounting; transport still keeps body and note separate.
@@ -2752,16 +2535,12 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   }
   const entry: AgentSteerQueueEntry = {
     operationId,
-    promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
-    ...(options?.execution === undefined ? {} : { execution: options.execution }),
-    ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
+    promptCondition: null,
     enqueuedAt: Date.now(),
-    ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
+    ...(session.processState === 'running' && session.status.state !== 'disconnected'
       ? { runId: session.control.run.runId } : {}),
     text,
     ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
-    ...(options?.reaction ? { reaction: structuredClone(options.reaction) } : {}),
-    ...(options?.sourceChannel ? { sourceChannel: options.sourceChannel } : {}),
     status: 'queued',
     ...(origin === 'manual' ? { origin: 'manual' } : {})
   }
@@ -2775,34 +2554,12 @@ let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 /** The existing Space and Survey selection facts captured by file display intents. */
-function surveyPresentationAfterClose(state: Pick<AppState, 'tabs' | 'surveyZoneSelection' | 'surveyNotebookId' | 'surveyNoteId'>, tabs: AppState['tabs']) {
-  const active = state.surveyZoneSelection?.active
-  const closedPage = state.surveyNotebookId && state.surveyNoteId && active && state.tabs[active.tabId]?.regions[active.regionId]?.kind === 'file' && !tabs[active.tabId]?.regions[active.regionId]
-  return { surveyNoteId: closedPage ? null : state.surveyNoteId,
-    surveyZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
-}
-
-export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise<NoteCreationReceipt> {
-  if (receipt.status !== 'written' || receipt.notebookRegistered) return receipt
-  try {
-    await changeNotebook({ kind: 'register', noteId: receipt.noteId, title: receipt.draft.trim().split('\n')[0]?.slice(0, 100) || 'Untitled note',
-      resource: { hostId: receipt.target.hostId, workspaceId: receipt.target.workspaceId, workspacePath: receipt.target.workspacePath, path: receipt.path },
-      ...(receipt.target.zoneId ? { workface: { zoneId: receipt.target.zoneId, workspaceId: receipt.target.workspaceId } } : {}), ...receipt.notebook }, 'note-register:' + receipt.intentId)
-    return { ...receipt, notebookRegistered: true, notebookIssue: undefined }
-  } catch (error) { return { ...receipt, notebookIssue: 'Note saved. Notebook registration is unconfirmed; recover this same note. ' + presentError(error) } }
-}
-
 export function fileNavigationSelection(state: AppState): string {
-  // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
-  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyNotebookId, state.surveyNoteId, state.surveyZoneSelection, state.workbenchSpaceSelection])
-  const reference = mainRegionReference(state.workbenchSpaceSelection)
-  if (reference) return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection,
-    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.surveyZoneSelection])
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
     tabId ? state.tabs[tabId]?.layout.activeRegionId : undefined,
-    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
+    state.agentFocus.execution.sessionId, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
 
 async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string): Promise<string> {
@@ -2836,8 +2593,8 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     const surface = tab?.regions[tab.layout.activeRegionId]
     if (surface?.kind !== 'agent') return
     const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
-    if (session && focusLaneForSession(topicIdForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)),
-      scratchTopicsForWorkspace(get().scratchTopicSnapshots, workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)))) === 'pmo') {
+    if (session && focusLaneForSession(topicIdForSession(get().config, session),
+      scratchTopicsForWorkspace(get().scratchTopicSnapshots, workspaceForSession(get().config, session))) === 'pmo') {
       get().focusPmoSession(session.id)
     }
   }
@@ -2930,8 +2687,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   config: null,
   providerCatalog: [],
   sessions: [],
-  sessionNameMetadata: {},
-  sessionNameMetadataWarning: null,
   recoveryCandidates: [],
   warmTerminal: null,
   unclaimedTerminalSessionIds: [],
@@ -2975,17 +2730,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   fileExplorerStates: {},
   viewModes: {},
   editorWordWrap: false,
-  editorMinimap: false,
-  explorerShowHidden: true,
-  explorerShowIgnored: true,
   editorRegionModes: {},
   editorRegionDiffs: {},
   executorDetections: {},
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
-  agentComposerHistory: {},
-  agentComposerHistoryNavigation: {},
   agentComposerNotes: {},
   agentSteerQueues: {},
   agentSteerInFlight: {},
@@ -2998,9 +2748,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   nameAuthorityRevision: 0,
   nameAcknowledgementRevision: 0,
   mainSurface: 'workbench',
-  notebookRecoveries: [],
-  surveyNotebookId: null, surveyNoteId: null,
-  setSurveyNotebook(notebookId, noteId = null) { set({ surveyNotebookId: notebookId, surveyNoteId: noteId }) },
   surveyZoneSelection: null,
   surveyCollectedZones: {},
   surveyExplorationNames: {},
@@ -3024,14 +2771,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const surveyZoneSelection = persistedSurveyZoneSelection(selection)
     // Re-emitting the current member preference is a refresh, not later navigation.
     if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
-    if (selection?.active) {
-      const state = get(), active = selection.active as Partial<WorkbenchProjectionSelection>
-      const locations = workbenchSelectionCatalog(state).locations.filter(location => location.zoneId === selection.zoneId &&
-        location.tabId === active.tabId && location.regionId === active.regionId &&
-        (!active.displayWorkspaceId || location.displayWorkspaceId === active.displayWorkspaceId) && (!active.groupId || location.groupId === active.groupId))
-      const exact = [...new Map(locations.map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
-      if (exact.length === 1) state.selectMainRegion(exact[0]!, state.workbenchSpaceSelection)
-    }
     set({ surveyZoneSelection })
     void saveWorkbenchSelection(false)
   },
@@ -3136,12 +2875,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!api.control || typeof api.control.onRequest !== 'function') {
       throw new Error('AgentMux Control API is unavailable')
     }
-    const pendingSessionEvents = sessionMembershipEventBuffer()
+    const pendingSessionEvents: RuntimeEvent[] = []
+    let sessionEventBufferOverflowed = false
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
-        enqueueSessionMembershipEvent(pendingSessionEvents, event)
+        pendingSessionEvents.push(event)
+        if (pendingSessionEvents.length > 256) {
+          pendingSessionEvents.shift()
+          sessionEventBufferOverflowed = true
+        }
         return
       }
       get().applyEvent(event)
@@ -3158,7 +2902,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : request.operation === 'metrics.renderer'
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
         : get().executeControl(request, signal))
-    const disposeSpatialLinkIssues = api.ui.onSpatialLinkIssue(message => get().reportError(new Error(message)))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
@@ -3169,11 +2912,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
-      cancelSessionMembershipResync()
       disposeSessions()
       disposeBrowsers()
       disposeControl()
-      disposeSpatialLinkIssues()
       disposeFileInvalidations()
       void stopWarmTerminal(get().warmTerminal).then((sessionId) => {
         if (!sessionId) return
@@ -3205,7 +2946,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((state) => state.loading ? ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues)
         .map(([sessionId, entries]) => [sessionId, entries.map(entry => ({ ...entry,
           status: entry.status === 'restoring' ? 'restoring' as const : 'deferred' as const,
-          awaitingExplicitSend: true as const
+          error: 'Queued before restart. Choose Send to execute this message.',
+          errorCode: EXECUTION_NOT_REQUESTED
         }))])) }) : state)
       set({ startupProgress: { step: 'runtime' } })
       // Keep the write fence closed until the restored Workbench has been projected into the live
@@ -3316,7 +3058,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const decision = agentStartupRecoveryDecision({
           runState: projected?.processState ?? 'missing',
           ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-          canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
+          canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
           now: Date.now()
         })
         if (decision.kind !== 'resume') {
@@ -3332,8 +3074,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }, candidate.workspacePath)
           if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
             recovered = true
-            if (recovery.advisory && recovery.session.id === candidate.agentSessionId && recovery.session.control.hostId === candidate.hostId)
-              startupWarnings.push(recovery.advisory)
           } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
             recoveryFailures.push(projected ? {
               ...projected,
@@ -3374,12 +3114,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       // A previous process's unclaimed View marker is not a current Stop intent.
       // Keep observed Runs discoverable; only an exact, current cancellation owns cleanup.
-      // One compensating read keeps the existing quiet-overflow behavior. Sustained
-      // Runtime traffic cannot hold the original durable workface behind another read.
-      if (pendingSessionEvents.overflowed) {
-        resetSessionMembershipRead(pendingSessionEvents)
+      while (sessionEventBufferOverflowed) {
+        pendingSessionEvents.length = 0
+        sessionEventBufferOverflowed = false
         const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot during startup reconciliation')
-        if (refreshedSnapshot) snapshot = refreshedSnapshot
+        if (!refreshedSnapshot) break
+        snapshot = refreshedSnapshot
       }
       // A canonical read already adopted during startup can finish this producer before publication.
       // An incomplete read keeps the original scope for the existing membership resync below.
@@ -3388,7 +3128,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // that committed fact; use the existing Store identity, with no second configuration cache.
       const config = persistedState.config !== configBeforeRead && persistedState.config !== null
         ? persistedState.config : configResult.value
-      if (emptySessionSnapshotWarning && snapshotVerified && !pendingSessionEvents.overflowed && startupSnapshotConfirmsSessions(
+      if (emptySessionSnapshotWarning && snapshotVerified && startupSnapshotConfirmsSessions(
         snapshot, [...persistedSessionIds], persistedState.restoredWorkbench?.tabs ?? {}, config
       )) {
         emptySessionSnapshotWarning = null
@@ -3429,8 +3169,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
-        (session) => focusLaneForSession(topicIdForSession(config, session, scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)),
-          scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspaceForSession(config, session, scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)))),
+        (session) => focusLaneForSession(topicIdForSession(config, session),
+          scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspaceForSession(config, session))),
         new Set([...persistedSessionIds].filter((id) => (
           !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
         )))
@@ -3450,8 +3190,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config,
         providerCatalog,
         sessions: projectRuntimeEndpointSessions(visibleSessions, snapshot.runtimeEndpointWarnings),
-        sessionNameMetadata: snapshot.sessionNameMetadataWarning ? get().sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], get().sessionNameMetadata),
-        sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null,
         recoveryCandidates: snapshot.recoveryCandidates,
         timelines: snapshot.timelines,
         runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,
@@ -3465,32 +3203,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         loading: false,
         error: startupError || null,
         lastError: startupError || null,
-        errorNoticeContext: startupError ? {
+        errorNoticeContext: emptySessionSnapshotWarning ? {
           kind: 'indeterminate',
-          summary: startupNoticeSummary(otherStartupError || null, emptySessionSnapshotWarning ? (missingRuntimeReferenceIds ?? [...persistedSessionIds]).length : 0),
-          ...(emptySessionSnapshotWarning ? { startupSessionSnapshot: {
+          startupSessionSnapshot: {
             sessionIds: missingRuntimeReferenceIds ?? [...persistedSessionIds],
             remainingMessage: otherStartupError || null,
             ...(missingRuntimeReferenceIds ? { missingRuntimeFacts: true as const } : {})
-          } } : {})
+          }
         } : null,
         errorDismissed: false
       })
-      // Publication releases the boot buffer before optional spatial/browser work awaits.
-      // Latest replacement facts survive a noisy neighbor; truncated timelines use Core.
-      booting = false
-      for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
-      for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
-      for (const [hostId, { warning }] of pendingSessionEvents.endpointWarnings) {
-        set(state => {
-          const warnings = (state.runtimeEndpointWarnings ?? []).filter(item => item.hostId !== hostId)
-          if (warning) warnings.push(warning)
-          return { runtimeEndpointWarnings: warnings, sessions: projectRuntimeEndpointSessions(state.sessions, warnings) }
-        })
-      }
-      if (pendingSessionEvents.overflowed || !snapshotVerified || emptySessionSnapshotWarning) {
-        startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: !snapshotVerified || Boolean(emptySessionSnapshotWarning) })
-      }
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
@@ -3558,7 +3280,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!config.workspaces.some((workspace) => workspace.id === workspaceId)) continue
         void api.files.observe(workspaceId, path).then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
       }
+      booting = false
       for (const sessionId of Object.keys(get().agentSteerQueues)) void get().flushAgentSteerQueue(sessionId)
+      for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
       // Cold-start browser rehydration. `restoreTab` is a pure presentation projection that emits a
       // neutral browser shell (url/title from disk, transient fields defaulted); the WebContentsView
@@ -3616,7 +3340,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
       // Agent recovery candidates remain protected by the same reducer used for event-driven resync.
-      void api.ui.spatialLinksReady().catch(error => get().reportError(new Error('Spatial link startup is unconfirmed. Your workface is kept; retry its exact link. ' + presentError(error))))
+      if (!snapshotVerified || emptySessionSnapshotWarning) startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: true })
       return () => {
         disposeRuntimeSubscriptions()
       }
@@ -3841,12 +3565,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       layouts: { ...state.layouts, [workspaceId]: focusGroup(layout, tabGroupId) }
     }))
   },
-  activateTab(workspaceId, tabGroupId, tabId, intent = 'navigation') {
+  activateTab(workspaceId, tabGroupId, tabId) {
     const current = get(), layout = current.layouts[workspaceId]
     if (!layout) return
     let choice: AgentMuxDesktopSpaceSelection
     try { choice = resolveWorkbenchOccurrenceSelection(current, workbenchSelectionCatalog(current),
-      { workspaceId, groupId: tabGroupId, tabId }, intent) }
+      { workspaceId, groupId: tabGroupId, tabId }, 'navigation') }
     catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
     const tab = current.tabs[tabId]
     const surface = tab ? titleWorkbenchSurface(tab) : null
@@ -3866,7 +3590,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : {})
     }))
   },
-  async executeControl(request, signal, options) {
+  async executeControl(request, signal) {
     if (isToolkitRequest(request)) {
       throw Object.assign(new Error('Toolkit requests belong to the Main execution owner.'), { code: 'CONTROL_FAILED' })
     }
@@ -3880,7 +3604,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.workspaces.add' ||
         request.operation === 'settings.executors.refresh' ||
         request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' ||
-        request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect' ||
         request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget' ||
         request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
@@ -3909,7 +3632,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return await executeSpatialControl({
         get,
         agentPresentation: () => readAgentPresentation(get()),
-        surveyPresentation: catalog => readSurveyPresentation(get(), catalog),
         appearance: (catalog, imageSpaceId, topics) => readSpatialAppearance(get(), catalog, imageSpaceId, topics,
           (target, choice) => api.scratch.readMoteAvatar(target.workspaceId, target.topicId, choice, target.objectKey)),
         patch: patch => set(state => {
@@ -3977,7 +3699,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         },
         notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)),
         closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId)
-      }, request, signal, options)
+      }, request, signal)
     }
     const input = () => {
       const state = get()
@@ -4012,15 +3734,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return session
     }
     requireActive()
-    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send' ||
-        request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
+    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send') {
       const session = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
       const records = (): AgentMuxPendingMessage[] => {
         const state = get()
         const current = reconcileDeliveredSteers(state, session.id)
-        return (current.agentSteerQueues[session.id] ?? []).map(entry =>
-          pendingSteerRecord(entry, state.agentSteerInFlight[session.id], state.agentSteerInFlightPhase[session.id],
-            Boolean(confirmedSteerDelivery(state.timelines[session.id], session.id, entry.operationId))))
+        return (current.agentSteerQueues[session.id] ?? []).map(entry => ({
+          pendingId: entry.operationId, text: entry.text, runId: entry.runId ?? null,
+          enqueuedAt: entry.enqueuedAt ?? null, status: entry.status,
+          phase: entry.operationId === state.agentSteerInFlight[session.id]
+            ? state.agentSteerInFlightPhase[session.id] ?? 'preparing' : null,
+          editable: agentSteerCanEdit(entry, state.agentSteerInFlight[session.id]),
+          delivery: entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
+          errorCode: entry.errorCode ?? null, error: entry.error ?? null
+        }))
       }
       if (request.operation === 'message.pending.ls') return { operation: request.operation, agentSessionId: session.id, messages: records() }
       const before = records().find(item => item.pendingId === request.pendingId)
@@ -4029,15 +3756,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().editQueuedAgentSteer(session.id, request.pendingId, request.expectedText, request.text)
         const message = records().find(item => item.pendingId === request.pendingId)!
         return { operation: request.operation, agentSessionId: session.id, message, changed: before.text !== message.text }
-      }
-      if (request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
-        const result = await get().archiveAgentSteer(session.id, request.pendingId, request.expectedText, request.operation === 'message.pending.archive')
-        // Capture the successful mutation itself. A later delivery event can remove restored
-        // Pending before a reader inspects it; that event cannot erase this business result.
-        const facts = { agentSessionId: session.id, message: pendingSteerRecord(result.entry, undefined, undefined,
-          Boolean(confirmedSteerDelivery(get().timelines[session.id], session.id, result.entry.operationId))), changed: result.changed }
-        if (request.operation === 'message.pending.archive') return { operation: request.operation, ...facts }
-        return { operation: request.operation, ...facts }
       }
       const disposition = await get().sendQueuedAgentSteer(session.id, request.pendingId)
       const message = records().find(item => item.pendingId === request.pendingId) ?? null
@@ -4214,29 +3932,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...demand }) => demand) }
       }
       const demand = projected.find((candidate) => candidate.id === request.demandId)
-      if (!demand) return { operation: request.operation, demand: null, goalContinuations: await api.continuousProgress.goals(request.demandId) }
+      if (!demand) return { operation: request.operation, demand: null }
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
-      return { operation: request.operation, demand: record, goalContinuations: await api.continuousProgress.goals(request.demandId) }
-    }
-    if (request.operation === 'demand.discuss') {
-      await get().refreshDemand(request.demandId)
-      const tabId = request.mode === 'open' ? await get().openDemandPmo(request.demandId) : await get().requestDemandPmoTask(request.demandId, request.mode)
-      const tab = get().tabs[tabId], region = tab?.regions[tab.layout.activeRegionId]
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, requestId: request.requestId, mode: request.mode, tabId, agentSessionId: region?.kind === 'agent' ? region.sessionId : null } }
-    }
-    if (request.operation === 'demand.confirm') {
-      await get().confirmDemandGoal(request.demandId, request.expectedRevision)
-      const demand = demandRecord(request.demandId)
-      return { operation: request.operation, demand, receipt: { demandId: demand.id, confirmedRevision: demand.alignment!.revision, confirmedAt: demand.alignment!.confirmedAt! } }
-    }
-    if (request.operation === 'demand.accept') {
-      await get().acceptDemandResult(request.demandId, request.expectedAlignmentRevision, request.expectedSubmissionId, request.acceptGaps)
-      const demand = demandRecord(request.demandId)
-      return { operation: request.operation, demand, receipt: { demandId: demand.id, alignmentRevision: demand.grounding!.alignmentRevision, submissionId: demand.grounding!.submissionId, acceptedAt: demand.grounding!.acceptedAt!, acceptedWithGaps: demand.grounding!.checks.some(check => check.outcome === 'gap') } }
-    }
-    if (request.operation === 'demand.continuation-action') {
-      const continuation = await api.continuousProgress.goalAction(request.demandId, request.loopId, request.action, request.expectedRevision, request.requestId, request.caller)
-      return { operation: request.operation, demandId: request.demandId, continuation, diskDurability: 'confirmed' }
+      return { operation: request.operation, demand: record }
     }
     if (request.operation === 'demand.create') {
       const project = request.projectId ? controlProject(request.projectId) : undefined
@@ -4244,12 +3942,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const policy = demandWriteDecision({
         mode: 'risk-confirm',
         risk: request.decision?.risk ?? 'unknown',
-        projectKnown: request.projectId === undefined || Boolean(project),
+        projectKnown: Boolean(project),
         hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
       })
       if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Demand routing is unresolved; choose a Project before writing.' : 'Demand write requires explicit confirmation.')
       const id = await get().createDemand({
-        ...(request.demandId === undefined ? {} : { id: request.demandId }),
         title: request.title,
         ...(request.description === undefined ? {} : { description: request.description }),
         projectId: request.projectId ?? null,
@@ -4275,35 +3972,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const current = demandRecord(demandId)
       await get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
     }
-    const startDemand = async (demandId: string, sessionId?: string, continuation?: { intervalMs: number; alignmentRevision: number }, businessOperationId?: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
-      if (continuation) {
-        const facts = await api.demands.list()
-        const fresh = facts.find(goal => goal.id === demandId)
-        if (!fresh || !sessionId || !fresh.sessionIds.includes(sessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact associated Session for this original Goal.')
-        set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(fresh, state.demands[demandId]) } }))
-      }
+    const startDemand = async (demandId: string, sessionId?: string) => {
       const current = demandRecord(demandId)
-      let savedContinuation: import('@agentmux/core').ContinuousProgressLoop | undefined
-      if (continuation) {
-        if (!sessionId || !businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Continuation needs an exact Session and stable business operation.')
-        const selected = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.control.agentSessionId === sessionId)
-        if (!selected || selected.kind !== 'agent' || selected.id !== sessionId || selected.hostId !== selected.control.hostId || selected.processState !== 'running') throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session mapping or running target is unconfirmed.')
-        const originalStarts = (await api.continuousProgress.goals(demandId)).filter(loop => loop.creationOperationId === businessOperationId)
-        if (originalStarts.length > 1) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original start has ambiguous durable loop facts. Your Agent and input are retained.')
-        const originalStart = originalStarts[0]
-        savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: selected.control.agentSessionId, hostId: selected.control.hostId, providerId: selected.providerId, workspacePath: selected.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: originalStart?.initialDelivery?.prompt ?? (current.description.trim() || current.title) }, caller)
-        const live = get().sessions.find(candidate => candidate.id === sessionId)
-        if (!live || live.kind !== 'agent' || live.control.agentSessionId !== savedContinuation.agentSessionId || live.control.hostId !== savedContinuation.hostId || live.control.run.runId !== savedContinuation.initialDelivery?.condition.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed after its start was saved. Its loop and healthy Agent are retained.')
-      }
       let attachedSessionId = sessionId ?? current.sessionIds.at(-1) ?? null
       if (attachedSessionId) {
         const session = get().sessions.find((candidate) => candidate.id === attachedSessionId)
         if (!session || session.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${attachedSessionId}`)
-        const original = savedContinuation?.initialDelivery
-        let operationId: string | false = original?.state === 'confirmed' ? original.operationId : admitAgentSteer(session.id, original?.prompt ?? (current.description.trim() || current.title), undefined, businessOperationId, undefined, undefined,
-          original && savedContinuation ? { goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : { execution: 'default' })
+        const operationId = admitAgentSteer(session.id, current.description.trim() || current.title)
         if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
-        if (original?.state !== 'confirmed') await get().flushAgentSteerQueue(session.id, operationId)
+        await get().flushAgentSteerQueue(session.id, operationId)
         const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
         if (retained) throw controlFailure('CONTROL_FAILED', retained.error ?? 'The execution message is queued; delivery is not yet confirmed.')
       } else {
@@ -4317,8 +3994,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       await get().updateDemand(demandId, { status: 'in_progress' })
       await appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
-      if (savedContinuation && attachedSessionId) savedContinuation = await api.continuousProgress.initialGoalInput(savedContinuation, savedContinuation.loopId, businessOperationId!, 'confirm')
-      return { sessionId: attachedSessionId, demand: demandRecord(demandId), ...(savedContinuation ? { continuation: savedContinuation } : {}) }
+      return { sessionId: attachedSessionId, demand: demandRecord(demandId) }
     }
     if (request.operation === 'demand.assign') {
       const current = demandRecord(request.demandId)
@@ -4334,8 +4010,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: false } }
     }
     if (request.operation === 'demand.start') {
-      const started = await startDemand(request.demandId, request.sessionId, request.continuation, request.requestId, request.caller)
-      return { operation: request.operation, demand: started.demand, ...(started.continuation ? { continuation: started.continuation } : {}), receipt: { demandId: request.demandId, startedAt: started.continuation?.initialDelivery?.startedAt ?? Date.now(), sessionId: started.sessionId } }
+      const started = await startDemand(request.demandId, request.sessionId)
+      return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, startedAt: Date.now(), sessionId: started.sessionId } }
     }
     if (request.operation === 'demand.handoff') {
       const current = demandRecord(request.demandId)
@@ -4370,26 +4046,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demandId: request.demandId, decisions: demand.decisionLog ?? [] }
     }
     if (request.operation === 'focus') {
-      const originalNavigation = fileNavigationSelection(get())
-      let navigationChanged = false
-      const stopObservingNavigation = useAppStore.subscribe(state => {
-        if (fileNavigationSelection(state) !== originalNavigation) navigationChanged = true
-      })
-      signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
       let topics: ScratchTopicSnapshot[] = []
       try { if (get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
       catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
         recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
-      finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
       const catalog = spatialCatalog(get(), topics)
       const before = captureDesktopInput(get().tabs)
       const beforeSelection = desktopSelection(get(), catalog)
       let navigationState: AgentMuxDesktopFocusResult['navigation']['state'] = 'applied'
       try {
         requireActive()
-        if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
-          message: 'A newer navigation happened while the original target was being observed.', recovery: 'The later workface is kept. Inspect the client before explicitly retrying this target.' })
         if (request.target.kind === 'goal') {
           if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
@@ -4540,7 +4207,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (condition.expectedRun.runId !== session.control.run.runId) throw controlFailure(
         'STALE_AGENT_SESSION', 'Message intent targets another Run.')
       await api.sessions.submitMessage(session.control, { envelope: request.message, condition,
-        ...(request.sourceChannel === undefined ? {} : { sourceChannel: request.sourceChannel }),
         ...(request.execution === undefined ? {} : { execution: request.execution }),
         ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       return { operation: request.operation, agentSessionId: session.id }
@@ -4847,13 +4513,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const owners = new Set(existing.map(item => JSON.stringify([item.tab.id, item.surface.regionId])))
       let references = [...new Map(catalog.locations.filter(location => owners.has(JSON.stringify([location.tabId, location.regionId])))
         .map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
-      // An explicit Space Group is the caller's navigation intent. Held Focus only
-      // disambiguates inside that scope; it cannot erase a different requested Group.
-      if (preferredTabGroupId) references = references.filter(reference => reference.groupId === preferredTabGroupId)
       const held = current.agentFocus.execution.sessionId === id ? current.agentFocus.execution.reference : undefined
       if (held && references.some(reference => reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId &&
         reference.tabId === held.tabId && reference.regionId === held.regionId)) references = references.filter(reference =>
           reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId && reference.tabId === held.tabId && reference.regionId === held.regionId)
+      if (preferredTabGroupId) references = references.filter(reference => reference.groupId === preferredTabGroupId)
       if (references.length !== 1) {
         current.reportError(new Error('The Session has no unique confirmed display occurrence. Its original workface and input are kept; choose its exact Tab, Group and Region.'), { kind: 'indeterminate' })
         return
@@ -4873,7 +4537,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     const session = get().sessions.find((candidate) => candidate.id === id)
-    const workspace = session ? workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)) : null
+    const workspace = session ? workspaceForSession(get().config, session) : null
     if (!session || !workspace) return
     const tabId = sessionTabId(id)
     const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
@@ -4888,7 +4552,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionId: id
     }
     const createdTab = createWorkbenchTab(tabId, surface)
-    const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots))
+    const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
     const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
     // Tab 已在某个分组里就只需激活；新建时必须真的挂上。挂不上（`preferredTabGroupId` 指向一个
     // 已不存在的分组）原先静默回落成原 layout：Tab 记录进了 state.tabs 而不在任何 tabOrder 里。
@@ -4965,12 +4629,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         space = { zoneId, spaceId }
         // Topic home is a resource context. A temporary Zone linked to that Topic still uses its
         // original Workspace root and never inherits the active Group's unrelated Topic.
-        // Category is the display Space; Topic identity remains on its original Zone.
-        // It must not be inferred from a Category's title or a suppressed content Space.
-        const originalTopics = zone.kind === 'home' ? topics.filter(topic =>
-          topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories)?.zoneId === zoneId) : []
-        topicId = originalTopics.length === 1 ? originalTopics[0]!.id
-          : zone.kind === 'home' ? state.spaceZoneBindings[zoneId]?.topicId ?? catalog.spaces.find(item => item.spaceId === spaceId)?.topicId : undefined
+        topicId = zone.kind === 'home' ? catalog.spaces.find(item => item.spaceId === spaceId)?.topicId : undefined
       } catch (error) { get().reportError(error); return }
     } else {
       topicId = isScratchWorkspaceId(workspaceId)
@@ -5043,7 +4702,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
         const committed = { ...reconcileWorkbenchFileProjection(current, topology),
-          ...surveyPresentationAfterClose(current, topology.tabs),
+          surveyZoneSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyZoneSelection),
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
@@ -5189,25 +4848,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // does not navigate the main workbench or authorize another Zone's launcher.
       set((state) => {
         const focusedTab = focusWorkbenchTabRegion(tab, regionId)
-        const local = focusedSessionId ? focusSessionContext(state, focusedSessionId) : state.agentFocus
         return { regionCaretFocus: null,
           ...(focusedTab === tab ? {} : { tabs: { ...state.tabs, [tabId]: focusedTab } }),
-          ...(local.pmo !== state.agentFocus.pmo ? { agentFocus: { ...state.agentFocus, pmo: local.pmo } } : {}) }
+          ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId, undefined,
+            { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) } : {}) }
       })
       return
     }
     let choice: AgentMuxDesktopSpaceSelection
     try { choice = resolveWorkbenchOccurrenceSelection(get(), workbenchSelectionCatalog(get()),
-      { workspaceId, groupId: tabGroupId, tabId, regionId }, cause === 'navigation' ? 'navigation' : 'local') }
+      { workspaceId, groupId: tabGroupId, tabId, regionId }) }
     catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
     set((state) => ({
-      workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
+      workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
       tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
       layouts: {
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout!, tabGroupId, tabId)
       },
-      // 键盘导航与外部显式打开目标才搬 DOM caret（regionFocusClaimsCaret）。判据是这次落焦的**因**，不是
+      // 只有键盘导航这一路才把 DOM caret 也搬过去（regionFocusClaimsCaret）。判据是这次落焦的**因**，不是
       // 「谁成了焦点」——指针点击那一路原生 mousedown 已把焦点放对，再夺一次会打断选择/原生行为。同一个
       // regionId 驱动绿环、原生视图让位、与这条 caret 意图，三者读同一次判定（region-focus.ts 顶部的纪律）。
       // nonce 递增让「连按方向键停在同一格」也能各触发一次，且 selector 不因对象相等忽略它。
@@ -5365,7 +5024,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { ...(obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
         : { tabs }),
-        ...surveyPresentationAfterClose(state, tabs),
+        surveyZoneSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection),
         workbenchSpaceSelection: desktopSpaceSelectionAfterClose(state.workbenchSpaceSelection, { tabs, layouts: state.layouts },
           { workspaceId, tabId, regionId }) }
     })
@@ -5432,15 +5091,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   toggleEditorWordWrap() {
     set((state) => ({ editorWordWrap: !state.editorWordWrap }))
   },
-  toggleEditorMinimap() {
-    set((state) => ({ editorMinimap: !state.editorMinimap }))
-  },
-  toggleExplorerShowHidden() {
-    set((state) => ({ explorerShowHidden: !state.explorerShowHidden }))
-  },
-  toggleExplorerShowIgnored() {
-    set((state) => ({ explorerShowIgnored: !state.explorerShowIgnored }))
-  },
   async setEditorRegionMode(regionId, workspaceId, path, mode) {
     set((state) => ({ editorRegionModes: { ...state.editorRegionModes, [regionId]: mode } }))
     // Only entering diff triggers a load, and only when this Region has no diff yet — switching back
@@ -5452,38 +5102,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async reloadRegionDiff(regionId, workspaceId, path) {
     await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
   },
-  async openFileAndReveal(path, tabGroupId, location, requestedWorkspaceId, navigationSignal) {
-    const navigation = get()
-    const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
-    const resource = navigation.config?.workspaces.find(workspace => workspace.id === workspaceId)
-    if (!workspaceId || !resource) return false
-    if (!navigation.layouts[workspaceId]) set(state => ({ layouts: {
-      ...state.layouts, [workspaceId]: createWorkspaceLayout(newTabGroupId())
-    } }))
-    const opening = navigationSignal
-      ? get().openFile(path, tabGroupId, location, workspaceId, undefined, undefined, navigationSignal)
-      : get().openFile(path, tabGroupId, location, workspaceId)
-    const intentVersion = fileOpenIntentVersion
-    const mayReveal = await opening
-    const state = get(), currentResource = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
-    // Preparation may finish after a newer navigation or a Workspace resource rebind.
-    if (!mayReveal || navigationSignal?.aborted || intentVersion !== fileOpenIntentVersion ||
-      state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId ||
-      state.agentFocus.execution.sessionId !== navigation.agentFocus.execution.sessionId ||
-      state.agentFocus.pmo.sessionId !== navigation.agentFocus.pmo.sessionId ||
-      currentResource?.hostId !== resource.hostId || currentResource.path !== resource.path) return false
-    const original = findFileWorkbenchSurface(state, workspaceId, path), layout = state.layouts[workspaceId]
-    const tab = original?.tab, surface = original?.surface
-    const groupId = tab && tabGroupForTab(layout, tab.id)
-    if (!tab || !surface || !groupId) return false
-    get().focusRegion(workspaceId, tab.id, surface.regionId, 'navigation', groupId)
-    const selected = get().workbenchSpaceSelection
-    if (selected?.workspaceId !== workspaceId || selected.tabId !== tab.id || selected.regionId !== surface.regionId || selected.groupId !== groupId) return false
-    set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
-    const request = get().regionCaretFocus
-    if (request && navigationSignal) navigationSignal.addEventListener('abort', () => get().clearRegionCaretFocus(request.nonce), { once: true })
-    return true
-  },
   async openFileDiff(path, requestedWorkspaceId) {
     const navigation = get()
     const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
@@ -5494,13 +5112,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const opening = get().openFile(path, undefined, undefined, workspaceId)
     const intentVersion = fileOpenIntentVersion
     const mayReveal = await opening
-    const state = get(), original = findFileWorkbenchSurface(state, workspaceId, path), layout = state.layouts[workspaceId]
-    const tab = original?.tab, surface = original?.surface
-    const tabId = tab?.id, regionId = surface?.regionId
-    const groupId = tabId ? tabGroupForTab(layout, tabId) : undefined
+    const tabId = fileTabId(workspaceId, path)
+    const regionId = initialWorkbenchRegionId(tabId)
+    const state = get(), tab = state.tabs[tabId], layout = state.layouts[workspaceId]
+    const surface = tab?.regions[regionId]
+    const groupId = tabGroupForTab(layout, tabId)
     // A failed file read has no destination. Reveal the exact successful placement without
     // setMainSurface's Session navigation replacing it with the original Agent Tab.
-    if (!tabId || !regionId || !tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
+    if (!tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
     // A later navigation owns the screen while the file producer is pending.
     if (
       mayReveal && intentVersion === fileOpenIntentVersion &&
@@ -5509,8 +5128,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       state.agentFocus.execution.sessionId === navigation.agentFocus.execution.sessionId &&
       state.agentFocus.pmo.sessionId === navigation.agentFocus.pmo.sessionId
     ) {
-      get().focusRegion(workspaceId, tabId, regionId, 'navigation', groupId)
-      set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
+      set({
+        activeWorkspaceId: workspaceId, mainSurface: 'workbench',
+        tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
+        layouts: { ...state.layouts, [workspaceId]: activateLayoutTab(layout, groupId, tabId) }
+      })
     }
     await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
   },
@@ -5551,63 +5173,76 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch { return false }
   },
   setMainSurface(mainSurface) {
-    const state = get()
-    // A confirmed old Focus reference can seed an absent Desktop choice. This
-    // never resolves a Session ID or guesses a sibling/first occurrence.
-    if (mainSurface === 'workbench' && !state.workbenchSpaceSelection && state.mainSurface === 'agents' && state.agentFocus.execution.reference) {
-      state.selectMainRegion(state.agentFocus.execution.reference, null)
+    set({ workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+    const selectedSessionId = executionFocusSessionId(get().agentFocus)
+    const selectedSession = selectedSessionId
+      ? get().sessions.find((session) => session.id === selectedSessionId)
+      : undefined
+    if (mainSurface === 'workbench' && selectedSession && !get().workbenchSpaceSelection) {
+      // The selected Session is the cross-surface navigation context. Reuse the existing
+      // selectSession path so Workspaces activates its durable Tab/Region instead of creating
+      // a second projection or losing the user's place.
+      set({ mainSurface })
+      get().selectSession(selectedSession.id)
+      return
     }
-    const choice = get().workbenchSpaceSelection
-    if (mainSurface === 'survey' && choice?.zoneId && choice.tabId && choice.regionId) {
-      const previous = get().surveyZoneSelection
-      get().setSurveyZoneSelection({ zoneId: choice.zoneId, selection: previous?.zoneId === choice.zoneId ? previous.selection : [],
-        active: { tabId: choice.tabId, regionId: choice.regionId } })
+    if (mainSurface === 'board' && selectedSessionId) {
+      const linkedDemand = Object.values(get().demands).find((demand) => demand.sessionIds.includes(selectedSessionId))
+      set({ mainSurface, selectedDemandId: linkedDemand?.id ?? null })
+      return
     }
-    set({ mainSurface, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-  },
-  selectMainRegion(reference, expected) {
-    const state = get()
-    if (expected !== undefined && !sameSpatialValue(state.workbenchSpaceSelection, expected)) return false
-    const { overlays } = readDesktopPresentation(desktopSelection(state, workbenchSelectionCatalog(state)), state.tabs)
-    if (overlays.settings === true || overlays.quickSwitcher === true) return false
-    const layout = state.layouts[reference.displayWorkspaceId], tab = state.tabs[reference.tabId]
-    const group = layout?.groups.find(item => item.id === reference.groupId)
-    if (!layout || !group || !groupIds(layout.root).includes(group.id) || !group.tabOrder.includes(reference.tabId) || !tab?.regions[reference.regionId]) return false
-    let choice: AgentMuxDesktopSpaceSelection
-    try { choice = resolveWorkbenchOccurrenceSelection(state, workbenchSelectionCatalog(state), {
-      workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
-    catch (error) { state.reportError(error, { kind: 'indeterminate' }); return false }
-    if (!sameSpatialValue(choice, state.workbenchSpaceSelection) || state.activeWorkspaceId !== choice.workspaceId) {
-      set({ workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, retainedSpatialFocus: null,
-        workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    }
-    return true
+    set({ mainSurface })
   },
   focusExecutionSession(id, reference) {
-    const state = get()
-    if (id && reference && !confirmedFocusReference(state, id, reference)) return false
-    const agentFocus = id !== null && !state.sessions.some(session => session.id === id)
-      ? focusExecution(state.agentFocus, id) : focusSessionContext(state, id, undefined, reference)
-    set({ agentFocus })
-    if (!id) return true
-    const result = executionFocusPresentation(agentFocus.execution, state.tabs, workbenchSelectionCatalog(state), () => {})
-    const target = result.projection?.selection[0]
-    if (target && get().selectMainRegion(target, state.workbenchSpaceSelection)) {
-      set(current => ({ agentFocus: { ...current.agentFocus, execution: { ...current.agentFocus.execution, reference: target } } }))
-      return true
+    if (id && reference) {
+      const state = get()
+      if (!confirmedFocusReference(state, id, reference)) return
+      const topicsWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      try {
+        const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicsWorkspace) ?? [])
+        if (!catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) return
+      } catch (error) {
+        get().reportError(error, { kind: 'indeterminate', summary: 'The selected work surface directory could not be confirmed. The original Session and work surface are retained.' })
+        return
+      }
     }
-    state.reportError(new Error(result.issue ?? 'The selected Agent occurrence is unconfirmed. Its workface is kept; choose an exact original location.'), { kind: 'indeterminate' })
-    return false
+    set((state) => ({ agentFocus: id !== null && !state.sessions.some((session) => session.id === id)
+      ? focusExecution(state.agentFocus, id)
+      : focusSessionContext(state, id, undefined, reference) }))
+  },
+  selectExecutionFocusReference(reference, expected) {
+    const state = get(), execution = state.agentFocus.execution
+    if (state.mainSurface !== 'agents' || !expected.sessionId || execution.sessionId !== expected.sessionId ||
+      (expected.reference
+        ? !sameWorkbenchProjectionSelection(execution.reference ?? null, expected.reference)
+        : execution.reference !== undefined)) return
+    const { overlays } = readDesktopPresentation({ surface: 'focus', mainSurface: 'agents', space: null, goalId: null }, state.tabs)
+    if (overlays.settings === true || overlays.quickSwitcher === true) return
+    const layout = state.layouts[reference.displayWorkspaceId]
+    const group = layout?.groups.find(item => item.id === reference.groupId)
+    const tab = state.tabs[reference.tabId]
+    if (!layout || !group || !groupIds(layout.root).includes(group.id) || !group.tabOrder.includes(reference.tabId) ||
+      !tab?.regions[reference.regionId]) return
+    const topicsWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+    try {
+      const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, topicsWorkspace) ?? [])
+      if (!catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) return
+    } catch (error) {
+      get().reportError(error, { kind: 'indeterminate', summary: 'The selected work surface directory could not be confirmed. The original Session and work surface are retained.' })
+      return
+    }
+    if (sameWorkbenchProjectionSelection(execution.reference ?? null, reference)) return
+    set({ agentFocus: { ...state.agentFocus, execution: { ...execution, reference } } })
   },
   focusPmoSession(id) {
     set((state) => {
       const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
       if (id && !session) return state
       if (session) {
-        const lane = focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
-          scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))))
+        const lane = focusLaneForSession(topicIdForSession(state.config, session),
+          scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session)))
         if (lane === null) return state
-        if (lane === 'execution') return state
+        if (lane === 'execution') return { agentFocus: focusSessionContext(state, id) }
       }
       return { agentFocus: focusPmo(state.agentFocus, id) }
     })
@@ -5952,55 +5587,33 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const displayId = placement?.displayWorkspaceId ?? workspaceId
     const background = placement?.focus === false
     const canonicalTabId = workspaceId ? fileTabId(workspaceId, path) : null
-    let exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
-    const destinationTabId = placement?.split?.tabId ?? placement?.launcher?.tabId ?? placement?.reference?.tabId ?? canonicalTabId
-    const originalTab = destinationTabId ? navigation.tabs[destinationTabId] : undefined
-    const splitAnchor = placement?.split ? originalTab?.regions[placement.split.regionId] : undefined
-    let expectedSurface = placement?.split ? undefined : exactRegionId ? originalTab?.regions[exactRegionId] : undefined
+    const exactRegionId = placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
+    const originalTab = canonicalTabId && Object.hasOwn(navigation.tabs, canonicalTabId) ? navigation.tabs[canonicalTabId] : undefined
+    let expectedSurface = exactRegionId ? originalTab?.regions[exactRegionId] : undefined
     let result: FileOpenResult = { placement: { status: 'unconfirmed', tabId: null, regionId: null },
       data: { kind: 'unconfirmed', reason: null }, navigation: background ? 'background' : 'unconfirmed' }
     const rememberPlacement = () => {
-      if (placement?.split) {
-        const target = workbenchSurfaces(get().tabs[placement.split.tabId]!).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
-        if (target) exactRegionId = target.regionId
-      }
       if (!canonicalTabId || !exactRegionId) return
-      const tab = get().tabs[destinationTabId!]
+      const tab = get().tabs[placement?.reference?.tabId ?? canonicalTabId]
       const surface = tab?.regions[exactRegionId]
       if (!expectedSurface && surface?.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path) expectedSurface = surface
     }
-    let releaseResource = () => {}
     try {
     const layout = displayId ? navigation.layouts[displayId] : undefined
     if (!workspaceId || !layout || placement && (!tabGroupId || !groupIds(layout.root).includes(tabGroupId) || !layout.groups.some(group => group.id === tabGroupId))) return false
-    const originalResource = navigation.config?.workspaces.find(workspace => workspace.id === workspaceId)
-    let resourceRebound = false, observedConfig = navigation.config
-    if (originalResource) releaseResource = useAppStore.subscribe(state => {
-      if (state.config === observedConfig) return
-      observedConfig = state.config
-      const current = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
-      if (current?.hostId !== originalResource.hostId || current.path !== originalResource.path) {
-        resourceRebound = true
-        releaseResource()
-      }
-    })
     const resourceCurrent = () => {
       const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
       const currentLayout = displayId ? get().layouts[displayId] : undefined
-      const currentTab = canonicalTabId ? get().tabs[destinationTabId!] : undefined
-      return !resourceRebound && (!originalResource || workspace?.hostId === originalResource.hostId && workspace.path === originalResource.path) &&
-        (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
+      const currentTab = canonicalTabId ? get().tabs[placement?.reference?.tabId ?? canonicalTabId] : undefined
+      return (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
         currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
-        fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement) &&
-        fileOpenSplitMatches(get(), workspaceId, tabGroupId, placement, confirmedExistingSpace(get())) &&
-        (!placement.split || currentTab?.regions[placement.split.regionId] === splitAnchor) &&
-        fileOpenLauncherMatches(get(), workspaceId, path, tabGroupId, placement)) &&
+        fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement)) &&
         (!placement?.onResult || !expectedSurface || exactRegionId && currentTab?.regions[exactRegionId] === expectedSurface)
     }
     if (!resourceCurrent()) return false
-    function confirmedExistingSpace(state: AppState): ConfirmedExistingFileSpace | undefined {
-      if (!placement || placement.reference || placement.launcher || !canonicalTabId) return undefined
-      const tab = state.tabs[placement.split?.tabId ?? canonicalTabId]
+    const confirmedExistingSpace = (state: AppState): ConfirmedExistingFileSpace | undefined => {
+      if (!placement || placement.reference || !canonicalTabId) return undefined
+      const tab = state.tabs[canonicalTabId]
       if (!tab) return undefined
       const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
       const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)
@@ -6011,7 +5624,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const region = tab.regions[id]
         return region?.kind === 'file' && region.workspaceId === workspaceId && region.path === path
       })
-      if (tab.workspaceId !== workspaceId || !placement.split && !file || !workspace ||
+      if (tab.workspaceId !== workspaceId || !file || !workspace ||
         workspace.hostId !== placement.resource.hostId || workspace.path !== placement.resource.path ||
         zone?.workspaceId !== workspaceId || zone.hostId !== workspace.hostId) {
         throw new Error('The existing File resource or Zone context is unconfirmed; its original Tab and body are retained.')
@@ -6049,7 +5662,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().setSurveyZoneCollected(placement.space.zoneId, true)
       }
       if (placement?.focus === true && placement.selection && resourceCurrent()) {
-        const choice = { ...placement.selection, ...(placement.split && exactRegionId ? { tabId: destinationTabId!, regionId: exactRegionId } : {}) }
+        const choice = placement.selection
         if (!choice.tabId || !choice.regionId || !choice.groupId) return
         set({ workbenchSpaceSelection: choice })
         get().focusRegion(choice.workspaceId, choice.tabId, choice.regionId, 'pointer', choice.groupId)
@@ -6062,23 +5675,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ activeWorkspaceId: displayId!, mainSurface: 'workbench' })
         return
       }
-      if (!placement?.projection) {
-        const current = get(), placed = displayId ? current.layouts[displayId] : undefined
-        const group = placed && findGroup(placed, placed.activeGroupId)
-        if (displayId && destinationTabId && exactRegionId && group?.tabOrder.includes(destinationTabId)) {
-          const applied = current.selectMainRegion({ displayWorkspaceId: displayId, groupId: group.id,
-            tabId: destinationTabId, regionId: exactRegionId }, navigation.workbenchSpaceSelection)
-          result.navigation = applied ? 'applied' : 'unconfirmed'
-        }
-        return
-      }
+      if (!placement?.projection) return
       if (placement.reference) { placement.projection.onSelect(placement.reference); return }
-      const tabId = placement.split?.tabId ?? placement.launcher?.tabId ?? fileTabId(workspaceId, path), tab = get().tabs[tabId]
+      const tabId = fileTabId(workspaceId, path), tab = get().tabs[tabId]
       if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
-      const reference = { displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: placement.split && exactRegionId ? exactRegionId : tab.layout.activeRegionId }
-      placement.projection.onSelect(reference)
-      if (placement.projection.presentationId === 'focus-workbench') result.navigation = get().mainSurface === 'agents' &&
-        sameWorkbenchProjectionSelection(mainRegionReference(get().workbenchSpaceSelection), reference) ? 'applied' : 'cancelled' 
+      placement.projection.onSelect({ displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: tab.layout.activeRegionId })
     }
     const key = documentKey(workspaceId, path)
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
@@ -6108,8 +5709,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return false
       }
     }
-    if (!background) prepareFileSurface(path, effectiveFileRegionMode(navigation.editorRegionModes, exactRegionId ?? '', path,
-      navigation.documentIssues[documentKey(workspaceId, path)]?.kind === 'binary'))
     try {
       // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
       // document) or on the `line` prop it reads (already-open document), then clears it. Setting it
@@ -6150,34 +5749,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const joinedRequest = Boolean(request)
         if (!request) {
           const openedLifetime = advanceDocumentLifetime(key)
-          const ownsRead = () => documentLifetime(key) === openedLifetime && fileOpenRequests.get(key) === request
-          const releaseObservation = async () => { if (ownsRead()) await api.files.unobserve(workspaceId, path) }
           request = Promise.resolve().then(async () => {
             try {
-              if (!ownsRead() || !resourceCurrent()) return false
+              if (!resourceCurrent()) return false
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
               await api.files.observe(workspaceId, path)
-              if (!ownsRead() || !resourceCurrent()) return false
+              if (!resourceCurrent()) return false
               const result = await api.files.read(workspaceId, path)
-              if (!ownsRead() || !resourceCurrent()) return false
+              if (!resourceCurrent()) return false
               if (result.status === 'directory') {
                 // The shared producer owns the verdict, not any caller's navigation.
-                await releaseObservation()
+                await api.files.unobserve(workspaceId, path)
                 return 'directory' as const
               }
               if (result.status !== 'read' && result.status !== 'binary') {
-                await releaseObservation()
+                await api.files.unobserve(workspaceId, path)
                 throw new Error(result.status === 'deleted'
                   ? `File was deleted: ${path}`
                   : result.message)
               }
               if (documentLifetime(key) !== openedLifetime) {
-                await releaseObservation()
+                await api.files.unobserve(workspaceId, path)
                 return false
               }
               const currentLayout = get().layouts[displayId!]
               if (!currentLayout) {
-                await releaseObservation()
+                await api.files.unobserve(workspaceId, path)
                 return false
               }
               const targetGroupId = tabGroupId ?? (findGroup(currentLayout, layout.activeGroupId)
@@ -6212,19 +5809,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 }
               })
               rememberPlacement()
-              if (result.status === 'binary' || format && !format.sourceEditable) await releaseObservation()
+              if (result.status === 'binary' || format && !format.sourceEditable) await api.files.unobserve(workspaceId, path)
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
                 await refreshFileDocument(workspaceId, path, openedLifetime)
               }
               return true
             } catch (error) {
-              if (!ownsRead() || !resourceCurrent()) return false
               result.data = { kind: 'failed', reason: presentError(error) }
               get().reportError(error)
               return false
             } finally {
-              if (resourceRebound && documentLifetime(key) === openedLifetime) await releaseObservation()
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
             }
           })
@@ -6288,14 +5883,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (location && !get().documents[key]) get().clearDocumentRevealTarget(key)
     }
     } finally {
-      releaseResource()
       if (placement?.onResult) {
-        const tabId = destinationTabId
+        const tabId = placement.reference?.tabId ?? canonicalTabId
         const tab = tabId && Object.hasOwn(get().tabs, tabId) ? get().tabs[tabId] : undefined
         const surface = exactRegionId ? tab?.regions[exactRegionId] : undefined
         const member = displayId && tabId && get().layouts[displayId]?.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(tabId))
         if (expectedSurface && surface === expectedSurface && surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path && member) {
-          result.placement = { status: originalTab?.regions[exactRegionId!] ? 'reused' : 'created', tabId: tabId!, regionId: exactRegionId! }
+          result.placement = { status: originalTab ? 'reused' : 'created', tabId: tabId!, regionId: exactRegionId! }
         } else if (result.data.kind !== 'not-file') result.placement = { status: result.data.kind === 'failed' && !expectedSurface ? 'none' : 'unconfirmed', tabId: null, regionId: null }
         if (!background && result.navigation !== 'applied' && (result.data.kind === 'text' || result.data.kind === 'media-preview' || result.data.kind === 'binary-preview')) result.navigation = 'cancelled'
         placement.onResult(result)
@@ -6345,8 +5939,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const job = api.scratch.listTopics(workspaceId).then(topics => {
       if (!stillCurrent()) return
       const retained = get().scratchTopicSnapshots[workspaceId]?.topics
-      const errors = [...topics.issues ?? [], ...topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] :
-        topic.moteArchive?.state === 'unknown' ? [`${topic.title}: Archive state unconfirmed · ${topic.moteArchive.issue}`] : [])]
+      const errors = topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] :
+        topic.moteArchive?.state === 'unknown' ? [`${topic.title}: Archive state unconfirmed · ${topic.moteArchive.issue}`] : [])
       const facts = topics.map(topic => {
         const previousTopic = retained?.find(candidate => candidate.id === topic.id)
         // A failed file read is no new identity fact. Keep the last complete object,
@@ -6356,12 +5950,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return topic.moteArchive?.state === 'unknown' && previousTopic?.moteArchive?.state !== 'unknown' && previousTopic?.moteArchive
           ? { ...topic, moteArchive: previousTopic.moteArchive } : topic
       })
-      // An unclaimed directory has no ID to attach a failure to. Its discovery gap
-      // cannot erase previously confirmed objects; keep their original facts until
-      // this same scope can be completely observed again.
-      if (topics.issues?.length) for (const original of retained ?? []) {
-        if (!facts.some(topic => topic.id === original.id)) facts.push(original)
-      }
       set(current => ({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
         scope, revision, topics: facts, error: errors.length ? errors.join(' · ') : null, reading: false
       } } }))
@@ -6384,7 +5972,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const topic = snapshot?.scope === scope ? snapshot.topics?.find(item => item.id === topicId) : undefined
     const identityPath = workspace && topic ? scratchTopicIdentityPath(workspace, topic) : null
     if (!workspace || !topic?.moteArchive || topic.moteArchive.state === 'unknown' || topic.moteArchive.version !== expectedVersion ||
-      identityPath === null || scratchTopicIdFromWorkspacePath(workspace.path, identityPath, snapshot?.topics) !== topicId ||
+      identityPath === null || scratchTopicIdFromWorkspacePath(workspace.path, identityPath) !== topicId ||
       // Historical snapshots identify only their configured home; sibling roots
       // require the identity field confirmed by Main.
       (!topic.identityDirectoryPath && identityPath !== scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) })) ||
@@ -6422,7 +6010,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // not the identity from which the Topic is derived.
     const topicId = `launcher:${crypto.randomUUID()}`
     const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
-    const targetTab = { ...newLauncherTab(workspace.id, topicId), ...(preset === 'mote' ? {} : { space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) } }),
+    const targetTab = { ...newLauncherTab(workspace.id, topicId), space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) },
       ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
     const regionId = targetTab.layout.activeRegionId
     const initialSurface = targetTab.regions[regionId]
@@ -6443,7 +6031,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         return {
           ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
-            workbenchSpaceSelection: { spaceId: nextTab.space?.spaceId ?? null, zoneId: nextTab.space?.zoneId ?? null, workspaceId: workspace.id, topicId,
+            workbenchSpaceSelection: { ...nextTab.space, workspaceId: workspace.id, topicId,
               tabId: nextTab.id, groupId: layout.activeGroupId, regionId },
             retainedSpatialFocus: null, regionCaretFocus: null, workbenchNavigationInputPolicy: null } : {}),
           tabs: { ...current.tabs, [nextTab.id]: nextTab },
@@ -6482,7 +6070,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw cause
     }
     const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
-    if (snapshot.id !== topicId || snapshot.readError || !address || preset !== 'mote' && address.zoneId !== targetTab.space?.zoneId) throw new Error('The created Topic original identity is unconfirmed. Its Tab, Region and draft are kept.')
+    if (!address || address.zoneId !== targetTab.space.zoneId) throw new Error('The created Topic original identity is unconfirmed. Its Tab, Region and draft are kept.')
     const mayReveal = fileNavigationSelection(get()) === bornSelection
     if (!initialRequest) placeLauncher(mayReveal)
     else set(current => {
@@ -6495,12 +6083,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const previous = current.scratchTopicSnapshots[workspace.id], scope = scratchTopicsScope(workspace)
       const topics = previous?.scope === scope ? previous.topics ?? [] : []
       const live = current.tabs[targetTab.id]
-      if (!live || live.topicId !== topicId || live.regions[regionId] !== initialSurface) return current
+      if (!live) return current
       const groupId = tabGroupForTab(current.layouts[workspace.id], live.id)
       return { tabs: { ...current.tabs, [live.id]: { ...live, space: address } },
         scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: { scope, revision: previous?.revision ?? 0,
-          reading: false, error: null, topics: topics.some(topic => topic.id === snapshot.id)
-            ? topics.map(topic => topic.id === snapshot.id ? snapshot : topic) : [...topics, snapshot] } },
+          reading: false, error: null, topics: [...topics.filter(topic => topic.id !== topicId), snapshot] } },
         ...(mayReveal && groupId ? { workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId,
           tabId: live.id, groupId, regionId: live.layout.activeRegionId } } : {}) }
     })
@@ -6529,9 +6116,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
     )
     const reveal = options?.reveal ?? true
-    const pendingOwners = Object.values(state.tabs).filter(tab => tab.workspaceId === workspaceId && tab.topicId === topicId && tab.topicPreparation && !tab.space)
-    const pendingBorn = options?.tabId ? pendingOwners.find(tab => tab.id === options.tabId) : pendingOwners.length === 1 ? pendingOwners[0] : undefined
-    const pendingRegion = pendingBorn?.regions[pendingBorn.layout.activeRegionId]
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
@@ -6541,8 +6125,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const topics = previous?.scope === scope ? previous.topics ?? [] : []
       return { scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: {
         scope, revision: previous?.revision ?? 0, reading: previous?.reading ?? false, error: previous?.error ?? null,
-        topics: topics.some(topic => topic.id === snapshot.id)
-            ? topics.map(topic => topic.id === snapshot.id ? snapshot : topic) : [...topics, snapshot] } } }
+        topics: [...topics.filter(topic => topic.id !== snapshot.id), snapshot] } } }
     })
     const selectObject = (current: AppState, snapshot: ScratchTopicSnapshot, targetTabId?: string): AgentMuxDesktopSpaceSelection => {
       const address = topicSpatialAddress(current.config, snapshot, current.spaceZoneBindings, current.topicCategories)
@@ -6572,9 +6155,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const known = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(topic => topic.id === topicId)
       const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
       const address = known ? topicSpatialAddress(state.config, known, state.spaceZoneBindings, state.topicCategories)
-        : { spaceId: null, zoneId: null }
+        : { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) }
       if (!address) throw new Error('The Topic Category relationship is unconfirmed. Original workface is kept.')
-      const tab = { ...newLauncherTab(workspace.id, topicId), ...(address.spaceId && address.zoneId ? { space: { spaceId: address.spaceId, zoneId: address.zoneId } } : {}), ...(request ? { topicPreparation: 'mote' as const } : {}) }
+      const tab = { ...newLauncherTab(workspace.id, topicId), space: address, ...(request ? { topicPreparation: 'mote' as const } : {}) }
       const regionId = tab.layout.activeRegionId, initialSurface = tab.regions[regionId]
       let groupId: string | undefined
       set(current => {
@@ -6610,9 +6193,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         remember(snapshot)
         const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
         if (!address) throw new Error('The born Topic relationship is unconfirmed. Its Tab, Region and draft are retained.')
-        if (snapshot.id !== topicId || snapshot.readError || tab.space && address.zoneId !== tab.space.zoneId) throw new Error('The confirmed Topic identity differs from its born owner. Its original Tab, Region and draft are retained.')
-        set(current => current.tabs[tab.id]?.topicId === topicId && current.tabs[tab.id]?.regions[regionId] === initialSurface
-          ? { tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: address } } } : current)
+        if (address.zoneId !== tab.space.zoneId) throw new Error('The confirmed Topic identity differs from its born owner. Its original Tab, Region and draft are retained.')
+        set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: address } } }))
         if (reveal && !options.signal?.aborted && fileNavigationSelection(get()) === bornSelection && get().tabs[tab.id]?.regions[regionId] === initialSurface) {
           const choice = selectObject(get(), snapshot, tab.id)
           set({ workbenchSpaceSelection: choice, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })
@@ -6701,15 +6283,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     finally { release() }
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
     remember(snapshot)
-    if (pendingBorn && snapshot.id === topicId && !snapshot.readError) {
-      const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
-      if (address) set(current => {
-        const live = current.tabs[pendingBorn.id]
-        if (!live?.topicPreparation || live.space || live.topicId !== topicId || live.regions[pendingBorn.layout.activeRegionId] !== pendingRegion) return current
-        const { topicPreparation: _prepared, ...prepared } = live
-        return { tabs: { ...current.tabs, [live.id]: { ...prepared, space: address } } }
-      })
-    }
     const mayReveal = reveal && !options?.signal?.aborted && !laterIntent
     if (reveal && !mayReveal) return false
     // The click already opened its durable Zone, optionally with an exact Chat.
@@ -6743,13 +6316,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             [workspace.id]: activateLayoutTab(layout, choice.groupId, choice.tabId) } } : {})
         }
       }
-      // Selecting an existing confirmed empty Topic/Zone does not create work.
-      // Explicit createScratchTopic/newTab owns the first durable surface.
-      if (objectChoice && !catalog.tabs.some(tab => tab.zoneId === address.zoneId)) return mayReveal
-        ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
-          workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null },
-          retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
-        : current
+      // A confirmed empty Mote is an empty discussion surface, not missing discovery.
+      if (scratchTopicKind(snapshot!.id, [snapshot!]) === 'mote' && mayReveal) return { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
+        workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null },
+        retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
       const tab = { ...newLauncherTab(workspace.id), topicId, space: address }
       const nextLayout = addTabPlacement(layout, layout.activeGroupId, tab.id)
       if (!nextLayout) {
@@ -6863,11 +6433,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       read = { ...read, status: 'unknown', issue: presentError(error) }; publish(); return read
     }
   },
-  async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId, notebook) {
-    const captured = get(), openingIntent = fileOpenIntentVersion, openingSelection = fileNavigationSelection(captured)
-    let navigationChanged = false
-    const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== openingSelection) navigationChanged = true })
-    try {
+  async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId) {
+    const captured = get(), openingIntent = fileOpenIntentVersion
     const tab = launcher ? captured.tabs[launcher.tabId] : undefined
     const launcherSurface = launcher ? tab?.regions[launcher.regionId] : undefined
     if (launcher && launcherSurface?.kind !== 'launcher') throw new Error('Launcher Region is no longer available')
@@ -6886,12 +6453,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const originalResource = captured.config?.workspaces.find(item => item.id === workspaceId)
     if (!originalResource) throw new Error('The Note resource Workspace is unavailable.')
-    const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'survey-workbench' && captured.mainSurface === 'survey' && captured.surveyNotebookId
-      ? captured.surveyNotebookId : DEFAULT_NOTEBOOK_ID }
     const noteId = retrying ? previous.noteId : crypto.randomUUID(), blockId = retrying ? previous.blockIds[0]! : crypto.randomUUID(), draft = retrying ? previous.draft : initialContent ?? ''
     let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
       ...(launcher ? { launcher } : {}),
-      notebook: retrying && previous.notebook ? previous.notebook : notebookContext,
       target: { workspaceId, hostId: originalResource.hostId, workspacePath: originalResource.path, directoryPath: null, relativeDirectory: null, zoneId: tab?.space?.zoneId ?? null,
         sourceSpaceId: tab?.space?.spaceId ?? null, displayWorkspaceId: noteCreationDisplayWorkspace(captured, { workspaceId, groupId, ...(projection ? { displayWorkspaceId: projection.displayWorkspaceId } : {}), ...(launcher ? { launcher } : {}) }), groupId },
       ...(projection && launcher ? { presentation: { presentationId: projection.presentationId, entity: projection.entity,
@@ -6924,12 +6488,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     receipt = { ...receipt, status: named.result.status, write: named.result, ...(named.result.status === 'written' ? {} : { issue: named.result.message }) }; publish()
     if (named.result.status !== 'written') return receipt
-    receipt = await registerCreatedNote(receipt); publish()
     set(current => ({ workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId) }))
     // Creation belongs to the captured request; a later navigation never grants it a new reveal intent.
-    if (navigationChanged || fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== openingSelection) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
+    if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== fileNavigationSelection(captured)) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
     if (!noteCreationResourceMatches(get().config, target)) { receipt = { ...receipt, issue: 'The Note was written to its captured resource, but the current resource is different. Restore that resource to check or open the same Note.' }; publish(); return receipt }
-    const placement = noteFilePlacement(target, projection, receipt.launcher)
+    const placement = noteFilePlacement(target, projection)
     if (!placement) { receipt = { ...receipt, issue: 'The exact Note display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
     try {
       receipt = { ...receipt, revealed: await get().openFile(receipt.path, target.groupId, undefined, target.workspaceId, undefined,
@@ -6937,7 +6500,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!receipt.revealed) receipt = { ...receipt, issue: 'The Note was created but could not be displayed. Open this same file; do not create another.' }
     } catch (error) { receipt = { ...receipt, issue: presentError(error) } }
     publish(); return receipt
-    } finally { stopWatching() }
   },
   async revealCreatedNote(launcherId, projection) {
     const retained = useLauncherState.getState().drafts[launcherId]?.noteCreation
@@ -6966,8 +6528,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== selected) {
       receipt = { ...receipt, issue: 'The same Note was checked. Later navigation was preserved; choose this file when ready.' }; publish(); return receipt
     }
-    receipt = await registerCreatedNote(receipt); publish()
-    const placement = noteFilePlacement(target, projection, receipt.launcher)
+    const placement = noteFilePlacement(target, projection)
     if (!resourceCurrent() || !placement) { receipt = { ...receipt, issue: 'The exact Note resource or display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
     try {
       receipt = { ...receipt, revealed: await get().openFile(receipt.path, target.groupId, undefined, target.workspaceId, undefined,
@@ -6979,7 +6540,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async retryCreatedNote(launcherId, projection) {
     const receipt = useLauncherState.getState().drafts[launcherId]?.noteCreation
     if (receipt?.status !== 'error') return receipt
-    return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId, receipt.notebook)
+    return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId)
   },
   async renamePath(path, nextPath, requestedWorkspaceId) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
@@ -7001,11 +6562,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const documentPath = key.slice(prefix.length)
         return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
       })
-      let originalLibrary = useNotebookLibrary.getState().state
-      try { originalLibrary = await refreshNotebookLibrary() }
-      catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
-      const resource = stateBeforeMove.config?.workspaces.find(item => item.id === workspaceId)
-      const relocations = originalLibrary && resource ? notebookRelocations(originalLibrary, resource, path, nextPath) : []
       let result
       try {
         result = await api.files.move({
@@ -7027,23 +6583,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       for (const observedPath of observedPaths) {
         advanceDocumentLifetime(documentKey(workspaceId, observedPath))
       }
-      set((state) => {
-        const { tabIds, ...renamed } = reduceFileRename(state, workspaceId, path, nextPath)
-        // The File owner confirmed these legacy Tab identities were replaced. Retire
-        // only the replaced Tabs; their original Region identities remain in the new Tabs.
-        for (const [oldTabId, newTabId] of tabIds) {
-          if (oldTabId !== newTabId) coreSpatialPersistence?.removeEntity(oldTabId)
-        }
-        const remap = (reference: NonNullable<AppState['surveyZoneSelection']>['selection'][number]) => tabIds.has(reference.tabId) ? { ...reference, tabId: tabIds.get(reference.tabId)! } : reference
-        return { ...renamed,
-        surveyZoneSelection: state.surveyZoneSelection ? { ...state.surveyZoneSelection,
-          selection: state.surveyZoneSelection.selection.map(remap), active: state.surveyZoneSelection.active ? remap(state.surveyZoneSelection.active) : null } : null,
+      set((state) => ({
+        ...reduceFileRename(state, workspaceId, path, nextPath),
         // Same reason as `createPath`: the Topics panel and the Board read this counter and nothing
         // else. Moving a Topic's `topic.md` out breaks the Topic's identity, and only the file tree
         // would notice. Folded into the projection's own `set` so it is one render, not two.
         workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
-        }
-      })
+      }))
       for (const observedPath of observedPaths) {
         const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
         transferFileSaveTail(workspaceId, observedPath, renamedPath)
@@ -7062,12 +6608,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } catch (error) {
           get().reportError(error)
         }
-      }
-      // The original File owner has confirmed success. A catalog failure never undoes or
-      // blocks this healthy file; exact metadata intents survive in the original UI receipt.
-      if (relocations.length) {
-        try { await recordNotebookChanges(relocations, 'note-file-move:' + crypto.randomUUID()) }
-        catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
       }
     })
   },
@@ -7190,7 +6730,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
+    if (!layout) throw new Error('Workspace layout is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
@@ -7412,7 +6952,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
+    if (!layout) throw new Error('Workspace layout is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
@@ -7499,66 +7039,44 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       return
     }
-    // Changing the visible project is not permission to stop another healthy shell.
-    if (existing) return
-    const request: TerminalLaunchInput = {
-      hostId: workspace.hostId,
-      workspacePath: workspace.path,
-      createOperationId: crypto.randomUUID()
+    if (existing) {
+      // A different host/cwd cannot reuse this shell. Keep its durable id recorded
+      // until Core confirms the stop.
+      void stopWarmTerminal(existing).then((sessionId) => {
+        if (!sessionId) return
+        set((state) => ({
+          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+            state.unclaimedTerminalSessionIds,
+            sessionId
+          )
+        }))
+      })
     }
-    const creation: WarmTerminalCreation = { request, inFlight: true }
-    const ready = api.sessions.launchTerminal(request).catch((error) => {
-      creation.inFlight = false
-      creation.issue = sessionLaunchFailure(error)
-      if (get().warmTerminal?.ready === ready) set((state) => ({
-        warmTerminal: state.warmTerminal ? { ...state.warmTerminal } : null
-      }))
-      return null
-    })
+    const ready = api.sessions
+      .launchTerminal({
+        hostId: workspace.hostId,
+        workspacePath: workspace.path,
+        createOperationId: crypto.randomUUID()
+      })
+      .catch(() => null)
     void ready.then((session) => {
-      if (!session) return
-      creation.inFlight = false
-      delete creation.issue
+      if (!session) {
+        if (get().warmTerminal?.ready === ready) set({ warmTerminal: null })
+        return
+      }
       set((state) => ({
+        // Track every successful prewarm even if another workspace replaced the slot
+        // while Core was launching it. The matching stop path removes the id later.
         warmTerminal: state.warmTerminal?.ready === ready
           ? { ...state.warmTerminal, session }
           : state.warmTerminal,
-        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(state.unclaimedTerminalSessionIds, session.id)
+        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(
+          state.unclaimedTerminalSessionIds,
+          session.id
+        )
       }))
     })
-    set({ warmTerminal: { key, ownerLauncherId, ready, session: null, creation } })
-  },
-  async retryWarmTerminal(workspaceId, ownerLauncherId, hostRestored = false) {
-    const workspace = get().config?.workspaces.find((item) => item.id === workspaceId)
-    const held = get().warmTerminal
-    if (!workspace || !held || held.key !== warmTerminalKey(workspace.hostId, workspace.path)) return null
-    const creation = held.creation
-    if (held.claimingLauncherId || held.session || !creation?.issue || creation.inFlight) return await held.ready
-    if (hostRestored && creation.hostRecoveryAttempted) return null
-    // This operation may already have created a Run. Confirm its original exact request;
-    // replacing the UUID or reconstructing its parameters would be another creation.
-    const request = creation.request
-    creation.inFlight = true
-    creation.hostRecoveryAttempted ||= hostRestored
-    const ready = api.sessions.launchTerminal(request).catch((error) => {
-      creation.inFlight = false
-      creation.issue = sessionLaunchFailure(error)
-      if (get().warmTerminal?.ready === ready) set((state) => ({
-        warmTerminal: state.warmTerminal ? { ...state.warmTerminal } : null
-      }))
-      return null
-    })
-    set({ warmTerminal: { ...held, ownerLauncherId, ready } })
-    const session = await ready
-    if (session) {
-      creation.inFlight = false
-      delete creation.issue
-      set((state) => ({
-        warmTerminal: state.warmTerminal?.ready === ready ? { ...state.warmTerminal, session } : state.warmTerminal,
-        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(state.unclaimedTerminalSessionIds, session.id)
-      }))
-    }
-    return session
+    set({ warmTerminal: { key, ownerLauncherId, ready, session: null } })
   },
   async promoteWarmTerminal(tabGroupId, launcher) {
     const state = get()
@@ -7584,40 +7102,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await get().launchTerminal(tabGroupId, launcher)
       return
     }
-    let held = state.warmTerminal
-    if (held.claimingLauncherId) throw new Error('This reusable shell is already opening in another Region. Its original request is retained; check it again after that opening settles.')
-    if (held.creation?.issue) {
-      const ownerLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
-      const confirmed = await get().retryWarmTerminal(workspace.id, ownerLauncherId)
-      if (!confirmed) {
-        const issue = get().warmTerminal?.creation?.issue ?? held.creation.issue
-        throw Object.assign(new Error(issue.message), issue)
-      }
-      const live = get().warmTerminal
-      if (!live || live.key !== key || live.session?.id !== confirmed.id) return
-      if (live.claimingLauncherId) throw new Error('This reusable shell is already opening. Check its original request after that opening settles.')
-      held = live
-      // A late confirmation belongs to the original Launcher, never a replacement View.
-      if (launcher && (get().tabs[launcher.tabId]?.regions[launcher.regionId] !== launcherSurface ||
-        !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launcher.tabId))) return
-    }
-    // Reserve the exact Launcher and retain the warm slot until its original receipt settles.
-    // Another preview cannot erase that request, and only one opening may claim the same Run.
+    const held = state.warmTerminal
+    // Reserve an explicit launcher Region while the warm Run is in flight. Otherwise its
+    // still-mounted create page sees an empty warm slot and starts another shell before this
+    // one attaches. Claim the existing healthy Run; do not stop it to repair our projection.
     const pendingSurface: TerminalWorkbenchSurface | undefined = launcherTab && launcher ? {
       regionId: launcher.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id,
       sessionId: held.session?.id ?? crypto.randomUUID()
     } : undefined
-    const claimingLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
-    set((current) => ({ warmTerminal: { ...held, claimingLauncherId }, ...(pendingSurface && launcherTab ? {
+    set((current) => ({ warmTerminal: null, ...(pendingSurface && launcherTab ? {
       tabs: { ...current.tabs, [launcherTab.id]: replaceWorkbenchRegion(launcherTab, pendingSurface.regionId, pendingSurface) }
     } : {}) }))
     const session = await held.ready
-    set((current) => {
-      const available = current.warmTerminal
-      if (!available || available.ready !== held.ready || available.claimingLauncherId !== claimingLauncherId) return current
-      const { claimingLauncherId: _claim, ...retained } = available
-      return { warmTerminal: session ? null : retained }
-    })
     if (!session) {
       if (pendingSurface && launcherTab && launcherSurface) {
         let restored = false
@@ -7629,11 +7125,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
         if (!restored) return
       }
-      // The original request may have been accepted before its reply failed. Keep
-      // this exact creation available for Check again, including its typed failure.
-      set((current) => ({ warmTerminal: current.warmTerminal ?? held }))
-      const issue = held.creation?.issue ?? sessionLaunchFailure(new Error('The original shell creation is unconfirmed. Check this same request again.'))
-      throw Object.assign(new Error(issue.message), issue)
+      await get().launchTerminal(tabGroupId, launcher)
+      return
     }
     if (!launcherTab && !get().layouts[workspace.id]) {
       if (await stopTerminalSession(session)) {
@@ -7723,7 +7216,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     void get().refreshSession(session.id)
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -7738,9 +7231,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       activeWorkspaceId: state.activeWorkspaceId
     })
     if (!workspaceId) throw new Error('Select a workspace first')
-    const displayWorkspaceId = requestedDisplayWorkspaceId ?? (launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspaceId)
+    const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspaceId
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
+    if (!layout) throw new Error('Workspace layout is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, tabGroupId)
@@ -7758,7 +7251,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         tabs: { ...current.tabs, [tabId]: targetTab },
         layouts: { ...current.layouts, [displayWorkspaceId!]: nextLayout }
       }))
-      get().selectMainRegion({ displayWorkspaceId: displayWorkspaceId!, groupId: tabGroupId, tabId, regionId }, state.workbenchSpaceSelection)
     }
     try {
       const browser = await api.browser.create(regionId, url, workspaceId)
@@ -7784,9 +7276,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return {
           tabs: {
             ...current.tabs,
-            [currentOwner.tab.id]: { ...replaceWorkbenchRegion(currentOwner.tab, regionId, surface),
-              // Resource attachment is not a later navigation intent.
-              layout: currentOwner.tab.layout }
+            [currentOwner.tab.id]: replaceWorkbenchRegion(currentOwner.tab, regionId, surface)
           }
         }
       })
@@ -7832,16 +7322,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     throw new Error(`Could not save the bookmark: ${lastReason}`)
   },
-  async openHttpLink(origin, rawUrl, destination, presentation) {
-    const opening = get(), expectedChoice = opening.workbenchSpaceSelection
-    const mainFocus = opening.mainSurface === 'agents' && presentation?.surface !== 'mote'
-    const focusLink = destination !== 'tab' && mainFocus && expectedChoice?.workspaceId === origin.workspaceId && expectedChoice.groupId === origin.tabGroupId && expectedChoice.tabId === origin.tabId && expectedChoice.regionId === origin.regionId
+  async openHttpLink(origin, rawUrl, destination) {
     const url = normalizeHttpLinkUrl(rawUrl)
     if (destination === 'system') {
       await api.ui.openExternal(url)
       return
     }
-    if (mainFocus && destination !== 'tab' && !focusLink) throw new Error('The selected Focus Region changed. Choose its original work surface explicitly; the Agent is kept.')
     const targetPlacement = origin.sessionId
       ? resolveSessionPlacement({
           sessionId: origin.sessionId,
@@ -7859,15 +7345,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Directional link destinations require a Tab and Region origin')
     }
 
-    const sourceTab = placementOrigin.tabId ? opening.tabs[placementOrigin.tabId] : undefined
-    if (placementOrigin.tabId && (!sourceTab || !placementOrigin.regionId || !sourceTab.regions[placementOrigin.regionId])) throw new Error('The original link Region is unconfirmed; its work surface is kept.')
-    const resourceWorkspaceId = sourceTab?.workspaceId ?? placementOrigin.workspaceId
     const tabId = destination === 'tab' ? `launcher:${crypto.randomUUID()}` : placementOrigin.tabId!
     const regionId = destination === 'tab' ? initialWorkbenchRegionId(tabId) : newRegionId()
     const pendingLauncher: LauncherWorkbenchSurface = {
       regionId,
       kind: 'launcher',
-      workspaceId: resourceWorkspaceId
+      workspaceId: placementOrigin.workspaceId
     }
     let planned = false
     let placementError: Error | null = null
@@ -7884,7 +7367,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (destination === 'tab') {
         const topicId = inheritedTopicIdForNewTab(
-          resourceWorkspaceId,
+          placementOrigin.workspaceId,
           layout,
           current.tabs,
           originGroup.id
@@ -7937,36 +7420,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (!planned) throw placementError ?? new Error('Link destination could not be created')
 
-    if (destination === 'tab') get().selectMainRegion({ displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId }, expectedChoice)
-    const plannedNavigation = fileNavigationSelection(get())
-    const plannedLocalRegion = get().tabs[tabId]?.layout.activeRegionId
     try {
-      await get().createBrowser(placementOrigin.tabGroupId!, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId, placementOrigin.workspaceId)
-      const current = get()
-      if (destination !== 'tab' && fileNavigationSelection(current) === plannedNavigation && current.tabs[tabId]?.regions[regionId]?.kind === 'browser') {
-        if (presentation?.surface === 'mote') {
-          if (current.tabs[tabId]?.layout.activeRegionId !== plannedLocalRegion) return
-          if (presentation.onSelectRegion) presentation.onSelectRegion(regionId)
-          else current.focusRegion(placementOrigin.workspaceId, tabId, regionId, 'floating-pointer', placementOrigin.tabGroupId)
-        } else current.selectMainRegion({ displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId }, expectedChoice)
-      }
+      await get().createBrowser(placementOrigin.tabGroupId!, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId)
     } catch (error) {
-      const reclaimPendingMark = (current: AppState, topology: Pick<AppState, 'tabs' | 'layouts'>) => {
-        if (!sameWorkbenchProjectionSelection(mainRegionReference(current.workbenchSpaceSelection), {
-          displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId })) return {}
-        const choice = expectedChoice ? desktopSpaceSelectionAfterClose(expectedChoice, topology, {
-          workspaceId: expectedChoice.workspaceId, tabId: expectedChoice.tabId ?? '',
-          ...(expectedChoice.groupId ? { groupId: expectedChoice.groupId } : {}),
-          ...(expectedChoice.regionId ? { regionId: expectedChoice.regionId } : {}) }) : null
-        return { workbenchSpaceSelection: choice, activeWorkspaceId: choice?.workspaceId ?? current.activeWorkspaceId }
-      }
       set((current) => {
         const liveTab = current.tabs[tabId]
         if (!liveTab || liveTab.regions[regionId] !== pendingLauncher) return current
         if (destination !== 'tab') {
           const nextTab = removeWorkbenchRegion(liveTab, regionId)
           return nextTab
-            ? { tabs: { ...current.tabs, [tabId]: nextTab }, ...reclaimPendingMark(current, { tabs: { ...current.tabs, [tabId]: nextTab }, layouts: current.layouts }) }
+            ? { tabs: { ...current.tabs, [tabId]: nextTab } }
             : current
         }
         const layout = current.layouts[placementOrigin.workspaceId]
@@ -7974,9 +7437,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!layout || !currentTabGroupId) return current
         const tabs = { ...current.tabs }
         delete tabs[tabId]
-        const topology = { tabs, layouts: { ...current.layouts,
-          [placementOrigin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId) } }
-        return { ...topology, ...reclaimPendingMark(current, topology) }
+        return {
+          tabs,
+          layouts: {
+            ...current.layouts,
+            [placementOrigin.workspaceId]: removeLayoutTab(layout, currentTabGroupId, tabId)
+          }
+        }
       })
       throw error
     }
@@ -8030,27 +7497,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       delete browserAnnotationsByBrowserId[browserId]
       return { browserAnnotationsByBrowserId }
     })
-  },
-  recordAgentComposerHistory(sessionId, text) {
-    if (!text.trim()) return
-    set(state => {
-      const entries = state.agentComposerHistory[sessionId] ?? []
-      const next = recordHistory({ entries, cursor: entries.length, stash: null }, text)
-      return {
-        agentComposerHistory: { ...state.agentComposerHistory, [sessionId]: next.entries },
-        agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
-          [sessionId]: { cursor: next.cursor, stash: next.stash } }
-      }
-    })
-  },
-  recallAgentComposerHistory(sessionId, direction, draft) {
-    const state = get(), entries = state.agentComposerHistory[sessionId] ?? []
-    const navigation = state.agentComposerHistoryNavigation[sessionId] ?? { cursor: entries.length, stash: null }
-    const result = navigateHistory({ entries, ...navigation }, direction, draft)
-    if (!result) return null
-    set({ agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
-      [sessionId]: { cursor: result.state.cursor, stash: result.state.stash } } })
-    return result.value
   },
   setAgentComposerDraft(sessionId, text) {
     const state = get(), session = sessionPresentationById(state.sessions).get(sessionId)
@@ -8108,43 +7554,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
-  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) {
-    return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) !== false
+  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote) {
+    return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote) !== false
   },
-  async archiveAgentSteer(sessionId, operationId, expectedText, archived) {
-    let changed = false
-    let result!: AgentSteerQueueEntry
-    set(state => {
-      const queue = state.agentSteerQueues[sessionId]
-      const entry = queue?.find(item => item.operationId === operationId)
-      if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is no longer available. No replacement was created.')
-      if (entry.text !== expectedText) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message changed. Read its current text before archiving or restoring it.')
-      if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is preparing or submitting. Archiving cannot recall Provider input; its original facts are kept.')
-      if (!archived && confirmedSteerDelivery(state.timelines[sessionId], sessionId, operationId)) {
-        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record is kept; read the confirmed History instead of restoring it to Pending.')
-      }
-      if (!archived && entry.archived && queue!.filter(item => !item.archived).length >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
-        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The active message queue is full. Archive another active message before restoring this original record; its archived facts are kept.')
-      }
-      result = entry
-      if ((entry.archived === true) === archived) return state
-      changed = true
-      return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue!.map(item => {
-        if (item !== entry) return item
-        if (archived) return (result = { ...item, archived: true as const })
-        const { archived: _archive, ...original } = item
-        return (result = { ...original, awaitingExplicitSend: true as const })
-      }) } }
+  removeAgentSteer(sessionId, operationId) {
+    // A submitted request cannot be recalled by deleting its local projection.
+    if (get().agentSteerInFlight[sessionId] === operationId) return
+    set((state) => {
+      const current = state.agentSteerQueues[sessionId] ?? []
+      const next = current.filter((entry) => entry.operationId !== operationId)
+      if (next.length === current.length) return state
+      const agentSteerQueues = { ...state.agentSteerQueues }
+      if (next.length) agentSteerQueues[sessionId] = next
+      else delete agentSteerQueues[sessionId]
+      return { agentSteerQueues }
     })
-    if (changed) agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
-    // Archive/restore preserve the original tuple; neither grants input permission nor wakes a drain.
-    // Flush the local debounce and await the existing platform flush request before returning.
-    // That owner's void flushStorageData call is not a disk/fsync ACK; actual restart retention
-    // needs its own evidence. A failed request retains the current record and reports its cause.
-    try {
-      await flushMessageWorkbench(false)
-    } catch (error) { get().reportWorkbenchSaveFailure(error); throw error }
-    return { changed, entry: result }
+    agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
+    void get().flushAgentSteerQueue(sessionId)
   },
   editQueuedAgentSteer(sessionId, operationId, expectedText, nextText) {
     if (!nextText.trim() || nextText.includes('\0')) {
@@ -8175,13 +7601,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const current = reconcileDeliveredSteers(state, sessionId)
       const queue = current.agentSteerQueues[sessionId]
       if (!queue) return current
-      const active = queue.filter(entry => !entry.archived)
-      const activeIndex = active.findIndex(entry => entry.operationId === operationId)
-      const index = queue.findIndex(entry => entry.operationId === operationId)
-      const neighborId = active[activeIndex + (direction === 'up' ? -1 : 1)]?.operationId
-      const adjacent = queue.findIndex(entry => entry.operationId === neighborId)
+      const index = queue.findIndex((entry) => entry.operationId === operationId)
+      const adjacent = index + (direction === 'up' ? -1 : 1)
       const entry = queue[index], neighbor = queue[adjacent]
-      if (!entry || entry.archived || !neighbor) return current
+      if (!entry || !neighbor) return current
       const sending = current.agentSteerInFlight[sessionId]
       if (entry.operationId === sending || neighbor.operationId === sending) return current
       const next = [...queue]
@@ -8192,68 +7615,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Rearranging intent grants no execution permission and does not wake the consumer.
   },
   async sendQueuedAgentSteer(sessionId, operationId) {
-    const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
-    const session = get().sessions.find(item => item.id === sessionId)
-    const attemptKey = JSON.stringify([sessionId, operationId])
-    const admission = manualSteerAttempts.get(attemptKey)
-    const seed = admission?.stage === 'queue-admission' ? admission.seed : startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
-      operationId, hostId: session?.hostId ?? null, condition: entry?.promptCondition,
-      ...(entry?.execution ? { execution: entry.execution } : {}),
-      ...(entry ? { prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text } : {}) })
-    const attempt: SteerDeliveryAttempt = admission?.stage === 'queue-admission' ? admission : { seed, stage: 'queue-validation' }
-    attempt.stage = 'queue-validation'
-    try {
-      if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is no longer in the pending queue.')
-      if (entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived. Restore it before choosing Send.')
-      if (get().agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original message already has an active send attempt. Its original input is kept.')
-      if (session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
-      if (entry.runId !== undefined && !steerEntryTargetsRun(entry, session.control.run.runId)) {
-        throw controlFailure('STALE_AGENT_SESSION', `The message belongs to Run ${entry.runId}; the Session now points to Run ${session.control.run.runId}. The original message will not be sent to another Run.`)
-      }
-      manualSteerAttempts.set(attemptKey, attempt)
-      set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
-        [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
-          if (item.operationId !== operationId || !item.awaitingExplicitSend) return item
-          const { awaitingExplicitSend: _pause, ...pending } = item
-          return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
-        }) } }))
-      attempt.stage = 'ordered-queue'
-      const pending = get().flushAgentSteerQueue(sessionId, operationId)
-      const originalDrain = agentSteerDrains.get(sessionId)
-      await pending
-      if (originalDrain?.submitted.has(operationId) || confirmedSteerDelivery(get().timelines[sessionId], sessionId, operationId)) return 'submitted'
-      if (originalDrain?.failures.has(operationId)) throw originalDrain.failures.get(operationId)
-      if (originalDrain?.waitingForInteraction.has(operationId)) return 'unconfirmed'
-      throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original selection left the ordered consumer without a confirmed submission. No new operation was created; inspect the original queue and retry this message.')
-    } catch (error) {
-      const failure = describeError(error)
-      const diagnostic = attempt.diagnostic ?? await recordMessageDeliveryFailure(attempt.seed, error, attempt.stage)
-      const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ''}${failure.detail ? `\n${failure.detail}` : ''}`
-      const message = `${reason}\nlogid: ${diagnostic.logId}\n${diagnostic.notice}`
-      set(state => {
-        const queue = state.agentSteerQueues[sessionId]
-        if (!queue) return state
-        return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue.map(item =>
-          item.operationId === operationId && item.text === entry?.text && item.agentMuxNote === entry?.agentMuxNote && item.sourceChannel === entry?.sourceChannel
-            ? { ...item, awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
-                ...(failure.code ? { errorCode: failure.code } : {}), status: 'deferred' as const } : item) } }
-      })
-      // The failure is visible in the original record and action feedback. Explicit retry
-      // remains available; this refusal never grants a background wake permission.
-      const controlFailure = deliveryFailure(error).controlFailure
-      throw Object.assign(new Error(message), { ...(failure.code ? { code: failure.code } : {}),
-        ...(failure.detail ? { detail: failure.detail } : {}), ...(controlFailure ? { controlFailure } : {}),
-        cause: error, logId: diagnostic.logId })
-    } finally {
-      if (manualSteerAttempts.get(attemptKey) === attempt) manualSteerAttempts.delete(attemptKey)
-    }
+    const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
+    const session = get().sessions.find((item) => item.id === sessionId)
+    if (!entry || session?.kind !== 'agent' || entry.runId !== undefined &&
+      !steerEntryTargetsRun(entry, session.control.run.runId)) return 'unconfirmed'
+    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues,
+      [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
+        if (item.operationId !== operationId || item.errorCode !== EXECUTION_NOT_REQUESTED) return item
+        const { error: _error, errorCode: _code, ...pending } = item
+        return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
+      }) } }))
+    // Manual retry uses the same ordered consumer and the entry's original operation identity.
+    const pending = get().flushAgentSteerQueue(sessionId, operationId)
+    const originalDrain = agentSteerDrains.get(sessionId)
+    await pending
+    return originalDrain?.submitted.has(operationId) ? 'submitted' : 'unconfirmed'
   },
   flushAgentSteerQueue(sessionId, explicitOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
     const current = get()
     const target = current.sessions.find(item => item.id === sessionId)
     const selected = current.agentSteerQueues[sessionId]?.find(entry => entry.operationId === explicitOperationId)
-    const requested = explicitOperationId !== undefined && selected && !selected.archived && target?.kind === 'agent' &&
+    const requested = explicitOperationId !== undefined && selected && target?.kind === 'agent' &&
       (selected.runId === undefined || steerEntryTargetsRun(selected, target.control.run.runId))
       ? explicitOperationId : undefined
     if (requested !== undefined && target?.kind === 'agent' && selected?.promptCondition === null && selected.execution === undefined) {
@@ -8272,15 +7655,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return active.promise
     }
     const selectedIds = (get().agentSteerQueues[sessionId] ?? []).filter(entry =>
-      !entry.archived && !entry.awaitingExplicitSend && entry.promptCondition === null && entry.execution !== undefined)
+      entry.errorCode !== EXECUTION_NOT_REQUESTED && entry.promptCondition === null && entry.execution !== undefined)
       .map(entry => entry.operationId)
-    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>(), failures: new Map<string, unknown>(), waitingForInteraction: new Set<string>() }
-    const retainWaitingSelections = (runId: string): void => {
-      for (const item of get().agentSteerQueues[sessionId] ?? []) {
-        if (!item.archived && !item.awaitingExplicitSend && item.runId === runId &&
-          item.promptCondition === null && item.execution !== undefined) drain.waitingForInteraction.add(item.operationId)
-      }
-    }
+    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>() }
     drain.promise = Promise.resolve().then(async () => {
       try {
         for (;;) {
@@ -8288,30 +7665,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Every await can change the queue, Run, connection or interaction. Never retain a tail.
           const state = get()
           let session = state.sessions.find((item) => item.id === sessionId)
-          const refuseSelections = (code: AgentMuxControlErrorCode, reason: string) => {
-            for (const id of drain.explicitSteers) drain.failures.set(id, controlFailure(code, reason))
-          }
-          if (session?.kind !== 'agent') { refuseSelections('UNKNOWN_AGENT_SESSION', 'The original Agent Session disappeared before queue dispatch.'); return }
+          if (session?.kind !== 'agent') return
           const sessionHostId = session.hostId
-          const endpointIssue = state.runtimeEndpointWarnings?.find(warning => warning.hostId === sessionHostId && warning.availability !== 'connected')
-          if (endpointIssue && drain.explicitSteers.size === 0) { refuseSelections('CONTROL_UNAVAILABLE', `Original Host ${sessionHostId} endpoint is ${endpointIssue.availability}: ${endpointIssue.message}`); return }
+          if (state.runtimeEndpointWarnings?.some((warning) => warning.hostId === sessionHostId && warning.availability !== 'connected')) return
           const currentRunId = session.control.run.runId
           const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
-            !item.archived && !item.awaitingExplicitSend &&
+            item.errorCode !== EXECUTION_NOT_REQUESTED &&
             (item.runId === undefined || steerEntryTargetsRun(item, currentRunId)))
           // Explicit steer selects its exact intent, leaving queue-only work untouched. Multiple
           // explicit requests retain their author order in this one queue, including across awaits.
           const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ??
             pendingEntries?.find(item => item.promptCondition === null && item.execution !== undefined) ?? pendingEntries?.[0]
-          if (!entry) { refuseSelections('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived, paused or belongs to a different Run before dispatch.'); return }
-          if (entry.runId === currentRunId && entry.promptCondition === null && entry.execution !== undefined && session.pendingInteraction) {
-            retainWaitingSelections(currentRunId)
-            return
-          }
-          if (!drain.explicitSteers.has(entry.operationId) && entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) {
-            refuseSelections('CONTROL_UNAVAILABLE', session.pendingInteraction ? 'The original Agent is waiting for an interaction response. Answer it before retrying this message.' : `Original Run ${session.control.run.runId} is ${session.processState}; Agent status is ${session.status.state}${session.status.detail ? `: ${session.status.detail}` : ''}`)
-            return
-          }
+          if (!entry) return
+          if (entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
           // The set joins active callers; only a known unsubmitted original selection can
           // outlive it. Unknown/historical or boot-paused inputs never gain auto-retry authority.
           const explicitAttempt = drain.explicitSteers.delete(entry.operationId) ||
@@ -8323,31 +7689,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             // receipt reconciles it; an explicit user retry keeps its original Core identity.
             set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
               [sessionId]: current.agentSteerQueues[sessionId]!.map(item => item.operationId === entry.operationId
-                ? { ...item, status: 'deferred', error: item.error ?? 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' } : item) } }))
+                ? { ...item, status: 'deferred', error: 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' } : item) } }))
             return
           }
           // Capture before recovery: a newly restored binding grants no save bypass.
           const explicitlyBound = explicitAttempt && entry.runId === currentRunId
           let preparedHere = false
           let dispatchStarted = false
-          const attemptHostId = session.hostId
-          const attemptSessionId = session.control.agentSessionId
-          let attemptRunId = entry.runId
-          let attemptCondition = entry.promptCondition
-          let attemptExecution = entry.execution
-          const deliveryAttempt = manualSteerAttempts.get(JSON.stringify([sessionId, entry.operationId])) ?? {
-            seed: startDeliveryAttempt({ agentSessionId: attemptSessionId, operationId: entry.operationId, hostId: attemptHostId,
-              condition: entry.promptCondition, ...(entry.execution ? { execution: entry.execution } : {}),
-              prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text }), stage: 'queue-preparation'
-          } as SteerDeliveryAttempt
-          const matchesAttempt = (item: AgentSteerQueueEntry) =>
-            !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
-            item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
-            item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) &&
-            (!dispatchStarted || item.execution === attemptExecution) &&
-            (item.promptCondition === null) === (attemptCondition === null) &&
-            item.promptCondition?.expectedRun.runId === attemptCondition?.expectedRun.runId &&
-            item.promptCondition?.afterSubmissionId === attemptCondition?.afterSubmissionId
           set((current) => ({
             agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId },
             agentSteerInFlightPhase: { ...current.agentSteerInFlightPhase, [sessionId]: 'preparing' }
@@ -8357,16 +7705,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: current.agentSteerQueues[sessionId]!.map(item => {
                   if (item.operationId !== entry.operationId) return item
-                  return { ...item, status: 'restoring' }
+                  const { error: _error, errorCode: _code, ...pending } = item
+                  return { ...pending, status: 'restoring' }
                 }) } }))
-              deliveryAttempt.stage = 'session-recovery'
               const recovered = await get().recoverSession(sessionId, entry.operationId)
               if (!recovered || recovered.kind !== 'agent' || recovered.processState !== 'running') {
                 throw new Error(get().sessions.find(item => item.id === sessionId)?.status.detail ??
                   'Session restoration did not produce a running Agent. Your message is kept.')
               }
               session = recovered
-              attemptRunId = recovered.control.run.runId
               set((current) => {
                 const entries = current.agentSteerQueues[sessionId]
                 if (!entries?.some(item => item.operationId === entry.operationId)) return current
@@ -8379,7 +7726,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             let pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             if (!pending) return
             if (pending.status === 'restoring') {
-              deliveryAttempt.stage = 'queue-persistence'
               await flushMessageWorkbench(explicitlyBound)
               // The exact binding precedes dispatch. Electron's void flush request is not fsync.
               set((current) => {
@@ -8388,79 +7734,60 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 return { agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: entries.map(item => {
                   if (item.operationId !== entry.operationId) return item
-                  return { ...item, status: 'queued' }
+                  const { error: _error, errorCode: _code, ...bound } = item
+                  return { ...bound, status: 'queued' }
                 }) } }
               })
             }
             pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             session = get().sessions.find(item => item.id === sessionId)
-            if (!pending || session?.kind !== 'agent') { if (explicitAttempt) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message or Agent Session changed during preparation.'); return }
+            if (!pending || session?.kind !== 'agent') return
             if (!steerEntryTargetsRun(pending, session.control.run.runId)) throw new Error(
               'The bound Run changed before dispatch. The delivery result is unknown; this message will not be sent to another Run.')
-            if (!explicitAttempt && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
+            if (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
             if (pending.promptCondition === undefined) throw new Error(
               'The original message delivery condition is unknown. This message is kept; compose a new message or use the terminal.')
             if (pending.promptCondition === null) {
               // Queue tails bind only as they reach dispatch. The public refresh reads Core's
               // admission identity; activity status and timeline receipts cannot replace it.
-              deliveryAttempt.stage = 'condition-refresh'
               const fresh = await api.sessions.refresh(session.control)
-              if (fresh.kind !== 'agent' || fresh.hostId !== attemptHostId || fresh.control.hostId !== attemptHostId ||
-                fresh.control.agentSessionId !== attemptSessionId || fresh.control.run.runId !== pending.runId) throw new Error(
-                'The original Session binding changed before message preparation. Your message is kept without dispatch.')
-              if (pending.execution !== undefined && fresh.pendingInteraction) {
-                if (drain.wake) continue
-                retainWaitingSelections(fresh.control.run.runId)
-                return
-              }
+              if (fresh.kind !== 'agent' || fresh.control.run.runId !== pending.runId) throw new Error(
+                'The Run changed before message preparation. This message will not be sent to another Run.')
               const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
                 afterSubmissionId: fresh.promptSubmissionPredecessor })
-              if (!explicitAttempt && (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected')) return
+              if (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected') return
               if (!explicitAttempt && fresh.status.state === 'working') return
               const execution = explicitAttempt ? (pending.execution ?? 'default') : 'default'
-              if (execution === 'immediate' && fresh.capabilities.promptExecution?.immediate !== 'interrupt-before-input' && fresh.capabilities.promptExecution?.immediate !== 'native-steer') {
+              if (execution === 'immediate' && fresh.capabilities.promptExecution?.immediate !== 'interrupt-before-input') {
                 throw new Error('The original immediate-send capability is unconfirmed for this Run. Your original message and execution choice are kept; retry Send or use the terminal.')
               }
               set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: current.agentSteerQueues[sessionId]!.map(item =>
                   item.operationId === entry.operationId ? { ...item, promptCondition: condition,
                     ...(explicitAttempt ? { execution } : {}) } : item) } }))
-              attemptCondition = condition
               preparedHere = true
             }
-            deliveryAttempt.stage = 'queue-persistence'
             await flushMessageWorkbench(explicitlyBound)
             pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             session = get().sessions.find(item => item.id === sessionId)
-            if (!pending || session?.kind !== 'agent') { if (explicitAttempt) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message or Agent Session changed during preparation.'); return }
+            if (!pending || session?.kind !== 'agent') return
             const condition = validateAgentPromptCondition(pending.promptCondition)
-            if (session.hostId !== attemptHostId || session.control.hostId !== attemptHostId ||
-              session.control.agentSessionId !== attemptSessionId || !matchesAttempt(pending) ||
-              !steerEntryTargetsRun(pending, session.control.run.runId) || condition.expectedRun.runId !== session.control.run.runId) throw new Error(
-              'The original message or Session binding changed before dispatch. Your message is kept without dispatch.')
+            if (!steerEntryTargetsRun(pending, session.control.run.runId) || condition.expectedRun.runId !== session.control.run.runId) throw new Error(
+              'The bound Run changed before dispatch. This message will not be sent to another Run.')
             set((current) => ({ agentSteerInFlightPhase: {
               ...current.agentSteerInFlightPhase, [sessionId]: 'submitting'
             } }))
             // After this invocation, even a BUSY/error can belong to another client joining
             // this exact operation. Only Core receipts can settle it; never reconstruct input.
-            attemptExecution = pending.execution
-            deliveryAttempt.seed = Object.freeze({ ...deliveryAttempt.seed, expectedRunId: condition.expectedRun.runId,
-              afterSubmissionId: condition.afterSubmissionId, conditionAvailable: true, execution: pending.execution ?? 'default' })
-            deliveryAttempt.stage = 'core-submit'
             dispatchStarted = true
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
               explicitAttempt ? { allowUncertainTurn: true,
                 ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
                 : pending.execution === 'immediate' ? { execution: 'immediate' } : undefined,
-              pending.origin === 'manual', pending.agentMuxNote, pending.sourceChannel, pending.goalContinuation ? { goalId: pending.goalContinuation.goalId, loopId: pending.goalContinuation.loopId } : undefined)
-            deliveryAttempt.stage = 'receipt-confirmation'
-            if (pending.goalContinuation) await api.continuousProgress.initialGoalInput({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, pending.goalContinuation.loopId, pending.operationId, 'confirm')
+              pending.origin === 'manual', pending.agentMuxNote)
             drain.submitted.add(entry.operationId)
             set((current) => {
-              const target = current.sessions.find(item => item.id === sessionId)
-              if (target?.kind !== 'agent' || target.hostId !== attemptHostId ||
-                target.control.agentSessionId !== attemptSessionId) return current
-              const next = (current.agentSteerQueues[sessionId] ?? []).filter(item => !matchesAttempt(item))
+              const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
               const agentSteerQueues = { ...current.agentSteerQueues }
               if (next.length) agentSteerQueues[sessionId] = next
               else delete agentSteerQueues[sessionId]
@@ -8471,11 +7798,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!get().agentSteerQueues[sessionId]?.some(item =>
               drain.explicitSteers.has(item.operationId))) return
           } catch (error) {
-            drain.failures.set(entry.operationId, error)
-            const failure = describeError(error)
-            deliveryAttempt.diagnostic = await recordMessageDeliveryFailure(deliveryAttempt.seed, error, deliveryAttempt.stage)
-            const diagnostic = deliveryAttempt.diagnostic
-            const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ''}${failure.detail ? `\n${failure.detail}` : ''}`
+            const message = presentError(error)
+            const turnEndUnconfirmed = typeof error === 'object' && error !== null &&
+              'code' in error && error.code === 'AGENT_TURN_END_UNCONFIRMED' ||
+              message.includes('Diagnostic: code=AGENT_TURN_END_UNCONFIRMED')
+            const submissionBusy = typeof error === 'object' && error !== null &&
+              'code' in error && error.code === 'AGENT_PROMPT_SUBMISSION_BUSY' ||
+              message.includes('Diagnostic: code=AGENT_PROMPT_SUBMISSION_BUSY')
             // A newly prepared condition is local until the real input API is invoked.
             // Storage/read failures before that boundary cannot make delivery unknown.
             // Error names after invocation cannot prove that no other client admitted it.
@@ -8483,20 +7812,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             // A delivery refusal is a retained local fact, not another global notification.
             set((current) => {
               const pending = current.agentSteerQueues[sessionId]
-              const target = current.sessions.find(item => item.id === sessionId)
-              if (!pending || target?.kind !== 'agent' || target.hostId !== attemptHostId ||
-                target.control.agentSessionId !== attemptSessionId) return current
+              if (!pending?.some((item) => item.operationId === entry.operationId)) return current
               return {
                 agentSteerQueues: {
                   ...current.agentSteerQueues,
                   [sessionId]: pending.map((item) => {
-                    // An old completion cannot decorate a replacement Run, condition or body
-                    // which happens to reuse the same local operation ID.
-                    if (!matchesAttempt(item)) return item
+                    if (item.operationId !== entry.operationId) return item
                     const { errorCode: _oldCode, ...retained } = item
                     return { ...retained, ...(unadmitted ? { promptCondition: null } : {}),
-                      status: item.status === 'restoring' ? 'restoring' : 'deferred', awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
-                      ...(failure.code ? { errorCode: failure.code } : {}) }
+                      status: item.status === 'restoring' ? 'restoring' : 'deferred', error: message,
+                      ...(turnEndUnconfirmed ? { errorCode: 'AGENT_TURN_END_UNCONFIRMED' }
+                        : submissionBusy ? { errorCode: 'AGENT_PROMPT_SUBMISSION_BUSY' } : {}) }
                   })
                 }
               }
@@ -8506,7 +7832,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const fresh = get()
             const freshSession = fresh.sessions.find(item => item.id === sessionId)
             const explicitPending = freshSession?.kind === 'agent' && fresh.agentSteerQueues[sessionId]?.some(item =>
-              drain.explicitSteers.has(item.operationId) && !item.archived && !item.awaitingExplicitSend &&
+              drain.explicitSteers.has(item.operationId) && item.errorCode !== EXECUTION_NOT_REQUESTED &&
               (item.runId === undefined || steerEntryTargetsRun(item, freshSession.control.run.runId)))
             if (!explicitPending && (explicitAttempt || stillPending && !drain.wake)) return
           }
@@ -8529,23 +7855,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     agentSteerDrains.set(sessionId, drain)
     return drain.promise
   },
-  send(sessionId, text, onRejected, origin, agentMuxNote, options) {
+  send(sessionId, text, onRejected, origin, agentMuxNote) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = crypto.randomUUID(), session = get().sessions.find(item => item.id === sessionId)
-    const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
-      operationId, hostId: session?.hostId ?? null, prompt: composeAgentPrompt(text, agentMuxNote).text })
-    const reject = (error: unknown) => {
-      const failure = describeError(error)
-      void recordMessageDeliveryFailure(seed, error, 'queue-admission').then(diagnostic => {
-        const message = `${failure.message}${failure.code ? ` [${failure.code}]` : ''}${failure.detail ? `\n${failure.detail}` : ''}\nlogid: ${diagnostic.logId}\n${diagnostic.notice}`
-        const show = onRejected ?? get().reportError
-        show(Object.assign(new Error(message), { cause: error,
-          ...(failure.code ? { code: failure.code } : {}), logId: diagnostic.logId }))
-      })
-    }
-    if (admitAgentSteer(sessionId, text, reject, operationId, origin, agentMuxNote, options) === false) return false
-    manualSteerAttempts.set(JSON.stringify([sessionId, operationId]), { seed, stage: 'queue-admission' })
-    void get().sendQueuedAgentSteer(sessionId, operationId).catch(error => (onRejected ?? get().reportError)(error))
+    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin, agentMuxNote)
+    if (operationId === false) return false
+    void get().flushAgentSteerQueue(sessionId, operationId)
     return true
   },
   async respondInteraction(sessionId, response) {
@@ -8749,9 +8063,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (priorFailure && get().errorNoticeContext === priorFailure) {
           set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
         }
-        if ((recovery.kind === 'reattachable' || recovery.kind === 'resumed') && recovery.advisory &&
-          get().sessions.some(item => item.id === sessionId && sessionOwnsControl(item, session.control)))
-          get().reportError(new Error(recovery.advisory), { kind: 'indeterminate' })
         return session
       }
       // Agent continuity belongs to its durable Core Session. A closed view does not own or
@@ -8868,12 +8179,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
     })
     if (core.type === 'connection-state' && core.state === 'restored') {
-      const warm = get().warmTerminal
-      const request = warm?.creation?.request
-      if (warm?.creation?.issue && request?.hostId === event.hostId) {
-        const workspace = get().config?.workspaces.find(item => item.hostId === request.hostId && item.path === request.workspacePath)
-        if (workspace) void get().retryWarmTerminal(workspace.id, warm.ownerLauncherId, true)
-      }
       startSessionMembershipResync(event, { recoverSavedAgents: true, restoredHostId: event.hostId })
       return
     }
@@ -9063,8 +8368,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       state.nameLabels = current.nameLabels
       state.nameAuthorityRevision = current.nameAuthorityRevision
     }
-    return { ...state, agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
-      agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
+    return { ...state, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
   },
   partialize: partializeAppState
 }))

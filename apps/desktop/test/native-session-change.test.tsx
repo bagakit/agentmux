@@ -11,7 +11,7 @@ import type { SessionSnapshot, AgentSessionControl, AppConfig } from '../src/sha
 import { nativeBindingKey, projectNativeSourceFacts } from '../src/shared/agent-native-source'
 import { reduceRuntimeEvent, runtimeDiagnosticNotice, type SessionProjectionState } from '../src/renderer/src/lib/session-state'
 import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHeader'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -27,8 +27,8 @@ function core(extra = {}): AgentMuxAgentSession { return { kind:'agent', agentSe
 function project(before: ReturnType<typeof session>, incoming: AgentMuxAgentSession) { return reduceRuntimeEvent({ sessions:[before],timelines:{} } as SessionProjectionState, { type:'core',hostId:'local',event:{ type:'agent-session', session:incoming } }).sessions[0] as ReturnType<typeof session> }
 const page = (id = old.sessionId, cursor: string | null = 'original-cursor'): AgentSessionHistoryPage => ({ agentSessionId:control.agentSessionId, source:{providerId:'codex',nativeSessionId:id}, items:[{id:`${id}-item`,kind:'user-message',contentParts:[{kind:'text',text:`History ${id}`}]}],nextCursor:cursor })
 let root:Root, host:HTMLDivElement
-beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true; vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}}); host=document.createElement('div');document.body.append(host);root=createRoot(host); useAppStore.setState({sessions:[session()],timelines:{},refreshSession:vi.fn().mockResolvedValue(session())},true); vi.spyOn(api.sessions,'historyPage').mockImplementation(async()=>page(old.sessionId,null)); vi.spyOn(api.sessions,'observeHistory').mockImplementation(async()=>({source:page((useAppStore.getState().sessions[0] as any).nativeHandle.sessionId).source,dispose:vi.fn()}) as any) })
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();getSelection()?.removeAllRanges();vi.restoreAllMocks();vi.unstubAllGlobals()})
+beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true; host=document.createElement('div');document.body.append(host);root=createRoot(host); useAppStore.setState({sessions:[session()],timelines:{},refreshSession:vi.fn().mockResolvedValue(session())},true); vi.spyOn(api.sessions,'historyPage').mockImplementation(async()=>page()); vi.spyOn(api.sessions,'observeHistory').mockImplementation(async()=>({source:page((useAppStore.getState().sessions[0] as any).nativeHandle.sessionId).source,dispose:vi.fn()}) as any) })
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks()})
 async function render(element: any) { await act(async()=>root.render(element)) }
 async function click(text:string) { const element=[...document.querySelectorAll<HTMLElement>('[role=menuitem],button')].find(one=>one.textContent?.trim()===text);expect(element,`Missing ${text}`).toBeTruthy();await act(async()=>element!.click()) }
 async function menu(value: ReturnType<typeof session>) { await render(createElement(AgentRegionHeader,{name:'Private Agent',executorLabel:'Private',sessionId:value.id,sessionKind:'agent',executionHost:{label:'This Mac',id:'local',cwd:_hygiene_fixturePath("private"),configured:true},regionId:'original-region',readOnly:false,onHistory:undefined,nativeSession:value}));const trigger=document.querySelector<HTMLButtonElement>('.agent-region-header__more')!;await act(async()=>{trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}))}) }
@@ -83,75 +83,18 @@ it('retains a reviewed operation and uncertain confirmation when the menu closes
 it('reports a historical repeat without claiming the current binding was changed',async()=>{
  vi.spyOn(api.sessions,'confirmNativeSession').mockResolvedValue({session:core({nativeHandle:{...candidate,sessionId:'today'}}),confirmation,persisted:true,current:false});await menu(session({observedNativeHandle:candidate,nativeSourceObservation:observation}));await click('Review source change…');await click('Confirm this native source');expect(document.body.textContent).toContain('earlier confirmation is retained');expect(document.body.textContent).not.toContain('Native source confirmed.')
 })
-function history(facts: ReturnType<typeof session>) { return createElement(ActivityView,{sessionId:control.agentSessionId,capability:'complete-events',items:[],conversationReading:{reference:control,identity:control.run.runId,nativeSourceFacts:facts,enabled:true,opened:true}}) }
+function history(facts: any) { return createElement(SessionHistoryView,{control,readingKey:control.run.runId,nativeSourceFacts:facts,label:'Private Agent',visible:true,themeId:'graphite',fontSize:13,workspaceRoot:_hygiene_fixturePath("private"),openWorkspaceFile:async()=>{},openHttpLink:()=>{}}) }
 it('keeps the original reader through confirmation and explicitly pages previous, never passes its old cursor to the current source',async()=>{
- let currentNative=old.sessionId
- vi.mocked(api.sessions.historyPage).mockImplementation(async(_reference,options)=>{
-  const source=options?.nativeSource==='previous'?old.sessionId:currentNative
-  const index=options?.cursor?Number(options.cursor.slice('original-cursor-'.length)):0
-  const next=page(source,source===old.sessionId?`original-cursor-${index+1}`:null)
-  return{...next,items:next.items.map(item=>({...item,id:`${item.id}-${index}`}))}
- })
- await render(history(session()));expect(host.textContent).toContain('History original-native')
- const original=host.querySelector('[data-native-record-id="original-native-item-0"]')!
- currentNative=candidate.sessionId
- await render(history(session({nativeHandle:candidate,nativeConfirmation:confirmation})))
- expect(host.querySelector('[data-native-record-id="original-native-item-0"]')).toBe(original)
- expect(host.textContent).not.toContain('History candidate-native')
- await click('Earlier')
- expect(api.sessions.historyPage).toHaveBeenCalledWith(control,{limit:100,cursor:'original-cursor-3',nativeSource:'previous'})
- await click('Current source')
- expect(api.sessions.historyPage).toHaveBeenLastCalledWith(control,{limit:100})
- expect(host.textContent).toContain('History candidate-native');expect(host.textContent).not.toContain('History original-native')
- expect(host.textContent).not.toContain('Native source changed')
- await click('Previous source')
- expect(api.sessions.historyPage).toHaveBeenCalledWith(control,{limit:100,nativeSource:'previous'})
- expect(host.textContent).toContain('History original-native');expect(host.textContent).not.toContain('History candidate-native')
- expect(host.textContent).not.toContain('Native source changed')
+ await render(history(session()));expect(host.textContent).toContain('History original-native');await render(history(session({nativeHandle:candidate,nativeConfirmation:confirmation})));expect(host.textContent).toContain('History original-native');await act(async()=>host.querySelector('.session-history__viewport')!.dispatchEvent(new WheelEvent('wheel',{deltaY:-10,bubbles:true})));expect(api.sessions.historyPage).toHaveBeenLastCalledWith(control,{cursor:'original-cursor',nativeSource:'previous'});await click('Current source');expect(api.sessions.historyPage).toHaveBeenLastCalledWith(control,{});vi.mocked(api.sessions.historyPage).mockResolvedValueOnce(page(old.sessionId));await click('Previous source');expect(api.sessions.historyPage).toHaveBeenLastCalledWith(control,{nativeSource:'previous'})
 })
 it('refuses a wrong native page while retaining the original reader',async()=>{
- await render(history(session()));vi.mocked(api.sessions.historyPage).mockResolvedValueOnce(page(candidate.sessionId));await click('Current');expect(host.textContent).toContain('History original-native');expect(host.textContent).toContain('Native source changed');expect(host.textContent).not.toContain('History candidate-native')
-})
-it('retains selection through source confirmation and retries the explicitly selected source after selection clears',async()=>{
- await render(history(session()))
- const body=host.querySelector('[data-native-record-id] .log-turn__body p')!,text=body.firstChild!
- const range=document.createRange();range.setStart(text,0);range.setEnd(text,7);getSelection()!.addRange(range)
- const facts=session({nativeHandle:candidate,nativeConfirmation:confirmation})
- await render(history(facts));vi.mocked(api.sessions.historyPage).mockResolvedValue(page(candidate.sessionId,null))
- await click('Current source')
- expect(host.querySelector('[data-native-record-id] .log-turn__body p')).toBe(body)
- expect(getSelection()!.toString()).toBe('History');expect(range.startContainer.isConnected).toBe(true)
- expect(host.textContent).toContain('clear the selection');expect(host.textContent).not.toContain('History candidate-native')
- getSelection()!.removeAllRanges();await click('Retry')
- expect(host.textContent).toContain('History candidate-native');expect(host.textContent).not.toContain('History original-native')
- expect(host.textContent).not.toContain('Native source changed')
-})
-it('does not append a new binding epoch to an old window when native identity returns A to B to A',async()=>{
- await render(history(session()))
- const original=host.querySelector('[data-native-record-id]')!
- await render(history(session({nativeHandle:candidate,nativeConfirmation:confirmation})))
- await render(history(session({nativeHandle:old,nativeConfirmation:{...confirmation,operationId:'return-to-A',previousNativeHandle:candidate,nativeHandle:old}})))
- expect(host.querySelector('[data-native-record-id]')).toBe(original)
- expect(api.sessions.historyPage).toHaveBeenCalledOnce()
- expect(host.textContent).toContain('explicitly open Current source')
+ await render(history(session()));vi.mocked(api.sessions.historyPage).mockResolvedValueOnce(page(candidate.sessionId));await click('Latest');expect(host.textContent).toContain('History original-native');expect(host.textContent).toContain('another source');expect(host.textContent).not.toContain('History candidate-native')
 })
 it('isolates shared history cache and late callbacks on a same-Run native binding change',async()=>{
  let resolve!:(value:AgentSessionHistoryPage)=>void
  vi.mocked(api.sessions.historyPage).mockImplementationOnce(()=>new Promise(done=>{resolve=done})).mockResolvedValue(page(candidate.sessionId,null))
  function Consumer(){const value=useSessionUserMessages(control);return createElement('div',{'data-source':value.nativeHistoryPage?.source.nativeSessionId},value.nativeHistoryPage?.source.nativeSessionId??'loading')}
  await render(createElement(Consumer));expect(api.sessions.historyPage).toHaveBeenCalledOnce();await act(async()=>useAppStore.setState({sessions:[session({nativeHandle:candidate,nativeConfirmation:confirmation})]}));expect(api.sessions.historyPage).toHaveBeenCalledTimes(2);expect(host.textContent).toBe(candidate.sessionId);await act(async()=>resolve(page(old.sessionId)));expect(host.textContent).toBe(candidate.sessionId)
-})
-it('rebuilds shared recent facts on exact binding epoch while candidate and unrelated Session facts cause no new read',async()=>{
- let value:ReturnType<typeof useSessionUserMessages>
- function Consumer(){value=useSessionUserMessages(control);return createElement('div',{},value.nativeHistoryPage?.source.nativeSessionId??'loading')}
- await render(createElement(Consumer))
- const original=value!.nativeHistoryPage
- expect(original).not.toBeNull();expect(api.sessions.historyPage).toHaveBeenCalledOnce()
- await act(async()=>useAppStore.setState({sessions:[session({observedNativeHandle:candidate,nativeSourceObservation:observation}),session({id:'unrelated',control:{...control,agentSessionId:'unrelated'}})]}))
- expect(value!.nativeHistoryPage).toBe(original);expect(api.sessions.historyPage).toHaveBeenCalledOnce()
- await act(async()=>useAppStore.setState({sessions:[session({nativeHandle:old,nativeConfirmation:{...confirmation,operationId:'A-returned',previousNativeHandle:candidate,nativeHandle:old}})]}))
- expect(api.sessions.historyPage).toHaveBeenCalledTimes(2);expect(api.sessions.observeHistory).toHaveBeenCalledTimes(2)
- expect(value!.nativeHistoryPage).not.toBe(original);expect(value!.nativeHistoryPage?.source.nativeSessionId).toBe(old.sessionId)
 })
 function mainOwner(){
  const controller=new RuntimeController(new AgentMuxMemoryAgentSessionStore(),async()=>{throw new Error('Unexpected host creation')})

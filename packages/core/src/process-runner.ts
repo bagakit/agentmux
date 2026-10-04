@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { AgentMuxError, agentMuxCancellationError } from './errors.js'
+import { AgentMuxError } from './errors.js'
 
 export type CommandInput = string | Uint8Array
 
@@ -26,7 +26,7 @@ export type ProcessRunner = (
 
 export const runProcess: ProcessRunner = async (command, args, options = {}) => {
   if (options.signal?.aborted) {
-    throw agentMuxCancellationError('Command was cancelled before launch.', 'COMMAND_ABORTED', options.signal.reason)
+    throw new AgentMuxError('Command was cancelled before launch.', 'COMMAND_ABORTED')
   }
   const environment = { ...process.env }
   for (const [name, value] of Object.entries(options.env ?? {})) {
@@ -64,7 +64,7 @@ export const runProcess: ProcessRunner = async (command, args, options = {}) => 
       }
       target.push(chunk)
     }
-    const abort = (): void => finishError(agentMuxCancellationError('Command was cancelled.', 'COMMAND_ABORTED', options.signal?.reason))
+    const abort = (): void => finishError(new AgentMuxError('Command was cancelled.', 'COMMAND_ABORTED'))
 
     child.once('error', finishError)
     child.stdout.on('data', (chunk) => accept(stdout, chunk))

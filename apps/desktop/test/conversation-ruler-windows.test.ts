@@ -37,8 +37,8 @@ describe('loaded conversation ruler references', () => {
   it('changes only the overview, not source order, body or references', () => {
     const records = conversationRulerRecords('self', page, [])
     const before = [...records]
-    expect(conversationRulerWindow(records, '6h').items.map(r => r.target)).toEqual(records.slice(1, 4).map(r => r.target))
-    expect(conversationRulerWindow(records, '12h').items.map(r => r.id)).toEqual(records.slice(1, 4).map(r => r.id))
+    expect(conversationRulerWindow(records, '15m').items.map(r => r.target)).toEqual(records.slice(2, 4).map(r => r.target))
+    expect(conversationRulerWindow(records, '1h').items.map(r => r.id)).toEqual(records.slice(1, 4).map(r => r.id))
     expect(conversationRulerWindow(records, '24h').items).toHaveLength(3)
     const all = conversationRulerWindow(records, 'all')
     expect(all.items).toHaveLength(4)
@@ -49,31 +49,14 @@ describe('loaded conversation ruler references', () => {
     expect(all.items[0]).toBe(records[0])
     expect(page.nextCursor).toBe('opaque')
   })
-  it.each([['6h', 21_600_000], ['12h', 43_200_000], ['24h', 86_400_000], ['3d', 259_200_000], ['7d', 604_800_000]] as const)(
-    'clips the %s overview at its inclusive recorded boundary without altering its source', (window, duration) => {
-      const input = { ...page, items: [
-        { ...page.items[0]!, id: 'outside', startedAt: end - duration - 1 },
-        { ...page.items[1]!, id: 'boundary', startedAt: end - duration },
-        { ...page.items[3]!, id: 'end', startedAt: end }
-      ] }
-      const records = conversationRulerRecords('self', input, [])
-      const result = conversationRulerWindow(records, window)
-      expect(result.items.map(r => r.record.id)).toEqual(['boundary', 'end'])
-      expect(result.items[0]).toBe(records[1])
-      expect(result.scale.span).toBe(duration)
-      expect(result.recentFraction).toBeCloseTo(1 - 3_600_000 / duration)
-      expect(records.map(r => r.record.id)).toEqual(['outside', 'boundary', 'end'])
-      expect(conversationRulerWindow(records, 'all').items).toHaveLength(3)
-    }
-  )
   it('keeps missing times separately reachable and never invents a clock', () => {
     const records = conversationRulerRecords('self', page, [])
-    expect(conversationRulerWindow(records, '6h').untimed[0]).toBe(records[4])
+    expect(conversationRulerWindow(records, '15m').untimed[0]).toBe(records[4])
     const onlyUnknown = records.filter(r => r.recordedAt === undefined)
-    expect(conversationRulerWindow(onlyUnknown, '12h').items).toEqual(onlyUnknown)
-    expect(conversationRulerWindow(onlyUnknown, '12h').scale.axis).toBe('ordinal')
+    expect(conversationRulerWindow(onlyUnknown, '1h').items).toEqual(onlyUnknown)
+    expect(conversationRulerWindow(onlyUnknown, '1h').scale.axis).toBe('ordinal')
     expect(conversationRulerDensity(onlyUnknown, 600)).toEqual([])
-    expect(conversationRulerWindow([], '12h').items).toEqual([])
+    expect(conversationRulerWindow([], '1h').items).toEqual([])
   })
   it('ignores another Session page, removes only repeated source IDs and retains reverse-time records', () => {
     expect(conversationRulerRecords('other', page, [])).toEqual([])
@@ -85,7 +68,7 @@ describe('loaded conversation ruler references', () => {
   })
   it('uses all loaded source records for a single author / time scale, not an observed-only axis', () => {
     const records = conversationRulerRecords('self', page, [timeline('visitor', end, { authorAgentSessionId: 'visitor' })])
-    const window = conversationRulerWindow(records, '12h')
+    const window = conversationRulerWindow(records, '1h')
     const marks = conversationAxis(window.items, s => s.role === 'agent')
     expect(marks.map(m => m.speaker.id)).toEqual(['self', 'visitor'])
     expect(marks.map(m => m.index)).toEqual([2, 3])

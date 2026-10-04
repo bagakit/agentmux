@@ -18,7 +18,6 @@ async function entries(owner: Awaited<ReturnType<typeof configOwnerFixture>>['ow
 
 function alternate(entry: AgentMuxControlSettingEntry) {
   if (entry.kind === 'boolean') return !entry.value
-  if (entry.kind === 'string' && entry.key.startsWith('profile.') && !entry.enum) return entry.key === 'profile.avatar' ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==' : 'A profile value'
   const choice = entry.enum?.find((value) => value !== entry.value)
   expect(choice, `alternate for ${entry.key}`).toBeDefined()
   return choice!
@@ -45,14 +44,14 @@ describe('ordinary preferences through the Main owner', () => {
       const next = alternate(entry), before = f.publish.mock.calls.length
       const result = await executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: String(next) }, f.owner)
       expect(result).toMatchObject({ operation: 'settings.set', entry: { ...entry, value: next } })
-      expect(f.publish).toHaveBeenCalledTimes(before + (next === entry.value ? 0 : 1))
+      expect(f.publish).toHaveBeenCalledTimes(before + 1)
       const bytes = await f.bytes()
       await executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: String(next) }, f.owner)
       expect(await f.bytes()).toBe(bytes)
-      expect(f.publish).toHaveBeenCalledTimes(before + (next === entry.value ? 0 : 1))
-      await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: entry.key === 'profile.about' ? 'x'.repeat(2001) : entry.key === 'profile.displayName' ? 'x'.repeat(81) : 'INVALID' }, f.owner)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+      expect(f.publish).toHaveBeenCalledTimes(before + 1)
+      await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: 'INVALID' }, f.owner)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
       expect(await f.bytes()).toBe(bytes)
-      expect(f.publish).toHaveBeenCalledTimes(before + (next === entry.value ? 0 : 1))
+      expect(f.publish).toHaveBeenCalledTimes(before + 1)
       expect(f.owner.current.browser.agentAutomation).toBe(false)
       expect(f.owner.current.browser.appLinkSchemes).toEqual({ custom: 'deny' })
       expect(f.owner.current.hosts).toEqual(initial.hosts)

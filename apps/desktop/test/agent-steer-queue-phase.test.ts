@@ -7,7 +7,7 @@ import { useAppStore } from '../src/renderer/src/store'
 
 const initial = useAppStore.getState()
 const gates: Array<{ resolve(): void }> = []
-const drains: Promise<unknown>[] = []
+const drains: Promise<void>[] = []
 
 function agent(id = 'phase-session'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
@@ -90,7 +90,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
       expect(useAppStore.getState().agentSteerInFlight[session.id]).toBe(selected.operationId)
       expect(useAppStore.getState().agentSteerInFlightPhase[session.id]).toBe('preparing')
       expect(submit).not.toHaveBeenCalled()
-      await expect(useAppStore.getState().archiveAgentSteer(session.id, selected.operationId, selected.text, true)).rejects.toThrow('preparing or submitting')
+      useAppStore.getState().removeAgentSteer(session.id, selected.operationId)
       useAppStore.getState().moveAgentSteer(session.id, selected.operationId, 'up')
       expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([head, { ...selected, execution: 'default' }])
       preparation.resolve()
@@ -181,117 +181,8 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     const retained = useAppStore.getState().agentSteerQueues[session.id]!
     expect(retained[0]).toEqual(head)
     expect(retained[1]).toEqual({ ...entry, execution: 'default', promptCondition: { expectedRun: session.control.run, afterSubmissionId: null }, status: 'deferred',
-      error: message, ...(shape === 'coded' ? { errorCode: 'AGENT_PROMPT_SUBMISSION_BUSY' } : {}) })
+      error: message, errorCode: 'AGENT_PROMPT_SUBMISSION_BUSY' })
     expect(submit).toHaveBeenCalledTimes(1)
-    expectReleased(session.id)
-  })
-
-  it.each(['recovery', 'storage'] as const)('keeps its original recovery cause while %s is pending', async waiting => {
-    const session = agent()
-    useAppStore.setState({ sessions: [session] })
-    const { runId: _run, ...unbound } = enqueue(session.id, 'unbound-original-cause')
-    const original = { ...unbound, status: 'deferred' as const, errorCode: 'ORIGINAL_RECOVERY_CAUSE', error: 'Keep the saved recovery cause.' }
-    useAppStore.setState({ agentSteerQueues: { [session.id]: [original] } })
-    const preparation = gate()
-    const recover = vi.spyOn(useAppStore.getState(), 'recoverSession').mockImplementation(async () => {
-      if (waiting === 'recovery') await preparation.promise
-      return session
-    })
-    const flush = vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
-      if (waiting === 'storage') await preparation.promise
-    })
-    const refresh = vi.mocked(api.sessions.refresh).mockImplementation(async () => {
-      expect(useAppStore.getState().agentSteerQueues[session.id]![0]).toMatchObject({ errorCode: original.errorCode, error: original.error })
-      return session
-    })
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('A new actual submission outcome'))
-    const drain = send(session.id, original.operationId)
-    await vi.waitFor(() => expect(waiting === 'recovery' ? recover : flush).toHaveBeenCalled())
-    expect(useAppStore.getState().agentSteerQueues[session.id]![0]).toMatchObject({
-      operationId: original.operationId, text: original.text, errorCode: original.errorCode, error: original.error
-    })
-    expect(submit).not.toHaveBeenCalled()
-    preparation.resolve(); await drain
-    expect(refresh).toHaveBeenCalledOnce()
-    expect(useAppStore.getState().agentSteerQueues[session.id]![0]!.error).toBe('A new actual submission outcome')
-    expectReleased(session.id)
-  })
-
-  it.each(['Host', 'Core Session'] as const)('rejects foreign %s preparation facts even when the Run string is equal', async replacement => {
-    const session = agent()
-    useAppStore.setState({ sessions: [session] })
-    const entry = enqueue(session.id, 'foreign-preparation')
-    const foreign = { ...session, ...(replacement === 'Host' ? { hostId: 'foreign-host' } : {}),
-      control: { ...session.control, ...(replacement === 'Host' ? { hostId: 'foreign-host' } : { agentSessionId: 'foreign-session' }) } }
-    vi.mocked(api.sessions.refresh).mockResolvedValue(foreign)
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
-    await send(session.id, entry.operationId)
-    expect(submit).not.toHaveBeenCalled()
-    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([expect.objectContaining({
-      operationId: entry.operationId, runId: entry.runId, text: entry.text, promptCondition: null
-    })])
-    expectReleased(session.id)
-  })
-
-  it.each(['Host', 'Core Session'] as const)('does not dispatch to a replacement %s while the original preparation is pending', async replacement => {
-    const session = agent()
-    useAppStore.setState({ sessions: [session] })
-    const entry = enqueue(session.id, 'binding-during-preparation')
-    const preparation = gate()
-    const refresh = vi.mocked(api.sessions.refresh).mockImplementation(async () => { await preparation.promise; return session })
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
-    const drain = send(session.id, entry.operationId)
-    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce())
-    useAppStore.setState({ sessions: [{ ...session, ...(replacement === 'Host' ? { hostId: 'replacement-host' } : {}),
-      control: { ...session.control, ...(replacement === 'Host' ? { hostId: 'replacement-host' } : { agentSessionId: 'replacement-session' }) } }] })
-    preparation.resolve(); await drain
-    expect(submit).not.toHaveBeenCalled()
-    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([expect.objectContaining({
-      operationId: entry.operationId, runId: entry.runId, text: entry.text
-    })])
-    expectReleased(session.id)
-  })
-
-  it.each(['replacement Run', 'replacement predecessor', 'replacement Host'] as const)('a late failure cannot decorate the same operation with a %s', async replacement => {
-    const session = agent()
-    useAppStore.setState({ sessions: [session] })
-    const entry = enqueue(session.id, 'late-original-operation')
-    const submission = gate()
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async () => {
-      await submission.promise
-      throw Object.assign(new Error('Late original preparation failure'), { code: 'AGENT_PROMPT_PREPARATION_FAILED' })
-    })
-    const drain = send(session.id, entry.operationId)
-    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
-    const run = replacement === 'replacement Run' ? { runId: 'new-original-session-run' } : session.control.run
-    const current = { ...useAppStore.getState().agentSteerQueues[session.id]![0]!, runId: run.runId,
-      ...(replacement === 'replacement Host' ? {} : {promptCondition:{expectedRun:run,afterSubmissionId:'new-predecessor'}}), error: 'Keep current reason', errorCode: 'CURRENT_OPERATION_CAUSE' }
-    useAppStore.setState({ sessions: [{ ...session, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}),
-      control: { ...session.control, run, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}) } }],
-      agentSteerQueues: { [session.id]: [current] } })
-    submission.resolve(); await drain
-    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([current])
-    expect(submit).toHaveBeenCalledOnce()
-    expectReleased(session.id)
-  })
-
-  it.each(['replacement Run', 'replacement predecessor', 'replacement Host'] as const)('a late ACK cannot remove the same operation with a %s', async replacement => {
-    const session = agent()
-    useAppStore.setState({ sessions: [session] })
-    const entry = enqueue(session.id, 'late-ack-original-operation')
-    const submission = gate()
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async () => { await submission.promise })
-    const drain = send(session.id, entry.operationId)
-    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
-    const run = replacement === 'replacement Run' ? { runId: 'new-original-session-run' } : session.control.run
-    const current = { ...useAppStore.getState().agentSteerQueues[session.id]![0]!, runId: run.runId,
-      ...(replacement === 'replacement Host' ? {} : {promptCondition:{expectedRun:run,afterSubmissionId:'new-predecessor'}}), error: 'Keep new row reason' }
-    useAppStore.setState({ sessions: [{ ...session, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}),
-      control: { ...session.control, run, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}) } }],
-      agentSteerQueues: { [session.id]: [current] } })
-    submission.resolve(); await drain
-    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([current])
-    expect(submit).toHaveBeenCalledOnce()
     expectReleased(session.id)
   })
 
@@ -301,8 +192,8 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     const entry = enqueue(session.id, 'retained-intent')
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     useAppStore.setState({ sessions: [{ ...session, pendingInteraction: {
-      id: 'private-request', agentSessionId:session.id, kind: 'permission', title: 'Pending decision',
-      options: [{ id: 'allow', label: 'Allow',kind:'allow-once' }], evidence:{source:'native-hook',observedAt:1,run:session.control.run}
+      requestId: 'private-request', kind: 'permission', summary: 'Pending decision',
+      options: [{ id: 'allow', label: 'Allow' }], observedAt: 1
     } } as Extract<SessionSnapshot, { kind: 'agent' }>] })
     await send(session.id, entry.operationId)
     expect(submit).not.toHaveBeenCalled()
@@ -375,7 +266,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     const partialize = useAppStore.persist.getOptions().partialize
     expect(partialize).toBeTypeOf('function')
     const persisted = partialize!(useAppStore.getState())
-    expect(persisted.agentSteerQueues?.[session.id]?.map(item => item.operationId)).toEqual([entry.operationId])
+    expect(persisted.agentSteerQueues[session.id]?.map(item => item.operationId)).toEqual([entry.operationId])
     expect(persisted).not.toHaveProperty('agentSteerInFlight')
     expect(persisted).not.toHaveProperty('agentSteerInFlightPhase')
     submission.resolve()

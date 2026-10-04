@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import { AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
@@ -11,7 +11,7 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: fixturePath("tmp/work"),
+    workspacePath: upstreamFixturePath("tmp/work"),
     run: { runId: run },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
@@ -130,7 +130,6 @@ describe('semantic session registry concurrency', () => {
     const transitionRelease = new Promise<void>((resolve) => { releaseTransition = resolve })
     const store: AgentMuxAgentSessionStore = {
       withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
-      confirmDurability: (id, run, expected) => memory.confirmDurability(id, run, expected),
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
@@ -176,7 +175,6 @@ describe('semantic session registry concurrency', () => {
     let compareCalls = 0
     const store: AgentMuxAgentSessionStore = {
       withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
-      confirmDurability: (id, run, expected) => memory.confirmDurability(id, run, expected),
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },

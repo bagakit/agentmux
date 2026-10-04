@@ -1,31 +1,21 @@
-import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
-import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
-import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
-  AGENTMUX_AGENT_MESSAGING_GUIDANCE,
   agentPromptPredecessor,
   validateAgentPromptCondition,
   type AgentPromptCondition,
   type AgentPromptExecution,
-  type AgentMessageChannel,
-  type AgentSessionQuestionReplyReceipt,
   type AgentMuxAgentMessageInput,
-  type AgentMuxRpcCallContext,
   type AgentMuxNativeSessionConfirmationInput,
   type AgentMuxNativeSessionConfirmation,
   runtimeStorageUsage,
-  loadSessionHistorySources,
   agentInteractionResponseUnavailableReason,
   type AgentCapabilities,
   type AgentCatalogEntry,
   type AgentExecutorId,
   type AgentProviderId,
   type AgentSessionHistoryPage,
-  type AgentSessionHistoryResourceRequest,
-  type AgentSessionHistoryResourceReadResult,
   type AgentSessionHistoryObservation,
   type AgentSessionHistoryObservationHandle,
   type AgentMuxClientEvent,
@@ -50,7 +40,6 @@ import type {
   AgentLaunchInput,
   AgentSessionControl,
   AgentSessionRecoveryCandidate,
-  AgentSessionNameMetadata,
   AppConfig,
   HostConfig,
   RuntimeEvent,
@@ -63,7 +52,6 @@ import type {
   SessionSnapshot,
   SessionHistoryPageOptions,
   SessionHistoryReference,
-  SessionQuestionReplyInput,
   TerminalLaunchInput
 } from '../shared/contracts.js'
 import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
@@ -629,7 +617,7 @@ export class RuntimeController {
   async providerCatalog(): Promise<AgentCatalogEntry[]> {
     const catalog = new Map<string, AgentCatalogEntry>()
     for (const host of this.hosts.values()) {
-      await host.client.connect()
+      if (!('runtimeOwnerIdentity' in host.client)) await host.client.connect()
       for (const entry of host.client.providers.catalog()) {
         if (!catalog.has(entry.id)) catalog.set(entry.id, entry)
       }
@@ -675,7 +663,6 @@ export class RuntimeController {
   }
 
   async snapshot(config: AppConfig): Promise<RuntimeSnapshot> {
-    const sessionNames = this.readSessionNames(config)
     const hosts = [...this.hosts]
     const unobservedWarnings = new Map<string, RuntimeEndpointWarning>()
     const results = await Promise.allSettled(hosts.map(async ([hostId, { client, config: hostConfig }]) => {
@@ -779,38 +766,11 @@ export class RuntimeController {
       client.runtimeIdentity().ownership === 'unverified' ? [hostId] : []
     ))
     return {
-      ...await sessionNames,
       sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates,
       ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {}),
       // A background connection can finish while another endpoint is being read. This cut still
       // did not observe that endpoint; keep its warning until the restored event's fresh resync.
       runtimeEndpointWarnings: [...new Map([...this.endpointWarnings, ...unobservedWarnings]).values()]
-    }
-  }
-
-  private async readSessionNames(config: AppConfig): Promise<Pick<RuntimeSnapshot, 'sessionNameMetadata' | 'sessionNameMetadataWarning'>> {
-    const localHostIds = new Set<string>(config.hosts.filter(host => host.kind === 'local').map(host => host.id))
-    if (localHostIds.size === 0) return {}
-    try {
-      // One catalogue read per complete snapshot, never per Host, label, or output event. The
-      // original store also covers stale bindings and retirement without consulting a live Run.
-      const sources = await loadSessionHistorySources(this.agentSessionStore)
-      const sessionNameMetadata = sources.flatMap((source): AgentSessionNameMetadata[] => {
-        if (!localHostIds.has(source.hostId) || !source.history) return []
-        const { providerId, executorId, workspacePath } = source.history
-        return [{
-          agentSessionId: source.agentSessionId, hostId: source.hostId, providerId, executorId, workspacePath,
-          state: source.state,
-          label: agentFallbackLabel(config, { hostId: source.hostId, providerId, executorId, workspacePath })
-        }]
-      })
-      return sessionNameMetadata.length > 0 ? { sessionNameMetadata } : {}
-    } catch (error) {
-      return { sessionNameMetadataWarning: {
-        code: error instanceof AgentMuxError ? error.code : 'SESSION_NAME_METADATA_UNAVAILABLE',
-        message: `Saved Session names could not be read: ${error instanceof Error ? error.message : String(error)}`,
-        recovery: 'Refresh the Session snapshot to retry reading the original Session store. Existing Agents remain available.'
-      } }
     }
   }
 
@@ -896,8 +856,6 @@ export class RuntimeController {
         }
         // Topic 说明是 AgentMux 自己的话，作为 agentMuxNote 交给 Core 的出口署名进信封；
         // 用户的真实请求原样留在 prompt（user 段）。desktop 不自己拼信封，也不再把两者混成一段。
-        const profileContext = profileAgentContext(config.profile)
-        const agentMuxNote = [preparedTopic?.prompt, request.agentMuxNote, profileContext].filter(note => note?.trim()).join('\n\n')
         const receipt = await client.createAgentWithDelivery({
           providerId: executor.providerId,
           executorId: request.executorId,
@@ -909,7 +867,7 @@ export class RuntimeController {
           },
           injectAgentMuxGuide: executor.injectAgentMuxGuide,
           commandOverride: executor.command,
-          ...(agentMuxNote ? { agentMuxNote } : {}),
+          ...([preparedTopic?.prompt, request.agentMuxNote].some(note => note?.trim()) ? { agentMuxNote: [preparedTopic?.prompt, request.agentMuxNote].filter(note => note?.trim()).join('\n\n') } : {}),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
@@ -1052,34 +1010,6 @@ export class RuntimeController {
       throw new Error(`History page belongs to another Session: ${page.agentSessionId}`)
     }
     return page
-  }
-
-  async sessionHistoryResource(
-    control: SessionHistoryReference,
-    input: AgentSessionHistoryResourceRequest,
-    config: AppConfig
-  ): Promise<AgentSessionHistoryResourceReadResult> {
-    if (typeof control.agentSessionId !== 'string' || !control.agentSessionId) throw new Error('Conversation resource requires an Agent Session.')
-    if (this.hostReconfigurationReservations.has(control.hostId)) throw new Error(`Runtime host is being reconfigured: ${control.hostId}`)
-    const host = this.hosts.get(control.hostId)
-    if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
-    if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
-    const executor = requireSessionExecutor(config, descriptor.history)
-    // Renderer supplies a recorded locator, never an invocation or an arbitrary file read.
-    const result = await host.client.sessionHistoryResource(control.agentSessionId, {
-      source: input.source, recordId: input.recordId, partIndex: input.partIndex, expectedReference: input.expectedReference,
-      ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
-      ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
-      commandOverride: executor.command, args: executor.args, env: executor.env
-    })
-    if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
-    if (result.agentSessionId !== control.agentSessionId || result.source.providerId !== input.source.providerId ||
-      result.source.nativeSessionId !== input.source.nativeSessionId || result.recordId !== input.recordId ||
-      result.turnId !== input.turnId || result.partIndex !== input.partIndex || result.reference !== input.expectedReference) {
-      throw new Error('History resource response belongs to another recorded target.')
-    }
-    return result
   }
 
   async observeSessionHistory(
@@ -1404,11 +1334,10 @@ export class RuntimeController {
     prompt: string,
     operationId: string,
     condition: AgentPromptCondition,
-    automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
+    automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution },
     authorHuman?: boolean,
-    agentMuxNote?: string,
-    sourceChannel: AgentMessageChannel = 'message-tool'
+    agentMuxNote?: string
   ): Promise<void> {
     const capturedCondition = validateAgentPromptCondition(condition)
     await this.trackHostLifecycleOperation(control.hostId, async () => {
@@ -1431,10 +1360,9 @@ export class RuntimeController {
           agentSessionId: control.agentSessionId,
           ...capturedCondition,
           operationId,
-          ...(automation ? { ...(automation.futureIntent ? { expectedFutureIntent: automation.futureIntent } : automation.completionId === undefined ? {} : { expectedCompletionId: automation.completionId }), ...(automation.inputByte === undefined ? {} : { expectedInputByte: automation.inputByte }), signal: automation.signal } : {}),
+          ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
           prompt,
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
-          sourceChannel,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
           ...(authorHuman === true ? { authorHuman: true } : {})
@@ -1464,22 +1392,6 @@ export class RuntimeController {
     })
   }
 
-  async replyQuestion(control: AgentSessionControl, input: SessionQuestionReplyInput, config: AppConfig): Promise<AgentSessionQuestionReplyReceipt> {
-    const condition = validateAgentPromptCondition(input)
-    const hostId = control.hostId, agentSessionId = control.agentSessionId
-    if (control.run.runId !== condition.expectedRun.runId) throw new AgentMuxError('Question reply targets another Run.', 'STALE_AGENT_SESSION')
-    const original = { source: { ...input.source }, turnId: input.turnId, recordId: input.recordId,
-      answers: input.answers.map(answer => ({ ...answer })), operationId: input.operationId,
-      ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) }
-    return await this.trackHostLifecycleOperation(hostId, async () => {
-      const client = await this.connectedClient(hostId)
-      const executor = requireSessionExecutor(config, client.agentSession(agentSessionId))
-      return await client.replySessionQuestion({ ...condition, ...original, agentSessionId,
-        commandOverride: executor.command, args: executor.args, env: executor.env,
-        authorHuman: true, sourceChannel: 'question-reply' })
-    })
-  }
-
   async submitMessage(control: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void> {
     await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
@@ -1491,42 +1403,6 @@ export class RuntimeController {
   }
 
   private progressInputObserver: ((control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>) | undefined
-  async authorizeFutureIntent(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, context?: AgentMuxRpcCallContext): Promise<void> {
-    if (!context?.caller) return
-    const client = await this.connectedClient(target.hostId), recipient = await client.statusAgent(target.agentSessionId)
-    if (recipient.session.hostId !== target.hostId || recipient.session.providerId !== target.providerId || recipient.session.workspacePath !== target.workspacePath) {
-      throw new AgentMuxError('The original future-message target is unconfirmed. The arrangement and manual input are retained.', 'STALE_AGENT_SESSION')
-    }
-    const sender = await client.authorizeAgentCaller(context.caller.capability, context.caller.agentSessionId)
-    await client.authorizeAgentMessage({ capability: context.caller.capability, callerAgentSessionId: sender.agentSessionId,
-      senderAgentSessionId: sender.agentSessionId, senderSessionId: sender.agentSessionId, senderRunId: sender.run.runId,
-      recipientSessionId: recipient.session.agentSessionId, recipientRunId: recipient.session.run.runId })
-  }
-  async saveFutureIntent(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string; creationOperationId?: string; prompt: string; checkIn?: AgentScheduleCheckInPolicy }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void> {
-    const client = await this.connectedClient(loop.hostId)
-    const status = await client.statusAgent(loop.agentSessionId)
-    if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId || status.session.workspacePath !== loop.workspacePath || !loop.futureIntentId || !loop.creationOperationId) {
-      throw new AgentMuxError('The original future-message target or intent is unconfirmed. Manual input remains available.', 'STALE_AGENT_SESSION')
-    }
-    await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
-      prompt: loop.prompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : ''), active, ...(context?.caller ? { caller: context.caller } : {}) })
-  }
-  async observeCheckIn(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, now: number, signal: AbortSignal, config: AppConfig): Promise<CheckInObservation> {
-    signal.throwIfAborted()
-    const client = await this.connectedClient(target.hostId), before = await client.statusAgent(target.agentSessionId)
-    const matches = (session: typeof before.session) => session.agentSessionId === target.agentSessionId && session.hostId === target.hostId && session.providerId === target.providerId && session.workspacePath === target.workspacePath
-    if (!matches(before.session)) return { known: false, reason: 'The original quiet follow-up target is unconfirmed.' }
-    const executor = requireSessionExecutor(config, before.session)
-    const timeline = await client.sessionTimeline(target.agentSessionId)
-    const page = await client.sessionHistoryPage(target.agentSessionId, { limit: 100, refreshNativeSource: true, requireCurrentSource: true, signal, commandOverride: executor.command, args: executor.args, env: executor.env })
-    signal.throwIfAborted()
-    const after = await client.statusAgent(target.agentSessionId)
-    signal.throwIfAborted()
-    const handle = after.session.nativeHandle
-    if (!matches(after.session) || before.session.run.runId !== after.session.run.runId || JSON.stringify(before.session.nativeHandle) !== JSON.stringify(handle) ||
-        handle?.kind !== 'provider' || handle.providerId !== page.source.providerId || handle.sessionId !== page.source.nativeSessionId) return { known: false, reason: 'The original Run or current conversation source changed while reading; this occurrence remains due.' }
-    return checkInHumanObservation(target.agentSessionId, timeline, page, now)
-  }
   setContinuousProgressInputObserver(observer: (control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>): () => void {
     this.progressInputObserver = observer
     return () => { if (this.progressInputObserver === observer) this.progressInputObserver = undefined }
@@ -1541,25 +1417,10 @@ export class RuntimeController {
         status.session.workspacePath !== loop.workspacePath) {
       throw new AgentMuxError('Continuous progress target identity changed. Review this loop before resuming.', 'STALE_AGENT_SESSION')
     }
-    if (status.run.acceptedInputBytes === null) throw new AgentMuxError('The original Native input cursor is unconfirmed. Automatic progress is paused; manual input and your Agent remain available.', 'CONTROL_UNAVAILABLE')
     const observer = this.progressInputObserver
     if (!observer) throw new Error('User input observation is unavailable. Automatic progress is paused; manual input remains available.')
     const inputOccupied = await observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal)
     return { session: status.session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
-  }
-
-  /** Read the original Core input transaction; absence is never a replacement admission. */
-  async inspectContinuousProgressInitial(loop: import('@agentmux/core').ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'> {
-    const initial = loop.initialDelivery
-    if (!initial) return 'unconfirmed'
-    const status = await (await this.connectedClient(loop.hostId)).statusAgent(loop.agentSessionId)
-    const session = status.session, admission = session.promptCompletionAdmission
-    if (session.hostId !== loop.hostId || session.agentSessionId !== loop.agentSessionId || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath ||
-        session.run.runId !== initial.condition.expectedRun.runId || admission?.submissionId !== initial.operationId ||
-        admission.intent?.run.runId !== initial.condition.expectedRun.runId || admission.intent.prompt !== initial.prompt ||
-        admission.intent.message?.userContent !== initial.prompt || admission.intent.message.systemContext !== undefined) return 'unconfirmed'
-    if (admission.acknowledged === true || session.terminalPromptSubmission?.submissionId === initial.operationId && session.terminalPromptSubmission.submit.acknowledged === true) return 'confirmed'
-    return 'pending'
   }
 
   async respondInteraction(
@@ -1673,23 +1534,6 @@ export class RuntimeController {
     else await client.signalTerminal(control.run, 'SIGINT')
   }
 
-  async observeStorage(control: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation> {
-    if (control.kind === 'terminal' && control.runId !== control.run.runId) {
-      throw Object.assign(new Error('Terminal storage target has conflicting Run identities.'), { code: 'INVALID_CONTROL_REQUEST' })
-    }
-    const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') {
-      // Confirm original Session/Run binding without changing lifecycle or opening an attachment.
-      const original = client.agentSession(control.agentSessionId)
-      if (original.run.runId !== control.run.runId) {
-        throw Object.assign(new Error('Session changed before storage observation. Refresh the original Session.'), { code: 'STALE_AGENT_SESSION_BINDING' })
-      }
-    }
-    const run = control.kind === 'agent' ? control.run : { runId: control.runId }
-    const result = await client.observeRunStorage(run)
-    return { ...result, runtime: { ...result.runtime, hostId: control.hostId } }
-  }
-
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.refreshAgentSession(control.agentSessionId, control.run)
@@ -1778,19 +1622,9 @@ export class RuntimeController {
     const scratch = config.workspaces.find((workspace) => (
       workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
     ))
-    let scratchTopicId: string | null = null, advisory: string | undefined
-    const name = stored.workspacePath.split('/').at(-1) ?? ''
-    if (scratch && /^(?:topic--(?:launcher|session|view)--|[0-9a-f]{16}$)/.test(name)) {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      try {
-        const topic = await Promise.race([this.scratchTopics.readForDirectory(scratch, stored.workspacePath),
-          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('The optional Wiki directory check timed out.')), 100) })])
-        if (topic?.readError) throw new Error(topic.readError)
-        scratchTopicId = topic?.id ?? null
-      } catch (error) {
-        advisory = `Wiki directory association is unconfirmed: ${error instanceof Error ? error.message : String(error)} Agent continuity and input remain available. Retry the original directory repair before the next resume.`
-      } finally { clearTimeout(timer) }
-    }
+    const scratchTopicId = scratch
+      ? scratchTopicIdFromWorkspacePath(scratch.path, stored.workspacePath)
+      : null
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
@@ -1807,12 +1641,11 @@ export class RuntimeController {
       const session = await this.sessionByTarget(client,
         { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
       if (session.kind === 'agent' && session.processState === 'running' &&
-        session.control.run.runId === result.currentRun.runId) return { kind: 'reattachable', session, ...(advisory ? { advisory } : {}) }
+        session.control.run.runId === result.currentRun.runId) return { kind: 'reattachable', session }
     }
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
     return {
       kind: result.kind,
-      ...(advisory ? { advisory } : {}),
       session: await this.sessionByTarget(
         client,
         { kind: 'agent-session', agentSessionId: control.agentSessionId },

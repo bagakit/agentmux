@@ -126,21 +126,6 @@ describe('Core-owned durable A2A global message queue', () => {
     } finally { release(); await Promise.allSettled([first, other]) }
   })
 
-  it('freezes channel and device on the existing journal without rewriting old origin facts', async () => {
-    const durable = await queue()
-    const sourceDevice = { hostId: 'host', deviceId: 'device', name: 'Approved device' }
-    const original = input({ messageId: 'frozen-origin', sourceChannel: 'cli', sourceDevice })
-    const receipt = await durable.append(original)
-    sourceDevice.name = 'Edited outside the queue'
-    const reopened = new DurableAgentMuxMessageQueue(durable.path)
-    const restored = (await reopened.listAfter())[0]!
-    expect(restored.sourceChannel).toBe('cli')
-    expect(restored.sourceDevice).toEqual({ hostId: 'host', deviceId: 'device', name: 'Approved device' })
-    expect(receipt.sourceDevice).toEqual(restored.sourceDevice)
-    await expect(reopened.append({ ...original, sourceChannel: 'api' })).rejects.toMatchObject({ code: 'MESSAGE_ID_CONFLICT' })
-    expect(await reopened.listAfter()).toHaveLength(1)
-  })
-
   it('preserves original intent and the last proven state across unknown Control outcomes', async () => {
     const durable = await queue()
     const message = await durable.append(input({ messageId: 'control-uncertain' }))
@@ -149,7 +134,7 @@ describe('Core-owned durable A2A global message queue', () => {
     await durable.recordDeliveryIssue(message.messageId, 'Retry result unknown\nControl reply closed', 200)
     const reopened = new DurableAgentMuxMessageQueue(durable.path)
     expect(await reopened.listAfter()).toEqual([{ sequence: message.sequence, envelope: message.envelope,
-      promptCondition: condition, execution: 'default', delivery: { state: 'queued', at: message.envelope.createdAt, reason: 'Retry result unknown\nControl reply closed' } }])
+      promptCondition: condition, delivery: { state: 'queued', at: message.envelope.createdAt, reason: 'Retry result unknown\nControl reply closed' } }])
     expect((await reopened.readJournal()).filter(record => record.kind === 'delivery-issue')).toEqual([
       { kind: 'delivery-issue', sequence: 3, messageId: message.messageId, at: 100, reason: 'Control ACK missing' },
       { kind: 'delivery-issue', sequence: 4, messageId: message.messageId, at: 200, reason: 'Retry result unknown\nControl reply closed' }

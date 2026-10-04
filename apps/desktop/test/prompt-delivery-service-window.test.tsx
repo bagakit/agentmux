@@ -45,7 +45,7 @@ describe('prompt delivery service window', () => {
 import { projectRuntimeEvent, type SessionProjectionState } from '../src/renderer/src/lib/session-state.js'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 it('projects live Core delivery notices and clears them on the next verified update', () => {
-  const initialSession = { ...session(), status: { state: 'idle', source: 'snapshot', observedAt: 1 }, id: 'agent', hostId: 'local', updatedAt: 1, control: {
+  const initialSession = { ...session(), id: 'agent', hostId: 'local', updatedAt: 1, control: {
     kind: 'agent', hostId: 'local', agentSessionId: 'agent', run: { runId: 'run-1' }
   } } as SessionSnapshot
   if (initialSession.kind === 'agent') delete initialSession.terminalPromptDelivery
@@ -64,14 +64,4 @@ it('projects live Core delivery notices and clears them on the next verified upd
   core.updatedAt = 3
   const restored = projectRuntimeEvent(degraded, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: core } }).state
   expect(notice(restored.sessions[0])).toBeNull()
-})
-
-it('keeps ordinary input available when Core cannot confirm the immediate native context', () => {
-  const value = session()
-  if (value.kind === 'agent') value.terminalPromptDelivery!.reason = 'immediate-context-unconfirmed'
-  const markup = renderToStaticMarkup(createElement(ServiceWindowNotice, { notice: notice(value) }))
-  expect(markup).toContain('Confirming the native execution context')
-  expect(markup).toContain('ordinary input and the healthy Run remain available')
-  expect(markup).toContain('retry this same message')
-  expect(markup).not.toContain('input continued without full screen confirmation')
 })

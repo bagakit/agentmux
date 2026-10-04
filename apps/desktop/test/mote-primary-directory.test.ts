@@ -2,7 +2,6 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } fr
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { moteDirectoryName } from '../src/main/scratch-directory-identity.mjs'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
@@ -15,7 +14,7 @@ async function fixture() {
   const host = { id: 'local', kind: 'local' as const }
   const topics = new ScratchTopics(), files = new WorkspaceFiles(() => host as never, { primaryMoteWorkspace: async () => workspace })
   const directory = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
-  const physical = join(await realpath(parent), 'motes', moteDirectoryName(PMO_TEAMS_TOPIC_ID))
+  const physical = join(await realpath(parent), 'motes', directory)
   return { parent, workspace, topics, files, directory, physical }
 }
 it('uses the real idempotent primary owner and preserves nonempty SOUL, Wiki, avatars and user data on repeated ensure', async () => {
@@ -37,7 +36,7 @@ it('final real delete protects the primary root and ancestor through parent and 
   await expect(files.delete(outer, 'motes')).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
   await symlink(dirname(physical), join(parent, 'alias'))
   const alias = { ...workspace, id: 'other-alias', path: join(parent, 'alias') }
-  await expect(files.delete(alias, moteDirectoryName(PMO_TEAMS_TOPIC_ID))).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
+  await expect(files.delete(alias, directory)).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
   expect(await readFile(join(physical, 'SOUL.md'))).toEqual(retained)
 })
 it('move refuses a protected source, ancestor and destination before the old atomic helper, with explicit primary reason', async () => {

@@ -262,7 +262,6 @@ const runtimeFixture = vi.hoisted(() => {
 })
 
 vi.mock('@agentmux/core', async () => {
-  const { loadSessionHistorySources } = await import('../../../packages/core/src/agent-session-store.js')
   const { agentInteractionResponseUnavailableReason } = await import('@agentmux/core/agent-interaction-state')
   const { agentPromptPredecessor, validateAgentPromptCondition } = await import('@agentmux/core/prompt-condition')
   class AgentMuxError extends Error {
@@ -277,7 +276,6 @@ vi.mock('@agentmux/core', async () => {
   }
   return {
     AgentMuxError,
-    loadSessionHistorySources,
     agentInteractionResponseUnavailableReason,
     agentPromptPredecessor,
     validateAgentPromptCondition,
@@ -298,7 +296,6 @@ vi.mock('../src/main/host-factory.js', () => ({
     return created
   })
 }))
-vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
@@ -307,7 +304,6 @@ const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
   async loadRetiredRuns() { return [] },
   async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
-  async confirmDurability() { throw new Error('Read-only Store fixture cannot confirm a write') },
   async loadRetiredAgentSessions() { return [] },
   async loadReopenCorrelations() { return [] },
   async compareAndSwap() {},
@@ -423,7 +419,6 @@ describe('RuntimeController configuration transaction', () => {
 
   it('waits for the original Host handshake before reading the Provider catalog', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
-    Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => null) })
     const handshake = deferred<void>()
     const catalog = new AgentProviderRegistry().catalog()
     let confirmed = false
@@ -449,7 +444,6 @@ describe('RuntimeController configuration transaction', () => {
 
   it('retains the original Host and working input when the Provider catalog handshake fails', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
-    Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => null) })
     const host = controller.executionHost('local'), originalSession = client.agentSession()
     const failure = new AgentMuxError('The original Host observation is unavailable.', 'CONTROL_UNAVAILABLE')
     client.connect.mockRejectedValueOnce(failure)
@@ -717,26 +711,6 @@ describe('RuntimeController configuration transaction', () => {
       prompt: 'Open Claude on the right.',
       initialMessage: { callerAgentSessionId: 'launch-author', capability: 'launch-capability' }
     }))
-  })
-
-  it.each([true, false])('new launch consumes the saved human profile only when shared (%s)', async shareWithAgents => {
-    const controller = await configuredController()
-    const client = runtimeFixture.FakeClient.instances[0]!
-    const prompt = '  Keep this exact request.\n'
-    const profile = { displayName: 'Alex', about: 'Be direct and preserve my work.', avatar: 'visual-only', shareWithAgents }
-    const config: AppConfig = { ...localConfig, profile, executors: { codex: { label: 'Profile test', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } } }
-    await expect(controller.launchAgent({ executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
-      prompt, agentMuxNote: 'Existing launch note.' }, config)).rejects.toThrow('stopped after input capture')
-    const input = client.createAgent.mock.calls[0]![0] as { agentMuxNote: string; prompt: string; workspacePath: string }
-    expect(input.prompt).toBe(prompt)
-    expect(input.workspacePath).toBe(_hygiene_fixturePath("repo"))
-    expect(input.agentMuxNote).toContain('Existing launch note.')
-    expect(input.agentMuxNote.includes('Preferred name: Alex')).toBe(shareWithAgents)
-    expect(input.agentMuxNote.includes(profile.about)).toBe(shareWithAgents)
-    expect(input.agentMuxNote).not.toContain('visual-only')
-    const wire = composeAgentLaunchPrompt(input.prompt, false, input.agentMuxNote)
-    expect(wire.text).toContain(prompt)
-    expect(wire.systemContext?.includes('Preferred name: Alex') ?? false).toBe(shareWithAgents)
   })
 
   it('launches a Scratch Agent inside its filesystem Topic with wiki context', async () => {
@@ -2934,25 +2908,4 @@ it('forwards owner geometry to the attached Renderer without requesting another 
   expect(client.resizeTerminal).not.toHaveBeenCalled()
   release()
   await controller.dispose()
-})
-
-// The optional Wiki association is bounded current-cwd observation, never a library gate.
-it.each(['stalled', 'failed', 'foreign'])('short Mote Wiki recovery %s retains healthy continuity and exact advisory', async variant => {
-  const scratch: import('../src/shared/contracts').WorkspaceRecord={id:SCRATCH_WORKSPACE_ID,hostId:'local',path:_hygiene_fixturePath("private/wiki-recovery/scratch"),name:'Topics',kind:'folder'}
-  const config: AppConfig={...localConfig,workspaces:[scratch],executors:{review:{id:'review',kind:'agent',providerId:'codex',label:'Review',command:'codex',args:[],env:{}}}}
-  const topics=new ScratchTopics(),read=vi.spyOn(topics,'readForDirectory')
-  if(variant==='stalled')read.mockImplementation(()=>new Promise(()=>{}))
-  else if(variant==='failed')read.mockRejectedValue(new Error('Private metadata access unavailable'))
-  else read.mockResolvedValue(null)
-  const list=vi.spyOn(topics,'list').mockRejectedValue(new Error('Must never scan library'))
-  const controller=new RuntimeController(store,localRuntimeConnector,topics);controller.commit(await controller.prepare(config))
-  const client=runtimeFixture.FakeClient.instances.at(-1)!,stored={...client.agentSession(),workspacePath:_hygiene_fixturePath("private/wiki-recovery/motes/0123456789abcdef")}
-  client.agentSession.mockReturnValue(stored)
-  client.ensureAgentContinuity.mockResolvedValue({kind:'reattachable',session:stored,run:stored.run})
-  client.runtimeProjection.mockResolvedValue({hostId:'local',subjects:[{subjectId:'agent:local:agent-1',kind:'agent',hostId:'local',workspacePath:stored.workspacePath,providerId:'codex',executorId:'review',agentSession:stored,run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'review',agentSessionId:'agent-1',workspacePath:stored.workspacePath,pid:42,state:'running',cols:80,rows:24,observedAt:1,latestOutputBytes:0,acceptedInputBytes:0}}]})
-  const began=Date.now(),result=await controller.recoverSession({kind:'agent',hostId:'local',agentSessionId:'agent-1',run:stored.run},config)
-  expect(Date.now()-began).toBeLessThan(1000);expect(result).toMatchObject({kind:'reattachable',session:{id:'agent-1',processState:'running'}})
-  if(variant!=='foreign')expect(result).toHaveProperty('advisory',expect.stringMatching(/Wiki directory association is unconfirmed/))
-  expect(client.ensureAgentContinuity).toHaveBeenCalledOnce();expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('env.AGENTMUX_WIKI_DIR');expect(list).not.toHaveBeenCalled()
-  await controller.dispose();vi.restoreAllMocks()
 })
