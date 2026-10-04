@@ -587,6 +587,16 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     invocation.ambiguous !== undefined && invocation.ambiguous !== true)) {
     throw new AgentMuxError('hookReceipt.toolInvocation is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
+  // Tool arguments are content, including empty/multiline text, not an identity.
+  // Keep the existing per-text storage bound; ingress separately bounds in-flight bodies.
+  if (invocation && (typeof invocation.toolInput !== 'string' || Buffer.byteLength(invocation.toolInput) > MAX_STORED_TEXT_BYTES)) {
+    throw new AgentMuxError('hookReceipt.toolInvocation.toolInput is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const nativeTranscriptPath = invocation?.nativeTranscriptPath === undefined
+    ? undefined : normalizeNativeTranscriptPath(invocation.nativeTranscriptPath)
+  if (invocation?.nativeTranscriptPath !== undefined && nativeTranscriptPath !== invocation.nativeTranscriptPath) {
+    throw new AgentMuxError('hookReceipt.toolInvocation.nativeTranscriptPath is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
   return {
     id: string(source.id, 'hookReceipt.id'),
     providerId: string(source.providerId, 'hookReceipt.providerId'),
@@ -598,9 +608,9 @@ function hookReceipt(value: unknown): AgentHookReceipt {
       nativeSessionId: string(invocation.nativeSessionId, 'hookReceipt.toolInvocation.nativeSessionId'),
       nativeToolCallId: string(invocation.nativeToolCallId, 'hookReceipt.toolInvocation.nativeToolCallId'),
       ...(invocation.nativeTurnId === undefined ? {} : { nativeTurnId: string(invocation.nativeTurnId, 'hookReceipt.toolInvocation.nativeTurnId') }),
-      ...(invocation.nativeTranscriptPath === undefined ? {} : { nativeTranscriptPath: string(invocation.nativeTranscriptPath, 'hookReceipt.toolInvocation.nativeTranscriptPath') }),
+      ...(nativeTranscriptPath === undefined ? {} : { nativeTranscriptPath }),
       toolName: string(invocation.toolName, 'hookReceipt.toolInvocation.toolName'),
-      toolInput: string(invocation.toolInput, 'hookReceipt.toolInvocation.toolInput'),
+      toolInput: invocation.toolInput as string,
       ...(invocation.ambiguous ? { ambiguous: true as const } : {})
     } } : {}),
     ...(source.lifecycleEvent === null ? { lifecycleEvent: null } : lifecycleEvent ? { lifecycleEvent } : {}),
