@@ -18,12 +18,8 @@ import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from '
 import { validateBrowserTaskBatchValues, BROWSER_TASK_BATCH_MAX_OPERATIONS, BROWSER_TASK_BATCH_MAX_MILLIS, BROWSER_TASK_BATCH_MAX_BYTES, type BrowserTaskBatchHost, type BrowserTaskRunBudget } from './browser-task-batch.js'
 
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
-const MAX_ASSETS = 32
-const MAX_VERSIONS = 16
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
-const MAX_RUNS = 64
-const MAX_FILE_BYTES = 1_048_576
 const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
 const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
@@ -40,12 +36,10 @@ export class BrowserTaskAssetFileStore implements BrowserTaskAssetStore {
     let source: string
     try { source = await readFile(this.path, 'utf8') }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
-    if (Buffer.byteLength(source) > MAX_FILE_BYTES) throw new Error('Task asset document exceeds its byte budget')
     return normalizeDocument(JSON.parse(source))
   }
   async save(document: BrowserTaskAssetDocument): Promise<void> {
     const source = `${JSON.stringify(normalizeDocument(document), null, 2)}\n`
-    if (Buffer.byteLength(source) > MAX_FILE_BYTES) throw new Error('Task asset document exceeds its byte budget')
     await mkdir(dirname(this.path), { recursive: true })
     await durableWriteFile(this.path, source)
   }
@@ -195,7 +189,6 @@ export class BrowserTaskAssets {
   /** Called with the actual Main-owned recording, never a Renderer-supplied replacement. */
   async importRecording(recording: BrowserDemonstrationDraft, name = 'Demonstrated task'): Promise<BrowserTaskAsset> {
     return this.change(async () => {
-      if (this.document.assets.length >= MAX_ASSETS) throw new Error('Task asset budget reached; existing assets were retained.')
       const at = this.now()
       const steps: BrowserTaskStep[] = recording.steps.map(step => ({
         id: identity(step.id), kind: step.method === 'fillInput' ? 'fill' : step.method === 'gotoUrl' ? 'navigate' : 'click',
@@ -243,7 +236,6 @@ export class BrowserTaskAssets {
     return this.change(async () => {
       const asset = this.requireAsset(assetId)
       if (asset.revision !== expectedRevision) throw new Error('Task draft changed; reload before saving its version.')
-      if (asset.versions.length >= MAX_VERSIONS) throw new Error('Task version budget reached; old versions were retained.')
       if (!asset.draft.steps.length) throw new Error('The draft has no steps. Add a reviewed step before saving a runnable version.')
       validateBrowserTaskPath(asset.draft.steps)
       asset.versions.push({ ...copy(asset.draft), version: (asset.versions.at(-1)?.version ?? 0) + 1, savedAt: this.now() })
@@ -303,7 +295,6 @@ export class BrowserTaskAssets {
           nextStep: 0, status: 'ready' as const, operationIds: [], stepExecutions: [], branchDecisions: [], executedMillis: 0, humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now()
         }
         if (!existing) {
-          if (this.document.runs.length >= MAX_RUNS) throw new Error('Task run budget reached; previous run facts were retained.')
           this.document.runs.push(next)
         }
         if (batchItem) batchItem.runId = next.id
@@ -488,7 +479,6 @@ export class BrowserTaskAssets {
           items: supplied.items.map(item => ({ id: item.id })), nextItem: 0, status: 'ready', operationCount: 0, executedMillis: 0, startedAt: this.now(), updatedAt: this.now() }
         if (!previous) {
           this.document.batches ??= []
-          if (this.document.batches.length >= 32) throw new Error('Batch progress budget reached; existing runs were retained.')
           this.document.batches.push(next)
         }
         lease.batchId = next.id; next.status = 'running'; delete next.warning; next.updatedAt = this.now()
@@ -711,10 +701,10 @@ function content(raw: BrowserTaskContent): BrowserTaskContent {
 }
 function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
   const raw = value as BrowserTaskAssetDocument
-  if (!raw || raw.version !== 1 || !Array.isArray(raw.assets) || raw.assets.length > MAX_ASSETS || !Array.isArray(raw.runs) || raw.runs.length > MAX_RUNS) throw new Error('Invalid task asset document')
+  if (!raw || raw.version !== 1 || !Array.isArray(raw.assets) || !Array.isArray(raw.runs)) throw new Error('Invalid task asset document')
   const assets = raw.assets.map(asset => {
     if (!asset || !Number.isSafeInteger(asset.revision) || asset.revision < 1 || !Number.isFinite(asset.createdAt) || !Number.isFinite(asset.updatedAt) ||
-        !Array.isArray(asset.versions) || asset.versions.length > MAX_VERSIONS) throw new Error('Invalid task asset')
+        !Array.isArray(asset.versions)) throw new Error('Invalid task asset')
     const versions = asset.versions.map((version, index) => {
       if (version.version !== index + 1 || !Number.isFinite(version.savedAt)) throw new Error('Invalid task version')
       return { ...content(version), version: version.version, savedAt: version.savedAt }
@@ -737,7 +727,7 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
       ...(run.warning ? { warning: text(run.warning) } : {}), startedAt: run.startedAt, updatedAt: run.updatedAt }
   })
   if (new Set(runs.map(run => run.id)).size !== runs.length) throw new Error('Duplicate task run identity')
-  const selectedRuns = Array.isArray(raw.selectedRuns) && raw.selectedRuns.length <= MAX_RUNS &&
+  const selectedRuns = Array.isArray(raw.selectedRuns) &&
     new Set(raw.selectedRuns.map(item => item?.browserId)).size === raw.selectedRuns.length &&
     raw.selectedRuns.every(item => item && runs.some(run => run.id === item.runId && run.browserId === item.browserId))
     ? raw.selectedRuns.map(item => ({ browserId: identity(item.browserId), runId: identity(item.runId) })) : undefined
@@ -802,7 +792,7 @@ function normalizePathFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersio
 }
 
 function normalizeBatches(value: BrowserTaskBatchRun[], assets: BrowserTaskAsset[], runs: BrowserTaskAssetRun[]): BrowserTaskBatchRun[] {
-  if (!Array.isArray(value) || value.length > 32 || new Set(value.map(batch => batch.id)).size !== value.length) throw new Error('Invalid batch progress collection')
+  if (!Array.isArray(value) || new Set(value.map(batch => batch.id)).size !== value.length) throw new Error('Invalid batch progress collection')
   return value.map(batch => {
     const asset = assets.find(asset => asset.id === batch.assetId && asset.browserId === batch.browserId)
     if (!asset?.versions.some(version => version.version === batch.version) || !Array.isArray(batch.items) || batch.items.length < 1 || batch.items.length > 16 ||
