@@ -179,6 +179,8 @@ export class AgentPromptSubmissionCoordinator {
     const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
       !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
     if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId || unfinished) return undefined
+    if (direct && current.pendingInteraction) throw new AgentMuxError(
+      'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     onPreparationStarted?.()
     try {
       this.deps.assertAgentRun(current, run)
@@ -613,6 +615,7 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     if (nativeSteer && !rejoiningFrozenPlan) {
+      assertInteraction(session)
       // Observe the current pane, preserving one original preparation deadline and
       // the frozen source across acknowledged protocol replies before first claim.
       const remaining = transportQualification ? transportQualification.deadline - Date.now() : 8_000
