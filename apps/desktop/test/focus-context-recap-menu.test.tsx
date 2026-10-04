@@ -10,7 +10,6 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { formatSessionAddress } from '../src/renderer/src/lib/agent-address'
-import { resolveAgentSharingMetadata } from '../src/renderer/src/lib/agent-sharing-metadata'
 import { chooseFocusFilter } from './fixtures/focus-filter-menu'
 
 const commits = vi.hoisted(() => ({ rows: {} as Record<string, number> }))
@@ -123,8 +122,8 @@ it.each([
 it('copies the exact second same-name Session with no guessed Region or lifecycle action', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), source = useAppStore.getState()
   await mount(); await open()
-  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Session Address', 'Stop Agent'])
-  await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId, resolveAgentSharingMetadata(secondId, source)))
+  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Agent Link', 'Stop Agent'])
+  await choose('Copy Agent Link'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId))
   expect(copy.mock.calls[0]![0]).not.toContain('region:'); expect(useAppStore.getState().agentFocus).toBe(source.agentFocus)
   expect(useAppStore.getState().sessions).toBe(source.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(source.agentComposerDrafts)
 })
@@ -148,20 +147,15 @@ it('copies the clicked same-name context with its own Provider and current Execu
       reviewer: { ...state.config!.executors.reviewer!, label: 'Renamed Review Executor' }
     }
   } })))
-  await choose('Copy Session Address')
+  await choose('Copy Agent Link')
   expect(copy).toHaveBeenCalledTimes(1)
   const text = copy.mock.calls[0]![0]
-  expect(text).toContain(`ID: ${secondId}\n`)
-  expect(text).toContain('Exe: native-review | Renamed Review Executor (Shared Provider)\n')
-  expect(text).not.toContain('native-author')
-  expect(text).not.toContain('ID: native-review')
-  expect(text).not.toContain('Author Executor')
-  expect(text).not.toContain('region:')
+  expect(text).toBe(`amux://agent/${secondId}`)
 })
 it('opens with Shift+F10, uses the same messaging address and returns Escape to the exact trigger', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  await mount(); await open(secondId, true); await choose('Copy Session Address')
-  expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId, resolveAgentSharingMetadata(secondId, useAppStore.getState())))
+  await mount(); await open(secondId, true); await choose('Copy Agent Link')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId))
   await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(row(secondId))))
   await open(secondId, true); await act(async () => menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   await act(async () => vi.waitFor(() => expect(document.querySelector('.focus-context-menu')).toBeNull()))
@@ -169,7 +163,7 @@ it('opens with Shift+F10, uses the same messaging address and returns Escape to 
 })
 it('reports a clipboard failure through the original shared error owner without losing the draft', async () => {
   vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValue(new Error('Clipboard denied: private probe'))
-  const before = useAppStore.getState(); await mount(); await open(); await choose('Copy Session Address')
+  const before = useAppStore.getState(); await mount(); await open(); await choose('Copy Agent Link')
   expect(useAppStore.getState().error).toContain('Clipboard denied: private probe')
   expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })

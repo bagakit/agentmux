@@ -1,3 +1,4 @@
+import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import React from 'react'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
@@ -10,6 +11,11 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/sr
 import '../../../src/renderer/src/styles/index.css'
 import type { SessionSnapshot } from '../../../src/shared/contracts'
 
+// Private preview workspaces must satisfy the same absolute durable identity contract.
+const config = await api.config.get()
+api.config.get = async () => ({ ...config, workspaces: config.workspaces.map((workspace, index) => ({
+  ...workspace, path: workspace.path.startsWith('/') ? workspace.path : (_hygiene_fixturePath("private/region-menu-preview/") + (index) + "")
+})) })
 await useAppStore.getState().initialize()
 const originals = (await api.sessions.snapshot()).sessions.filter(session => session.kind === 'agent').slice(0, 2)
 if (originals.length !== 2) throw new Error('The public preview must provide two distinct Agent Sessions')

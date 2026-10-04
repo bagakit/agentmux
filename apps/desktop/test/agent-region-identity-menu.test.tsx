@@ -85,7 +85,7 @@ it('keeps the full name accessible while moving executor and Session context int
   expect(context!.textContent).toContain(`Session: ${sessionIds[0]}`)
   expect(context!.textContent).toContain('Executor:')
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
-  await select(menuItem(menu,'Copy Region Address'))
+  await select(menuItem(menu,'Copy Region Link'))
   expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
 })
 it('the actual identity follows user name, first prompt, Session label and then the current Provider label',async()=>{
@@ -119,12 +119,12 @@ it('read-only observation keeps the same Agent identity while the original polic
 })
 it.each(['mouse','touch'])('the actual Copy Region item keeps its origin while its neighbor is active (%s)',async(pointerType)=>{
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined);await mount();const menu=await menuWithRightActive()
-  await select(menuItem(menu,'Copy Region Address'),pointerType);expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
+  await select(menuItem(menu,'Copy Region Link'),pointerType);expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId))
   expect(useAppStore.getState().tabs[tabId]!.layout.activeRegionId).toBe(rightId)
 })
 it('keyboard selection retains the exact original Region and the active neighbor',async()=>{
   const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined);await mount();const menu=await menuWithRightActive()
-  await act(async()=>{const item=menuItem(menu,'Copy Region Address');item.focus();item.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))})
+  await act(async()=>{const item=menuItem(menu,'Copy Region Link');item.focus();item.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))})
   expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(leftId));expect(useAppStore.getState().tabs[tabId]!.layout.activeRegionId).toBe(rightId)
 })
 it('the actual Split item targets its original left Region, and keeps the neighbor Session and draft',async()=>{

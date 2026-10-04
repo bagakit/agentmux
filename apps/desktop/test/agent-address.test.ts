@@ -11,7 +11,6 @@ import { AGENTMUX_CONTROL_ERROR_CODES } from '@agentmux/core/control'
 import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
   addressingRecovery,
-  formatMessagingAddress,
   formatRegionAddress,
   formatSessionAddress,
   formatTabAddress
@@ -42,34 +41,20 @@ function assertEveryCommandRunnable(text: string, where: string): number {
   return seen
 }
 
-describe('compact sharing cards', () => {
-  it('uses a semantic SID and preserves the exact clicked Region as context', () => {
-    const card = formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
-    expect(card).toContain('--- amux : IDCard ---\nID: agent-7\nExe: ? | ? (?)\nRegion: region:pane-2')
-    expect(card).toContain("# amux agent send --to-session='agent-7' --text \"...\"")
-    expect(card).not.toContain('--to-region')
-    expect(formatMessagingAddress({ agentSessionId: 'agent-7' })).toBe(formatSessionAddress('agent-7'))
+describe('object sharing links', () => {
+  it('shares the semantic Agent without presentation metadata', () => {
+    expect(formatSessionAddress('agent-7')).toBe('amux://agent/agent-7')
   })
 
-  it('keeps spatial cards typed and discoverable without guessing an Agent', () => {
-    for (const [kind, card, selector] of [
-      ['Region', formatRegionAddress('region:2'), "--region='region:2'"],
-      ['Tab', formatTabAddress('tab:2'), "--tab='tab:2'"]
-    ]) {
-      expect(card).toContain(`--- amux : ${kind} ---`)
-      expect(card).toContain(`# amux space inspect ${selector}`)
-      expect(card).toContain('# amux --skill\n-----')
-      expect(card).not.toContain('agent send')
-    }
+  it('keeps exact Region and complete Tab identities distinct', () => {
+    expect(formatRegionAddress('region:2')).toBe('amux://region/region%3A2')
+    expect(formatTabAddress('tab:2')).toBe('amux://tab/tab%3A2')
   })
 
-  it('checks all six printed hints and escapes shell targets consistently', () => {
-    const target = "a'b c"
-    const cards = [formatSessionAddress(target), formatRegionAddress(target), formatTabAddress(target)]
-    expect(cards.reduce((seen, card) => seen + assertEveryCommandRunnable(card, 'card'), 0)).toBe(6)
-    expect(cards[0]).toContain(`--to-session='a'"'"'b c'`)
-    expect(cards[1]).toContain(`--region='a'"'"'b c'`)
-    expect(cards[2]).toContain(`--tab='a'"'"'b c'`)
+  it('encodes whitespace and separators without adding commands or annotations', () => {
+    expect(formatSessionAddress('a b/c?d#e')).toBe('amux://agent/a%20b%2Fc%3Fd%23e')
+    expect(formatRegionAddress('a b/c?d#e')).toBe('amux://region/a%20b%2Fc%3Fd%23e')
+    expect(formatTabAddress('a b/c?d#e')).toBe('amux://tab/a%20b%2Fc%3Fd%23e')
   })
 })
 
@@ -369,53 +354,20 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
   })
 })
 
-describe('恢复命令与复制地址共用同一个格式化出口', () => {
-  // 这条是本 task 的架构核心：两份拼接会各自演进，漂移时不会有任何测试变红。
-  // 因此这里不是"看起来一样"，而是断言两侧逐字来自同一处。
-
-  it('同一个 Session，复制出的语义命令与恢复给出的命令逐字一致', () => {
-    const copied = formatSessionAddress('agent-a')
-    const recovered = addressingRecovery({
-      code: 'MESSAGE_TARGET_NOT_UNIQUE',
-      candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
-    })
-    // 从复制出的地址里取出那一行 send 命令，它必须原样出现在恢复文本里。
-    const sendLine = copied.split('\n').map(line => line.replace(/^# /u, '')).find((line) => line.startsWith('amux agent send '))
-    expect(sendLine).toBeDefined()
-    expect(recovered).toContain(sendLine!)
-  })
-
-  it('恢复按语义 SID 发送，不替一个多投影 Agent 猜第一格', () => {
+describe('Core owns links and executable recovery commands', () => {
+  it('a share is one link; ambiguity recovery still supplies complete semantic send commands', () => {
+    expect(formatSessionAddress('agent-a')).toBe('amux://agent/agent-a')
     const recovered = addressingRecovery({
       code: 'MESSAGE_TARGET_NOT_UNIQUE',
       candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1', 'region:2'] }]
     })
-    const sessionSendLine = formatSessionAddress('agent-a')
-      .split('\n')
-      .map(line => line.replace(/^# /u, '')).find((line) => line.startsWith('amux agent send '))
-    expect(sessionSendLine).toBeDefined()
-    expect(recovered).toContain(sessionSendLine!)
+    expect(recovered).toContain('amux agent send --to-session=\'agent-a\' --text "..."')
     expect(recovered).not.toContain('--to-region')
-  })
-
-  it('复制侧与恢复侧断言的是同一段文本，改格式必然一起红', () => {
-    // 上面两条断言"两侧一致"，但共用出口时它们在任何格式下都一致——那证明不了"同时变红"。
-    // 这条锁住的是另一件事：两侧各自都有**独立的字面断言**钉住命令长什么样。
-    // Agent 名片和候选恢复都钉住语义 SID；显式 Region 地址仍有独立的空间用途。
-    const sessionId = 'agent-a'
-    const literal = `amux agent send --to-session='${sessionId}'`
-    expect(formatSessionAddress(sessionId)).toContain(literal)
-    expect(
-      addressingRecovery({
-        code: 'MESSAGE_TARGET_NOT_UNIQUE',
-        candidates: [{ agentSessionId: sessionId, regionIds: ['region:1'] }]
-      })
-    ).toContain(literal)
   })
 
   const RENDERER_SRC = fileURLToPath(new URL('../src/renderer/src', import.meta.url))
   const CORE_OWNER = new URL('../../../packages/core/src/sharing.ts', import.meta.url)
-  const ASSEMBLY = /(?:amux|agentmux)\s+(?:agent|space)\s+(?:send|inspect)\b/u
+  const ASSEMBLY = /(?:amux|agentmux)\s+(?:agent\s+send|space\s+inspect)\b/u
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
       const path = `${dir}/${entry.name}`
@@ -442,87 +394,24 @@ describe('恢复命令与复制地址共用同一个格式化出口', () => {
 
 })
 
-describe('入口接线：菜单真的调用了交接出口，并且真的把它画出来', () => {
-  // 纯函数正确不代表菜单接上了，而"model 里造了一项"也不代表用户点得到——本轮实测踩过：
-  // 两个菜单都构造了 handoff，却都没渲染它，于是那条能力对用户根本不存在。所以这里查两件事：
-  // 解析走的是交接出口（而不是退回直接复制地址），以及那一项确实被渲染成菜单项。
-
-  it('Region 菜单把那一格交给交接出口，并渲染出这一项', async () => {
-    const source = readFileSync(
-      new URL('../src/renderer/src/components/RegionContextMenu.tsx', import.meta.url),
-      'utf8'
-    )
-    expect(source).toContain('formatMessagingAddress({ agentSessionId, regionId, ...sharingMetadata?.() })')
-
-    // 「造了不画等于没有」这件事现在真跑得到：菜单画的是 model.entries，那份清单是可执行的数据。
-    // 此前这里是两条 toContain('model.handoff.onSelect' / '.label') 的文本断言，而文本看不见
-    // 那一项有没有被画出来——把 JSX 条件改成 `{false && model.handoff ? (`，「Message this Agent」
-    // 与它的分隔符永不渲染，34 条断言全绿（实测）。清单的在场、顺序、可点性由
-    // region-context-menu.test.tsx 定死，这里只钉住"交接那一项在清单里且解析成 Region 地址"。
-    const { createRegionCopyModel } = await import(
-      '../src/renderer/src/components/RegionContextMenu.js'
-    )
+describe('object-link menu consumers', () => {
+  it.each([
+    ['RegionContextMenu', 'region:pane-2'],
+    ['WorkbenchTabContextMenu', 'view:x']
+  ] as const)('%s exposes one clickable semantic Agent link', async (component, identity) => {
     const copied: string[] = []
-    const entries = createRegionCopyModel({
-      regionId: 'region:pane-2',
-      agentSessionId: 'agent-7',
-      writeClipboardText: async (text: string) => {
-        copied.push(text)
-      }
-    }).entries
-    const handoff = entries.find(
-      (entry) => entry.kind === 'action' && entry.action.label === 'Message this Agent'
-    )
-    expect(handoff, '交接那一项不在菜单画出来的清单里——用户点不到').toBeDefined()
-    if (handoff?.kind !== 'action') throw new Error('unreachable')
-    await handoff.action.onSelect()
-    expect(copied).toEqual([
-      formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })
-    ])
-  })
-
-  it('Tab 菜单不带那一格，于是落到 Session，并渲染出这一项', async () => {
-    const source = readFileSync(
-      new URL('../src/renderer/src/components/WorkbenchTabContextMenu.tsx', import.meta.url),
-      'utf8'
-    )
-    expect(source).toContain('formatMessagingAddress({ agentSessionId, ...sharingMetadata?.() })')
-
-    // 与 Region 侧同一条路：菜单画的是 model.entries，那份清单是可执行的数据，故"造了不画"跑得到。
-    // 此前这里是两条 toContain('copyModel.handoff.onSelect' / '.label') 的文本断言，而文本看不见
-    // 那一项有没有被画出来——把 JSX 条件改成 `{false && copyModel.handoff ? (` 就能在全绿之下把它抹掉。
-    const { createWorkbenchTabCopyModel } = await import(
-      '../src/renderer/src/components/WorkbenchTabContextMenu.js'
-    )
-    const copied: string[] = []
-    const entries = createWorkbenchTabCopyModel({
-      tabId: 'view:x',
-      agentSessionId: 'agent-7',
-      writeClipboardText: async (text: string) => {
-        copied.push(text)
-      }
-    }).entries
-    const handoff = entries.find(
-      (entry) => entry.kind === 'action' && entry.action.label === 'Message this Agent'
-    )
-    expect(handoff, '交接那一项不在菜单画出来的清单里——用户点不到').toBeDefined()
-    if (handoff?.kind !== 'action') throw new Error('unreachable')
-    await handoff.action.onSelect()
-    // Tab 菜单没有"哪一格"，于是解析成跨 View 稳定的 Session 地址。
-    expect(copied).toEqual([formatMessagingAddress({ agentSessionId: 'agent-7' })])
-    expect(copied[0]).toBe(formatSessionAddress('agent-7'))
-  })
-
-  it('两个菜单的 model 类型都声明了 handoff——否则它连类型上都不存在', () => {
-    // 上一轮的死代码正是这样溜过去的：对象字面量里多写一个字段，类型里没有，
-    // 组件那侧也就永远取不到它，而 tsc 不会为"多写"报错。
-    for (const file of ['RegionContextMenu.tsx', 'WorkbenchTabContextMenu.tsx']) {
-      const source = readFileSync(
-        new URL(`../src/renderer/src/components/${file}`, import.meta.url),
-        'utf8'
-      )
-      expect(source).toMatch(/handoff\?: \w+CopyAction/u)
-    }
+    const writeClipboardText = async (text: string) => { copied.push(text) }
+    const { createRegionCopyModel } = await import('../src/renderer/src/components/RegionContextMenu.js')
+    const { createWorkbenchTabCopyModel } = await import('../src/renderer/src/components/WorkbenchTabContextMenu.js')
+    const model = component === 'RegionContextMenu'
+      ? createRegionCopyModel({ regionId: identity, agentSessionId: 'agent-7', writeClipboardText })
+      : createWorkbenchTabCopyModel({ tabId: identity, agentSessionId: 'agent-7', writeClipboardText })
+    const links = model.entries.filter(entry => entry.kind === 'action' && entry.action.label === 'Copy Agent Link')
+    expect(links).toHaveLength(1)
+    const link = links[0]!
+    if (link.kind !== 'action') throw new Error('unreachable')
+    await link.action.onSelect()
+    expect(copied).toEqual(['amux://agent/agent-7'])
   })
 
   it('send 的失败路径真的把恢复命令塞进了错误消息', async () => {

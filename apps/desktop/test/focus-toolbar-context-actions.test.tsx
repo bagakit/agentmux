@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { createWorkspaceLayout, moveTabToNewGroup, addTabOccurrence } from '@agentmux/layout'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
 import { executionFocusPresentation } from '../src/renderer/src/lib/focus-tab-projection'
@@ -40,6 +41,7 @@ beforeEach(async () => {
     layouts: { ...state.layouts, project: { ...layout, activeGroupId: 'ordinary-group' } }, activeWorkspaceId: SCRATCH_WORKSPACE_ID,
     mainSurface: 'agents', agentFocus: { ...state.agentFocus, execution: { sessionId: executionAgent.id, history: [], reference } },
     launchAgent: launch, agentComposerDrafts: { ...state.agentComposerDrafts, [sourceRegion]: 'Source Region unsent' } })
+  await initializeSpatialControlFixture(moteTopics)
   vi.spyOn(api.scratch, 'ensureMote').mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id)!)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   await act(async () => root.render(createElement(Scene)))
@@ -66,7 +68,7 @@ it('creates one exact complete-Tab discussion through the original primary Mote 
   const created = discussions(); expect(created).toHaveLength(1)
   const tab = created[0]!, prompt = useAppStore.getState().agentComposerDrafts[tab.layout.activeRegionId]!
   expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID)
-  expect(prompt).toContain(formatTabAddress(sourceId)); expect(prompt).not.toContain(formatTabAddress('ordinary-decoy'))
+  expect(prompt).toContain('amux://tab/displayed-complete-tab'); expect(prompt).toContain(formatTabAddress(sourceId)); expect(prompt).not.toContain(formatTabAddress('ordinary-decoy'))
   expect(prompt).not.toContain('original-run-'); expect(prompt).not.toContain('source-file')
   expect(launch).toHaveBeenCalledExactlyOnceWith('fixture', prompt, 'mote-group', { tabId: tab.id, regionId: tab.layout.activeRegionId }, undefined, undefined, undefined)
   for (const [key, value] of Object.entries(drafts)) expect(useAppStore.getState().agentComposerDrafts[key]).toBe(value)
@@ -82,7 +84,7 @@ it('captures the existing custom Mote identity, rejects duplicate pending clicks
   expect(discussions()).toHaveLength(1); expect(api.scratch.ensureMote).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, customMoteId)
   expect(button('Chat about this tab with Mote').disabled).toBe(true)
   const born = discussions()[0]!, prompt = useAppStore.getState().agentComposerDrafts[born.layout.activeRegionId]
-  expect(born.topicId).toBe(customMoteId); expect(prompt).toContain(formatTabAddress(sourceId))
+  expect(born.topicId).toBe(customMoteId); expect(prompt).toContain('amux://tab/displayed-complete-tab'); expect(prompt).toContain(formatTabAddress(sourceId))
   const laterInput = document.createElement('input'); document.body.append(laterInput)
   await act(async () => { requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); useAppStore.setState({ mainSurface: 'board', activeWorkspaceId: 'project' }); laterInput.focus() })
   await act(async () => release(moteTopics.find(topic => topic.id === customMoteId)!)); await settle()

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildSync } from 'esbuild'
-import { formatSessionAddress, formatRegionAddress, formatTabAddress } from '../src/sharing.js'
+import { formatSessionAddress, formatRegionAddress, formatTabAddress, parseAmuxObjectLink, agentSessionSendCommand } from '../src/sharing.js'
 import { ObjectCliProbe } from './helpers/object-cli-rpc.js'
 
 const exec = promisify(execFile)
@@ -23,27 +23,32 @@ async function command(probe: ObjectCliProbe, script: string) {
 }
 
 describe('public amux sharing consumption', () => {
-  it('runs each nonempty printed hint through the real short-name bin and object parser', async () => {
+  it('consumes decoded object links through the real short-name CLI and public service', async () => {
     const probe = new ObjectCliProbe(); probes.push(probe); await probe.start()
     const identity = "--original id$'quoted"
-    for (const card of [formatSessionAddress(identity, { nativeSessionId: 'different-native-id' }), formatRegionAddress(identity), formatTabAddress(identity)]) {
-      const hints = card.split('\n').filter(line => line.startsWith('# amux ')).map(line => line.slice(2))
-      expect(hints).toHaveLength(2)
-      const result = await command(probe, hints[0]!)
+    const quoted = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'"
+    const links = [formatSessionAddress(identity), formatRegionAddress(identity), formatTabAddress(identity)]
+    expect(links).toHaveLength(3)
+    for (const link of links) {
+      const target = parseAmuxObjectLink(link)
+      const script = target.kind === 'agent' ? agentSessionSendCommand(target.agentSessionId)
+        : target.kind === 'region' ? `amux space inspect --region=${quoted(target.regionId)}`
+        : target.kind === 'tab' ? `amux space inspect --tab=${quoted(target.tabId)}` : ''
+      expect(script.length).toBeGreaterThan(0)
+      const result = await command(probe, script)
       expect(result.code, result.stderr).toBe(1)
       expect(JSON.parse(result.stderr).error.code).toBe('CLI_ROUTE_PROBE')
-      const guide = await command(probe, hints[1]!)
-      expect(guide.code, guide.stderr).toBe(0)
-      expect(guide.stdout).toContain('agentmux agent send')
     }
     expect(probe.requests.map(request => ({ method: request.method, params: request.params }))).toEqual([
-      { method: 'agent.send', params: { target: { kind: 'agent-session', agentSessionId: identity }, text: '...', operationId: expect.any(String) } },
+      { method: 'agent.send', params: { target: { kind: 'agent-session', agentSessionId: identity }, text: '...', sourceChannel: 'cli', operationId: expect.any(String) } },
       { method: 'space.inspect', params: { target: { regionId: identity } } },
       { method: 'space.inspect', params: { target: { tabId: identity } } }
     ])
-    const help = await command(probe, 'amux agent --help')
-    expect(help.code, help.stderr).toBe(0)
-    expect(help.stdout).toContain('agentmux agent inspect')
+    const guide = await command(probe, 'amux --skill')
+    expect(guide.code, guide.stderr).toBe(0)
+    expect(guide.stdout).toContain('amux://')
+    expect(guide.stdout).toContain('parseAmuxObjectLink')
+    expect(guide.stdout).toContain('--expect-session SID')
     expect(probe.requests).toHaveLength(3)
   })
 
@@ -64,7 +69,7 @@ describe('public amux sharing consumption', () => {
     const result = await exec(process.execPath, ['--input-type=module', '-e',
       "import {formatSessionAddress} from '@agentmux/core/sharing'; console.log(formatSessionAddress('S'))"
     ], { cwd: fileURLToPath(new URL('../../../apps/desktop', import.meta.url)) })
-    expect(result.stdout).toContain('--- amux : IDCard ---\nID: S\nExe: ? | ? (?)')
+    expect(result.stdout).toBe('amux://agent/S\n')
   })
 
   it('includes the executable short name and sharing module in the real package archive', async () => {

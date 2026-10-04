@@ -6,7 +6,6 @@ import ts from 'typescript'
 // MutationObserver 按 Radix 的 DOM 协议统一观察之后，那条 import 没了，stub 也就不需要了。
 import { createRegionCopyModel } from '../src/renderer/src/components/RegionContextMenu.js'
 import {
-  formatMessagingAddress,
   formatRegionAddress,
   formatSessionAddress
 } from '../src/renderer/src/lib/agent-address.js'
@@ -23,8 +22,8 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
       writeClipboardText
     })
 
-    expect(model.regionAddress.label).toBe('Copy Region Address')
-    expect(model.sessionAddress?.label).toBe('Copy Session Address')
+    expect(model.regionAddress.label).toBe('Copy Region Link')
+    expect(model.sessionAddress?.label).toBe('Copy Agent Link')
 
     await model.regionAddress.onSelect()
     // 内容来自唯一 formatter，组件不自己拼字符串。
@@ -45,33 +44,17 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
 
     await model.regionAddress.onSelect()
     const copied = writeClipboardText.mock.calls[0]![0]
-    expect(copied).toContain('region:pane-9')
+    expect(copied).toBe('amux://region/region%3Apane-9')
     expect(copied).not.toContain('pane-1')
   })
 
-  it('Agent 名片给出稳定 SID 与这一格的准确空间命令', async () => {
-    // 交接是这个菜单的主要意图。点击发生在某一格上，我们知道是哪一格而接收方不知道，
-    // 所以它解析成 Region 而非 Session——把消歧做在源头。
-    const writeClipboardText = vi.fn(async (_text: string) => {})
-    const model = createRegionCopyModel({
-      regionId: 'region:pane-2',
-      agentSessionId: 'agent-7',
-      writeClipboardText
-    })
-    expect(model.handoff?.label).toBe('Message this Agent')
-    await model.handoff?.onSelect()
-    expect(writeClipboardText).toHaveBeenCalledWith(formatMessagingAddress({
-      agentSessionId: 'agent-7',
-      regionId: 'region:pane-2'
-    }))
-    // 退化成 Session 地址会丢掉"是哪一格"，那正是这个入口要保住的信息。
-    expect(writeClipboardText).not.toHaveBeenCalledWith(formatSessionAddress('agent-7'))
-    const copied = writeClipboardText.mock.calls[0]![0]
-    expect(copied).toContain("amux agent send --to-session='agent-7'")
-    expect(copied).toContain('Region: region:pane-2')
-    expect(copied).toContain('# amux --skill')
-    expect(copied).not.toContain('space mv')
-    expect(copied).not.toContain('--to-region')
+  it('shares stable semantic Agent and clicked Region separately without metadata', async () => {
+    const write = vi.fn(async (_text: string) => {})
+    const model = createRegionCopyModel({ regionId: 'region:pane-2', agentSessionId: 'agent-7', writeClipboardText: write })
+    await model.sessionAddress!.onSelect()
+    expect(write).toHaveBeenCalledExactlyOnceWith('amux://agent/agent-7')
+    await model.regionAddress.onSelect()
+    expect(write).toHaveBeenLastCalledWith('amux://region/region%3Apane-2')
   })
 
   it('非 Agent 的 Region 不提供 Session 地址——缺席表达，不画禁用的假按钮', () => {
@@ -83,7 +66,6 @@ describe('Region 右键菜单：点哪格就是哪格', () => {
     // 一格文件/浏览器/launcher 没有 Agent 语义身份可寻址。
     expect(model.sessionAddress).toBeUndefined()
     // 没有 Agent 就没有可交接的对象，交接入口同样缺席。
-    expect(model.handoff).toBeUndefined()
     // 但它仍然是一格，Region 地址照样有意义（inspect 得到它显示什么）。
     expect(model.regionAddress).toBeDefined()
   })
@@ -190,7 +172,7 @@ describe('菜单画哪几项、什么顺序', () => {
     const first = entriesFor('agent-7')[0]
     expect(first?.kind).toBe('action')
     // 只断言"handoff 在清单里"会放过它排到末尾；位置本身就是这个设计决定。
-    expect(first?.kind === 'action' ? first.action.label : undefined).toBe('Message this Agent')
+    expect(first?.kind === 'action' ? first.action.label : undefined).toBe('Copy Agent Link')
   })
 
   it('清单不多不少，就是在场的那些动作', () => {
@@ -200,25 +182,18 @@ describe('菜单画哪几项、什么顺序', () => {
       .filter((entry) => entry.kind === 'action')
       .map((entry) => (entry.kind === 'action' ? entry.action.label : ''))
     expect(labels).toEqual([
-      'Message this Agent',
-      'Copy Region Address',
-      'Copy Session Address'
+      'Copy Agent Link',
+      'Copy Region Link'
     ])
     expect(
       entriesFor(null)
         .filter((entry) => entry.kind === 'action')
         .map((entry) => (entry.kind === 'action' ? entry.action.label : ''))
-    ).toEqual(['Copy Region Address'])
+    ).toEqual(['Copy Region Link'])
   })
 
-  it('分隔线恰好一道，且真的隔着两组东西', () => {
-    const entries = entriesFor('agent-7')
-    const separators = entries.filter((entry) => entry.kind === 'separator')
-    expect(separators).toHaveLength(1)
-    // 贴在顶上或悬在底下的线是噪音——它必须两侧都有东西。
-    const at = entries.findIndex((entry) => entry.kind === 'separator')
-    expect(at).toBeGreaterThan(0)
-    expect(at).toBeLessThan(entries.length - 1)
+  it('one group of copy links needs no separator', () => {
+    expect(entriesFor('agent-7').map(entry => entry.kind)).toEqual(['action', 'action'])
   })
 
   it('没有交接可做时不画那道线', () => {
@@ -237,9 +212,8 @@ describe('菜单画哪几项、什么顺序', () => {
       writeClipboardText
     })
     const expected = new Map<string, string>([
-      ['Message this Agent', formatMessagingAddress({ agentSessionId: 'agent-7', regionId: 'region:pane-2' })],
-      ['Copy Region Address', formatRegionAddress('region:pane-2')],
-      ['Copy Session Address', formatSessionAddress('agent-7')]
+      ['Copy Region Link', formatRegionAddress('region:pane-2')],
+      ['Copy Agent Link', formatSessionAddress('agent-7')]
     ])
 
     let clicked = 0

@@ -843,7 +843,7 @@ setInterval(tick,100);
     assert.deepEqual(restored.identity,before.identity,'The original Agent name and More return from the same durable Session facts')
     await activateButton(second.cdp,`document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`)
     const entries=await waitFor('restored actual More items',()=>second.cdp.evaluate(`(()=>{const menu=document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]');return menu&&[...menu.querySelectorAll('[role="menuitem"]')].map(item=>item.textContent.trim())})()`))
-    assert.ok(entries.length>0);assert.ok(entries.includes('Copy Region Address'));assert.ok(entries.includes('Conversation history'))
+    assert.ok(entries.length>0);assert.ok(entries.includes('Copy Region Link'));assert.ok(entries.includes('Conversation history'))
     await key(second.cdp,'Escape','Escape')
     await waitFor('restored menu dismissed',()=>second.cdp.evaluate(`!document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')`))
     // Radix FocusScope restores focus from its deferred unmount callback, after the Portal disappears.

@@ -5,7 +5,6 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
 import { formatSessionAddress } from '../../../src/renderer/src/lib/agent-address'
-import { resolveAgentSharingMetadata } from '../../../src/renderer/src/lib/agent-sharing-metadata'
 import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
 import { FocusContextRow } from '../../../src/renderer/src/components/FocusContextRow'
 import { TransientErrorNotice } from '../../../src/renderer/src/components/TransientErrorNotice'
@@ -55,7 +54,7 @@ function Probe() {
 createRoot(document.getElementById('root')).render(h(Probe))
 let nodes = [], draft
 window.recapProof = {
-  ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b', resolveAgentSharingMetadata('recap-b', useAppStore.getState())),
+  ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b')),
   remember() { nodes = [...document.querySelectorAll('.focus-context')]; draft = document.querySelector('[aria-label="Later explicit input"]'); draft.setSelectionRange(2,8) },
   denyClipboard(value) { denyClipboard = value },
   churn() { for (let index = 0; index < 200; index++) useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, status: { ...session.status, observedAt: now + index + 1 } })) })) },

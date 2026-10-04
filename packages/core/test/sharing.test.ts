@@ -1,105 +1,43 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
-import {
-  formatAmuxSharing, formatSessionAddress, formatMessagingAddress,
-  formatRegionAddress, formatTabAddress, formatSpaceAddress, formatZoneAddress,
-  formatAmuxSpatialLink, parseAmuxSpatialLink, type AmuxSpatialLinkTarget
-} from '../src/sharing.js'
+import { formatAmuxSharing, formatSessionAddress, formatRegionAddress, formatTabAddress,
+  formatSpaceAddress, formatZoneAddress, formatAmuxObjectLink, parseAmuxObjectLink, type AmuxObjectLinkTarget } from '../src/sharing.js'
 
-describe('amux sharing', () => {
-  it('keeps an Agent card short, typed and directly addressable', () => {
-    expect(formatSessionAddress('h_tAP3RXjU95i0d7', {
-      nativeSessionId: 'native-thread-42', provider: 'Codex', executor: 'codex-full-auto'
-    })).toBe([
-      '--- amux : IDCard ---',
-      'ID: h_tAP3RXjU95i0d7',
-      'Exe: native-thread-42 | codex-full-auto (Codex)',
-      '# amux agent send --to-session=\'h_tAP3RXjU95i0d7\' --text "..."',
-      '# amux --skill',
-      '-----'
-    ].join('\n'))
+describe('amux object sharing', () => {
+  it('copies one original typed link without metadata, instructions or a guessed location', () => {
+    expect(formatSessionAddress('original')).toBe('amux://agent/original')
+    expect(formatRegionAddress('region:original')).toBe('amux://region/region%3Aoriginal')
+    expect(formatTabAddress('tab:original')).toBe('amux://tab/tab%3Aoriginal')
+    expect(formatSpaceAddress({ spaceId: 'space/original' })).toBe('amux://space/space%2Foriginal')
+    expect(formatZoneAddress({ zoneId: 'zone/original' })).toBe('amux://zone/zone%2Foriginal')
+    const unrelated = { spaceId: 'original', kind: 'agent', agentSessionId: 'other', label: 'ID: forged' }
+    expect(formatSpaceAddress(unrelated)).toBe('amux://space/original')
   })
 
-  it('keeps missing metadata unknown while retaining the usable SID', () => {
-    expect(formatSessionAddress('original')).toContain('Exe: ? | ? (?)')
-    expect(formatSessionAddress('original')).toContain("--to-session='original'")
-    expect(formatSessionAddress('original', { executor: 'saved-id' }))
-      .toContain('Exe: ? | saved-id (?)')
-  })
-
-  it('does not let structurally compatible metadata replace the semantic target or invent a Region', () => {
-    const metadata = { provider: 'Codex', executor: 'X', agentSessionId: 'other', regionId: 'invented' }
-    const card = formatSessionAddress('original', metadata)
-    expect(card).toContain('ID: original\nExe: ? | X (Codex)')
-    expect(card).toContain("--to-session='original'")
-    expect(card).not.toContain('other')
-    expect(card).not.toContain('Region:')
-  })
-
-  it('keeps a clicked Region as context without rerouting the Agent', () => {
-    const card = formatMessagingAddress({
-      agentSessionId: 'original', regionId: 'clicked', provider: 'Claude', executor: 'reviewer'
-    })
-    expect(card.split('\n')).toContain('Region: clicked')
-    expect(card).toContain("--to-session='original'")
-    expect(card).not.toContain('--to-region')
-    expect(card).not.toContain('space mv')
-    expect(card).not.toContain('--zone')
-    expect(formatMessagingAddress({ agentSessionId: 'original' })).toBe(formatSessionAddress('original'))
-  })
-
-  it('types spatial cards without promising a unique semantic recipient', () => {
-    expect(formatRegionAddress('R')).toBe(
-      "--- amux : Region ---\nID: R\n# amux space inspect --region='R'\n# amux --skill\n-----")
-    expect(formatTabAddress('T')).toBe(
-      "--- amux : Tab ---\nID: T\n# amux space inspect --tab='T'\n# amux --skill\n-----")
-    expect(formatRegionAddress('R') + formatTabAddress('T')).not.toContain('agent send')
-  })
-
-  it('prevents display metadata from forging fields while preserving names', () => {
-    const card = formatSessionAddress('S', { provider: 'Codex\nID: forged', executor: 'A | B\r\n-----' })
-    expect(card.split('\n')).toHaveLength(6)
-    expect(card.split('\n').filter(line => line.startsWith('ID:'))).toEqual(['ID: S'])
-    expect(card).toContain('Exe: ? | A \\| B\\r\\n----- (Codex\\nID: forged)')
-    expect(formatSessionAddress('S', { nativeSessionId: 'native\nID: forged | token' }))
-      .toContain('Exe: native\\nID: forged \\| token | ? (?)')
-    expect(formatSessionAddress('S', { provider: 'A\u2028B\u2029C\u007f' }))
-      .toContain('Exe: ? | ? (A\\u2028B\\u2029C\\u007f)')
-  })
-
-  it('frames owner content without trimming or interpreting it', () => {
-    const original = ' path:3-9\n\n\`\`\`ts\n  x\n\`\`\`\n'
-    expect(formatAmuxSharing('File', original)).toBe(
-      '--- amux : File ---\n' + original + '\n-----')
-  })
-
-  it('shares original parent Space and Zone identities without a child or a stale parent hint', () => {
-    const spaceId = JSON.stringify(['local', fixturePath("Topics/工作")]), zoneId = '["topic", "one/two%"]'
-    const card = formatSpaceAddress({ spaceId, label: 'Work\nID: fake' })
-    expect(card.split('\n')).toEqual(['--- amux : Space ---', `ID: ${spaceId}`, 'Name: Work\\nID: fake',
-      `Link: ${formatAmuxSpatialLink({ kind: 'space', spaceId })}`, `# amux space inspect --space='${spaceId}'`, '# amux --skill', '-----'])
-    const zone = formatZoneAddress({ zoneId })
-    expect(zone).toContain(`Link: ${formatAmuxSpatialLink({ kind: 'zone', zoneId })}`)
-    expect(zone).not.toContain('--space='); expect(zone).not.toContain('Name:')
-    expect(formatZoneAddress({ zoneId: "a'b" })).toContain("--zone='a'\"'\"'b'")
-  })
-
-  it('round-trips opaque identities through the strict public URI owner', () => {
+  it('round-trips opaque original identities independently for all five object kinds', () => {
     for (const id of ['original', '中文 🍃', ("[\"host\",\"" + (fixturePath("root/topic")) + "\"]"), 'a?b#c%d|e', "a'b", '\n']) {
-      for (const target of [{ kind: 'space', spaceId: id }, { kind: 'zone', zoneId: id }] as AmuxSpatialLinkTarget[]) {
-        expect(parseAmuxSpatialLink(formatAmuxSpatialLink(target))).toEqual(target)
-      }
+      const targets: AmuxObjectLinkTarget[] = [{ kind: 'agent', agentSessionId: id }, { kind: 'region', regionId: id },
+        { kind: 'tab', tabId: id }, { kind: 'space', spaceId: id }, { kind: 'zone', zoneId: id }]
+      expect(targets).toHaveLength(5)
+      for (const target of targets) expect(parseAmuxObjectLink(formatAmuxObjectLink(target))).toEqual(target)
     }
+    expect(parseAmuxObjectLink('amux://agent/a%2Fb%25%20%23')).toEqual({ kind: 'agent', agentSessionId: 'a/b% #' })
   })
 
-  it('rejects unsupported targets, hidden actions, malformed encoding and guessed identities', () => {
-    for (const raw of ['amux://agent/S', 'amux://zone/', 'amux://zone/A/B', 'amux://zone/A?space=B',
+  it('rejects unknown kinds, executable additions and noncanonical or malformed identities', () => {
+    const invalid = ['amux://run/S', 'amux://agent/', 'amux://zone/A/B', 'amux://agent/A?text=run',
       'amux://space/A#x', 'amux://user@zone/A', 'amux://zone:80/A', 'amux://zone/%',
-      'amux://zone/%FF', 'amux://zone/%41', 'amux://zone/%2f', 'amux://ZONE/A', ' amux://zone/A', 'https://zone/A']) {
-      expect(() => parseAmuxSpatialLink(raw), raw).toThrow()
-    }
-    expect(() => parseAmuxSpatialLink(null as unknown as string)).toThrow()
-    expect(() => formatAmuxSpatialLink({ kind: 'zone', zoneId: '' })).toThrow()
-    expect(() => formatAmuxSpatialLink({ kind: 'agent', zoneId: 'S' } as unknown as AmuxSpatialLinkTarget)).toThrow()
+      'amux://zone/%FF', 'amux://zone/%41', 'amux://zone/%2f', 'amux://ZONE/A', ' amux://zone/A', 'https://zone/A']
+    expect(invalid).toHaveLength(14)
+    for (const raw of invalid) expect(() => parseAmuxObjectLink(raw), raw).toThrow()
+    expect(() => parseAmuxObjectLink(null as unknown as string)).toThrow()
+    expect(() => formatAmuxObjectLink({ kind: 'zone', zoneId: '' })).toThrow()
+    expect(() => formatAmuxObjectLink({ kind: 'unknown', zoneId: 'S' } as unknown as AmuxObjectLinkTarget)).toThrow()
+  })
+
+  it('keeps File and Browser content sharing byte-for-byte in its original frame', () => {
+    const original = ' path:3-9\n\n```ts\n  x\n```\n'
+    expect(formatAmuxSharing('File', original)).toBe('--- amux : File ---\n' + original + '\n-----')
+    expect(formatAmuxSharing('Browser', original)).toBe('--- amux : Browser ---\n' + original + '\n-----')
   })
 })

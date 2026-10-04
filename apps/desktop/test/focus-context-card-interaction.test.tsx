@@ -13,7 +13,6 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { formatSessionAddress } from '../src/renderer/src/lib/agent-address'
-import { resolveAgentSharingMetadata } from '../src/renderer/src/lib/agent-sharing-metadata'
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 
@@ -76,6 +75,7 @@ beforeEach(async () => {
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
   vi.spyOn(api.spatial, 'confirmNameCommit').mockImplementation(operationId => owner.confirmNameCommit(operationId))
   vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
+  await owner.retainDisplayLabels([first, second].map(id => ({ target: { kind: 'agent-session' as const, id }, value: 'Same visible Agent' })))
   await initializeSpatialControlFixture()
   useAppStore.setState(acknowledgedNameProjection((await owner.readForLayout())!, 0)!)
   container = document.createElement('div'); destination = document.createElement('input'); document.body.append(container, destination)
@@ -121,13 +121,13 @@ it('uses one keyboard-readable preview and the same exact-SID menu without selec
   await act(async () => card(second).focus()); expect(document.querySelectorAll('.focus-context-hover')).toHaveLength(1)
   const before = useAppStore.getState(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await menu(second, 'shift-f10'); expect(preview()).toBeNull()
-  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Rename Agent', 'Copy Session Address', 'Stop Agent'])
+  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Rename Agent', 'Copy Agent Link', 'Stop Agent'])
   const identity = document.querySelector('.focus-context-menu__identity')!
   expect(identity.textContent).toBe(useAppStore.getState().agentNames[second])
   expect(identity.querySelector('strong')?.getAttribute('title')).toBe(identity.textContent)
   expect(identity.querySelector('span, code')).toBeNull()
   expect(card(second).getAttribute('aria-pressed')).toBe('false'); expect(select).not.toHaveBeenCalled()
-  await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(second, resolveAgentSharingMetadata(second, before)))
+  await choose('Copy Agent Link'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(second))
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus); expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
@@ -142,7 +142,7 @@ it('keeps exact card navigation after dismissing its action menu', async () => {
 it('keeps a newly opened keyboard menu when an older menu finishes restoring focus', async () => {
   vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await menu(second, true)
-  const copy = [...document.querySelectorAll<HTMLElement>('.focus-context-menu [role="menuitem"]')].find(node => node.textContent === 'Copy Session Address')!
+  const copy = [...document.querySelectorAll<HTMLElement>('.focus-context-menu [role="menuitem"]')].find(node => node.textContent === 'Copy Agent Link')!
   await act(async () => copy.click())
   await menu(second, 'shift-f10')
   await advance(1)

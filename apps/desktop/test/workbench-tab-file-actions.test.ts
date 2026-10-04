@@ -70,7 +70,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
   it('文件 Tab 有三项文件动作，且顺序在地址之后', () => {
     const labels = labelsOf(fileEntries())
     expect(labels).toEqual([
-      'Copy Tab Address',
+      'Copy Tab Link',
       'Copy Path',
       'Copy Relative Path',
       'Reveal in Finder'
@@ -178,8 +178,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
   it('文件 Tab 同时承载唯一 Agent 时，两类动作各自都在（按类型切，不是二选一）', () => {
     const labels = labelsOf(fileEntries('agent-7'))
     // agent 侧
-    expect(labels).toContain('Message this Agent')
-    expect(labels).toContain('Copy Session Address')
+    expect(labels).toContain('Copy Agent Link')
     // file 侧
     expect(labels).toContain('Copy Path')
     expect(labels).toContain('Reveal in Finder')
@@ -196,7 +195,7 @@ describe('文件 Tab 菜单：路径复制与在文件管理器中显示', () =>
       writeClipboardText
     })
     const expectedCopy = new Map<string, string>([
-      ['Copy Tab Address', 'AgentMux Tab view:x'],
+      ['Copy Tab Link', 'amux://tab/view%3Ax'],
       ['Copy Path', '~/repo/src/app/main.ts'],
       ['Copy Relative Path', 'src/app/main.ts']
     ])

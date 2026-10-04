@@ -9,7 +9,7 @@ import { parseRpcResponse } from '../src/public-rpc-frame.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxInspectedRegion } from '../src/control.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { AgentMuxError } from '../src/errors.js'
-import { formatMessagingAddress, formatRegionAddress, formatTabAddress } from '../src/sharing.js'
+import { formatSessionAddress, formatRegionAddress, formatTabAddress, parseAmuxObjectLink, agentSessionSendCommand } from '../src/sharing.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 
@@ -145,16 +145,21 @@ describe('copied card commands through the compiled public CLI', () => {
     })])
   })
 
-  it('executes Agent, Region and Tab ID-card commands through the actual shell with literal quoted identities', async () => {
+  it('consumes Agent, Region and Tab links through the actual shell with literal quoted identities', async () => {
     const regionId = "region with 'quotes'"
-    const cards = [formatMessagingAddress({ agentSessionId: sid, regionId }),
-      formatRegionAddress(regionId), formatTabAddress(tabId)]
-    const commands = cards.map(card => card.split('\n').filter(line => line.startsWith('# amux ') && line !== '# amux --skill'))
-    expect(commands.map(lines => lines.length)).toEqual([1, 1, 1])
     const quoted = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'"
+    const links = [formatSessionAddress(sid), formatRegionAddress(regionId), formatTabAddress(tabId)]
+    const commands = links.map(link => {
+      const target = parseAmuxObjectLink(link)
+      return target.kind === 'agent' ? agentSessionSendCommand(target.agentSessionId)
+        : target.kind === 'region' ? `amux space inspect --region=${quoted(target.regionId)}`
+        : target.kind === 'tab' ? `amux space inspect --tab=${quoted(target.tabId)}` : ''
+    })
+    expect(commands).toHaveLength(3)
+    expect(commands.every(command => command.length > 0)).toBe(true)
     const results = []
-    for (const [command] of commands) {
-      const script = `amux() { ${quoted(cli)} --endpoint ${quoted('unix://' + join(root, 'control.sock'))} "$@"; }; ${command!.slice(2)}`
+    for (const command of commands) {
+      const script = `amux() { ${quoted(cli)} --endpoint ${quoted('unix://' + join(root, 'control.sock'))} "$@"; }; ${command}`
       const result = await exec('/bin/zsh', ['-f', '-c', script], { env, timeout: 5_000 })
         .then(output => ({ code: 0, ...output }), error => error as { code: number; stdout: string; stderr: string })
       results.push(result)
