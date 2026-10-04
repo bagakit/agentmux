@@ -265,11 +265,11 @@ describe('saved future-message admission', () => {
     expect(h.client.agentSession('bound-agent').futurePromptIntents).toBeUndefined()
     const sourceDevice = { hostId: 'local', deviceId: 'first-device', name: 'First device' }
     await h.client.saveAgentFuturePromptIntent({ ...request, caller: { agentSessionId: 'first-author', capability: first }, sourceDevice })
-    const firstMessage = h.client.agentSession('bound-agent').futurePromptIntents!['schedule-source']!.message
+    const firstMessage = (await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-source'))!.message
     expect(firstMessage).toEqual({ userContent: 'hello', authorAgentSessionId: 'first-author', sourceDevice })
     const invalidReplay = await h.client.saveAgentFuturePromptIntent({ ...request, active: false, caller: { agentSessionId: 'first-author', capability: later } }).then(() => undefined, error => error)
     expect(invalidReplay).toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
-    expect(h.client.agentSession('bound-agent').futurePromptIntents!['schedule-source']).toMatchObject({ active: true, message: firstMessage })
+    expect(await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-source')).toMatchObject({ active: true, message: firstMessage })
     await h.client.saveAgentFuturePromptIntent({ ...request, active: false, caller: { agentSessionId: 'later-author', capability: later }, sourceDevice: { ...sourceDevice, deviceId: 'later-device' } })
     await h.client.saveAgentFuturePromptIntent({ ...request, caller: { agentSessionId: 'later-author', capability: later } })
     expect((await loadAgentSessions(h.store))[0]!.futurePromptIntents!['schedule-source']!.message).toEqual(firstMessage)
@@ -283,11 +283,11 @@ describe('saved future-message admission', () => {
   it('refuses changed future content fields even when their composed native bytes are identical', async () => {
     const h = await fixture(true)
     await h.client.saveAgentFuturePromptIntent({ agentSessionId: 'bound-agent', intentId: 'schedule-split', operationId: 'split-create', prompt: 'hello', agentMuxNote: 'Original context', active: true })
-    const saved = h.client.agentSession('bound-agent').futurePromptIntents!['schedule-split']!
+    const saved = (await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-split'))!
     const rejected = await h.client.submitAgentPrompt({ ...h.input, prompt: saved.prompt, expectedInputByte: 0, expectedFutureIntent: { intentId: 'schedule-split', occurrenceAt: 1000 } }).then(() => undefined, error => error)
     expect(h.writes).toEqual([])
     expect(rejected).toMatchObject({ code: 'AGENT_FUTURE_INTENT_CHANGED' })
-    expect(h.client.agentSession('bound-agent').futurePromptIntents!['schedule-split']).not.toHaveProperty('lastOccurrenceAt')
+    expect(await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-split')).not.toHaveProperty('lastOccurrenceAt')
   })
   it('persists exact future intent through the production client and admits each occurrence once', async () => {
     const h = await fixture(true)
@@ -296,7 +296,7 @@ describe('saved future-message admission', () => {
     const future = { intentId: 'schedule-1', occurrenceAt: 1000 }
     await h.client.submitAgentPrompt({ ...h.input, expectedInputByte: 0, expectedFutureIntent: future })
     const admitted = h.client.agentSession('bound-agent')
-    expect(admitted.futurePromptIntents!['schedule-1']).toMatchObject({ lastOccurrenceAt: 1000, lastOperationId: 'bound-operation' })
+    expect(await h.client.readAgentFuturePromptIntent(admitted.agentSessionId, 'schedule-1')).toMatchObject({ lastOccurrenceAt: 1000, lastOperationId: 'bound-operation' })
     const count = h.writes.length
     await h.client.submitAgentPrompt({ ...h.input, expectedInputByte: 0, expectedFutureIntent: future })
     expect(h.writes).toHaveLength(count)
@@ -321,7 +321,7 @@ describe('saved future-message admission', () => {
     const input = { ...h.input, expectedInputByte: mode === 'changed-input' ? 4 : 0, expectedFutureIntent: { intentId: 'schedule-1', occurrenceAt: 1000 }, ...(mode === 'changed-message' ? { prompt: 'different' } : {}), ...(mode === 'wrong-run' ? { expectedRun: { runId: 'another-run' } } : {}) }
     await expect(h.client.submitAgentPrompt(input)).rejects.toBeInstanceOf(Error)
     expect(h.writes).toEqual([])
-    expect(h.client.agentSession('bound-agent').futurePromptIntents!['schedule-1']).not.toHaveProperty('lastOccurrenceAt')
+    expect(await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-1')).not.toHaveProperty('lastOccurrenceAt')
     if (mode !== 'permission' && mode !== 'null-input') {
       await h.client.submitAgentPrompt({ ...h.input, ...agentPromptCondition(h.client.agentSession('bound-agent')), operationId: 'manual-kept', allowUncertainTurn: true })
       expect(h.writes.length).toBeGreaterThan(0)
