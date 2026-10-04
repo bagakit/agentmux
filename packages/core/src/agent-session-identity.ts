@@ -6,8 +6,8 @@ export function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
 }
 
 export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
-  const { hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, ...publicSession } = structuredClone(session)
-  return publicSession
+  const { hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
+  return structuredClone(publicSession)
 }
 
 /** Identity of a completed turn, scoped to its exact Run. */
