@@ -210,12 +210,17 @@ function DesktopApp() {
   useEffect(() => { setFocusView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
   useEffect(() => { setFocusView(value => value === 'unconfirmed' ? 'tab' : value) }, [mainSurface])
   const focusRegionOnly = focusView === 'region'
+  // The exact main choice survives closing only its Focus presentation.
+  const mainFocus = useMemo(() => mainSurface === 'agents'
+    ? mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
+    : { projection: null, issue: null, references: [] },
+  [mainSurface, workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
   const focusPresentation = useMemo(() => mainSurface === 'agents' && focusView !== 'closed'
     ? focusView === 'unconfirmed'
       ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference))
-      : mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
+      : mainFocus
     : { projection: null, issue: null, references: [] },
-  [mainSurface, focusView, workbenchSpaceSelection, agentFocus.execution, tabs, surveyCatalog, selectFocusReference, selectFocusContext, focusRegionOnly])
+  [mainSurface, focusView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
   const focusProjection = focusPresentation.projection
   const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
@@ -521,7 +526,7 @@ function DesktopApp() {
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={mainFocus.projection?.selection.length === 1 ? mainFocus.projection.selection[0] : null} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div
