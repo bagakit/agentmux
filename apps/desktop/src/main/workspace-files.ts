@@ -102,24 +102,20 @@ export function workspaceFileObserverCount(): number {
   return activeLocalFileObservers
 }
 
-// Node does not expose openat(2), and Darwin's /dev/fd directory handles cannot
-// be used as path prefixes. A short Node worker gives each operation a kernel-
-// pinned cwd. It validates that physical cwd after spawn, then touches only one
-// basename; replacing the original parent path with a symlink cannot redirect
-// the operation after that point.
+// Each local process inherits a kernel-pinned cwd and validates its physical
+// location before acting. Read/save use the existing native helper; discovery
+// and observation retain their dedicated Node implementation. Replacing the
+// parent pathname cannot redirect a basename operation after that point.
 export const LOCAL_WORKER_SOURCE = String.raw`
-import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
-import { constants, link, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
+import { lstat, realpath, stat } from 'node:fs/promises'
 import { execFileSync, spawn } from 'node:child_process'
-import { join, sep } from 'node:path'
+import { sep } from 'node:path'
 
-${fileBytesAreBinary.toString()}
 ${LOCAL_FILE_LIST_SOURCE}
 
 const request = JSON.parse(process.argv[1] ?? '')
 const expectedRoot = process.argv[2]
-let writePublished = false
 
 async function currentDirectory() {
   const cwd = await realpath('.')
@@ -135,132 +131,14 @@ async function inputBytes() {
   return Buffer.concat(chunks)
 }
 
-async function openRegularFile(name, flags) {
-  const handle = await open(name, flags | constants.O_NOFOLLOW)
-  try {
-    if (!(await handle.stat()).isFile()) throw new Error('Workspace path is not a regular file')
-    return handle
-  } catch (error) {
-    await handle.close()
-    throw error
-  }
-}
-
-function revisionFor(bytes) {
-  return 'sha256:' + createHash('sha256').update(bytes).digest('hex')
-}
-
-async function currentFile(name) {
-  try {
-    const handle = await openRegularFile(name, constants.O_RDONLY)
-    try {
-      const [bytes, info] = await Promise.all([handle.readFile(), handle.stat()])
-      return { revision: revisionFor(bytes), mode: info.mode & 0o7777, binary: fileBytesAreBinary(bytes) }
-    } finally {
-      await handle.close()
-    }
-  } catch (error) {
-    if (error?.code === 'ENOENT') return { revision: null, mode: null }
-    throw error
-  }
-}
-
 try {
   await currentDirectory()
   process.stderr.write('${LOCAL_WORKER_READY}\n')
-  const input = await inputBytes()
-  const cwd = await currentDirectory()
+  await inputBytes()
+  await currentDirectory()
 
-  if (request.action === 'read') {
-    const handle = await openRegularFile(request.name, constants.O_RDONLY)
-    try { process.stdout.write(await handle.readFile()) } finally { await handle.close() }
-  } else if (request.action === 'read-bytes') {
-    const handle = await openRegularFile(request.name, constants.O_RDONLY)
-    let scannedBytes = 0
-    try {
-      const before = await handle.stat({ bigint: true })
-      const totalBytes = Number(before.size)
-      if (!Number.isSafeInteger(totalBytes) || totalBytes > request.maxFileBytes) {
-        throw Object.assign(new Error('Workspace file exceeds the byte transfer budget'), { code: 'WORKSPACE_FILE_BYTE_LIMIT' })
-      }
-      if (request.offset > totalBytes) throw new Error('Byte offset exceeds the Workspace file length')
-      const end = Math.min(totalBytes, request.offset + request.maxBytes)
-      const bytes = Buffer.alloc(end - request.offset)
-      const block = Buffer.alloc(64 * 1024)
-      const digest = createHash('sha256')
-      let position = 0
-      while (position < totalBytes) {
-        const read = await handle.read(block, 0, Math.min(block.length, totalBytes - position), position)
-        if (!read.bytesRead) throw Object.assign(new Error('Workspace file changed while reading its bytes'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
-        const chunk = block.subarray(0, read.bytesRead)
-        digest.update(chunk)
-        const start = Math.max(position, request.offset), stop = Math.min(position + read.bytesRead, end)
-        if (stop > start) chunk.copy(bytes, start - request.offset, start - position, stop - position)
-        position += read.bytesRead
-        scannedBytes = position
-      }
-      const after = await handle.stat({ bigint: true })
-      if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
-        throw Object.assign(new Error('Workspace file changed while reading its bytes'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
-      }
-      const revision = 'sha256:' + digest.digest('hex')
-      if (request.expectedRevision !== undefined && request.expectedRevision !== revision) {
-        throw Object.assign(new Error('Workspace file no longer matches its original revision'), { code: 'WORKSPACE_FILE_REVISION_MISMATCH' })
-      }
-      process.stdout.write(JSON.stringify({
-        data: bytes.toString('base64'), totalBytes, revision, offset: request.offset,
-        returnedBytes: bytes.length, nextOffset: end < totalBytes ? end : null,
-        readCost: { payloadBytes: position }
-      }))
-    } catch (error) {
-      error.readCost = { payloadBytes: scannedBytes }
-      throw error
-    } finally { await handle.close() }
-  } else if (request.action === 'list-files') {
+  if (request.action === 'list-files') {
     process.stdout.write(JSON.stringify(await listFileNames(request.limit)))
-  } else if (request.action === 'list') {
-    const entries = await readdir('.', { withFileTypes: true })
-    const ignored = new Set()
-    if (entries.length) {
-      try {
-        const result = execFileSync('git', ['check-ignore', '-z', '--stdin'], {
-          input: entries.map((entry) => entry.name).join('\0') + '\0',
-          encoding: 'utf8', timeout: 5000, maxBuffer: 2 * 1024 * 1024,
-          stdio: ['pipe', 'pipe', 'pipe']
-        })
-        for (const name of result.split('\0')) if (name) ignored.add(name)
-      } catch (error) {
-        // 1 = no matches; a non-Git directory has no ignore facts. Listing stays usable.
-        if (error.status === 1 && error.stdout) {
-          for (const name of String(error.stdout).split('\0')) if (name) ignored.add(name)
-        }
-      }
-    }
-    process.stdout.write(JSON.stringify(await Promise.all(entries.map(async (entry) => {
-      const result = {
-        name: entry.name,
-        isDirectory: entry.isDirectory(),
-        isSymlink: entry.isSymbolicLink(),
-        ...(ignored.has(entry.name) ? { ignored: true } : {})
-      }
-      if (result.isSymlink) {
-        result.linkTarget = await readlink(entry.name)
-        try { result.isDirectory = (await stat(entry.name)).isDirectory() }
-        catch { result.linkIssue = 'unavailable' }
-      } else if (entry.isFile()) {
-        try {
-          const metadata = await lstat(entry.name)
-          if (metadata.isFile() && Number.isFinite(metadata.mtimeMs)) result.mtimeMs = metadata.mtimeMs
-        } catch { /* Unconfirmed metadata does not remove a listed file. */ }
-      }
-      return result
-    }))))
-  } else if (request.action === 'reveal') {
-    if (request.name !== null) {
-      const handle = await open(request.name, constants.O_RDONLY | constants.O_NOFOLLOW)
-      await handle.close()
-    }
-    process.stdout.write(request.name === null ? cwd : join(cwd, request.name))
   } else if (request.action === 'observe') {
     const watcher = watch('.', { persistent: true }, (_eventType, filename) => {
       if (filename === request.name) process.stdout.write('${LOCAL_WORKER_INVALIDATED}\n')
@@ -285,83 +163,6 @@ try {
       process.exit(0)
     })
     process.stdout.write('${LOCAL_WORKER_OBSERVING}\n')
-  } else if (request.action === 'write') {
-    const before = await currentFile(request.name)
-    if (request.textOnly && before.binary) {
-      process.stdout.write(JSON.stringify({ status: 'error', code: 'WORKSPACE_BINARY_FILE_NOT_EDITABLE', message: 'The current file contains binary bytes. The original file and text draft were kept.' }))
-    } else if (before.revision !== request.expectedRevision) {
-      process.stdout.write(JSON.stringify({ status: 'conflict', observedRevision: before.revision }))
-    } else {
-      const temporaryName = '.' + request.name + '.agentmux-' + process.pid + '-' + randomBytes(8).toString('hex')
-      let handle = null
-      let temporaryExists = false
-      try {
-        handle = await open(
-          temporaryName,
-          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-          before.mode ?? 0o666
-        )
-        temporaryExists = true
-        if (before.mode !== null) await handle.chmod(before.mode)
-        if (request.fault === 'temporary-write') {
-          throw Object.assign(new Error('Injected temporary write failure'), { code: 'INJECTED_TEMPORARY_WRITE' })
-        }
-        await handle.writeFile(input)
-        await handle.sync()
-        await handle.close()
-        handle = null
-
-        const immediatelyBeforeReplace = await currentFile(request.name)
-        if (request.textOnly && immediatelyBeforeReplace.binary) {
-          process.stdout.write(JSON.stringify({ status: 'error', code: 'WORKSPACE_BINARY_FILE_NOT_EDITABLE', message: 'The current file contains binary bytes. The original file and text draft were kept.' }))
-        } else if (immediatelyBeforeReplace.revision !== request.expectedRevision) {
-          process.stdout.write(JSON.stringify({
-            status: 'conflict',
-            observedRevision: immediatelyBeforeReplace.revision
-          }))
-        } else {
-          if (request.fault === 'replace') {
-            throw Object.assign(new Error('Injected atomic replace failure'), { code: 'INJECTED_REPLACE' })
-          }
-          if (request.fault === 'occupy') {
-            const competitor = await open(request.name, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-            try { await competitor.writeFile('competing bytes') } finally { await competitor.close() }
-          }
-          if (request.exclusive) {
-            try {
-              await link(temporaryName, request.name)
-              writePublished = true
-              if (request.fault === 'receipt') throw Object.assign(new Error('Write was published but its receipt failed'), { code: 'INJECTED_WRITE_RECEIPT' })
-              process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
-            } catch (error) {
-              if (error?.code !== 'EEXIST') throw error
-              process.stdout.write(JSON.stringify({ status: 'conflict', observedRevision: (await currentFile(request.name)).revision }))
-            }
-          } else {
-            await rename(temporaryName, request.name)
-            temporaryExists = false
-            writePublished = true
-            if (request.fault === 'receipt') throw Object.assign(new Error('Write was published but its receipt failed'), { code: 'INJECTED_WRITE_RECEIPT' })
-            process.stdout.write(JSON.stringify({ status: 'written', revision: revisionFor(input) }))
-          }
-        }
-      } finally {
-        if (handle) await handle.close().catch(() => {})
-        if (temporaryExists) await unlink(temporaryName).catch(() => {})
-      }
-    }
-  } else if (request.action === 'create') {
-    if (request.kind === 'directory') await mkdir(request.name)
-    else {
-      const handle = await open(
-        request.name,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-        0o666
-      )
-      await handle.close()
-    }
-  } else if (request.action === 'delete') {
-    await rm(request.name, { recursive: true, force: false })
   } else {
     throw new Error('Unknown local Workspace operation')
   }
@@ -369,8 +170,7 @@ try {
   process.stderr.write('${LOCAL_WORKER_ERROR}' + JSON.stringify({
     message: error instanceof Error ? error.message : String(error),
     code: error && typeof error === 'object' && 'code' in error ? error.code : null,
-    readCost: error && typeof error === 'object' && 'readCost' in error ? error.readCost : undefined,
-    writeOutcomeUnknown: writePublished
+    readCost: error && typeof error === 'object' && 'readCost' in error ? error.readCost : undefined
   }) + '\n')
   process.exitCode = 1
 }
@@ -500,13 +300,25 @@ async function runLocalWorker(
   signal?.throwIfAborted()
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
-  const child = spawn(process.execPath, [
+  const native = request.action !== 'observe' && request.action !== 'list-files'
+  const args = native ? [
+    '--workspace-file', request.action, root, 'name' in request ? request.name ?? '' : '',
+    request.action === 'write' ? request.expectedRevision ?? 'null' : request.action === 'create' ? request.kind : 'null',
+    request.action === 'write' && request.exclusive ? '1' : '0',
+    request.action === 'write' && request.textOnly ? '1' : '0',
+    request.action === 'write' ? request.fault ?? '' : '',
+    request.action === 'read-bytes' ? String(request.offset) : '0',
+    request.action === 'read-bytes' ? String(request.maxBytes) : '0',
+    request.action === 'read-bytes' ? String(request.maxFileBytes) : '0',
+    request.action === 'read-bytes' ? request.expectedRevision ?? 'null' : 'null'
+  ] : [
     '--input-type=module',
     '--eval',
     LOCAL_WORKER_SOURCE,
     JSON.stringify(request),
     root
-  ], {
+  ]
+  const child = spawn(native ? WORKSPACE_MOVE_HELPER : process.execPath, args, {
     cwd,
     env: environment,
     stdio: ['pipe', 'pipe', 'pipe'],
