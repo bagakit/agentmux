@@ -25,8 +25,8 @@ export function BuildFilePreview({ regionId, kind, path, visible = true }: { reg
     return () => { active = false; if (timer) clearTimeout(timer) }
   }, [regionId, visible, result?.buildId, result?.status])
   if (!visible) return null
-  return <div className="file-build-preview" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-    <div className="file-build-preview__actions" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 12 }}>
+  return <div className="file-build-preview">
+    <div className="file-build-preview__actions">
       <strong>{kind === 'latex' ? 'LaTeX' : 'Typst'} document</strong>
       {result?.status === 'running'
         ? <button type="button" className="small-button" onClick={() => { void cancelFileRegionBuild(regionId, result.buildId) }}>Cancel build</button>
@@ -34,9 +34,9 @@ export function BuildFilePreview({ regionId, kind, path, visible = true }: { reg
       <span role="status">{result?.status === 'running' ? 'Building…' : result?.status ?? 'Build explicitly to preview the current draft.'}</span>
       {result?.status === 'unknown' && <><button type="button" className="small-button" onClick={() => { void inspectFileRegionBuild(regionId, result.buildId) }}>Refresh build status</button><button type="button" className="small-button" onClick={() => { void cancelFileRegionBuild(regionId, result.buildId) }}>Cancel build</button></>}
     </div>
-    <p style={{ padding: '0 12px', marginTop: 0 }}>{kind === 'latex' ? 'Requires Tectonic on the original local Host and a complete offline package cache.' : 'Requires Typst on the original local Host.'} Install the tool on that Host, then retry. Remote document builds are currently unavailable.</p>
+    {(!result || result.status === 'unavailable') && <p className="file-build-preview__help">{kind === 'latex' ? 'Requires Tectonic on the original local Host and a complete offline package cache.' : 'Requires Typst on the original local Host.'} Install the tool on that Host, then retry. Remote document builds are currently unavailable.</p>}
     {result?.message && <div className="file-preview-state" role={result.status === 'failed' || result.status === 'unknown' ? 'alert' : 'status'}><span>{result.message}</span></div>}
-    {result?.log && <details style={{ padding: '0 12px 12px' }} open={result.status !== 'succeeded'}><summary>Build log</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 240, overflow: 'auto' }}>{result.log}</pre></details>}
-    {result?.status === 'succeeded' && reading?.pdf && <div style={{ flex: 1, minHeight: 0 }}><Suspense fallback={<div role="status">Loading PDF reader…</div>}><PdfContent data={reading.pdf} name={path} visible={visible} /></Suspense></div>}
+    {result?.log && <details className="file-build-preview__log" open={result.status !== 'succeeded'}><summary>Build log</summary><pre>{result.log}</pre></details>}
+    {result?.status === 'succeeded' && reading?.pdf && <div className="file-build-preview__artifact"><Suspense fallback={<div className="file-preview-state" role="status">Loading PDF reader…</div>}><PdfContent data={reading.pdf} name={path} visible={visible} /></Suspense></div>}
   </div>
 }

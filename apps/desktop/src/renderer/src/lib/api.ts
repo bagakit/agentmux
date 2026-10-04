@@ -564,6 +564,12 @@ const mockApi: AgentMuxDesktopApi = {
     readPreview: async () => ({ status: 'unavailable', code: 'WEB_PREVIEW_FILES_UNAVAILABLE', message: 'Workspace bytes preview is available in the desktop application.' }),
     openHtmlPreview: async () => { throw new Error('HTML workspace preview is available in the desktop application.') },
     releaseHtmlPreview: async () => {},
+    renderDiagram: async () => { throw new Error('Isolated diagram rendering is available in the desktop application.') },
+    cancelDiagram: async () => {},
+    build: async () => { throw new Error('File compilation is available in the desktop application.') },
+    inspectBuild: async () => undefined,
+    cancelBuild: async () => undefined,
+    releaseBuild: async () => {},
     write: async (workspaceId, input) => {
       const observedRevision = mockFileRevisions.get(input.path) ?? null
       if (observedRevision !== input.expectedRevision) {

@@ -4211,6 +4211,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get, setEditorRegionMode: (...args) => get().setEditorRegionMode(...args),
       closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
     }, request)
+    if (request.operation === 'file.format') {
+      const { formatFileRegion } = await import('./lib/file-formats/format-file-region')
+      const result = await formatFileRegion(request.regionId, signal)
+      return { operation: request.operation, regionId: request.regionId, status: result.status, message: result.message ?? null }
+    }
+    if (request.operation === 'file.build' || request.operation === 'file.build.inspect' || request.operation === 'file.build.cancel') {
+      const builds = await import('./lib/file-formats/build-file-region')
+      const result = request.operation === 'file.build'
+        ? await builds.buildFileRegion(request.regionId, signal, request.requestId)
+        : request.operation === 'file.build.inspect'
+          ? await builds.inspectFileRegionBuild(request.regionId, request.buildId)
+          : await builds.cancelFileRegionBuild(request.regionId, request.buildId)
+      return request.operation === 'file.build' ? { operation: request.operation, ...result }
+        : request.operation === 'file.build.inspect' ? { operation: request.operation, ...result } : { operation: request.operation, ...result }
+    }
     if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv' || request.operation === 'space.bind' || request.operation === 'space.unbind') {
       return await executeSpatialControl({
         get,

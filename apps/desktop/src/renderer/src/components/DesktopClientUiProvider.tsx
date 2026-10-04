@@ -1,5 +1,5 @@
 import { ClientUiProvider, type ClientUiPlatform, type ConversationSenderDetails } from '@agentmux/client-ui'
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { useAppStore } from '../store'
@@ -9,6 +9,10 @@ import { ProjectIcon } from './ProjectIcon'
 import { SemanticIcon } from './semantic-icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { InlineAgentLink } from './InlineAgentLink'
+
+const DiagramFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DiagramFilePreview })))
+const DotFilePreview = lazy(() => import('./file-preview/DotFilePreview').then(module => ({ default: module.DotFilePreview })))
+const DrawioFilePreview = lazy(() => import('./file-preview/DrawioFilePreview').then(module => ({ default: module.DrawioFilePreview })))
 
 /** Focus intents are Desktop workface facts; a shared editor only registers its own DOM target. */
 export function bindDesktopComposerFocus(target: HTMLElement, focus: () => boolean): () => void {
@@ -52,7 +56,12 @@ const desktopPlatform: ClientUiPlatform = {
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
   renderProjectLabel: project => <SenderProject project={project} />,
   renderIcon: (name, size) => <SemanticIcon name={name} size={size} />,
-  renderAgentLink: reference => <InlineAgentLink {...reference} />
+  renderAgentLink: reference => <InlineAgentLink {...reference} />,
+  renderMarkdownDiagram: ({ code, language, visible }) => <Suspense fallback={<span role="status">Preparing diagram…</span>}>
+    {language === 'dot' || language === 'gv' ? <DotFilePreview content={code} visible={visible} />
+      : language === 'drawio' ? <DrawioFilePreview content={code} visible={visible} />
+      : <DiagramFilePreview kind={language} content={code} visible={visible} />}
+  </Suspense>
 }
 
 /** Electron IO, the Desktop identity surface and its workface focus policy stay in this client. */

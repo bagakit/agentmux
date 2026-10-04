@@ -13,6 +13,7 @@ import { FilePreviewPane } from './FilePreviewPane'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SourceFilePreview } from './file-preview/SourceFilePreview'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
+import { registerFileRegionBuilder, type FileBuildSource } from '../lib/file-formats/build-file-region'
 
 const EditorPane = lazy(async () => ({ default: (await import('./EditorPane')).EditorPane }))
 const NoteFileSurfaceView = lazy(async () => ({ default: (await import('./NoteFileSurfaceView')).NoteFileSurfaceView }))
@@ -41,16 +42,43 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
   const setRegionMode = useAppStore(state => state.setEditorRegionMode)
   const previewing = regionMode === 'preview'
+  useEffect(() => {
+    if (!visible || released) return
+    const read = (): FileBuildSource | null => {
+      const state = useAppStore.getState(), document = state.documents[key]
+      const region = state.tabs[tabId]?.regions[surface.regionId]
+      const resource = state.config?.workspaces.find(item => item.id === surface.workspaceId)
+      if (!document || !resource || region?.kind !== 'file' || region.workspaceId !== surface.workspaceId || region.path !== surface.path) return null
+      const kind = workspaceFileFormat(surface.path).sourcePreview
+      return { workspaceId: surface.workspaceId, path: surface.path, content: document.content, model: document,
+        generation: state.documentGenerations[key] ?? 0, region,
+        kind: kind === 'latex' || kind === 'typst' ? kind : null, resource: { hostId: resource.hostId, path: resource.path } }
+    }
+    const isCurrent = (source: FileBuildSource) => {
+      const now = read()
+      return now !== null && now.model === source.model && now.region === source.region && now.content === source.content &&
+        now.generation === source.generation && now.resource.hostId === source.resource.hostId && now.resource.path === source.resource.path
+    }
+    return registerFileRegionBuilder(surface.regionId, {
+      snapshot: read, isCurrent,
+      watch: (source, invalidate) => useAppStore.subscribe((next, previous) => {
+        if (next.documents[key] !== previous.documents[key] || next.documentGenerations[key] !== previous.documentGenerations[key] ||
+          next.tabs[tabId]?.regions[surface.regionId] !== previous.tabs[tabId]?.regions[surface.regionId] || next.config?.workspaces !== previous.config?.workspaces) {
+          if (!isCurrent(source)) invalidate()
+        }
+      })
+    })
+  }, [key, tabId, surface.regionId, surface.workspaceId, surface.path, visible, released])
   useEffect(() => { if (note && noteReveal) void setRegionMode(surface.regionId, surface.workspaceId, surface.path, 'preview') },
     [note, noteReveal, setRegionMode, surface.regionId, surface.workspaceId, surface.path])
   const overBudget = useMemo(() => {
-    if (!visible || released || !previewing || !doc || !(markdown || svg || note || html)) return false
+    if (!visible || released || !previewing || !doc || !format.sourcePreview) return false
     if (doc.content.length > WORKSPACE_FILE_MAX_BYTES) return true
     // UTF-8 needs at most three bytes per UTF-16 unit. Encode only up to the preview ceiling.
     const bytes = new Uint8Array(Math.min(WORKSPACE_FILE_MAX_BYTES + 1, doc.content.length * 3))
     const result = new TextEncoder().encodeInto(doc.content, bytes)
     return result.written > WORKSPACE_FILE_MAX_BYTES || result.read < doc.content.length
-  }, [visible, released, previewing, doc?.content, markdown, svg, note, html])
+  }, [visible, released, previewing, doc?.content, format.sourcePreview])
 
   if (!format.sourceEditable || (!doc && binary)) {
     return <FilePreviewPane surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
@@ -96,7 +124,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     : note
     ? <NoteFileSurfaceView tabId={tabId} surface={surface} />
     : format.sourcePreview
-    ? <SourceFilePreview key={key} kind={format.sourcePreview} content={doc.content} path={surface.path}
+    ? <SourceFilePreview key={key} regionId={surface.regionId} kind={format.sourcePreview} content={doc.content} path={surface.path}
       workspaceId={surface.workspaceId} workspaceRoot={workspaceRoot} visible={visible} openReference={openReference}
       openHttpLink={(url) => {
         if (!reference) { reportError(new Error('The original File display position is unconfirmed. Its content is retained.')); return }
