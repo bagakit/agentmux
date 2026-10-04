@@ -181,6 +181,12 @@ export function serviceNoticeAriaLive(kind: ServiceNoticeClass['kind']): Service
  *
  * 「重启后会话恢复」是唯一还没接线的消费者：它落地后会在这里多加一个自己的 marker 分支，共用同一存活判定。
  */
+/** Revisions and byte counters are diagnostics, not a new notice cause. */
+export function nativeSessionServiceCause(session: SessionSnapshot): string {
+  const service = session.nativeService
+  return JSON.stringify([service?.owner, service?.output, service?.input.phase, service?.terminalFault?.stage])
+}
+
 export function nativeSessionServiceOutcome(session: SessionSnapshot): StepOutcome {
   const service = session.nativeService
   if (!service) return { completed: true }
@@ -190,10 +196,17 @@ export function nativeSessionServiceOutcome(session: SessionSnapshot): StepOutco
     service.input.phase.type === 'unavailable' && service.input.phase.reason !== 'historical' ? 'input unavailable' : null,
     service.terminalFault ? `terminal view ${service.terminalFault.stage} at byte ${service.terminalFault.throughByte}` : null
   ].filter((value): value is string => value !== null)
+  if (!unavailable.length && service.output.type === 'backpressured') return {
+    completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
+      label: 'Serving output under resource pressure',
+      degradedMode: `Output progress is paused by resource pressure. The Run was last observed ${session.processState}; input is ${service.input.phase.type}. This does not confirm saved output or input delivery.`,
+      restore: 'Check Runtime storage and resource status and release constrained resources. This notice clears when output serves again. Keep this Session and do not resend unconfirmed input.'
+    }
+  }
   if (!unavailable.length) return { completed: true }
   return { completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
-    label: 'Native terminal service',
-    degradedMode: `${unavailable.join('; ')}. The child was last observed ${session.processState}. Original output, input delivery and terminal rendering remain separate facts.`,
+    label: service.output.type === 'backpressured' ? 'Native terminal service under output resource pressure' : 'Native terminal service',
+    degradedMode: `${unavailable.join('; ')}${service.output.type === 'backpressured' ? '; original output under resource pressure' : ''}. The child was last observed ${session.processState}. Original output, input delivery and terminal rendering remain separate facts.`,
     restore: 'Keep this Session and refresh its original service observation. Restore the unavailable lane before using it; do not resend unconfirmed input.'
   } }
 }
