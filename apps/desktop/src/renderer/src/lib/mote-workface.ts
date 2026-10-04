@@ -1,3 +1,4 @@
+import type { MoteDefaultConversation } from '../../../shared/mote-quick-mode'
 import { createContext, useMemo, useRef } from 'react'
 import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
@@ -10,6 +11,7 @@ import { homeZoneId } from '../../../shared/space-addresses'
 export type MoteWorkfaceScope = { topic: ScratchTopicSnapshot; workspace: WorkspaceRecord; rootPath: string; issue?: string }
 export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   floating: boolean
+  defaultConversation?: MoteDefaultConversation | undefined
   selectTab(tabId: string, groupId: string): void
 }) | null>(null)
 

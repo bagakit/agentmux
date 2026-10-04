@@ -1,3 +1,4 @@
+import { moteDefaultConversation, moteConversationReference } from './mote-quick-preferences'
 import { useSyncExternalStore } from 'react'
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -134,6 +135,17 @@ export function pmoTeamsTopicFloatingTargetTabId(
   return candidates.length === 1 ? candidates[0]!.id : undefined
 }
 
+/** Only entering without an explicit target uses the original saved default. No global navigation or Run operation. */
+export function floatingMoteDefaultSelection(floating: PmoTeamsTopicFloatingState): PmoTeamsTopicFloatingState {
+  const current = useAppStore.getState(), topicId = pmoTeamsTopicFloatingTargetTopicId(floating, current.tabs)
+  const workspace = current.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+  const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
+  const topic = topics?.find(item => item.id === topicId)
+  const preferred = topic ? moteDefaultConversation(current, topic, SCRATCH_WORKSPACE_ID) : {}
+  return preferred.conversation && !preferred.issue ? { ...floating, targetTopicId: topicId, targetTabId: preferred.conversation.tabId,
+    reference: moteConversationReference(preferred.conversation) } : floating
+}
+
 /** Capture a first confirmed local choice once; unknown saved addresses stay verbatim. */
 function initialFloatingSelection(floating: PmoTeamsTopicFloatingState): PmoTeamsTopicFloatingState {
   const current = useAppStore.getState()
@@ -199,7 +211,7 @@ export function requestPmoTeamsTopicFloatingPreview(): void {
   cancelClose()
   if (snapshot().open) return
   captureFocus()
-  update(initialFloatingSelection({ ...snapshot(), preview: true }))
+  update(initialFloatingSelection(floatingMoteDefaultSelection({ ...snapshot(), preview: true })))
 }
 export function leavePmoTeamsTopicFloatingPreview(): void {
   cancelClose()
@@ -223,9 +235,10 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
   const tabId = options?.targetTabId?.trim() ?? options?.reference?.tabId
   const topicId = options?.targetTopicId?.trim() ?? (tabId ? current.tabs[tabId]?.topicId : undefined)
   const retargeted = Boolean(topicId && topicId !== previous.targetTopicId || tabId && tabId !== previous.targetTabId)
-  const next = initialFloatingSelection({ ...previous, open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
+  let next = initialFloatingSelection({ ...previous, open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
     ...(tabId ? { targetTabId: tabId } : topicId && topicId !== previous.targetTopicId ? { targetTabId: undefined } : {}),
     ...(suppliedReference ? { reference: suppliedReference } : retargeted ? { reference: undefined } : {}) })
+  if (!tabId && !suppliedReference && (!previous.open || topicId && topicId !== previous.targetTopicId)) next = floatingMoteDefaultSelection(next)
   const layout = current.layouts[SCRATCH_WORKSPACE_ID]
   const resolvedTopicId = pmoTeamsTopicFloatingTargetTopicId(next, current.tabs)
   const resolvedTabId = pmoTeamsTopicFloatingTargetTabId(next, current.tabs, layout, current.agentFocus.pmo.sessionId)

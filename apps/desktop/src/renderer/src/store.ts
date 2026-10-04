@@ -1,3 +1,4 @@
+import { moteDefaultExecutor, moteDefaultConversation } from './lib/mote-quick-preferences'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
 import { describeError } from '@agentmux/client-ui/error-presentation'
@@ -2329,11 +2330,13 @@ function newRegionId(): string {
 }
 
 function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
+  const executorId = moteDefaultExecutor(useAppStore.getState(), workspaceId, topicId)
   const tabId = `launcher:${crypto.randomUUID()}`
   const surface: LauncherWorkbenchSurface = {
     regionId: initialWorkbenchRegionId(tabId),
     kind: 'launcher',
-    workspaceId
+    workspaceId,
+    ...(executorId ? { executorId } : {})
   }
   const tab = createWorkbenchTab(tabId, surface)
   return topicId ? { ...tab, topicId } : tab
@@ -6871,6 +6874,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!address) throw new Error('The Topic Category relationship is unconfirmed. Its original content and workface are kept.')
       const catalog = workbenchSelectionCatalog(current)
       const parent = { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null }
+      if (!targetTabId) {
+        const preferred = moteDefaultConversation(current, snapshot, workspace.id)
+        if (preferred.conversation && !preferred.issue) return { ...resolveDesktopSpaceSelection(current, catalog, {
+          ...address, ...preferred.conversation }), topicId }
+      }
       const held = current.workbenchSpaceSelection
       const layout = current.layouts[workspace.id]
       const projected = projectWorkbenchSpaceSelection(layout, current.tabs, catalog,
@@ -7036,7 +7044,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (reveal && !mayReveal) return false
     // The click already opened its durable Zone, optionally with an exact Chat.
     // Metadata refresh is not another navigation or permission to create a Tab.
-    if (revealedExistingWorkface) return true
+    if (revealedExistingWorkface) {
+      const preferred = !options?.tabId ? moteDefaultConversation(get(), snapshot, workspace.id) : {}
+      const fresh = preferred.issue ? undefined : preferred.conversation
+      const prior = known?.quickMode?.status === 'saved' ? known.quickMode.defaults.conversation : undefined
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(prior)) {
+        const choice = selectObject(get(), snapshot)
+        const selectedLayout = get().layouts[choice.workspaceId]
+        set(current => ({ activeWorkspaceId: choice.workspaceId, workbenchSpaceSelection: choice,
+          ...(selectedLayout && choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
+            [choice.workspaceId]: activateLayoutTab(selectedLayout, choice.groupId, choice.tabId) } } : {}) }))
+      }
+      return true
+    }
     let createdLauncher: WorkbenchTab | undefined
     let placementFailed = false
     set((current) => {
@@ -7058,11 +7078,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (boundTab || objectChoice && catalog.tabs.some(tab => tab.zoneId === address.zoneId)) {
         if (!mayReveal) return current
         const choice = objectChoice ?? selectObject(current, snapshot!, boundTab!.id)
+        const selectedLayout = current.layouts[choice.workspaceId]
         return {
-          activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const, workbenchSpaceSelection: choice,
+          activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench' as const, workbenchSpaceSelection: choice,
           retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
-          ...(choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
-            [workspace.id]: activateLayoutTab(layout, choice.groupId, choice.tabId) } } : {})
+          ...(selectedLayout && choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
+            [choice.workspaceId]: activateLayoutTab(selectedLayout, choice.groupId, choice.tabId) } } : {})
         }
       }
       // Selecting an existing confirmed empty Topic/Zone does not create work.

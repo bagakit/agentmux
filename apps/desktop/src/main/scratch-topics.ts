@@ -1,3 +1,4 @@
+import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from '../shared/mote-quick-mode.js'
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
@@ -423,6 +424,19 @@ export class ScratchTopics {
     return result
   }
 
+  private async readMoteQuickMode(directory: string): Promise<MoteQuickMode> {
+    try {
+      const info = await lstat(join(directory, MOTE_QUICK_MODE_PATH))
+      if (info.size > 65536) return { status: 'unconfirmed', message: 'MOTE.md exceeds the 64 KiB settings limit. Inspect the original file; existing work is kept.' }
+      const content = await readRegularFile(join(directory, MOTE_QUICK_MODE_PATH))
+      const parsed = parseMoteQuickMode(content)
+      return parsed.status === 'valid' ? { status: 'saved', defaults: parsed.defaults, version: wikiVersion(content) } : parsed
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return { status: 'missing' }
+      return { status: 'unconfirmed', message: `MOTE.md read failed: ${error instanceof Error ? error.message : String(error)}. Original work is kept.` }
+    }
+  }
+
   async read(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot | null> {
     requireScratchWorkspace(workspace)
     const directoryName = scratchTopicDirectoryName(topicId)
@@ -469,7 +483,7 @@ export class ScratchTopics {
       ...(content === undefined ? { title: topicId, summary: '' } : topicCopy(content)),
       ...(kind ? { kind } : {}),
       ...(soulFact?.soul ? { soul: soulFact.soul } : {}),
-      ...(kind === 'mote' ? { moteArchive: await this.readMoteArchive(resolved, topicId) } : {}),
+      ...(kind === 'mote' ? { moteArchive: await this.readMoteArchive(resolved, topicId), quickMode: await this.readMoteQuickMode(resolved) } : {}),
       ...(issues.length ? { readError: issues.join('\n') } : {}),
       collaborators: (agentFiles ?? []).flatMap((fileName) => collaborator(fileName) ?? []),
       ...(wiki ? { wiki: {
