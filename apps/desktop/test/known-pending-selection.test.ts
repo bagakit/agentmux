@@ -110,3 +110,52 @@ it('the actual compiled CLI and typed public RPC return the same original waitin
   expect(api.sessions.submitPrompt).not.toHaveBeenCalled();expect(queue()[1]!.promptCondition).toBeNull()
  }finally{await rpc?.dispose();await server.stop();await rm(root,{recursive:true})}
 },20000)
+
+it('the actual compiled CLI sends a never-dispatched original after its durable Session replaces the Run',async()=>{
+ const stale={...entry('chosen'),runId:'retired-run',awaitingExplicitSend:true as const,status:'deferred' as const}
+ const neighbors=[entry('first'),entry('tail')]
+ useAppStore.setState({sessions:[base],agentSteerQueues:{[sid]:[neighbors[0]!,stale,neighbors[1]!]}})
+ const root=await mkdtemp(join(tmpdir(),'amx-explicit-rebind-'))
+ const server=new AgentMuxControlServer({socketPath:join(root,'control.sock'),execute:request=>useAppStore.getState().executeControl(request)})
+ let rpc:Awaited<ReturnType<typeof connectAgentMuxRpc>>|undefined
+ try{
+  await server.start();rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}})
+  const before=await rpc.call('message.pending.ls',{agentSessionId:sid})
+  expect(before.messages.find(x=>x.pendingId==='chosen')).toMatchObject({runId:'retired-run',editable:true,delivery:'not-submitted'})
+  const cli=await runCompiledObjectCli(['--endpoint','unix://'+server.path,'message','pending','send','--session',sid,'--pending-id','chosen'],objectCliEnvironment(root))
+  expect(cli.code,cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result).toMatchObject({pendingId:'chosen',disposition:'submitted',message:null})
+  expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(api.sessions.submitPrompt).mock.calls[0]!.slice(0,4)).toEqual([base.control,stale.text,'chosen',{expectedRun:base.control.run,afterSubmissionId:null}])
+  expect(vi.mocked(api.sessions.submitPrompt).mock.calls[0]![6]).toBe(stale.agentMuxNote)
+  expect(queue()).toEqual(neighbors)
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Keep current draft')
+  expect((await rpc.call('message.pending.ls',{agentSessionId:sid})).messages.map(x=>x.pendingId)).toEqual(['first','tail'])
+ }finally{await rpc?.dispose();await server.stop();await rm(root,{recursive:true})}
+},20000)
+
+it('keeps a freshly selected old-Run intent waiting on the current interaction without losing its execution choice',async()=>{
+ const stale={...entry('chosen'),runId:'retired-run',awaitingExplicitSend:true as const}
+ useAppStore.setState({agentSteerQueues:{[sid]:[stale]}})
+ expect(await send()).toMatchObject({disposition:'unconfirmed',message:{runId,delivery:'not-submitted'}})
+ expect(queue()).toEqual([{...stale,runId,awaitingExplicitSend:undefined,execution:'immediate'}])
+ expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+ clearInteraction();await useAppStore.getState().flushAgentSteerQueue(sid)
+ expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1)
+ expect(vi.mocked(api.sessions.submitPrompt).mock.calls[0]![4]).toEqual({allowUncertainTurn:true,execution:'immediate'})
+ expect(queue()).toEqual([])
+})
+
+it('retains a never-dispatched message through another Run change during refresh and accepts a later explicit retry',async()=>{
+ const stale={...entry('chosen'),runId:'retired-run',awaitingExplicitSend:true as const}
+ const next={...base,control:{...base.control,run:{runId:'next-run'}}}
+ useAppStore.setState({sessions:[base],agentSteerQueues:{[sid]:[stale]}})
+ vi.mocked(api.sessions.refresh).mockImplementationOnce(async()=>{useAppStore.setState({sessions:[next]});return next})
+ await expect(send()).rejects.toThrow('Session binding changed')
+ expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+ expect(queue()[0]).toMatchObject({operationId:'chosen',text:stale.text,promptCondition:null,awaitingExplicitSend:true})
+ vi.mocked(api.sessions.refresh).mockResolvedValue(next)
+ expect(await send()).toMatchObject({disposition:'submitted'})
+ expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1)
+ expect(vi.mocked(api.sessions.submitPrompt).mock.calls[0]![3]).toEqual({expectedRun:next.control.run,afterSubmissionId:null})
+})
