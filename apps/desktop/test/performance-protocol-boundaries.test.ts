@@ -78,14 +78,24 @@ const opening = (data: unknown) => ({ jsonrpc: '2.0', id: 'proof', result: { sub
 const event = (sequence: number, type: string, data?: unknown) => ({ jsonrpc: '2.0', method: 'system.subscription.event', params: { subscriptionId: 'reader', method: 'system.metrics.watch', sequence, event: { type, ...(data ? { data } : {}) } } })
 async function start(frames: unknown[], options: { fragment?: number; linger?: boolean; rawHex?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amx-script-pipe-')); cleanups.push(() => rm(root, { recursive: true, force: true }))
-  const input = join(root, 'input.json'), progress = join(root, 'progress'), pid = join(root, 'pid')
+  const input = join(root, 'input.json'), progress = join(root, 'progress'), pid = join(root, 'pid'), outputState = join(root, 'output-state.json'), observer = join(root, 'output-observer.mjs')
   await writeFile(input, JSON.stringify({ frames, ...options }))
-  const child = spawn(process.execPath, [process.env.AGENTMUX_PERFORMANCE_SCRIPT!, resolve('apps/desktop/scripts/fixtures/performance-protocol-boundaries/metrics-cli.mjs')], { env: { ...objectCliEnvironment(root), AGENTMUX_PROTOCOL_INPUT: input, AGENTMUX_PROTOCOL_PROGRESS: progress, AGENTMUX_PROTOCOL_PID: pid }, stdio: ['pipe', 'pipe', 'pipe'] })
+  // Observe the actual script pipe without changing bytes, callbacks or write's
+  // return value. The child CLI does not load this private process argument.
+  await writeFile(observer, `import { renameSync, writeFileSync } from 'node:fs';
+const write = process.stdout.write; let writes = 0, blocked = false;
+process.stdout.write = function(...args) {
+  const admitted = write.apply(this, args); writes++; blocked ||= !admitted;
+  const path = process.env.AGENTMUX_PROTOCOL_OUTPUT_STATE;
+  writeFileSync(path + '.tmp', JSON.stringify({ writes, blocked })); renameSync(path + '.tmp', path);
+  return admitted;
+};`)
+  const child = spawn(process.execPath, ['--import', observer, process.env.AGENTMUX_PERFORMANCE_SCRIPT!, resolve('apps/desktop/scripts/fixtures/performance-protocol-boundaries/metrics-cli.mjs')], { env: { ...objectCliEnvironment(root), AGENTMUX_PROTOCOL_INPUT: input, AGENTMUX_PROTOCOL_PROGRESS: progress, AGENTMUX_PROTOCOL_PID: pid, AGENTMUX_PROTOCOL_OUTPUT_STATE: outputState }, stdio: ['pipe', 'pipe', 'pipe'] })
   cleanups.push(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') })
   let stderr = ''; child.stderr.on('data', bytes => { stderr += bytes.toString() })
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>(resolve => child.once('close', (code, signal) => resolve({ code, signal, stderr })))
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => child.once('exit', (code, signal) => resolve({ code, signal })))
-  return { child, closed, exited, root, progress, pid }
+  return { child, closed, exited, root, progress, pid, outputState }
 }
 async function read(child: ChildProcessWithoutNullStreams) {
   let text = ''; child.stdout.on('data', bytes => { text += bytes.toString() })
@@ -108,9 +118,15 @@ it('runs the actual official script through real public metrics owner and compil
 it('pauses source consumption under real OS output backpressure, then drains every frame in order', async () => {
   const data = observation(1500), frames = [opening(data), ...Array.from({ length: 19 }, (_, i) => event(i+1, 'snapshot', { ...data, observedAt: 1001+i })), event(20, 'end')]
   const p = await start(frames)
-  await vi.waitFor(async () => expect(Number(await readFile(p.progress, 'utf8'))).toBeGreaterThan(0))
-  await new Promise(resolve => setTimeout(resolve, 400))
+  const state = async () => JSON.parse(await readFile(p.outputState, 'utf8')) as { writes: number; blocked: boolean }
+  await vi.waitFor(async () => expect((await state()).blocked).toBe(true))
+  // Starting at the actual false result, an unread consumer may have exactly
+  // one admitted frame. Source-write progress alone includes kernel buffering
+  // and parsing cost, so it cannot prove the script stops admitting frames.
+  const deadline = Date.now() + 3000
+  while ((await state()).writes === 1 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
   expect(p.child.exitCode).toBeNull()
+  expect((await state()).writes).toBe(1)
   expect(Number(await readFile(p.progress, 'utf8'))).toBeLessThan(5)
   const output = await read(p.child), result = await p.closed
   expect(result, result.stderr).toMatchObject({ code: 0, signal: null, stderr: '' })
