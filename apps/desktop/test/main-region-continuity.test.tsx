@@ -141,7 +141,7 @@ it('main Region: actual Survey item selection updates the common main Region ins
   const state = useAppStore.getState(), catalog = spatialCatalog(state, moteTopics)
   const zoneId = catalog.tabs.find(tab => tab.tabId === sourceId)!.zoneId!
   await act(async () => state.setSurveyZoneCollected(zoneId, true))
-  await click('Survey: browse and manage pages')
+  await click('Survey: browse and explore')
   const item = [...container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)?.querySelector<HTMLButtonElement>('button.survey-item')
   expect(item, 'actual Survey row is required').toBeTruthy()
   await act(async () => item!.click())

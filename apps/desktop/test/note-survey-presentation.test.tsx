@@ -49,7 +49,7 @@ async function mountSurvey(multipleGroups = false) {
   if (multipleGroups) useAppStore.setState({ layouts: { workspace: moveTabToNewGroup(useAppStore.getState().layouts.workspace!, second.id, 'g', 'g', 'right', 'second-group') } })
   const zoneId = spatialCatalog(useAppStore.getState(), []).tabs.find(tab => tab.tabId === first.id)!.zoneId!
   expect(useAppStore.getState().setSurveyZoneCollected(zoneId, true)).toBe(true)
-  await dom.render(<App />); await dom.click('[aria-label="Survey: browse and manage pages"]')
+  await dom.render(<App />); await dom.click('[aria-label="Survey: browse and explore"]')
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)
   expect(row).toBeDefined(); await act(async () => row!.querySelector<HTMLButtonElement>('.survey-item')!.click())
   await dom.click('.global-survey-surface button.workbench-tab[data-workbench-tab-id="first"]')

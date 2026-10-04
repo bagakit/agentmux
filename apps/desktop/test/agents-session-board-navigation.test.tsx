@@ -43,7 +43,7 @@ describe('PMO / Space / Focus / Goals / Survey navigation', () => {
       'Space: show terminal and file workbench',
       expect.stringMatching(/^Focus: show execution contexts\. \d+ working, \d+ requests, \d+ failed$/),
       'Goals: show goals and progress',
-      'Survey: browse and manage pages'
+      'Survey: browse and explore'
     ])
     expect(buttons.filter((button) => button.classList.contains('selected'))).toHaveLength(1)
     expect(buttons[3]?.classList.contains('selected')).toBe(true)

@@ -218,8 +218,11 @@ describe('Renderer persistence boundary', () => {
       workbenchSpaceSelection: null,
       mainSurface: 'workbench',
       notebookRecoveries: [],
-      surveyNotebookId: null,
-      surveyNoteId: null,
+      recallNotebookId: null,
+      recallNoteId: null,
+      recallZoneSelection: null,
+      recallSidebarCollapsed: false,
+      recallSidebarWidth: 220,
       surveyZoneSelection: null,
       surveyCollectedZones: {},
       surveyExplorationNames: {},
@@ -1050,4 +1053,19 @@ describe('Renderer persistence boundary', () => {
     // 仍然是 1：第二次没有到达 IPC。
     expect(read).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it('persists Recall presentation independently from Browser research and restores legacy Note presentation without changing entities', () => {
+  const recall = {zoneId:'original-note-zone',selection:[],active:null}, survey = {zoneId:'original-browser-zone',selection:[],active:null}
+  useAppStore.setState({config, mainSurface:'recall', recallNotebookId:'original-book',recallNoteId:'original-note', recallZoneSelection:recall,
+    surveyZoneSelection:survey, recallSidebarWidth:280,recallSidebarCollapsed:true,surveySidebarWidth:350,surveySidebarCollapsed:false})
+  const original = useAppStore.getState(), saved = useAppStore.persist.getOptions().partialize!(original)
+  const restored = restorePersistedUiState(config,saved)
+  expect(restored).toMatchObject({mainSurface:'recall',recallNotebookId:'original-book',recallNoteId:'original-note',recallZoneSelection:recall,
+    surveyZoneSelection:survey,recallSidebarWidth:280,recallSidebarCollapsed:true,surveySidebarWidth:350,surveySidebarCollapsed:false})
+  const transferred = restorePersistedUiState(config,{mainSurface:'survey',surveyNotebookId:'original-book',surveyNoteId:'original-note',surveyZoneSelection:recall})
+  expect(transferred).toMatchObject({mainSurface:'recall',recallNotebookId:'original-book',recallNoteId:'original-note',recallZoneSelection:recall,surveyZoneSelection:null})
+  expect(restorePersistedUiState(config,{mainSurface:'survey',surveyZoneSelection:survey})).toMatchObject({mainSurface:'survey',surveyZoneSelection:survey,recallNotebookId:null})
+  expect(useAppStore.getState().tabs).toBe(original.tabs); expect(useAppStore.getState().sessions).toBe(original.sessions)
 })
