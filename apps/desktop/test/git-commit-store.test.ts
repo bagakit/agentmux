@@ -2,6 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { AppConfig } from '../src/shared/contracts'
 import type { GitCommitSnapshot, GitCommitDiffDescriptor } from '../src/shared/git-contracts'
 import { useAppStore } from '../src/renderer/src/store'
@@ -78,4 +79,22 @@ it('keeps an existing scope when a mismatched snapshot arrives and refuses an un
   expect(useAppStore.getState().tabs[opened.tabId]!.regions[opened.regionId]).toMatchObject({ selection: { commitOid: snapshot.commitOid } })
   expect(() => useAppStore.getState().openGitWorkbench('repo', { ...snapshot, hostId: 'other' })).toThrow('original Git workspace')
   expect(Object.keys(useAppStore.getState().tabs)).toEqual([opened.tabId])
+})
+
+const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'exact-git-open', operation: 'open.git' as const,
+  workspaceId: 'repo', expectedResource: { hostId: 'local', workspacePath: _hygiene_fixturePath("repo") }, oid: snapshot.commitOid }
+it('rejects a wrong public resource before reading or changing the workface', async () => {
+  const read = vi.fn(); Object.assign(window.agentmux!.git, { commitDetails: read })
+  await expect(useAppStore.getState().executeControl({ ...request, expectedResource: { ...request.expectedResource, workspacePath: _hygiene_fixturePath("unrelated") } })).rejects.toThrow('resource changed')
+  expect(read).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs).toEqual({})
+})
+
+it('rejects a workspace rebound during public commit read without opening a stale page', async () => {
+  let resolve!: (value: unknown) => void
+  Object.assign(window.agentmux!.git, { commitDetails: vi.fn(() => new Promise(done => { resolve = done })) })
+  const opened = useAppStore.getState().executeControl(request)
+  const rejected = expect(opened).rejects.toThrow('resource changed while reading')
+  useAppStore.setState({ config: { ...config, workspaces: [{ ...config.workspaces[0]!, path: _hygiene_fixturePath("other") }] } })
+  resolve({ kind: 'ready', snapshot })
+  await rejected; expect(useAppStore.getState().tabs).toEqual({})
 })
