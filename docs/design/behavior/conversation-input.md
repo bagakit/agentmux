@@ -131,6 +131,9 @@
 
 ### 对话里的贴图
 
+- 原生对话记录明确声明的 image resource 与粘贴输入分别沿原 owner 读取；公共定位请求保留原 source、turn（存在时）、record、part index 和完整 reference。原 Host 经 Core／Provider 重新定位该准确记录与 image part 后，才读取其中真实声明的 file／data 字节；客户端 supplied reference 只作准确比对，不能授予任意路径读取权限，也不扩大粘贴目录的权限。
+- 已呈现记录可继续打开图片，不依赖移动的最新页；first-page cursor 不是冻结定位。Provider 使用已有准确记录读取能力，缺能力明确说明，不按正文／时间猜定位，不新建历史缓存、资源账本或自动抓取 opaque／HTTP 引用。图像原始字节上限 16 MiB，单次请求只能缩小预算；支持的 raster 类型与解码尺寸守有界预算。读取失败保原 reference、正文和阅读窗口，说明本次失败与可重试动作，不改变 Session／Run 生命周期。
+
 - 粘进对话的图片要**看得见**：渲染成缩略图，而不是一颗只显示路径的文件链接按钮。点击放大到灯箱。
 - 路径表示原样保留：Agent 要靠那个 `@path` 去读图，缩略图只是给人看的一层，不替换引用本身。
 - 走 data URI 是 CSP 逼出来的（`img-src 'self' data:` 挡死 `file:`），不是选择。

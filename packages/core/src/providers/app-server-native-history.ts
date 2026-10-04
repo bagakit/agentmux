@@ -3,6 +3,7 @@ import { withAppServerNativeRead } from './app-server-native-read.js'
 import { AgentMuxError } from '../errors.js'
 import type {
   AgentProviderSessionHistoryContext,
+  AgentProviderSessionHistoryRecordContext,
   AgentProviderSessionQuestionReplyContext,
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
@@ -454,16 +455,17 @@ export async function readAppServerSessionHistoryPage(
   })
 }
 
-/** Resolve one exact indexed record with bounded anchors, then encode its Provider-owned reply. */
-export async function prepareAppServerSessionQuestionReply(context: AgentProviderSessionQuestionReplyContext): Promise<string> {
+/** The existing indexed record anchor shared by questions and resource reads. */
+async function exactAppServerEntry(context: AgentProviderSessionHistoryRecordContext, unsupported = 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED', missing = 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD'): Promise<Record<string, unknown>> {
+  if (!context.turnId) throw new AgentMuxError('This indexed record requires its recorded turn.', unsupported)
   return await withAppServerNativeRead(context, 'history', async request => {
     const metadata = object(object(await request('thread/read', {
       threadId: context.source.nativeSessionId, includeTurns: false
     })).thread)
     if (metadata.id !== context.source.nativeSessionId) throw new AgentMuxError(
-      'Native question source changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      'Native record source changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     if (metadata.historyMode !== 'paginated') throw new AgentMuxError(
-      'This native Session does not expose indexed question records.', 'AGENT_QUESTION_REPLY_UNSUPPORTED')
+      'This native Session does not expose indexed records.', unsupported)
     const anchor = object(await request('thread/items/list', {
       threadId: context.source.nativeSessionId, turnId: context.turnId, limit: 1,
       sortDirection: 'desc', cursor: { type: 'item', itemId: context.recordId }
@@ -475,12 +477,24 @@ export async function prepareAppServerSessionQuestionReply(context: AgentProvide
       sortDirection: 'asc', ...(previous === undefined ? {} : { cursor: { type: 'item', itemId: previous } })
     }))
     if (!Array.isArray(page.data) || page.data.length !== 1) throw new AgentMuxError(
-      'The exact native question record is unavailable.', 'UNKNOWN_AGENT_QUESTION')
+      'The exact native record is unavailable.', missing)
     const entry = object(page.data[0]), item = object(entry.item)
-    if (entry.turnId !== context.turnId || item.id !== context.recordId || item.type !== 'agentMessage') throw new AgentMuxError(
-      'The native question lookup returned another record.', 'UNKNOWN_AGENT_QUESTION')
-    const questions = codexQuestionRequest(item)
-    if (!questions) throw new AgentMuxError('This record does not contain native asynchronous questions.', 'UNKNOWN_AGENT_QUESTION')
-    return encodeCodexQuestionReply(questions, context.answers)
+    if (entry.turnId !== context.turnId || item.id !== context.recordId) throw new AgentMuxError(
+      'The native lookup returned another record.', missing)
+    return entry
   })
+}
+
+export async function readAppServerSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem> {
+  return itemEntry(await exactAppServerEntry(context), context.source)
+}
+
+/** Resolve one exact indexed record with bounded anchors, then encode its Provider-owned reply. */
+export async function prepareAppServerSessionQuestionReply(context: AgentProviderSessionQuestionReplyContext): Promise<string> {
+  const entry = await exactAppServerEntry(context, 'AGENT_QUESTION_REPLY_UNSUPPORTED', 'UNKNOWN_AGENT_QUESTION'), item = object(entry.item)
+  if (item.type !== 'agentMessage') throw new AgentMuxError(
+    'The native question lookup returned another record kind.', 'UNKNOWN_AGENT_QUESTION')
+  const questions = codexQuestionRequest(item)
+  if (!questions) throw new AgentMuxError('This record does not contain native asynchronous questions.', 'UNKNOWN_AGENT_QUESTION')
+  return encodeCodexQuestionReply(questions, context.answers)
 }

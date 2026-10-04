@@ -1,4 +1,5 @@
 import { readControlJsonInput } from './cli-json-input.js'
+import { parseSessionHistoryResourceParams } from './session-history-resource.js'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
@@ -218,6 +219,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       return { hostId: id(f, '--host'), agentSessionId: id(f, '--session', true), source,
         ...numbers(f, { '--limit': 'limit', '--max-bytes': 'maxBytes' }), ...fields(f, { '--cursor': 'cursor' }) }
     }, 'Sources are explicit: missing native identity does not erase captured work. Follow nextCursor with the same Host/Session/source. A fragment is exact JSON UTF-8 bytes in base64; concatenate contiguous offsets and verify its SHA-256 before parsing. Host restart or source change requires reading the first page again. Reading never restores, attaches, sends or stops a Run.'),
+  command('agent.history.resource', '--input FILE|-', 'Read one exact recorded image at its original Host without operating a Run.', { '--input': 'data' },
+    async f => parseSessionHistoryResourceParams(await readControlJsonInput(value(f, '--input', true)!, 'Recorded image')) as unknown as Record<string, unknown>,
+    'JSON requires hostId, agentSessionId, source {providerId,nativeSessionId}, recordId, partIndex and expectedReference; preserve turnId when recorded. Locate these facts with agent.history --source native. maxBytes can only reduce the fixed 16 MiB cap. The Host rereads the exact original record and image part; expectedReference grants no arbitrary path access. File and raster data references may yield MIME/base64 bytes; opaque/HTTP or unavailable images retain their reference and readable reason. No network fetch or Run operation occurs.'),
   command('agent.context', '--host ID --session ID [--cursor TOKEN] [--limit N]', 'Read all available original context sources, complete entries and diagnostics without controlling the Agent.',
     { '--host': 'data', '--session': 'data', '--cursor': 'data', '--limit': 'value' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ...fields(f, { '--cursor': 'cursor' }), ...numbers(f, { '--limit': 'limit' }) }),
     'Both saved Core work and native conversation are included automatically. Follow nextCursor with the same exact Host and Session; limit bounds entries per source, never text length. Unavailable sources are reported alongside readable material. local means this Core Host, including on a remote machine. Read-only requests and cancellation never stop the original Run.'),
