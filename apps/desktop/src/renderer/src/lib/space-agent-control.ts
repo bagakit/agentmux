@@ -406,18 +406,24 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
   let agent: AgentMuxSpaceAgentFact | null = snapshot ? snapshotFact(snapshot) : null
   const issues: AgentMuxSpatialIssue[] = []
   if (binding.createAgent) {
+    let creationConfirmed = false
     const hostId = binding.executionHostId ?? binding.resource?.hostId ?? snapshot?.hostId ?? catalog.zones.find(item => item.zoneId === binding.target.zoneId)?.hostId
     if (hostId) try {
       const created = await ports.creation(hostId, binding.agentSessionId)
       if (created.agentSessionId !== binding.agentSessionId) throw new Error('Creation read returned another Session identity.')
-      if (binding.recovery && created.creation?.createOperationId !== binding.requestId) throw new Error('Core has not confirmed this original creation operation identity. Its healthy Session is retained without attaching a replacement.')
+      if (created.creation?.createOperationId !== binding.requestId) throw new Error('Core has not confirmed this original creation operation identity. Its healthy Session is retained without attaching a replacement.')
       agent = agentFact(created, hostId)
+      creationConfirmed = created.creation?.persistence !== 'unconfirmed' && !created.creation?.failure
       // Repair only the original reserved projection from the existing Core receipt.
       // This read never repeats creation, input or lifecycle recovery.
       const afterRead = currentLocation()
       if (binding.recovery && afterRead.atTarget && !afterRead.snapshot) await ports.attach(binding.regionId, { created, projectionFailures: [] })
     }
-    catch (error) { issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', error)) }
+    catch (error) {
+      issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', `Current creation check: ${error instanceof Error ? error.message : String(error)}`))
+    }
+    if (!creationConfirmed && binding.originalFailure) issues.unshift({ ...binding.originalFailure,
+      step: `original-${binding.originalFailure.step}`, message: `Original operation failure: ${binding.originalFailure.message}` })
   }
   ;({ state, catalog, to, atTarget, snapshot } = currentLocation())
   const workspace = binding.resource && state.config?.workspaces.find(item => item.hostId === binding.resource!.hostId && item.path === binding.resource!.path)
@@ -477,11 +483,23 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   const report: AgentMuxSpaceMutationReport = { requestId: request.requestId, outcome: 'unknown', from: null, to: null,
     agent: null, resource: null, save: unsaved(), issues: [] }
   const finish = (): AgentMuxSpaceControlResult => ({ operation, ...report })
-  const fail = (error: unknown, step: string) => {
-    const notice = error instanceof SpatialFailure ? error.issue : issue(step, 'SPACE_OPERATION_UNCONFIRMED', error)
+  const fail = async (error: unknown, step: string) => {
+    const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'SPACE_OPERATION_UNCONFIRMED'
+    const notice = error instanceof SpatialFailure ? error.issue : issue(step, code, error)
     report.issues.push(notice)
     report.outcome = report.agent || report.resource || report.save.layoutApplied ? 'partial' : 'unknown'
     ports.notice(notice)
+    const binding = ports.get().spatialRequests[request.requestId]
+    if (ownsAdmission && binding?.createAgent && !binding.originalFailure) {
+      ports.patch({ spatialRequests: { ...ports.get().spatialRequests,
+        [request.requestId]: { ...binding, originalFailure: notice } } })
+      // Save the original error alongside its admitted identity, without re-entering launch.
+      // A storage observation failure cannot erase the in-memory error or claim a disk ACK.
+      try {
+        report.save = await ports.save(report.save.layoutApplied)
+        if (report.save.reason) report.issues.push(issue('failure-save', 'SPACE_FAILURE_SAVE_UNCONFIRMED', report.save.reason))
+      } catch (saveError) { report.issues.push(issue('failure-save', 'SPACE_FAILURE_SAVE_UNCONFIRMED', saveError)) }
+    }
     return finish()
   }
   try {
@@ -613,7 +631,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       report.agent = snapshot ? snapshotFact(snapshot) : null
       return finish()
     }
-    if (signal?.aborted) return fail('The caller disconnected after intent admission; inspect this request without replaying.', 'control')
+    if (signal?.aborted) return await fail('The caller disconnected after intent admission; inspect this request without replaying.', 'control')
     if (resourceInput) {
       const result = await ports.createResource({ spaceId: request.destination.spaceId!, resource: resourceInput })
       report.resource = result.resource
@@ -649,7 +667,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     ports.patch(placement)
     report.to = target.address
     report.save = await ports.save(true)
-    if (!report.save.localStorageWritten && binding.createAgent) return fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
+    if (!report.save.localStorageWritten && binding.createAgent) return await fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
     if (request.focus) ports.focus(target.address)
     if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session') {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
@@ -665,7 +683,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       report.agent = agentFact({ ...launched.created, ...(launched.creation ? { creation: launched.creation } : {}) }, launchHostId)
-      if (launched.created.agentSessionId !== sessionId) return fail('Core returned another Session; its healthy Run has been retained for inspection.', 'creation')
+      if (launched.created.agentSessionId !== sessionId) return await fail('Core returned another Session; its healthy Run has been retained for inspection.', 'creation')
       await ports.attach(target.address.regionId, launched)
       const landing = resolveSpatialCommit(ports.get().tabs, target.address.regionId, { kind: 'agent', sessionId })
       report.to = landing.kind === 'landed' ? addressOf(spatialCatalog(ports.get(), topics), target.address.regionId, { ...(target.address.spaceId ? { spaceId: target.address.spaceId } : {}), ...(target.address.zoneId ? { zoneId: target.address.zoneId } : {}), displayWorkspaceId: target.address.displayWorkspaceId, groupId: target.address.groupId }) : null
@@ -688,6 +706,6 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     report.outcome = report.issues.length ? 'partial' : operation === 'space.mv' ? 'moved' : 'opened'
     for (const notice of report.issues) ports.notice(notice)
     return finish()
-  } catch (error) { return fail(error, 'owner') }
+  } catch (error) { return await fail(error, 'owner') }
   finally { if (ownsAdmission) activeRequests.delete(request.requestId) }
 }

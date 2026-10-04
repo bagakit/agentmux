@@ -1,4 +1,4 @@
-import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, TopicCategory } from '@agentmux/core/control'
+import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, AgentMuxSpatialIssue, TopicCategory } from '@agentmux/core/control'
 import type { AgentMuxAgentForkSource } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicPhysicalPath } from './scratch-topics'
@@ -81,6 +81,8 @@ export type SpatialRequestBinding = {
   regionId: string
   agentSessionId: string
   createAgent: boolean
+  /** First failure of this admitted operation; later reads cannot replace its evidence. */
+  originalFailure?: AgentMuxSpatialIssue
   /** Original Core owner, independent of any later display move. */
   executionHostId?: string
   /** User's recovery choice. Correlation only; Core remains the creation/history owner. */
