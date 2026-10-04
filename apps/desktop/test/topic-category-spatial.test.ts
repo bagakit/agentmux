@@ -143,8 +143,9 @@ describe('Topic Category uses original Core identities through local migration',
   })
   it('keeps concurrent work and corrupt durable bytes instead of committing a stale or absent graph', async () => {
     const f = await fixture(), preview = await f.owner.migratePreview(), original = (await f.state.read())!
-    const newer = structuredClone(original.graph); newer.tabs[0]!.name = 'User changed this while previewing'
-    await f.state.commit({ expectedRevision: original.revision, graph: newer })
+    await f.state.mutateDisplayLabel({ target: { kind: 'tab', id: original.graph.tabs[0]!.tabId },
+      value: 'User changed this while previewing', expectedNameRevision: 0, source: 'manual', operationId: 'concurrent-topic-preview-label' },
+    { actor: { kind: 'user', id: 'fixture-user', verified: true }, source: 'explicit-edit', entryPoint: 'space.rename', transport: 'local', location: {} })
     await expect(f.owner.migrateApply(preview.spatialRevision)).rejects.toMatchObject({ code: 'SPATIAL_STATE_CONFLICT' })
     expect((await f.state.read())!.graph.tabs[0]!.name).toBe('User changed this while previewing')
     await writeFile(f.state.path, 'original corrupt bytes')
