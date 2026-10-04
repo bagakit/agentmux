@@ -51,7 +51,10 @@ export function resolveWorkbenchOccurrenceSelection(state: DesktopSelectionState
   const sourceSpace = originalSpace && catalog.bindings.some(binding => binding.spaceId === originalSpace && binding.zoneId === tab?.zoneId) ? originalSpace : undefined
   const within = choice?.workspaceId === reference.workspaceId && choice.zoneId === tab?.zoneId &&
     (choice.spaceId === null || catalog.bindings.some(binding => binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId))
-  if (choice && !within && intent === 'local') reject('SPACE_SCOPE_UNCONFIRMED',
+  const sameUnboundOccurrence = choice?.spaceId === null && choice.zoneId === null &&
+    choice.workspaceId === reference.workspaceId && choice.groupId === reference.groupId && choice.tabId === reference.tabId &&
+    choice.regionId === (reference.regionId ?? state.tabs[reference.tabId]?.layout.activeRegionId)
+  if (choice && !within && !sameUnboundOccurrence && intent === 'local') reject('SPACE_SCOPE_UNCONFIRMED',
     'This local position is not confirmed in the selected object. Its original workface and reference are kept.')
   const selected = resolveDesktopSpaceSelection(state, catalog, {
     ...(sameSpace ? { spaceId: choice.spaceId! } : sourceSpace ? { spaceId: sourceSpace } : {}),
@@ -68,6 +71,24 @@ export function resolveWorkbenchOccurrenceSelection(state: DesktopSelectionState
 export function workbenchObjectLayout(state: NavigationState, workspaceId: string, layout = state.layouts[workspaceId]) {
   const catalog = workbenchSelectionCatalog(state)
   let choice = state.workbenchSpaceSelection?.workspaceId === workspaceId ? state.workbenchSpaceSelection : null
+  if (choice?.spaceId === null && choice.zoneId === null && choice.tabId && choice.groupId && choice.regionId &&
+    catalog.tabs.some(tab => tab.tabId === choice!.tabId && tab.zoneId !== null)) {
+    // Discovery can confirm the original membership after this exact occurrence was selected.
+    // Re-resolve that address through the existing catalog owner; ambiguity stays unknown.
+    const originalAddress = { workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId }
+    try { choice = resolveWorkbenchOccurrenceSelection({ ...state, workbenchSpaceSelection: null }, catalog,
+      originalAddress, 'navigation') }
+    catch (error) {
+      const original = projectWorkbenchProjection(layout, state.tabs, {
+        entity: { kind: 'tab', tabId: originalAddress.tabId }, presentationId: 'space-workbench',
+        displayWorkspaceId: workspaceId, catalog, selectionMode: 'occurrence',
+        selection: [{ displayWorkspaceId: workspaceId, groupId: originalAddress.groupId,
+          tabId: originalAddress.tabId, regionId: originalAddress.regionId }], onSelect: () => {}
+      })
+      return { layout: original.layout, choice, confirmed: false,
+        issues: [(error as Error).message, ...original.issues] }
+    }
+  }
   if (!choice && layout) {
     const group = layout.groups.find(group => group.id === layout.activeGroupId)
     if (group?.activeTabId) {
