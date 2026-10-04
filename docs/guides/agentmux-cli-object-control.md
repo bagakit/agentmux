@@ -127,15 +127,20 @@ agentmux schedule cancel --data request.json
 
 用户可在同一创建 JSON 中显式加入 `checkIn: {silenceMs:64800000, minIntervalMs:72000000, dailyBudget:1, quiet:{start:'<quiet-start-HH:mm>', end:'<quiet-end-HH:mm>'}}` 开启安静跟进；其中安静时段的两个占位符须替换为实际策略时刻，JSON 文件需使用双引号。省略即关闭，已鉴权 Agent 不能开启。两个间隔可明确设置为 5 分钟至 30 天，预算为每个保存时区的日历日 1–3 次；安静时段使用该时区的 `HH:mm`，开始与结束须不同。`inspect` 显示保存策略、已认领预算、未答状态与未知原因，暂停／继续／取消仍用上面的原操作。跟进要求可确认的本会话人工上下文；较晚未知输入或当前来源未确认时保原到期安排。问候内容由真实 Agent 依据保存主题生成，不能把 timer、Native 文本或 Agent 消息当人类答复。
 
-## 改显示名，再读取当前值
+## 按已读版本改显示名
+
+先读取准确对象的名称版本。Agent 使用 `agent inspect` 的 `displayName.nameRevision`；Tab 使用 `space inspect` 中该 Tab 的 `nameRevision`。只有版本已观察且为有效整数时才提交，不能猜零或从另一对象复用版本。
 
 ```sh
-agentmux agent rename --session '<session-id>' --name 'CLI 实现'
 agentmux agent inspect --session '<session-id>'
-agentmux space rename --tab '<tab-id>' --name '评审'
+agentmux agent rename --session '<session-id>' --name-revision N --name 'CLI 实现'
+agentmux space inspect --tab '<tab-id>'
+agentmux space rename --tab '<tab-id>' --name-revision M --name '评审'
 ```
 
-两种改名都支持 `--clear`；名称文本可以使用 `--name=--help`。改名只改桌面显示名称。保存失败会保留已应用的值，返回 `partial` 并退出非零；保存请求不代表磁盘已确认。稍后 `agent inspect` 分别报告 Core Session 与桌面显示事实。桌面覆盖名不能确认早先请求的结果，也不能从覆盖名 `null` 推断 Session 是否存在、退休或健康；桌面不可用时仍保留能读取到的 Core 事实。
+`N` 与 `M` 分别替换为同一目标刚读到的名称版本。版本冲突时重新读取目标并由调用者确认新意图，不自动覆盖并发改名。准确参数与版本校验归[CLI parser](../../packages/core/src/agentmux-cli-commands.ts)和[空间状态名称 owner](../../packages/core/src/spatial-state.ts)。
+
+两种改名都支持 `--clear`，清空同样需要原名称版本；名称文本可以使用 `--name=--help`。改名只改显示名称，不改变实体身份。保存失败保留已应用值，返回 `partial` 并退出非零；保存请求不代表磁盘已确认。后续读取分别报告 Core Session 与显示事实；覆盖名不能确认早先请求结果，覆盖名 `null` 不说明 Session 存在、退休或健康。客户端不可用时仍保留能读取到的 Core 事实。
 
 右键 Agent 名片用 SID 发送与检查；知道点击的准确 Region 时，另外给空间检查、保输入导航和需填写目标的移动模板。向 Tab 发送时按不同 SID 消歧：同一个 SID 的多个 Region 仍是一个收件人；多个不同 SID 会返回真实候选。最终 owner 发现内容已替换时拒绝原投递，不改投、重发或冒称成功。
 

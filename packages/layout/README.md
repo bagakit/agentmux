@@ -1,43 +1,15 @@
 # @agentmux/layout
 
-工作区分屏布局的**纯代数**——一棵带方向与比例的二叉分屏树，叶子上挂各自的载荷。工作区的
-tab-group 布局与 tab 内的 region 布局是同一棵树，只有叶子载荷不同，所以这套树代数只存在一份。
+本包重导出 Core 的无 UI 空间布局代数，供已有客户端通过 `@agentmux/layout` 消费同一实现。代数的唯一源码 owner 是 [`@agentmux/core/spatial-layout`](../core/src/spatial-layout.ts)；本包不持有空间状态、实体身份或生命周期。
 
-## 为什么是独立的包
+## 树与载荷的关系
 
-这套代数此前住在 Desktop 渲染层里，与 React/Electron/store/Agent 概念混在一起。抽成包是为了让
-「树的结构、方向寻址、焦点移动、比例夹取」这些**与显示无关**的判定可以在包外消费、在裸的非 DOM
-环境里测，且从机器上保证它不回头依赖任何 UI/Agent 概念。
+显示 Workspace 的分割树以 Tab Group 为叶子，各 Group 通过 Tab 顺序组织完整 Tab 的展示；Tab 内的分割树以 Region 为叶子。两类树复用相同的泛型二叉树代数，叶子载荷和所属对象不同，不是同一份布局实例。实体与绑定关系见[空间模型](../../docs/design/behavior/spaces-and-layout.md#tabtab-group-与-region)。
 
-**零 UI/Agent 依赖**是这个包的硬约束，不是风格：`src/` 下任何文件都不得 import `react` /
-`react-dom` / `electron` / `zustand`、任何渲染层路径、或 `@agentmux/core` 的 barrel。唯一允许的
-外部依赖是 node-free 的类型 SSOT 子路径 `@agentmux/core/workbench-layout-preset`（布局预设名的全集，
-控制协议与 GUI 共用同一份，不在这里重列）。这条约束由 `test/package-consumer.test.ts` 逐文件静态
-扫描守着。
+## API 与消费边界
 
-## 公共 API
+[`src/index.ts`](src/index.ts) 只重导出 Core 子路径。分割树、比例、方向寻址和两类布局 reducer 的准确 exports 以该子路径为准；消费者使用包入口，不另复制算法或深引内部文件。
 
-只从包入口 `@agentmux/layout` 取，不要深入 `src/`：
+该 Core 子路径必须独立于 React、Electron、Renderer Store 和 Agent 生命周期。布局变更的提交、持久化与空间身份由[Core 空间状态 owner](../../docs/architecture/spatial-state.md)处理；纯代数计算不代表布局已保存。
 
-- **split-tree**：泛型分屏树 `SplitTreeNode<Leaf>`、比例夹取（`clampSplitRatio` /
-  `clampSplitTreeRatios` / `setSplitRatioAtPath`）、叶子操作（`collectLeafIds` / `removeLeaf` /
-  `replaceLeaf` / `findSiblingLeafId` / `dedupeLeafIds` / `leafIdsMatchRecords`），以及比例 SSOT
-  常量 `MIN_SPLIT_RATIO` / `MIN_SPLIT_PERCENT` / `EVEN_SPLIT_RATIO`。
-- **split-direction**：方向的几何真相——`orientationOf` / `placementOf` / `regionInDirection` /
-  `REGION_GEOMETRY_EPSILON`。
-- **workbench-layout**：`WorkspaceLayout` 与 tab-group 树的 reducer（`addTab` / `removeTab` /
-  `moveTab` / `moveTabToNewGroup` / `assertGroupInvariant` …），`SplitDirection` union 定义处。
-- **workbench-view-layout**：`WorkbenchViewLayout` 与 region 树的 reducer、`workbenchRegionBounds`、
-  `applyWorkbenchRegionLayoutPreset`。
-
-## 无构建步骤
-
-`exports` 直接指向 `./src/*.ts`：vite/vitest 直接转译 TS，消费者无需先 build，本包也**没有**
-`build` 脚本——类型检查由 `typecheck`（`tsc --noEmit`）负责，不 emit 任何产物。
-
-这条对消费者是有约束的：`main` 指向 `.ts`，所以只有会转译 TS 的宿主能 import 本包。今天的
-24 个生产调用点全在渲染层（vite），测试走 vitest，都满足。**主进程（纯 node，无 vite）不能
-直接 import 本包**——那会抛 `ERR_UNKNOWN_FILE_EXTENSION`。若将来主进程真要用这套代数，正确
-的动作是那时再加回 emit 并把 `exports` 指向产物，而不是现在留一份没人读的 `dist/`。
-
-The shared algebra now lives in the node-free `@agentmux/core/spatial-layout` entry. This package exports the same original functions for its existing consumers; it holds no spatial store or lifecycle. Core and clients therefore use one implementation of topology, ratios and directional addressing.
+本包的入口直接指向 TypeScript 源文件，没有 emit/build 步骤。运行环境、exports 和检查命令以 [`package.json`](package.json) 为准；宿主须支持该源 TS 及其模块解析，不能仅凭是否使用 Node 或 Vite 推断可导入。类型检查使用 `typecheck`，消费边界测试见 [`test/package-consumer.test.ts`](test/package-consumer.test.ts)。
