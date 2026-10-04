@@ -199,6 +199,27 @@ describe('failed Hosted event lease release', () => {
 })
 
 describe('semantic Host observation consumers', () => {
+  it('reports an invalid JS callback on the actual Hosted observation path while healthy consumers continue', async () => {
+    const f = fixture(), bridge = rpcPort(f.service)
+    const client = await connectHostedAgentMux({ rpc: bridge.port, consumerId: 'consumer-a' })
+    const diagnostic = vi.fn(), invalid = vi.fn(() => Promise.resolve()), events: AgentMuxClientEvent[] = []
+    client.onEvent(invalid as unknown as (event: AgentMuxClientEvent) => void, { onError: diagnostic })
+    client.onEvent(event => { events.push(event) })
+    try {
+      const observation: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'original-run' }, state: 'running', pid: 421, evidence: { source: 'run-process', observedAt: 2 } }
+      f.emit(observation)
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state')).toHaveLength(1))
+      f.emit({ ...observation, evidence: { ...observation.evidence, observedAt: 3 } })
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'process-state')).toHaveLength(2))
+      expect(invalid).toHaveBeenCalledOnce()
+      expect(diagnostic).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_ASYNC' }))
+      expect(events.filter(event => event.type === 'process-state')).toHaveLength(2)
+      expect(events.filter(event => event.type === 'agent-error' && event.code === 'CLIENT_EVENT_LISTENER_ASYNC')).toHaveLength(1)
+      expect(client.runtimeOwnerIdentity()?.availability).toBe('connected')
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    } finally { await client.dispose(); await f.service.dispose() }
+  })
+
   it('recovers the original Core after its actual bounded reconnect has exhausted, on the next explicit Hosted business retry', async () => {
     const core = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
     let connected = false, unavailable = false, connectionLost!: () => void
