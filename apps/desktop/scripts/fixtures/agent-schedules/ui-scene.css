@@ -1,7 +1,0 @@
-.schedule-scene { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; background: var(--surface-0); color: var(--text); font-family: var(--font-sans); }
-.schedule-scene > header { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--line-soft); font-size: var(--fs-body); font-weight: 600; }
-.schedule-scene > header > span { color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
-.schedule-scene__body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-5); }
-.schedule-scene > footer { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--line-soft); font-size: var(--fs-meta); color: var(--text-3); }
-.schedule-scene > footer label { display: grid; gap: var(--sp-2); }
-.schedule-scene > footer textarea { padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; resize: none; width: 100%; }

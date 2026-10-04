@@ -65,6 +65,16 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   if (!sourceTab || sourceTab.workspaceId !== input.workspaceId) return { kind: 'unchanged' }
   const surface = sourceTab.regions[input.regionId]
   if (!surface) return { kind: 'unchanged' }
+  // A file surface is exempt — the one Region kind that cannot be relocated to a fresh Tab. A file's
+  // Tab is addressed by a canonical id derived from its path (fileTabId), and file-workbench-state.ts's
+  // reduceDocumentAttached / reduceDocumentLoadFailed / reduceFileOpened all look the surface up by that
+  // canonical id. Moving a file Region into a `view:…` Tab puts a `kind:'file'` surface into a Tab whose
+  // id ≠ fileTabId(...) — exactly the change that file's invariant comment names as silently degrading
+  // (re-opening the file would spawn a duplicate; a re-attach/load-failure would miss the surface). This
+  // is the same reason move-session-view relocates only agent/terminal Regions. Every other kind is safe:
+  // a browser's browserId equals its (here preserved) regionId, and agent/terminal/launcher carry no
+  // Tab-id coupling.
+  if (surface.kind === 'file') return { kind: 'unchanged' }
   // The new Tab lands inside the source Tab's own group, so that group must exist in the layout.
   const layout = input.layouts[input.workspaceId]
   if (!layout) return { kind: 'unchanged' }
@@ -81,8 +91,7 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   // Topic's projection would drop the new Tab out of its Topic (see WorkbenchTab.topicId).
   const newTab: WorkbenchTab = {
     ...createWorkbenchTab(input.mint.tabId, surface),
-    ...(sourceTab.topicId ? { topicId: sourceTab.topicId } : {}),
-    ...(sourceTab.space ? { space: sourceTab.space } : {})
+    ...(sourceTab.topicId ? { topicId: sourceTab.topicId } : {})
   }
 
   // Land the new Tab adjacent to its source (immediately after it in the group's tabOrder) and make it

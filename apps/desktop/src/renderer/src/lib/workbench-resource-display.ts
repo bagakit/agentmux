@@ -76,17 +76,16 @@ export function workbenchDisplayTabs(tabs: Tabs, workspaceId: string, layout?: W
 }
 
 /** All ordinary occurrences; only a confirmed Browser can actually mirror its content. */
-export function ordinaryWorkbenchViewTargets(layout: WorkspaceLayout | undefined, tabs: Tabs, displayWorkspaceId: string, prefix = 'workbench-tab-slot', selected?: WorkbenchProjectionSelection | null): WorkbenchViewTargets {
+export function ordinaryWorkbenchViewTargets(layout: WorkspaceLayout | undefined, tabs: Tabs, displayWorkspaceId: string, prefix = 'workbench-tab-slot'): WorkbenchViewTargets {
   const targets: Record<string, WorkbenchViewTarget[]> = {}
   if (!layout) return targets
   const visibleGroups = displayMembership(layout).visible
   for (const group of layout.groups) if (visibleGroups.has(group.id)) for (const tabId of new Set(group.tabOrder)) {
-    const tab = tabs[tabId], held = selected?.displayWorkspaceId === displayWorkspaceId && selected.groupId === group.id && selected.tabId === tabId ? selected : null
-    const regionId = held?.regionId ?? tab?.layout.activeRegionId
+    const tab = tabs[tabId], regionId = tab?.layout.activeRegionId
     if (!tab || !regionId || !tab.regions[regionId]) continue
     const reference = { displayWorkspaceId, groupId: group.id, tabId, regionId }
     const target: WorkbenchViewTarget = { hostId: workbenchProjectionSlotId(prefix, reference), active: true,
-      visible: group.activeTabId === tabId, surface: 'space', reference, ...(held ? { retainedRegionId: held.regionId } : {}) }
+      visible: group.activeTabId === tabId, surface: 'space', reference }
     ;(targets[tabId] ??= []).push(target)
   }
   return targets

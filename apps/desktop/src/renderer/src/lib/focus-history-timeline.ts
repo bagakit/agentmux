@@ -19,11 +19,11 @@ export type FocusTimelineProject = {
   tracks: FocusTimelineTrack[]
 }
 const UNKNOWN_PROJECT = 'unknown-project'
-function projectKey(identity: AgentFocusHistoryIdentity | undefined, hostId?: string): string {
-  return identity?.project ? JSON.stringify([identity.hostId, identity.project.id]) : JSON.stringify([identity?.hostId ?? hostId ?? null, UNKNOWN_PROJECT])
+function projectKey(identity: AgentFocusHistoryIdentity | undefined): string {
+  return identity?.project ? JSON.stringify([identity.hostId, identity.project.id]) : UNKNOWN_PROJECT
 }
-export function focusTimelineTrackKey(sessionId: string, identity: AgentFocusHistoryIdentity | undefined, hostId?: string): string {
-  return JSON.stringify([projectKey(identity, hostId), sessionId])
+export function focusTimelineTrackKey(sessionId: string, identity: AgentFocusHistoryIdentity | undefined): string {
+  return JSON.stringify([projectKey(identity), sessionId])
 }
 const trackKey = focusTimelineTrackKey
 function currentIdentity(context: FocusContext, lane: FocusProjectLane | undefined): AgentFocusHistoryIdentity {
@@ -52,13 +52,13 @@ export function observeFocusInputTracks(entries: readonly AgentFocusHistoryEntry
   }
   return new Map([...facts].map(([key, fact]) => {
     const identity = fact.conflict ? undefined : fact.observed.identity
-    return [key, { sessionId: fact.sessionId, identity, key: trackKey(fact.sessionId, identity, fact.observed.identity!.hostId) }]
+    return [key, { sessionId: fact.sessionId, identity, key: trackKey(fact.sessionId, identity) }]
   }))
 }
 /** Context observations organize input; they never prove a message's past project. */
 export function resolveFocusInputTrack(observations: ReadonlyMap<string, FocusInputTrack>, reference: { hostId: string; agentSessionId: string }): FocusInputTrack {
   const observed = observations.get(referenceKey(reference))
-  return observed ?? { sessionId: reference.agentSessionId, identity: undefined, key: trackKey(reference.agentSessionId, undefined, reference.hostId) }
+  return observed ?? { sessionId: reference.agentSessionId, identity: undefined, key: trackKey(reference.agentSessionId, undefined) }
 }
 
 /** Historical segments use their own observation. Current ownership only describes current facts. */
@@ -66,8 +66,8 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
   const groups = new Map<string, FocusTimelineProject>()
   const tracks = new Map<string, FocusTimelineTrack>()
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
-  const ensure = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined, hostId?: string) => {
-    const groupKey = projectKey(identity, hostId), key = trackKey(sessionId, identity, hostId)
+  const ensure = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined) => {
+    const groupKey = projectKey(identity), key = trackKey(sessionId, identity)
     let track = tracks.get(key)
     if (!track) {
       const group = groups.get(groupKey) ?? { key: groupKey, name: identity?.project?.name ?? 'Project not recorded', workspaceId: identity?.project?.id, tracks: [] }
@@ -92,7 +92,7 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
   // Only actually read, timed input occupies a row. Its Context observations
   // organize the row; message-time ownership remains explicitly unknown.
   for (const readonlyInputTrack of readonlyInputTracks) {
-    const track = ensure(readonlyInputTrack.sessionId, readonlyInputTrack.identity, readonlyInputTrack.reference?.hostId)
+    const track = ensure(readonlyInputTrack.sessionId, readonlyInputTrack.identity)
     track.inputProjectObserved = !!readonlyInputTrack.identity?.project
     track.inputReference = readonlyInputTrack.reference
   }
@@ -116,19 +116,19 @@ const compareName = (a: { key: string; name: string }, b: { key: string; name: s
  * Focus timestamps select a recorded name only; they never supply task activity. */
 export function focusTimelineOrderCandidates(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], entries: readonly AgentFocusHistoryEntry[], inputTracks: readonly FocusInputTrack[] = []): FocusTimelineOrderCandidate[] {
   const groups = new Map<string, { key: string; name: string; namedAt: number; activityAt: number | null; tracks: Map<string, { key: string; name: string; namedAt: number }> }>()
-  const remember = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined, namedAt: number, activityAt: number | null = null, hostId?: string) => {
-    const key = projectKey(identity, hostId)
+  const remember = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined, namedAt: number, activityAt: number | null = null) => {
+    const key = projectKey(identity)
     const group = groups.get(key) ?? { key, name: identity?.project?.name ?? 'Project not recorded', namedAt, activityAt: null, tracks: new Map() }
     if (namedAt >= group.namedAt) { group.name = identity?.project?.name ?? 'Project not recorded'; group.namedAt = namedAt }
     if (activityAt !== null && Number.isFinite(activityAt) && activityAt > 0) group.activityAt = Math.max(group.activityAt ?? 0, activityAt)
-    const id = trackKey(sessionId, identity, hostId), track = group.tracks.get(id)
+    const id = trackKey(sessionId, identity), track = group.tracks.get(id)
     if (!track || namedAt >= track.namedAt) group.tracks.set(id, { key: id, name: identity?.name ?? sessionId, namedAt })
     groups.set(key, group)
   }
   for (const entry of entries) remember(entry.sessionId, entry.identity, entry.focusedAt)
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   for (const context of contexts) remember(context.id, currentIdentity(context, byContext.get(context.id)), Infinity, context.lastActivityAt)
-  for (const inputTrack of inputTracks) remember(inputTrack.sessionId, inputTrack.identity, -Infinity, null, inputTrack.reference?.hostId)
+  for (const inputTrack of inputTracks) remember(inputTrack.sessionId, inputTrack.identity, -Infinity)
   return [...groups.values()].map(group => ({ key: group.key, name: group.name, activityAt: group.activityAt,
     tracks: [...group.tracks.values()].map(({ key, name }) => ({ key, name })) }))
 }

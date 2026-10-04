@@ -5,7 +5,6 @@ import type {
   AgentMuxInteractionResponse
 } from '@agentmux/core'
 import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } from '../lib/agent-interaction-plan.js'
-import { AgentQuestionChoices } from './AgentQuestionChoices.js'
 import { presentError } from '../lib/error-presentation.js'
 
 /** The single typed plan owns answer semantics; this card owns presentation and submission state. */
@@ -164,8 +163,20 @@ export function AgentInteractionCard({
         </div>
       </div>
       {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} Choose an option to retry.</p> : null}
-      <AgentQuestionChoices options={choices.map(choice => choice.option)} selectedId={selectedOption} disabled={unavailable}
-        onChoose={id => { const choice = choices.find(choice => choice.option.id === id); if (choice) void respond(choice.response) }} />
+      <div className="agent-interaction__options">
+        {choices.map(({ option, response }) => (
+          <button
+            key={option.id}
+            aria-pressed={selectedOption === option.id}
+            type="button"
+            disabled={unavailable}
+            onClick={() => void respond(response)}
+          >
+            <span>{option.label}</span>
+            {option.description ? <small>{option.description}</small> : null}
+          </button>
+        ))}
+      </div>
       <div className="agent-interaction__actions">
         <button
           type="button"

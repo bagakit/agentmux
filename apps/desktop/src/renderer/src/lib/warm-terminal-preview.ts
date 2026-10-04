@@ -1,13 +1,4 @@
-import type { SessionSnapshot, TerminalLaunchInput } from '../../../shared/contracts'
-import type { SessionLaunchFailure } from '../../../shared/session-launch-result'
-
-/** The original request survives a lost receipt and a transfer of its preview owner. */
-export type WarmTerminalCreation = {
-  request: TerminalLaunchInput
-  inFlight: boolean
-  issue?: SessionLaunchFailure
-  hostRecoveryAttempted?: boolean
-}
+import type { SessionSnapshot } from '../../../shared/contracts'
 
 /**
  * 热终端槽在**这一个 launcher** 眼里是什么样。
@@ -39,8 +30,6 @@ export type WarmTerminalPreview = {
    * 表达 promote 之后槽被清空（此时该重新预热一个）。
    */
   slotHeld: boolean
-  state: 'idle' | 'preparing' | 'ready' | 'unconfirmed' | 'elsewhere' | 'other-target'
-  creation?: WarmTerminalCreation
 }
 
 /**
@@ -61,7 +50,7 @@ export function warmLauncherId(input: { tabGroupId: string; regionId: string | u
 
 export function warmTerminalPreview(input: {
   /** 全局槽。`null` 表示当前没有热 shell。 */
-  warmTerminal: { key: string; ownerLauncherId: string; session: SessionSnapshot | null; creation?: WarmTerminalCreation } | null
+  warmTerminal: { key: string; ownerLauncherId: string; session: SessionSnapshot | null } | null
   /** 这个 launcher 所属 workspace 的 host + cwd 键；无 workspace 时为 `null`。 */
   warmKey: string | null
   /** 这个 launcher 的归属身份，来自 {@link warmLauncherId}。 */
@@ -71,19 +60,15 @@ export function warmTerminalPreview(input: {
   // key 不同就是另一个 host / 另一个 cwd 的 shell，与这个 launcher 无关。`warmKey` 为 null（没有
   // workspace）时也走这条：不能让「两个都没有键」凑成相等。
   if (!warmTerminal || warmKey === null || warmTerminal.key !== warmKey) {
-    return { session: null, pending: false, slotHeld: false, state: warmTerminal && warmKey !== null ? 'other-target' : 'idle' }
+    return { session: null, pending: false, slotHeld: false }
   }
   // 槽是这个 workspace 的，shell 还在起——不论归属给谁，这个 launcher 都该显示「正在预热」而不是
   // 冷卡片：点下去 promote 会等 `ready`，用户看到的不该是「没有热 shell」。
-  if (!warmTerminal.session) {
-    const unconfirmed = Boolean(warmTerminal.creation?.issue && !warmTerminal.creation.inFlight)
-    return { session: null, pending: !unconfirmed, slotHeld: true,
-      state: unconfirmed ? 'unconfirmed' : 'preparing', ...(warmTerminal.creation ? { creation: warmTerminal.creation } : {}) }
-  }
+  if (!warmTerminal.session) return { session: null, pending: true, slotHeld: true }
   // shell 起好了，但只有 owner 渲染 live view；同胞显示冷卡片。点击认领照旧可用（promote 只按 key
   // 取槽，不看归属）。宁可少一个预览，也不要两个抢同一个 PTY 的预览。
   if (warmTerminal.ownerLauncherId !== launcherId) {
-    return { session: null, pending: false, slotHeld: true, state: 'elsewhere' }
+    return { session: null, pending: false, slotHeld: true }
   }
-  return { session: warmTerminal.session, pending: false, slotHeld: true, state: 'ready' }
+  return { session: warmTerminal.session, pending: false, slotHeld: true }
 }

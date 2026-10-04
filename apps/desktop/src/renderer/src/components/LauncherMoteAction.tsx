@@ -18,8 +18,7 @@ import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 
 function LauncherMoteAvatar({ mote, topicId }: { mote?: ScratchTopicSnapshot | undefined; topicId: string }) {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
-  const bindings = useAppStore(state => state.spaceZoneBindings)
-  const target = useMemo(() => workspace && mote ? topicSpaceIconTarget(workspace, mote, bindings) : undefined, [workspace, mote, bindings])
+  const target = useMemo(() => workspace && mote ? topicSpaceIconTarget(workspace, mote) : undefined, [workspace, mote])
   const icon = useAppStore(state => target ? state.spaceObjectIcons[target.key] ?? null : null)
   return <SpaceObjectIcon kind="mote" name={mote?.title ?? 'Saved Mote'} manualIcon={icon}
     avatarWorkspaceId={workspace?.id} avatarTopicId={topicId} avatarObjectKey={target?.key} />

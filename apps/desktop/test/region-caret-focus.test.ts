@@ -16,7 +16,7 @@ import {
   dispatchWorkbenchCommand,
   type WorkbenchShortcutStore
 } from '../src/renderer/src/lib/workbench-shortcuts.js'
-import { createWorkspaceLayout, moveTabToNewGroup, regionIds } from '@agentmux/layout'
+import { createWorkspaceLayout, regionIds } from '@agentmux/layout'
 import {
   createWorkbenchTab,
   initialWorkbenchRegionId
@@ -54,12 +54,13 @@ describe('regionFocusClaimsCaret：谁触发的落焦决定抢不抢 caret', () 
     ).toBe(false)
   })
 
-  it('键盘与显式外部导航请求 caret；直接指针不请求', () => {
-    // 全部已声明 cause 的非空分布同时保护外部导航与直接指针的差异。
+  it('穷举全部 cause：恰好一种抢 caret，且是键盘那种', () => {
+    // 判据落在「果」的分布上而不是逐个字面量：把决策取反（`=== 'pointer'`）会让抢/不抢整体对调，
+    // 这里立刻红；把两种都判成抢（`true`）或都不抢（`false`）也红——恰好一个为真且是 keyboard。
     const claiming = REGION_FOCUS_CAUSES.filter((cause) => regionFocusClaimsCaret(cause))
-    expect(claiming).toEqual(['keyboard', 'navigation'])
-    // 自检声明集合完整；不能把漏掉 cause 当作分布通过。
-    expect(new Set<RegionFocusCause>(REGION_FOCUS_CAUSES).size).toBe(4)
+    expect(claiming, `抢 caret 的 cause 应恰好一种，实测 [${claiming.join(', ')}]`).toEqual(['keyboard'])
+    // 自检：cause 表本身覆盖了两种值，否则上面那条在「只有一种 cause」的表下恒真。
+    expect(new Set<RegionFocusCause>(REGION_FOCUS_CAUSES).size).toBe(3)
   })
 })
 
@@ -143,8 +144,6 @@ describe('store.focusRegion：键盘投 caret 意图，指针不投，清除只�
     const tabId = 'view-caret'
     const rootRegionId = initialWorkbenchRegionId(tabId)
     useAppStore.setState({
-      config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {},
-        workspaces: [{ id: 'workspace', hostId: 'local', path: _hygiene_fixturePath("repo"), name: 'Project', kind: 'folder' }], appearance: { terminalTheme: 'graphite' } },
       tabs: {
         [tabId]: createWorkbenchTab(tabId, { regionId: rootRegionId, kind: 'launcher', workspaceId: 'workspace' })
       },
@@ -237,11 +236,6 @@ describe('store.focusRegion：键盘投 caret 意图，指针不投，清除只�
   it.each(['workspace', 'workspace-selection', 'tab-group', 'tab', 'launcher', 'main-surface'] as const)(
     '%s navigation cancels an unconsumed request before a late terminal mount', async destination => {
       const { tabId, rootRegionId } = twoRegionFixture()
-      if (destination === 'tab-group') {
-        const another = createWorkbenchTab('other-view', { kind: 'launcher', regionId: 'other-region', workspaceId: 'workspace' })
-        const layout = moveTabToNewGroup(createWorkspaceLayout('group-one', [tabId, another.id]), another.id, 'group-one', 'group-one', 'right', 'group-two')
-        useAppStore.setState(state => ({ tabs: { ...state.tabs, [another.id]: another }, layouts: { workspace: layout } }))
-      }
       useAppStore.setState({ activeWorkspaceId: 'workspace' })
       useAppStore.getState().focusRegion('workspace', tabId, rootRegionId, 'keyboard')
       const pending = useAppStore.getState().regionCaretFocus
@@ -252,7 +246,7 @@ describe('store.focusRegion：键盘投 caret 意图，指针不投，清除只�
         workspace: { id: 'other-workspace', hostId: 'local', name: 'Other', path: _hygiene_fixturePath("other"), kind: 'folder' },
         config: { version: 9, workspaces: [], hosts: [], executors: {}, appearance: { terminalTheme: 'graphite' } }, changed: true
       })
-      else if (destination === 'tab-group') state.focusTabGroup('workspace', 'group-two')
+      else if (destination === 'tab-group') state.focusTabGroup('workspace', 'group-one')
       else if (destination === 'tab') state.activateTab('workspace', 'group-one', tabId)
       else if (destination === 'launcher') state.openLauncher({ workspaceId: 'workspace', tabGroupId: 'group-one', reveal: true })
       else state.setMainSurface('board')

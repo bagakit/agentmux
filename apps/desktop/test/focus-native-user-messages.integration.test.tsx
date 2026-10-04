@@ -96,7 +96,7 @@ async function fixture(records: NativeRecord[], captured = false) {
   const render = () => act(async () => root.render(createElement(GlobalFocusSurface)))
   const click = async (selector: string) => { const target = element.querySelector<HTMLButtonElement>(selector) ?? floating().querySelector<HTMLButtonElement>(selector); expect(target, selector).not.toBeNull(); await act(async () => target!.click()) }
   const wait = async (check: () => void) => act(async () => { await vi.waitFor(check, { timeout: 3000, interval: 10 }) })
-  const readInputs = async () => { await click('[aria-label="View conversation records"]'); await wait(() => expect(floating().querySelector('[aria-label="Available conversation records"]')).not.toBeNull()) }
+  const readInputs = async () => { await click('[aria-label="View input records"]'); await wait(() => expect(floating().querySelector('[aria-label="Available input records"]')).not.toBeNull()) }
   const verifyNoRuntime = () => expect(forbidden.map(spy => spy.mock.calls.length)).toEqual(forbidden.map(() => 0))
   return { directory, store, client, sessions, stored, root, element, history, reads, writes, render, click, wait, readInputs, writeRecords, verifyNoRuntime }
 }
@@ -134,7 +134,7 @@ it('unknown-time native inputs stay accessible in Focus and ordered parts use th
   const h = await fixture([record('timed', 'Timed input'), record('untimed', [{ type: 'text', text: 'Before resource' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' } }, { type: 'text', text: 'After resource' }], null)])
   await h.render(); await h.wait(() => expect(h.history).toHaveBeenCalledOnce())
   await h.wait(() => expect(h.element.querySelectorAll('.recent-focus__message')).toHaveLength(1))
-  expect([...h.element.querySelectorAll<HTMLElement>('.recent-focus__message')].map(item => item.dataset.inputMessageId)).toEqual([nativeId('timed')])
+  expect([...h.element.querySelectorAll<HTMLElement>('.recent-focus__message')].map(item => item.dataset.messageId)).toEqual([nativeId('timed')])
   const focus = useAppStore.getState().agentFocus
   await h.readInputs(); await h.click(`[data-input-message-id="${nativeId('untimed')}"]`)
   const preview = floating().querySelector<HTMLElement>(`[data-input-preview-id="${nativeId('untimed')}"]`)!
@@ -149,11 +149,11 @@ it('unknown-time native inputs stay accessible in Focus and ordered parts use th
 it('out-of-window, future and missing-time records never get guessed time positions; only the explicit Context is read', async () => {
   const h = await fixture([record('old', 'Old input', NOW - 8 * HOUR), record('future', 'Future input', NOW + HOUR / 2), record('missing', 'Untimed input', null), record('current', 'Current input')])
   await h.render(); await h.wait(() => expect(h.element.querySelectorAll('.recent-focus__message')).toHaveLength(1))
-  expect([...h.element.querySelectorAll<HTMLElement>('.recent-focus__message')].map(item => item.dataset.inputMessageId)).toEqual([nativeId('current')])
+  expect([...h.element.querySelectorAll<HTMLElement>('.recent-focus__message')].map(item => item.dataset.messageId)).toEqual([nativeId('current')])
   expect(h.reads.map(read => read.id)).toEqual([A])
   const focus = useAppStore.getState().agentFocus
   await h.readInputs()
-  await act(async () => { const select = floating().querySelector<HTMLSelectElement>('[aria-label="Conversation records Context"]')!; select.value = B; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  await act(async () => { const select = floating().querySelector<HTMLSelectElement>('[aria-label="Input records Context"]')!; select.value = B; select.dispatchEvent(new Event('change', { bubbles: true })) })
   await h.wait(() => expect(h.reads.map(read => read.id)).toEqual([A, B]))
   expect(useAppStore.getState().agentFocus).toBe(focus); expect(floating().querySelector(`[data-input-message-id="native:claude:native-${B}:other"]`)).not.toBeNull(); h.verifyNoRuntime()
 })
@@ -178,17 +178,17 @@ it('an old window beyond the first page uses opaque cursors and three raw pages 
 
 it('unrelated Session output causes zero new native reads or marker DOM replacement', async () => {
   const h = await fixture([record('one', 'Relevant input')])
-  await h.render(); await h.wait(() => expect(h.element.querySelector(`[data-input-message-id="${nativeId('one')}"]`)).not.toBeNull())
-  const marker = h.element.querySelector(`[data-input-message-id="${nativeId('one')}"]`)
+  await h.render(); await h.wait(() => expect(h.element.querySelector(`[data-message-id="${nativeId('one')}"]`)).not.toBeNull())
+  const marker = h.element.querySelector(`[data-message-id="${nativeId('one')}"]`)
   const projection = vi.spyOn(UserMessages, 'projectSessionUserMessages')
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, [C]: { agentSessionId: C, revision: 1, items: [{ id: 'decoy-output', agentSessionId: C, kind: 'assistant_message', source: 'native-hook', status: 'complete', createdAt: NOW, updatedAt: NOW, title: 'Unrelated output', content: 'Only Context C changed' }] } } })))
-  expect(h.reads.map(read => read.id)).toEqual([A]); expect(h.element.querySelector(`[data-input-message-id="${nativeId('one')}"]`)).toBe(marker)
+  expect(h.reads.map(read => read.id)).toEqual([A]); expect(h.element.querySelector(`[data-message-id="${nativeId('one')}"]`)).toBe(marker)
   expect(projection.mock.calls.filter(([input]) => input.agentSessionId === A)).toEqual([])
   // Positive control: the actually consumed public module must observe related
   // source growth, so spying on an unused re-export cannot silently pass zero.
   await h.writeRecords([record('one', 'Relevant input'), record('related-new', 'New input in Context A')])
   await h.readInputs(); await h.click('.recent-focus__input-actions button:last-child')
-  await h.wait(() => expect(floating().querySelector(`[data-input-message-id="${nativeId('related-new')}"]`)).not.toBeNull())
+  await h.wait(() => expect(h.element.querySelector(`[data-message-id="${nativeId('related-new')}"]`)).not.toBeNull())
   expect(h.reads.map(read => read.id)).toEqual([A, A])
   expect(projection.mock.calls.filter(([input]) => input.agentSessionId === A).length).toBeGreaterThan(0); h.verifyNoRuntime()
 })

@@ -1,1 +1,0 @@
-{"extends":"../../../tsconfig.json","compilerOptions":{"noEmit":true},"include":["../../../src/**/*.ts","../../../src/**/*.tsx","../../../test/activity-ruler-reading-follow.integration.test.tsx","../../../../../packages/client-ui/src/**/*.ts","../../../../../packages/client-ui/src/**/*.tsx"]}

@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +11,7 @@ async function frame(body: string) {
  const s=new AgentTerminalScreen(120,40),b=Buffer.from(`\x1b[?2026h\x1b[2J${body}\x1b[16;3H\x1b[?2026l`)
  await s.write({startByte:0,endByte:b.length,dataBytes:b});return s
 }
-const ordinary=("\u001b[13;1H• Working (10s • esc to interrupt)\u001b[16;1H› \u001b[2mAsk Codex to do anything\u001b[22m\u001b[18;1Hprobe default · " + (fixturePath("private/probe")) + " · 87% context left")
+const ordinary=("\u001b[13;1H• Working (10s • esc to interrupt)\u001b[16;1H› \u001b[2mAsk Codex to do anything\u001b[22m\u001b[18;1Hprobe default · " + (upstreamFixturePath("private/probe")) + " · 87% context left")
 describe('Provider-owned immediate evidence',()=>{
  it('distinguishes placeholder from actual draft after the cursor',async()=>{
   const s=await frame(ordinary);try {
@@ -26,12 +26,10 @@ describe('Provider-owned immediate evidence',()=>{
   ['modal',ordinary+'\x1b[17;1H1. Approve request'],['multiline draft',ordinary+'\x1b[17;1Hhidden draft'],
   ['remapped interrupt',ordinary.replace('esc to interrupt','f12 to interrupt')],['clipped preview',ordinary.replace('\x1b[13;1H','\x1b[1;1H')]
  ])('does not guess from %s',async(_name,body)=>{const s=await frame(body);try{expect(inspectCodexPromptExecution(s.snapshot())).toBe('unavailable')}finally{s.dispose()}})
- it('contributes native steer and preserves authenticated canceled semantic end without changing default',()=>{
+ it('contributes explicit immediate plan and canceled semantic end without changing default',()=>{
   const p=new AgentProviderRegistry().get('codex');expect(p.planPromptInput('owned')).not.toHaveProperty('prepare')
-  expect(p.catalog.capabilities.promptExecution).toEqual({immediate:'native-steer'});expect(p.planPromptInput('owned',{execution:'immediate'})).not.toHaveProperty('prepare')
-  const envelope={providerId:'codex',agentSessionId:'agent',runId:'run',receiptId:'receipt',eventName:'Interrupt',payload:{session_id:'native',turn_id:'native-turn'}}
-  expect(p.normalizeHook(envelope,{processNativeHandle:{kind:'provider',providerId:'codex',sessionId:'native'}})).toMatchObject({semanticState:'unknown',lifecycleEvent:'turn-end',nativeTurnId:'native-turn',mainSubject:true})
-  expect(p.normalizeHook(envelope,{})).toMatchObject({semanticState:'unknown',lifecycleEvent:null,mainSubject:false})
+  expect(p.planPromptInput('owned',{execution:'immediate'})).toMatchObject({prepare:{interrupt:'\x1b',endEvent:'Interrupt'}})
+  expect(p.normalizeHook({providerId:'codex',agentSessionId:'agent',runId:'run',receiptId:'receipt',eventName:'Interrupt',payload:{session_id:'native',turn_id:'native-turn'}},{})).toMatchObject({semanticState:'unknown',lifecycleEvent:'turn-end',nativeTurnId:'native-turn'})
   expect(new AgentProviderRegistry().get('claude').planPromptInput('owned')).not.toHaveProperty('prepare')
   expect(()=>new AgentProviderRegistry().get('claude').planPromptInput('owned',{execution:'immediate'})).toThrow(/ordinary terminal input remains available/)
  })

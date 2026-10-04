@@ -292,8 +292,8 @@ export function buildTopicBoardRows(
 ): TopicBoardRow[] {
   const byTopic = new Map<string, SessionSnapshot[]>()
   for (const session of sessions) {
-    if (!workspaceOwnsSessionPath(scratch, session, topics)) continue
-    const topicId = scratchTopicIdFromWorkspacePath(scratch.path, session.workspacePath, topics)
+    if (!workspaceOwnsSessionPath(scratch, session)) continue
+    const topicId = scratchTopicIdFromWorkspacePath(scratch.path, session.workspacePath)
     if (!topicId) continue
     const group = byTopic.get(topicId)
     if (group) group.push(session)

@@ -1,4 +1,3 @@
-import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -9,7 +8,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
-import { durableWriteFile, DurableWriteError } from './durable-write.js'
+import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
@@ -76,6 +75,11 @@ const MAX_TIMELINE_STORE_BYTES = 8 * 1024 * 1024
 const LOCK_ATTEMPTS = 300
 const LOCK_RETRY_MIN_MS = 5
 const LOCK_RETRY_JITTER_MS = 10
+// `open(path, 'wx')` and the following owner write are two syscalls. If the process dies between them,
+// contenders can observe an empty lock. Keep a just-created owner-less lock for a short grace window so
+// a healthy acquirer that is still writing its PID cannot be mistaken for a dead owner; after that window
+// the lock is stale because no valid owner could have been recorded.
+const LOCK_OWNER_WRITE_GRACE_MS = 250
 
 export type AgentMuxRecoverableStopOperation = {
   daemonInstance: string
@@ -128,8 +132,6 @@ export type AgentMuxRetiredAgentSession = {
 export type AgentMuxAgentSessionStore = {
   /** Exclusive in-flight Prompt orchestration; contention rejects without invoking operation. */
   withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T>
-  /** Flush the current exact binding; reading bytes alone does not acknowledge persistence. */
-  confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void>
   load(): Promise<readonly unknown[]>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
@@ -585,11 +587,6 @@ function hookReceipt(value: unknown): AgentHookReceipt {
       'INVALID_AGENT_SESSION_STORE'
     )
   }
-  const invocation = source.toolInvocation === undefined ? undefined : record(source.toolInvocation, 'hookReceipt.toolInvocation')
-  if (invocation && (Object.keys(invocation).some(key => !['nativeSessionId', 'nativeToolCallId', 'nativeTurnId', 'nativeTranscriptPath', 'toolName', 'toolInput', 'ambiguous'].includes(key)) ||
-    invocation.ambiguous !== undefined && invocation.ambiguous !== true)) {
-    throw new AgentMuxError('hookReceipt.toolInvocation is invalid.', 'INVALID_AGENT_SESSION_STORE')
-  }
   return {
     id: string(source.id, 'hookReceipt.id'),
     providerId: string(source.providerId, 'hookReceipt.providerId'),
@@ -597,15 +594,6 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     run: runRef(source.run),
     eventName,
     ...(source.nativeTurnId === undefined ? {} : { nativeTurnId: string(source.nativeTurnId, 'hookReceipt.nativeTurnId') }),
-    ...(invocation ? { toolInvocation: {
-      nativeSessionId: string(invocation.nativeSessionId, 'hookReceipt.toolInvocation.nativeSessionId'),
-      nativeToolCallId: string(invocation.nativeToolCallId, 'hookReceipt.toolInvocation.nativeToolCallId'),
-      ...(invocation.nativeTurnId === undefined ? {} : { nativeTurnId: string(invocation.nativeTurnId, 'hookReceipt.toolInvocation.nativeTurnId') }),
-      ...(invocation.nativeTranscriptPath === undefined ? {} : { nativeTranscriptPath: string(invocation.nativeTranscriptPath, 'hookReceipt.toolInvocation.nativeTranscriptPath') }),
-      toolName: string(invocation.toolName, 'hookReceipt.toolInvocation.toolName'),
-      toolInput: string(invocation.toolInput, 'hookReceipt.toolInvocation.toolInput'),
-      ...(invocation.ambiguous ? { ambiguous: true as const } : {})
-    } } : {}),
     ...(source.lifecycleEvent === null ? { lifecycleEvent: null } : lifecycleEvent ? { lifecycleEvent } : {}),
     observedAt: timestamp(source.observedAt, 'hookReceipt.observedAt'),
     ...(source.subject === undefined ? {} : { subject: (() => {
@@ -1232,8 +1220,7 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(message.systemContext === undefined ? {} : { systemContext: bytes(message.systemContext) }),
         ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'prompt message author') }),
         ...(message.authorHuman === true ? { authorHuman: true as const } : {}),
-        ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }),
-        ...(message.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(message.sourceChannel) })
+        ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) })
       }
     })() }) }
 }
@@ -1340,11 +1327,6 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       return {
         ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
         ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
-        ...(admission.outputCursorBytes === undefined ? {} : { outputCursorBytes: timestamp(admission.outputCursorBytes, 'prompt admission output boundary') }),
-        ...(admission.futureIntent === undefined ? {} : { futureIntent: (() => {
-          const future = record(admission.futureIntent, 'future prompt occurrence')
-          return { intentId: string(future.intentId, 'future intent id'), occurrenceAt: timestamp(future.occurrenceAt, 'future occurrence') }
-        })() }),
         ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
         ...(admission.frameRefresh === undefined ? {} : { frameRefresh: (() => {
           const refresh = record(admission.frameRefresh, 'prompt native frame refresh')
@@ -1368,21 +1350,6 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
           return admission.notApplied
         })() }),
         operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), startByte, endByte }
-    })() }),
-    ...(source.futurePromptIntents === undefined ? {} : { futurePromptIntents: (() => {
-      const intents = record(source.futurePromptIntents, 'future prompt intents')
-      if (Object.keys(intents).length > 256) throw new AgentMuxError('Future intent records exceed the bounded Session store.', 'INVALID_AGENT_SESSION_STORE')
-      return Object.fromEntries(Object.entries(intents).map(([id, value]) => {
-        string(id, 'future intent id')
-        const intent = record(value, 'future prompt intent'), message = record(intent.message, 'future prompt source')
-        if (typeof intent.active !== 'boolean' || message.authorHuman !== undefined) throw new AgentMuxError('Future prompt origin or active state is invalid.', 'INVALID_AGENT_SESSION_STORE')
-        return [id, { operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORE_BYTES), active: intent.active,
-          message: { userContent: text(message.userContent, 'future prompt content', MAX_STORE_BYTES), ...(message.systemContext === undefined ? {} : { systemContext: text(message.systemContext, 'future prompt context', MAX_STORE_BYTES) }),
-            ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'future prompt author') }),
-            ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }) },
-          ...(intent.lastOccurrenceAt === undefined ? {} : { lastOccurrenceAt: timestamp(intent.lastOccurrenceAt, 'last future occurrence') }),
-          ...(intent.lastOperationId === undefined ? {} : { lastOperationId: string(intent.lastOperationId, 'last future operation') }) }]
-      }))
     })() }),
     ...(source.terminalPromptSubmission === undefined
       ? {}
@@ -1897,13 +1864,6 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     }
   }
 
-  async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void> {
-    const current = this.sessions.get(agentSessionId)
-    if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession)) {
-      throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
-    }
-  }
-
   async load(): Promise<readonly unknown[]> {
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
@@ -2263,15 +2223,6 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
 
 const requireNative = createRequire(import.meta.url)
 
-/** Only the post-replacement phase carries this receipt. It is not a success acknowledgement. */
-export class AgentMuxSessionDurabilityError extends AgentMuxError {
-  readonly replacementApplied = true
-  constructor(cause: DurableWriteError) {
-    super('The Session is readable, but its durable save is not confirmed. Its Run is retained; retry save confirmation.',
-      'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED', cause.cause instanceof Error ? cause.cause.message : String(cause.cause))
-  }
-}
-
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
   private lockReleaseFailure: AgentMuxError | null = null
@@ -2296,17 +2247,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } finally {
       await handle.close()
     }
-  }
-
-  async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void> {
-    await this.enqueue(async () => {
-      const document = await this.read()
-      const current = document.sessions.find(session => session.agentSessionId === agentSessionId)
-      if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession)) {
-        throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
-      }
-      await this.write(document)
-    })
   }
 
   async load(): Promise<readonly unknown[]> {
@@ -2906,12 +2846,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       throw new AgentMuxError('Agent Session store exceeds its size limit.', 'AGENT_SESSION_STORE_LIMIT')
     }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    try {
-      await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true, ...(signal ? { signal } : {}) })
-    } catch (error) {
-      if (error instanceof DurableWriteError && error.phase === 'after-replace') throw new AgentMuxSessionDurabilityError(error)
-      throw error
-    }
+    await durableWriteFile(this.path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
     if (pruneTimelines || retained !== document) await this.maintainTimelineFiles(retained)
   }
 
@@ -3078,24 +3013,67 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     signal?: AbortSignal,
     attempts = LOCK_ATTEMPTS
   ): Promise<() => Promise<void>> {
-    const native: { tryLock(fd: number): boolean } = requireNative('fs-native-extensions')
     const path = `${this.path}.lock`
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    // All writers keep this inode. Kernel ownership ends on close or process death;
-    // a dead owner's pathname is never unlinked underneath a new healthy owner.
-    const handle = await open(path, 'a+', 0o600)
-    try {
-      for (let attempt = 0; attempt < attempts; attempt += 1) {
-        signal?.throwIfAborted()
-        if (native.tryLock(handle.fd)) return async () => { await handle.close() }
-        if (attempt + 1 < attempts) {
-          await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      signal?.throwIfAborted()
+      try {
+        const handle = await open(path, 'wx', 0o600)
+        await handle.writeFile(`${process.pid}\n`, 'utf8')
+        return async () => {
+          await handle.close()
+          await unlink(path).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT') throw error
+          })
         }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        await this.removeDeadOwnerLock(path)
+        await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
       }
-      throw new AgentMuxError('Agent Session store is busy. Retry the same operation.', 'AGENT_SESSION_STORE_BUSY')
+    }
+    throw new AgentMuxError('Agent Session store is busy.', 'AGENT_SESSION_STORE_BUSY')
+  }
+
+  private async removeDeadOwnerLock(path: string): Promise<void> {
+    let content: string
+    try {
+      content = await readFile(path, 'utf8')
     } catch (error) {
-      await handle.close()
-      throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      return
+    }
+
+    const firstToken = content.trim().split(/\s+/u)[0]
+    const pid = Number(firstToken)
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      // An empty/malformed lock has no owner to probe. It is only reclaimable once the two-syscall
+      // acquisition grace period has elapsed; otherwise the original acquirer may still be writing.
+      let metadata
+      try {
+        metadata = await stat(path)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        return
+      }
+      if (Date.now() - metadata.mtimeMs < LOCK_OWNER_WRITE_GRACE_MS) return
+    } else {
+      try {
+        process.kill(pid, 0)
+        // The owner is alive; never reclaim its lock. Keep waiting for the owner to release it.
+        return
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return
+      }
+    }
+
+    // Re-read before unlinking so a contender that already replaced the observed bytes is not removed.
+    // The unlink still remains best-effort: another contender may win the race first.
+    try {
+      if (await readFile(path, 'utf8') !== content) return
+      await unlink(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
   }
 }

@@ -1,5 +1,5 @@
 import { ArrowUpRight, ChevronDown, Globe2, LoaderCircle, Minus, NotebookPen, SquareTerminal, X } from 'lucide-react'
-import type { TerminalThemeId, WorkspaceRecord } from '../../../shared/contracts'
+import type { SessionSnapshot, TerminalThemeId, WorkspaceRecord } from '../../../shared/contracts'
 import { DESKTOP_ACTIONS } from '../../../shared/desktop-actions'
 import { useAppStore } from '../store'
 import { EMPTY_LAUNCHER_DRAFT, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
@@ -8,18 +8,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { TerminalView } from './TerminalView'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
-import type { WarmTerminalPreview } from '../lib/warm-terminal-preview'
-import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 type UtilityKind = 'terminal' | 'browser' | 'note'
-export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, sections, onSectionChange, warmPreview, terminalThemeId, terminalFontSize, visible, busy, onRun }: {
+export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, sections, onSectionChange, warmSession, warmPending, terminalThemeId, terminalFontSize, visible, busy, onRun }: {
   workspace: WorkspaceRecord | undefined
   tabGroupId: string
   launcherRef: { tabId: string; regionId: string } | undefined
   launcherId: string
   sections: Record<LauncherSection, LauncherSectionMode>
   onSectionChange(section: LauncherSection, mode: LauncherSectionMode): void
-  warmPreview: WarmTerminalPreview
+  warmSession: SessionSnapshot | null
+  warmPending: boolean
   terminalThemeId: TerminalThemeId | undefined
   terminalFontSize: number
   visible: boolean
@@ -29,9 +28,6 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   const draft = useLauncherState(state => state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT)
   const writeDraft = useLauncherState(state => state.setDraft)
   const promoteWarmTerminal = useAppStore(state => state.promoteWarmTerminal)
-  const retryWarmTerminal = useAppStore(state => state.retryWarmTerminal)
-  const warmSession = warmPreview.session
-  const warmPending = warmPreview.pending
   const createBrowser = useAppStore(state => state.createBrowser)
   const createNote = useAppStore(state => state.createNote)
   const revealCreatedNote = useAppStore(state => state.revealCreatedNote)
@@ -98,9 +94,6 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
   const disabled = !workspace || busy !== null
   function openTerminal() { void onRun('terminal', () => promoteWarmTerminal(tabGroupId, launcherRef)) }
-  function checkWarmTerminal() {
-    if (workspace) void onRun('terminal', () => retryWarmTerminal(workspace.id, launcherId))
-  }
   function openBrowser(submittedAddress: string) { void onRun('browser', () => createBrowser(tabGroupId, launcherRef, submittedAddress.trim() || 'about:blank')) }
   function openNote(content?: string) {
     void onRun('note', async () => {
@@ -124,7 +117,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   function header(kind: UtilityKind) {
     const Icon = icons[kind], expanded = sections[kind] === 'expanded'
     return <header className="launcher-utility__head">
-      <span><Icon size={14} /><strong>{labels[kind]}</strong>{kind === 'terminal' && expanded ? <small>{warmSession ? 'Reusable shell' : warmPending ? 'Warming shell…' : warmPreview.state === 'unconfirmed' ? 'Check connection' : 'Open in tab'}</small> : null}</span>
+      <span><Icon size={14} /><strong>{labels[kind]}</strong>{kind === 'terminal' && expanded ? <small>{warmSession ? 'Reusable shell' : warmPending ? 'Warming shell…' : 'Shell not attached'}</small> : null}</span>
       <span className="launcher-section-actions">
         {kind !== 'browser' && !(kind === 'note' && expanded && !hasNoteDraft) ? <button type="button" className="icon-button" disabled={disabled} aria-label={kind === 'note' ? hasNoteDraft ? 'Save and open note draft' : 'Create blank note' : kind === 'terminal' && warmSession ? 'Open reusable Terminal in tab' : `Open ${labels[kind]}`}
           title={kind === 'note' ? hasNoteDraft ? 'Save & open current draft' : 'Create blank note' : 'Open in tab'} data-agentmux-action={kind === 'terminal' ? DESKTOP_ACTIONS.claimReusableTerminal : DESKTOP_ACTIONS.createNote}
@@ -139,14 +132,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
       <div className="launch-surfaces-stack">
         {sections.terminal !== 'hidden' ? <section className="launcher-utility launch-terminal" data-section="terminal" data-mode={sections.terminal}>
           {header('terminal')}
-          {sections.terminal === 'expanded' ? warmSession && terminalThemeId && workspace ? <div className="launch-terminal__body"><TerminalView session={warmSession} themeId={terminalThemeId} fontSize={terminalFontSize} interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={{ workspaceId: workspace.id, tabGroupId }} /></div> : <div className="launcher-terminal-pending">
-            {warmPreview.creation?.issue ? <ServiceWindowNotice title="Shell connection needs checking" notice={{ kind: 'indeterminate', notice: {
-              step: warmPreview.creation.issue.controlFailure.disposition === 'not_applied' ? 'Shell creation was not applied' : 'Shell creation is unconfirmed',
-              mode: `${warmPreview.creation.issue.message} ${warmPreview.creation.issue.controlFailure.disposition === 'not_applied' ? 'The Host confirmed this request was not applied.' : 'The original shell may already be running.'} Host · ${warmPreview.creation.request.hostId} · ${warmPreview.creation.request.workspacePath}. Code · ${warmPreview.creation.issue.code}${warmPreview.creation.issue.detail ? ` · ${warmPreview.creation.issue.detail}` : ''}. Request · ${warmPreview.creation.request.createOperationId}.`,
-              restore: 'Check the original request again, or open that same Terminal in a tab.'
-            } }} summary={{ step: 'Shell connection needs checking', mode: 'Your original request and task input are kept.', restore: 'Check again to reconnect the same shell.' }} actions={<div className="launcher-terminal-recovery-actions"><button type="button" className="small-button" disabled={disabled || warmPending} onClick={checkWarmTerminal}>{warmPending ? 'Checking…' : 'Check again'}</button><button type="button" className="small-button" disabled={disabled} onClick={openTerminal}>Open Terminal<ArrowUpRight size={12} /></button></div>} /> : <><span>{warmPending ? 'Preparing a reusable host shell…' : warmPreview.state === 'elsewhere' ? 'This shell is being previewed in another region. Open it here to use the same Terminal.' : warmPreview.state === 'other-target' ? 'A reusable shell belongs to another project. Open a Terminal for this project; the other shell is kept.' : warmPreview.state === 'ready' ? 'The shell is connected. Open it in a tab while its display settings load.' : 'Open a Terminal in this project to start a shell.'}</span>
-            <button type="button" className="small-button" disabled={disabled} onClick={openTerminal}>Open Terminal<ArrowUpRight size={12} /></button></>}
-          </div> : null}
+          {sections.terminal === 'expanded' ? warmSession && terminalThemeId && workspace ? <div className="launch-terminal__body"><TerminalView session={warmSession} themeId={terminalThemeId} fontSize={terminalFontSize} interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={{ workspaceId: workspace.id, tabGroupId }} /></div> : <div className="launcher-terminal-pending"><span>{warmPending ? 'Preparing a reusable host shell…' : 'The shell preview is not available.'}</span><button type="button" className="small-button" disabled={disabled} onClick={openTerminal}>Open Terminal<ArrowUpRight size={12} /></button></div> : null}
         </section> : null}
         <div className="launch-surface-quick-grid">
           {sections.browser !== 'hidden' ? <section ref={browserRow} className="launcher-utility launcher-browser" data-section="browser" data-mode={sections.browser} data-closing={browserClosing || undefined}>

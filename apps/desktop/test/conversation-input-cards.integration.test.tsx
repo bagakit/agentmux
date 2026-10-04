@@ -1,5 +1,4 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -10,7 +9,7 @@ import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-
+import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { api } from '../src/renderer/src/lib/api'
 import type { AgentSessionControl } from '../src/shared/contracts'
@@ -62,8 +61,8 @@ it('routes actual Activity native and captured inputs right while preserving tru
 
 it('uses that same parser in the actual History reader and keeps equal bodies as distinct records', async () => {
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
-  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: control, visible: true, label: "Implementation", workspaceRoot: _hygiene_fixturePath("private"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
-  expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(e=>e.dataset.nativeRecordId)).toEqual(['native-prefix','native-answer','native-prefix-again'])
+  await act(async () => root.render(<SessionHistoryView control={control} visible label="Implementation" themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("private")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
+  expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(e=>e.dataset.historyItemId)).toEqual(['native-prefix','native-answer','native-prefix-again'])
   for (const id of ['native-prefix','native-prefix-again']) {
     const el = host.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!
     expect(el.dataset.messageDirection).toBe('incoming')

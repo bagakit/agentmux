@@ -4,10 +4,7 @@ import {
   caretAtLastLine,
   emptyHistory,
   navigateHistory,
-  recordHistory,
-  restoreComposerHistory,
-  MAX_COMPOSER_HISTORY_ENTRIES,
-  MAX_COMPOSER_HISTORY_BYTES
+  recordHistory
 } from '../src/renderer/src/lib/composer-history.js'
 
 describe('recordHistory', () => {
@@ -128,32 +125,5 @@ describe('caret boundary predicates', () => {
     const caret = v.length - 1 // inside 'bottom'
     expect(caretAtFirstLine(v, caret)).toBe(false)
     expect(caretAtLastLine(v, caret)).toBe(true)
-  })
-})
-
-
-describe('bounded durable editor history', () => {
-  it('retains the last 100 whole bodies with nonconsecutive repeats in original order', () => {
-    let state = emptyHistory
-    for (let index = 0; index < 101; index++) state = recordHistory(state, 'body-' + index)
-    expect(state.entries).toEqual(Array.from({length: MAX_COMPOSER_HISTORY_ENTRIES}, (_, index) => 'body-' + (index + 1)))
-    state = recordHistory(state, 'body-99')
-    expect(state.entries.slice(-3)).toEqual(['body-99','body-100','body-99'])
-  })
-  it('measures actual multibyte UTF-8 and evicts only complete oldest entries', () => {
-    const body = '图'.repeat(21840)
-    let state = emptyHistory
-    for (let index = 0; index < 17; index++) state = recordHistory(state, body + index)
-    expect(state.entries).toHaveLength(16)
-    expect(state.entries[0]).toBe(body + '1')
-    expect(state.entries.at(-1)).toBe(body + '16')
-    expect(state.entries.reduce((sum, entry) => sum + new TextEncoder().encode(entry).byteLength, 0)).toBeLessThanOrEqual(MAX_COMPOSER_HISTORY_BYTES)
-  })
-  it('restores only valid per-Session body arrays without inferring queue or delivery facts', () => {
-    const restored = restoreComposerHistory({a:['literal original','later'], b:[false], c:null, d:{entries:['not a body array']}})
-    expect(restored).toEqual({a:['literal original','later']})
-    expect(restoreComposerHistory(undefined)).toEqual({})
-    expect(restoreComposerHistory(['not a Session map'])).toEqual({})
-    expect(restoreComposerHistory({a:Array.from({length:101},(_,i)=>''+i)}).a).toHaveLength(100)
   })
 })

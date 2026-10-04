@@ -151,8 +151,9 @@ function flatten(value: string): string {
  *
  * 下界：单个簇就超预算时（例如 60 个组合重音叠在一个字母上）两边都留不下任何簇，只剩一个 `…`。
  * 有界、不崩，但也确实什么都没留下。路径里不会出现这种东西，故不为它加一条特例分支。
- * 只物化预算内的簇和判断切点所需的一簇，不为短摘要保留全文的分段数组。头部迭代遇到预算即停，
- * 尾部通过 containing 从末尾取完整簇；native 查边界仍可能处理长输入，尤其是巨大单簇。
+ * 那两处 `?? value.length` 兜底正是这条下界的实现：它**承重**，换成 `?? 0` 会让尾切原样吐回整串
+ * （实测 65 个码元，超上界 17 格）。尾切那处有判据钉着；头切那处够不着（`value.length > budget`
+ * 保证循环收不完所有簇），是等价变异体，不为它写测试。
  *
  * 两头都要削掉切口上的空白：头切 `trimEnd()`，尾切 `trimStart()`。少任何一边都会漏出
  * `…␠file.md` 或 `path␠…` 这种看起来像少了一截的东西。这在路径上**不是假想**——macOS 上
@@ -165,23 +166,24 @@ function flatten(value: string): string {
 export function clampStep(value: string, keep: 'head' | 'tail' = 'head', limit = MAX_STEP_SUMMARY_LENGTH): string {
   if (value.length <= limit) return value
   const budget = limit - 1 // 省略号占一格
-  const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)
+  const clusters = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)]
   if (keep === 'tail') {
-    let start = value.length
-    while (start > 0) {
-      const cluster = segments.containing(start - 1)!
-      if (!(value.length - cluster.index <= budget)) break
-      start = cluster.index
+    let taken = 0
+    let start = clusters.length
+    // 从尾部往前收，直到再收一簇就会超预算。
+    while (start > 0 && taken + clusters[start - 1]!.segment.length <= budget) {
+      start -= 1
+      taken += clusters[start]!.segment.length
     }
-    return `…${value.slice(start).trimStart()}`
+    return `…${value.slice(clusters[start]?.index ?? value.length).trimStart()}`
   }
   let end = 0
-  for (const cluster of segments) {
-    const next = cluster.index + cluster.segment.length
-    if (!(next <= budget)) break
-    end = next
+  let taken = 0
+  while (end < clusters.length && taken + clusters[end]!.segment.length <= budget) {
+    taken += clusters[end]!.segment.length
+    end += 1
   }
-  return `${value.slice(0, end).trimEnd()}…`
+  return `${value.slice(0, clusters[end]?.index ?? value.length).trimEnd()}…`
 }
 
 /**

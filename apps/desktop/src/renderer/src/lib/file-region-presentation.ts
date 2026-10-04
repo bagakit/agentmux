@@ -1,4 +1,5 @@
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
+import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
 import type { AgentMuxFileViewMode } from '@agentmux/core/control'
 
 export type EditorRegionMode = 'edit' | 'diff' | 'preview'
@@ -11,16 +12,18 @@ export function storedFileRegionMode(modes: Readonly<Record<string, EditorRegion
 }
 
 export function fileSupportsInlinePreview(path: string): boolean {
-  return workspaceFileFormat(path).sourcePreview !== null
+  const extension = path.split('.').at(-1)?.toLowerCase()
+  return extension === 'md' || extension === 'markdown' || extension === 'mdown' ||
+    workspaceFilePreviewFormat(path)?.sourceEditable === true || path.endsWith(NOTE_FILE_EXTENSION)
 }
 
 export function effectiveFileRegionMode(modes: Readonly<Record<string, EditorRegionMode>>, regionId: string,
   path: string, binary = false): EditorRegionMode {
-  const format = workspaceFileFormat(path)
-  if (binary || !format.sourceEditable) return 'preview'
+  const format = workspaceFilePreviewFormat(path)
+  if (binary || format && !format.sourceEditable) return 'preview'
   const stored = storedFileRegionMode(modes, regionId)
   if (stored === 'diff' || stored === 'edit' || stored === 'preview' && fileSupportsInlinePreview(path)) return stored
-  return format.defaultMode
+  return format?.sourceEditable || path.endsWith(NOTE_FILE_EXTENSION) ? 'preview' : 'edit'
 }
 
 export function publicFileRegionMode(mode: EditorRegionMode | null): AgentMuxFileViewMode | null {

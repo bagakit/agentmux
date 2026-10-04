@@ -77,8 +77,6 @@ import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners.js'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '@agentmux/layout'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 const initial = useAppStore.getState()
 const origin = { workspaceId: 'private-workspace', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }
@@ -134,16 +132,15 @@ beforeEach(async () => {
     constructor(callback: () => void) { resized = callback }
     observe() {}; unobserve() {}; disconnect() {}
   })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const readout = this.classList.contains('terminal-link-preview')
     const x = readout ? 4 : 0, y = readout ? (this.dataset.placement === 'top' ? 4 : 436) : 0
     const width = readout ? 200 : 240, height = readout ? 40 : 480
     return { x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }
   })
   openHttp = vi.fn().mockResolvedValue(undefined); openFile = vi.fn().mockResolvedValue(undefined)
-  const config = await api.config.get()
   useAppStore.setState({ openHttpLink: openHttp, openFile, config: {
-    ...config, workspaces: [{ id: origin.workspaceId, name: 'Private project', kind: 'folder', hostId: 'local', path: session.workspacePath }]
+    ...initial.config, workspaces: [{ id: origin.workspaceId, hostId: 'local', path: session.workspacePath }]
   } as NonNullable<typeof initial.config> })
   element = document.createElement('div'); host = document.createElement('div')
   host.id = 'agentmux-window-overlay-host'; host.className = 'window-overlay-host'; host.dataset.overlayHost = ''
@@ -176,96 +173,6 @@ async function fileLink(path = 'src/example.ts:3'): Promise<ILink> {
   return links![0]!
 }
 
-const focusOrigin = { ...origin, sessionId: session.id }
-const otherFocusOrigin = { workspaceId: 'private-other-display', tabGroupId: 'private-other-group',
-  tabId: 'private-other-tab', regionId: 'private-other-region', sessionId: session.id }
-const focusReference = (source: typeof focusOrigin | typeof otherFocusOrigin) => ({ displayWorkspaceId: source.workspaceId,
-  groupId: source.tabGroupId, tabId: source.tabId, regionId: source.regionId })
-async function focusTerminal(destination: 'region' | 'tab' = 'region') {
-  const original = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, kind: 'terminal', phase: 'attached',
-    workspaceId: origin.workspaceId, sessionId: session.id }, 'Original terminal')
-  const other = createWorkbenchTab(otherFocusOrigin.tabId, { regionId: otherFocusOrigin.regionId, kind: 'terminal', phase: 'attached',
-    workspaceId: origin.workspaceId, sessionId: session.id }, 'Other occurrence')
-  await act(async () => {
-    const state = useAppStore.getState()
-    useAppStore.setState({ mainSurface: 'agents', sessions: [session], agentComposerDrafts: { [session.id]: 'Original unsent input' },
-      config: { ...state.config!, focus: { recentActivityHours: state.config?.focus?.recentActivityHours ?? 48, linkDestination: destination },
-        workspaces: [...state.config!.workspaces, { id: otherFocusOrigin.workspaceId, name: 'Other display', kind: 'folder', hostId: 'local', path: _hygiene_fixturePath("private/display") }] },
-      tabs: { [original.id]: original, [other.id]: other }, layouts: {
-        [origin.workspaceId]: createWorkspaceLayout(origin.tabGroupId, [origin.tabId]),
-        [otherFocusOrigin.workspaceId]: createWorkspaceLayout(otherFocusOrigin.tabGroupId, [otherFocusOrigin.tabId]) },
-      agentFocus: { execution: { sessionId: session.id, reference: focusReference(focusOrigin),
-        history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } } })
-    root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={focusOrigin} autoFocus={false} />)
-  })
-}
-
-describe('mounted Focus Terminal destinations', () => {
-  it('plain HTTP from both real provider callbacks immediately uses the current Region or Tab preference', async () => {
-    await focusTerminal()
-    for (const destination of ['region', 'tab'] as const) {
-      await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, focus: { recentActivityHours: state.config?.focus?.recentActivityHours ?? 48, linkDestination: destination } } })))
-      for (const activate of [web.activate, terminal.options.linkHandler!.activate]) {
-        await act(async () => activate(pointer(), 'https://example.test/focus', range))
-        expect(host.querySelector('[role="dialog"]')).toBeNull()
-        expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/focus', destination === 'region' ? 'right' : 'tab')
-      }
-    }
-    expect(openHttp).toHaveBeenCalledTimes(4)
-    expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
-  })
-
-  it('Alt chooser belongs to its full same-Session occurrence and cannot drift after that reference changes', async () => {
-    await focusTerminal('tab')
-    const drafts = useAppStore.getState().agentComposerDrafts
-    const callback = terminal.data, provider = terminal.provider, owners = terminalResourceOwnerCounts()
-    const alt = () => { pointer(); return new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80, altKey: true }) }
-    await act(async () => web.activate(alt(), 'https://example.test/explicit'))
-    expect(openHttp).not.toHaveBeenCalled()
-    expect(host.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Choose where to open the link')
-    await act(async () => host.querySelector<HTMLButtonElement>('button[data-destination="left"]')!.click())
-    expect(openHttp).toHaveBeenCalledExactlyOnceWith(focusOrigin, 'https://example.test/explicit', 'left')
-    await act(async () => terminal.options.linkHandler!.activate(alt(), 'https://example.test/stale', range))
-    const oldChoice = host.querySelector<HTMLButtonElement>('button[data-destination="tab"]')!
-    expect(oldChoice).not.toBeNull(); terminal.selection = 'Original terminal selection'
-    await act(async () => {
-      useAppStore.setState(state => ({ agentFocus: { ...state.agentFocus, execution: { ...state.agentFocus.execution,
-        reference: focusReference(otherFocusOrigin) } } }))
-      root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={otherFocusOrigin} autoFocus={false} />)
-    })
-    expect(host.querySelector('[role="dialog"]')).toBeNull()
-    await act(async () => oldChoice.click())
-    expect(openHttp).toHaveBeenCalledTimes(1)
-    expect(useAppStore.getState().agentFocus.execution.reference).toEqual(focusReference(otherFocusOrigin))
-    expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
-    expect(terminal.getSelection()).toBe('Original terminal selection')
-    expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
-    expect(terminal.data).toBe(callback); expect(terminal.provider).toBe(provider)
-    await act(async () => { terminal.userInput(); terminal.data('Input remains usable') })
-    expect(api.sessions.write).toHaveBeenCalledExactlyOnceWith(session.control, 'Input remains usable', 'user')
-    expect(renderer.Terminal.instances).toEqual([terminal]); expect(terminalResourceOwnerCounts()).toEqual(owners)
-    expect(api.sessions.attach).toHaveBeenCalledOnce(); expect(api.sessions.detach).not.toHaveBeenCalled()
-  })
-
-  it('Focus preserves Cmd HTTP/file system exits and drag or selected-text protection with the original input owner', async () => {
-    await focusTerminal()
-    for (const activate of [web.activate, terminal.options.linkHandler!.activate]) {
-      await act(async () => activate(new MouseEvent('mouseup', { button: 0, metaKey: true }), 'https://example.test/system', range))
-      expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/system', 'system')
-      await act(async () => { pointer(); activate(new MouseEvent('mouseup', { button: 0, clientX: 150, clientY: 80 }), 'https://example.test/drag', range) })
-      terminal.selection = 'Keep selected text'
-      await act(async () => activate(pointer(), 'https://example.test/selection', range))
-      expect(terminal.getSelection()).toBe('Keep selected text'); terminal.selection = ''
-    }
-    expect(openHttp).toHaveBeenCalledTimes(2)
-    const file = await fileLink()
-    await act(async () => file.activate(new MouseEvent('mouseup', { button: 0, metaKey: true }), file.text))
-    expect(api.files.openSystem).toHaveBeenCalledExactlyOnceWith(origin.workspaceId, 'src/example.ts')
-    expect(openFile).not.toHaveBeenCalled(); expect(host.querySelector('[role="dialog"]')).toBeNull()
-    expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
-  })
-})
-
 describe('mounted Terminal link exits', () => {
   it('the wrapped continuation context menu resolves the same full file in its source workspace', async () => {
     await installCells('说明 src/example.ts:3:2,', 12)
@@ -295,7 +202,7 @@ describe('mounted Terminal link exits', () => {
     expect(second![0]!.range).toEqual({ start: { x: 6, y: 1 }, end: { x: 11, y: 2 } })
     expect(api.files.openSystem).not.toHaveBeenCalled(); expect(openFile).not.toHaveBeenCalled(); expect(openHttp).not.toHaveBeenCalled()
     await act(async () => second![0]!.activate(pointer(), second![0]!.text))
-    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3, column: 2 }, origin.workspaceId, undefined, undefined)
+    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3, column: 2 }, origin.workspaceId)
     expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
   })
   for (const provider of ['bare URL', 'OSC 8'] as const) {
@@ -333,7 +240,7 @@ describe('mounted Terminal link exits', () => {
     await act(async () => { pointer(); file.activate(new MouseEvent('mouseup', { button: 0, clientX: 150, clientY: 80 }), file.text) })
     expect(openFile).not.toHaveBeenCalled()
     await act(async () => { file.activate(pointer(), file.text) })
-    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3 }, origin.workspaceId, undefined, undefined)
+    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3 }, origin.workspaceId)
     const artifact = await fileLink('release/Example.dmg')
     await act(async () => { artifact.activate(pointer(2), artifact.text) })
     expect(api.files.openSystem).not.toHaveBeenCalled()

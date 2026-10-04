@@ -4,6 +4,7 @@ import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { URL as NodeURL } from 'node:url'
+import { resolve } from 'node:path'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('../src/renderer/src/hooks/useWorkspaceBranches', () => ({ useWorkspaceBranches: () => ({ snapshot: null, loading: false, error: null, refresh: async () => true }) }))
 vi.mock('../src/renderer/src/hooks/useGitStatus', () => ({ useGitStatus: () => ({ status: null, loading: false, error: null, refresh: async () => true }) }))
@@ -17,7 +18,7 @@ const workspace = { id: 'one', name: 'Project', hostId: 'local', path: _hygiene_
 const changes = new Set<EventListenerOrEventListenerObject>()
 let reduced = false
 const animations = vi.fn(() => ({ cancel: vi.fn() }))
-const nav = () => dom.container.querySelector<HTMLElement>('.surface-mode-switch')!
+const nav = () => dom.container.querySelector<HTMLElement>('.source-control-switch')!
 const lens = () => nav().querySelector<HTMLElement>('[data-liquid-selection]')!
 const tabs = () => [...nav().querySelectorAll<HTMLButtonElement>('[role="tab"]')]
 const selected = () => tabs().find(button => button.getAttribute('aria-selected') === 'true')!
@@ -37,22 +38,22 @@ beforeEach(() => {
     addListener: () => {}, removeListener: () => {}, dispatchEvent: () => true
   } as MediaQueryList)
   // Layout is supplied by the browser in Native; the mounted boundary uses known tab rectangles.
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    const index = ['branches', 'changes', 'history'].indexOf(this.getAttribute('data-surface-mode') ?? '')
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    const index = ['branches', 'changes', 'history'].indexOf(this.getAttribute('data-git-view') ?? '')
     return new DOMRect(index < 0 ? 0 : index * 100, 0, index < 0 ? 300 : 100, 28)
   })
-  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) { return [this.getBoundingClientRect()] as unknown as DOMRectList })
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function () { return [this.getBoundingClientRect()] as unknown as DOMRectList })
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(28)
   if (!HTMLElement.prototype.animate) Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, writable: true, value: () => ({ cancel() {} }) })
   vi.spyOn(HTMLElement.prototype, 'animate').mockImplementation(animations as unknown as HTMLElement['animate'])
 })
 
 describe('actual Explorer Git switch material', () => {
-  it('connects one shared lens to the three original buttons and keeps keyboard selection and focus', async () => {
+  it('connects one Settings lens to the three original buttons and keeps keyboard selection and focus', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
     expect(nav()).not.toBeNull()
     expect(tabs().map(button => button.textContent)).toEqual(['Branches', 'Changes', 'History'])
-    expect(tabs().map(button => button.dataset.surfaceMode)).toEqual(['branches', 'changes', 'history'])
+    expect(tabs().map(button => button.dataset.gitView)).toEqual(['branches', 'changes', 'history'])
     expect(nav().querySelectorAll('[data-liquid-selection]')).toHaveLength(1)
     const surface = lens()
     expect(surface.getAttribute('aria-hidden')).toBe('true')
@@ -60,7 +61,7 @@ describe('actual Explorer Git switch material', () => {
     expect(surface.dataset.liquidSelection).toBe('branches')
     for (const [name, view] of [['ArrowRight', 'changes'], ['End', 'history'], ['Home', 'branches']] as const) {
       await key(selected(), name)
-      expect(selected().dataset.surfaceMode).toBe(view)
+      expect(selected().dataset.gitView).toBe(view)
       expect(document.activeElement).toBe(selected())
       expect(selected().tabIndex).toBe(0)
       expect(lens()).toBe(surface)
@@ -90,20 +91,18 @@ describe('actual Explorer Git switch material', () => {
     expect(animations).not.toHaveBeenCalled()
   })
 
-  it('connects the compact neutral surface, transparent selected foreground and system contrast alternatives', async () => {
+  it('connects the compact material, transparent selected foreground and system contrast alternatives', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
-    const css = readFileSync(new NodeURL('../src/renderer/src/styles/surface-mode-switch.css', import.meta.url), 'utf8')
+    const css = readFileSync(new NodeURL('../src/renderer/src/styles/source-control.css', import.meta.url), 'utf8')
     const sheet = new CSSStyleSheet(); sheet.replaceSync(css)
-    expect(sheet.cssRules.length).toBeGreaterThan(8)
+    expect(sheet.cssRules.length).toBeGreaterThan(20)
     const rule = (selector: string) => [...sheet.cssRules].find(item => item instanceof CSSStyleRule && item.selectorText === selector) as CSSStyleRule
     expect(rule(`.${nav().className}`)).toBeDefined()
-    expect(rule('.surface-mode-switch').style.getPropertyValue('backdrop-filter')).toBe('')
-    expect(rule('.surface-mode-switch').style.background).toBe('transparent')
-    expect(rule('.surface-mode-switch').style.border).toBe('0px')
-    expect(rule('.surface-mode-switch').style.getPropertyValue('padding')).toBe('var(--sp-1)')
-    expect(rule('.surface-mode-switch button').style.height).toBe('24px')
-    expect(rule('.surface-mode-switch button').style.fontSize).toBe('var(--fs-meta)')
-    expect(rule('.surface-mode-switch button.selected, .surface-mode-switch button.selected:hover').style.background).toBe('transparent')
+    expect(rule('.source-control-switch').style.getPropertyValue('backdrop-filter')).toContain('var(--material-control-blur)')
+    expect(rule('.source-control-switch').style.getPropertyValue('padding')).toBe('var(--sp-1)')
+    expect(rule('.source-control-switch button').style.height).toBe('24px')
+    expect(rule('.source-control-switch button').style.fontSize).toBe('var(--fs-meta)')
+    expect(rule('.source-control-switch button.selected').style.background).toBe('transparent')
     expect(css).toContain('@media (forced-colors: active)')
     expect(css).toContain('HighlightText')
     expect(css).toContain('prefers-reduced-transparency: reduce')

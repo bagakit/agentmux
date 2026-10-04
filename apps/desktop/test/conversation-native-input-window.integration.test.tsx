@@ -60,11 +60,11 @@ describe('Native input read window in the actual conversation and original Histo
   expect([...feed().querySelectorAll('button')].map(node=>node.textContent?.trim())).not.toContain('Read earlier records')
   const trigger=button('History');await click(trigger)
   const history=container.querySelector<HTMLElement>('.session-history')!;expect(history).not.toBeNull()
-  expect([...history.querySelectorAll('.session-history [data-native-record-id]')].map(node=>node.getAttribute('data-native-record-id'))).toEqual(Array.from({length:30},(_,i)=>`assistant-${i}`))
+  expect([...history.querySelectorAll('[data-history-item-id]')].map(node=>node.getAttribute('data-history-item-id'))).toEqual(Array.from({length:30},(_,i)=>`assistant-${i}`))
   await click(button('Load earlier records',history))
-  const original=history.querySelector('[data-native-record-id="older-input-original-id"]')!
+  const original=history.querySelector('[data-history-item-id="older-input-original-id"]')!
   expect(original).not.toBeNull();expect(original.textContent).toContain('Original earlier human-shaped input; author unrecorded')
-  expect([...history.querySelectorAll('.session-history [data-native-record-id]')].map(node=>node.getAttribute('data-native-record-id'))).toEqual(['older-input-original-id',...Array.from({length:30},(_,i)=>`assistant-${i}`)])
+  expect([...history.querySelectorAll('[data-history-item-id]')].map(node=>node.getAttribute('data-history-item-id'))).toEqual(['older-input-original-id',...Array.from({length:30},(_,i)=>`assistant-${i}`)])
   expect(read.mock.calls.map(([control,options])=>[control,options])).toEqual([[agent('a').control,{limit:30}],[agent('a').control,{limit:30,cursor:'opaque-earlier-records'}],[agent('a').control,undefined],[agent('a').control,{cursor:'opaque-earlier-records'}]])
   await click(button('Activity',history));await frame()
   expect(history.hidden).toBe(true);expect(document.activeElement).toBe(trigger);assertHealthy('a')

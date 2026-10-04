@@ -9,7 +9,6 @@ import ctxmuxArtifacts from '../src/ctxmux-artifact-contract.json' with { type: 
 const execFileAsync = promisify(execFile)
 const artifactPlatform = `${process.platform}-${process.arch}`
 const expectedManifestSha256 = ctxmuxArtifacts.manifests[artifactPlatform]
-const expectedSource = ctxmuxArtifacts.sources[artifactPlatform]
 if (!expectedManifestSha256) throw new Error(`AgentMux has no qualified ctxmux artifacts for ${artifactPlatform}.`)
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const buildRoot = join(packageRoot, '.ctxmux-build')
@@ -46,8 +45,8 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
     manifest.schema !== 'ctxmux.local-artifacts.v1' ||
-    manifest.source.commit !== expectedSource.commit ||
-    manifest.source.tree !== expectedSource.tree ||
+    manifest.source.commit !== ctxmuxArtifacts.source.commit ||
+    manifest.source.tree !== ctxmuxArtifacts.source.tree ||
     manifest.source.worktree_clean !== true ||
     manifest.product.version !== ctxmuxArtifacts.version ||
     manifest.product.protocol !== ctxmuxArtifacts.protocol ||

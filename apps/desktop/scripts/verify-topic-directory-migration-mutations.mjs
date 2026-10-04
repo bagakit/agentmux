@@ -5,12 +5,12 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const files = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/src/main/scratch-directory-identity.mjs']
+const files = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs']
 const digest = source => createHash('sha256').update(source).digest('hex')
 const full = 'actual helper and script retain cwd'
 const mutations = [
   { id: 'primary-misclassified', file: files[1], from: "if (id === 'launcher:leader') return 'mote'", to: "if (id === 'launcher:leader') return 'topic'", pattern: 'dry-run is read-only' },
-  { id: 'identity-not-saved', file: files[1], from: 'await retainIdentity(sourcePath, sourcePath, helperPath)', to: '/* omit identity persistence */', pattern: full },
+  { id: 'identity-not-saved', file: files[1], from: 'await retainIdentity(sourcePath, sourcePath)', to: '/* omit identity persistence */', pattern: full },
   { id: 'non-atomic-alias-move', file: files[0], from: 'RENAME_SWAP | RENAME_NOFOLLOW_ANY | RENAME_RESOLVE_BENEATH', to: 'RENAME_NOFOLLOW_ANY | RENAME_RESOLVE_BENEATH', pattern: full },
   { id: 'source-inode-not-bound', file: files[0], from: '(unsigned long long)original.st_ino != expected_ino', to: '(unsigned long long)original.st_ino == expected_ino', pattern: 'native action refuses source identity drift' },
   { id: 'target-conflict-not-preflighted', file: files[1], from: "if (await optionalInfo(destinationPath)) throw failure('The canonical target already exists; neither object is replaced.', 'DIRECTORY_MIGRATION_TARGET_EXISTS')", to: 'await optionalInfo(destinationPath)', pattern: 'existing target content and conflicting durable identity' }

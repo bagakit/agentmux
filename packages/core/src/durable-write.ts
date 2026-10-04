@@ -29,8 +29,8 @@ export class DurableWriteError extends Error {
  * 必须先把新内容刷进磁盘，再 rename，最后刷父目录让这条目录项本身落地。把 fsync 挪到
  * rename 之后、或者干脆不 fsync，就等于回到「原子但会丢」的老问题。
  *
- * 要求持久确认的调用者收到分阶段错误：rename 后目录 flush 失败不能冒充未写入，
- * 也不能把当前读得到字节冒充断电后的保证。
+ * 父目录 fsync 尽力而为：部分文件系统对目录句柄的 fsync 返回 EINVAL/EISDIR/EACCES，
+ * 那不代表数据没落盘，吞掉即可，不阻断这次写入。
  */
 export async function durableWriteFile(
   path: string,

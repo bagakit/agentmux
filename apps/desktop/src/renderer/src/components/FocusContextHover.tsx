@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useShallow } from 'zustand/react/shallow'
@@ -13,9 +13,6 @@ import { useAppStore } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { getWindowOverlayHost } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { agentStateEnteredAt } from '../lib/agent-state-time'
-import { elapsedShort } from '../lib/project-activity-row'
-import { FocusContextStateMark } from './FocusContextState'
 
 // One transient reading surface, with no identity data or retained registry.
 let dismissCurrentPreview: (() => void) | null = null
@@ -70,27 +67,6 @@ function FocusContextInputs({ context }: { context: FocusContext }) {
     {notice ? <p className="focus-context-hover__notice" role="status" title={reader.error?.message ?? reader.observationError?.message}>
       {notice}. Open the Agent to read History.</p> : null}
   </section>
-}
-
-/** The clock belongs only to this open header; held prose and input readers do not tick. */
-function FocusContextStateSummary({ context }: { context: FocusContext }) {
-  const session = useAppStore(state => state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId))
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (context.stateEnteredAt === undefined && context.lastActivityAt === null) return
-    const tick = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(tick)
-  }, [context.id, context.hostId, context.runId, context.stateEnteredAt, context.lastActivityAt])
-  const confirmed = session ? agentStateEnteredAt(session, now) : undefined
-  const enteredAt = confirmed !== undefined && confirmed === context.stateEnteredAt ? confirmed : undefined
-  const lastActive = context.lastActivityAt !== null && Number.isFinite(context.lastActivityAt) && context.lastActivityAt >= 0 && context.lastActivityAt <= now ? context.lastActivityAt : undefined
-  const time = enteredAt !== undefined ? elapsedShort(now - enteredAt)
-    : lastActive !== undefined ? `Last active ${elapsedShort(now - lastActive)} ago` : 'Activity time unknown'
-  const duration = enteredAt !== undefined && context.bucket === 'attention' ? `${context.state === 'error' ? 'For' : 'Waiting'} ${time}` : time
-  return <span className="focus-context-hover__state" aria-label={`${context.stateLabel} · ${duration}`} data-state-time={enteredAt !== undefined ? 'duration' : lastActive !== undefined ? 'last-active' : 'unknown'}>
-    <span className="focus-context-hover__state-label"><FocusContextStateMark context={context} />{context.stateLabel}</span>
-    <span className="focus-context-hover__state-time">{duration}</span>
-  </span>
 }
 
 /** Intent reveals held card facts and one scoped, read-only input preview. */
@@ -170,7 +146,7 @@ export function useFocusContextHover(context: FocusContext, requested: boolean) 
   const preview = open && host ? createPortal(<div ref={panel} id={id} className="focus-context-hover" role="tooltip"
     data-state="open" aria-label={`Full context for ${context.name}`} style={{ visibility: 'hidden' }}
     onPointerEnter={keepOpen} onPointerLeave={hideSoon}>
-    <header><strong>{context.name}</strong><FocusContextStateSummary context={context} /></header>
+    <header><strong>{context.name}</strong><span>{context.stateLabel}</span></header>
     {!context.detailIsRecap ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin} · ${context.recap.text}`}>{context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}{(context.recap.reading?.truncated ?? true) ? ' · Excerpt' : ''}</small>

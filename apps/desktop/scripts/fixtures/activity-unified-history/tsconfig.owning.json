@@ -1,5 +1,0 @@
-{
-  "extends": "../../../tsconfig.json",
-  "compilerOptions": { "noEmit": true, "types": ["vitest/globals", "node", "vite/client"] },
-  "include": ["../../../test/activity-unified-history.integration.test.tsx", "../../../src/**/*.ts", "../../../src/**/*.tsx", "../../../../../packages/client-ui/src/**/*.ts", "../../../../../packages/client-ui/src/**/*.tsx"]
-}

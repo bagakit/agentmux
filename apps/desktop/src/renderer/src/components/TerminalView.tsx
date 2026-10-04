@@ -1,12 +1,11 @@
 import { rendererPerformance } from '../lib/renderer-performance'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
-import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
-import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
+import { registerTerminalViewObservation } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -14,7 +13,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
-import { useMemo, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -216,7 +215,6 @@ export function TerminalView({
   useLayoutEffect(() => {
     if (switchTarget) return tabSwitchObservation.registerTerminal(switchTarget, () => switchReaderRef.current?.() ?? null)
   }, [switchTarget, session.id, session.control.run.runId])
-  const inputGeometryRef = useRef<TerminalInputGeometry | null>(null)
   const refreshObservationRef = useRef<(() => Promise<void>) | null>(null)
   const onObservationRefreshRef = useRef(onObservationRefresh)
   onObservationRefreshRef.current = onObservationRefresh
@@ -333,10 +331,7 @@ export function TerminalView({
   }, [linkPreview])
   useLayoutEffect(clearLinkPreview, [fontSize])
   const openHttpLink = useAppStore((state) => state.openHttpLink)
-  const fileOrigin = useMemo(() => ({ ...linkOrigin, sessionId: session.id }), [linkOrigin, session.id])
-  const linkOpening = useSessionLinkOpening(fileOrigin)
-  const linkOpeningRef = useRef(linkOpening)
-  linkOpeningRef.current = linkOpening
+  const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
   const workspaceIsLocal = useAppStore((state) =>
     state.config?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local'
@@ -432,8 +427,6 @@ export function TerminalView({
     const element = terminal?.element
     if (!terminal || hydrating || !autoFocusRef.current || !visibleRef.current ||
       !element?.isConnected || element.closest('[inert]')) return
-    const active = element.ownerDocument.activeElement
-    if (active?.isConnected && active !== element.ownerDocument.body && !element.contains(active)) return
     terminal.focus()
   }, [hydrating])
 
@@ -555,12 +548,6 @@ export function TerminalView({
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
       })) return
-      const pendingFile = linkOpeningRef.current.request
-      if (pendingFile) linkOpeningRef.current.dismiss(pendingFile.id)
-      if (useAppStore.getState().mainSurface === 'agents') {
-        linkOpeningRef.current.activateHttp(url, event)
-        return
-      }
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
       // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
@@ -684,11 +671,7 @@ export function TerminalView({
                 link: match,
                 local: workspaceIsLocalRef.current,
                 openSystem: (path) => api.files.openSystem(linkOriginRef.current.workspaceId, path),
-                openFile: async (link) => {
-                  linkRequestRef.current = null
-                  setLinkRequest(null)
-                  linkOpeningRef.current.activateFile(link.path, location, event)
-                }
+                openFile: async (link) => { await openFile(link.path, linkOriginRef.current.tabGroupId, location, linkOriginRef.current.workspaceId) }
               }).catch(reportError)
             },
             hover: (event: MouseEvent) => {
@@ -780,40 +763,6 @@ export function TerminalView({
       replaying: replayingContinuation
     })
     switchReaderRef.current = readSwitch
-    const currentInputElement = (element: HTMLElement) =>
-      !disposed && terminalRef.current === terminal && visibleRef.current &&
-      terminal.element === element && element.isConnected && !element.closest('[hidden], [inert]')
-    const inputGeometry: TerminalInputGeometry = {
-      readOverlapTop(element, popup) {
-        if (!currentInputElement(element)) return undefined
-        const screen = element.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
-        const buffer = terminal.buffer.active, lineIndex = buffer.baseY + buffer.cursorY
-        const row = lineIndex - buffer.viewportY
-        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0) return undefined
-        const rowHeight = screen.height / terminal.rows
-        // Protect the actual current input and occupied bottom status rows.
-        // This is text geometry, not a Provider-specific footer interpretation.
-        const protectedRows = new Set([Math.max(0, terminal.rows - 2), terminal.rows - 1])
-        if (row >= 0 && row < terminal.rows) protectedRows.add(row)
-        let overlapTop: number | undefined
-        for (const protectedRow of protectedRows) {
-          const rowRect = new DOMRect(screen.left, screen.top + protectedRow * rowHeight, screen.width, rowHeight)
-          const currentLine = { viewportY: buffer.viewportY + protectedRow, getLine: (line: number) => buffer.getLine(line), getNullCell: () => buffer.getNullCell() }
-          if (terminalLinkReadoutOverlapsText(currentLine, terminal.cols, 1, rowRect, popup)) {
-            overlapTop = overlapTop === undefined ? rowRect.top : Math.min(overlapTop, rowRect.top)
-          }
-        }
-        return overlapTop
-      },
-      subscribe(element, onChange) {
-        if (!currentInputElement(element)) return () => {}
-        const changed = () => { if (currentInputElement(element)) onChange() }
-        const events = [terminal.onRender(changed), terminal.onCursorMove(changed), terminal.onScroll(changed)]
-        const releaseListeners = resourceOwners.acquireListeners(events.length)
-        return () => { for (const event of events) event.dispose(); releaseListeners() }
-      }
-    }
-    inputGeometryRef.current = inputGeometry
     let cursor = 0
     let resizeRevision = 0
     let liveGapRedrawPending = false
@@ -1473,12 +1422,7 @@ export function TerminalView({
     viewport.observeViewport()
     requestAnimationFrame(() => {
       if (!disposed && autoFocusRef.current && visibleRef.current && terminal.element?.isConnected &&
-        !terminal.element.closest('[inert]')) {
-        const element = terminal.element
-        const active = element.ownerDocument.activeElement
-        if (active?.isConnected && active !== element.ownerDocument.body && !element.contains(active)) return
-        terminal.focus()
-      }
+        !terminal.element.closest('[inert]')) terminal.focus()
     })
     return () => {
       disposed = true
@@ -1488,11 +1432,8 @@ export function TerminalView({
       }
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
       if (switchReaderRef.current === readSwitch) switchReaderRef.current = null
-      if (inputGeometryRef.current === inputGeometry) inputGeometryRef.current = null
       clearTimeout(revealDeadline)
       clearLinkPreview()
-      const pendingLink = linkOpeningRef.current.request
-      if (pendingLink) linkOpeningRef.current.dismiss(pendingLink.id)
       setLinkRequest((current) => {
         const next = current?.terminalGeneration === terminalGeneration ? null : current
         linkRequestRef.current = next
@@ -1534,10 +1475,7 @@ export function TerminalView({
       regionId,
       sessionId: session.id,
       runId: session.control.run.runId
-    }, () => observationReaderRef.current?.(), {
-      readOverlapTop: (element, popup) => inputGeometryRef.current?.readOverlapTop(element, popup),
-      subscribe: (element, onChange) => inputGeometryRef.current?.subscribe(element, onChange) ?? (() => {})
-    })
+    }, () => observationReaderRef.current?.())
   }, [linkOrigin.regionId, session.id, session.control.run.runId])
 
   async function redrawCurrentScreen(): Promise<boolean> {
@@ -1828,7 +1766,6 @@ export function TerminalView({
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
           <TerminalServiceNotices scope={noticeScope} visible={visible} available={!hydrating}
-            storageControl={session.control} continuationReason={continuationAbsence?.reason}
             reveal={revealNotice} replayGeometry={replayGeometryNotice}
             viewportSync={viewportSyncNotice} continuation={continuationNotice}
             causes={{
@@ -1902,10 +1839,9 @@ export function TerminalView({
         </div>
       </TerminalContextMenu>
       <OpenDestinationPopover
-        request={linkOpening.request ?? linkRequest}
-        canSplit={linkOpening.request ? linkOpening.canSplit : Boolean(linkOrigin.tabId && linkOrigin.regionId)}
+        request={linkRequest}
+        canSplit={Boolean(linkOrigin.tabId && linkOrigin.regionId)}
         onDismiss={(requestId) => {
-          if (linkOpening.request) { linkOpening.dismiss(requestId); return }
           setLinkRequest((current) => {
             const next = dismissTerminalLinkRequest(current, requestId)
             if (linkRequestRef.current?.id === requestId) linkRequestRef.current = next
@@ -1913,7 +1849,6 @@ export function TerminalView({
           })
         }}
         onSelect={(destination) => {
-          if (linkOpening.request) { linkOpening.choose(destination); return }
           const request = linkRequest
           if (!request || linkRequestRef.current?.id !== request.id) return
           linkRequestRef.current = null

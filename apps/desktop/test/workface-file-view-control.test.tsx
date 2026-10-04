@@ -20,7 +20,6 @@ import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { agent, neighborSid, privateEnvironment, targetSid } from './helpers/workface-control-fixture'
 import { fileConfig, fileTopics, startWorkfaceFileFixture, zoneFor } from './helpers/workface-file-fixture'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
-import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { workfaceMonacoModelCount } from './helpers/workface-monaco-fixture'
 
 const initial = useAppStore.getState(), ownFile = 'apps/desktop/test/workface-file-view-control.test.tsx'
@@ -80,14 +79,6 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
     expect(result.locations.map(location => [location.displayWorkspaceId, location.regionId])).toEqual([['resource', currentRegion], ['display', currentRegion]])
     expect(read).not.toHaveBeenCalled(); expect(diff).not.toHaveBeenCalled(); expect(setter).not.toHaveBeenCalled(); expect(active).not.toHaveBeenCalled()
     expect(fixture!.flush).not.toHaveBeenCalled(); expect(protectedFacts()).toEqual(before); fixture!.noLifecycle()
-  })
-  it.each(['data.json', 'data.jsonc', 'data.csv', 'data.tsv'])('reports %s reader support through real CLI and updates the original Region', async path => {
-    await arrange(path)
-    expect(await view()).toMatchObject({ effectiveMode: 'source', supportedModes: ['source', 'diff', 'preview'], data: 'text' })
-    const original = useAppStore.getState().documents[documentKey('resource', path)]
-    await act(async () => { await view('preview') })
-    expect(await view()).toMatchObject({ effectiveMode: 'preview', outcome: 'read', content: { status: 'unconfirmed' } })
-    expect(useAppStore.getState().documents[documentKey('resource', path)]).toBe(original)
   })
   it('changes both occurrences of one Region while another Region of the same dirty TextDoc remains source', async () => {
     await arrange(); useAppStore.getState().updateDocument(currentId, '# Unsaved original text\n\nStill one TextDoc', currentRegion); await mount()
@@ -197,9 +188,6 @@ it(restoreName, async () => {
   if (restoring) {
     const payload = JSON.parse(await readFile(process.env.AGENTMUX_WORKFACE_RESTORE_RECORD!, 'utf8')); expect(process.pid).not.toBe(payload.parentPid)
     localStorage.setItem('agentmux-workbench-v1', payload.record)
-    // Positions now belong to Core. Restore its durable record alongside the Renderer draft record.
-    expect(payload.spatial.graph.tabs.length).toBeGreaterThan(0)
-    await api.spatial.commit({ expectedRevision: 0, graph: payload.spatial.graph })
     vi.spyOn(api.config, 'get').mockResolvedValue(fileConfig); vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
     vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(fileTopics)
     vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
@@ -219,22 +207,11 @@ it(restoreName, async () => {
     } finally { dispose() }
     return
   }
-  await arrange()
-  // The CLI fixture's original Agent tabs predate Core addressing. Install their
-  // authoritative resource context before taking the unchanged restart snapshot.
-  const original = useAppStore.getState()
-  const descriptors = desktopWorkbenchFromSpatial(desktopSpatialGraph(original, fileTopics))
-  useAppStore.setState({ tabs: Object.fromEntries(Object.entries(original.tabs).map(([id, tab]) =>
-    [id, { ...tab, ...(descriptors.tabs[id]?.space ? { space: descriptors.tabs[id]!.space } : {}) }])) })
-  await view('preview'); await prepareRendererUpdate()
+  await arrange(); await view('preview'); await prepareRendererUpdate()
   const state = useAppStore.getState(), record = localStorage.getItem('agentmux-workbench-v1')!; expect(record.length).toBeGreaterThan(0)
   expect(JSON.parse(record).state.editorRegionModes).toBeUndefined()
   const directory = await mkdtemp(_hygiene_fixturePath("tmp/amx-wfv-")), recordPath = join(directory, 'record.json'), childProof = join(directory, 'child-proof.json'), reportPath = join(directory, 'vitest.json')
-  // The arranged CLI fixture disposes its observation subscription. Serialize its original positions through the production projection.
-  const saved = await api.spatial.read()
-  const spatial = await api.spatial.commit({ expectedRevision: saved?.revision ?? 0, graph: desktopSpatialGraph(state, fileTopics, saved?.graph ?? null) })
-  expect(spatial.graph.tabs.length).toBeGreaterThan(0)
-  await writeFile(recordPath, JSON.stringify({ parentPid: process.pid, record, spatial, childProof, tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts, currentId, currentRegion, otherRegion }))
+  await writeFile(recordPath, JSON.stringify({ parentPid: process.pid, record, childProof, tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts, currentId, currentRegion, otherRegion }))
   const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_STATE_DIRECTORY: join(directory, 'state'), AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'),
     AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson'), AGENTMUX_WORKFACE_RESTORE_PHASE: 'file-view-child', AGENTMUX_WORKFACE_RESTORE_RECORD: recordPath })
   try { const result = await promisify(execFile)(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', process.env.AGENTMUX_WORKFACE_MUTATION_CONFIG ?? 'vitest.config.ts',

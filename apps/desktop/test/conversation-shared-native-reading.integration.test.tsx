@@ -1,5 +1,4 @@
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
-import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -11,7 +10,7 @@ import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
-
+import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
 import { api } from '../src/renderer/src/lib/api'
@@ -78,32 +77,33 @@ async function fixture() {
 }
 
 async function settledHistory(): Promise<void> {
-  for (let i = 0; i < 80 && host.querySelectorAll('.activity-feed [data-native-record-id]').length !== 1; i += 1) {
+  for (let i = 0; i < 80 && host.querySelectorAll('[data-history-item-id]').length !== 1; i += 1) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   }
-  expect(host.querySelectorAll('.activity-feed [data-native-record-id]')).toHaveLength(1)
+  expect(host.querySelectorAll('[data-history-item-id]')).toHaveLength(1)
 }
 
 describe('shared native presentation preserves the existing reading owner', () => {
-  it('a real public native user trace keeps its raw record and canonical disclosure identity when opened and refreshed', async () => {
+  it('a real public native user trace keeps the raw History record identity when opened and refreshed', async () => {
     const f = await fixture(); const pages: AgentSessionHistoryPage[] = []; const pending: Promise<AgentSessionHistoryPage>[] = []
     const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => {
       expect(control).toEqual(f.control); const read = f.page(); pending.push(read); const result = await read; pages.push(result); return result
     })
-    await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
+    await act(async () => root.render(<SessionHistoryView control={f.control} label="Recipient" visible={true}
+      themeId="graphite" fontSize={12} workspaceRoot={f.workspacePath} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
     await act(async () => { await Promise.all(pending) })
     await settledHistory()
     expect(pages.map(page => page.items.map(item => item.id))).toEqual([[f.rawId]])
-    const row = host.querySelector<HTMLElement>('.activity-feed [data-native-record-id]')!
-    expect(row.dataset.nativeRecordId).toBe(f.rawId)
+    const row = host.querySelector<HTMLElement>('[data-history-item-id]')!
+    expect(row.dataset.historyItemId).toBe(f.rawId)
     expect(row.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
     const trace = row.querySelector<HTMLButtonElement>('button.conversation-tool-trace__row')!
     expect(trace).not.toBeNull(); expect(trace.getAttribute('aria-expanded')).toBe('false')
     await act(async () => trace.click())
     console.log('SHARED_READING_USER_TRACE_IDENTITY', JSON.stringify({ rawId: f.rawId, traceId: trace.dataset.traceId, expanded: trace.getAttribute('aria-expanded') }))
     expect(trace.getAttribute('aria-expanded')).toBe('true')
-    expect(parseTraceDisclosureKey(trace.dataset.traceId!)).toEqual([projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: pages[0]! })[0]!.id, JSON.stringify(['tool-result', 'opaque:call:0', 0])])
-    const latest = [...host.querySelectorAll<HTMLButtonElement>('.activity-feed__reading button')].find(button => button.textContent?.trim() === 'Current')!
+    expect(parseTraceDisclosureKey(trace.dataset.traceId!)).toEqual([f.rawId, JSON.stringify(['tool-result', 'opaque:call:0', 0])])
+    const latest = [...host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')].find(button => button.textContent?.includes('Latest'))!
     await act(async () => latest.click())
     expect(history).toHaveBeenCalledTimes(2)
     await act(async () => { await Promise.all(pending) })

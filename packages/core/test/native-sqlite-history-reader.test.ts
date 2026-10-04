@@ -69,7 +69,7 @@ async function fixture(large = false) {
   writer.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   const content = JSON.stringify({ role: 'assistant', content: [{ type: 'reasoning', text: 'reason' }, { type: 'text', text: 'committed WAL answer' }] })
   writer.prepare('INSERT INTO blobs VALUES (?,?)').run('native-message', Buffer.from(content))
-  cleanup.push(async () => { if (writer.isOpen) writer.close(); await rm(root, { recursive: true, force: true }) })
+  cleanup.push(async () => { writer.close(); await rm(root, { recursive: true, force: true }) })
   return { root, path, writer, content }
 }
 
@@ -83,30 +83,6 @@ async function release(reader: NativeSqliteHistoryReader) {
 }
 
 describe('Native SQLite physical read owner', () => {
-  it('reads a real closed WAL-mode database without creating native WAL/SHM sidecars', async () => {
-    const f = await fixture(); f.writer.close()
-    const before = await readFile(f.path)
-    expect([...before.subarray(18, 20)]).toEqual([2, 2])
-    await expect(stat(`${f.path}-wal`)).rejects.toMatchObject({ code: 'ENOENT' })
-    const reader = await NativeSqliteHistoryReader.open(f.path, AbortSignal.timeout(10_000))
-    expect(await reader.get('SELECT data FROM blobs WHERE id=?', ['native-message'])).toEqual([new Uint8Array(Buffer.from(f.content))])
-    await reader.verifyUnchanged(); await release(reader)
-    expect(await readFile(f.path)).toEqual(before)
-    await expect(stat(`${f.path}-wal`)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(stat(`${f.path}-shm`)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('refuses a mixed closed snapshot when a real writer creates and commits a WAL after reading', async () => {
-    const f = await fixture(); f.writer.close()
-    const reader = await NativeSqliteHistoryReader.open(f.path, AbortSignal.timeout(10_000))
-    expect(await reader.get('SELECT id FROM blobs WHERE id=?', ['native-message'])).toEqual(['native-message'])
-    const writer = new DatabaseSync(f.path)
-    try {
-      writer.prepare('INSERT INTO blobs VALUES (?,?)').run('new-native-row', Buffer.from('new native input'))
-      await expect(reader.verifyUnchanged()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED' })
-    } finally { writer.close(); await release(reader) }
-  })
-
   it('reads a real WAL-only typed record from a >4MiB database through sparse bounded physical I/O and releases SQL/VFS/files', async () => {
     const f = await fixture(true), before = await readFile(f.path), wal = await readFile(`${f.path}-wal`)
     const stalePath = join(f.root, 'main-only.db'); await writeFile(stalePath, before)
@@ -193,7 +169,7 @@ describe('Native SQLite physical read owner', () => {
     }
     const reader = await NativeSqliteHistoryReader.open(f.path, AbortSignal.timeout(10_000))
     expect(changed).toBe(true)
-    await expect(reader.verifyUnchanged()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED' })
+    await expect(reader.verifyUnchanged()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
     await release(reader)
   })
 
@@ -201,7 +177,7 @@ describe('Native SQLite physical read owner', () => {
     const f = await fixture(), reader = await NativeSqliteHistoryReader.open(f.path, AbortSignal.timeout(10_000))
     expect(await reader.get('SELECT id FROM blobs WHERE id=?', ['native-message'])).toEqual(['native-message'])
     f.writer.prepare('INSERT INTO blobs VALUES (?,?)').run('next-commit', Buffer.from('next'))
-    await expect(reader.verifyUnchanged()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED' })
+    await expect(reader.verifyUnchanged()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
     await release(reader)
   })
 

@@ -40,24 +40,8 @@ export function fileExplorerDropDirectory(node: FileExplorerMoveNode): string {
   return node.isDirectory ? node.path : workspacePathParent(node.path)
 }
 
-export type FileExplorerMoveIndex = {
-  paths: ReadonlySet<string>
-  directoryPaths: ReadonlySet<string>
-}
-
-/** One index per loaded tree; menus and drag share its collision facts. */
-export function createFileExplorerMoveIndex(nodes: readonly FileExplorerMoveNode[]): FileExplorerMoveIndex {
-  const paths = new Set<string>(), directoryPaths = new Set([''])
-  for (const node of nodes) {
-    const path = node.path
-    paths.add(path)
-    if (node.isDirectory) directoryPaths.add(path)
-  }
-  return { paths, directoryPaths }
-}
-
 export function planFileExplorerMove(
-  index: FileExplorerMoveIndex,
+  nodes: readonly FileExplorerMoveNode[],
   sourcePath: string,
   directoryPath: string
 ): FileExplorerMovePlan {
@@ -68,18 +52,22 @@ export function planFileExplorerMove(
     return { status: 'blocked', reason: 'into-self' }
   }
   const destinationPath = workspacePathInDirectory(directoryPath, workspacePathName(sourcePath))
-  if (index.paths.has(destinationPath)) {
+  if (nodes.some((node) => node.path === destinationPath)) {
     return { status: 'blocked', reason: 'destination-exists' }
   }
   return { status: 'ready', sourcePath, directoryPath, destinationPath }
 }
 
 export function fileExplorerMoveTargets(
-  index: FileExplorerMoveIndex,
+  nodes: readonly FileExplorerMoveNode[],
   sourcePath: string
 ): FileExplorerMoveTarget[] {
-  return [...index.directoryPaths].flatMap((path) => {
-    const plan = planFileExplorerMove(index, sourcePath, path)
+  const directoryPaths = new Set([
+    '',
+    ...nodes.flatMap((node) => node.isDirectory ? [node.path] : [])
+  ])
+  return [...directoryPaths].flatMap((path) => {
+    const plan = planFileExplorerMove(nodes, sourcePath, path)
     return plan.status === 'ready'
       ? [{ path, label: path || 'Workspace Root' }]
       : []

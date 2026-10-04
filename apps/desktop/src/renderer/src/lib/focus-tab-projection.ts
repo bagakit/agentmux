@@ -1,54 +1,14 @@
 import { workbenchSurfaces, type WorkbenchTab } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
-import type { AgentMuxDesktopSpaceSelection, AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { AgentFocusContext } from './agent-focus'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
-import { mainRegionReference } from './desktop-focus-navigation'
 import { selectSpatialCatalog } from './space-agent-control'
 
 export type ExecutionFocusPresentation = {
   projection: WorkbenchProjection | null
   issue: string | null
   references: readonly WorkbenchProjectionSelection[]
-  unselected?: boolean
-}
-
-/** Main presentation consumes the durable Desktop choice, independently of Agent MRU. */
-export function mainFocusPresentation(
-  choice: AgentMuxDesktopSpaceSelection | null,
-  tabs: Readonly<Record<string, WorkbenchTab>>,
-  catalog: AgentMuxSpaceCatalog | null,
-  onSelect: WorkbenchProjection['onSelect'],
-  level: 'tab' | 'region' = 'tab'
-): ExecutionFocusPresentation {
-  if (!choice) return { projection: null, issue: null, references: [] }
-  // A parent with no selected leaf is a normal navigation choice, not an
-  // unconfirmed Region. Keep all original members without selecting a peer.
-  if (catalog && !choice.tabId && !choice.regionId && choice.zoneId &&
-    catalog.zones.some(zone => zone.zoneId === choice.zoneId && zone.kind !== 'unknown' && !zone.issue) &&
-    (choice.spaceId === null
-      ? !catalog.bindings.some(binding => binding.zoneId === choice.zoneId)
-      : catalog.bindings.some(binding => binding.zoneId === choice.zoneId && binding.spaceId === choice.spaceId))) {
-    return { projection: { entity: { kind: 'zone', zoneId: choice.zoneId },
-      presentationId: 'focus-workbench', displayWorkspaceId: choice.workspaceId,
-      catalog, selectionMode: 'occurrence', selection: [], onSelect }, issue: null, references: [] }
-  }
-  if (catalog && !choice.tabId && !choice.zoneId &&
-    catalog.spaces.some(space => space.spaceId === choice.spaceId && !space.issue)) {
-    return { projection: null, issue: null, references: [], unselected: true }
-  }
-  const references = catalog?.locations.filter(location => location.displayWorkspaceId === choice.workspaceId &&
-    location.spaceId === choice.spaceId && location.zoneId === choice.zoneId &&
-    location.tabId === choice.tabId && (!choice.regionId || location.regionId === choice.regionId)).map(location => ({
-      displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId })) ?? []
-  const reference = mainRegionReference(choice)
-  if (!catalog || !reference || !tabs[reference.tabId]?.regions[reference.regionId] ||
-    !references.some(location => sameWorkbenchProjectionSelection(location, reference))) return { projection: null, references,
-    issue: 'The selected object has no confirmed Region occurrence. Its original workface and reference are kept; choose an exact existing location.' }
-  return { projection: { entity: level === 'region' ? { kind: 'region', regionId: reference.regionId } : { kind: 'tab', tabId: reference.tabId },
-    presentationId: 'focus-workbench', displayWorkspaceId: reference.displayWorkspaceId,
-    catalog: selectSpatialCatalog(catalog, { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }),
-    selection: [reference], onSelect }, issue: null, references }
 }
 
 /** Resolve an occurrence from authoritative membership, never from the first Session Tab. */

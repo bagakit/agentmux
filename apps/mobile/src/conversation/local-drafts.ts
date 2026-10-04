@@ -1,4 +1,3 @@
-import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { getDeviceWorkface, type DraftRecord } from '../recovery/device-workface'
 
 export type PromptAttempt = {
@@ -7,18 +6,12 @@ export type PromptAttempt = {
   draft: string
   phase: 'sending' | 'unknown' | 'rejected' | 'confirmed'
   message: string
-  request?: { condition: AgentPromptCondition; execution: 'default' | 'immediate'; explicit: boolean; runtimeId: string | null }
-  /** Missing means historical/unknown, never permission to construct another input. */
-  inputRequested?: boolean
-  originalRuntimeId?: string | null
-  explicit?: boolean
-  logId?: string
 }
 export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string }
 function restoredMessage(value: PromptAttempt['phase'], interaction = false): string {
   if (value === 'unknown') return interaction
     ? '重启后的原请求答复回执未知；不会重复回答，请核对原会话。'
-    : '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。'
+    : '重启后的原输入回执未知；草稿保留，不会重新投递，请刷新核对原会话。'
   return value === 'confirmed' ? '先前已由 Core 确认；当前连接另行核对。' : '原输入未发送或已被拒绝；草稿保留。'
 }
 
@@ -39,7 +32,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       for (const [key, draft] of savedDrafts) drafts.set(key, draft as string)
       for (const [key, item] of savedAttempts) {
         const intent = item as PromptAttempt, status = intent.phase === 'sending' ? 'unknown' : intent.phase
-        attempts.set(key, { ...intent, phase: status, message: restoredMessage(status) })
+        attempts.set(key, { operationId: intent.operationId, runId: intent.runId, draft: intent.draft, phase: status, message: restoredMessage(status) })
       }
       for (const [key, item] of savedResponses) {
         const status = (item as ResponseAttempt).phase === 'sending' ? 'unknown' : (item as ResponseAttempt).phase
@@ -55,13 +48,9 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       const record: DraftRecord = { version: 1, drafts: [...drafts],
         attempts: [...attempts].map(([key, intent]) => [key, {
           operationId: intent.operationId, runId: intent.runId,
-          // Failed original bodies are retained for explicit retry. Confirmed bodies
-          // remain in Core history and are removed from this device-owned intent.
-          draft: intent.phase === 'confirmed' ? '' : intent.draft, phase: intent.phase,
-          ...(intent.request ? { request: structuredClone(intent.request) } : {}), ...(intent.logId ? { logId: intent.logId } : {}),
-          ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
-          ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
-          ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {})
+          // Only an unresolved original draft is needed to reconcile a late receipt. Completed
+          // or rejected bodies remain in the authoritative Core history, never a device log.
+          draft: intent.phase === 'sending' || intent.phase === 'unknown' ? intent.draft : '', phase: intent.phase
         }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase }]) }
       owner.updateConversation(record)
       state.canSave = true

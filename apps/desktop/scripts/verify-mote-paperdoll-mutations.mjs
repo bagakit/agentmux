@@ -38,7 +38,7 @@ const variants = [
   ['face-is-not-first', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('setEditingFace(Boolean(target?.avatarTarget))', 'setEditingFace(false)')],
   ['save-invisible-alternative', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('let choice = draft', 'let choice = alternativeDraft')],
   ['source-switch-publishes-draft', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('setDraft(face ? faceDraft : alternativeDraft)', 'setDraft(face ? faceDraft : alternativeDraft); if(target) void useAppStore.getState().setSpaceObjectIcon(target.key, face ? faceDraft : alternativeDraft)')],
-  ['avatar-liquid-ignores-x', 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx', motion, 'same connected liquid', s => s.replace('const horizontal = Math.abs(next.x - from.x) > Math.abs(next.y - from.y)', 'const horizontal = false')],
+  ['avatar-liquid-ignores-x', 'apps/desktop/src/renderer/src/components/settings/LiquidSelectionSurface.tsx', motion, 'same connected liquid', s => s.replace('const horizontal = Math.abs(next.x - from.x) > Math.abs(next.y - from.y)', 'const horizontal = false')],
   ['face-gaze-is-disconnected', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', motion, 'connected static face rig', s => s.replace("setProperty('--mote-gaze-x'", "setProperty('--unused-gaze-x'")],
   ['saved-face-never-joins-motion', 'apps/desktop/src/renderer/src/components/MoteIdentityMotion.tsx', motion, 'a saved face joins', s => s.replace('[expression, visible, children]', '[expression, visible]')],
   ['sessionless-face-subscribes-to-store', 'apps/desktop/src/renderer/src/components/MoteIdentityMotion.tsx', motion, 'identities without a Session', s => s.replace('return !props.moteSessionId', 'return false')],
@@ -89,7 +89,7 @@ try {
   for (const [symbol, definition, pattern] of [
     ['SpaceObjectIcon identity', 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', /<SpaceObjectIcon\s/],
     ['observeMoteMotion', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', /\bobserveMoteMotion\(/],
-    ['LiquidSelectionSurface', 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx', /<LiquidSelectionSurface\s/],
+    ['LiquidSelectionSurface', 'apps/desktop/src/renderer/src/components/settings/LiquidSelectionSurface.tsx', /<LiquidSelectionSurface\s/],
     ['MoteFace', 'apps/desktop/src/renderer/src/components/MoteFace.tsx', /<MoteFace\s/],
     ['MoteFaceEditor', 'apps/desktop/src/renderer/src/components/MoteFaceEditor.tsx', /<MoteFaceEditor\s/],
     ['MoteIdentityMotion', 'apps/desktop/src/renderer/src/components/MoteIdentityMotion.tsx', /<MoteIdentityMotion\s/],

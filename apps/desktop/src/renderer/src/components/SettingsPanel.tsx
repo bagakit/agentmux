@@ -8,7 +8,7 @@ import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { SETTINGS_GROUPS as GROUPS } from './settings/settings-catalog'
 import { settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 
@@ -147,7 +147,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId, t
           const Pane = settingsModules.find((module) => module.id === pane)!.Pane
           const visible = active === pane && visibleSections.length > 0
           return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!visible} inert={!visible}>
-            <Pane config={config} onClose={onClose} onNavigate={setActive} active={visible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest} />
+            <Pane config={config} onClose={onClose} active={visible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest} />
           </div>
         })}
       </main>

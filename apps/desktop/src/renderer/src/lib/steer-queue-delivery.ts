@@ -1,15 +1,9 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 
-export function confirmedSteerDelivery(timeline: AgentTimelineSnapshot | undefined, sessionId: string, operationId: string): boolean {
-  return timeline?.agentSessionId === sessionId && timeline.items.some(item =>
-    item.agentSessionId === sessionId && item.kind === 'user_message' && item.status === 'complete' &&
-    item.id === `prompt:${operationId}`)
-}
-
 /** Core records prompt:<operationId> only after the input side effect succeeds. A lost IPC reply
  * or renderer restart must not turn that durable delivery back into a retryable local draft. */
 export function reconcileDeliveredSteers<State extends {
-  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true }>>
+  agentSteerQueues: Record<string, Array<{ operationId: string }>>
   timelines: Record<string, AgentTimelineSnapshot>
 }>(state: State, sessionId: string): State {
   const queue = state.agentSteerQueues[sessionId]
@@ -18,7 +12,7 @@ export function reconcileDeliveredSteers<State extends {
   const delivered = new Set(timeline.items
     .filter((item) => item.agentSessionId === sessionId && item.kind === 'user_message' && item.status === 'complete')
     .map((item) => item.id))
-  const pending = queue.filter((entry) => entry.archived || !delivered.has(`prompt:${entry.operationId}`))
+  const pending = queue.filter((entry) => !delivered.has(`prompt:${entry.operationId}`))
   if (pending.length === queue.length) return state
   const agentSteerQueues = { ...state.agentSteerQueues }
   if (pending.length) agentSteerQueues[sessionId] = pending

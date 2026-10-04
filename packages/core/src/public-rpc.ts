@@ -1,9 +1,5 @@
 import { AGENTMUX_RPC_TOPIC_METHODS } from './public-rpc-topics.js'
 import type { TopicParameterMap, TopicResultMap, TopicMethod } from './public-rpc-topics.js'
-import { AGENTMUX_RPC_FILE_METHODS } from './public-rpc-files.js'
-import type { FileParameterMap, FileResultMap, FileMethod } from './public-rpc-files.js'
-import { AGENTMUX_RPC_SCHEDULE_METHODS } from './public-rpc-schedules.js'
-import type { ScheduleParamsMap, ScheduleResultMap, ScheduleMethod } from './public-rpc-schedules.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentPromptExecution } from './types.js'
 import { AGENTMUX_HOSTED_RPC_METHODS } from './hosted-client-contract.js'
@@ -20,7 +16,6 @@ import type { AgentMuxRpcDeviceMethod, AgentMuxRpcDeviceParameterMap, AgentMuxRp
 /** Canonical public names and their existing business owner. No wire aliases. */
 export const AGENTMUX_RPC_CONTROL_METHODS = {
   'message.pending.ls': 'message.pending.ls', 'message.pending.edit': 'message.pending.edit', 'message.pending.send': 'message.pending.send',
-  'message.pending.archive': 'message.pending.archive', 'message.pending.restore': 'message.pending.restore',
   'agent.open': 'agent.open', 'agent.rename': 'agent.rename', 'agent.view': 'agent.view',
   'agent.interrupt': 'interrupt', 'agent.resume': 'resume', 'agent.stop': 'stop',
   'space.ls': 'space.ls', 'space.inspect': 'space.inspect', 'space.rename': 'space.rename',
@@ -29,27 +24,19 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view',
   'terminal.open': 'open.terminal', 'browser.open': 'open.browser',
   'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
-  'browser.inspect': 'browser.operation',
-  // Stopping an active external-tab operation also ends only its original sharing
-  // grant. Finished operations return their retained state without revoking sharing.
-  // Other targets and the original tab remain. Cancelling a reader does neither.
-  'browser.stop': 'browser.stop',
+  'browser.inspect': 'browser.operation', 'browser.stop': 'browser.stop',
   'browser.replay': 'browser.replay', 'browser.follow': 'browser.subscribe',
   'browser.task.assets': 'browser.task.assets', 'browser.task.reliability': 'browser.task.reliability',
   'browser.task.run': 'browser.task.run', 'browser.task.stop': 'browser.task.stop',
   'browser.task.batch': 'browser.task.batch', 'browser.task.batch-stop': 'browser.task.batch-stop',
   'goal.ls': 'demand.list', 'goal.inspect': 'demand.show', 'goal.create': 'demand.create',
   'goal.update': 'demand.update', 'goal.delete': 'demand.delete', 'goal.assign': 'demand.assign',
-  'goal.discuss': 'demand.discuss', 'goal.confirm': 'demand.confirm', 'goal.accept': 'demand.accept',
-  'goal.start': 'demand.start', 'goal.continuation-action': 'demand.continuation-action', 'goal.handoff': 'demand.handoff',
+  'goal.start': 'demand.start', 'goal.handoff': 'demand.handoff',
   'goal.link-session': 'demand.link-session', 'goal.link-project': 'demand.link-project',
   'goal.decisions': 'demand.decision-log', 'goal.focus': 'focus',
   'app.inspect': 'inspect.client', 'app.focus': 'focus',
   'settings.inspect': 'settings.get', 'settings.set': 'settings.set',
   'settings.hosts.ls': 'settings.hosts.list', 'settings.hosts.test': 'settings.hosts.test',
-  'settings.hosts.upgrade-check': 'settings.hosts.upgrade-check',
-  'settings.hosts.upgrade': 'settings.hosts.upgrade',
-  'settings.hosts.upgrade-inspect': 'settings.hosts.upgrade-inspect',
   'settings.executors.refresh': 'settings.executors.refresh',
   'settings.workspaces.register': 'settings.workspaces.add',
   'settings.browser-links.ls': 'settings.browser.links.list',
@@ -83,19 +70,17 @@ type GoalKeys<T> = T extends readonly (infer E)[] ? GoalKeys<E>[] : T extends ob
     K extends 'receipt' | 'goal' | 'demand' | 'goals' | 'demands' | 'decisions' | 'patch' ? GoalKeys<T[K]> : T[K]
 } : T
 type OperationKeys<T> = T extends object ? {
-  [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' | 'receipt' ? OperationKeys<T[K]> : T[K]
+  [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' ? OperationKeys<T[K]> : T[K]
 } : T
 type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: boolean }
   : M extends 'goal.ls' ? AgentMuxRpcGoalFilters
-  : M extends 'goal.create' ? Omit<GoalKeys<BusinessParams<M>>, 'decision'> & {
+  : M extends 'goal.create' ? Omit<BusinessParams<M>, 'decision'> & {
       risk?: import('./control.js').AgentMuxDemandDecision['risk'];
       confirmation?: import('./control.js').AgentMuxDemandDecision['confirmation']; wikiVersion?: string;
       decision?: Omit<import('./control.js').AgentMuxDemandDecision, 'recordedAt' | 'sourceSessionId'> }
   : M extends 'goal.focus' ? { goalId: string; input?: 'preserve' | 'target' }
   : M extends 'settings.browser-links.forget' ? { input: unknown }
-  : M extends 'settings.prompts.inspect' ? { id: string; keyword?: never } | { keyword: string; id?: never }
-  : M extends 'settings.executors.inspect' ? { id: string }
   : M extends `settings.${'executors' | 'prompts'}.update` ? { id: string; input: unknown }
   : M extends `settings.${'executors' | 'prompts'}.delete` ? { id: string; input?: unknown }
   : M extends 'toolkit.update' | 'toolkit.delete' | 'toolkit.run' | 'toolkit.stop'
@@ -164,10 +149,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = TopicParameterMap & FileParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
-  'notebook.ls': Record<string, never>
-  'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string }
-  'notebook.apply': import('./notebook-catalog.js').NotebookWrite
+type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'space.state': Record<string, never>
   'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
   'space.resolve': import('./spatial-state.js').AgentMuxSpatialResolve
@@ -178,22 +160,17 @@ type NativeParams = TopicParameterMap & FileParameterMap & ScheduleParamsMap & A
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmationInput
   'agent.context': import('./agent-context.js').AgentContextParams
-  'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
-  'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceParams
-  'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadInput
   'agent.reopen': Parameters<AgentMuxClient['reopenAgent']>[0]
   'agent.reopen.check': Parameters<AgentMuxClient['reconcileAgentReopen']>[0]
   'agent.role.ls': { workspacePath?: string }
   'agent.role.register': { role: string; providerId?: string }
   'agent.role.resolve': { role: string; workspacePath?: string }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
-    execution?: AgentPromptExecution; sourceChannel?: import('./types.js').AgentMessageChannel;
+    execution?: AgentPromptExecution;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
   'agent.output': { agentSessionId: string; afterByte?: number; follow?: boolean }
-  'message.delivery.inspect': { logId: string; hostId?: string }
-  'message.delivery.report': { hostId: string; record: import('./delivery-attempt.js').DeliveryAttempt }
   'message.inbox.check': { limit: number }
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
   'message.dispatch.open': { sourceMessageId: string }
@@ -201,15 +178,11 @@ type NativeParams = TopicParameterMap & FileParameterMap & ScheduleParamsMap & A
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
   'app.snapshot': AgentMuxRpcSnapshotParams
   'goal.activity': AgentMuxRpcGoalFilters
-  'system.storage': { hostId: string; runId: string }
   'system.doctor': { workspacePath?: string }
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
-  'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
-  'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null }
-  'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
+type NativeResult = TopicResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
   'space.resolve': ReturnType<typeof import('./spatial-state.js').resolveSpatialRegion>
@@ -223,9 +196,6 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'agent.inspect': AgentMuxRpcAgentInspection
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmation
   'agent.context': import('./agent-context.js').AgentContextPage
-  'agent.question.reply': import('./types.js').AgentSessionQuestionReplyReceipt
-  'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceResult
-  'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadPage
   'agent.reopen': { session: Awaited<ReturnType<AgentMuxClient['reopenAgent']>> }
   'agent.reopen.check': { session: Awaited<ReturnType<AgentMuxClient['reconcileAgentReopen']>> }
   'agent.role.ls': { bindings: AgentRoleBinding[] }
@@ -235,8 +205,6 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
-  'message.delivery.inspect': import('./delivery-attempt.js').DeliveryAttemptLookup
-  'message.delivery.report': import('./delivery-attempt.js').DeliveryAttemptLookup
   'message.inbox.check': Awaited<ReturnType<AgentMuxClient['checkDeliveries']>>
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
@@ -244,14 +212,13 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>>
   'app.snapshot': AgentMuxRpcSnapshot
   'goal.activity': { activity: Array<{ goalId: string; message: string; updatedAt: number }> }
-  'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
   'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded' }
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = TopicParameterMap & FileParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | TopicMethod | FileMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = TopicParameterMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | TopicMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -267,19 +234,15 @@ export type AgentMuxRpcSpacePresentation = {
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_TOPIC_METHODS,
-  ...AGENTMUX_RPC_FILE_METHODS,
-  ...AGENTMUX_RPC_SCHEDULE_METHODS,
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
-  'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
-  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.context': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
-  'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
-  'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
+  'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
@@ -297,7 +260,7 @@ type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
 export type AgentMuxRpcStreamInitial<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcStreamInitialMap[M]
 export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'end'; data: unknown }
-  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; logId?: string; evidence?: import('./types.js').AgentMuxEvidence } }
+  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; evidence?: import('./types.js').AgentMuxEvidence } }
   | (M extends AgentMuxHostedStreamMethod ? Extract<AgentMuxHostedStreamEvent, { type: 'snapshot' }>
     : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }

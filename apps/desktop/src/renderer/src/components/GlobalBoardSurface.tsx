@@ -13,7 +13,6 @@ import { DIRECT_GOAL_TITLE, directGoalRequest, retryDirectGoal, saveDirectGoal, 
 import { GoalDetail } from './GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { GoalsCommonActions } from './GoalsCommonActions'
-import { resolveGoalsPreferences } from '../../../shared/goals-preferences'
 
 export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
@@ -48,13 +47,13 @@ export function GlobalBoardSurface() {
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)
   const executors = config?.executors ?? EMPTY_EXECUTORS
   const [query, setQuery] = useState('')
-  const [view, setView] = useState(() => resolveGoalsPreferences(config?.goals).defaultView)
+  const [view, setView] = useState<'list' | 'board'>('list')
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<DemandStatus | 'all'>('all')
   const [projectFilter, setProjectFilter] = useState('all')
   const [routingFilter, setRoutingFilter] = useState<'all' | 'unassigned' | 'assigned'>('all')
   const [executorFilter, setExecutorFilter] = useState('all')
-  const [showHistory, setShowHistory] = useState(() => resolveGoalsPreferences(config?.goals).showFinished)
+  const [showHistory, setShowHistory] = useState(false)
   const [moteErrors, setMoteErrors] = useState<Record<string, { message: string; mode: 'open' | 'grill' | 'grounding' }>>({})
   const [motePending, setMotePending] = useState<Record<string, 'open' | 'grill' | 'grounding'>>({})
   const [acknowledgementFeedback, setAcknowledgementFeedback] = useState<Record<string, GoalAcknowledgementFeedback>>({})

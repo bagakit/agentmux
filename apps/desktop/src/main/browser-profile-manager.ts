@@ -48,8 +48,6 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private readonly importWindows = new Set<BrowserWindow>()
   private readonly activeMutations = new Set<Promise<unknown>>()
   private defaultId: string | null = null
-  private initialization: Promise<void> | null = null
-  private initializationError: Error | null = null
   private disposed = false
   private disposePromise: Promise<void> | null = null
 
@@ -57,9 +55,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   async initialize(): Promise<void> {
     this.assertActive()
-    if (this.defaultId) return
-    if (this.initialization) return await this.initialization
-    const attempt = this.trackMutation((async () => {
+    await this.trackMutation((async () => {
       const profiles = await this.store.listProfiles()
       const defaultProfile = profiles.find((profile) => profile.isDefault)
       if (!defaultProfile) throw new Error('Browser Profile metadata has no default Profile')
@@ -72,15 +68,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       this.profiles.clear()
       for (const profile of profiles) this.profiles.set(profile.id, cloneProfile(profile))
       this.defaultId = defaultProfile.id
-      this.initializationError = null
-    })()).catch(cause => {
-      this.initializationError = new Error(`Browser Profiles could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}. Original profile data is kept. Repair the metadata or its access, then retry the Profile connection.`, { cause })
-      throw this.initializationError
-    }).finally(() => {
-      if (this.initialization === attempt) this.initialization = null
-    })
-    this.initialization = attempt
-    await attempt
+    })())
   }
 
   defaultProfileId(): string {
@@ -300,7 +288,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   private assertInitialized(): void {
     this.assertActive()
-    if (!this.defaultId) throw this.initializationError ?? new Error('Browser Profiles are not confirmed yet. Other work is available; retry the Profile connection.')
+    if (!this.defaultId) throw new Error('Browser Profile manager is not initialized')
   }
 
   private assertActive(): void {

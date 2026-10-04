@@ -1,9 +1,8 @@
 import { useEffect, useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
-import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentSessionHistoryObservationHandle, AgentSessionHistorySource } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentSessionHistoryObservationHandle } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
-import type { SessionHistoryReference } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
 import { sessionPresentationById } from './session-presentation'
@@ -88,10 +87,6 @@ function notifySubscribers(entry: SessionEntry) {
   for (const listener of entry.subscribers) {
     listener()
   }
-}
-
-function messageFactPage(entry: SessionEntry): AgentSessionHistoryPage | null {
-  return entry.historyPage ? { ...entry.historyPage, items: entry.items, nextCursor: entry.nextCursor } : null
 }
 
 function sameSource(a: AgentSessionHistoryPage['source'], b: AgentSessionHistoryPage['source']): boolean {
@@ -203,21 +198,6 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
   return acquiring
 }
 
-/** One typed read boundary for recent facts and each presentation's original-sequence window. */
-export async function readSessionConversationPage(
-  reference: SessionHistoryReference,
-  options: { cursor?: string; source?: AgentSessionHistorySource; limit?: number; nativeSource?: 'previous' } = {}
-): Promise<AgentSessionHistoryPage> {
-  const page = await api.sessions.historyPage(reference, { limit: options.limit ?? 30,
-    ...(options.cursor ? { cursor: options.cursor } : {}), ...(options.nativeSource ? { nativeSource: options.nativeSource } : {}) })
-  if (page.agentSessionId !== reference.agentSessionId) throw new Error('Native page belongs to another Session.')
-  if (options.source && !sameSource(options.source, page.source)) {
-    throw changedSourceError('Native source changed. The current window is kept; refresh its source.')
-  }
-  if (options.cursor && page.nextCursor === options.cursor) throw new Error('The conversation cursor did not advance. Retry the read.')
-  return page
-}
-
 async function fetchSessionHistoryPage(
   control: AgentSessionControlInput,
   entry: SessionEntry,
@@ -242,19 +222,23 @@ async function fetchSessionHistoryPage(
       await observeEntry(control, entry, mode === 'replace')
       if (!current()) return null
       const read = async (cursor?: string): Promise<AgentSessionHistoryPage> => {
-        const source = entry.observationHandle?.source ?? (mode !== 'replace' ? entry.historyPage?.source : undefined)
-        const page = await readSessionConversationPage(control, { ...(cursor ? { cursor } : {}), ...(source ? { source } : {}) })
+        const page = await api.sessions.historyPage(control, { limit: 30, ...(cursor ? { cursor } : {}) })
+        if (page.agentSessionId !== entry.agentSessionId) throw new Error('Native page belongs to another Session.')
+        if (entry.observationHandle && !sameSource(entry.observationHandle.source, page.source)) {
+          throw changedSourceError('Native source changed after observation was established. Refresh its source.')
+        }
+        if (entry.historyPage && mode !== 'replace' && !sameSource(entry.historyPage.source, page.source)) {
+          throw changedSourceError('Native source changed. The current window is kept; refresh its source.')
+        }
         return page
       }
       let page = await read(mode === 'earlier' ? entry.nextCursor ?? undefined : undefined)
       if (!current()) return null
       let items = page.items
       let nextCursor = page.nextCursor
-      let originalPage = page
       let windowIncomplete = mode === 'initial' || mode === 'replace' ? false : entry.windowIncomplete
       if (mode === 'initial' || mode === 'replace') {
-        if (!withinWindow(items)) throw new Error('The native page exceeds the reading window budget. Earlier records remain readable in this conversation.')
-        originalPage = page
+        if (!withinWindow(items)) throw new Error('The native page exceeds the reading window budget. Earlier records remain available in History.')
         // Find input context only when opening a window. Process records can
         // occupy the latest page; keep every accepted page and its real cursor.
         for (let pages = 1; nextCursor && pages < MAX_REVALIDATION_PAGES &&
@@ -271,10 +255,8 @@ async function fetchSessionHistoryPage(
           }
           items = combined
           nextCursor = earlier.nextCursor
-          originalPage = { ...page, items, nextCursor }
         }
       } else if (mode === 'earlier') {
-        originalPage = entry.historyPage ?? page
         const existing = new Set(entry.items.map(item => item.id))
         items = [...page.items.filter(item => !existing.has(item.id)), ...entry.items]
       } else if (mode === 'revalidate' && entry.items.length) {
@@ -291,18 +273,6 @@ async function fetchSessionHistoryPage(
           index = incoming.findIndex(item => item.id === boundary)
         }
         if (index < 0) windowIncomplete = true
-        // The raw reading window stays continuous. Its cursor belongs to an actual
-        // accepted page boundary; the independent message projection may be sparse.
-        const previous = entry.historyPage
-        const refreshedOriginal = new Map(incoming.map(item => [item.id, item]))
-        const originalItems = previous && index >= 0 && previous.items.at(-1)?.id === boundary
-          ? [...previous.items.map(item => {
-            const latest = refreshedOriginal.get(item.id)
-            return latest && JSON.stringify(latest) !== JSON.stringify(item) ? latest : item
-          }), ...incoming.slice(index + 1)] : incoming
-        originalPage = previous && index >= 0 && previous.items.at(-1)?.id === boundary && withinWindow(originalItems)
-          ? { ...page, items: originalItems, nextCursor: previous.nextCursor }
-          : { ...page, items: incoming, nextCursor }
         // Retain old raw IDs and their objects. Only newly observed records are
         // appended; reread overlap updates a record only when its facts changed.
         const refreshed = new Map(incoming.map(item => [item.id, item]))
@@ -319,7 +289,7 @@ async function fetchSessionHistoryPage(
       }
       entry.items = items
       entry.nextCursor = nextCursor
-      entry.historyPage = originalPage
+      entry.historyPage = { ...page, items, nextCursor }
       entry.windowIncomplete = windowIncomplete
       if (mode === 'initial' || mode === 'replace') entry.windowFrozen = false
       return entry.historyPage
@@ -346,10 +316,8 @@ export function useSessionUserMessages(
   options?: { enabled?: boolean }
 ): {
   messages: AgentSessionUserMessage[]
-  /** Continuous original records and their real Provider page boundary. */
+  /** Retained original records; the cursor remains a real Provider page boundary. */
   nativeHistoryPage: AgentSessionHistoryPage | null
-  /** Retained context facts; process clipping can make this projection non-contiguous. */
-  nativeContextItems: AgentSessionHistoryPage['items']
   nextCursor: string | null
   hasMore: boolean
   loading: boolean
@@ -381,8 +349,7 @@ export function useSessionUserMessages(
     key: string
     messages: AgentSessionUserMessage[]
     nativeHistoryPage: AgentSessionHistoryPage | null
-    nativeContextItems: AgentSessionHistoryPage['items']
-  }>({ key: '', messages: [], nativeHistoryPage: null, nativeContextItems: [] })
+  }>({ key: '', messages: [], nativeHistoryPage: null })
 
   useEffect(() => {
     if (!sessionKey || !control) return
@@ -457,7 +424,7 @@ export function useSessionUserMessages(
   const readForReveal = useCallback(async (source: AgentSessionUserMessage['source']) => {
     const entry = sessionKey ? sessionRegistry.get(sessionKey) : undefined
     if (!entry || !control || source.kind !== 'native') return { page: null, error: null, windowFrozen: false, sourceChanged: false }
-    const currentPage = messageFactPage(entry)
+    const currentPage = entry.historyPage
     const matchesSource = currentPage && sameSource(currentPage.source, source)
     const loaded = matchesSource && currentPage.items.some(item => item.kind === 'user-message' && item.id === source.recordId)
     if (entry.inFlight) await entry.inFlight
@@ -468,7 +435,7 @@ export function useSessionUserMessages(
         await fetchSessionHistoryPage(control, entry, currentPage ? 'earlier' : 'reveal')
       }
     }
-    return { page: messageFactPage(entry), error: entry.error, windowFrozen: entry.windowFrozen, sourceChanged: sourceChanged(entry) }
+    return { page: entry.historyPage, error: entry.error, windowFrozen: entry.windowFrozen, sourceChanged: sourceChanged(entry) }
   }, [sessionKey])
 
   // Non-speculative read during render: do not create entry on uncommitted/aborted renders
@@ -479,8 +446,6 @@ export function useSessionUserMessages(
   const nativeHistoryPage = !isAgent || !control || !sessionKey ? null
     : active ? entry?.historyPage ?? committed?.nativeHistoryPage ?? null
     : committed?.nativeHistoryPage ?? null
-  const nativeContextItems = active ? entry?.items ?? committed?.nativeContextItems ?? []
-    : committed?.nativeContextItems ?? []
 
   let messages: AgentSessionUserMessage[] = []
 
@@ -493,7 +458,7 @@ export function useSessionUserMessages(
     if (entry?.historyPage || timeline) {
       messages = projectSessionUserMessages({
         agentSessionId: control.agentSessionId,
-        historyPage: entry ? messageFactPage(entry) ?? undefined : undefined,
+        historyPage: entry?.historyPage ?? undefined,
         timeline
       })
     } else if (entry?.loading && committedSnapshotRef.current.key === sessionKey) {
@@ -514,16 +479,14 @@ export function useSessionUserMessages(
       committedSnapshotRef.current = {
         key: sessionKey,
         messages,
-        nativeHistoryPage,
-        nativeContextItems
+        nativeHistoryPage
       }
     }
-  }, [active, sessionKey, messages, nativeHistoryPage, nativeContextItems])
+  }, [active, sessionKey, messages, nativeHistoryPage])
 
   return {
     messages,
     nativeHistoryPage,
-    nativeContextItems,
     nextCursor: entry?.nextCursor ?? null,
     hasMore: Boolean(entry?.nextCursor),
     loading: active ? (entry?.loading ?? false) : false,

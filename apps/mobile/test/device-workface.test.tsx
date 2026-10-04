@@ -81,12 +81,11 @@ describe('one durable mobile workface owner', () => {
     expect(new DeviceWorkfaceStore(() => disk).snapshot().record).toEqual(imported)
     expect(disk.setItem).toHaveBeenCalledTimes(2)
   })
-  it('rejects another Host and accepts the original Host at a changed address without erasing input', () => {
+  it('rejects another Host at the same address and another address without erasing the original input', () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
     expect(() => owner.confirmHost({ origin: original().hostUrl, hostId: 'replacement-host' })).toThrow('原 Host 身份不同')
+    expect(() => owner.confirmHost({ origin: 'https://192.168.1.21:4321', hostId: 'host-original' })).toThrow('原 Host 身份不同')
     expect(owner.snapshot().record).toEqual(original()); expect(disk.raw()).toBe(before); expect(disk.setItem).not.toHaveBeenCalled()
-    owner.confirmHost({ origin: 'https://192.168.1.21:4321', hostId: 'host-original' })
-    expect(owner.snapshot().record).toEqual({ ...original(), host: { origin: 'https://192.168.1.21:4321', hostId: 'host-original' } })
   })
   it('restores the actual app offline after a preserved-file import and never resends the original unknown input', async () => {
     const owner = getDeviceWorkface(), backup = owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: original() }))
@@ -130,23 +129,18 @@ describe('one durable mobile workface owner', () => {
     const overlay = document.createElement('div'); document.body.appendChild(overlay)
     const view = await mount(<MobileApp client={null} connection={{ state: 'unavailable', message: '原 Mac 未连接' }}
       platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(view.element, '连接你的 Mac'))
+    await click(button(view.element, '查看连接状态'))
     expect(button(overlay, '导出工作面文件').disabled).toBe(false)
     expect(button(overlay, '选择工作面文件').disabled).toBe(false)
     expect(overlay.querySelector('input[type="file"]')).not.toBeNull()
     expect(overlay.textContent).toContain('恢复后仍需核对原 Mac 和设备授权')
   })
-  it('exports the actual temporary app Session selection beside an unreadable original record without writing it', async () => {
+  it('exports the actual temporary app navigation beside an unreadable original record without writing it', async () => {
     localStorage.setItem(DEVICE_WORKFACE_KEY, '{keep-original-bytes')
-    localStorage.setItem('agentmux-mobile-home', 'focus')
-    const f = fixture()
-    f.client.forwardRpc = vi.fn().mockImplementation(async () => ({ catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [],
-      agentPresentation: [{ agentSessionId: 'session-original', name: 'Original Agent', project: '', group: 'working', state: 'working', detail: '', providerId: 'codex' }] } }))
-    const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Mac 已连接' }} platform={createBrowserPlatform()} />)
-    await click(view.element.querySelector<HTMLButtonElement>('.mobile-session-list button')!)
-    await view.render(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Mac 暂不可达' }} platform={createBrowserPlatform()} />)
-    expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
-    expect(getDeviceWorkface().parseBackup(getDeviceWorkface().exportBackup()).selectedSessionId).toBe('session-original')
+    const view = await mount(<MobileApp client={null} connection={{ state: 'unavailable', message: '原 Mac 未连接' }} platform={createBrowserPlatform()} />)
+    await click(button(view.element, '终端'))
+    expect(button(view.element, '终端').getAttribute('aria-current')).toBe('page')
+    expect(getDeviceWorkface().parseBackup(getDeviceWorkface().exportBackup()).panel).toBe('terminal')
     expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe('{keep-original-bytes')
   })
   it('retains staged drafts when a failed initial read recovers to an empty durable store', () => {

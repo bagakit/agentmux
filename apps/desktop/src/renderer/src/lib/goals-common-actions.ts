@@ -2,11 +2,12 @@ import type { AppConfig, ComposerShortcut, GoalsCommonActionRef, GoalsCommonActi
 import { resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { configuredExecutors, type ConfiguredExecutor } from './executors'
 import { GOAL_EXPLORATION_ACTIONS, goalExplorationNextText, type GoalExplorationProject } from './goals-entry-actions'
-import { resolveGoalsCommonActions } from '../../../shared/goals-preferences'
-export { DEFAULT_GOALS_COMMON_ACTIONS } from '../../../shared/goals-preferences'
 
+export const DEFAULT_GOALS_COMMON_ACTIONS: GoalsCommonActionsConfig = {
+  items: [{ kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }], collapsed: false
+}
 export const commonActionKey = (ref: GoalsCommonActionRef): string => `${ref.kind}:${ref.id}`
-export const commonActionsDirectory = (config: AppConfig | null): GoalsCommonActionsConfig => resolveGoalsCommonActions(config?.goalsCommonActions)
+export const commonActionsDirectory = (config: AppConfig | null): GoalsCommonActionsConfig => config?.goalsCommonActions ?? DEFAULT_GOALS_COMMON_ACTIONS
 export type GoalsCommonAction = {
   ref: GoalsCommonActionRef; key: string; body: string; label: string
   executor?: ConfiguredExecutor | undefined; initialExecutor?: boolean; project?: GoalExplorationProject; reason?: string; conditional?: boolean

@@ -54,10 +54,10 @@ describe('needs-you shape glyph', () => {
   })
 
   it('suppresses the glyph on the 5px corner marks where it cannot seat', () => {
-    // Tab-corner marks shrink the dot to 5px; a glyph there would be illegible, and the
+    // Tab-corner and rail-row marks shrink the dot to 5px; a glyph there would be illegible, and the
     // corner position already differentiates. The pip lifts only on full-size surfaces.
     const suppressed = ruleBody(
-      '.workbench-tab__agent-mark .status__dot::after'
+      '.workspace-agent-row__mark .status__dot::after,\n.workbench-tab__agent-mark .status__dot::after'
     )
     expect(suppressed).toContain('display: none')
   })

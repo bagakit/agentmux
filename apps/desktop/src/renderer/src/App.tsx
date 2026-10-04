@@ -1,4 +1,3 @@
-import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest } from './components/SettingsNavigation'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -13,7 +12,6 @@ import {
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
-import { RemoteCoreUpgradeNotices } from './components/RemoteCoreUpgradeNotices'
 import { ToolkitStatusBar } from './components/toolkit/ToolkitStatusBar'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
@@ -36,9 +34,9 @@ import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
-import { executionFocusPresentation, mainFocusPresentation } from './lib/focus-tab-projection'
+import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { api } from './lib/api'
-import { fileNavigationSelection, useAppStore } from './store'
+import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
 import { isMacPlatform } from './lib/host-platform'
 import { applyAppAppearance } from './lib/app-appearance'
@@ -56,7 +54,6 @@ import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
 import { useWorkbenchObjectLayout } from './hooks/useWorkbenchObjectLayout'
 import { workbenchNavigationTabs } from './lib/workbench-navigation-catalog'
-import { mainRegionReference } from './lib/desktop-focus-navigation'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
 import { isSessionSurface } from './lib/workbench-surface-kinds'
@@ -64,7 +61,6 @@ import { isSessionSurface } from './lib/workbench-surface-kinds'
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
 export function App() {
-  useEffect(() => observeNotebookLibrary(), [])
   const workflowComponentGallery = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-component-gallery') === '1'
   if (workflowComponentGallery) return <WorkflowComponentGallery />
@@ -76,11 +72,9 @@ function DesktopApp() {
   const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => setSettingsRoute({ section, executorId }), [])
   const closeSettings = useCallback((): void => setSettingsRoute(null), [])
   const openToolkit = useCallback((toolId: string): void => setSettingsRoute({ section: 'toolkit', toolId }), [])
-  const openHostSettings = useCallback((hostId: string): void => setSettingsRoute({ section: 'hosts', hostId }), [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings }), [openSettings, openToolkit, openHostSettings])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit }), [openSettings, openToolkit])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
-  const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
@@ -98,6 +92,7 @@ function DesktopApp() {
   const tabs = useAppStore((state) => workbenchNavigationTabs(state.tabs))
   const resourceWorkspaces = useMemo(() => workbenchResourceTabs(tabs), [tabs])
   const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
+  const topicCategories = useAppStore(state => state.topicCategories)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
 
@@ -116,8 +111,6 @@ function DesktopApp() {
     desktopPresentationCommitted()
   })
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
-  const surveyNotebookId = useAppStore(state => state.surveyNotebookId)
-  const surveyNoteId = useAppStore(state => state.surveyNoteId)
   const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
   const [unconfirmedBrowserRegionIds, setUnconfirmedBrowserRegionIds] = useState<ReadonlySet<string>>(() => new Set())
   const onBrowserControlConfirmation = useCallback((regionId: string, unconfirmed: boolean) => {
@@ -167,10 +160,6 @@ function DesktopApp() {
   const surveyCatalog = spatialDirectory.catalog
   const selectMoteReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState(), current = readPmoTeamsTopicFloatingState(), tab = state.tabs[reference.tabId]
-    // A retained callback cannot reopen or retarget a later sidecar View choice.
-    // Async Region completion checks the original Tab's current local Region.
-    if (current && (current.open !== moteFloating.open || current.targetTabId !== moteFloating.targetTabId ||
-      current.targetTopicId !== moteFloating.targetTopicId)) return
     const topicId = pmoTeamsTopicFloatingTargetTopicId(current ?? moteFloating, state.tabs)
     if (!tab?.regions[reference.regionId] || tab.topicId !== topicId ||
       !workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
@@ -200,62 +189,35 @@ function DesktopApp() {
     return targets
   }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference,
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
-  const [focusView, setFocusView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
-    if (useAppStore.getState().selectMainRegion(reference, workbenchSpaceSelection)) setFocusView(value => value === 'region' ? 'region' : 'tab')
-  }, [workbenchSpaceSelection])
-  const selectFocusContext = useCallback((id: string, reference?: WorkbenchProjectionSelection) => {
-    setFocusView(useAppStore.getState().focusExecutionSession(id, reference) ? 'tab' : 'unconfirmed')
-  }, [])
-  useEffect(() => { setFocusView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
-  useEffect(() => { setFocusView(value => value === 'unconfirmed' ? 'tab' : value) }, [mainSurface])
-  const focusRegionOnly = focusView === 'region'
-  // The exact main choice survives closing only its Focus presentation.
-  const mainFocus = useMemo(() => mainSurface === 'agents'
-    ? mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
+    useAppStore.getState().selectExecutionFocusReference(reference, agentFocus.execution)
+  }, [agentFocus.execution])
+  const [focusRegionOnly, setFocusRegionOnly] = useState(false)
+  useEffect(() => setFocusRegionOnly(false), [agentFocus.execution.sessionId])
+  const focusPresentation = useMemo(() => mainSurface === 'agents'
+    ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
     : { projection: null, issue: null, references: [] },
-  [mainSurface, workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
-  const focusPresentation = useMemo(() => mainSurface === 'agents' && focusView !== 'closed'
-    ? focusView === 'unconfirmed'
-      ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference))
-      : mainFocus
-    : { projection: null, issue: null, references: [] },
-  [mainSurface, focusView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
+  [mainSurface, agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
   const focusProjection = focusPresentation.projection
   const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
-    if (!state.surveyZoneSelection) return
-    const currentTopics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
-    const currentCatalog = spatialCatalog(state, currentTopics)
+    if (!surveyCatalog || !state.surveyZoneSelection || state.surveyZoneSelection.zoneId !== surveySelection?.zoneId) return
     const tab = state.tabs[reference.tabId]
-    const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, currentCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
+    const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, surveyCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
     const layout = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
-    if (!tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
-      !currentCatalog.tabs.some(member => member.tabId === tab.id && member.zoneId === state.surveyZoneSelection!.zoneId)) return
-    state.selectMainRegion(reference, state.workbenchSpaceSelection)
+    if (!surveyCatalog || !tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
+      !spatialCatalog(state, surveyTopics ?? []).tabs.some(member => member.tabId === tab.id && member.zoneId === state.surveyZoneSelection!.zoneId)) return
     surveyOccurrence.current = reference
     state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
-  }, [])
-  const surveyProjection = useMemo(() => {
-    if (!surveySelection || !surveyCatalog) return null
-    const projection = resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
-      surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference)
-    const active = surveySelection.active
-    const surface = active ? tabs[active.tabId]?.regions[active.regionId] : undefined
-    if (!projection || !surveyNotebookId || !surveyNoteId || !active || surface?.kind !== 'file') return projection
-    const references = projection.selection.filter(reference => reference.tabId === active.tabId && reference.regionId === active.regionId)
-    const reference = references.find(value => surveyOccurrence.current && sameWorkbenchProjectionSelection(value, surveyOccurrence.current))
-      // The original File owner may change a legacy path-based Tab ID. The same immutable Region
-      // in this exact display/Group remains the original occurrence; never choose another Group.
-      ?? references.find(value => surveyOccurrence.current && value.regionId === surveyOccurrence.current.regionId &&
-        value.displayWorkspaceId === surveyOccurrence.current.displayWorkspaceId && value.groupId === surveyOccurrence.current.groupId)
-      ?? (references.length === 1 ? references[0] : undefined)
-    return reference ? { ...projection, entity: { kind: 'region' as const, regionId: reference.regionId }, selection: [reference] } : projection
-  }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference, surveyNotebookId, surveyNoteId])
-  const surveyCurrentSelection = useMemo(() => surveySelection ? surveyResolvedZoneSelection(surveySelection, surveyProjection, mainRegionReference(workbenchSpaceSelection) ?? surveyOccurrence.current) : null,
-    [surveySelection, surveyProjection, workbenchSpaceSelection])
+  }, [surveySelection?.zoneId, surveyCatalog, surveyTopics])
+  const surveyProjection = useMemo(() => surveySelection && surveyCatalog
+    ? resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
+      surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference) : null,
+  [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference])
+  const surveyCurrentSelection = useMemo(() => surveySelection ? surveyResolvedZoneSelection(surveySelection, surveyProjection, surveyOccurrence.current) : null,
+    [surveySelection, surveyProjection])
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const currentOrdinaryLayout = activeWorkspaceId ? layouts[activeWorkspaceId] : undefined
   const retainedOrdinaryLayout = useRef<{ workspaceId: string; layout: NonNullable<typeof currentOrdinaryLayout> } | null>(null)
@@ -265,12 +227,11 @@ function DesktopApp() {
   const ordinaryTargets = useMemo(() => {
     const layout = ordinaryObject.layout
     if (!layout || !activeWorkspaceId) return {}
-    const reference = mainRegionReference(workbenchSpaceSelection)
-    const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
+    const held = retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
-    const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
+    const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId)
     return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsRoute }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsRoute, retainedSpatialFocus, workbenchSpaceSelection])
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsRoute, retainedSpatialFocus])
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, WorkbenchViewTarget[]> = {}
     const append = (tabId: string, target: WorkbenchViewTarget) => (targets[tabId] ??= []).push(target)
@@ -281,7 +242,7 @@ function DesktopApp() {
       const projected = projectWorkbenchProjection(layouts[projection.displayWorkspaceId], tabs, projection)
       for (const reference of projected.selection) {
         if (projected.unsupportedTabIds.has(reference.tabId)) continue
-        append(reference.tabId, { hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
+        append(reference.tabId, { hostId: workbenchProjectionSlotId(`${projection.presentationId}-slot`, reference),
           active: !(surveyToolsOpen && narrowControls) && (surveyCurrentSelection?.active?.tabId !== reference.tabId ||
             sameWorkbenchProjectionSelection(surveyCurrentSelection.active, reference)), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', controlsOpen: surveyToolsOpen,
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) })
@@ -371,7 +332,10 @@ function DesktopApp() {
     fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
-  const toolsVisible = toolsAvailable && toolsOpen
+  const topicCategoryOverview = workbenchSpaceSelection?.workspaceId === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection.zoneId === null &&
+    topicCategories.some(category => category.spaceId === workbenchSpaceSelection.spaceId)
+  // The Category directory lives in the main page; entering a Topic restores its secondary Chats directory.
+  const toolsVisible = toolsAvailable && toolsOpen && !topicCategoryOverview
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
   const renderedToolDockWidth = Math.min(toolDockMaximumWidth, getRenderedToolDockWidth(toolDockWidth, projectRailOpen))
@@ -443,13 +407,7 @@ function DesktopApp() {
         insideTerminal: target.closest('.xterm') !== null
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
-        toggleQuickSwitch: () => {
-          if (!presentationRef.current.overlays.quickSwitcher) quickSwitchOrigin.current = {
-            element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
-            navigation: fileNavigationSelection(useAppStore.getState())
-          }
-          setQuickSwitchOpen(current => !current)
-        },
+        toggleQuickSwitch: () => setQuickSwitchOpen((current) => !current),
         openShortcuts: () => openSettings('keyboard-shortcuts')
       })
       if (routeWindowShortcut(event, isMac, editableTarget, handlers)) event.preventDefault()
@@ -524,9 +482,9 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
                 </section>
               ) : null}
-              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
+              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={mainFocus.projection?.selection.length === 1 ? mainFocus.projection.selection[0] : null} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div
@@ -568,7 +526,6 @@ function DesktopApp() {
             </section>
           </div>
         <div className="main-shell__notices">
-          <RemoteCoreUpgradeNotices />
           <TransientErrorNotice
             error={lifecycleError ? null : error}
             dismissed={errorDismissed}
@@ -598,10 +555,7 @@ function DesktopApp() {
           <WindowUtilityBar toolkit={<ToolkitStatusBar />} />
         </div>
       </footer>
-      <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} returnFocus={() => {
-        const original = quickSwitchOrigin.current
-        return original?.navigation === fileNavigationSelection(useAppStore.getState()) ? original.element : null
-      }} />
+      <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
       </div>
       <WindowOverlayHost />
       </RendererResourceOwners>

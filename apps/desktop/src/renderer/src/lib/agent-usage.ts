@@ -71,12 +71,6 @@ export function contextUsedPercent(context: AgentTurnUsage['context'] | undefine
  */
 export type ContextPressure = Extract<RiskTier, 'caution' | 'danger'>
 
-/** Shared next-step wording; pressure is a reminder, not a prediction of provider compaction. */
-export const CONTEXT_PRESSURE_HINT = {
-  caution: 'plan to wrap up or start a fresh session',
-  danger: 'wrap up now or start a fresh session'
-} as const
-
 /** 提醒门槛。`danger` 在前：判档从最严重的开始落，新增一档时顺序不会悄悄改变语义。 */
 const PRESSURE_THRESHOLDS: readonly (readonly [ContextPressure, number])[] = [
   ['danger', 90],

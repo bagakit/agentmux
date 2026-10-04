@@ -1,72 +1,158 @@
-@import './markdown-outline.css';
-
-/* Conversation hierarchy stays compact; document hierarchy has its own reading rhythm. */
-.md { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; white-space: normal; }
-.md > :first-child { margin-top: 0; }
-.md-paragraph { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.md-heading { margin: var(--sp-2) 0 0; color: var(--text); font-size: inherit; font-weight: 680; letter-spacing: -.01em; }
+/* Markdown inside a turn. The turn body uses the client body token and every element below INHERITS it —
+   including headings, deliberately. Heading levels differ by weight, colour and the space above them,
+   never by size: the surface contract forbids buying hierarchy with type scale, and a transcript full of
+   large headings destroys the density that makes a trace scannable. A heading in an agent's answer is a
+   section marker, not a page title. */
+.md { display: flex; flex-direction: column; gap:var(--sp-3); white-space: normal; }
+.md > :first-child { margin-top:0; }
+.md-paragraph { margin:0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-heading {
+  margin:var(--sp-2) 0 0;
+  color: var(--text);
+  font-size: inherit;
+  font-weight: 680;
+  letter-spacing: -.01em;
+}
+/* Deeper levels step DOWN in emphasis, not in size: weight first, then colour. */
 .md-heading[data-level='3'] { font-weight: 620; }
-.md-heading[data-level='4'], .md-heading[data-level='5'], .md-heading[data-level='6'] { color: var(--text-2); font-weight: 600; }
-
-.md-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior: contain; }
+.md-heading[data-level='4'], .md-heading[data-level='5'], .md-heading[data-level='6'] {
+  color: var(--text-2);
+  font-weight: 600;
+}
+/* GFM table. It scrolls inside its own container because agents emit wide comparison tables, and a long
+   row must never widen the turn or push the whole feed sideways (density contract: wide content scrolls
+   in its own overflow container). */
+.md-table-scroll { max-width: 100%; overflow-x: auto; }
 .md-table { border-collapse: collapse; font-size: inherit; }
-.md-table th, .md-table td { padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--wash-2); text-align: left; white-space: nowrap; }
+.md-table th, .md-table td {
+  padding:var(--sp-2) var(--sp-4);
+  /* A hairline grid is the one place a rule genuinely carries meaning — it says which cell belongs to
+     which column. Kept at the lowest contrast that still separates. */
+  border-bottom: 1px solid var(--wash-2);
+  text-align: left;
+  white-space: nowrap;
+}
 .md-table th { color: var(--text-2); font-weight: 620; }
 .md-table td { color: var(--text); }
 .md-table th[data-align='center'], .md-table td[data-align='center'] { text-align: center; }
 .md-table th[data-align='right'], .md-table td[data-align='right'] { text-align: right; }
 .md-table tr:last-child td { border-bottom: 0; }
+/* A quote is set in from the spine and quieter — no oversized glyph, no size change. */
+.md-quote {
+  margin:0;
+  padding-left:var(--sp-4);
+  border-left: 2px solid var(--wash-2);
+  color: var(--text-2);
+}
+.md-rule { height: 0; margin:var(--sp-1) 0; border: 0; border-top: 1px solid var(--wash-2); }
+.md-list .md-list { margin-top:var(--sp-1); }
+.md-list .md-paragraph { margin:0; }
+.md-list { margin:0; padding-left:var(--sp-6); display: flex; flex-direction: column; gap:var(--sp-1); }
+.md-list li { overflow-wrap: anywhere; }
+.md-code {
+  padding:1px var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+}
+/* Code owns its own horizontal scroll so a long line cannot widen the turn and force the whole feed to
+   scroll sideways. */
+.md-block-code {
+  margin:var(--sp-1) 0;
+  padding:var(--sp-4) var(--sp-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  box-shadow: var(--hl);
+  overflow-x: auto;
+}
+.md-block-code code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  white-space: pre;
+}
+/* A link is a button because an <a href> in untrusted output is a navigation escape hatch; it still has
+   to READ as a link, so it borrows the accent and underline and nothing else.
 
-.md-quote { margin: 0; padding-left: var(--sp-4); border-left: 2px solid var(--wash-2); color: var(--text-2); }
-.md-rule { height: 0; margin: var(--sp-1) 0; border: 0; border-top: 1px solid var(--wash-2); }
-.md-list { margin: 0; padding-left: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-1); }
-.md-list .md-list { margin-top: var(--sp-1); }
-.md-list .md-paragraph { margin: 0; }
-.md-list li { min-width: 0; overflow-wrap: anywhere; }
-.md-list li::marker { color: var(--text-3); font-variant-numeric: tabular-nums; }
-.md-task-item { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: var(--sp-3); list-style: none; }
-.md-task-item > input { width: 13px; height: 13px; margin: 4px 0 0; accent-color: var(--green-2); opacity: 1; cursor: default; }
-.md-task-item__content { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+   TWO independent knobs decide how the line looks, and the file reference is the stress case: its content
+   is a pure-mono path like `docs/plans/tasks.json:987`, dense with slashes and g/j descenders.
+   - WHERE it sits: `text-underline-offset: 3px` from the (mono) baseline. 2px sat inside the descender
+     zone and read as cramped (tracker #794). 3px is a compromise, NOT full clearance — mono slashes and
+     g/j still reach below it, so the line does pass through their lower ink.
+   - WHETHER it stays whole: `text-decoration-skip-ink: none`. Because the line crosses that dense
+     descender ink, the engine default (`auto`) carves a gap at every slash and descender — the underline
+     comes out ragged/dashed and reads as imprecise (the actual #794 complaint on the screenshot). `none`
+     forces one continuous stroke. Chosen over the alternatives: pushing the offset far enough to clear
+     mono descenders would float the line off the short glyphs and detach it from the text (and #794
+     already bounced on offset); `text-underline-position: under` drops the line to the em-box bottom, a
+     visibly lower, CJK-oriented position we don't want.
 
-.md-code { padding: 1px var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); font-family: var(--font-mono); font-size: var(--fs-body); }
-.md-block-code { min-width: 0; margin: var(--sp-1) 0; padding: var(--sp-4); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--hl); overflow-x: auto; overscroll-behavior: contain; }
-.md-block-code code { font-family: var(--font-mono); font-size: var(--fs-body); line-height: 1.5; white-space: pre; }
+   On the reported case a CJK font in the stack would change nothing, and it is worth being exact about
+   WHY, because the scope is narrower than it looks. `.md-link` has three render sites (AgentMarkdown):
+   a path auto-detected inside prose (:84) puts only the matched ASCII substring in the box — the Chinese
+   renders in sibling text nodes — but an explicit `[标签](路径)` (:162, :191) puts its bracket LABEL in
+   the box, CJK included. So "no CJK inside the decorated box" holds for the auto-detected reference that
+   #794 reports, NOT for `.md-link` generally. Both knobs above are content-agnostic, so they are still
+   right on the shared base; but if misalignment is ever reported on a CJK-labelled link, the two-font
+   baseline question is live there and this comment must not be read as having settled it.
 
-/* Both HTTP and file references share one continuous underline, including dense mono paths. */
-.md-link { padding: 0; border: 0; color: var(--green-2); background: none; font: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-skip-ink: none; cursor: pointer; }
+   Both knobs live here once and both link kinds inherit them — the file reference carries `.md-link` too
+   — so the two affordances cannot drift apart on the values that decide where the line sits and whether
+   it stays continuous. */
+.md-link {
+  padding:0;
+  border: 0;
+  color: var(--green-2);
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-skip-ink: none;
+  cursor: pointer;
+}
 .md-link:hover { color: var(--green); }
-.md-link:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
-.md-link--file { color: inherit; font-family: var(--font-mono); text-decoration: underline; text-decoration-color: transparent; transition: text-decoration-color var(--dur-fast) ease; }
-.md-link--file:hover { color: var(--green); text-decoration-color: currentColor; }
+
+/* A workspace file reference opens IN the app rather than leaving it, so it reads as a path — mono,
+   text colour — and earns the link underline only on hover. Underlining every path an agent mentions
+   would stripe a whole paragraph; the target still has to be legible as prose first.
+
+   悬停下划线做成克制的淡入，而不是"啪"地出现。下划线始终在盒模型里占位（`text-decoration: underline`），
+   位置因此由上面那条 baseline-aware 的 offset 决定、也不会在 hover 时抖动布局；平时用
+   `text-decoration-color: transparent` 把它藏起来，hover 时只把这一个属性沿 `--dur-fast`(120ms、标准
+   缓动) 渐显。`text-decoration` 这条线本身不可动画，能动画的是它的**颜色**，且本仓唯一的渲染引擎是
+   Electron/Chromium，故动的是 `text-decoration-color`。`prefers-reduced-motion` 下 base.css 的全局
+   规则把 transition-duration 归零：hover 时下划线照旧出现（:hover 那条是状态切换，transition 只是替
+   它加动画），只是不再渐显。 */
+.md-link--file {
+  color: inherit;
+  font-family: var(--font-mono);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color var(--dur-fast) ease;
+}
+.md-link--file:hover {
+  color: var(--green);
+  text-decoration-color: currentColor;
+}
+/* Inside a code span the mono face and ground already come from `.md-code`. */
 .md-code .md-link--file { font-family: inherit; }
 
-.md-image-attachment { padding: 0; border: 0; background: none; color: var(--green-2); font: inherit; cursor: pointer; }
+/* An inline image reference. A workspace image is a button that opens IN the app, so it reads as an
+   affordance — accent text, pointer. The `--unavailable` variant is a plain <span> for an image that
+   can't be previewed (remote/non-workspace); it must read as inert, so it drops to muted text and the
+   default cursor. Without the modifier rule the two would look identical and a dead reference would
+   invite a click that goes nowhere. */
+.md-image-attachment {
+  padding:0;
+  border: 0;
+  background: none;
+  color: var(--green-2);
+  font: inherit;
+  cursor: pointer;
+}
 .md-image-attachment:hover { color: var(--green); }
-.md-image-attachment--unavailable, .md-image-attachment--unavailable:hover { color: var(--text-3); cursor: default; }
+.md-image-attachment--unavailable { color: var(--text-3); cursor: default; }
 
-.md-footnote-reference { line-height: 0; font-size: .8em; }
-.md-footnote-reference .md-link { padding: 0 1px; text-decoration: none; font-variant-numeric: tabular-nums; }
-.md-footnotes { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); color: var(--text-2); }
-.md-footnotes > .md-list { gap: var(--sp-3); }
-.md-footnotes li > .md-paragraph { display: inline; }
-.md-footnote-backlinks { display: inline-flex; gap: var(--sp-2); margin-left: var(--sp-2); }
-.md-footnote-backlinks .md-link { text-decoration: none; }
-
-.md-document { gap: var(--sp-4); }
-/* A bounded document scrolls as a whole; its tables and code retain their content height. */
-.md-document > * { flex-shrink: 0; }
-.md-document .md-paragraph { white-space: normal; }
-.md-document .md-heading { scroll-margin-top: var(--sp-6); margin-top: var(--sp-6); line-height: 1.35; }
-.md-document .md-heading[data-level='1'] { font-size: 1.65em; font-weight: 720; letter-spacing: -.025em; }
-.md-document .md-heading[data-level='2'] { font-size: 1.25em; font-weight: 680; letter-spacing: -.015em; }
-.md-document .md-heading[data-level='3'] { font-size: 1.1em; }
-.md-document > :first-child { margin-top: 0; }
-.md-document .md-heading:focus, .md-footnotes [data-md-footnote]:focus { outline: none; }
-.md-document .md-list { gap: var(--sp-2); }
-.md-document .md-quote { padding: var(--sp-2) var(--sp-4); border-color: var(--line); }
-.md-document .md-table { min-width: 100%; }
-.md-document .md-table th { background: var(--surface-1); }
-.md-document .md-table th, .md-document .md-table td { padding: var(--sp-3) var(--sp-4); vertical-align: top; }
-.md-document .md-block-code { border: 1px solid var(--line-soft); box-shadow: none; }
-.md-document .md-block-code[data-language]::before { display: block; content: attr(data-language); margin-bottom: var(--sp-3); color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-meta); }
-.md-document .md-footnotes { margin-top: var(--sp-6); }
+.md-image-attachment--unavailable:hover { color: var(--text-3); }

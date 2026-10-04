@@ -60,7 +60,7 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
               {...(page === 'connection' ? { 'data-resource-row': item.id } : {})}
               aria-current={selected ? 'page' : undefined} className="settings-host-page" onClick={() => onSelect(item.id, page)}>
               {page === 'connection' ? <SlidersHorizontal size={13} aria-hidden="true" /> : <FolderOpen size={13} aria-hidden="true" />}
-              <span>{page === 'connection' ? 'Connection' : 'Projects'}</span>
+              <span>{page === 'connection' ? 'Connection' : 'Linked projects'}</span>
               {page === 'projects' ? <small>{item.projectCount}</small> : null}
               {selected ? <Check size={12} aria-hidden="true" /> : null}
             </button>

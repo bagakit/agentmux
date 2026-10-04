@@ -4,7 +4,6 @@ import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { blake3 } from '@noble/hashes/blake3.js'
 import { AgentMuxError } from '../errors.js'
-import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import {
   NativeJsonlHistoryReader,
   readNativeHistoryBytes,
@@ -12,15 +11,10 @@ import {
 } from '../native-jsonl-history-reader.js'
 import type {
   AgentProviderSessionHistoryContext,
-  AgentProviderSessionHistoryObservationContext,
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
-  AgentSessionHistoryItem,
-  AgentSessionHistoryObservationHandle
+  AgentSessionHistoryItem
 } from '../types.js'
-
-type GrokHistorySourceContext = Pick<AgentProviderSessionHistoryContext,
-  'source' | 'transcriptPath' | 'env' | 'workspacePath' | 'signal'>
 
 const GROK_CHAT_HISTORY_FILE = 'chat_history.jsonl'
 const GROK_UPDATES_FILE = 'updates.jsonl'
@@ -131,8 +125,7 @@ function stringifyValue(value: unknown): string {
 }
 
 export async function resolveGrokChatHistoryPath(
-  context: GrokHistorySourceContext,
-  allowMissing = false
+  context: AgentProviderSessionHistoryContext
 ): Promise<string> {
   const givenPath = context.transcriptPath
   if (givenPath) {
@@ -167,8 +160,6 @@ export async function resolveGrokChatHistoryPath(
       throw new AgentMuxError('Native transcript path has not been established.', 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE')
     }
   } catch (err: unknown) {
-    // Observation can await the first write to this exact native source.
-    if (allowMissing && (err as NodeJS.ErrnoException).code === 'ENOENT') return candidate
     if (err instanceof AgentMuxError) throw err
     throw new AgentMuxError('Native transcript path has not been established.', 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE')
   }
@@ -178,7 +169,7 @@ export async function resolveGrokChatHistoryPath(
 
 async function verifySummaryIdentity(
   sessionDir: string,
-  context: GrokHistorySourceContext,
+  context: AgentProviderSessionHistoryContext,
   budget: NativeHistoryReadBudget
 ): Promise<void> {
   context.signal.throwIfAborted()
@@ -448,16 +439,6 @@ function convertGrokRecord(
     title: `Grok ${type}`,
     contentParts: [{ kind: 'text', text: JSON.stringify(record) }]
   }
-}
-
-/** Observe the same verified conversation file as the reader, including id-only handles. */
-export async function observeGrokSessionHistory(
-  context: AgentProviderSessionHistoryObservationContext
-): Promise<AgentSessionHistoryObservationHandle> {
-  const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
-  const chatHistoryPath = await resolveGrokChatHistoryPath(context, true)
-  await verifySummaryIdentity(dirname(chatHistoryPath), context, budget)
-  return observeNativeJsonlHistory({ ...context, transcriptPath: chatHistoryPath })
 }
 
 export async function readGrokSessionHistoryPage(

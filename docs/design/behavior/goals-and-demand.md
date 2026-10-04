@@ -56,6 +56,8 @@
 
 - **显式新建直接开始目标讨论**。用户最新要求：「new goal出来那个对话框太难看，交互差，不如直接新建一个虚线边框的goal，直接打开一个pmo」。New Goal 一次明确点击就保存真实待定义的 Goal 草稿并进入它的专属 PMO，不再事前要求填写意图表单；这条最新方向替代此前「空白/取消不创建、先填再提交」的新建合同。草稿不虚构意图、完成标准或人的确认，以当前明确选择的真实 Project 作上下文，没有选择就保持未分配；普通常用探索 CTA 仍不先造 Goal/Project。讨论只整理和更新这同一个 Goal，不再创建第二个实例或项目，不启动目标的执行 Run。一次在途新建、短暂离开/返回及保存回执不明都保留原创建身份，不能重复造目标；只在 owner 已确认保存后进入 PMO，未知先读取同一目标。保存或 PMO 准备/投递失败就地说明实际失败步骤、已保留事实及恢复动作；已有 Goal、已建立的专属 Tab/launcher 和原请求保持，再试仍指向它们，不误称尚未建立的 Tab 已存在，也不停止健康 Run。优先级、日期、标签、批次、执行者与 Session 仍不是创建必填项。Agent 整理真实目标和标准，不虚构用户未表达的要求或查证不到的 Context，人工确认与结果接受继续沿原合同。
 
+Goals 的 Work 导航归属、跨上下文打开和无唯一已知关联时不猜 Goal，只见[Work、Survey 与 Mote 的导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)；下述专属讨论定义实体关系，不合并 Goals 与左下 Mote 面板的选择。
+
 - **Goal 在主 Mote 中有专属 Tab**。用户进一步明确：「项目里有主 mote 的对吧? 我们创建 goal 的时候, 应该去主 mote 里创建 tab, 而不是创建一个新的 mote」。主 Mote 的固定默认身份唯一见[《Mote 头像与主 Mote》](motes-and-coordination.md#mote-头像与主-mote)；New Goal 在这同一个主 Mote 内建立该 Goal 的专属讨论 Tab，各 Goal 保持各自独立的 Agent 上下文，不能把新 Tab、Region 或 AgentSession 说成新 Mote。原主 Mote 名称、目录、SOUL、头像、Wiki 与资料保留，不按 Goal 或 Project 复制 Mote 实体或人格；Goal 所关联 Project 只提供该目标的真实上下文，不决定另一个主 Mote 身份。已有 Goal 继续指向原专属 Tab，重入、重试与重启先保留并恢复同一 Goal/Tab/Region/Session 关系，恢复未知沿原服务窗说明，不借其他 Goal 的讨论冒充恢复。 用户继续实际使用后指出 Goal 启动仍未复用主 bot，且 Agent 没有理解要更新 Demand、在合适的位置建立项目并让其他 Agent 执行；同一个 Mote 目录不足以证明已经复用主 bot。常用探索、New Goal 与已有 Goal 的讨论都归原主 Mote：探索只在其中建立独立讨论 Tab，不新建 Mote，不提前造空 Goal/Project；New Goal 和已有 Goal 沿各自专属 Tab 与同一 Goal ID。新讨论沿原明确目标及已知 bot 的真实 Executor/Provider 配置，保原名称、SOUL、Wiki 和资料，不因配置顺序、产品名或活动项目静默换一个 bot；既有映射的 Session 继续原上下文，不能以复用 bot 为由让不同 Goal 共用会话。明确指令的适用 Provider 限制仍成立，不匹配须可见，不另建每 Mote 偏好或身份名册。
 
 已知主 bot 的事实尚未确认时，原主 Mote 的 launcher 内明确说明原 bot 未确认、请求未发送、完整草稿仍在同一 Region，以及手动选择 Agent 后启动的下一步。不能只把说明留在浮窗后，也不能把另一配置的默认选中态说成已复用原 bot；没有既有 bot 的首次选择和非主 Mote 的普通 launcher 沿各自原用途。已在运行的 Session 继续原上下文，不受新讨论的配置选择阻断。
@@ -224,11 +226,3 @@ Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态�
 - Demand 详情必须提供明确的“打开 PMO”动作。点击后打开 PMO Teams 浮窗并聚焦该 Demand 的专属 Tab；如果原 Tab 已被关闭或不可恢复，动作先为该 Demand 建立新的专属 PMO Tab，再打开它，不能悄悄切到另一个 Demand 的上下文。
 - New Demand 的初始提示词必须带上稳定 Demand ID、标题、描述和当前路由事实，并明确 PMO 只负责澄清、分配和跟进，不直接冒充执行 Agent。PMO 对话创建 Demand 的路径仍由 PMO 自己决定是否写入，不因为专属 Tab 规则自动新建空 Demand。
 - New Demand 打开的浮窗如果带有明确目标 Tab，浮窗只能等待并展示这张 Tab 的 Agent；目标 Agent 尚未挂上时不能先展示旧 PMO Session，也不能在目标标记清除后回退到其他 Demand 的 PMO。
-
-### Goal 与原持续推进的连接
-
-确认的 Goal 可以由明确关联的准确执行 Session 持续推进。原 `goal.start` 通过可选 continuation 授权绑定已确认 alignment revision 与同一业务 operationId；未提供 continuation 仍是原有限开始。原 `goal.inspect` 按该 Goal 投影原续跑 Manager 的准确目标、状态与原操作回执，读不创建调度或复制 Goal 账本。原 `goal.continuation-action` 以准确 Goal/loop、预期 revision 与业务 operationId 沿同一 Manager 执行暂停、恢复、停止或检查；普通日历 `schedule.*` 不承载 interval 续跑。RPC/CLI/GUI 与连接设备对同一操作、版本和结果使用一致语义。
-
-有限 Goal 开始把已确认的任务正常提交给明确的执行 Session；Provider 具备立即打断能力不等于这次目标开始获得抢占授权。提交方式与同一业务操作在首次入队时保存，重试沿原方式和原回执；已经选择立即打断或方式尚未确认的旧操作，不能被新的有限开始静默改成普通提交。忙碌、待权限、错误 Run 和投递未知仍由原 Core 判定并保留原任务、草稿与健康工作面，不在失败后换方式或换身份重发。用户的显式立即发送与原持续推进保留各自原合同。
-
-Goal 完成/取消仅停止相应 loop；blocked、待决定、确认失效或读取未知暂停自动动作并保留健康 Agent。loop 与 Goal grounding 的人类接受各自成立，自动推进不替用户确认目标、接受成果或宣告成功。交互与 Mote 入口唯一见[《目标、持续推进与成果回报》](motes-and-coordination.md#目标持续推进与成果回报)。

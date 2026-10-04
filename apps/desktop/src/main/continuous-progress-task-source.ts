@@ -7,23 +7,13 @@ const execute = promisify(execFile)
 export function validateContinuousProgressTaskSource(value: unknown): asserts value is ContinuousProgressTaskSource {
   if (!value || typeof value !== 'object') throw new Error('Choose an exact task source root, Feature ID and public script.')
   const source = value as ContinuousProgressTaskSource
-  if (source.kind === 'goal') {
-    if (Object.keys(source).some(key => !['kind', 'goalId', 'alignmentRevision'].includes(key)) || !source.goalId?.trim() || !Number.isSafeInteger(source.alignmentRevision) || source.alignmentRevision < 1) throw new Error('Choose an exact Goal and confirmed alignment revision.')
-    return
-  }
-  if (!['root', 'ownerId', 'readerPath'].every(key => typeof source[key as keyof typeof source] === 'string' && String(source[key as keyof typeof source]).trim()) ||
+  if (!['root', 'ownerId', 'readerPath'].every(key => typeof source[key as keyof ContinuousProgressTaskSource] === 'string' && source[key as keyof ContinuousProgressTaskSource].trim()) ||
       !isAbsolute(source.root) || !isAbsolute(source.readerPath)) throw new Error('Task source root and public script must be explicit absolute paths; Feature ID must be nonempty.')
 }
 
 /** Read one explicit public owner receipt. The Tracker validates canonical state and computes its frontier. */
-export async function readContinuousProgressTaskSource(source: ContinuousProgressTaskSource, signal: AbortSignal, readGoal?: GoalProgressReader): Promise<{ action: 'continue' | 'pause' | 'stop'; reason: string }> {
+export async function readContinuousProgressTaskSource(source: ContinuousProgressTaskSource, signal: AbortSignal): Promise<{ action: 'continue' | 'pause' | 'stop'; reason: string }> {
   validateContinuousProgressTaskSource(source)
-  if (source.kind === 'goal') {
-    if (!readGoal) throw new Error('The original Goal owner is unavailable; manual input remains available.')
-    const goal = await readGoal(source.goalId)
-    signal.throwIfAborted()
-    return decideGoalProgressSource(source, goal)
-  }
   const { stdout } = await execute('/bin/bash', [source.readerPath, 'get-owner-receipt', '--root', source.root, '--feature', source.ownerId, '--json'],
     { signal, timeout: 10_000, maxBuffer: 256 * 1024, encoding: 'utf8', cwd: source.root })
   const receipt: unknown = JSON.parse(stdout)
@@ -45,17 +35,4 @@ export async function readContinuousProgressTaskSource(source: ContinuousProgres
   }
   if (value.continuation === 'blocked') return { action: 'pause', reason: prefix + value.blockers.map(blocker => `${blocker.class}: ${blocker.reason}`).join('; ') }
   throw new Error('Task source lifecycle is unconfirmed; manual input remains available.')
-}
-
-export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> } }
-export type GoalProgressReader = (goalId: string) => Promise<GoalProgressRecord | null>
-
-/** Main interprets the original Goal snapshot; this does not live in Core's scheduler. */
-export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>, goal: GoalProgressRecord | null | undefined): { action: 'continue' | 'pause' | 'stop'; reason: string } {
-  if (!goal || goal.id !== source.goalId) return { action: 'pause', reason: 'The original Goal is unavailable; its loop and Agent are retained.' }
-  const prefix = `Goal ${source.goalId}: `
-  if (goal.status === 'done' || goal.status === 'cancelled') return { action: 'stop', reason: prefix + goal.status + '; the Agent Run is kept.' }
-  if (goal.status === 'blocked') return { action: 'pause', reason: prefix + 'blocked; review the original Goal.' }
-  if (goal.alignment?.revision !== source.alignmentRevision || goal.alignment.confirmedAt === null) return { action: 'pause', reason: prefix + 'the original confirmed scope changed. Stop this loop before explicitly starting the new scope.' }
-  return { action: 'continue', reason: prefix + `confirmed scope r${source.alignmentRevision}; source checked.` }
 }

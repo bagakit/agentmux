@@ -1,9 +1,8 @@
-import type { ContinuousProgressLoop } from './continuous-progress-scheduler.js'
 import type { PendingMessageControlRequest, PendingMessageControlResult } from './pending-message-control.js'
 export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError } from './errors.js'
-import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel } from './types.js'
+import type { AgentExecutorId, AgentProviderId, AgentPromptExecution } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
@@ -253,7 +252,7 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; execution?: AgentPromptExecution; sourceChannel?: AgentMessageChannel; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; execution?: AgentPromptExecution; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
@@ -310,26 +309,18 @@ export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.list' }
   | { operation: 'settings.hosts.test'; id: string; input?: never }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; id?: never }
-  | { operation: 'settings.hosts.upgrade-check'; id: string; input?: never }
-  | { operation: 'settings.hosts.upgrade-check'; input: AgentMuxControlSettingsResourceFields; id?: never }
-  | { operation: 'settings.hosts.upgrade'; id: string; expected: import('./remote-core-upgrade.js').RemoteCoreUpgradeExpected }
-  | { operation: 'settings.hosts.upgrade-inspect'; id: string }
 )
 export type AgentMuxHostCheckOutcome = 'ready' | 'unsupported' | 'check-failed'
 export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.list'; hosts: AgentMuxControlSettingsResourceFields[] }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; outcome: AgentMuxHostCheckOutcome; detail: string }
-  | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
-  | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
-  | { operation: 'settings.hosts.upgrade-inspect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
 export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields }
 export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
   operation: 'settings.workspaces.add'; input: AgentMuxControlSettingsResourceFields
 }
 export type AgentMuxControlSettingsResourceRequest = RequestBase & (
   | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind }
-  | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; id: string; keyword?: never }
-  | { operation: 'settings.resource.get'; resource: 'prompts'; keyword: string; id?: never }
+  | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; id: string }
   | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; id: string; value: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; id: string; changes: AgentMuxControlSettingsResourceFields; expected?: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.resource.remove'; resource: AgentMuxControlSettingsResourceKind; id: string; expected?: AgentMuxControlSettingsResourceFields }
@@ -425,12 +416,6 @@ export type AgentMuxControlDemandStartRequest = RequestBase & {
   operation: 'demand.start'
   demandId: string
   sessionId?: string
-  continuation?: { intervalMs: number; alignmentRevision: number }
-  caller?: AgentMuxControlCaller
-}
-export type AgentMuxControlDemandContinuationActionRequest = RequestBase & {
-  operation: 'demand.continuation-action'; demandId: string; loopId: string
-  action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlDemandHandoffRequest = RequestBase & {
   operation: 'demand.handoff'
@@ -613,7 +598,6 @@ export type AgentMuxControlRequest =
   | AgentMuxControlGoalAcceptRequest
   | AgentMuxControlDemandAssignRequest
   | AgentMuxControlDemandStartRequest
-  | AgentMuxControlDemandContinuationActionRequest
   | AgentMuxControlDemandHandoffRequest
   | AgentMuxControlDemandDeleteRequest
   | AgentMuxControlDemandLinkSessionRequest
@@ -711,15 +695,14 @@ export type AgentMuxControlResult =
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
   | { operation: 'demand.list'; demands: AgentMuxDemand[] }
-  | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }
+  | { operation: 'demand.show'; demand: AgentMuxDemand | null }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
   | { operation: 'demand.discuss'; demand: AgentMuxDemand; receipt: { demandId: string; requestId: string; mode: 'open' | 'grill' | 'grounding'; tabId: string; agentSessionId: string | null } }
   | { operation: 'demand.confirm'; demand: AgentMuxDemand; receipt: { demandId: string; confirmedRevision: number; confirmedAt: number } }
   | { operation: 'demand.accept'; demand: AgentMuxDemand; receipt: { demandId: string; alignmentRevision: number; submissionId: string; acceptedAt: number; acceptedWithGaps: boolean } }
   | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }
-  | { operation: 'demand.start'; demand: AgentMuxDemand; continuation?: ContinuousProgressLoop; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
-  | { operation: 'demand.continuation-action'; demandId: string; continuation: ContinuousProgressLoop; diskDurability: 'confirmed' }
+  | { operation: 'demand.start'; demand: AgentMuxDemand; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
   | { operation: 'demand.handoff'; demand: AgentMuxDemand; receipt: { demandId: string; handedOffAt: number; sessionId: string | null } }
   | { operation: 'demand.delete'; demand: AgentMuxDemand; receipt: { demandId: string; deletedAt: number } }
   | { operation: 'demand.link-session'; demand: AgentMuxDemand; receipt: { demandId: string; sessionId: string } }
@@ -961,9 +944,6 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'diagnostics.crash-log.reveal': 'short',
   'settings.hosts.list': 'short',
   'settings.hosts.test': 'long',
-  'settings.hosts.upgrade-check': 'long',
-  'settings.hosts.upgrade': 'long',
-  'settings.hosts.upgrade-inspect': 'long',
   'settings.executors.refresh': 'long',
   'settings.set': 'long',
   'settings.browser.links.list': 'short',
@@ -1001,8 +981,6 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'message.pending.ls': 'short',
   'message.pending.edit': 'short',
   'message.pending.send': 'long',
-  'message.pending.archive': 'short',
-  'message.pending.restore': 'short',
   'browser.subscribe': 'short'
   , 'demand.list': 'short'
   , 'demand.show': 'short'
@@ -1013,7 +991,6 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.accept': 'short'
   , 'demand.assign': 'short'
   , 'demand.start': 'long'
-  , 'demand.continuation-action': 'long'
   , 'demand.handoff': 'short'
   , 'demand.delete': 'short'
   , 'demand.link-session': 'short'

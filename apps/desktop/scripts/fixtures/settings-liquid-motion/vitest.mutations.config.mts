@@ -13,7 +13,7 @@ const paths = [
   'apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
   'apps/desktop/src/renderer/src/components/settings/modules/prompts.tsx',
   'apps/desktop/src/renderer/src/components/settings/ShortcutSettingsPane.tsx',
-  'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx',
+  'apps/desktop/src/renderer/src/components/settings/LiquidSelectionSurface.tsx',
   'apps/desktop/src/renderer/src/components/ComposerTextarea.tsx',
   'apps/desktop/src/renderer/src/components/settings/use-resource-drafts.ts',
   'apps/desktop/src/main/config-owner.ts',

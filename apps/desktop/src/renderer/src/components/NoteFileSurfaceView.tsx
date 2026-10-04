@@ -15,7 +15,6 @@ import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { NoteFileView } from './NoteFileView'
-import { noteReadingStyle } from '../lib/note-reading-style'
 
 type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpaceLocation; displayName: string; tabName: string; position: string }
 
@@ -119,9 +118,8 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     if (exact.length > 1) { setNotice('Choose an original Note display position.'); setChoices(exact); return }
     void openAt(exact[0]!)
   }
-  const originalResource = config?.workspaces.find(item => item.id === surface.workspaceId)
   if (!document) return null
-  return <div className="note-surface" style={noteReadingStyle(config?.notes)}>
+  return <div className="note-surface">
 
     {directoryFacts?.issues.length ? <div className="note-knowledge-notice" role="status">{directoryFacts.issues.map((issue, index) => <div key={index}>{issue}</div>)}</div> : null}
     {!blockPresentation ? <div className="note-knowledge-notice" role="status">Block selection recovery is unconfirmed for this display. Editing continues; restore its exact display position to resume selection recovery.</div> : null}
@@ -132,7 +130,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       key={JSON.stringify([choice.location.displayWorkspaceId, choice.location.groupId, choice.location.tabId, choice.location.regionId])} onClick={() => void openAt(choice)}>
       <span title={`${choice.location.displayWorkspaceId} · ${choice.location.groupId} · ${choice.location.tabId} · ${choice.location.regionId}`}>{choice.displayName} · {choice.tabName}</span><small>{choice.source.location.path} · {choice.position}</small>
     </button>)}</div> : null}
-    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} knowledge={knowledge} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen}
+    <NoteFileView document={document} knowledge={knowledge} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />

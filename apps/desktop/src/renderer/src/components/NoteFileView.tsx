@@ -3,19 +3,15 @@ import type { FileDocument } from '../../../shared/contracts'
 import type { NoteBlockTarget } from '../../../shared/note-document'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import { desktopElementVisible } from '../lib/desktop-presentation'
-import { NotebookPageDetails } from './NotebookPageDetails'
-import type { NoteResource } from '@agentmux/core/notebook-catalog'
-import { sameNoteResource, useNotebookLibrary } from '../lib/notebook-library'
 import { NoteBlockEditor, type NoteEditorHandle } from './NoteBlockEditor'
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
-export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource }: {
-  resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onSave: () => void
+export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock }: {
+  document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onSave: () => void
   onOpen: (source: NoteSource, blockId: string) => void; revealBlock?: NoteBlockTarget; onRevealed?: () => void
   focusRequest?: number; canFocus?: () => boolean; onFocused?: (nonce: number) => void
   restoredBlock?: NoteBlockTarget; onSelectedBlock?: (target: NoteBlockTarget) => void
 }) {
-  const catalog = useNotebookLibrary(state => state.state)
   const read = useMemo(() => parseNoteFile(document), [document])
   const [issue, setIssue] = useState<string | null>(null)
   const [restoreIssue, setRestoreIssue] = useState<string | null>(null)
@@ -59,8 +55,6 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>
   return <div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
-    {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!} /> : null}
-    {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}
     <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} {...(onSelectedBlock ? { onSelectedBlock } : {})} />
   </div>
 }

@@ -7,7 +7,7 @@ import { ToolkitReceiptStore } from '../src/main/toolkit-receipt-store.js'
 import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
-import { TOOLKIT_MAX_LISTED_TOOLS, type ToolkitToolDefinition } from '@agentmux/core/control'
+import type { ToolkitToolDefinition } from '@agentmux/core/control'
 const directories: string[] = []
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }) })
 async function store(ids: () => string[]) {
@@ -16,16 +16,6 @@ async function store(ids: () => string[]) {
 }
 
 describe('bounded Toolkit durable receipt file', () => {
-  it('preserves every legal public catalog receipt across durable reload and rejects excess identities', async () => {
-    const ids = Array.from({ length: TOOLKIT_MAX_LISTED_TOOLS }, (_, index) => `tool-${index}`)
-    const s = await store(() => ids)
-    await Promise.all(ids.map(id => s.value.save(id, { admission: { invocationId: id } })))
-    const restored = new ToolkitReceiptStore(s.file, () => ids)
-    for (const id of ids) expect(await restored.read(id)).toEqual({ admission: { invocationId: id } })
-    expect(Object.keys(JSON.parse(await readFile(s.file, 'utf8')).tools)).toEqual(ids)
-    await expect(s.value.save('excess', { admission: null })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
-    expect(Object.keys(JSON.parse(await readFile(s.file, 'utf8')).tools)).toEqual(ids)
-  })
   it('builds entries in the real write queue and preserves both concurrent tool admissions including own prototype keys', async () => {
     const s = await store(() => ['__proto__', 'two'])
     const one = { admission: { invocationId: 'one' }, latestConfirmed: null }, two = { admission: { invocationId: 'two' }, latestConfirmed: null }

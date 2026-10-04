@@ -9,17 +9,12 @@ const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any
   find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
   replacement: resolve(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
-const clientUiExports = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
-for (const [key, value] of Object.entries(clientUiExports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
-  const target = typeof value === 'string' ? value : (value as { browser: string }).browser
-  const name = key === '.' ? '@agentmux/client-ui' : '@agentmux/client-ui/' + key.slice(2)
-  const pattern = name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
-  aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: resolve(root, 'packages/client-ui', target).replace('*', '$1') })
-}
 aliases.push({ find: /^@agentmux\/layout$/, replacement: resolve(root, 'packages/core/src/spatial-layout.ts') })
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },
   plugins: [{ name: 'new-project-owning-source', enforce: 'pre',
+    resolveId(id) { if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-zone-file-resource' },
+    load(id) { if (id === '\0unused-zone-file-resource') return 'export function zoneFileResource() { throw new Error("Unrelated missing file-resource leaf was invoked in the projection proof") }' },
     transform(source, id) {
       const path = id.split('?')[0]!
       if (!path.startsWith(root + '/apps/desktop/src/')) return

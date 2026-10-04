@@ -85,12 +85,6 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
   const entityKnown = scope.entity.kind === 'zone' ? Boolean(workbenchProjectionZone(scope)) : memberIds.size > 0
   if (!entityKnown || !layout) return { layout: null, issues: ['The original entity or its display layout is still restoring. Its exact reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
   const members = new Map(scope.catalog.tabs.filter(tab => memberIds.has(tab.tabId)).map(tab => [tab.tabId, tab]))
-  // Zero authoritative members is an empty Zone; missing loaded content is not.
-  if (scope.entity.kind === 'zone' && members.size === 0 && scope.selection.length === 0) {
-    const zone = workbenchProjectionZone(scope)!
-    if (zone.kind === 'unknown') return { layout: null, issues: [zone.issue ?? 'The original Zone resource is still unconfirmed. Its reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
-    return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], unsupportedTabIds: new Set(), selection: [] }
-  }
   const placements = new Map<string, Set<string>>()
   for (const location of scope.entity.kind === 'zone' ? [] : scope.catalog.locations) {
     if (!workbenchProjectionMatches(scope, location) || location.displayWorkspaceId !== scope.displayWorkspaceId || !members.has(location.tabId)) continue

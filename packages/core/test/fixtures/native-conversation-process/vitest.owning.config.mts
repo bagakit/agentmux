@@ -6,14 +6,14 @@ import original from '../../../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../../../..')
 const changes: Record<string, [string, string, string]> = {
-  'drop-provider-phase': ['packages/core/src/providers/app-server-native-history.ts',
+  'drop-provider-phase': ['packages/core/src/providers/codex-native-history.ts',
     '...(messagePhase === undefined ? {} : { messagePhase }),', '...{},'],
   'drop-normalized-metadata': ['packages/core/src/session-history.ts',
     '...(item.collaboration === undefined ? {} : { collaboration: collaboration(item.collaboration) }),', '...{},'],
-  'receiver-as-host-session': ['packages/core/src/providers/app-server-native-history.ts',
+  'receiver-as-host-session': ['packages/core/src/providers/codex-native-history.ts',
     'const target = reference(id)\n      return target ? [target] : []',
     "const target = reference('private-main-session')\n      return target ? [target] : []"],
-  'target-completes-operation': ['packages/core/src/providers/app-server-native-history.ts',
+  'target-completes-operation': ['packages/core/src/providers/codex-native-history.ts',
     '...(status === undefined ? {} : { status }),', "...{ status: 'completed' as const },"],
   'drop-normalized-phase': ['packages/core/src/session-history.ts',
     "...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),", '...{},']

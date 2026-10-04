@@ -14,7 +14,7 @@ import {
 } from './file-explorer-stale-dir-cache'
 import type { DirCache, TreeNode } from './file-explorer-types'
 import { fileExplorerContains } from '../../lib/file-explorer-scope'
-import { useWorkspaceResource } from '../../hooks/useWorkspaceResource'
+import { useAppStore } from '../../store'
 
 function pathDepth(path: string): number {
   return path ? path.split('/').length - 1 : -1
@@ -38,8 +38,8 @@ export function flattenFileTree(
   return rows
 }
 
-export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '', active = true) {
-  const resource = useWorkspaceResource(workspaceId)
+export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '') {
+  const resource = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === workspaceId))
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
@@ -110,14 +110,10 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
     // previous Workspace's loaded/loading entries.
     cacheRef.current = {}
     setDirCache({})
+    void loadDir(rootPath, { force: true })
   }, [loadDir, loadScope])
 
   useEffect(() => {
-    if (active && !cacheRef.current[rootPath]) void loadDir(rootPath, { force: true })
-  }, [active, loadDir, loadScope, rootPath])
-
-  useEffect(() => {
-    if (!active) return
     for (const path of expanded) {
       const decision = decideExpandedDirLoad(
         cacheRef.current[path],
@@ -127,7 +123,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         void loadDir(path, decision === 'reload' ? { force: true } : undefined)
       }
     }
-  }, [active, expanded, loadDir])
+  }, [expanded, loadDir])
 
   const refreshTree = useCallback(async () => {
     const admitted = loadTrackerRef.current.runIfActive(loadScope, () => {

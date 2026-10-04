@@ -1,22 +1,24 @@
-import { useSessionLinkOpening } from '../lib/session-link-opening'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
-import { cloneElement, useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react'
+import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
-import type { OpenHttpLinkOrigin } from '../lib/open-destination'
+import { dismissOpenDestinationRequest, type OpenDestination, type OpenHttpLinkOrigin } from '../lib/open-destination'
+import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
+import { isMacPlatform } from '../lib/host-platform'
 import { ActivityView } from './ActivityView'
 import { AgentRegionHeader } from './AgentRegionHeader'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { SessionRegionHost } from './SessionRegionHost'
-import { OpenDestinationPopover } from './OpenDestinationBar'
+import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
+import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
 export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel, executionHost,
-  activity, eligible, recovery, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion }: {
+  activity, eligible, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion }: {
   target: WorkbenchViewTarget
   regionId: string
   sourceKey: string
@@ -24,9 +26,8 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   name: string
   executorLabel: string
   executionHost: RegionExecutionHost
-  activity?: ComponentProps<typeof ActivityView>
+  activity: ComponentProps<typeof ActivityView>
   eligible: boolean
-  recovery?: ReactNode
   readOnly: boolean
   resourceOrigin: OpenHttpLinkOrigin
   composer?: ReactNode
@@ -36,29 +37,55 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
 }) {
   const reference = target.reference!
   const visible = target.visible !== false
-  const origin = useMemo(() => ({ ...resourceOrigin, sessionId, workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId,
-    tabId: reference.tabId, regionId }), [sessionId, resourceOrigin.workspaceId,
+  const origin = useMemo(() => ({ ...resourceOrigin, workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId,
+    tabId: reference.tabId, regionId }), [resourceOrigin.workspaceId, resourceOrigin.sessionId,
       reference.displayWorkspaceId, reference.groupId, reference.tabId, regionId])
   // Parsing belongs to the original Session resource; placement belongs to this proven display.
   const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId,
     { ...origin, workspaceId: reference.displayWorkspaceId }),
   [sessionId, origin, reference.displayWorkspaceId])
   const fileContext = useAppStore(selectFileContext)
+  const openFile = useAppStore(state => state.openFile)
+  const openHttpLink = useAppStore(state => state.openHttpLink)
+  const reportError = useAppStore(state => state.reportError)
   const [service, setService] = useState<string | null>(null)
-  const linkOpening = useSessionLinkOpening(origin, setService, selectRegion, target)
-  const openProjectFile = linkOpening.activateFile
-  const linkRequest = linkOpening.request
-  const openProseLink = linkOpening.activateHttp
-  const chooseDestination = linkOpening.choose
+  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }) => {
+    selectRegion()
+    if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
+      setService('The rendered file resource or display occurrence changed. The Agent keeps running.')
+      return
+    }
+    void openFile(path, reference.groupId, location,
+      fileContext.project?.workspaceId ?? resourceOrigin.workspaceId, undefined,
+      fileContext.placement ? { ...fileContext.placement, displayWorkspaceId: reference.displayWorkspaceId } : undefined)
+      .then(opened => { if (!opened) setService('The file resource or this display occurrence could not be confirmed.') })
+      .catch(reportError)
+  }, [selectRegion, selectFileContext, fileContext, openFile, reference.groupId,
+    reference.displayWorkspaceId, resourceOrigin.workspaceId, reportError])
+  const [linkRequest, setLinkRequest] = useState<OpenDestinationRequest | null>(null)
+  const nextRequest = useRef(0)
+  const openProseLink = useCallback((url: string, event: LinkClickModifiers) => {
+    selectRegion()
+    if (terminalLinkModifierOpensSystemBrowser(event, isMacPlatform())) {
+      void openHttpLink(origin, url, 'system').catch(reportError)
+    } else setLinkRequest({ id: ++nextRequest.current, url, x: event.clientX, y: event.clientY })
+  }, [selectRegion, openHttpLink, origin, reportError])
+  const chooseDestination = useCallback((destination: OpenDestination) => {
+    if (!linkRequest) return
+    const request = linkRequest
+    setLinkRequest(current => dismissOpenDestinationRequest(current, request.id))
+    selectRegion()
+    void openHttpLink(origin, request.url, destination).catch(reportError)
+  }, [linkRequest, selectRegion, openHttpLink, origin, reportError])
   const surfaceRef = useRef<HTMLElement>(null)
   const noteRef = useRef<ConversationAnnotationNoteHandle>(null)
   const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
     selectRegion()
     noteRef.current?.select(selection, sessionId)
   }, [selectRegion, sessionId])
-  const presented = useRef<{ sourceKey: string; content: ReactElement<ComponentProps<typeof ActivityView>> | null }>({ sourceKey, content: null })
+  const presented = useRef<{ sourceKey: string; content: ReactNode }>({ sourceKey, content: null })
   if (presented.current.sourceKey !== sourceKey) presented.current = { sourceKey, content: null }
-  if (visible && eligible && activity) {
+  if (visible && eligible) {
     const { openWorkspaceFile: _primaryFile, onSelectAnnotation: _primaryAnnotation, ...facts } = activity
     presented.current.content = <ActivityView {...facts}
       workspaceRoot={fileContext.workspaceRoot} homeDir={fileContext.homeDir}
@@ -66,12 +93,9 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
       openHttpLink={openProseLink}
       {...(onAnnotate ? { onSelectAnnotation: selectAnnotation } : {})}
-      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})} />
+      {...(activity.userMessageRead ? { userMessageRead: { ...activity.userMessageRead, onReadEarlier: () =>
+        setService('Earlier records are available in History in the original Session work surface. This presentation keeps Activity and your draft.') } } : {})} />
   }
-  const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
-  const content = presented.current.content && reading
-    ? cloneElement(presented.current.content, { conversationReading: { ...reading,
-      enabled: visible && eligible, opened: false, onClose: undefined } }) : presented.current.content
   const hostId = workbenchSessionStageHostId(target, regionId)
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
     active={target.active} visible={visible} retainedRegionId={regionId} reference={{ ...reference, regionId }}
@@ -82,12 +106,12 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
         <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId} sessionKind="agent" executionHost={executionHost}
           regionId={regionId} readOnly={readOnly} onHistory={undefined} {...(target.headerPortalTargetId ? { portalTargetId: target.headerPortalTargetId } : {})} />
         <div className="agent-body" data-observation-surface="workflow">
-          {!eligible ? recovery ?? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}
+          {!eligible ? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}
           {service && eligible ? <div role="status" className="activity-feed__read-notice">{service}</div> : null}
-          <div className="agent-terminal-stage" hidden={!eligible} inert={!eligible}>{content}</div>
+          <div className="agent-terminal-stage" hidden={!eligible} inert={!eligible}>{presented.current.content}</div>
         </div>
-        <OpenDestinationPopover request={linkRequest} canSplit={linkOpening.canSplit}
-          onDismiss={linkOpening.dismiss} onSelect={chooseDestination} />
+        <OpenDestinationPopover request={linkRequest} canSplit={Boolean(origin.tabId && origin.regionId)}
+          onDismiss={id => setLinkRequest(current => dismissOpenDestinationRequest(current, id))} onSelect={chooseDestination} />
         <ConversationAnnotationNote ref={noteRef} sessionId={sessionId} regionRef={surfaceRef}
           active={visible && eligible && Boolean(onAnnotate)} {...(onAnnotate ? { onAnnotate } : {})} />
         {composer ? <div className="agent-input-stack" data-input-surface="activity" hidden={!eligible} inert={!eligible}>{composer}</div> : null}

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; media-src blob:">
+<title>Private same-page live stream capability</title>
+<style>
+  html, body { margin: 0; background: #202730; color: #e9edf2; font: 15px/1.4 system-ui; }
+  header { padding: 12px 20px; }
+  .positions { display: flex; gap: 28px; padding: 0 20px; }
+  section { width: 480px; flex: 0 0 480px; }
+  h2 { margin: 0 0 6px; font-size: 15px; }
+  video { display: block; width: 480px; height: 300px; object-fit: contain; background: #10161d; }
+  video[hidden] { display: none; }
+  p { margin: 12px 20px; }
+</style>
+<header>One original WebContents · one live stream · two private positions</header>
+<div class="positions">
+  <section><h2>Position A</h2><video id="a" autoplay muted playsinline></video></section>
+  <section><h2>Position B</h2><video id="b" autoplay muted playsinline></video></section>
+</div>
+<p>The original native page occupies the lower area before its View is hidden.</p>
+<script>
+  const videos = ['a', 'b'].map(id => document.getElementById(id))
+  const state = { captureAttemptCount: 0, captureCount: 0, inputCalls: [], phases: [], frames: { a: 0, b: 0 }, callbackHandles: {} }
+  let stream, originalViewport, lastInput = Promise.resolve()
+  const fit = video => {
+    const r = video.getBoundingClientRect()
+    const scale = Math.min(r.width / video.videoWidth, r.height / video.videoHeight)
+    return { x: r.x + (r.width - video.videoWidth * scale) / 2,
+      y: r.y + (r.height - video.videoHeight * scale) / 2,
+      width: video.videoWidth * scale, height: video.videoHeight * scale }
+  }
+  for (const video of videos) for (const [type, inputType] of [['pointerdown', 'mouseDown'], ['pointerup', 'mouseUp']]) {
+    video.addEventListener(type, event => {
+      const r = fit(video), x = (event.clientX - r.x) / r.width, y = (event.clientY - r.y) / r.height
+      if (x < 0 || y < 0 || x >= 1 || y >= 1) return
+      const record = { binding: video.id, type: inputType, x, y, trusted: event.isTrusted,
+        consumerPoint: { x: event.clientX, y: event.clientY }, visible: !video.hidden }
+      state.inputCalls.push(record)
+      lastInput = lastInput.then(() => window.streamProbe.input(record))
+    })
+  }
+  const fact = video => ({ id: video.id, hidden: video.hidden, display: getComputedStyle(video).display, readyState: video.readyState,
+    width: video.videoWidth, height: video.videoHeight, fit: video.videoWidth ? fit(video) : null,
+    presentedFramesObserved: state.frames[video.id] })
+  window.streamFixture = {
+    async start(viewport, capture) {
+      originalViewport = viewport
+      state.captureAttemptCount += 1
+      state.captureStage = capture.route === 'receiver-tab' ? 'requesting-receiver-tab-getUserMedia' : 'requesting-getDisplayMedia'
+      try {
+        stream = capture.route === 'receiver-tab'
+          ? await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: {
+            chromeMediaSource: 'tab', chromeMediaSourceId: capture.sourceId,
+            maxWidth: viewport.width, maxHeight: viewport.height, maxFrameRate: 30
+          } } })
+          : await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: viewport.width, max: viewport.width }, height: { ideal: viewport.height, max: viewport.height }, frameRate: { max: 30 } }, audio: false })
+      }
+      catch (error) {
+        state.captureFailure = { name: error.name, message: error.message, code: error.code }
+        throw new Error(error.name + ': ' + error.message)
+      }
+      state.captureCount += 1
+      state.captureStage = 'stream-granted-awaiting-first-video-play'
+      for (const video of videos) video.srcObject = stream
+      await Promise.all(videos.map(video => video.play()))
+      state.captureStage = 'both-video-players-ready'
+      return { trackCount: stream.getTracks().length, settings: stream.getVideoTracks()[0].getSettings() }
+    },
+    expectColor(label, expected, ids = ['a', 'b']) {
+      const phase = { label, expected, samples: {}, matches: {}, startedAt: performance.now() }
+      state.phases.push(phase)
+      return new Promise((resolve, reject) => {
+        let completed = false
+        const finish = (error) => {
+          if (completed) return; completed = true; clearTimeout(timer)
+          for (const id of ids) if (state.callbackHandles[id] !== undefined) {
+            document.getElementById(id).cancelVideoFrameCallback(state.callbackHandles[id]); delete state.callbackHandles[id]
+          }
+          phase.elapsedMs = performance.now() - phase.startedAt
+          if (error) { phase.failure = error.message; reject(error) } else resolve(phase)
+        }
+        const timer = setTimeout(() => finish(new Error('Actual live pixel update missing: ' + label)), 12000)
+        for (const id of ids) {
+          const video = document.getElementById(id), canvas = document.createElement('canvas')
+          canvas.width = 1; canvas.height = 1
+          const context = canvas.getContext('2d', { willReadFrequently: true })
+          phase.samples[id] = []
+          const inspect = (_now, metadata) => {
+            if (completed) return
+            state.frames[id] += 1
+            context.drawImage(video, video.videoWidth * 40 / originalViewport.width,
+              video.videoHeight * 40 / originalViewport.height, 1, 1, 0, 0, 1, 1)
+            const pixel = Array.from(context.getImageData(0, 0, 1, 1).data)
+            phase.samples[id].push({ presentedFrames: metadata.presentedFrames, mediaTime: metadata.mediaTime,
+              width: metadata.width, height: metadata.height, pixel })
+            if (expected.every((channel, i) => Math.abs(pixel[i] - channel) <= 12)) phase.matches[id] = true
+            if (ids.every(key => phase.matches[key])) return finish()
+            if (phase.samples[id].length >= 90) return finish(new Error('Bounded pixel sample budget exhausted: ' + label))
+            state.callbackHandles[id] = video.requestVideoFrameCallback(inspect)
+          }
+          state.callbackHandles[id] = video.requestVideoFrameCallback(inspect)
+        }
+      })
+    },
+    point(binding, sourcePoint) {
+      const video = document.getElementById(binding), r = fit(video)
+      const point = { x: r.x + sourcePoint.x / originalViewport.width * r.width,
+        y: r.y + sourcePoint.y / originalViewport.height * r.height }
+      return { ...point, target: document.elementFromPoint(point.x, point.y)?.id, fit: r }
+    },
+    hide(binding) { document.getElementById(binding).hidden = true },
+    async waitInput() { await lastInput },
+    facts() {
+      return { ...state, videos: videos.map(fact), trackIds: stream?.getTracks().map(track => track.id),
+        trackSettings: stream?.getVideoTracks().map(track => track.getSettings()),
+        trackStates: stream?.getTracks().map(track => ({ id: track.id, readyState: track.readyState, muted: track.muted })),
+        sameStream: Boolean(stream && videos.every(video => video.srcObject === stream)),
+        sameTrack: Boolean(stream && videos.every(video => video.srcObject.getVideoTracks()[0] === stream.getVideoTracks()[0])) }
+    },
+    stop() {
+      for (const id of Object.keys(state.callbackHandles)) document.getElementById(id).cancelVideoFrameCallback(state.callbackHandles[id])
+      state.callbackHandles = {}
+      if (stream) for (const track of stream.getTracks()) track.stop()
+      for (const video of videos) { video.pause(); video.srcObject = null }
+      return stream?.getTracks().map(track => ({ id: track.id, readyState: track.readyState })) || []
+    }
+  }
+</script>
+</html>

@@ -8,7 +8,6 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxHostedClient, type AgentMuxHosted
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
-import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
 
@@ -105,11 +104,6 @@ export async function connectHostedAgentMux(options: {
   }
   const invoke = async (method: AgentMuxHostedMethod, args: unknown[]): Promise<unknown> => {
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
-    if (method === 'sessionHistoryResource') {
-      const request = parseSessionHistoryResourceOptions(args[1])
-      args = [args[0], { ...request, source: { ...request.source },
-        ...(request.args ? { args: [...request.args] } : {}), ...(request.env ? { env: { ...request.env } } : {}) }, ...args.slice(2)]
-    }
     await connect()
     let signal: AbortSignal | undefined, wireArgs = args
     // Cancellation belongs to the exact SDK field. Ordinary data, including env.signal,
@@ -121,23 +115,9 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
-    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource') {
-      const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
-      if (input && isAbortSignal(input.signal)) {
-        const { signal: cancellation, ...value } = input
-        signal = cancellation; wireArgs = [args[0], value, ...args.slice(2)]
-      }
-    }
     const response = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
       invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, signal ? { signal } : {})
-    const decoded = decodeHostedValue(response.value)
-    if (method === 'sessionHistoryResource') {
-      const request = parseSessionHistoryResourceOptions(wireArgs[1])
-      if (typeof wireArgs[0] !== 'string' || !decoded || typeof decoded !== 'object' || Array.isArray(decoded))
-        throw new AgentMuxError('Invalid recorded resource reply.', 'CONTROL_PROTOCOL_ERROR')
-      return parseSessionHistoryResourceReadResult(decoded, wireArgs[0], request)
-    }
-    return decoded
+    return decodeHostedValue(response.value)
   }
   const notifyHistory = (read: HistoryRead, observation: AgentSessionHistoryObservation): void => {
     if (disposed || read.disposed) return

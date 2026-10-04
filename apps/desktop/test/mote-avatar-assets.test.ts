@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
-import { decodeObjectAvatar } from '../src/main/object-avatar-image'
+import { decodeMoteAvatar } from '../src/main/mote-avatar-image'
 import { MOTE_AVATAR_INPUT_MAX_BYTES, isMoteAvatarRef } from '../src/shared/mote-avatars'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH } from '../src/shared/scratch-topics'
 import { directoryIdentity } from '../src/shared/space-addresses'
@@ -43,11 +43,11 @@ it('rejects malformed, animated, undecodable, oversized and non-crop images befo
   await expect(service.previewAvatar(workspace, topic.id, imageInput(imagePng(4097, 1)), directoryIdentity(workspace.hostId, topic.physicalDirectoryPath!))).rejects.toThrow('4096')
   await expect(service.saveAvatar(workspace, topic.id, imageInput(imagePng(128, 128)), directoryIdentity(workspace.hostId, topic.physicalDirectoryPath!))).rejects.toThrow('256')
   const animated = Buffer.concat([imagePng().subarray(0, 33), Buffer.from([0, 0, 0, 0]), Buffer.from('acTL'), Buffer.alloc(4)])
-  expect(() => decodeObjectAvatar(imageInput(animated), controlledNativeImage)).toThrow('static')
+  expect(() => decodeMoteAvatar(imageInput(animated), controlledNativeImage)).toThrow('static')
   const unsupportedDecode = vi.fn(controlledNativeImage)
-  expect(() => decodeObjectAvatar({ ...input, mimeType: 'image/webp' } as never, unsupportedDecode)).toThrow('PNG or JPEG')
+  expect(() => decodeMoteAvatar({ ...input, mimeType: 'image/webp' } as never, unsupportedDecode)).toThrow('PNG or JPEG')
   expect(unsupportedDecode).not.toHaveBeenCalled()
-  expect(() => decodeObjectAvatar(input, () => ({ isEmpty: () => true }) as never)).toThrow('decoded')
+  expect(() => decodeMoteAvatar(input, () => ({ isEmpty: () => true }) as never)).toThrow('decoded')
   expect(await readdir(join(directory, '.agentmux'))).not.toContain('avatars')
 })
 it('rejects asset reference traversal, regular-file replacement, hash tampering and directory symlinks', async () => {
@@ -95,15 +95,4 @@ it('explicit custom avatar preview, save and read do not consume unrelated Wiki 
   await expect(service.previewAvatar(workspace, topic.id, imageInput(), key)).resolves.toEqual(expected)
   await expect(service.readAvatar(workspace, topic.id, ref, key)).resolves.toEqual(expected)
   await expect(service.saveAvatar(workspace, topic.id, imageInput(), key)).resolves.toEqual(ref)
-})
-
-it('bounds encoded PNG and JPEG dimensions before native decode and verifies the decoded original size', () => {
-  const createImage = vi.fn(controlledNativeImage)
-  const png = imagePng(); png.writeUInt32BE(100000, 16); png.writeUInt32BE(100000, 20)
-  expect(() => decodeObjectAvatar(imageInput(png), createImage)).toThrow('4096')
-  expect(createImage).not.toHaveBeenCalled()
-  const jpeg = Buffer.from([255,216,255,192,0,17,8,255,255,255,255,3,1,17,0,2,17,0,3,17,0,255,217])
-  expect(() => decodeObjectAvatar({ mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,' + jpeg.toString('base64') }, createImage)).toThrow('4096')
-  expect(createImage).not.toHaveBeenCalled()
-  expect(() => decodeObjectAvatar(imageInput(), () => controlledNativeImage(imagePng(128,128)))).toThrow('does not match')
 })

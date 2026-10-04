@@ -32,7 +32,7 @@ export default defineConfig({
     if (code !== before) return { code, map: null }
   } }, { name: 'sender-context-compiled-source', enforce: 'post', transform(code, id) {
     const file = id.split('?')[0]!, log = process.env.AGENTMUX_CONVERSATION_SENDER_LOADED_SOURCE
-    if (!log || !['ConversationMessage.tsx', 'SessionPane.tsx', 'ActivityView.tsx', 'conversation-speaker.ts'].some(name => file.endsWith(`/${name}`))) return
+    if (!log || !['ConversationMessage.tsx', 'SessionPane.tsx', 'SessionHistoryView.tsx', 'ActivityView.tsx', 'conversation-speaker.ts'].some(name => file.endsWith(`/${name}`))) return
     const output = `${log}.${file.split('/').at(-1)}.compiled.js`; writeFileSync(output, code); appendFileSync(`${log}.compiled.jsonl`, JSON.stringify({ path: relative(root,file), output, bytes: Buffer.byteLength(code), sha256: createHash('sha256').update(code).digest('hex') }) + '\n')
   } }],
   test: { ...original.test, server: { deps: { inline: ['@agentmux/client-ui'] } }, include: ['apps/desktop/test/conversation-sender-context.integration.test.tsx'], passWithNoTests: false, fileParallelism: false }

@@ -18,7 +18,7 @@ function floatingSelection(): string {
     reference === null, reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, reference?.regionId])
 }
 
-export function confirmedMoteReference(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope,
+function confirmedMoteReference(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope,
   options: { floating?: boolean | undefined; reference?: WorkbenchProjectionSelection | null | undefined }): WorkbenchProjectionSelection | null {
   const workspace = state.config?.workspaces.find(item => item.id === owner.workspace.id)
   if (workspace?.hostId !== owner.workspace.hostId || workspace.path !== owner.workspace.path ||
@@ -56,61 +56,6 @@ function sameOwner(current: MoteWorkfaceScope | null, owner: MoteWorkfaceScope):
 
 type FileDestination = Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>
 
-/** User-authored discussion preparation. The returned original Launcher is never a running Session. */
-export function openMoteDiscussionDraft(owner: MoteWorkfaceScope, prompt: string, options: {
-  reference?: WorkbenchProjectionSelection | null | undefined; destination?: FileDestination | null | undefined
-  agentMuxNote?: string | undefined
-} = {}): WorkbenchProjectionSelection | null {
-  const state = useAppStore.getState()
-  const fail = (message: string) => { useAppStore.getState().reportError(new Error(message)); return null }
-  if (!prompt.trim()) return fail('Write your own question before preparing a new discussion.')
-  const reference = options.destination !== undefined && !options.reference ? null : confirmedMoteReference(state, owner, options)
-  const destination = reference ?? emptyMoteDestination(state, owner, options)
-  if (!destination) return fail('The exact original Mote display is unconfirmed. Your question and work are kept; choose its original Group and retry.')
-  const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic]
-  const catalog = spatialCatalog(state, topics)
-  const spaceId = directoryIdentity(owner.workspace.hostId, scratchTopicIdentityPath(owner.workspace, owner.topic))
-  const zoneId = reference ? catalog.locations.find(location => sameWorkbenchProjectionSelection(location, reference))?.zoneId : homeZoneId(spaceId)
-  if (!zoneId || !catalog.bindings.some(binding => binding.zoneId === zoneId && binding.spaceId === spaceId)) return fail('The original Mote Zone is unconfirmed. Your question and existing discussions are kept; retry discovery.')
-  // initialInputs belongs to Group input transfer and clears old inputs. This independent question does not use it.
-  const tabId = state.openLauncher({ workspaceId: owner.workspace.id, displayWorkspaceId: destination.displayWorkspaceId,
-    tabGroupId: destination.groupId, zoneId, reveal: true })
-  const current = useAppStore.getState(), tab = tabId ? current.tabs[tabId] : undefined
-  const workspace = current.config?.workspaces.find(item => item.id === owner.workspace.id)
-  const region = tab?.regions[tab.layout.activeRegionId]
-  const placed = tab && current.layouts[destination.displayWorkspaceId]?.groups.find(group => group.id === destination.groupId)?.tabOrder.includes(tab.id)
-  if (!tabId || !tab || Object.hasOwn(state.tabs, tabId) || !placed || tab.workspaceId !== owner.workspace.id ||
-      tab.space?.zoneId !== zoneId || tab.space.spaceId !== spaceId || region?.kind !== 'launcher' || region.workspaceId !== owner.workspace.id ||
-      workspace?.hostId !== owner.workspace.hostId || workspace.path !== owner.workspace.path) {
-    return fail('The new discussion Launcher is not confirmed. Your question and original work are kept; inspect the new Tab and retry.')
-  }
-  if ((current.agentComposerDrafts[region.regionId] ?? '') !== '') return fail('The new Launcher already has later input. That input is kept; paste your question there when ready.')
-  if (options.agentMuxNote !== undefined && current.agentComposerNotes[region.regionId] !== undefined)
-    return fail('The new Launcher already has later context. That context and your question are kept; review the Launcher before retrying.')
-  let changed = false
-  const unsubscribe = useAppStore.subscribe(next => {
-    if (next.tabs[tabId] !== tab || (next.agentComposerDrafts[region.regionId] ?? '') !== prompt ||
-      next.agentComposerNotes[region.regionId] !== undefined && next.agentComposerNotes[region.regionId] !== options.agentMuxNote) changed = true
-  })
-  try {
-    // Keep the original input owner, including its continuous-work pause semantics.
-    current.setAgentComposerDraft(region.regionId, prompt)
-    if (options.agentMuxNote !== undefined) {
-      let staged = false
-      useAppStore.setState(next => {
-        if (changed || next.tabs[tabId] !== tab || next.agentComposerDrafts[region.regionId] !== prompt ||
-          next.agentComposerNotes[region.regionId] !== undefined || !confirmedMoteReference(next, owner, {
-            reference: { displayWorkspaceId: destination.displayWorkspaceId, groupId: destination.groupId, tabId, regionId: region.regionId }
-          })) return next
-        staged = true
-        return { agentComposerNotes: { ...next.agentComposerNotes, [region.regionId]: options.agentMuxNote! } }
-      })
-      if (!staged || changed) return fail('The new Launcher changed while preparing its context. Later inputs and work are kept; review it before retrying.')
-    }
-  } finally { unsubscribe() }
-  return { displayWorkspaceId: destination.displayWorkspaceId, groupId: destination.groupId, tabId, regionId: region.regionId }
-}
-
 /** A user's new File/Terminal action in a confirmed empty Mote needs a Group,
  * not a made-up discussion. Saved unknown entities never use this route. */
 function confirmedMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope,
@@ -131,7 +76,7 @@ function confirmedMoteDestination(state: ReturnType<typeof useAppStore.getState>
   return destination
 }
 
-export function emptyMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope, options: {
+function emptyMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope, options: {
   floating?: boolean | undefined; reference?: WorkbenchProjectionSelection | null | undefined; destination?: FileDestination | null | undefined
 }): FileDestination | null {
   if (options.reference) return null
@@ -142,14 +87,11 @@ export function emptyMoteDestination(state: ReturnType<typeof useAppStore.getSta
   } else {
     const choice = state.workbenchSpaceSelection
     if (choice?.tabId || choice?.regionId) return null
-    if (destination === undefined && choice && state.mainSurface === 'workbench' && state.activeWorkspaceId === choice.workspaceId) {
+    if (destination === undefined && choice?.groupId) {
       const spaceId = directoryIdentity(owner.workspace.hostId, scratchTopicIdentityPath(owner.workspace, owner.topic))
       const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
       if (choice.spaceId !== spaceId || !catalog.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === choice.zoneId)) return null
-      // A new File/Terminal action uses the active Pane of this actual empty Space.
-      // This is not an address for any saved or unconfirmed discussion.
-      const groupId = choice.groupId ?? state.layouts[choice.workspaceId]?.activeGroupId
-      if (groupId) destination = { displayWorkspaceId: choice.workspaceId, groupId }
+      destination = { displayWorkspaceId: choice.workspaceId, groupId: choice.groupId }
     }
   }
   return destination ? confirmedMoteDestination(state, owner, destination, true) : null
@@ -253,7 +195,6 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
       if (captured.options.floating) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
     }
     captured.options.onOpened?.()
-    return openedReference
   }, [])
   const terminal = useCallback(async (path: string) => {
     const captured = latest.current, owner = captured.scope

@@ -209,20 +209,13 @@ describe('Renderer persistence boundary', () => {
       // 只把它加进下面的期望值（不喂坏值）等于只守「它在场」，而它自己那条取值校验无人守。
       projectRailWidth: Number.NaN,
       surveySidebarWidth: Number.NaN,
-      editorWordWrap: 'on' as never,
-      editorMinimap: 'on' as never,
-      explorerShowHidden: 0 as never,
-      explorerShowIgnored: null as never
+      editorWordWrap: 'on' as never
     })).toEqual({
       activeWorkspaceId: 'workspace-a',
       workbenchSpaceSelection: null,
       mainSurface: 'workbench',
-      notebookRecoveries: [],
-      surveyNotebookId: null,
-      surveyNoteId: null,
       surveyZoneSelection: null,
       surveyCollectedZones: {},
-      surveyExplorationNames: {},
       noteBlockSelections: {},
       surveySidebarCollapsed: false,
       surveySidebarWidth: 220,
@@ -238,10 +231,7 @@ describe('Renderer persistence boundary', () => {
       focusTimelineNameWidth: 112,
       focusTimelineHeight: 96,
       focusTimelineRuler: { mode: 'daily', timeZone: 'system', intervalMinutes: 120, phaseMinutes: 1380 },
-      editorWordWrap: false,
-      editorMinimap: false,
-      explorerShowHidden: true,
-      explorerShowIgnored: true
+      editorWordWrap: false
     })
   })
 

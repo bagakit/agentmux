@@ -1,5 +1,5 @@
 /** Plain-text sharing. Identity fields describe objects; they never authenticate a sender. */
-export type AmuxSharingKind = 'IDCard' | 'Region' | 'Tab' | 'Space' | 'Zone' | 'File' | 'Browser'
+export type AmuxSharingKind = 'IDCard' | 'Region' | 'Tab' | 'File' | 'Browser'
 
 export type AgentSharingMetadata = {
   nativeSessionId?: string | undefined
@@ -72,44 +72,4 @@ export function formatTabAddress(tabId: string): string {
     `# amux space inspect --tab=${shellArgument(tabId)}`,
     '# amux --skill'
   ].join('\n'))
-}
-
-/** An original spatial object, independent of its current display parent or title. */
-export type AmuxSpatialLinkTarget = { kind: 'space'; spaceId: string } | { kind: 'zone'; zoneId: string }
-
-export function formatAmuxSpatialLink(target: AmuxSpatialLinkTarget): string {
-  if (target.kind !== 'space' && target.kind !== 'zone') throw new TypeError('A spatial link must identify a Space or Zone.')
-  const id = target.kind === 'space' ? target.spaceId : target.zoneId
-  if (typeof id !== 'string' || !id) throw new TypeError('An exact original spatial identity is required.')
-  return `amux://${target.kind}/${encodeURIComponent(id)}`
-}
-
-/** Only generated spatial links are accepted. No command, location hint or metadata is executed. */
-export function parseAmuxSpatialLink(raw: string): AmuxSpatialLinkTarget {
-  if (typeof raw !== 'string') throw new TypeError('A spatial link must be text.')
-  const match = /^amux:\/\/(space|zone)\/([^/?#]+)$/u.exec(raw)
-  if (!match) throw new TypeError('Choose an amux Space or Zone link with one exact identity.')
-  const id = decodeURIComponent(match[2]!)
-  const target: AmuxSpatialLinkTarget = match[1] === 'space' ? { kind: 'space', spaceId: id } : { kind: 'zone', zoneId: id }
-  if (formatAmuxSpatialLink(target) !== raw) throw new TypeError('The spatial link encoding is not an exact original identity.')
-  return target
-}
-
-function formatSpatialAddress(target: AmuxSpatialLinkTarget, label?: string): string {
-  const id = target.kind === 'space' ? target.spaceId : target.zoneId
-  return formatAmuxSharing(target.kind === 'space' ? 'Space' : 'Zone', [
-    `ID: ${field(id)}`,
-    ...(label === undefined ? [] : [`Name: ${field(label)}`]),
-    `Link: ${formatAmuxSpatialLink(target)}`,
-    `# amux space inspect --${target.kind}=${shellArgument(id)}`,
-    '# amux --skill'
-  ].join('\n'))
-}
-
-export function formatSpaceAddress({ spaceId, label }: { spaceId: string; label?: string }): string {
-  return formatSpatialAddress({ kind: 'space', spaceId }, label)
-}
-
-export function formatZoneAddress({ zoneId, label }: { zoneId: string; label?: string }): string {
-  return formatSpatialAddress({ kind: 'zone', zoneId }, label)
 }

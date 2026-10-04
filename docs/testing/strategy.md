@@ -76,7 +76,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 - ready receipt 确认 `packaged: true`；caller Agent Session 由 `.app` 内随包 Core/ctxmux artifact
   创建，packaged Desktop 从同一 Store 建立其唯一 Tab/Region 投影；
-- 受管 caller 执行 `agentmux space inspect --tab self`，读取确切 Region ID，再用
+- 受管 caller 执行 `agentmux inspect --tab self`，读取确切 Region ID，再用
   `agentmux agent open --executor <executor-id> --region <region-id> --split right`；
   receipt 的 `result.agent` 返回新 Agent Session/Run，`result.to` 返回实际空间地址，
   新 Run 的 public status 为 `running`；
@@ -84,7 +84,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
   从 checkout 搬到 packaged App 后可以继续使用原 daemon，receipt 中的启动路径只作诊断，不参与身份判断；
 - 将随包 source/manifest 身份、正在服务的 Runtime identity/capability 与 cleanup 归属分别核对；
   兼容服务可以继续承载健康 Run，旧启动路径或缺失 owner receipt 不能代替不兼容判据；
-- smoke 后通过公开 `agentmux agent stop --session <test-session-id>` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
+- smoke 后通过公开 `stop --session` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
   进程残留，再删除系统临时目录中的 test-only 子目录。
 
 空间方向的非视觉合同由 Desktop Control/Layout 测试对真实 Layout Store/reducer
@@ -134,15 +134,6 @@ Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 
 `test:resources` 的 `agentmux.t017-desktop-resources.v1` receipt 使用系统临时目录下的短、测试专属 Runtime；清理从 exact socket 的 `lsof` owner 出发，同时复核可用时的 `owner.json`、daemon path 与完整 argv，并在每次发信号前重验。Harness 先证明一个已 ready 但尚无 receipt 的真实 test-owned daemon 也能被精确清理，再运行 Desktop。receipt 从完整 ready-launcher process sample 计算 300 KiB xterm 输出、Monaco、Browser 和 release 增量，不为新的首屏基线预写未经测量的代表值。资源循环共七轮：前两轮显式记录 lazy-cache warm-up，后五轮以第一个 post-warmup 样本为 baseline，任一后续峰值相对它的增长必须低于 128 MiB；内存被系统回收后的下降不冒充泄漏。全部七轮 owner-clean release 样本与 browserReleased 都分别受 released-vs-ready-launcher increment 和 absolute total 硬上限约束，不能靠 warm-up 分类掩盖整体膨胀。Absolute total 保持 1 GiB；released increment 由该总上限减去 448 MiB 支持 baseline floor 得到 576 MiB，不再错误复用 Editor 的 512 MiB 增量预算。Fresh baseline 是首屏 reusable Terminal 已 ready 的真实产品态：0 Monaco model、0 document、0 file watcher、0 Browser WebContents、恰好 4 个全局 runtime subscription，以及恰好 1 个 Terminal View、3 或 4 个 Addon（取决于 WebGL 是否可用）、6 个 listener、1 个 Main Session Attachment owner 和 1 个 Renderer lease。每轮 claim 后继续使用同一 Run；stop 后必须出现从未使用过的新 reusable Terminal Session，并让完整 owner 集合精确回到 fresh baseline，不能复用已 stopped Session。打开 Browser 时 reusable Terminal 的 View 与 Attachment 会释放，但 backend Run 合法保留；关闭 Browser 后必须由同一个 Session 重新建立 ready launcher 并回到相同 owner baseline。多轮 steady-state peak growth 单独阻止持续泄漏；预算判断与完整进程样本保留在 Gate receipt，而不是只记录摘要。
 
 live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明 child 消失、同 Run ID 恢复为 historical/interrupted、崩溃前 Replay marker 保留，并由 replacement daemon 的不同 instance identity 证明没有复用死亡 Owner。slow Consumer 从 byte 0 读取时得到真实 Gap，另一 fast Consumer 仍连续收到超过 4 MiB 和最终 marker。
-
-### 隔离资源故障与恢复验证
-
-以下是[低资源下的正确性与可恢复性](../design/behavior/shared-rules.md#低资源下的正确性与可恢复性)的验证方法，不代表当前候选已通过。
-
-- 在测试专属目录、存储或进程中，使实际 Owner 消费 ENOSPC、EACCES、EIO、短写，以及调度或内存压力；覆盖写前、写入／替换后回执与 cleanup 失败，断言故障确已触发。不得填满宿主磁盘或压迫用户 Run。慢响应、分配失败和进程被杀分别记录，不能仅凭超时推断资源原因；声称覆盖 OOM／强杀时，须有独立进程的实际退出及持久恢复证据。
-- 对比故障前、故障期间与资源恢复后的原草稿、消息身份、条件、已确认输入进度和工作面。失败不能覆盖最后已确认记录；未保存内容仍在当前进程时须可见，并与持久确认区分。释放真实故障后，验证原操作可在同 Owner 及实际受影响的跨 Owner 入口显式重试、已确认字节不重复、未知输入不自动重投，健康能力不因旧失败持续被占用。
-- 按本次改动选择定义外生产消费者及受影响的公共 SDK／RPC／CLI 链，核对同一次失败的原因、标识与查询结果；不为未改动的接口复制全部场景。诊断存储失败或观测不完整也须可辨认，不以缺记录代替零输入或成功，不要求在不可写或 OOM 时凭空生成完整持久日志。
-- 涉及持久恢复时，用第二个测试专属进程直接读取第一次实际保存的记录，不重新种入数据。已确认内容应保持原身份与进度；强杀前未确认的内容只按真实可恢复结果陈述。记录本轮源码、实际故障、恢复条件、缺失证据与精确归属的清理结果，不将历史资源样本外推为本轮通过。
 
 ## 证据边界
 

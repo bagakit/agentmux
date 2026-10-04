@@ -40,7 +40,7 @@ try {
     { name: 'new-mote-wrong-root', path: 'apps/desktop/src/main/scratch-topics.ts', test: ordinary,
       changes: [['const root = mote ? roots.motes : roots.topics', 'const root = roots.topics']] },
     { name: 'relocated-identity-reissued', path: 'apps/desktop/src/main/scratch-topic-directories.ts', test: ordinary,
-      changes: [['if (identity) return identity', 'if (identity) return physical']] },
+      changes: [['return value.identityDirectoryPath', 'return physical']] },
     { name: 'write-escape-opened', path: 'apps/desktop/src/main/workspace-files.ts', test: ordinary,
       changes: [['return { root: dirname(directory), requested: [basename(directory), ...parts.slice(1)].join(sep) }',
         'return { root: dirname(dirname(directory)), requested: [basename(dirname(directory)), basename(directory), ...parts.slice(1)].join(sep) }']] },

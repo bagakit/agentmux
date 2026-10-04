@@ -1,1 +1,0 @@
-{"extends":"../tsconfig.json","include":["../src/renderer/src/global.d.ts","conversation-input-origin.test.tsx","helpers/reaction-public-client-fixture.ts"]}

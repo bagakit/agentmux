@@ -10,27 +10,6 @@ type Reader = { dispose(): Promise<void> }
 type Consumer = { receive(frame: unknown): void; end(error?: Error): void; subscriptionId?: string; dispose(): void }
 export const AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS = 30_000
 
-/** Diagnose the exact superseded endpoint receipt without admitting it to the client. */
-function validateEndpoint(value: unknown, socketPath?: string): void {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const result = value as Record<string, unknown>
-    const endpoint = result.endpoint as Record<string, unknown> | undefined
-    if (Object.keys(result).sort().join(',') === 'endpoint,framing,protocol' &&
-        result.protocol === 'jsonrpc-2.0' && result.framing === 'json-lines' &&
-        endpoint && typeof endpoint === 'object' && !Array.isArray(endpoint) &&
-        Object.keys(endpoint).sort().join(',') === 'path,transport' && endpoint.transport === 'unix' &&
-        typeof endpoint.path === 'string' && endpoint.path.startsWith('/') &&
-        (socketPath === undefined || endpoint.path === socketPath)) {
-      // The current validator checks every other field. This synthetic receipt is
-      // diagnostic only: the original response is always refused below.
-      parseRpcNativeResult('system.endpoint', { ...result, connection: 'responded' }, {})
-      throw new AgentMuxError('The remote Core uses an older endpoint interface without a confirmed connection receipt. Update this service in its connection settings.',
-        'REMOTE_CORE_UPGRADE_REQUIRED')
-    }
-  }
-  parseRpcNativeResult('system.endpoint', value, {})
-}
-
 /** A transport channel only. The existing JSONRPCClient/dispatcher retain RPC ownership. */
 export class AgentMuxRpcSshTransport {
   private readonly child: ChildProcessWithoutNullStreams
@@ -38,7 +17,7 @@ export class AgentMuxRpcSshTransport {
   private readonly subscriptions = new Map<string, Consumer>()
   private readonly ready: Promise<void>
   private closed = false
-  constructor(args: string[], private readonly onClose: () => void, socketPath?: string) {
+  constructor(args: string[], private readonly onClose: () => void) {
     this.child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })
     const lines = new AgentMuxRpcLines(), probeId = randomUUID()
     let established = false, resolveReady!: () => void, rejectReady!: (error: Error) => void
@@ -64,7 +43,7 @@ export class AgentMuxRpcSshTransport {
           const response = parseRpcResponse(frame)
           if (response.id !== probeId) throw new AgentMuxError('SSH RPC establishment response belongs to another request.', 'CONTROL_PROTOCOL_ERROR')
           const error = rpcResponseError(response); if (error) throw error
-          validateEndpoint(response.result, socketPath)
+          parseRpcNativeResult('system.endpoint', response.result, {})
           established = true; clearTimeout(timer); resolveReady(); return
         }
         if (frame && typeof frame === 'object' && Object.hasOwn(frame, 'id')) {

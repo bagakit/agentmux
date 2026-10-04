@@ -11,7 +11,7 @@
 | 读者问题 | 唯一正文 |
 | --- | --- |
 | 全局原则、保护边界及文档归属 | [共同原则、设计事实与 Owner](behavior/shared-rules.md) |
-| Space、Zone、Tab、Region、导航和布局身份 | [空间、导航与工作面](behavior/spaces-and-layout.md) |
+| Work／Survey／Mote 导航上下文、Space／Zone／Tab／Region 与布局身份 | [空间、导航与工作面](behavior/spaces-and-layout.md) |
 | Topics 的分类、主题、讨论、知识沉淀与本地承接 | [Topics 知识库的层级与沉淀](behavior/spaces-and-layout.md#topics-知识库的层级与沉淀) |
 | 持久 Mote、PMO、快捷面和原协调上下文 | [Mote 与 PMO 协调](behavior/motes-and-coordination.md) |
 | 目标对齐、结果核对、Demand、Board 与 Task | [Goals 与 Demand 闭环](behavior/goals-and-demand.md) |

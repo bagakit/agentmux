@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile, appendFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -9,31 +9,15 @@ import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
-import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
-import type { AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
-import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import * as runner from '../src/process-runner.js'
-import { DurableWriteError } from '../src/durable-write.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentProviderNativeSessionDiscoveryContext } from '../src/types.js'
 
 const SID = 'private-native-owner', NATIVE = 'exact-native-main', RUN = 'same-original-run'
 const BODY = '\n  Genuine recorded final 原文\n'
-const durableFailure = vi.hoisted(() => ({ path: null as string | null, syncs: 0 }))
-vi.mock('node:fs/promises', async importOriginal => {
- const actual = await importOriginal<typeof import('node:fs/promises')>()
- return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
-  const handle = await actual.open(...args)
-  if (durableFailure.path && String(args[0]).startsWith(durableFailure.path + '.') && args[1] === 'wx') {
-   handle.sync = async () => { durableFailure.syncs++; throw Object.assign(new Error('owned pre-replacement fsync failure'), { code: 'EIO' }) }
-  }
-  return handle
- } }
-})
 const fixtureReceipts: Array<{ processId: number; root: string; exited: boolean; recordsRemoved: boolean }> = []
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { durableFailure.path = null; durableFailure.syncs = 0; for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks()
+afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks()
  if (process.env.AMX_TARGET_PROOF) await writeFile(process.env.AMX_TARGET_PROOF, JSON.stringify({ userRuntimeTouched: false, privateFixtures: fixtureReceipts, cleanup: { remaining: fixtureReceipts.filter(item => !item.exited || !item.recordsRemoved) } }, null, 2) + '\n')
 })
 
@@ -112,85 +96,6 @@ it('explicit current Page reads an existing different verified source without ne
  expect(page.items[2]?.id).toBe('final-1')
 })
 
-function strictNativeProvider(client: AgentMuxClient): AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession' | 'readSessionHistoryPage'>> {
- const provider = client.providers.get('codex')
- if (!provider.discoverNativeSession || !provider.readSessionHistoryPage) throw new Error('This owning fixture requires the real native reader and discovery')
- return provider as AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession' | 'readSessionHistoryPage'>>
-}
-it('requires a fresh current witness for automatic reads while ordinary retained history and the healthy Run stay available', async () => {
- const f = await fixture(), bytes = await readFile(join(f.root, 'sessions.json'))
- const discover = vi.spyOn(strictNativeProvider(f.client), 'discoverNativeSession').mockRejectedValue(new Error('Current source observation unavailable'))
- const retained = await f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true })
- expect(retained.source.nativeSessionId).toBe('retained-old')
- await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })).rejects.toThrow('Current source observation unavailable')
- expect((await f.read()).source.nativeSessionId).toBe('retained-old')
- const saved = JSON.parse(await readFile(join(f.root, 'sessions.json'), 'utf8')).sessions[0]
- const original = JSON.parse(bytes.toString()).sessions[0]
- expect(saved).toMatchObject({ ...original, updatedAt: expect.any(Number),
-  nativeSourceObservation: { state: 'unknown', run: original.run, reason: 'current-main-unconfirmed', observedAt: expect.any(Number) } })
- expect(saved.nativeHandle).toEqual(original.nativeHandle)
- expect((await f.kernel.status(RUN)).state.type).toBe('running')
- expect(discover).toHaveBeenCalledTimes(2)
-})
-
-it('rechecks the exact current Run witness after a strict provider page has finished', async () => {
- const f = await fixture(), provider = strictNativeProvider(f.client), original = provider.readSessionHistoryPage!
- vi.spyOn(provider, 'readSessionHistoryPage').mockImplementationOnce(async context => {
-   const page = await original(context)
-   f.status.mockResolvedValue({ ...f.run, pid: f.processId + 1 } as Awaited<ReturnType<CtxmuxRunAdapter['status']>>)
-   return page
- })
- await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })).rejects.toThrow('original Run process changed')
- expect((await f.read()).source.nativeSessionId).toBe(NATIVE)
-})
-
-it('cancels only the strict current read while its original Run and retained reading survive', async () => {
- const f = await fixture(), provider = strictNativeProvider(f.client), controller = new AbortController()
- let began!: () => void, release!: () => void
- const entered = new Promise<void>(resolve => { began = resolve }), hold = new Promise<void>(resolve => { release = resolve })
- const original = provider.discoverNativeSession!
- vi.spyOn(provider, 'discoverNativeSession').mockImplementationOnce(async context => { began(); await hold; return original(context) })
- const reading = f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true, signal: controller.signal })
- await entered; const failure = new Error('Only this automatic read was cancelled'); controller.abort(failure)
- await expect(reading).rejects.toBe(failure); release()
- expect((await f.read()).source.nativeSessionId).toBe('retained-old')
- expect((await f.kernel.status(RUN)).state.type).toBe('running')
-})
-
-it('carries a borrowed strict current read and its cancellation through the exact finite Host field', async () => {
- const f = await fixture()
- vi.spyOn(f.kernel, 'identity').mockReturnValue({ daemonInstanceId: 'original-native-daemon', protocolVersion: 18, buildIdentity: 'private-current-source' })
- const service = new AgentMuxHostedRuntimeService(f.client, null, () => hostedTestOwner(f.client)), invocations: Array<{ method: string; args: unknown[] }> = [], signals: AbortSignal[] = []
- const port = {
-  call: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
-   const decoded = JSON.parse(JSON.stringify(params)); if (method === 'runtime.invoke') { invocations.push(decoded.invocation); if (options?.signal) signals.push(options.signal) }
-   return JSON.parse(JSON.stringify(await service.call(method, decoded, options ?? {})))
-  },
-  subscribe: async (method: string, params: unknown, handlers: { onInitial(value: unknown): void; onEvent(value: unknown): void; signal?: AbortSignal }) => {
-   const stream = await service.subscribe(method, params, event => handlers.onEvent(JSON.parse(JSON.stringify(event))), handlers.signal ? { signal: handlers.signal } : {})
-   handlers.onInitial(JSON.parse(JSON.stringify(stream.initial))); await stream.start?.(); return { dispose: async () => await stream.dispose() }
-  }
- } as unknown as AgentMuxHostedRpcPort
- const borrowed = await connectHostedAgentMux({ rpc: port })
- try {
-  const page = await borrowed.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })
-  expect(page.source.nativeSessionId).toBe(NATIVE)
-  const controller = new AbortController(), provider = strictNativeProvider(f.client), original = provider.discoverNativeSession!
-  let began!: () => void, release!: () => void
-  const entered = new Promise<void>(resolve => { began = resolve }), hold = new Promise<void>(resolve => { release = resolve })
-  vi.spyOn(provider, 'discoverNativeSession').mockImplementationOnce(async context => { began(); await hold; return original(context) })
-  const reading = borrowed.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true, signal: controller.signal })
-  await entered; controller.abort(new Error('Only the original bounded reader'))
-  release(); await expect(reading).rejects.toThrow('Only the original bounded reader')
-  expect(signals).toEqual([controller.signal])
-  const wire = invocations.filter(invocation => invocation.method === 'sessionHistoryPage')
-  expect(wire).toHaveLength(2); expect(wire[1]!.args[1]).toMatchObject({ requireCurrentSource: true, refreshNativeSource: true })
-  expect(wire[1]!.args[1]).not.toHaveProperty('signal')
-  expect((await borrowed.sessionHistoryPage(SID, f.options)).source.nativeSessionId).toBe(NATIVE)
-  expect((await f.kernel.status(RUN)).state.type).toBe('running')
- } finally { await borrowed.dispose(); await service.dispose() }
-})
-
 it('retains explicit resume targets across current native history refresh and observation',async()=>{
  for(const provenance of ['semantic-resume-target','reopenedFrom'] as const){
   const f=await fixture(),old=(await loadAgentSessions(f.store))[0]!
@@ -256,33 +161,6 @@ it('keeps no-observer explicit-current read available through operation-local wi
  const os=vi.spyOn(runner,'runProcess')
  expect((await succeeds(f.read())).source.nativeSessionId).toBe('retained-old')
  expect(os).not.toHaveBeenCalled()
-})
-
-it('keeps a confirmed source readable after real durable pre-replacement EIO without publishing its locator', async () => {
- const f = await fixture(), statePath = join(f.root, 'sessions.json'), before = await readFile(statePath)
- const actualSave = f.store.compareAndSwap.bind(f.store), failures: unknown[] = []
- vi.spyOn(f.store, 'compareAndSwap').mockImplementation(async (...args) => {
-  try { return await actualSave(...args) } catch (error) { failures.push(error); throw error }
- })
- durableFailure.path = statePath
- const page = await succeeds(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
- expect(page.source.nativeSessionId).toBe(NATIVE)
- expect(page.items[2]?.id).toBe('final-1')
- expect(durableFailure.syncs).toBe(1)
- expect(failures).toHaveLength(1)
- expect(failures[0]).toBeInstanceOf(DurableWriteError)
- expect(failures[0]).toMatchObject({ phase: 'before-replace', cause: { code: 'EIO' } })
- expect(await readFile(statePath)).toEqual(before)
- expect((await readdir(f.root)).filter(name => name.startsWith('sessions.json.') && name.endsWith('.tmp'))).toEqual([])
- expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe('retained-old')
- expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED')).toBe(true)
- durableFailure.path = null
- expect((await f.read()).source.nativeSessionId).toBe('retained-old')
- vi.spyOn(f.kernel, 'identity').mockReturnValue({ daemonInstanceId: 'private-durable-reader' } as ReturnType<CtxmuxRunAdapter['identity']>)
- const input = vi.spyOn(f.kernel, 'input').mockResolvedValue({ run: { ...f.run, acceptedInputBytes: 1 }, appliedByteRange: { startByte: 0, endByte: 1 } } as Awaited<ReturnType<CtxmuxRunAdapter['input']>>)
- await expect(f.client.writeAgent({ agentSessionId: SID, expectedRun: f.session.run, source: 'user', data: 'x' })).resolves.toMatchObject({ appliedByteRange: { startByte: 0, endByte: 1 } })
- expect(input).toHaveBeenCalledOnce()
- expect(await readFile(statePath)).toEqual(before)
 })
 
 it('never discovers again on ordinary current Pages or opaque earlier pages after durable acquisition',async()=>{
@@ -509,169 +387,4 @@ it('invalidates the original temporary observation after durable B then durable 
   expect(page.items[0]?.id).toBe('old-final')
   expect(changes.some(event => event.kind === 'unavailable' && event.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')).toBe(true)
   temporaryB.dispose(); durableB.dispose(); currentA.dispose()
-})
-
-async function sharedFixture(provider?: AgentProvider) {
-  const f = await fixture(provider)
-  const owner: AgentMuxStoredAgentSession = { ...f.session, agentSessionId: 'original-native-owner',
-    run: { runId: 'original-owner-run' }, hookBindingId: 'original-owner-binding', hookToken: 'original-owner-token',
-    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: NATIVE, transcriptPath: f.files[0]! } }
-  await f.store.compareAndSwap(null, owner)
-  const registry = Reflect.get(f.client, 'registry') as { load(host: string): Promise<void>; resolve: (lookup: unknown) => AgentMuxStoredAgentSession }
-  await registry.load('local')
-  const bytes = await readFile(join(f.root, 'sessions.json'))
-  const actualSave = f.store.compareAndSwap.bind(f.store)
-  const writes = vi.spyOn(f.store, 'compareAndSwap')
-  return { ...f, owner, registry, bytes, actualSave, writes }
-}
-
-it('preserves an explicit target when the observed source already belongs to another Session', async () => {
- for (const provenance of ['semantic-resume-target', 'reopenedFrom'] as const) {
-  const f = await sharedFixture(), old = (await loadAgentSessions(f.store)).find(value => value.agentSessionId === SID)!
-  const target: AgentMuxStoredAgentSession = { ...old, ...(provenance === 'semantic-resume-target'
-   ? { nativeBinding: { source: 'semantic-resume-target' as const, run: { ...old.run }, observedAt: 1 } }
-   : { reopenedFrom: { run: { runId: 'retired-explicit-target' }, source: 'user' as const, observedAt: 1 } }) }
-  await f.actualSave(old, target); await f.client.refreshAgentSession(SID, target.run)
-  const before = parseRpcAgentSession(f.client.agentSession(SID)), ownerBefore = f.client.agentSession(f.owner.agentSessionId)
-  const ownerStoredBefore = (await loadAgentSessions(f.store)).find(value => value.agentSessionId === f.owner.agentSessionId)!
-  const page = await succeeds(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
-  expect(page.source.nativeSessionId).toBe('retained-old')
-  expect(page.items.map(item => item.id)).toEqual(['old-final'])
-  await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true }))
-   .rejects.toMatchObject({ code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' })
-  const observer = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
-  expect(observer.source).toEqual(page.source)
-  expect((await f.read()).source).toEqual(page.source); observer.dispose()
-  const after = parseRpcAgentSession(f.client.agentSession(SID))
-  expect(after.nativeHandle).toEqual(before.nativeHandle)
-  expect(after.nativeBinding).toEqual(before.nativeBinding)
-  expect(after.reopenedFrom).toEqual(before.reopenedFrom)
-  expect(after.pendingInteraction).toEqual(before.pendingInteraction)
-  expect(after.observedNativeHandle).toEqual(f.owner.nativeHandle)
-  expect(f.client.agentSession(f.owner.agentSessionId)).toEqual(ownerBefore)
-  const stored = await loadAgentSessions(f.store)
-  expect(stored.find(value => value.agentSessionId === SID)?.observedNativeHandle).toEqual(f.owner.nativeHandle)
-  expect(stored.find(value => value.agentSessionId === f.owner.agentSessionId)).toEqual(ownerStoredBefore)
-  expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED' && event.message.includes('explicit semantic resume target'))).toBe(true)
-  vi.spyOn(f.kernel, 'identity').mockReturnValue({ daemonInstanceId: 'private-shared-target' } as ReturnType<CtxmuxRunAdapter['identity']>)
-  const input = vi.spyOn(f.kernel, 'input').mockResolvedValue({ run: { ...f.run, acceptedInputBytes: 1 }, appliedByteRange: { startByte: 0, endByte: 1 } } as Awaited<ReturnType<CtxmuxRunAdapter['input']>>)
-  await expect(f.client.writeAgent({ agentSessionId: SID, expectedRun: target.run, source: 'user', data: 'x' })).resolves.toMatchObject({ appliedByteRange: { startByte: 0, endByte: 1 } })
-  expect(input).toHaveBeenCalledOnce()
-  expect(f.client.agentSession(SID).run).toEqual(before.run)
-  expect(f.client.agentSession(SID).nativeHandle).toEqual(before.nativeHandle)
- }
-})
-
-it('reads shared current native records through the existing observation without taking either durable identity', async () => {
-  const f = await sharedFixture(), changes: Array<{ kind: string }> = []
-  const observer = await succeeds(f.client.observeSessionHistory(SID, value => changes.push(value), f.options))
-  const page = await succeeds(f.read())
-  expect(page.source).toEqual(observer.source)
-  expect(page.source.nativeSessionId).toBe(NATIVE)
-  expect(page.items.map(item => item.id)).toEqual(['user-1', 'progress-1', 'final-1', 'user-2'])
-  expect(page.items[2]!.contentParts).toEqual([{ kind: 'text', text: BODY }])
-  expect(f.writes).not.toHaveBeenCalled()
-  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(f.bytes)
-  expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe('retained-old')
-  expect(f.client.agentSession(f.owner.agentSessionId).nativeHandle?.sessionId).toBe(NATIVE)
-  expect(f.status.mock.calls.every(([id]) => id === RUN)).toBe(true)
-  expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED')).toBe(true)
-  await appendFile(f.files[0]!, '{"type":"event_msg"}\n')
-  await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0))
-  expect(changes[0]!.kind).toBe('invalidated')
-  expect((await succeeds(f.read())).source).toEqual(observer.source)
-  observer.dispose()
-  expect((await succeeds(f.read())).items[0]!.id).toBe('old-final')
-  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(f.bytes)
-})
-
-it('reads an explicitly current shared Page without registering or persisting another identity', async () => {
-  const f = await sharedFixture()
-  const page = await succeeds(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
-  expect(page.source.nativeSessionId).toBe(NATIVE)
-  expect(page.items[2]!.id).toBe('final-1')
-  expect(f.writes).not.toHaveBeenCalled()
-  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(f.bytes)
-})
-
-it('cross-checks an indexed shared owner against its exact durable identity', async () => {
-  const f = await sharedFixture(), resolve = f.registry.resolve.bind(f.registry)
-  vi.spyOn(f.registry, 'resolve').mockImplementation(lookup => ({ ...resolve(lookup), agentSessionId: 'different-index-owner' }))
-  await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
-    .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
-  expect(f.writes).not.toHaveBeenCalled()
-})
-
-for (const change of ['foreign-run', 'foreign-handle', 'own-run', 'own-handle'] as const) {
-  it(`rejects shared reading after ${change} changes without clearing either Session`, async () => {
-    const f = await sharedFixture(), observer = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
-    const id = change.startsWith('foreign') ? f.owner.agentSessionId : SID
-    const old = (await loadAgentSessions(f.store)).find(item => item.agentSessionId === id)!
-    await f.actualSave(old, { ...old, ...(change.endsWith('run') ? { run: { runId: 'changed-run' } }
-      : { nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'changed-native', transcriptPath: f.oldFile } }) })
-    await expect(f.read()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
-    expect((await loadAgentSessions(f.store)).map(item => item.agentSessionId).sort()).toEqual([SID, f.owner.agentSessionId].sort())
-    observer.dispose()
-  })
-}
-
-it('does not promote a borrowed source when another operation moves durable bindings to that same handle', async () => {
-  const f = await sharedFixture(), observer = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
-  await f.actualSave(f.owner, { ...f.owner, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'owner-moved-away', transcriptPath: f.oldFile } })
-  const own = (await loadAgentSessions(f.store)).find(item => item.agentSessionId === SID)!
-  await f.actualSave(own, { ...own, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: NATIVE, transcriptPath: f.files[0]! } })
-  await expect(f.read()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
-  observer.dispose()
-})
-
-async function sharedManualObservation() {
-  const codex = new AgentProviderRegistry().get('codex')
-  let changed: NonNullable<Parameters<NonNullable<AgentProvider['observeSessionHistory']>>[0]['onChange']> | undefined
-  let source: { providerId: string; nativeSessionId: string } | undefined
-  const provider: AgentProvider = { ...codex, async observeSessionHistory(context) {
-    changed = context.onChange; source = context.source
-    return { source: context.source, dispose() {} }
-  } }
-  const f = await sharedFixture(provider)
-  const changes: Array<{ kind: string; code?: string }> = []
-  const observer = await succeeds(f.client.observeSessionHistory(SID, value => changes.push(value), f.options))
-  return { ...f, changes, observer, invalidate: () => changed!({ kind: 'invalidated', source: source! }) }
-}
-
-it('verifies the current Run before publishing a shared-source invalidation', async () => {
-  const f = await sharedManualObservation()
-  f.status.mockResolvedValue({ ...f.run, pid: f.processId + 1 } as Awaited<ReturnType<CtxmuxRunAdapter['status']>>)
-  f.invalidate()
-  await vi.waitFor(() => expect(f.changes.length).toBeGreaterThan(0))
-  expect(f.changes).toEqual([expect.objectContaining({ kind: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })])
-  f.observer.dispose()
-})
-
-it('drops an invalidation whose source validation finishes after its Consumer releases the observation', async () => {
-  const f = await sharedManualObservation()
-  let release!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  f.status.mockImplementation(async () => { await gate; return f.run as Awaited<ReturnType<CtxmuxRunAdapter['status']>> })
-  try {
-    f.invalidate()
-    await new Promise(resolve => setImmediate(resolve))
-    expect(f.changes).toEqual([])
-    f.observer.dispose()
-  } finally { release() }
-  await new Promise(resolve => setTimeout(resolve, 30))
-  expect(f.changes).toEqual([])
-})
-
-it('coalesces a burst into one pending shared-source validation and preserves the acquisition notification', async () => {
-  const codex = new AgentProviderRegistry().get('codex')
-  const provider: AgentProvider = { ...codex, async observeSessionHistory(context) {
-    for (let i = 0; i < 12; i++) context.onChange({ kind: 'invalidated', source: context.source })
-    return { source: context.source, dispose() {} }
-  } }
-  const f = await sharedFixture(provider), changes: Array<{ kind: string }> = []
-  const observer = await succeeds(f.client.observeSessionHistory(SID, value => changes.push(value), f.options))
-  await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0))
-  expect(changes).toEqual([{ kind: 'invalidated', source: observer.source, agentSessionId: SID }])
-  expect(f.writes).not.toHaveBeenCalled()
-  observer.dispose()
 })

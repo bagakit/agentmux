@@ -114,7 +114,7 @@ export function classifyContinuityFailure(
     case 'native-handle-unavailable':
       return {
         title: 'No resume token for this Agent',
-        reason: 'Core does not currently have a confirmed native identity for this Agent Session, so the Provider was not invoked for this restore. The original Session and saved work remain. Other Agents are unaffected.',
+        reason: 'This Agent Session never recorded a verified Provider handle, so there is nothing to resume from. Other Agents are unaffected.',
         remedy: { kind: 'start-new' },
         actionLabel: 'Start a new Agent'
       }

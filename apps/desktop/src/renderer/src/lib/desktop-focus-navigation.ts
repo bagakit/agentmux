@@ -5,7 +5,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { selectSpatialCatalog, spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { projectWorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { projectWorkbenchProjection } from './workbench-projection'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 
@@ -20,12 +20,6 @@ export type DesktopSelectionState = {
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   tabs: Readonly<Record<string, WorkbenchTab>>
   layouts: Readonly<Record<string, WorkspaceLayout>>
-}
-/** An exact Region address is a view of the existing choice, never a second owner. */
-export function mainRegionReference(choice: AgentMuxDesktopSpaceSelection | null): WorkbenchProjectionSelection | null {
-  return choice?.groupId && choice.tabId && choice.regionId ? {
-    displayWorkspaceId: choice.workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId
-  } : null
 }
 export class DesktopFocusFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }
@@ -109,15 +103,22 @@ export function projectWorkbenchSpaceSelection(layout: WorkspaceLayout | undefin
     return layout ? { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], confirmed: true }
       : { layout: null, issues: ['The original Category workface is still restoring.'], confirmed: false }
   }
+  // A Tab can have a confirmed display occurrence before its Zone membership is known.
+  // Display that exact entity; neither resource discovery nor presentation invents a Zone.
   if (choice.spaceId === null && choice.zoneId === null && choice.tabId) {
     const entity = catalog.tabs.find(tab => tab.tabId === choice.tabId)
     const matching = catalog.locations.filter(location => location.spaceId === null && location.zoneId === null &&
-      location.displayWorkspaceId === choice.workspaceId && location.groupId === choice.groupId && location.tabId === choice.tabId && location.regionId === choice.regionId)
+      location.displayWorkspaceId === choice.workspaceId && location.groupId === choice.groupId &&
+      location.tabId === choice.tabId && location.regionId === choice.regionId)
     if (entity?.zoneId === null && layout && matching.length === 1 && choice.groupId && choice.regionId) {
-      const projected = projectWorkbenchProjection(layout, tabs, { entity: { kind: 'tab', tabId: choice.tabId },
-        presentationId: 'space-workbench', displayWorkspaceId: choice.workspaceId, catalog, selectionMode: 'occurrence',
-        selection: [{ displayWorkspaceId: choice.workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId }], onSelect: () => {} })
-      return { layout: projected.layout, issues: projected.issues, confirmed: projected.selection.length === 1 && projected.layout !== null }
+      const projected = projectWorkbenchProjection(layout, tabs, {
+        entity: { kind: 'tab', tabId: choice.tabId }, presentationId: 'space-workbench',
+        displayWorkspaceId: choice.workspaceId, catalog, selectionMode: 'occurrence',
+        selection: [{ displayWorkspaceId: choice.workspaceId, groupId: choice.groupId,
+          tabId: choice.tabId, regionId: choice.regionId }], onSelect: () => {}
+      })
+      return { layout: projected.layout, issues: projected.issues,
+        confirmed: projected.selection.length === 1 && projected.layout !== null }
     }
   }
   const zone = catalog.zones.find(zone => zone.zoneId === choice.zoneId)
@@ -125,11 +126,7 @@ export function projectWorkbenchSpaceSelection(layout: WorkspaceLayout | undefin
     binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId))) return { layout: null, confirmed: false,
       issues: ['The selected object or its original Zone position is not confirmed. Its workface and exact reference are kept.'] }
   const members = catalog.tabs.filter(tab => tab.zoneId === choice.zoneId)
-  if (!members.length && choice.tabId === null) {
-    if (zone.kind === 'unknown') return { layout: null, confirmed: false,
-      issues: [zone.issue ?? 'The original Zone resource is still unconfirmed. Its reference is kept.'] }
-    return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], confirmed: true }
-  }
+  if (!members.length && choice.tabId === null) return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], confirmed: true }
   const projected = projectWorkbenchProjection(layout, tabs, {
     entity: { kind: 'zone', zoneId: zone.zoneId }, presentationId: 'space-workbench', displayWorkspaceId: choice.workspaceId,
     catalog, selection: choice.tabId && choice.groupId && choice.regionId ? [{ displayWorkspaceId: choice.workspaceId,
@@ -149,21 +146,8 @@ function reject(code: string, message: string, candidates?: AgentMuxSpaceSelecto
 }
 
 /** Resolve the durable placement, never execution cwd or the first unrelated Tab/Agent. */
-export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Partial<Pick<SpatialWorkbench, 'spaceZoneBindings' | 'config' | 'topicCategories'>>, catalog: AgentMuxSpaceCatalog,
+export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Partial<Pick<SpatialWorkbench, 'spaceZoneBindings'>>, catalog: AgentMuxSpaceCatalog,
   target: AgentMuxSpaceSelector): AgentMuxDesktopSpaceSelection {
-  const category = target.spaceId && !target.zoneId && !target.tabId && !target.regionId && !target.groupId
-    ? state.topicCategories?.find(category => category.spaceId === target.spaceId) : undefined
-  if (category) {
-    const original = catalog.spaces.find(space => space.spaceId === category.spaceId)
-    const workspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === category.hostId)
-    if (!original || original.kind !== 'container' || original.hostId !== category.hostId || original.directoryPath !== category.directoryPath || !workspace) {
-      reject('SPACE_RESOURCE_UNKNOWN', 'The original Category resource is not currently confirmed.')
-    }
-    if (target.displayWorkspaceId && target.displayWorkspaceId !== workspace.id) {
-      reject('SPACE_LOCATION_REQUIRED', 'The requested display Workspace is not the original Category context.', [{ spaceId: category.spaceId, displayWorkspaceId: workspace.id }])
-    }
-    return { spaceId: category.spaceId, zoneId: null, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null }
-  }
   const selected = selectSpatialCatalog(catalog, {
     ...(target.spaceId ? { spaceId: target.spaceId } : {}), ...(target.zoneId ? { zoneId: target.zoneId } : {}),
     ...(target.tabId ? { tabId: target.tabId } : {}), ...(target.regionId ? { regionId: target.regionId } : {}),
@@ -226,26 +210,19 @@ export function desktopSelection(state: DesktopSelectionState, catalog: AgentMux
 export function desktopSpaceSelectionAfterClose(choice: AgentMuxDesktopSpaceSelection | null,
   topology: Pick<DesktopSelectionState, 'tabs' | 'layouts'>,
   closed: { workspaceId: string; tabId: string; groupId?: string; regionId?: string }): AgentMuxDesktopSpaceSelection | null {
-  if (!choice || choice.tabId !== closed.tabId ||
-    (closed.regionId && choice.regionId !== closed.regionId)) return choice
+  if (!choice || choice.workspaceId !== closed.workspaceId || choice.tabId !== closed.tabId ||
+    (closed.groupId && choice.groupId !== closed.groupId) || (closed.regionId && choice.regionId !== closed.regionId)) return choice
   const layout = topology.layouts[choice.workspaceId]
   const previousGroup = layout?.groups.find(group => group.id === choice.groupId)
   const previousTab = choice.tabId ? topology.tabs[choice.tabId] : undefined
   if (previousGroup?.tabOrder.includes(choice.tabId!) && previousTab &&
     (!choice.regionId || previousTab.regions[choice.regionId])) return choice
   const parent = { ...choice, tabId: null, groupId: null, regionId: null }
-  // Region/entity removal applies to every display occurrence. A placement close
-  // only affects its addressed Group; another surviving display keeps its choice.
-  if (!closed.regionId && previousTab && (choice.workspaceId !== closed.workspaceId ||
-    (closed.groupId && choice.groupId !== closed.groupId))) return choice
-  const successor = closed.regionId && previousGroup?.tabOrder.includes(choice.tabId!)
-    ? previousTab
-    : previousGroup?.activeTabId ? topology.tabs[previousGroup.activeTabId] : undefined
-  if (!previousGroup || !successor || (successor.id !== choice.tabId &&
-    (!choice.zoneId || successor.space?.zoneId !== choice.zoneId))) return parent
-  const regionId = successor.layout.activeRegionId
-  if (!successor.regions[regionId]) return parent
-  return { ...choice, tabId: successor.id, groupId: previousGroup.id, regionId }
+  const activeGroup = layout?.groups.find(group => group.id === layout.activeGroupId)
+  const activeTab = activeGroup?.activeTabId ? topology.tabs[activeGroup.activeTabId] : undefined
+  if (!activeGroup || !activeTab || !choice.zoneId || activeTab.space?.zoneId !== choice.zoneId) return parent
+  return { ...choice, tabId: activeTab.id, groupId: activeGroup.id,
+    regionId: activeTab.regions[activeTab.layout.activeRegionId] ? activeTab.layout.activeRegionId : null }
 }
 
 /** Missing discovery/Runtime snapshots retain this exact durable choice; they never select a peer. */

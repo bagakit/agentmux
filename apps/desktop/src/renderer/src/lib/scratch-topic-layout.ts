@@ -298,7 +298,16 @@ export function openTopicWorkSurfaces(
     for (const tabId of group.tabOrder) {
       const tab = tabs[tabId]
       if (!tab?.topicId) continue
-      const cells = topicTabRegionCells(tab)
+      const cells = workbenchRegionBounds(tab.layout.root).map((cell) => {
+        const surface = tab.regions[cell.regionId]
+        return surface
+          ? {
+              ...cell,
+              surfaceKind: surface.kind,
+              ...(surface.kind === 'agent' ? { agentSessionId: surface.sessionId } : {})
+            }
+          : cell
+      })
       const existing = byTopic.get(tab.topicId) ?? []
       existing.push({ tabId, active: group.activeTabId === tabId, cells })
       byTopic.set(tab.topicId, existing)
@@ -316,19 +325,4 @@ export function openTopicRegionMosaics(
     const active = entries.find((entry) => entry.active) ?? entries[0]
     return [topicId, active?.cells.map(({ surfaceKind: _surfaceKind, ...cell }) => cell) ?? []] as const
   }))
-}
-
-const tabCells = new WeakMap<WorkbenchTab, readonly TopicRegionCell[]>()
-
-/** Region geometry changes with the original Tab, never with selection or Runtime output. */
-export function topicTabRegionCells(tab: WorkbenchTab): readonly TopicRegionCell[] {
-  const cached = tabCells.get(tab)
-  if (cached) return cached
-  const cells = workbenchRegionBounds(tab.layout.root).map(cell => {
-    const surface = tab.regions[cell.regionId]
-    return surface ? { ...cell, surfaceKind: surface.kind,
-      ...(surface.kind === 'agent' ? { agentSessionId: surface.sessionId } : {}) } : cell
-  })
-  tabCells.set(tab, cells)
-  return cells
 }

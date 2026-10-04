@@ -1,20 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { ZodError } from 'zod'
-import { app } from 'electron'
-import { parseToolkitConfigurationFields, type ToolkitRequest, type ToolkitResult,
-  type ToolkitToolConfiguration, type ToolkitConfigurationFields } from '@agentmux/core/control'
+import { parseToolkitToolFields, type ToolkitRequest, type ToolkitResult,
+  type ToolkitToolDefinition, type ToolkitToolFields } from '@agentmux/core/control'
 import type { AppConfig } from '../shared/contracts.js'
 import { MOBILE_CONNECTION_TOOL_ID } from '../shared/toolkit-preferences.js'
 import { ConfigConflict, configValuesEqual } from '../shared/config-edit.js'
 import { toolkitToolSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
 
-export function toolkitTools(config: AppConfig): ToolkitToolConfiguration[] { return config.toolkit?.tools ?? [] }
-export function toolkitFields({ id: _id, revision: _revision, ...fields }: ToolkitToolConfiguration): ToolkitConfigurationFields {
-  return 'kind' in fields ? fields : { ...fields, actions: fields.actions ?? [] }
+export function toolkitTools(config: AppConfig): ToolkitToolDefinition[] { return config.toolkit?.tools ?? [] }
+export function toolkitFields({ id: _id, revision: _revision, ...fields }: ToolkitToolDefinition): ToolkitToolFields {
+  return { ...fields, actions: fields.actions ?? [] }
 }
-export function findToolkitTool(config: AppConfig, id: string): ToolkitToolConfiguration {
+export function findToolkitTool(config: AppConfig, id: string): ToolkitToolDefinition {
   return toolkitTools(config).find(tool => tool.id === id) ?? fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${id}” does not exist.`)
 }
 function fail(code: string, message: string): never { throw new AgentMuxError(message, code) }
@@ -40,32 +39,30 @@ export async function executeToolkitConfig(request: Extract<ToolkitRequest,
   let changed = false
   const saved = await owner.update(current => {
     const tools = toolkitTools(current), old = tools.find(tool => tool.id === request.toolId)
-    let next: ToolkitToolConfiguration | undefined
+    let next: ToolkitToolDefinition | undefined
     if (request.operation === 'toolkit.add') {
       if (old) fail('SETTING_RESOURCE_EXISTS', `Tool “${request.toolId}” already exists.`)
-      const value = 'kind' in request.value ? { ...request.value, workspacePath: request.value.workspacePath ?? app.getPath('home') } : request.value
-      const fields = parseToolkitConfigurationFields(value, false, 'INVALID_SETTING_VALUE') as ToolkitConfigurationFields
+      const fields = parseToolkitToolFields(request.value, false, 'INVALID_SETTING_VALUE') as ToolkitToolFields
       next = { id: request.toolId, revision: randomUUID(), ...fields }
       changed = true
     } else {
       if (!old) fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${request.toolId}” does not exist.`)
       const fields = toolkitFields(old)
       if (request.operation === 'toolkit.remove') {
-        if (request.expected !== undefined && !configValuesEqual(fields, ('kind' in request.expected ? request.expected : { ...request.expected, actions: request.expected.actions ?? [] }))) {
+        if (request.expected !== undefined && !configValuesEqual(fields, { ...request.expected, actions: request.expected.actions ?? [] })) {
           throw new ConfigConflict(`toolkit.tools.${request.toolId}`)
         }
         changed = true
       } else {
-        const changes = parseToolkitConfigurationFields(request.changes, true, 'INVALID_SETTING_VALUE')
-        const expected = request.expected === undefined ? undefined : parseToolkitConfigurationFields(request.expected, true, 'INVALID_SETTING_VALUE')
-        for (const key of Object.keys(changes)) {
+        const changes = parseToolkitToolFields(request.changes, true, 'INVALID_SETTING_VALUE')
+        const expected = request.expected === undefined ? undefined : parseToolkitToolFields(request.expected, true, 'INVALID_SETTING_VALUE')
+        for (const key of Object.keys(changes) as (keyof ToolkitToolFields)[]) {
           if (expected && !Object.hasOwn(expected, key)) fail('INVALID_SETTING_VALUE', 'Expected must cover every changed field.')
-          if (expected && !configValuesEqual(Reflect.get(fields, key), Reflect.get(changes, key)) && !configValuesEqual(Reflect.get(fields, key), Reflect.get(expected, key))) {
+          if (expected && !configValuesEqual(fields[key], changes[key]) && !configValuesEqual(fields[key], expected[key])) {
             throw new ConfigConflict(`toolkit.tools.${request.toolId}.${key}`)
           }
         }
-        const requested = parseToolkitConfigurationFields({ ...fields, ...changes }, false, 'INVALID_SETTING_VALUE') as ToolkitConfigurationFields
-        if (('kind' in fields) !== ('kind' in requested)) fail('INVALID_SETTING_VALUE', 'Tool source kind cannot be changed by a preference edit.')
+        const requested = parseToolkitToolFields({ ...fields, ...changes }, false, 'INVALID_SETTING_VALUE') as ToolkitToolFields
         changed = !configValuesEqual(fields, requested)
         next = changed ? { ...old, ...requested } : old
       }

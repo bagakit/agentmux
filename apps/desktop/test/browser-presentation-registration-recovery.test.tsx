@@ -2,7 +2,6 @@
 import { act, createElement, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { previewFrame, previewMedia } from './helpers/browser-preview-media'
 
 const bridge = vi.hoisted(() => ({
   registerPresentation: vi.fn(), removePresentation: vi.fn(), updatePresentation: vi.fn(),
@@ -10,10 +9,6 @@ const bridge = vi.hoisted(() => ({
   onPresentationEvent: vi.fn(), getZoomFactor: vi.fn()
 }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: bridge, ui: bridge } }))
-vi.mock('../src/renderer/src/store', async () => {
-  const { create } = await import('zustand')
-  return { useAppStore: create(() => ({ noticeReadReceipts: {}, acquireNativeSurfaceOverlay() {}, releaseNativeSurfaceOverlay() {} })) }
-})
 // Consume the actual persistent disclosure; a null mock would hide the source failure.
 import { BrowserPresentationStage, useBrowserPresentationCapture } from '../src/renderer/src/components/BrowserPresentationStage'
 
@@ -41,18 +36,14 @@ let originalRect: typeof HTMLElement.prototype.getBoundingClientRect
 let mediaDescriptor: PropertyDescriptor | undefined
 let stageWidth: number
 const stopped = vi.fn()
-async function render(next: Partial<StageProps> = {}, advanceDocumentTask = true) {
+async function render(next: Partial<StageProps> = {}) {
   props = { ...props, ...next }
   await act(async () => root.render(createElement(LiveStage, props)))
-  if (advanceDocumentTask) await documentTask()
 }
 async function settle() { await act(async () => {}) }
-async function documentTask() { await act(async () => { await vi.advanceTimersByTimeAsync(0) }) }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.clearAllMocks()
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-  vi.spyOn(document, 'readyState', 'get').mockReturnValue('complete')
   bridge.registerPresentation.mockReset().mockResolvedValue({ leaseId: 'actual-lease' })
   bridge.removePresentation.mockResolvedValue(undefined)
   bridge.updatePresentation.mockResolvedValue(undefined)
@@ -64,12 +55,12 @@ beforeEach(() => {
   mediaDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
     getDisplayMedia: vi.fn(async () => {
-      const { track, stream } = previewMedia('track-one')
-      track.stop = stopped
+      const stream = new MediaStream()
+      Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'track-one', stop: stopped }] })
       return stream
     })
   } })
-  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function () { previewFrame(this); return Promise.resolve() })
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
   originalRect = HTMLElement.prototype.getBoundingClientRect
   stageWidth = 640
   HTMLElement.prototype.getBoundingClientRect = function () {
@@ -84,7 +75,7 @@ afterEach(async () => {
   HTMLElement.prototype.getBoundingClientRect = originalRect
   if (mediaDescriptor) Object.defineProperty(navigator, 'mediaDevices', mediaDescriptor)
   else delete (navigator as unknown as Record<string, unknown>).mediaDevices
-  vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
 it('reconnects the retained Stage after authoritative creation updates the same Browser identity', async () => {
@@ -235,7 +226,6 @@ it('coalesces pending initial input selection across stages sharing one original
         presentation: { ...presentation, occurrence: { ...presentation.occurrence, presentationId: 'presentation-two' } } }))
   }
   await act(async () => root.render(createElement(TwoStages)))
-  await documentTask()
   expect(bridge.registerPresentation).toHaveBeenCalledTimes(2)
   expect(bridge.activatePresentation).toHaveBeenCalledTimes(1)
   await act(async () => selection.resolve({ outcome: 'selected' }))
@@ -347,73 +337,4 @@ it('stops only its acquired stream when ready acknowledgement completes after ow
   expect(stopped).toHaveBeenCalledTimes(1)
   expect(bridge.ackPresentationCapture).toHaveBeenCalledWith('capture-one', { outcome: 'stopped', trackIds: ['track-one'] })
   expect(container.textContent).toBe('')
-})
-
-
-it('waits for the original document and one task before same-navigation registration', async () => {
-  const ready = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
-  await render({ navigationId: 'same-original-navigation' }, false)
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  expect(container.querySelector('[data-original-content]')).not.toBeNull()
-  ready.mockReturnValue('complete')
-  await act(async () => window.dispatchEvent(new Event('load')))
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
-  expect(bridge.activatePresentation.mock.calls).toEqual([['actual-lease', { kind: 'select', focus: 'preserve' }]])
-  expect(props.navigationId).toBe('same-original-navigation')
-})
-
-it('also yields one task for a completed hidden document without waiting for a frame', async () => {
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
-  await render({ navigationId: 'warm-original-navigation' }, false)
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
-  expect(bridge.armPresentationCapture).toHaveBeenCalledTimes(1)
-})
-
-it('cancels original document readiness on Stage unmount', async () => {
-  const removed=vi.spyOn(window,'removeEventListener')
-  const added=vi.spyOn(window,'addEventListener')
-  const ready = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
-  await render({}, false)
-  await act(async () => root.unmount())
-  root = createRoot(container)
-  const originalLoad=added.mock.calls.find(row=>row[0]==='load')![1]
-  expect(removed.mock.calls.some(row=>row[0]==='load'&&row[1]===originalLoad)).toBe(true)
-  ready.mockReturnValue('complete')
-  await act(async () => window.dispatchEvent(new Event('load')))
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  expect(bridge.activatePresentation).toHaveBeenCalledTimes(0)
-})
-
-it('cancels the scheduled document task on Stage unmount', async () => {
-  await render({}, false)
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  await act(async () => root.unmount())
-  root = createRoot(container)
-  expect(vi.getTimerCount()).toBe(0)
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  expect(bridge.activatePresentation).toHaveBeenCalledTimes(0)
-})
-
-it('reads latest geometry and input intent when document readiness crosses an update', async () => {
-  const ready = vi.spyOn(document, 'readyState', 'get').mockReturnValue('interactive')
-  await render({ inputSelected: false, navigationId: 'same-original-navigation' }, false)
-  stageWidth = 440
-  await render({ inputSelected: true }, false)
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(0)
-  ready.mockReturnValue('complete')
-  await act(async () => window.dispatchEvent(new Event('load')))
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
-  expect(bridge.registerPresentation.mock.calls[0]![0].geometry.bounds.width).toBe(440)
-  expect(bridge.activatePresentation.mock.calls).toEqual([['actual-lease', { kind: 'select', focus: 'preserve' }]])
-  await act(async () => window.dispatchEvent(new Event('load')))
-  await documentTask()
-  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
 })

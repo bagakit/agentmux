@@ -51,22 +51,16 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     if (notice) notices.push({ id, occurrence: JSON.stringify(identity), notice,
       ...(observedAt === undefined ? {} : { observedAt }) })
   }
-  const problem = queue.find(entry => !entry.archived && (entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
-    !steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState)))
+  const problem = queue.find(entry => entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
+    !steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState))
   if (problem) notices.push({ id: 'queue', occurrence: JSON.stringify([...identity, problem.operationId]),
     notice: { kind: 'process-degraded', notice: {
       step: problem.status === 'restoring' && sendingId === problem.operationId
-        ? 'Restoring the Agent before execution'
-        : problem.errorCode === 'AGENT_PROMPT_PREPARATION_FAILED' ? 'Preparing this send did not complete'
-        : problem.promptCondition !== null ? 'The original message delivery is still unconfirmed'
-        : problem.awaitingExplicitSend ? 'The restored message waits for explicit Send'
-        : 'A queued message has not been sent',
+        ? 'Restoring the Agent before execution' : 'A queued message has not been sent',
       mode: errorIdentity(problem.error ?? (problem.status === 'restoring'
         ? 'Your message is kept while its Session is restored and the Run binding is saved.'
         : 'The bound Run is unavailable or changed. Its delivery result is unknown; it will not be replayed on another Run.')),
-      restore: problem.promptCondition !== null
-        ? 'Your original message and operation are kept. Inspect the original conversation and outbox before choosing Send; it will not be replayed automatically.'
-        : 'Your message is kept. Open the outbox to inspect, send, copy or edit it.'
+      restore: 'Your message is kept. Open the outbox to inspect, retry, copy or remove it.'
     } } })
   return notices
 }

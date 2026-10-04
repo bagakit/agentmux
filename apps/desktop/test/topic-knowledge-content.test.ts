@@ -7,12 +7,11 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, startHeadlessAgentMux, type ExecutionHost, type TopicKnowledgeWrite } from '@agentmux/core'
-import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { TopicKnowledgeOwner } from '../src/main/topic-knowledge'
 import { TopicSpatialOwner } from '../src/main/topic-spatial-owner'
-import { FileReadOwner } from '../src/main/file-read-owner'
 import { MOTE_SOUL_PATH, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../src/shared/scratch-topics'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import type { WorkspaceRecord } from '../src/shared/contracts'
@@ -44,10 +43,6 @@ async function fixture() {
   const owner = new TopicKnowledgeOwner(scratch, files, () => workspace)
   owner.setSpatialPort(new TopicSpatialOwner({ state, workspace: () => workspace, topics: () => owner.listTopicSnapshots(),
     categories: () => owner.listCategories(), ensureDefaultCategory: () => owner.ensureDefaultCategoryContent() }))
-  const publicFiles = new FileReadOwner({ files, workspace: id => id === workspace.id ? workspace : undefined,
-    topicForDirectory: (w, directory) => scratch.readForDirectory(w, directory),
-    catalog: async () => { const current = await state.read(); return current ? spatialCatalog(current.graph) : null } })
-  owner.setFileReadPort(publicFiles)
   const { topic } = await owner.call('topic.create', { topicId: 'view:knowledge', title: '招聘讨论' })
   const authored: TopicKnowledgeWrite = { topicId: topic.topicId, entryId: ENTRY, title: '结构化面试', content: '有来源的建议：采用结构化问题。',
     form: 'derived', certainty: 'proposal', scope: '工程岗位；原讨论涉及两轮面试。',
@@ -56,7 +51,7 @@ async function fixture() {
       { kind: 'note', noteId: 'original-note', blockId: 'source-block' }, { kind: 'survey', zoneId: 'original-survey', tabId: 'survey-chat', regionId: 'survey-thread' },
       { kind: 'space', zoneId: 'original-project-zone', tabId: 'project-chat', regionId: 'project-thread' },
       { kind: 'url', url: 'https://example.org/research' }], expectedRevision: null }
-  return { root, workspace, scratch, files, publicFiles, state, owner, topic, authored }
+  return { root, workspace, scratch, files, state, owner, topic, authored }
 }
 
 describe('Knowledge entries retain exact source identity through original file CAS', () => {
@@ -228,10 +223,7 @@ describe('Knowledge entries retain exact source identity through original file C
       expect(global.unavailable).toContainEqual(expect.objectContaining({ code: 'TOPIC_SCOPE_UNCONFIRMED' }))
       const globalCli = await runCompiledObjectCli(['topic', 'knowledge', 'search', '--query', 'source-block'], env)
       expect(globalCli.code, globalCli.stderr).toBe(0)
-      expect(JSON.parse(globalCli.stdout)).toMatchObject({ ok: true, operation: 'topic.knowledge.search', result: {
-        entries: global.entries, documents: global.documents, unavailable: global.unavailable,
-        observation: { record: { query: 'source-block', topicId: null, outcome: 'partial', counters: { entryMatches: 1 } } }
-      } })
+      expect(JSON.parse(globalCli.stdout)).toMatchObject({ ok: true, operation: 'topic.knowledge.search', result: global })
       expect(await f.state.read()).toEqual(originalState)
       expect(await readFile(join(privateDirectory, ENTRY + '.json'), 'utf8')).toBe(privateBytes)
       expect(await readFile(join(directory, 'topic.md'), 'utf8')).toBe(originalTopic)

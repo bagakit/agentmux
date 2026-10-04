@@ -290,9 +290,7 @@ app.whenReady().then(async () => {
       await until('window.remoteLiveReady() && window.remoteWritersSettled()', 20000)
       result.restoredWriterObservation = await win.webContents.executeJavaScript('({ agent: window.remoteTerminalObservation(), writers: window.terminals.map(item => ({ ...item.remoteProofMetrics })) })')
       await capture(`${phase}-owner-restored.png`)
-      result.archivedOriginalUnconfirmed = await win.webContents.executeJavaScript('window.remoteArchiveUnconfirmed()')
-      assert.equal(result.archivedOriginalUnconfirmed.entry.operationId, 'private-original-unconfirmed')
-      assert.equal(result.archivedOriginalUnconfirmed.entry.archived, true)
+      await win.webContents.executeJavaScript('window.remoteRemoveUnconfirmed(); true')
     }
     result.workbenchPaint = await win.webContents.executeJavaScript('window.remotePaintObservation()')
     await capture(`${phase}-workbench.png`)

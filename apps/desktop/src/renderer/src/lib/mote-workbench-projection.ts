@@ -29,19 +29,18 @@ export function moteWorkbenchProjection(catalog: AgentMuxSpaceCatalog | null, ta
   let reference = held ? catalog.locations.find(location => sameWorkbenchProjectionSelection(held, location) && location.tabId === tab.id)
     : held === undefined && choices.length === 1 ? choices[0] : undefined
   let followsCurrentSelection = false
-  if (entity && held?.tabId === tab.id && !Object.hasOwn(tab.regions, held.regionId) &&
+  if (zone && held?.tabId === tab.id && !Object.hasOwn(tab.regions, held.regionId) &&
     Object.hasOwn(tab.regions, tab.layout.activeRegionId) && workbenchDisplayReferenceMatches(layouts[held.displayWorkspaceId], held)) {
     const current = { ...held, regionId: tab.layout.activeRegionId }
     const locations = catalog.locations.filter(location => sameWorkbenchProjectionSelection(current, location))
     if (locations.length === 1) { reference = locations[0]; followsCurrentSelection = true }
   }
-  const unbound = entity?.zoneId === null && (!tab.space) && reference && catalog.locations.filter(location => sameWorkbenchProjectionSelection(reference!, location) && location.zoneId === null && location.spaceId === null).length === 1
-  if ((!zone && !unbound) || !reference || !tab.regions[reference.regionId] || !workbenchDisplayReferenceMatches(layouts[reference.displayWorkspaceId], reference)) return { ...retained, choices,
+  if (!zone || !reference || !tab.regions[reference.regionId] || !workbenchDisplayReferenceMatches(layouts[reference.displayWorkspaceId], reference)) return { ...retained, choices,
     issue: choices.length > 1 && held === undefined ? 'Choose where to continue this discussion. Every original location is kept.'
       : 'The exact discussion location is not confirmed. Its original content and reference are kept.' }
   return { catalog, retainedTabId: tab.id, choices,
     issue: followsCurrentSelection ? 'The previously selected Region is no longer in this Tab. Its current selection is available; choose a Region to confirm where to continue.' : null, projection: {
-    entity: zone ? { kind: 'zone', zoneId: zone.zoneId } : { kind: 'tab', tabId: tab.id },
+    entity: { kind: 'zone', zoneId: zone.zoneId },
     presentationId: PMO_FLOATING_TAB_SLOT_PREFIX.replace(/-slot$/, ''),
     displayWorkspaceId: reference.displayWorkspaceId, catalog,
     selectionMode: 'occurrence',

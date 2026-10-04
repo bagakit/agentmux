@@ -11,52 +11,34 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), exec = promisify(execFile), require = createRequire(import.meta.url)
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-const packages = ['core', 'demand', 'client-ui', 'layout', 'relay']
+const packages = ['core', 'demand', 'client-ui', 'layout']
 
 /** A new restart mode reuses the real harness; only its build tree is private. */
 export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
-  assert.ok(['pending-edit', 'steer-recovery', 'prompt-preparation-stage'].includes(mode), 'Only the owning private proof modes may use this build')
-  const steerRecovery = mode === 'steer-recovery', phaseCapture = mode === 'prompt-preparation-stage'
-  assert.ok(!phaseCapture || !arguments_.some(a => a === '--steer-recovery' || a === '--pending-edit'), 'Finite phase capture has a distinct scope')
-  assert.ok(!phaseCapture || arguments_.every(a => a === '--prompt-preparation-stage' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=') || a.startsWith('--prompt-preparation-stage-source-ref=')), 'Finite phase capture accepts only its bounded Source/receipt options')
+  assert.ok(['pending-edit', 'steer-recovery'].includes(mode), 'Only the owning private proof modes may use this build')
+  const steerRecovery = mode === 'steer-recovery'
   const diagnosticOnly = steerRecovery && arguments_.includes('--steer-recovery-diagnostic')
   const typedCrossCore = steerRecovery && arguments_.includes('--typed-response-cross-core')
   const typedFirstHook = steerRecovery && arguments_.includes('--typed-response-first-hook')
-  const startupFirstSend = steerRecovery && arguments_.includes('--startup-first-send')
-  const startupRestoredOnly = steerRecovery && arguments_.includes('--startup-restored-first-send')
-  const finalQualification = steerRecovery && (arguments_.includes('--steer-recovery-final') || !(diagnosticOnly || typedCrossCore || startupFirstSend || startupRestoredOnly))
-  const startupQualification = startupFirstSend || startupRestoredOnly
-  assert.ok(!(startupFirstSend && startupRestoredOnly), 'Startup proof triggers have distinct qualification scopes')
-  assert.ok(!finalQualification || !(startupQualification || diagnosticOnly || typedCrossCore), 'Final GUI qualification has a distinct Source and Native scope')
-  assert.ok(!startupQualification || !(diagnosticOnly || typedCrossCore), 'Startup first Send is a distinct Native qualification')
   assert.ok(!typedFirstHook || typedCrossCore, 'First-Hook qualification must use the two-Core Native mode')
   assert.ok(!(diagnosticOnly && typedCrossCore), 'Distinct bounded proof modes cannot be combined')
-  const environmentKey = phaseCapture ? 'AGENTMUX_PROMPT_PREPARATION_BUILD_RECEIPT' : steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
-  const worker = phaseCapture ? 'prompt-preparation-stage-native-proof.mjs' : steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
-  const resultField = phaseCapture ? 'promptPreparationStage' : finalQualification ? 'steerRecoveryFinal' : startupRestoredOnly ? 'startupRestoredFirstSend' : startupFirstSend ? 'startupFirstSend' : typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
-  const evidence = join(root, phaseCapture ? '.tmp/prompt-preparation-stage' : steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(globalThis.crypto.randomUUID()))
+  const environmentKey = steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
+  const worker = steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
+  const resultField = typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
+  const evidence = join(root, steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(globalThis.crypto.randomUUID()))
   // The inner real harness has Unix sockets below this tree. macOS's per-user
   // tmpdir prefix would exceed sockaddr_un's path limit after that nesting.
-  const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), phaseCapture ? 'amx-ps-' : steerRecovery ? 'amx-sr-' : 'amx-pe-')))
+  const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), steerRecovery ? 'amx-sr-' : 'amx-pe-')))
   await mkdir(evidence, { recursive: true })
   const requestedReceipt = arguments_.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
   const receiptPath = requestedReceipt ? resolve(root, requestedReceipt) : join(evidence, 'receipt.json')
   const buildReceiptPath = join(evidence, 'build.json')
   const sourceArchivePath = join(evidence, 'source.tar')
-  const requestedSourceRef = arguments_.find(value => value.startsWith('--' + mode + '-source-ref='))?.slice(('--' + mode + '-source-ref=').length) ?? (phaseCapture ? 'refs/heads/main' : undefined)
-  assert.ok(!phaseCapture || requestedSourceRef, 'Finite phase capture requires immutable complete SourceRef')
-  assert.ok(!finalQualification || requestedSourceRef, 'Final GUI qualification requires an explicit complete Main SourceRef')
+  const requestedSourceRef = arguments_.find(value => value.startsWith('--' + mode + '-source-ref='))?.slice(('--' + mode + '-source-ref=').length)
   const sourceCommit = (await exec('git', ['rev-parse', '--verify', '--end-of-options', (requestedSourceRef ?? 'HEAD') + '^{commit}'], { cwd: root })).stdout.trim()
-  const mainAtCapture = finalQualification ? (await exec('git', ['rev-parse', 'refs/heads/main'], { cwd: root })).stdout.trim() : undefined
-  if (finalQualification) assert.equal(sourceCommit, mainAtCapture, 'Final GUI qualification consumes the full current Main, never an older candidate')
-  const t010ManifestArgument = arguments_.find(value => value.startsWith('--startup-first-send-product-manifest='))?.slice('--startup-first-send-product-manifest='.length)
-  const t010ManifestSha = arguments_.find(value => value.startsWith('--startup-first-send-product-manifest-sha='))?.slice('--startup-first-send-product-manifest-sha='.length)
-  assert.ok(!finalQualification || !t010ManifestArgument && !t010ManifestSha, 'Final GUI qualification prohibits product source overlays')
-  assert.ok(!t010ManifestArgument && !t010ManifestSha || startupQualification && requestedSourceRef && t010ManifestArgument && /^[0-9a-f]{64}$/.test(t010ManifestSha),
-    'A T010 product candidate requires its bounded Native mode, exact full Main SourceRef and manifest hash')
   const build = { schema: 'agentmux.pending-edit-restart-build.v1', privateRoot, sources: {}, compiled: {},
     sharedSourceWritten: false, userRunTouched: false, sourceCommit,
-    sourceMode: requestedSourceRef ? 'exact-git-archive-with-test-only-overlay' : 'captured-working-source', requestedSourceRef: requestedSourceRef ?? null, ...(finalQualification ? { mainAtCapture, productOverlayProhibited: true } : {}) }
+    sourceMode: requestedSourceRef ? 'exact-git-archive-with-test-only-overlay' : 'captured-working-source', requestedSourceRef: requestedSourceRef ?? null }
   let failure, outcome
   const record = async (directory, destination) => {
     for (const file of await readdir(directory, { recursive: true, withFileTypes: true })) if (file.isFile()) {
@@ -84,38 +66,8 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       await rm(archive)
       // Overlay only the two owning proof scripts from this execution tree;
       // all product code comes from the exact committed source.
-      for (const path of ['apps/desktop/scripts/verify-workbench-persistence-restart.mjs', 'apps/desktop/scripts/pending-edit-restart-proof.mjs', ...(steerRecovery ? ['apps/desktop/scripts/steer-recovery-native-proof.mjs'] : []), ...(phaseCapture ? ['apps/desktop/scripts/prompt-preparation-stage-native-proof.mjs', 'apps/desktop/scripts/fixtures/prompt-preparation-stage'] : [])])
-        await cp(join(root, path), join(privateRoot, path), { recursive: true })
-    }
-    if (t010ManifestArgument) {
-      // Product ownership remains Core's exact approved T010 slice. Apply only to the
-      // private complete Main archive, before Source capture and the actual build.
-      const manifestPath = resolve(root, t010ManifestArgument), manifestBytes = await readFile(manifestPath)
-      assert.equal(sha(manifestBytes), t010ManifestSha)
-      const manifest = JSON.parse(manifestBytes)
-      assert.equal(manifest.schema, 'agentmux.t010.urgent-source.v1')
-      const allowed = ['packages/core/src/agent-provider.ts', 'packages/core/src/client.ts', 'packages/core/src/prompt-submission.ts',
-        'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'packages/core/src/providers/codex.ts',
-        'packages/core/src/providers/codex-prompt-transport-preparation.ts', 'packages/core/test/initial-transport-preparation.test.ts',
-        'packages/core/test/initial-transport-provider.test.ts', 'packages/core/scripts/initial-transport-preparation.vitest.config.mts',
-        'packages/core/scripts/verify-initial-transport-preparation.mjs']
-      assert.deepEqual(Object.keys(manifest.files).sort(), allowed.sort())
-      await exec('git', ['merge-base', '--is-ancestor', manifest.base, sourceCommit], { cwd: root })
-      const patchBytes = await readFile(join(dirname(manifestPath), 'own.patch'))
-      assert.equal(sha(patchBytes), manifest.patchSha256)
-      const patchPaths = [...patchBytes.toString('utf8').matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)]
-      assert.equal(patchPaths.length, allowed.length)
-      assert.ok(patchPaths.every(match => match[1] === match[2] && allowed.includes(match[1])))
-      assert.deepEqual(patchPaths.map(match => match[1]).sort(), allowed)
-      const frozenManifest = join(evidence, 't010-product-manifest.json'), frozenPatch = join(evidence, 't010-product.own.patch')
-      await writeFile(frozenManifest, manifestBytes); await writeFile(frozenPatch, patchBytes)
-      await exec('git', ['apply', '--check', frozenPatch], { cwd: privateRoot })
-      await exec('git', ['apply', frozenPatch], { cwd: privateRoot })
-      for (const path of allowed) assert.equal(sha(await readFile(join(privateRoot, path))), manifest.files[path], 'Exact Core-owned T010 candidate: ' + path)
-      build.sourceMode = 'exact-full-Main-archive-with-declared-Core-owned-T010-and-test-only-overlay'
-      build.t010ProductCandidate = { manifest: frozenManifest, manifestSha256: sha(manifestBytes), patch: frozenPatch,
-        patchSha256: sha(patchBytes), base: manifest.base, fullMainSnapshot: sourceCommit, sources: manifest.files,
-        boundary: 'Only the separately Source-qualified T010 own delta is applied privately; no T008 product or shared-tree mutation.' }
+      for (const path of ['apps/desktop/scripts/verify-workbench-persistence-restart.mjs', 'apps/desktop/scripts/pending-edit-restart-proof.mjs', ...(steerRecovery ? ['apps/desktop/scripts/steer-recovery-native-proof.mjs'] : [])])
+        await cp(join(root, path), join(privateRoot, path))
     }
     if (diagnosticOnly) {
       const probeSource = join(root, ".tmp/message-tool-compact-feedback-fixture/first-send-prepare-probe/prepare-call-probe.mjs")
@@ -127,7 +79,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     }
     const directories = ['apps/desktop/src', 'apps/desktop/browser-extension', 'apps/desktop/scripts', 'apps/desktop/brand', 'apps/desktop/native', 'apps/desktop/resources', 'apps/host/src',
       'packages/core/src', 'packages/core/scripts', 'packages/core/bin', 'packages/core/vendor',
-      'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/layout/src', 'patches']
+      'packages/demand/src', 'packages/demand/bin', 'packages/client-ui/src', 'packages/layout/src', 'patches']
     for (const directory of directories) {
       if (!requestedSourceRef) {
         try { await cp(join(root, directory), join(privateRoot, directory), { recursive: true }) }
@@ -165,7 +117,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       }
       for (const pkg of packages) await symlink(join(privateRoot, 'packages', pkg), join(privateRoot, directory, '@agentmux', pkg), 'dir')
     }
-    if (steerRecovery || phaseCapture) {
+    if (steerRecovery) {
       // This candidate's vendored SDK owns both its runtime bundle and TypeScript surface.
       // Sharing the installed SDK can mix a newer/older peer dependency with this archive.
       const artifactDirectory = join(privateRoot, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch)
@@ -249,25 +201,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         reason: 'Concurrent shared-tree resource deletion while production imports still reference this bitmap; private fixture only, no shared restoration.' }
     }
     await command('private-demand-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/demand/tsconfig.build.json'], privateRoot)
-    await command('private-relay-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/relay/tsconfig.json'], privateRoot)
     await command('private-core-build', process.execPath, [join(privateRoot, 'packages/core/scripts/build.mjs')], privateRoot)
-    await record(join(privateRoot, 'packages/demand/dist'), build.compiled)
-    await record(join(privateRoot, 'packages/relay/dist'), build.compiled)
-    build.workspaceConsumers = {}
-    for (const directory of ['packages/core/node_modules', 'apps/desktop/node_modules']) {
-      const consumer = join(privateRoot, directory, 'restart-proof-workspace-consumer.mjs')
-      await writeFile(consumer, `import{fileURLToPath}from'node:url';await import('@agentmux/demand/goals');await import('@agentmux/relay');console.log(JSON.stringify(Object.fromEntries(['@agentmux/demand/goals','@agentmux/relay'].map(name=>[name,fileURLToPath(import.meta.resolve(name))]))));\n`)
-      const resolved = JSON.parse((await exec(process.execPath, [consumer], { cwd: privateRoot })).stdout)
-      await rm(consumer)
-      build.workspaceConsumers[directory] = {}
-      for (const [name, path] of Object.entries(resolved)) {
-        const pkg = name === '@agentmux/relay' ? 'relay' : 'demand', subpath = name === '@agentmux/relay' ? '.' : './goals'
-        const metadata = JSON.parse(await readFile(join(privateRoot, 'packages', pkg, 'package.json'), 'utf8'))
-        const entry = await realpath(path)
-        assert.equal(entry, join(privateRoot, 'packages', pkg, metadata.exports[subpath].import))
-        build.workspaceConsumers[directory][name] = { entry: relative(privateRoot, entry), sha256: sha(await readFile(entry)) }
-      }
-    }
     const brandScript = join(privateRoot, 'apps/desktop/scripts/build-brand-assets.mjs')
     try { await readFile(brandScript); await command('private-brand-build', process.execPath, [brandScript], privateRoot) }
     catch (error) {
@@ -291,13 +225,13 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     await record(join(privateRoot, 'packages/core/dist'), build.compiled)
     assert.ok(Object.keys(build.compiled).length > 100)
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
-    const args = arguments_.filter(value => !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref=') && !value.startsWith('--startup-first-send-product-manifest=') && !value.startsWith('--startup-first-send-product-manifest-sha='))
+    const args = arguments_.filter(value => !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref='))
     const lines = []
     const executionEnvironment = { ...process.env, [environmentKey]: buildReceiptPath }
     delete executionEnvironment.ELECTRON_RUN_AS_NODE
     outcome = await runProbeProcess(process.execPath, [join(privateRoot, 'apps/desktop/scripts', worker), ...args,
       '--probe-root=' + privateRoot, '--receipt-path=' + receiptPath], { cwd: privateRoot, temporaryRoot: privateRoot,
-      env: executionEnvironment, timeoutMs: steerRecovery || phaseCapture ? 300_000 : 130_000, onLine: line => lines.push(line) })
+      env: executionEnvironment, timeoutMs: steerRecovery ? 300_000 : 130_000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, 'restart.log'), lines.join('\n') + '\n')
     assert.equal(outcome.timedOut, false)
     assert.equal(outcome.exitCode, 0)
@@ -318,8 +252,8 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     // unsaved data. Keep its exact sourceCommit and failure receipt, not a redundant cache.
     await rm(sourceArchivePath, { force: true })
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
-    await writeFile(join(evidence, 'summary.json'), JSON.stringify({ schema: phaseCapture ? 'agentmux.prompt-preparation-stage-build-proof.v1' : steerRecovery ? 'agentmux.steer-recovery-restart-proof.v1' : 'agentmux.pending-edit-restart-proof.v1', passed: !failure,
-      receiptPath, buildReceiptPath, outcome, qualifiedScope: phaseCapture ? 'actual-Electron-IPC-and-limited-phase-visual-only' : finalQualification ? 'Fresh-complete-Main-GUI-A-B-C-only' : startupRestoredOnly ? 'GUI-restored-first-Send-only' : startupFirstSend ? 'Native-initial-and-GUI-restored-first-Send-only' : typedFirstHook ? 'SDK-two-Core-first-Hook-Native-only' : typedCrossCore ? 'SDK-two-Core-Native-only' : diagnosticOnly ? 'first-Send-diagnostic-only' : mode, userRunTouched: false, sharedSourceWritten: false,
+    await writeFile(join(evidence, 'summary.json'), JSON.stringify({ schema: steerRecovery ? 'agentmux.steer-recovery-restart-proof.v1' : 'agentmux.pending-edit-restart-proof.v1', passed: !failure,
+      receiptPath, buildReceiptPath, outcome, qualifiedScope: typedFirstHook ? 'SDK-two-Core-first-Hook-Native-only' : typedCrossCore ? 'SDK-two-Core-Native-only' : diagnosticOnly ? 'first-Send-diagnostic-only' : mode, userRunTouched: false, sharedSourceWritten: false,
       failure: failure ? { name: failure.name, message: failure.message, stack: failure.stack } : null }, null, 2))
   }
   process.stdout.write(JSON.stringify({ mode: '--' + mode, passed: !failure, receiptPath, buildReceiptPath, evidence,

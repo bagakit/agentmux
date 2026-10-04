@@ -1,4 +1,5 @@
 import { Wrench } from 'lucide-react'
+import type { ToolkitToolDefinition } from '@agentmux/core/control'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { resolvePerformancePreferences, resolveMobileConnectionPreferences, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../../shared/toolkit-preferences'
@@ -24,9 +25,9 @@ async function saveMobileConnection(mobileConnection: MobileConnectionPreference
 }
 
 export const toolkitSettingsModule = {
-  id: 'toolkit', group: 'toolkit', title: 'Toolkit Library', icon: Wrench,
+  id: 'toolkit', group: 'preferences', title: 'Toolkit', icon: Wrench,
   description: 'Local tools and results, right where you work.',
-  keywords: 'mods performance cpu memory rss process resource toolkit tool built in script javascript directory arguments status bar icon label phone mobile connection device 手机 连接 设备 状态 auth account usage quota reset 账号 账户 鉴权 用量 额度 重置',
+  keywords: 'performance cpu memory rss process resource toolkit tool built in script javascript directory arguments status bar icon label phone mobile connection device 手机 连接 设备 状态 auth account usage quota reset 账号 账户 鉴权 用量 额度 重置',
   savedSummary(config) {
     const preferences = resolvePerformancePreferences(config)
     const mobile = resolveMobileConnectionPreferences(config)
@@ -40,11 +41,11 @@ export const toolkitSettingsModule = {
   }
 } as const satisfies SettingsModule
 
-async function runSavedTool(id: string): Promise<string> {
-  const snapshot = await api.toolkit.get(id)
-  if (snapshot.kind !== 'script') throw new Error(snapshot.kind === 'package-unavailable' ? snapshot.reason : 'This tool is not a user script.')
+async function runSavedTool(definition: ToolkitToolDefinition): Promise<string> {
+  const snapshot = await api.toolkit.get(definition.id)
+  if (snapshot.kind !== 'script') throw new Error('This tool is not a user script.')
   if (snapshot.admission) throw new Error(snapshot.admission.state === 'unknown' ? 'Execution unconfirmed. Check this tool’s status before running again.' : 'This tool already has an execution in progress.')
-  const result = await api.toolkit.run(id, { invocationId: crypto.randomUUID(), expectedRevision: snapshot.definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
+  const result = await api.toolkit.run(definition.id, { invocationId: crypto.randomUUID(), expectedRevision: definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
   if (result.kind !== 'script') throw new Error('The execution result could not be confirmed.')
   return result.state === 'unknown' ? 'Execution unconfirmed. Open this tool in the status bar to check its status.' : 'Execution admitted. View its actual result in the status bar.'
 }

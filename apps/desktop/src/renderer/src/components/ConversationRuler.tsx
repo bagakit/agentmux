@@ -1,8 +1,7 @@
 import { Info } from 'lucide-react'
-import { useAppStore } from '../store'
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
-import { describeReadout, describeRulerAxis, describeRulerRange, describeSpan, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
+import { describeReadout, describeRulerAxis, describeSpan, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
 import type { RulerAxisItem, ConversationAxisMark } from '../lib/conversation-axis'
 import { conversationRulerDensity, rulerRecordQuote } from '../lib/conversation-ruler'
@@ -29,11 +28,18 @@ function readoutAnchor(
   })
 }
 
-/** One passive readout for a recorded moment, sender quote or current reading interval. */
+/**
+ * 面板要显示的内容。**一个面板、两种内容源**，不是两个面板。
+ *
+ * 主刻度悬停给的是「什么时候」（`RulerReadoutText`）；轴上的头像标记给的是「说了什么」（原话）。
+ * 两者共用同一个浮层、同一套锚定几何、同一条关闭路径——因为它们回答的是同一个问题的两半，而且
+ * 在屏幕上占的是同一个位置：两个各自管自己显隐的浮层会在标记与刻度都被指到时同时浮出来，互相
+ * 叠住。用一个可辨别联合类型而不是两个可选字段：「既有时间又有原话」和「两者都没有」都不是合法
+ * 状态，让类型直接说出这件事，而不是靠渲染时的 if 去防。
+ */
 type ReadoutBody =
   | { kind: 'moment'; text: RulerReadoutText }
   | { kind: 'quote'; name: string; quote: string }
-  | { kind: 'range' }
 
 type Readout = {
   body: ReadoutBody
@@ -49,6 +55,12 @@ type Readout = {
  * hover and focus read the same scale for the moment (or ordinal) at a position without ever moving
  * the selection.
  */
+/**
+ * 导出**只为可判**：`renderToStaticMarkup` 不输出任何 handler，所以「hover 出面板 / Escape 关面板 /
+ * 空引文不开面板」这三条接线在标记流上完全不可见。测试把这个组件当函数求值、从 element 树上取到那些
+ * handler 并真的调用（先例：`ConversationAxis` 的点击接线就是这么判的）。
+ * 生产调用者只有本文件的 {@link ActivityView}。
+ */
 export function Ruler({
   items,
   scale,
@@ -58,8 +70,7 @@ export function Ruler({
   axes,
   controls,
   recentFraction = 0,
-  activity = [],
-  reading
+  activity = []
 }: {
   items: readonly RulerAxisItem[]
   scale: RulerScale
@@ -74,9 +85,8 @@ export function Ruler({
    * 递出去，调用方把身份补上——两边各给自己知道的那一半，谁都不必知道对方的。
    */
   controls?: (close: () => boolean) => ReactNode
-  recentFraction?: number | null
+  recentFraction?: number
   activity?: AgentActivityHistoryProjection['segments']
-  reading?: { loading: boolean; hasMore: boolean }
   axes?: (peek: {
     width: number
     onPeek: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
@@ -84,7 +94,6 @@ export function Ruler({
   }) => JSX.Element | null
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
-  const bandRef = useRef<HTMLSpanElement>(null)
   const [readout, setReadout] = useState<Readout | null>(null)
   const [trackWidth, setTrackWidth] = useState(0)
   useLayoutEffect(() => {
@@ -99,7 +108,6 @@ export function Ruler({
   const density = useMemo(() => conversationRulerDensity(items, trackWidth), [items, trackWidth])
   const axisLabel = describeRulerAxis(scale)
   const span = describeSpan(scale)
-  const range = band ? describeRulerRange(scale, band) : null
 
   const feedRect = (): DOMRect | null =>
     trackRef.current?.closest('.activity-feed')?.getBoundingClientRect() ?? null
@@ -111,15 +119,6 @@ export function Ruler({
     const trackRect = track.getBoundingClientRect()
     const anchor = readoutAnchor(trackRect, feed, pointerX)
     setReadout({ body: { kind: 'moment', text: describeReadout(scale.readoutOf(index), scale.count) }, ...anchor })
-  }
-
-  const showRange = (): void => {
-    const track = trackRef.current
-    const rect = bandRef.current?.getBoundingClientRect()
-    const feed = feedRect()
-    if (!track || !rect || !feed || !band) return
-    setReadout({ body: { kind: 'range' },
-      ...readoutAnchor(track.getBoundingClientRect(), feed, rect.left + rect.width / 2) })
   }
 
   /**
@@ -166,7 +165,7 @@ export function Ruler({
    * 是错的（同一帧内不存在第二个键盘事件），而它换来的是两份必须同步的状态。删掉了。
    */
   const closeReadout = (): boolean => {
-    const wasOpen = readout !== null && (readout.body.kind !== 'range' || range !== null)
+    const wasOpen = readout !== null
     setReadout(null)
     return wasOpen
   }
@@ -183,21 +182,11 @@ export function Ruler({
   }
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
-    const rect = bandRef.current?.getBoundingClientRect()
-    if (rect && event.clientX >= rect.left && event.clientX <= rect.right &&
-      event.clientY >= rect.top && event.clientY <= rect.bottom) {
-      showRange()
-      return
-    }
     const at = scale.readoutAtFraction(fractionFromClientX(event.clientX))
     if (at) showReadout(at.index, event.clientX)
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Escape') {
-      if (closeReadout()) { event.preventDefault(); event.stopPropagation() }
-      return
-    }
     const next = stepRulerSelection(selectedIndex, event.key, scale.count)
     if (next === null || next === selectedIndex) {
       // Home/End with an existing selection can equal current; still consume the navigation keys so
@@ -218,7 +207,7 @@ export function Ruler({
   }
 
   const handleFocus = (): void => {
-    if (selectedIndex === null) { showRange(); return }
+    if (selectedIndex === null) return
     const track = trackRef.current
     if (track) {
       const rect = track.getBoundingClientRect()
@@ -229,22 +218,11 @@ export function Ruler({
   const selectedText =
     selectedIndex === null ? undefined : describeReadout(scale.readoutOf(selectedIndex), scale.count).summary
 
-  const legendId = useId()
-  const legendAnchor = `--ruler-guide-${legendId.replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
-  const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
-  const overlayLease = useRef<(() => void) | null>(null)
-  useEffect(() => () => { overlayLease.current?.(); overlayLease.current = null }, [])
-
-  const participants = axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })
-
   return (
-    <div className="activity-ruler" data-reading-surface={reading ? 'true' : undefined}>
+    <div className="activity-ruler">
       {/* Summary sits above one full-width coordinate box shared by axes and ticks. */}
       <div className="activity-ruler__stack">
-        {reading?.hasMore ? <span className="conversation-ruler__unread-edge" aria-hidden="true" /> : null}
-        {/* Keep the existing coordinate structure stable as the time window changes. */}
-        {participants ? <div className="activity-ruler__participants">{participants}</div> : null}
+        {axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })}
         <div
           ref={trackRef}
           className="activity-ruler__track"
@@ -264,11 +242,19 @@ export function Ruler({
         onBlur={closeReadout}
       >
         <span className="activity-ruler__rail" />
+        {band ? (
+          <span
+            className="activity-ruler__band"
+            data-axis={scale.axis}
+            style={{ left: `${band.startFraction * 100}%`, right: `${(1 - band.endFraction) * 100}%` }}
+            aria-hidden="true"
+          />
+        ) : null}
         {scale.axis === 'temporal' ? <>
-          {recentFraction !== null && recentFraction > 0 && recentFraction < 1 ? <span className="conversation-ruler__cutoff" style={{ left: `${recentFraction * 100}%` }} title="Latest recorded hour starts here" /> : null}
-          <span className="conversation-ruler__recent" style={{ left: `${Math.max(0, Math.min(1, recentFraction ?? 0)) * 100}%` }} aria-hidden="true" />
+          {recentFraction > 0 ? <span className="conversation-ruler__cutoff" style={{ left: `${recentFraction * 100}%` }} title="Latest recorded hour starts here" /> : null}
+          <span className="conversation-ruler__recent" style={{ left: `${recentFraction * 100}%` }} aria-hidden="true" />
           {density.map((bin, index) => bin.count > 0 ? <span key={index} className="conversation-ruler__density"
-            data-era={recentFraction === null ? undefined : bin.left < recentFraction ? 'history' : 'recent'}
+            data-era={bin.left < recentFraction ? 'history' : 'recent'}
             style={{ left: `${bin.left * 100}%`, width: `${bin.width * 100}%`, height: `${2 + bin.strength * 5}px` }}
             title={`${bin.count} loaded records · Recorded density, not execution`} /> : null)}
           {activity.map(segment => {
@@ -280,15 +266,6 @@ export function Ruler({
               title={`Recorded ${segment.state}${segment.detail ? ` · ${segment.detail}` : ''}${segment.startKnown ? '' : ' · Start not recorded'}`} />
           })}
         </> : null}
-        {band ? (
-          <span
-            ref={bandRef}
-            className="activity-ruler__band"
-            data-axis={scale.axis}
-            style={{ left: `min(${band.startFraction * 100}%, calc(100% - 3px))`, right: `${(1 - band.endFraction) * 100}%` }}
-            aria-hidden="true"
-          />
-        ) : null}
         {items.map((item, index) => {
           const raw = 'kind' in item && item.kind === 'ruler-record' ? item.record : item
           const status = 'status' in raw ? raw.status : 'deliveryStatus' in raw ? raw.deliveryStatus : undefined
@@ -304,58 +281,24 @@ export function Ruler({
           <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true">→</span><span>{span.to}</span></span>
 
         </span> : <span className="activity-ruler__span">Record order</span>}
-        <span className="activity-ruler__count" data-loading={reading?.loading ? 'true' : undefined} >
-          {scale.count} records
-        </span>
+        <span className="activity-ruler__count">{scale.count} records</span>
       </div>
-      <div className="activity-ruler__actions">
-        {controls?.(closeReadout)}
-        <button type="button" className="activity-ruler__guide-trigger" aria-label="Timeline guide"
-          title="Explain this timeline" popoverTarget={legendId} popoverTargetAction="toggle"
-          style={{ anchorName: legendAnchor }} onClick={closeReadout}><Info size={13} aria-hidden="true" /></button>
-      </div>
-      <div id={legendId} popover="auto" className="activity-ruler__guide" role="dialog"
-        aria-labelledby={`${legendId}-title`} style={{ positionAnchor: legendAnchor }}
-        onToggle={event => {
-          // The browser owns dismissal; hold only the existing native-surface resource lease.
-          if (event.newState === 'open' && !overlayLease.current) {
-            acquireOverlay(); overlayLease.current = releaseOverlay
-          } else if (event.newState === 'closed') {
-            overlayLease.current?.(); overlayLease.current = null
-          }
-        }}>
-        <h3 id={`${legendId}-title`}>Timeline guide</h3>
-        <p className="activity-ruler__guide-scope">Only loaded records · Not the entire session</p>
-        {reading?.hasMore ? <p className="activity-ruler__guide-scope">Earlier original records remain unread. The edge has no time width or completion percentage.</p> : null}
-        <dl className="activity-ruler__guide-keys">
-          <div><dt><span className="activity-ruler__guide-swatch" data-key="range" data-axis={scale.axis} />Reading range</dt><dd>The conversation currently in view</dd></div>
-          <div><dt><span className="activity-ruler__guide-swatch" data-key="recent" />Brighter rail</dt><dd>The latest recorded hour</dd></div>
-        </dl>
-        <div className="activity-ruler__guide-states" aria-label="Recorded activity">
-          <span><i data-key="working" />Working</span><span><i data-key="idle" />Idle</span><span><i data-key="waiting" />Awaiting input</span>
-        </div>
-        <p className="activity-ruler__guide-footnote">Height shows record density, not execution. Unmarked time is unknown.</p>
-      </div>
-      {readout && (readout.body.kind !== 'range' || range) ? (
+      {controls?.(closeReadout)}
+      <span
+        className="activity-ruler__note"
+        title="Loaded records only · Blue: recorded working · Dotted: recorded idle · Amber: awaiting input · Unmarked: unknown · Brighter rail: latest recorded hour · Height: record density"
+      >
+        <Info size={12} />
+      </span>
+      {readout ? (
         <div
           className="activity-ruler__readout"
           data-placement={readout.placement}
           data-body={readout.body.kind}
           role="status"
-          style={{ left: readout.left, top: readout.top,
-            ...(readout.body.kind === 'range' ? { maxWidth: feedRect()?.width } : {}) }}
+          style={{ left: readout.left, top: readout.top }}
         >
-          {readout.body.kind === 'range' ? (range ? (
-            <>
-              <span className="activity-ruler__readout-time">
-                {range.axis === 'temporal' ? <>{range.from} – {range.to}</> : <>Records {range.from}–{range.to} of {range.total}</>}
-              </span>
-              <span className="activity-ruler__readout-offset">
-                {range.axis === 'temporal' && range.elapsed ? <>{range.elapsed} · </> : null}
-                {range.count} loaded record{range.count === 1 ? '' : 's'} in range
-              </span>
-            </>
-          ) : null) : readout.body.kind === 'quote' ? (
+          {readout.body.kind === 'quote' ? (
             <Fragment>
               <span className="activity-ruler__readout-speaker">{readout.body.name}</span>
               <span className="activity-ruler__readout-quote">{readout.body.quote}</span>

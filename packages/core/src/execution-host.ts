@@ -21,11 +21,6 @@ export type LocalExecutionHostOptions = {
   runner?: ProcessRunner
 }
 
-/** A new local Host's display default; an explicitly configured name takes precedence. */
-export function defaultLocalHostLabel(platform: NodeJS.Platform = process.platform): string {
-  return platform === 'darwin' ? 'This Mac' : platform === 'win32' ? 'This PC' : 'This Computer'
-}
-
 export class LocalExecutionHost implements ExecutionHost {
   readonly id: string
   readonly kind = 'local' as const
@@ -34,7 +29,7 @@ export class LocalExecutionHost implements ExecutionHost {
 
   constructor(options: LocalExecutionHostOptions = {}) {
     this.id = options.id ?? 'local'
-    this.label = options.label ?? defaultLocalHostLabel()
+    this.label = options.label ?? 'This Mac'
     this.runner = options.runner ?? runProcess
   }
 

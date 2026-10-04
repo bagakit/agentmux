@@ -1,17 +1,13 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, FolderOpen, Minus, Plus, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
-import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
-import { usePreviewObjectUrl, useWorkspaceFilePreview, type ReadyFilePreview } from '../lib/use-workspace-file-preview'
-import { FilePathLabel } from './FilePathLabel'
-import { FilePreviewState } from './FilePreviewState'
-
-const PdfContent = lazy(async () => ({ default: (await import('./PdfContent')).PdfContent }))
-type LoadedPreview = ReadyFilePreview & { url: string }
+type PreviewResult = Awaited<ReturnType<typeof api.files.readPreview>>
+type ReadyPreview = Extract<PreviewResult, { status: 'ready' }>
+type LoadedPreview = Omit<ReadyPreview, 'bytes'> & { url: string; owner: string }
 
 export function formatFileBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -113,40 +109,58 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
 function MediaContent({ preview, name }: { preview: LoadedPreview; name: string }) {
   const player = useRef<HTMLMediaElement>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [duration, setDuration] = useState<number | null>(null)
   useEffect(() => {
+    setState('loading')
     const element = player.current
     return () => { element?.pause(); element?.removeAttribute('src'); element?.load() }
   }, [preview.url])
-  const events = { onLoadedMetadata: () => {
-    const seconds = player.current?.duration
-    setDuration(seconds !== undefined && Number.isFinite(seconds) ? Math.floor(seconds) : null)
-    if (preview.kind === 'audio') setState('ready')
-  }, onLoadedData: () => setState('ready'), onError: () => setState('error') }
+  const events = { onLoadedMetadata: () => setState('ready'), onError: () => setState('error') }
   return <div className={`file-media file-media--${preview.kind}`} data-decode-state={state}>
     {state === 'error' ? <div className="file-preview-state" role="alert"><strong>Media could not be decoded</strong><span>The current engine cannot play this file’s format or codec. Try opening it in a system application.</span></div> : null}
     {preview.kind === 'audio'
       ? <audio ref={element => { player.current = element }} aria-label={name} src={preview.url} controls preload="metadata" {...events} />
-      : <video ref={element => { player.current = element }} aria-label={name} src={preview.url} controls preload="auto" {...events} />}
-    <span className="file-preview__metadata">{state === 'loading' ? 'Reading media metadata · ' : ''}{duration !== null ? `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')} · ` : ''}{formatFileBytes(preview.byteLength)}</span>
+      : <video ref={element => { player.current = element }} aria-label={name} src={preview.url} controls preload="metadata" {...events} />}
+    <span className="file-preview__metadata">{state === 'loading' ? 'Reading media metadata · ' : ''}{formatFileBytes(preview.byteLength)}</span>
   </div>
 }
 
 export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { surface: FileWorkbenchSurface; visible?: boolean; onRetryBinary?: () => void }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary' ? state.documentIssues[key] : null)
-  const canOpenExternally = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
+  const canOpenExternally = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)?.hostId === 'local')
   const reportError = useAppStore(state => state.reportError)
-  const { preview, failure, reload } = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary)
-  const url = usePreviewObjectUrl(preview)
+  const [loaded, setPreview] = useState<LoadedPreview | null>(null)
+  const [failed, setFailure] = useState<{ owner: string; status: string; message: string } | null>(null)
+  // Render-time identity prevents even the commit before passive cleanup from labeling old bytes as a new file.
+  const preview = visible && loaded?.owner === key ? loaded : null
+  const failure = visible && failed?.owner === key ? failed : null
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    setPreview(null); setFailure(null)
+    if (!visible || binary) return
+    let cancelled = false, url: string | null = null
+    void api.files.readPreview(surface.workspaceId, surface.path).then(result => {
+      if (cancelled) return
+      if (result.status !== 'ready') {
+        setFailure({ owner: key, status: result.status, message: 'message' in result ? result.message : 'This path is a directory, not a file.' })
+        return
+      }
+      url = URL.createObjectURL(new Blob([new Uint8Array(result.bytes).buffer], { type: result.mimeType }))
+      const { bytes: _bytes, ...facts } = result
+      setPreview({ ...facts, url, owner: key })
+    }).catch(error => {
+      if (!cancelled) setFailure({ owner: key, status: 'unavailable', message: error instanceof Error ? error.message : String(error) })
+    })
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url) }
+  }, [surface.workspaceId, surface.path, visible, binary, attempt])
   const external = async (action: 'openSystem' | 'reveal') => {
     try { await api.files[action](surface.workspaceId, surface.path) } catch (error) { reportError(error) }
   }
   return <section className="file-preview-pane" data-preview-state={binary ? 'binary' : failure?.status ?? (preview ? 'loaded' : visible ? 'loading' : 'inactive')}>
     <header className="editor-header file-preview__header">
-      <FilePathLabel path={surface.path} />
+      <span title={surface.path}>{surface.path}</span>
       <div className="editor-header__actions">
-        {!binary || onRetryBinary ? <button className="icon-button" aria-label="Reload file preview" title="Reload file preview" onClick={() => binary ? onRetryBinary?.() : reload()}><RefreshCw size={13} /></button> : null}
+        {!binary || onRetryBinary ? <button className="icon-button" aria-label="Reload file preview" title="Reload file preview" onClick={() => binary ? onRetryBinary?.() : setAttempt(value => value + 1)}><RefreshCw size={13} /></button> : null}
         {canOpenExternally ? <>
           <button className="icon-button" aria-label="Open file in system application" title="Open in system application" onClick={() => void external('openSystem')}><ArrowUpRight size={13} /></button>
           <button className="icon-button" aria-label={revealInFileManagerLabel()} title={revealInFileManagerLabel()} onClick={() => void external('reveal')}><FolderOpen size={13} /></button>
@@ -154,11 +168,10 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
       </div>
     </header>
     {binary ? <div className="file-preview-state"><strong>Binary file</strong><span>This file has no editable text content. Open it in a system application to inspect it.</span>{binary.kind === 'binary' ? <span className="file-preview__metadata">{formatFileBytes(binary.byteLength)}</span> : null}</div>
-      : failure ? <div className="file-preview-state" role="alert"><strong>{failure.status === 'too-large' ? 'File exceeds the preview budget' : failure.status === 'deleted' ? 'File was deleted' : failure.status === 'changed' ? 'File changed while reading' : failure.status === 'directory' ? 'This path is a directory' : 'Preview unavailable'}</strong><span>{failure.message}</span><button className="small-button" onClick={() => reload()}>Retry</button></div>
+      : failure ? <div className="file-preview-state" role="alert"><strong>{failure.status === 'too-large' ? 'File exceeds the preview budget' : failure.status === 'deleted' ? 'File was deleted' : failure.status === 'changed' ? 'File changed while reading' : failure.status === 'directory' ? 'This path is a directory' : 'Preview unavailable'}</strong><span>{failure.message}</span><button className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry</button></div>
       : !preview ? <div className="file-preview-state" role="status">{visible ? 'Reading file…' : 'Preview paused while hidden'}</div>
-      : preview.kind === 'pdf' ? <Suspense fallback={<FilePreviewState title="Loading PDF reader" />}><PdfContent data={preview.bytes} name={surface.path} visible={visible} /></Suspense>
-      : !url ? <FilePreviewState title="Preparing file preview" />
-      : preview.kind === 'image' ? <ImageContent key={url} src={url} name={surface.path} byteLength={preview.byteLength} />
-      : <MediaContent key={url} preview={{ ...preview, url }} name={surface.path} />}
+      : preview.kind === 'image' ? <ImageContent key={preview.url} src={preview.url} name={surface.path} byteLength={preview.byteLength} />
+      : preview.kind === 'pdf' ? <embed className="file-preview__pdf" src={preview.url} type="application/pdf" title={`PDF ${surface.path}`} />
+      : <MediaContent key={preview.url} preview={preview} name={surface.path} />}
   </section>
 }

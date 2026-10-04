@@ -227,7 +227,6 @@ function respondForwards(source: string): Forward[] {
         ts.forEachChild(inner, collect)
       }
       collect(node.initializer.expression)
-      if (calls.length === 0) return // Open-terminal actions are not semantic responses.
       expect(calls).toHaveLength(1)
       const [call] = calls
       expect(call!.arguments).toHaveLength(1)
@@ -252,10 +251,9 @@ describe('AgentInteractionCard forwards the projection instead of deciding', () 
     const forwards = respondForwards(cardSource)
 
     // 自检：提取器真的看见了控件。改名或换写法让它一个都找不到时这里红，而不是静默全绿。
-    // Permission owns two option maps and both Cancel actions. The shared question
-    // choices are exercised through their real mounted onChoose consumer.
-    expect(forwards).toHaveLength(4)
-    expect(forwards.filter((forward) => forward.inChoiceMap)).toHaveLength(2)
+    // 五个：scoped 那列 allow、紧凑动作行、提问的选项列，加两处 Cancel。
+    expect(forwards).toHaveLength(5)
+    expect(forwards.filter((forward) => forward.inChoiceMap)).toHaveLength(3)
 
     for (const { argument, inChoiceMap } of forwards) {
       // 按选项渲染出来的按钮，必须发它自己那一条——不是 dismiss，也不是别的记录的。

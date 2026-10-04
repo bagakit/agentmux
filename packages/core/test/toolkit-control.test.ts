@@ -50,7 +50,7 @@ describe('public Toolkit RPC lifecycle and framing',()=>{
   it('keeps unsupported typed, validates exact owner schema and operation budgets',async()=>{
     const {path}=await server()
     await expect((await client(path)).call('toolkit.inspect',{toolId:base.toolId})).rejects.toMatchObject({code:'TOOLKIT_UNSUPPORTED'})
-    expect(parseToolkitSnapshot(snapshot())).toMatchObject({ kind: 'metrics', state: 'idle' })
+    expect(parseToolkitSnapshot(snapshot()).state).toBe('idle')
     expect(()=>parseAgentMuxControlRequest({...base,operation:'toolkit.get',extra:true})).toThrow()
     expect(()=>parseToolkitSnapshot({...snapshot(),observedAt:10})).toThrow()
     expect(()=>parseToolkitSnapshot({...snapshot(),trend:Array.from({length:61},()=>({observedAt:1,appCpuPercent:0,appRssKib:0}))})).toThrow()

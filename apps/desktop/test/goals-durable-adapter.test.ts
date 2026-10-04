@@ -7,7 +7,6 @@ import { openDemandStore } from '@agentmux/demand'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
-import { nameChangeRequests, unknownNameContext } from '../src/main/name-change-audit'
 
 const initial = useAppStore.getState()
 let root: string
@@ -18,8 +17,6 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'amux-goal-adapter-'))
   owner = openDemandStore({ root })
   useAppStore.setState({ demands: {}, selectedDemandId: null })
-  // This original Goal-only fixture has no saved continuous arrangements.
-  vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
   vi.spyOn(api.demands, 'create').mockImplementation(input => owner.create({ ...input, id: 'goal' }))
   vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
   vi.spyOn(api.demands, 'update').mockImplementation((id, patch) => owner.update(id, patch))
@@ -85,7 +82,7 @@ describe('actual durable owner to Renderer projection', () => {
     expect(await useAppStore.getState().executeControl({ ...base, operation: 'demand.list' })).toMatchObject({ demands: [{ id: 'goal', source: 'session', alignment: { revision: 2, summary: 'Latest summary' } }] })
     const retained = useAppStore.getState().demands.goal
     await owner.remove('goal')
-    expect(await useAppStore.getState().executeControl({ ...base, operation: 'demand.show', demandId: 'goal' })).toEqual({ operation: 'demand.show', demand: null, goalContinuations: [] })
+    expect(await useAppStore.getState().executeControl({ ...base, operation: 'demand.show', demandId: 'goal' })).toEqual({ operation: 'demand.show', demand: null })
     expect(useAppStore.getState().demands.goal).toEqual(retained)
   })
 
@@ -184,14 +181,14 @@ it('invokes the actual registered Main Demand handlers against the unique filesy
   expect(block).toContain("handle('demands:decision'")
   const routes = new Map<string, (...args: unknown[]) => Promise<unknown>>()
   const javascript = ts.transpileModule(block, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
-  new Function('handle', 'demands', 'nameChangeRequests', javascript)((channel: string, callback: (...args: unknown[]) => Promise<unknown>) => routes.set(channel, callback), owner, nameChangeRequests)
+  new Function('handle', 'demands', javascript)((channel: string, callback: (...args: unknown[]) => Promise<unknown>) => routes.set(channel, callback), owner)
   expect([...routes.keys()]).toEqual(['demands:list', 'demands:create', 'demands:update', 'demands:confirmAlignment', 'demands:acceptGrounding', 'demands:delete', 'demands:linkSession', 'demands:unlinkSession', 'demands:activity', 'demands:decision'])
   await routes.get('demands:create')!({ id: 'ipc', title: 'Actual Main adapter', sessionIds: ['healthy-run'] })
-  await nameChangeRequests.run({ context: unknownNameContext('private-real-handler'), operationId: 'real-update' }, () => routes.get('demands:update')!('ipc', { alignment: proposal }))
+  await routes.get('demands:update')!('ipc', { alignment: proposal })
   await routes.get('demands:confirmAlignment')!('ipc', 1)
   expect((await owner.get('ipc'))!.alignment!.confirmedAt).toEqual(expect.any(Number))
   expect((await owner.get('ipc'))!.alignment!.confirmedAt).toBeGreaterThan(0)
-  await nameChangeRequests.run({ context: unknownNameContext('private-real-handler'), operationId: 'real-grounding' }, () => routes.get('demands:update')!('ipc', { grounding: { alignmentRevision: 1, summary: 'Restored', checks: [{ criterionId: 'tabs', outcome: 'met', evidence: ['README.md'], note: '' }] } }))
+  await routes.get('demands:update')!('ipc', { grounding: { alignmentRevision: 1, summary: 'Restored', checks: [{ criterionId: 'tabs', outcome: 'met', evidence: ['README.md'], note: '' }] } })
   await routes.get('demands:acceptGrounding')!('ipc', 1, (await owner.get('ipc'))!.grounding!.submissionId)
   const actual = await openDemandStore({ root }).get('ipc')
   expect(actual!.alignment!.confirmedAt).toBeGreaterThan(0)

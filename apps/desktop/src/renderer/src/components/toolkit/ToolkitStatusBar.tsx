@@ -1,25 +1,24 @@
 import { Activity, ArrowLeft, MoreHorizontal, Smartphone, X } from 'lucide-react'
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ToolkitToolConfiguration } from '@agentmux/core/control'
+import type { ToolkitToolDefinition } from '@agentmux/core/control'
 import { resolvePerformancePreferences, resolveMobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
 import { useAppStore } from '../../store'
 import { PerformancePanel } from '../performance/PerformancePanel'
 import { ToolkitPopover, type ToolkitPopoverSelection } from '../performance/PerformancePopover'
 import { ToolkitIcon } from './ToolkitIcon'
 import { MobileConnectionToolkit } from './MobileConnectionToolkit'
-import { toolkitIdentity, useToolkitPackages, type ToolkitToolIdentity } from './use-toolkit-packages'
 import { UserToolkitResult } from './UserToolkitResult'
 
 const OVERFLOW_SELECTION = Symbol('toolkit-overflow')
-const NO_TOOLS: readonly ToolkitToolConfiguration[] = []
-const UserTool = memo(function UserTool({ definition, selection }: { definition: ToolkitToolIdentity; selection: ToolkitPopoverSelection }) {
+const NO_TOOLS: readonly ToolkitToolDefinition[] = []
+const UserTool = memo(function UserTool({ definition, selection }: { definition: ToolkitToolDefinition; selection: ToolkitPopoverSelection }) {
   const [visible, setVisible] = useState(false)
   const changed = useCallback((value: boolean) => setVisible(value), [])
   return <ToolkitPopover {...selection} toolId={definition.id} name={definition.name} icon={<ToolkitIcon icon={definition.icon} size={14} aria-hidden="true" />} label={definition.statusBar === 'label'} onVisibleChange={changed}>
     {close => <UserToolkitResult definition={definition} active={visible && selection.selectedToolId === definition.id} close={close} />}
   </ToolkitPopover>
 })
-const Overflow = memo(function Overflow({ tools, selection }: { tools: readonly ToolkitToolIdentity[]; selection: ToolkitPopoverSelection }) {
+const Overflow = memo(function Overflow({ tools, selection }: { tools: readonly ToolkitToolDefinition[]; selection: ToolkitPopoverSelection }) {
   const chosen = tools.find(tool => tool.id === selection.selectedToolId)
   const [visible, setVisible] = useState(false)
   const changed = useCallback((value: boolean) => setVisible(value), [])
@@ -35,8 +34,7 @@ const Overflow = memo(function Overflow({ tools, selection }: { tools: readonly 
 export const ToolkitStatusBar = memo(function ToolkitStatusBar() {
   const preferences = useAppStore(state => state.config?.toolkit)
   const tools = preferences?.tools ?? NO_TOOLS
-  const metadata = useToolkitPackages(tools, true)
-  const enabled = useMemo(() => tools.filter(tool => tool.enabled).map(tool => toolkitIdentity(tool, metadata.packages)), [tools, metadata.packages])
+  const enabled = useMemo(() => tools.filter(tool => tool.enabled), [tools])
   const performance = resolvePerformancePreferences(preferences ? { toolkit: preferences } : {})
   const mobileConnection = resolveMobileConnectionPreferences(preferences ? { toolkit: preferences } : {})
   const [selectedToolId, setSelectedToolId] = useState<string | symbol | null>(null)

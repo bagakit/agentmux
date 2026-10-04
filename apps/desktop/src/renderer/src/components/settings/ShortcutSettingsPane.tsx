@@ -1,6 +1,4 @@
 import { ArrowLeft, Check, Plus, Search, Trash2, X } from 'lucide-react'
-import { PROMPT_REACTION_ICONS, PROMPT_REACTION_STARTERS, isPromptReactionCode, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
-import { PromptReactionIconView } from '@agentmux/client-ui/components/ConversationReactionActions'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
@@ -10,7 +8,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
-import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'
@@ -47,8 +45,6 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     else if (drafts.some((other) => other.id !== candidate.id && other.keyword.trim() === keyword)) {
       errors.push({ id: candidate.id, field: 'Keyword', message: `“${keyword}” is already used by another prompt.` })
     }
-    if (candidate.reactionIcon && !isPromptReactionCode(keyword)) errors.push({ id: candidate.id, field: 'Keyword',
-      message: 'Quick reply codes use up to 48 lowercase letters, digits or hyphens and start with a letter.' })
     if (!candidate.body.trim()) errors.push({ id: candidate.id, field: 'Prompt', message: 'Write the instruction this prompt will use.' })
     return errors
   })
@@ -83,18 +79,6 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       const { providerId: _dropped, ...rest } = current[id]!
       return { ...current, [id]: providerId ? { ...rest, providerId } : rest }
     })
-  }
-  function bindReaction(id: string, icon?: PromptReactionIcon): void {
-    resource.setValue(current => {
-      const { reactionIcon: _dropped, ...rest } = current[id]!
-      return { ...current, [id]: icon ? { ...rest, reactionIcon: icon } : rest }
-    })
-  }
-  function addReactionStarters(): void {
-    const additions = PROMPT_REACTION_STARTERS.filter(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword))
-    if (!additions.length) return
-    resource.setValue(current => ({ ...current, ...Object.fromEntries(additions.map(starter => [starter.id, { ...starter }])) }))
-    open(additions[0]!.id)
   }
   function open(id: string): void { setSelectedId(id); setView('editor') }
   function add(): void {
@@ -141,8 +125,6 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       <div className="settings-pane-toolbar prompt-workbench__toolbar">
         <span className="settings-resource-count">{drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
         <button type="button" className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
-        {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
-          <button type="button" className="small-button" onClick={addReactionStarters}><Check size={13} /> Add quick replies</button> : null}
       </div>
       <div className="prompt-workbench__body">
         <section className="prompt-library" aria-label="Prompt library">
@@ -151,10 +133,10 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
             <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => (
               <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
-                <span className="prompt-library__name">{candidate.reactionIcon ? <PromptReactionIconView icon={candidate.reactionIcon} size={13} /> : null}<strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <Check size={13} aria-label="Selected prompt" /> : null}</span>
+                <span className="prompt-library__name"><strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <Check size={13} aria-label="Selected prompt" /> : null}</span>
                 <code>{candidate.keyword.trim() ? `/${candidate.keyword.trim()}` : 'No keyword yet'}</code>
                 <span className="prompt-library__body">{candidate.body.trim().split('\n').find((line) => line.trim()) || 'Write an instruction…'}</span>
-                <span className="prompt-library__scope">{providerName(candidate)} · {candidate.reactionIcon ? 'Reply card' : candidate.states?.length ? candidate.states.map(stateName).join(', ') : 'Draft shortcut'}</span>
+                <span className="prompt-library__scope">{providerName(candidate)} · {candidate.states?.length ? candidate.states.map(stateName).join(', ') : 'Draft shortcut'}</span>
                 {problems.some((problem) => problem.id === candidate.id) ? <span className="prompt-library__invalid">Needs attention</span> : null}
               </button>
             ))}
@@ -171,13 +153,6 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
               <label><span>Keyword</span><input aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? 'Use /keyword or the bare word to expand your draft.'}</small></label>
               <label><span>Agent</span><select value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Where this instruction is available.</small></label>
             </div>
-            <fieldset className="prompt-state-settings prompt-reaction-settings"><legend>Quick reply on Agent messages</legend>
-              <div className="prompt-reaction-settings__choices"><button type="button" className="small-button" aria-pressed={!prompt.reactionIcon} onClick={() => bindReaction(prompt.id)}>None</button>
-                {PROMPT_REACTION_ICONS.map(icon => <button type="button" className="small-button" key={icon} aria-label={`Quick reply icon ${icon}`} aria-pressed={prompt.reactionIcon === icon} onClick={() => bindReaction(prompt.id, icon)}>
-                  <PromptReactionIconView icon={icon} />{icon === 'check' ? 'Check' : icon === 'play' ? 'Play' : 'Explain'}</button>)}
-              </div><small>Clicking its SVG sends this saved instruction only, with the original reply reference. It never approves permission requests.</small>
-              {prompt.reactionIcon ? <small>Agent lookup: <code>agentmux settings prompts inspect --keyword {prompt.keyword.trim() || 'code'}</code></small> : null}
-            </fieldset>
             <fieldset className="prompt-state-settings"><legend>Available in Agent status when</legend><div className="prompt-state-settings__choices">{COMPOSER_PROMPT_STATES.map((state) => {
               const meaning = describeAgentDisplayState(state)
               return <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label} <code>{state}</code></strong><small>{meaning.description}</small></span></label>

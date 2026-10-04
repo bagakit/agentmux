@@ -122,11 +122,7 @@ export function ObservationSurfaceGallery() {
           placeholder="Ask, steer, or paste a command…"
           onChange={setDraft}
           mailbox={<SessionMailbox visible system={inbox} queued={queued}
-          onArchiveQueued={async (id,expectedText,archived) => setQueued(items => items.map(item => {
-            if (item.id !== id || item.text !== expectedText) return item
-            if (archived) return {...item,archived:true as const}
-            const {archived:_archive,...original}=item; return {...original,awaitingExplicitSend:true as const}
-          }))}
+          onRemoveQueued={(id) => setQueued((items) => items.filter((item) => item.id !== id))}
           onSendQueued={(id) => { setComposerAction(`Example send: ${queued.find((item) => item.id === id)?.text}`); setQueued((items) => items.filter((item) => item.id !== id)) }} />}
           onSubmit={() => { setComposerAction(`Example payload: ${expandSemanticReferences(draft)}`); setDraft('') }}
           commands={[{ text: '/status', description: 'Provider command' }, composerShortcutSuggestion(GALLERY_PROMPT)]}

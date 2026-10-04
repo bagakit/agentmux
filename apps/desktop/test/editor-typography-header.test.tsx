@@ -43,10 +43,7 @@ beforeEach(() => {
     saveDocument: save, reloadDocument: reload, overwriteDocument: overwrite })
 })
 afterEach(() => { stylesheet.remove(); document.documentElement.style.removeProperty('--fs-body') })
-const render = async () => {
-  await dom.render(<EditorPane tabId={tab.id} surface={surface} />)
-  await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) })
-}
+const render = () => dom.render(<EditorPane tabId={tab.id} surface={surface} />)
 const button = (name: string) => dom.container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)
 
 it('consumes the actual App font and live override without remounting or changing the document/view', async () => {
@@ -88,8 +85,8 @@ it('opens the actual keyboard menu, toggles wrap and returns focus after Escape'
   const trigger = button('File options')!; expect(trigger).not.toBeNull()
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
   const menu = document.querySelector<HTMLElement>('[role="menu"]'); expect(menu).not.toBeNull()
-  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]; expect(items).toHaveLength(3)
-  expect(menu!.classList.contains('file-options-menu')).toBe(true)
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')]; expect(items).toHaveLength(2)
+  expect(menu!.classList.contains('editor-options-menu')).toBe(true)
   const wrap = items.find(item => item.textContent?.includes('Word wrap'))!; expect(wrap.getAttribute('aria-checked')).toBe('false')
   await act(async () => wrap.click()); expect(useAppStore.getState().editorWordWrap).toBe(true)
   expect(wrap.getAttribute('aria-checked')).toBe('true')

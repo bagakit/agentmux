@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, unlink, utimes, writeFile } from 'node:fs/promises'
@@ -27,7 +27,7 @@ function storedSession() {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: fixturePath("tmp/work"),
+    workspacePath: upstreamFixturePath("tmp/work"),
     run: { runId: 'daemon-1' },
     retiredRuns: [] as { runId: string }[],
     hookBindingId: 'hook-binding-1',
@@ -148,7 +148,7 @@ async function withRetiredRing(
   }
   const fromMemory = await exercise(memory)
 
-  const root = await mkdtemp(fixturePath("tmp/agentmux-retired-ring-"))
+  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-retired-ring-"))
   try {
     const path = join(root, 'agent-sessions.json')
     await writeFile(path, `${JSON.stringify({
@@ -202,7 +202,7 @@ describe('semantic session persistence boundary', () => {
   })
 
   it('rejects retired File Store schemas without rewriting or migrating them', async () => {
-    const root = await mkdtemp(fixturePath("tmp/agentmux-retired-store-"))
+    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-retired-store-"))
     try {
       for (const version of [3, 4]) {
         const path = join(root, `sessions-v${version}.json`)
@@ -712,7 +712,6 @@ describe('semantic session persistence boundary', () => {
       async load() { return [storedSession(), storedSession()] },
       async loadRetiredRuns() { return [] },
       async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
-  async confirmDurability() { throw new Error('Read-only Store fixture cannot confirm a write') },
   async loadRetiredAgentSessions() { return [] },
   async loadReopenCorrelations() { return [] },
       async compareAndSwap() {},
@@ -737,7 +736,7 @@ describe('semantic session persistence boundary', () => {
   })
 
   it('does not commit a Timeline mutation after an aborted lock wait', async () => {
-    const root = await mkdtemp(fixturePath("tmp/agentmux-store-abort-"))
+    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-store-abort-"))
     const path = join(root, 'sessions.json')
     try {
       const store = new AgentMuxFileAgentSessionStore(path)
@@ -774,7 +773,7 @@ describe('semantic session persistence boundary', () => {
   })
 
   it('does not commit a Session write after an aborted lock wait', async () => {
-    const root = await mkdtemp(fixturePath("tmp/agentmux-store-abort-"))
+    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-store-abort-"))
     const path = join(root, 'sessions.json')
     try {
       await writeFile(`${path}.lock`, `${process.pid}\n`, { mode: 0o600 })
@@ -1173,7 +1172,7 @@ describe('Agent Session store corruption salvage', () => {
       providerId: 'codex',
       executorId: 'codex',
       hostId: 'local',
-      workspacePath: fixturePath("tmp/work"),
+      workspacePath: upstreamFixturePath("tmp/work"),
       run: { runId: `run-${index}` },
       retiredRuns: [],
       hookBindingId: `hook-${index}`,

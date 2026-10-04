@@ -7,10 +7,9 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 
-export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: TopicCategory | 'create' | null; onClose(): void; returnFocus?: () => HTMLElement | null }) {
+export function TopicCategoryDialog({ target, onClose }: { target: TopicCategory | 'create' | null; onClose(): void }) {
   const [name, setName] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), id = useRef('')
-  const content = useRef<HTMLDivElement>(null)
   useEffect(() => { setName(target && target !== 'create' ? target.title : ''); id.current = crypto.randomUUID(); setError(null) }, [target])
   async function save() {
     if (!target || busy || !name.trim()) return
@@ -26,13 +25,7 @@ export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: 
   }
   return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
-      <Dialog.Content ref={content} className="confirmation-dialog dialog-surface topic-dialog" onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
-        onCloseAutoFocus={event => {
-          if (!returnFocus) return
-          event.preventDefault()
-          const original = returnFocus(), active = document.activeElement
-          if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || content.current?.contains(active))) original.focus({ preventScroll: true })
-        }}
+      <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog" onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">{target === 'create' ? 'New Topic category' : 'Rename Topic category'}</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Group related Topics under a shared theme.</Dialog.Description>

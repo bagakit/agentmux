@@ -4,12 +4,6 @@ be reached; do not read or write an alternative configuration. Settings inspect 
 it exposes the supported subset, not the entire client configuration. Saving configuration
 does not launch an Agent or certify Agent health. No Runtime is started or connected for help.
 
-Use settings inspect notes or settings inspect goals to discover reading and starting-view
-preferences, including their legal values and defaults. For example, settings set notes.fontSize 16
-adjusts note body text; settings set goals.defaultView board applies to newly opened Goals views.
-Views already open keep their current choices. settings set goals.showFinished true includes
-finished goals by default. These preferences do not edit note files or change Goal lifecycle.
-
 Resource input uses --input <file|->. Input is bounded UTF-8 JSON, read from a file or stdin (-). Create takes a field
 object; the ID occurs only in the positional argument. Update takes {"changes": {...},
 "expected": {...}} with nonempty changes and optional expected fields. Delete optionally
@@ -21,15 +15,6 @@ Executor refresh takes exact Executor and Host IDs and only checks availability.
 means a regular executable was found; missing means no usable executable; check-failed
 retains cause.code/message. It does not launch, stop, resume, save configuration or imply
 Agent health. Use settings hosts test --input <file|-> for an unsaved connection draft.
-Host upgrade-check is a read-only maintenance probe, including for an incompatible
-ordinary handshake. It identifies the original headless Core, exact candidate and whether
-healthy Runs can be retained. upgrade requires the complete checked expected value and
-an explicit operationId in its JSON input. It only updates a saved exact Host; it never
-fetches npm latest or replaces an unqualified Native Runtime. An unknown result requires
-upgrade-inspect with the same operationId; neither inspect nor reconnect replays upgrade.
-Updates require an exact Linux x64 headless owner with verified leases and an explicit
-supported launch environment. Additional launch configuration is refused before stopping
-the owner; it is not copied into deployment receipts. Existing Runs remain available.
 Exit 0 means the Host diagnostic returned facts, including unsupported/check-failed; it
 does not prove the connection is healthy. Workspace register accepts {hostId,path,name?}; paths remain literal. It
 registers an existing directory, does not run Git/create a worktree, and returns Workspace
@@ -53,18 +38,7 @@ Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
 Delete input uses {"expected":{...}} with complete saved editable fields.
 Revisions are owner-issued, never editable. Performance is read-only.
 
-Install a local extension directory with agentmux toolkit install ID --path <PACKAGE_DIRECTORY>
-and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd is chosen by the Host. The saved record
-holds the directory reference and enabled/statusBar/args/cwd preferences. It does not import
-a source copy. Edit manifest.json, entry or helper files in that directory; the next explicit
-inspect/run/action captures the current files. Manifest schema is agentmux.toolkit.package.v1,
-with name, named icon, relative entry and optional actions {id,label,entry,args?}.
-ls reports package metadata availability and configRevision; inspect reports the effective
-definition revision, content SHA256 and exact source entries. Package and execution cwd
-are separate paths. A missing package retains its configuration and original execution facts.
-Stop still targets the retained admission; unavailable source cannot admit a new execution.
-
-Installing, saving, enabling an entry, inspect/script/ls and watch do not execute user scripts.
+Saving, enabling an entry, inspect/script/ls and watch do not execute user scripts.
 Run captures the definition/result baseline once in the service and admits one execution.
 Full input can pin invocationId, expectedRevision and expectedLatestExecutionId. Stop input
 pins executionId (null means no active execution). After an unknown receipt inspect the
@@ -73,7 +47,7 @@ original identity; do not retry automatically. Closing watch releases only its r
 Saved actions have id, label, JavaScript ESM script and args, sharing the tool's fixed cwd.
 At most 16 actions share the definition budget. Action input pins invocationId,
 expectedRevision, sourceExecutionId and expectedAdmissionExecutionId (null if idle).
-Changed package files, targets or newer results reject stale actions. Retained invocation replays its facts;
+Changed targets/newer results reject stale actions. Retained invocation replays its facts;
 output cannot define actions. Scripts use the local user's files/environment/network;
 this capability does not provide a sandbox, secret storage, scheduling or remote execution.
 

@@ -19,6 +19,6 @@ export function humanizePromptDeliveryError(error: unknown, options: { runState?
   const message = options.runState === 'ended'
     ? 'The Agent Run has ended. Your message has not been sent; resume the Agent before retrying.'
     : known
-  const diagnostic = [`code=${error.code}`, error.message, error.detail?.trim()].filter(Boolean).join(' ')
-  return new AgentMuxError(diagnostic ? `${message} Diagnostic: ${diagnostic}` : message, error.code, error.detail, error.controlFailure, error.logId)
+  const diagnostic = [`code=${error.code}`, error.detail?.trim()].filter(Boolean).join(' ')
+  return new AgentMuxError(diagnostic ? `${message} Diagnostic: ${diagnostic}` : message, error.code, error.detail)
 }

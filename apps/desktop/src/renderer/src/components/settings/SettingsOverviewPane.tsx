@@ -25,22 +25,20 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
         <div className="settings-overview__identity"><strong>AgentMux</strong><p>Your agent workspace.</p></div>
       </div>
       <div className="settings-overview__groups">
-        {(['left', 'right'] as const).map((column) => <div key={column} className="settings-overview__column" data-overview-column={column}>
-          {groups.filter((group) => group.overviewColumn === column).map((group) => <section key={group.id} data-settings-group={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
-            <header><h3 id={`settings-overview-${group.id}`}>{group.title}</h3></header>
-            <div className="settings-overview__entries">
-              {group.items.map((item) => {
-                const Icon = item.icon
-                return <button key={item.id} type="button" className="settings-overview__entry" title={item.description} data-settings-section={item.id} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
-                  <Icon size={16} aria-hidden="true" />
-                  <span className="settings-overview__entry-label"><strong>{item.title}</strong></span>
-                  <span className="settings-overview__summary">{item.savedSummary(config)}</span>
-                  <ChevronRight size={14} aria-hidden="true" />
-                </button>
-              })}
-            </div>
-          </section>)}
-        </div>)}
+        {groups.map((group) => <section key={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
+          <header><h3 id={`settings-overview-${group.id}`}>{group.title}</h3><small>Saved configuration</small></header>
+          <div className="settings-overview__entries">
+            {group.items.map((item) => {
+              const Icon = item.icon
+              return <button key={item.id} type="button" className="settings-overview__entry" title={item.description} data-settings-section={item.id} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
+                <Icon size={16} aria-hidden="true" />
+                <span className="settings-overview__entry-label"><strong>{item.title}</strong></span>
+                <span className="settings-overview__summary">{item.savedSummary(config)}</span>
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            })}
+          </div>
+        </section>)}
       </div>
     </div>
   )

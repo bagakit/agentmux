@@ -10,22 +10,11 @@ const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any
   replacement: resolve(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
 aliases.push({ find: /^@agentmux\/layout$/, replacement: resolve(root, 'packages/core/src/spatial-layout.ts') })
-const clientUi = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8'))
-const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const clientUiAliases = Object.entries(clientUi.exports).flatMap(([key, value]) => {
-  const target = typeof value === 'string' ? value : (value as { browser?: string }).browser
-  if (!target) return []
-  const name = '@agentmux/client-ui' + (key === '.' ? '' : key.slice(1))
-  return [{ find: new RegExp('^' + name.split('*').map(escape).join('(.*)') + '$'), replacement: resolve(root, 'packages/client-ui', target.replace('*', '$1')) }]
-}).sort((a, b) => b.find.source.length - a.find.source.length)
-aliases.unshift(...clientUiAliases)
-aliases.push(
-  { find: /^react$/, replacement: resolve(root, 'apps/desktop/node_modules/react') },
-  { find: /^react-dom$/, replacement: resolve(root, 'apps/desktop/node_modules/react-dom') }
-)
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
-export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' }, resolve: { alias: aliases, conditions: ['browser'] },
+export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'] },
   plugins: [{ name: 'native-session-owning-source', enforce: 'pre',
+    resolveId(id) { if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-zone-file-resource'; if (/(^|\/)ConversationView(?:\.js)?$/.test(id)) return '\0unused-conversation-view' },
+    load(id) { if (id === '\0unused-conversation-view') return 'export function ConversationView(){throw new Error("Unrelated ConversationView leaf invoked in native proof")}' ; if (id === '\0unused-zone-file-resource') return 'export function zoneFileResource() { throw new Error("Unrelated missing file-resource leaf was invoked in the projection proof") }' },
     transform(source, id) {
       const path = id.split('?')[0]!
       if (!path.startsWith(root + '/apps/desktop/src/') && !path.startsWith(root + '/packages/core/src/')) return

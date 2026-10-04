@@ -1,9 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -129,20 +125,9 @@ function browserSurface(regionId: string, browserId = `browser:${regionId}`) {
   }
 }
 
-let spatialDirectory: string
-beforeEach(async () => {
-  // initialize reads Core durable positions before Renderer seed state. Each case owns its
-  // original store; a previous case's saved Session must never become this case's missing fact.
-  spatialDirectory = await mkdtemp(join(tmpdir(), 'agentmux-lifecycle-spatial-'))
-  const spatial = new AgentMuxSpatialStateStore(join(spatialDirectory, 'spatial.json'))
-  vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.read())
-  vi.spyOn(api.spatial, 'commit').mockImplementation(input => spatial.commit(input))
-  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
-})
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks()
   useAppStore.setState(initialState, true)
-  await rm(spatialDirectory, { recursive: true, force: true })
 })
 
 describe('Session and Launcher lifecycle ownership', () => {
@@ -1622,7 +1607,7 @@ describe('Warm terminal pool', () => {
     expect(launchTerminal).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps another workspace shell and its late result when the target changes', async () => {
+  it('retires a replaced workspace shell without losing ownership of its late result', async () => {
     launcherFixture()
     const first = deferred<SessionSnapshot>()
     const firstSession = terminalSession('first-workspace-run')
@@ -1648,12 +1633,11 @@ describe('Warm terminal pool', () => {
     useAppStore.getState().prewarmTerminal('other', warmOwner)
     first.resolve(firstSession)
 
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledWith(firstSession.control))
     await vi.waitFor(() => {
-      expect(useAppStore.getState().warmTerminal?.session).toEqual(firstSession)
-      expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual(['first-workspace-run'])
+      expect(useAppStore.getState().warmTerminal?.session).toEqual(secondSession)
+      expect(useAppStore.getState().unclaimedTerminalSessionIds).toEqual(['second-workspace-run'])
     })
-    expect(stop).not.toHaveBeenCalled()
-    expect(api.sessions.launchTerminal).toHaveBeenCalledOnce()
   })
 
   it('tracks a resolved inline terminal until the user claims it', async () => {
@@ -1687,7 +1671,7 @@ describe('Warm terminal pool', () => {
     expect(launchTerminal).toHaveBeenCalledTimes(1)
   })
 
-  it('explicitly confirms the same request when the prewarm creation failed', async () => {
+  it('falls back to a fresh launch when the prewarm spawn failed', async () => {
     const launcher = launcherFixture()
     const fresh = terminalSession('fresh-run')
     let call = 0
@@ -1697,10 +1681,7 @@ describe('Warm terminal pool', () => {
       return fresh
     })
 
-    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(fresh)
-
     useAppStore.getState().prewarmTerminal('workspace', warmOwner)
-    await useAppStore.getState().warmTerminal?.ready
     await useAppStore.getState().promoteWarmTerminal('pane', {
       tabId: launcher.id,
       regionId: launcher.layout.activeRegionId
@@ -1710,7 +1691,6 @@ describe('Warm terminal pool', () => {
     expect(surface).toMatchObject({ kind: 'terminal', sessionId: 'fresh-run' })
     expect(useAppStore.getState().sessions).toEqual([fresh])
     expect(launchTerminal).toHaveBeenCalledTimes(2)
-    expect(launchTerminal.mock.calls[1]![0]).toEqual(launchTerminal.mock.calls[0]![0])
     expect(useAppStore.getState().error).toBeNull()
   })
 
@@ -1822,7 +1802,6 @@ describe('Warm terminal pool', () => {
       recoveryCandidates: []
     })
     const stop = vi.spyOn(api.sessions, 'stop').mockRejectedValue(new Error('owner unavailable'))
-    const originalFocus = useAppStore.getState().agentFocus
 
     const dispose = await useAppStore.getState().initialize()
 
@@ -1832,9 +1811,6 @@ describe('Warm terminal pool', () => {
     expect(state.unclaimedTerminalSessionIds).toEqual([warm.id])
     expect(state.tabs['session:warm-run']).toBeUndefined()
     expect(state.tabs['session:visible-run']).toBeUndefined()
-    expect(Object.values(state.tabs).flatMap(workbenchSurfaces).filter(surface => surface.kind === 'agent' || surface.kind === 'terminal')).toEqual([])
-    expect(state.agentFocus).toEqual(originalFocus)
-    expect(state.recoveryCandidates).toEqual([])
     expect(state.error).toBeNull()
     dispose()
   })

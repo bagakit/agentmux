@@ -37,7 +37,7 @@ function ready(revision = 'image-original', kind: 'image' | 'audio' | 'video' | 
 async function render(node: ReactNode) { await act(async () => root.render(node)); await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) }) }
 async function click(title: string) {
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === title || item.getAttribute('aria-label') === title)
-  expect(button).toBeDefined(); await act(async () => button!.click()); await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) })
+  expect(button).toBeDefined(); await act(async () => button!.click())
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -196,7 +196,6 @@ async function chooseOption(label: string) {
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"],[role="menuitemcheckbox"]')].find(element => element.textContent?.includes(label))
   expect(item).toBeDefined()
   await act(async () => { item!.focus(); item!.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})) })
-  await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 it('keeps Wrap and Diff reachable by original keyboard menu without changing the File body or layout', async () => {
   const {file,id,key} = seed('compact.ts','const original = 1')
@@ -266,84 +265,4 @@ it('the original Editor checks an unconfirmed save instead of retrying and keeps
   expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
   expect(useAppStore.getState().documents[key]?.revision).toBe('read-back')
   expect(container.querySelector('[aria-label="Save file"]')).not.toBeNull()
-})
-
-it('rejects bytes and releases URLs across a same-ID root/Host replacement, including a batched A → B → A', async () => {
-  const { file } = seed('diagram.png')
-  const configA = useAppStore.getState().config!
-  const configB = { ...configA, workspaces: configA.workspaces.map(workspace => workspace.id === 'workspace' ? { ...workspace, path: _hygiene_fixturePath("different-root"), hostId: 'remote-host' } : workspace) }
-  const pending: Array<(value: ReturnType<typeof ready>) => void> = []
-  vi.mocked(api.files.readPreview).mockImplementation(() => new Promise(resolve => pending.push(resolve)))
-  await render(<FilePreviewPane surface={file} />)
-  await act(async () => { useAppStore.setState({ config: configB }); useAppStore.setState({ config: configA }) })
-  expect(pending).toHaveLength(2)
-  await act(async () => pending[0]!(ready('stale-original-root')))
-  expect(createUrl).not.toHaveBeenCalled(); expect(container.querySelector('img')).toBeNull()
-  await act(async () => pending[1]!(ready('current-root')))
-  expect(createUrl).toHaveBeenCalledTimes(1)
-  await act(async () => useAppStore.setState({ config: configB }))
-  expect(container.querySelector('img')).toBeNull(); expect(revokeUrl).toHaveBeenCalledTimes(1)
-  await act(async () => pending[2]!(ready('new-host-root')))
-  expect(createUrl).toHaveBeenCalledTimes(2)
-})
-
-it.each(['json', 'jsonc', 'csv', 'tsv'] as const)('%s reader uses the current original draft and keeps Source, revision and durable identity', async extension => {
-  const original = extension.startsWith('json') ? '{"title":"saved"}' : `title${extension === 'tsv' ? '\t' : ','}value\nsaved,001`
-  const { file, id, key } = seed(`data.${extension}`, original)
-  await render(<FileSurfaceView tabId={id} surface={file} />)
-  expect(container.querySelector('textarea')?.value).toBe(original)
-  const before = useAppStore.getState()
-  const draft = extension.startsWith('json') ? '{"title":"current unsaved draft","integer":9007199254740993}' : `title${extension === 'tsv' ? '\t' : ','}value\ncurrent unsaved draft${extension === 'tsv' ? '\t' : ','}001`
-  await act(async () => useAppStore.getState().updateDocument(id, draft, file.regionId))
-  await click('Preview')
-  expect(container.querySelector('.file-data-preview')).not.toBeNull()
-  expect(container.textContent).toContain('current unsaved draft')
-  if (extension.startsWith('json')) expect(container.textContent).toContain('9007199254740993')
-  expect(api.files.readPreview).not.toHaveBeenCalled()
-  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
-  await click('Source')
-  expect(container.querySelector('textarea')?.value).toBe(draft)
-  expect(useAppStore.getState().documents[key]?.revision).toBe('original')
-  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
-})
-
-it('reads Markdown images only near the viewport, releases them offscreen, and reserves their decoded height', async () => {
-  seed('notes.md')
-  const observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = []
-  vi.stubGlobal('IntersectionObserver', class {
-    constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) { observers.push(callback) }
-    observe() {} disconnect() {}
-  })
-  const { WorkspaceImage } = await import('../src/renderer/src/components/WorkspaceImage')
-  await render(<WorkspaceImage workspaceId="workspace" path="diagram.png" alt="Diagram" openFile={() => {}} />)
-  expect(api.files.readPreview).not.toHaveBeenCalled()
-  expect(observers).toHaveLength(1)
-  await act(async () => observers[0]!([{ isIntersecting: true }]))
-  expect(api.files.readPreview).toHaveBeenCalledExactlyOnceWith('workspace', 'diagram.png')
-  const image = container.querySelector('img')!
-  expect(image).not.toBeNull()
-  vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({ height: 320 } as DOMRect)
-  await act(async () => image.dispatchEvent(new Event('load')))
-  expect(container.querySelector<HTMLElement>('.file-markdown-image')?.style.minHeight).toBe('320px')
-  await act(async () => observers[0]!([{ isIntersecting: false }]))
-  expect(container.querySelector('img')).toBeNull(); expect(revokeUrl).toHaveBeenCalledTimes(1)
-  expect(container.querySelector<HTMLElement>('.file-markdown-image')?.style.minHeight).toBe('320px')
-  await act(async () => observers[0]!([{ isIntersecting: true }]))
-  expect(api.files.readPreview).toHaveBeenCalledTimes(2)
-})
-
-it('keeps media metadata readiness when a cached native load arrives before passive effects', async () => {
-  const { file } = seed('tone.wav')
-  vi.mocked(api.files.readPreview).mockResolvedValue(ready('audio-current', 'audio'))
-  let delivered = false
-  await render(<Profiler id="cached-media" onRender={() => {
-    const player = container.querySelector('audio')
-    if (!player || delivered) return
-    delivered = true
-    Object.defineProperty(player, 'duration', { value: 2 })
-    player.dispatchEvent(new Event('loadedmetadata'))
-  }}><FilePreviewPane surface={file} /></Profiler>)
-  expect(delivered).toBe(true)
-  expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
-  expect(container.textContent).toContain('0:02 · 3 B')
 })

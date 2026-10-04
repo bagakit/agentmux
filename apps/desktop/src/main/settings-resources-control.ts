@@ -1,4 +1,3 @@
-import { isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import type {
   AgentMuxControlErrorCode, AgentMuxControlSettingsResourceFields as Fields,
   AgentMuxControlSettingsResourceItem as Item, AgentMuxControlSettingsResourceKind as Kind,
@@ -47,7 +46,6 @@ function normalizePrompt(value: Fields): Fields {
   if (typeof normalized.label === 'string') normalized.label = normalized.label.trim() || String(normalized.keyword ?? '')
   // null is the explicit unbind intent; absence in an update means leave the binding alone.
   if (normalized.providerId === null) delete normalized.providerId
-  if (normalized.reactionIcon === null) delete normalized.reactionIcon
   return normalized
 }
 function validateExpected(resource: Kind, value: Fields): Fields {
@@ -76,7 +74,6 @@ function replace(config: AppConfig, resource: Kind, id: string, value: Fields | 
   }
   const keywords = new Set<string>()
   for (const prompt of prompts) {
-    if (prompt.reactionIcon && !isPromptReactionCode(prompt.keyword)) fail('INVALID_SETTING_VALUE', 'Quick reply codes use lowercase letters, digits or hyphens, starting with a letter, up to 48 characters.')
     if (!prompt.keyword.trim() || !prompt.body.trim() || keywords.has(prompt.keyword.trim())) {
       fail('INVALID_SETTING_VALUE', `Prompt “${prompt.id}” needs a unique keyword and a nonempty body.`)
     }
@@ -89,12 +86,7 @@ function replace(config: AppConfig, resource: Kind, id: string, value: Fields | 
 export async function executeSettingsResourcesControl(request: Request, owner: ConfigOwner): Promise<Result> {
   const { resource } = request
   if (request.operation === 'settings.resource.list') return { operation: request.operation, resource, items: items(owner.current, resource), partial: true }
-  if (request.operation === 'settings.resource.get') {
-    const item = request.keyword === undefined ? find(owner.current, resource, request.id)
-      : items(owner.current, 'prompts').find(candidate => candidate.value.keyword === request.keyword)
-        ?? fail('SETTING_RESOURCE_NOT_FOUND', `Prompt keyword “${request.keyword}” does not exist.`)
-    return { operation: request.operation, resource, item }
-  }
+  if (request.operation === 'settings.resource.get') return { operation: request.operation, resource, item: find(owner.current, resource, request.id) }
   if (resource === 'executors' && !executorIdSchema.safeParse(request.id).success) fail('INVALID_SETTING_VALUE', `Invalid Executor identity: ${request.id}`)
   let changed = false
   const saved = await owner.update((current) => {
@@ -117,12 +109,12 @@ export async function executeSettingsResourcesControl(request: Request, owner: C
     if (resource === 'executors' && request.changes.avatar === null) combined.avatar = {}
     const value = validate(resource, resource === 'prompts' ? normalizePrompt(combined) : combined, false)
     const changes = Object.fromEntries(Object.keys(request.changes).map((key) => [key,
-      resource === 'prompts' && (key === 'providerId' || key === 'reactionIcon') && request.changes[key] === null ? null : value[key]])) as Fields
+      resource === 'prompts' && key === 'providerId' && request.changes[key] === null ? null : value[key]])) as Fields
     const expected = request.expected === undefined ? undefined : validateExpected(resource, request.expected)
     const completeExpected = request.expected !== undefined && schemas[resource].safeParse(request.expected).success
     if (expected && Object.keys(changes).some((key) => !Object.hasOwn(expected, key) && !(completeExpected && optionalField(resource, key)))) fail('INVALID_SETTING_VALUE', 'Expected must cover every changed field.')
     for (const key of Object.keys(changes)) {
-      const requested = resource === 'prompts' && (key === 'providerId' || key === 'reactionIcon') && changes[key] === null ? undefined : changes[key]
+      const requested = key === 'providerId' && changes[key] === null ? undefined : changes[key]
       const previous = expected?.[key] === null && optionalField(resource, key) ? undefined : expected?.[key]
       if (expected && !configValuesEqual(existing.value[key], requested) && !configValuesEqual(existing.value[key], previous)) throw new ConfigConflict(`${resource}.${request.id}.${key}`)
     }

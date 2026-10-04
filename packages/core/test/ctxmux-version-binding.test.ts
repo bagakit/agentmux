@@ -133,7 +133,8 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
  * 分类表和实际 import 接线独立校验；不能靠过期哈希与历史 fixture 制造非空假绿。
  */
 const IDENTITY_HASHES = [
-  ...Object.values(ctxmuxArtifacts.sources).flatMap(source => [source.commit, source.tree]),
+  ctxmuxArtifacts.source.commit,
+  ctxmuxArtifacts.source.tree,
   ...Object.values(ctxmuxArtifacts.manifests)
 ] as const
 
@@ -220,7 +221,7 @@ function roleViolation(relPath: string, role: string): string | null {
     case 'ssot': {
       if (relPath !== 'packages/core/src/ctxmux-artifact-contract.json') return `${relPath} 不是唯一 artifact 合同`
       const contract = JSON.parse(text)
-      const hashes = [...Object.values(contract.sources ?? {}).flatMap((source: any) => [source.commit, source.tree]), ...Object.values(contract.manifests ?? {})]
+      const hashes = [contract.source?.commit, contract.source?.tree, ...Object.values(contract.manifests ?? {})]
       return hashes.length >= 3 && hashes.every(value => typeof value === 'string' && /^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(value))
         ? null : `${relPath} 缺少可辨认的 Source 或平台 manifest identity`
     }
@@ -294,7 +295,7 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
     expect(CTXMUX_VERSION.length).toBeGreaterThan(0)
     expect(typeof CTXMUX_COMMIT).toBe('string')
     expect(CTXMUX_COMMIT).toMatch(/^[0-9a-f]{40}$/)
-    expect(CTXMUX_COMMIT).toBe(ctxmuxArtifacts.sources[`${process.platform}-${process.arch}` as keyof typeof ctxmuxArtifacts.sources].commit)
+    expect(CTXMUX_COMMIT).toBe(ctxmuxArtifacts.source.commit)
     expect(CTXMUX_VERSION).toBe(ctxmuxArtifacts.version)
   })
 
@@ -311,7 +312,7 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
       expect(imports.some(value => ts.isStringLiteral(value.moduleSpecifier) &&
         value.moduleSpecifier.text === module && value.importClause?.name !== undefined), path).toBe(true)
     }
-    expect(readFileSync(join(coreRoot, 'scripts/build.mjs'), 'utf8')).toContain('manifest.source.commit !== expectedSource.commit')
+    expect(readFileSync(join(coreRoot, 'scripts/build.mjs'), 'utf8')).toContain('manifest.source.commit !== ctxmuxArtifacts.source.commit')
     expect(readFileSync(adapterPath, 'utf8')).toContain('manifest.source.commit !== CTXMUX_COMMIT')
   })
 

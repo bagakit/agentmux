@@ -1,4 +1,3 @@
-import { validateDeliveryLogId } from './delivery-attempt.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { loadOrCreateRelayKeyPair } from './rpc-relay-keypair.js'
@@ -201,10 +200,9 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
+    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' ||
       error.detail !== undefined && typeof error.detail !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
-    if (error.logId !== undefined) validateDeliveryLogId(error.logId)
     if (error.controlFailure !== undefined) parseRpcControlFailure(error.controlFailure)
     if (error.evidence !== undefined) {
       const evidence = parseOutputGapEvidence(error.evidence)
@@ -266,9 +264,7 @@ class RpcClient implements AgentMuxRpcClient {
     const abort = () => controller.abort()
     signal?.addEventListener('abort', abort, { once: true })
     let deadline: ReturnType<typeof setTimeout> | undefined
-    const deviceRecovery = () => method === 'device.hello'
-      ? "Check this device's connection state and ask a local user to inspect the original device facts before another explicit mutation. Never automatically replay a write."
-      : 'Read agentmux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
+    const deviceRecovery = () => 'Read agentmux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
     const armDeadline = () => {
       // Finite intents remain with their admitted owner until its receipt, an
       // explicit cancellation or transport failure. Only reader opening is timed.
@@ -282,7 +278,7 @@ class RpcClient implements AgentMuxRpcClient {
       if (!responseDelivered) {
         let failure = error ?? new AgentMuxError('RPC ended before its response.', 'CONTROL_PROTOCOL_ERROR')
         if (isAgentMuxRpcDeviceMethod(method) && failure instanceof AgentMuxError) {
-          failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId)
+          failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure)
         }
         rpc.receive(rpcFailure(request.id!, failure))
       }
@@ -321,16 +317,16 @@ class RpcClient implements AgentMuxRpcClient {
           if (finished) return
           handlers!.onEvent(event as AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>)
           if (event.type === 'end') end()
-          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown; logId?: string };
+          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown };
             end(new AgentMuxRpcError(failure.message, failure.code, -32000, failure.details, failure.candidates, failure.detail,
-              failure.controlFailure === undefined ? undefined : parseRpcControlFailure(failure.controlFailure), failure.logId)) }
+              failure.controlFailure === undefined ? undefined : parseRpcControlFailure(failure.controlFailure))) }
         }
       } catch (error) { end(transportError(error)) }
     }
     const rpc = new JSONRPCClient(async payload => {
       try {
         if (this.endpoint.transport === 'ssh') {
-          if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined }, this.endpoint.socketPath)
+          if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined })
           opening = this.ssh.open(payload, receive, end, controller.signal, armDeadline)
         } else { armDeadline(); opening = openRequest(this.endpoint, payload, receive, end, controller.signal, this.relayKeyPair) }
         reader = await opening

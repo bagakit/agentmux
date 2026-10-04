@@ -1,4 +1,3 @@
-import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { memo, useMemo, useState } from 'react'
 import { useStore } from 'zustand'
 import type { BrowserToolbarConfig, WorkspaceRecord } from '../../../shared/contracts'
@@ -22,7 +21,6 @@ export const BrowserToolsPanel = memo(function BrowserToolsPanel({ workspace, vi
     subscribe: visible ? useAppStore.subscribe : () => () => {}
   }), [visible])
   const sessions = useStore(toolStore, (state) => state.sessions)
-  const topicFacts = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
   const tabs = useStore(toolStore, (state) => state.tabs)
   const browserAnnotationsByBrowserId = useStore(toolStore, (state) => state.browserAnnotationsByBrowserId)
   const deleteBrowserAnnotation = useAppStore((state) => state.deleteBrowserAnnotation)
@@ -39,8 +37,8 @@ export const BrowserToolsPanel = memo(function BrowserToolsPanel({ workspace, vi
   const browserAnnotations = useMemo(() => Object.values(browserAnnotationsByBrowserId).flat()
     .filter((annotation) => annotation.workspaceId === workspace.id), [browserAnnotationsByBrowserId, workspace.id])
   const workspaceAgentSessions = useMemo(() => sessions.flatMap((session) => (
-    session.kind === 'agent' && workspaceOwnsSessionPath(workspace, session, topicFacts) ? [session] : []
-  )), [sessions, workspace, topicFacts])
+    session.kind === 'agent' && workspaceOwnsSessionPath(workspace, session) ? [session] : []
+  )), [sessions, workspace])
 
   async function saveBrowserToolbar(toolbar: BrowserToolbarConfig, expected: BrowserToolbarConfig): Promise<void> {
     if (savingBrowserToolbar) return

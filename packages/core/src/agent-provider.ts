@@ -26,7 +26,6 @@ import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
-  AgentMuxRunRef,
   AgentNativeSessionHandle,
   AgentPostureInputPlan,
   AgentPromptInputPlan,
@@ -35,7 +34,6 @@ import type {
   AgentPromptExecutionEvidence,
   AgentProviderSessionStatus,
   AgentNativePromptPredecessor,
-  AgentHookReceipt,
   AgentTerminalScreenSnapshot,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
@@ -43,9 +41,6 @@ import type {
   AgentProviderNativeSessionDiscovery,
   AgentProviderNativeSessionDiscoveryContext,
   AgentProviderSessionHistoryContext,
-  AgentProviderSessionHistoryRecordContext,
-  AgentSessionHistoryItem,
-  AgentProviderSessionQuestionReplyContext,
   AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryObservationContext,
   AgentSessionHistoryObservationHandle,
@@ -78,8 +73,6 @@ export type AgentProviderHookActivation = { active: boolean; code: string; actio
 
 export type AgentProviderHookNormalizationContext = Readonly<{
   nativeHandle?: Readonly<AgentNativeSessionHandle>
-  /** Only the existing durable receipt of this exact Core Run. */
-  previousHookReceipt?: Readonly<AgentHookReceipt>
   /** This Run was started for an exact semantic resume target; Hook observations cannot redirect it. */
   protectedNativeTarget?: boolean
   processNativeHandle?: Readonly<AgentNativeSessionHandle>
@@ -97,47 +90,8 @@ export type AgentProviderPromptExecutionContext = {
   nativeHandle?: Readonly<AgentNativeSessionHandle>
   /** Only the exact current Core Run can consume its pre-resume native evidence. */
   nativePromptPredecessor?: Readonly<AgentNativePromptPredecessor>
-  /** Cancellation abandons only this read-only observation, never the Agent. */
-  signal?: AbortSignal
 }
 
-export type AgentProviderPreparedPromptTransport = Readonly<{
-  nativeSourceId: string
-  /** A fresh check of the original native writer/source, never cached input authorization. */
-  verifyCurrentTransport(context: AgentProviderPromptExecutionContext): Promise<boolean>
-}>
-
-/** Ephemeral qualification from the existing screen owner, never a second input journal. */
-export type AgentInteractionTargetFrame = Readonly<{
-  run: Readonly<AgentMuxRunRef>
-  outputThroughByte: number
-  geometryRevision: number
-  evidenceGeneration: number
-}>
-
-export type AgentProviderInteractionResponseContext = AgentProviderPromptExecutionContext & Readonly<{
-  agentSessionId: string
-  run: Readonly<AgentMuxRunRef>
-  inputByte: number
-  signal: AbortSignal
-  observeTarget(inspect: (screen: AgentTerminalScreenSnapshot) => boolean): Promise<AgentInteractionTargetFrame>
-}>
-
-export type AgentProviderPreparedInteractionResponse = Readonly<{
-  plan: AgentMuxInteractionInputPlan
-  target: Readonly<{
-    agentSessionId: string
-    run: Readonly<AgentMuxRunRef>
-    requestId: string
-    nativeToolCallId: string
-    nativeSourceId: string
-    inputByte: number
-    frame: AgentInteractionTargetFrame
-  }>
-  inspectCurrentTarget(screen: AgentTerminalScreenSnapshot): boolean
-  /** Re-read the same native invocation/source immediately before a new input claim. */
-  verifyCurrentTarget(context: AgentProviderPromptExecutionContext): Promise<boolean>
-}>
 export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
@@ -161,8 +115,6 @@ export type AgentProvider = {
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
-  readSessionHistoryRecord?(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem>
-  prepareSessionQuestionReply?(context: AgentProviderSessionQuestionReplyContext): Promise<string>
   observeSessionHistory?(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle>
   /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
   planManagedHooks?(context: AgentManagedHookPlanContext): AgentManagedHookPlan | null
@@ -172,17 +124,11 @@ export type AgentProvider = {
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
   buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
-  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }): AgentPromptInputPlan
+  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
-  inspectPromptExecution?(screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']): AgentPromptExecutionContext
+  inspectPromptExecution?(screen: AgentTerminalScreenSnapshot): AgentPromptExecutionContext
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
-  preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
-  prepareInteractionResponse?(
-    context: AgentProviderInteractionResponseContext,
-    request: Readonly<AgentMuxInteractionRequest>,
-    response: Readonly<AgentMuxInteractionResponse>
-  ): Promise<AgentProviderPreparedInteractionResponse | null>
   observeSessionStatus?(context: AgentProviderSessionStatusObservationContext): Promise<{ dispose(): void }>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
@@ -206,8 +152,6 @@ export type AgentProviderDefinition = {
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
-  readSessionHistoryRecord?: (context: AgentProviderSessionHistoryRecordContext) => Promise<AgentSessionHistoryItem>
-  prepareSessionQuestionReply?: (context: AgentProviderSessionQuestionReplyContext) => Promise<string>
   observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
@@ -223,12 +167,10 @@ export type AgentProviderDefinition = {
     prompt: string | undefined,
     args: readonly string[]
   ) => string[]
-  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }) => AgentPromptInputPlan
-  inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
+  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution }) => AgentPromptInputPlan
+  inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot) => AgentPromptExecutionContext
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
-  preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
-  prepareInteractionResponse?: AgentProvider['prepareInteractionResponse']
   observeSessionStatus?: (context: AgentProviderSessionStatusObservationContext) => Promise<{ dispose(): void }>
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
@@ -345,21 +287,6 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       )
     }
   }
-  const immediateStrategy = catalogSeed.capabilities.promptExecution?.immediate
-  if (immediateStrategy !== undefined) {
-    if (immediateStrategy !== 'interrupt-before-input' && immediateStrategy !== 'native-steer') {
-      throw new AgentMuxError('Provider immediate strategy is invalid.', 'INVALID_AGENT_PROVIDER')
-    }
-    for (const probe of ['probe', 'probe\nsecond-line']) {
-      const plan = definition.planPromptInput?.(probe, { execution: 'immediate' })
-      if (plan?.kind !== 'render-then-submit' ||
-          Boolean(plan.prepare) !== (immediateStrategy === 'interrupt-before-input') ||
-          !definition.inspectPromptExecution ||
-          immediateStrategy === 'native-steer' && (!definition.readPromptExecutionEvidence || !definition.verifyPromptExecutionTransport)) {
-        throw new AgentMuxError('Provider immediate strategy and its native input contribution are inconsistent.', 'INVALID_AGENT_PROVIDER')
-      }
-    }
-  }
   const launchOptionDeclarations = definition.launchOptions ?? []
   validateLaunchOptionDeclarations(catalogSeed.id, launchOptionDeclarations)
   const posture: AgentPostureProtocol | undefined = definition.posture
@@ -380,14 +307,10 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
-    ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
-    ...(definition.prepareInteractionResponse ? { prepareInteractionResponse: definition.prepareInteractionResponse } : {}),
     ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
-    ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),
-    ...(definition.prepareSessionQuestionReply ? { prepareSessionQuestionReply: definition.prepareSessionQuestionReply } : {}),
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
@@ -488,10 +411,8 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     },
     planPromptInput(prompt, context) {
       const plan = definition.planPromptInput?.(prompt, context) ?? { kind: 'single-phase' as const, data: `${prompt}\r` }
-      const strategy = catalog.capabilities.promptExecution?.immediate
       if (context?.execution === 'immediate' &&
-          (!strategy || plan.kind !== 'render-then-submit' ||
-           Boolean(plan.prepare) !== (strategy === 'interrupt-before-input') || !definition.inspectPromptExecution)) {
+          (plan.kind !== 'render-then-submit' || !plan.prepare || !definition.inspectPromptExecution)) {
         throw new AgentMuxError(`${catalog.label} has no safe native immediate input plan. The message and healthy Run are retained; ordinary terminal input remains available.`,
           'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
       }
@@ -513,18 +434,13 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }
-      const previous = context.previousHookReceipt
-      const correlationContext = previous && (previous.agentSessionId !== envelope.agentSessionId ||
-        previous.providerId !== envelope.providerId || previous.run.runId !== envelope.runId)
-        ? { ...(context.nativeHandle ? { nativeHandle: context.nativeHandle } : {}) } : context
-      const normalized = normalizeNativeHook(definition.hook, envelope, correlationContext)
+      const normalized = normalizeNativeHook(definition.hook, envelope, context)
       const resolvedEnvelope = envelope.eventName === normalized.eventName
         ? envelope
         : { ...envelope, eventName: normalized.eventName }
       const mainInteraction = normalized.mainSubject ? definition.interaction : undefined
       const interaction = mainInteraction
-        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction,
-          definition.hook.resolveInteractionToolCallId?.(normalized.eventName, resolvedEnvelope.payload ?? {}, correlationContext))
+        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction)
         : undefined
       const interactionCompletion = mainInteraction
         ? normalizeTerminalInteractionCompletion(resolvedEnvelope, normalized.status.observedAt, mainInteraction) : undefined

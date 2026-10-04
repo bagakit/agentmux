@@ -38,24 +38,9 @@ export function useSpaceObjectMenu() {
   }
 }
 
-/** Visible object actions hand a dialog the original invoker after its menu releases focus. */
-export function useSpaceObjectActionsMenu() {
-  const trigger = useRef<HTMLButtonElement>(null)
-  const pendingDialog = useRef<(() => void) | null>(null)
-  return {
-    trigger,
-    onOpenChange(open: boolean) { if (open) pendingDialog.current = null },
-    openDialog(callback: () => void) { pendingDialog.current = callback },
-    onCloseAutoFocus(event: Event) {
-      const callback = pendingDialog.current; pendingDialog.current = null
-      if (callback) { event.preventDefault(); trigger.current?.focus(); callback() }
-    }
-  }
-}
-
 /** A real object menu for Space Motes/Topics; registered Folder menus reuse the same entry. */
 export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuOpen, moteArchive, moteActions, container }: {
-  target: SpaceIconTarget | null; onChangeIcon?(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
+  target: SpaceIconTarget; onChangeIcon?(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
   moteArchive?: { archived: boolean; disabled?: boolean; reason?: string; onChange(): Promise<boolean>; returnFocus?(): HTMLElement | null }
   moteActions?: { pinned: boolean; onTogglePin(): void; onEdit(): void; onRename?(): void; onNewDiscussion?(): void; onMaterials?(): void; onOpenSpace?(): void }
   container?: () => HTMLElement | null
@@ -74,8 +59,8 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
         {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><Pencil size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
-        {onChangeIcon && target ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => target && onChangeIcon(target))}>
-          <Shapes size={14} /><span>{target.avatarTarget || target.imageTarget ? 'Change avatar…' : 'Change icon…'}</span>
+        {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => onChangeIcon(target))}>
+          <Shapes size={14} /><span>{target.avatarTarget ? 'Change avatar…' : 'Change icon…'}</span>
         </ContextMenu.Item> : null}
         {moteActions ? <>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onEdit)}>

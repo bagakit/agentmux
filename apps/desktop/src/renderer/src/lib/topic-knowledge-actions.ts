@@ -51,14 +51,7 @@ export function selectedKnowledgeSources(workspaceId: string): { title: string; 
 export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise<void> {
   const state = useAppStore.getState()
   if (source.kind === 'notebook') {
-    const library = await api.notebooks.read()
-    if (!library.notebooks[source.notebookId]) throw new Error('The original notebook is not confirmed. Its source reference is kept.')
-    const current = useAppStore.getState()
-    if (current.mainSurface !== state.mainSurface || current.surveyNotebookId !== state.surveyNotebookId || current.surveyNoteId !== state.surveyNoteId || current.surveyZoneSelection !== state.surveyZoneSelection || current.workbenchSpaceSelection !== state.workbenchSpaceSelection) return
-    useAppStore.getState().setSurveyZoneSelection(null)
-    useAppStore.getState().setSurveyNotebook(source.notebookId)
-    useAppStore.getState().setMainSurface('survey')
-    return
+    throw new Error('The original Notebook owner is unavailable for ' + source.notebookId + '. Its exact source reference and current workface are kept.')
   }
   if (source.kind === 'url') return api.ui.openExternal(source.url)
   if (source.kind === 'file') {
@@ -88,11 +81,12 @@ export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise
     const tab = state.tabs[source.chatId], groups = Object.entries(state.layouts).flatMap(([workspaceId, layout]) => layout.groups.filter(group => group.tabOrder.includes(source.chatId!)).map(group => ({ workspaceId, groupId: group.id })))
     const origin = tab?.space?.zoneId ? state.spaceZoneBindings[tab.space.zoneId] : undefined
     if (!tab || origin?.topicId !== source.topicId || origin.contentKind !== 'topic' || groups.length !== 1 || source.threadId && !Object.hasOwn(tab.regions, source.threadId)) throw new Error('The original discussion source and position are not uniquely confirmed. Its reference is kept.')
+    if (!await state.openScratchTopic(source.topicId)) return
+    const current = useAppStore.getState(), latest = current.tabs[tab.id]
+    if (latest !== tab) throw new Error('The source discussion changed during navigation. Its original reference is kept.')
     const location = groups[0]!
-    const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${crypto.randomUUID()}`, operation: 'focus', target: {
-      kind: 'space', zoneId: tab.space!.zoneId, tabId: tab.id, displayWorkspaceId: location.workspaceId, groupId: location.groupId,
-      ...(source.threadId ? { regionId: source.threadId } : {}) }, inputPolicy: 'target' })
-    if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') throw new Error('The original discussion position is not confirmed. Its reference is kept; reopen its exact source workface.')
+    useAppStore.getState().activateTab(location.workspaceId, location.groupId, tab.id)
+    if (source.threadId) useAppStore.getState().focusRegion(location.workspaceId, tab.id, source.threadId)
     return
   }
   const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${crypto.randomUUID()}`, operation: 'focus', target: {

@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -24,7 +24,7 @@ afterEach(async () => {
 function session(status?: AgentStatus): AgentMuxStoredAgentSession {
   return {
     kind: 'agent', agentSessionId: 'entry-agent', providerId: 'codex', executorId: 'codex',
-    hostId: 'local', workspacePath: fixturePath("repo"), run: { runId: 'entry-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: upstreamFixturePath("repo"), run: { runId: 'entry-run' }, retiredRuns: [],
     hookBindingId: 'entry-binding', hookToken: 'entry-token',
     createdAt: 1, updatedAt: Math.max(1, status?.observedAt ?? 0), ...(status ? { semanticStatus: status } : {})
   }
@@ -71,7 +71,7 @@ async function harness(initial = session(), store: AgentMuxAgentSessionStore = n
   let beforeAck: (() => Promise<void>) | undefined
   const run = (): CtxmuxAdapterRun => ({
     nativeService: null,
-    runId: 'entry-run', lifecycleOperationId: null, program: 'codex', args: [], workspacePath: fixturePath("repo"),
+    runId: 'entry-run', lifecycleOperationId: null, program: 'codex', args: [], workspacePath: upstreamFixturePath("repo"),
     pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor
   })
@@ -305,24 +305,10 @@ it('failed idle persistence after accepted input preserves ACK and cursor with a
 it('native interaction first claim invalidates idle but replay preserves the newly completed epoch', async () => {
   const h = await harness({
     ...session(done(100)), pendingInteraction: { request: {
-      kind: 'permission', id: 'permission-one', nativeToolCallId: 'entry-tool-call', agentSessionId: 'entry-agent', title: 'Allow action?',
+      kind: 'permission', id: 'permission-one', agentSessionId: 'entry-agent', title: 'Allow action?',
       options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }],
       evidence: { source: 'native-hook', observedAt: 100, run: { runId: 'entry-run' }, hookReceiptId: 'permission-one' }
     } }
-  })
-  // This state-entry test contributes an explicit synthetic Provider target.
-  // Exact native target admission is independently covered by interaction-input-target.
-  const provider = h.client.providers.get('codex')
-  provider.prepareInteractionResponse = async (context, request, response) => ({
-    plan: provider.planInteractionResponse(request, response),
-    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
-      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'native-entry', inputByte: context.inputByte,
-      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
-    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
-  })
-  h.inner.screenEvidence.currentCompleteFrame = () => ({
-    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] },
-    outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0
   })
   const failAckSave = vi.spyOn(h.store, 'compareAndSwap')
   h.beforeAck(async () => {
@@ -341,8 +327,6 @@ it('native interaction first claim invalidates idle but replay preserves the new
   await h.feed('Stop')
   await respond()
   expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBe(3_000)
-  expect(h.client.agentSession('entry-agent').pendingInteraction).toMatchObject({
-    request: { nativeToolCallId: 'entry-tool-call' }, response: { acknowledged: true }
-  })
+  expect(h.client.agentSession('entry-agent').pendingInteraction).toBeUndefined()
   expect(h.writes.map((input) => input.data)).toEqual(['1'])
 })

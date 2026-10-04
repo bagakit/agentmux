@@ -72,7 +72,7 @@ it('locates the selected lower track among thirteen at 168px only on explicit re
   const h = await fixture([], 13)
   const contexts = Array.from({ length: 13 }, (_, i) => context(h, i, i === 12 ? 'working' : 'done', i === 12 ? NOW - HOUR : null))
   useAppStore.setState({ focusTimelineHeight: 168, agentComposerDrafts: { original: 'Keep the original draft' } })
-  await act(async () => h.root.render(createElement(RecentFocusTimeline, { contexts, entries: contexts.map((c, i) => ({...visit(c.id, NOW - (i + 1) * 1000),identity:{name:c.name,kind:c.kind,providerId:c.providerId,hostId:c.hostId,workspacePath:c.workspacePath}})), currentSessionId: 'archived-12', currentContext: {id:'archived-12',hostId:'private-host'}, onSelect: h.onSelect })))
+  await act(async () => h.root.render(createElement(RecentFocusTimeline, { contexts, entries: contexts.map((c, i) => visit(c.id, NOW - (i + 1) * 1000)), currentSessionId: 'archived-12', onSelect: h.onSelect })))
   await h.wait(() => { expect(h.element.querySelectorAll('[data-focus-timeline-id]')).toHaveLength(13); expect(h.element.querySelector('.recent-focus')!.getAttribute('data-native-record-count')).toBe('1') })
   const viewport = h.element.querySelector<HTMLElement>('.recent-focus__viewport')!, track = h.element.querySelector<HTMLElement>('[data-focus-current="true"]')!, ruler = h.element.querySelector('.recent-focus__ruler')!
   expect(track.dataset.focusTimelineId).toBe('archived-12')

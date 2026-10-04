@@ -2,10 +2,9 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
-import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile } from '@agentmux/core'
-import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
+import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
+import { parseToolkitToolDefinition, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
-import { PROMPT_REACTION_ICONS, isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import { COMPOSER_PROMPT_STATES } from '../shared/composer-shortcut-library.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import {
@@ -17,9 +16,6 @@ import {
   EDITOR_FONT_SIZE_MIN,
   EDITOR_FONT_SIZE_MAX,
   PROJECT_RAIL_DENSITY_IDS,
-  MOTE_DIRECTORY_VIEW_IDS,
-  MOTE_DIRECTORY_AVATAR_SIZE_MIN,
-  MOTE_DIRECTORY_AVATAR_SIZE_MAX,
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
   TERMINAL_THEME_IDS,
@@ -28,19 +24,11 @@ import {
 } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 import { PERFORMANCE_STATUS_BAR_IDS, TOOLKIT_ICON_IDS } from '../shared/toolkit-preferences.js'
-import { INITIAL_TOOLKIT_PACKAGES } from '../../resources/toolkit/initial-packages.js'
-import { bootstrapToolkitPackages } from './toolkit-package-bootstrap.js'
-import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_LIMIT, validProfileAvatar } from '../shared/user-profile.js'
-import { FOCUS_RECENT_ACTIVITY_HOURS } from '../shared/focus-preferences.js'
-import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
-import { GOALS_VIEW_IDS } from '../shared/goals-preferences.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
-    const definition = parseToolkitToolConfiguration(value)
-    if (!definition.workspacePath.startsWith('/') || ('kind' in definition
-      ? !definition.packagePath.startsWith('/')
-      : !TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number]))) {
+    const definition = parseToolkitToolDefinition(value)
+    if (!TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number]) || !definition.workspacePath.startsWith('/')) {
       context.addIssue({ code: 'custom', message: 'Tool needs an available icon and an absolute local working directory.' })
       return z.NEVER
     }
@@ -204,8 +192,7 @@ export const composerShortcutSchema = z
     label: z.string().min(1),
     body: z.string().min(1),
     providerId: z.string().min(1).optional(),
-    states: z.array(z.enum(COMPOSER_PROMPT_STATES)).optional(),
-    reactionIcon: z.enum(PROMPT_REACTION_ICONS).optional()
+    states: z.array(z.enum(COMPOSER_PROMPT_STATES)).optional()
   })
   .strict()
 
@@ -247,15 +234,6 @@ const configSchema = z
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
     browser: browserSchema,
-    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), linkDestination: z.enum(['region', 'tab']).optional() }).strict().optional(),
-    notes: z.object({ fontSize: z.number().refine(validNoteFontSize).optional(), contentWidth: z.enum(NOTE_CONTENT_WIDTHS).optional() }).strict().optional(),
-    goals: z.object({ defaultView: z.enum(GOALS_VIEW_IDS).optional(), showFinished: z.boolean().optional() }).strict().optional(),
-    profile: z.object({
-      displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),
-      about: z.string().max(USER_PROFILE_ABOUT_LIMIT),
-      avatar: z.string().max(USER_PROFILE_AVATAR_LIMIT).refine(validProfileAvatar),
-      shareWithAgents: z.boolean()
-    }).strict().optional(),
     toolkit: z.object({
       performance: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),
       mobileConnection: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),
@@ -281,8 +259,6 @@ const configSchema = z
     // 没有它，写成必需会让整块判失败）——且同样**不回填**：缺席即默认档，读处一律 `?? 'default'`，
     // 不补盘。成员来自 import 进来的元组（schema-enum-ssot.test.ts），未知字符串一律判失败。
     projectRailDensity: z.enum(PROJECT_RAIL_DENSITY_IDS).optional(),
-    moteDirectoryView: z.enum(MOTE_DIRECTORY_VIEW_IDS).optional(),
-    moteDirectoryAvatarSize: z.number().int().min(MOTE_DIRECTORY_AVATAR_SIZE_MIN).max(MOTE_DIRECTORY_AVATAR_SIZE_MAX).optional(),
     // 复制路径给绝对地址还是缩写 `~`。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
     // 没有它，写成必需会让整块判失败）——且**不回填**：缺席与默认（缩写）同义，补盘只是白写；读处
     // 一律 `=== true` 判绝对档，落盘只在用户勾了绝对路径时发生。
@@ -290,12 +266,6 @@ const configSchema = z
   })
   .strict()
   .superRefine((config, context) => {
-    for (const [index, prompt] of (config.composerShortcuts ?? []).entries()) {
-      if (prompt.reactionIcon && !isPromptReactionCode(prompt.keyword)) context.addIssue({
-        code: 'custom', path: ['composerShortcuts', index, 'keyword'],
-        message: 'Quick reply codes must start with a lowercase letter and contain up to 48 lowercase letters, digits or hyphens.'
-      })
-    }
     const hostIds = new Set(config.hosts.map((host) => host.id))
     if (hostIds.size !== config.hosts.length) {
       context.addIssue({ code: 'custom', path: ['hosts'], message: 'Host ids must be unique' })
@@ -374,7 +344,7 @@ void _schemaEnumsAreExactlyTheirUnions
 
 export const DEFAULT_CONFIG: AppConfig = {
   version: CONFIG_VERSION,
-  hosts: [{ id: 'local', kind: 'local', label: defaultLocalHostLabel() }],
+  hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
   executors: {
     codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
     claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
@@ -1024,12 +994,6 @@ export class ConfigStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         loaded = structuredClone(DEFAULT_CONFIG)
-        loaded.toolkit = { tools: await bootstrapToolkitPackages({
-          resourceRoot: join(app.getAppPath(), 'resources', 'toolkit'),
-          packageRoot: join(app.getPath('userData'), 'toolkit', 'packages'), workspacePath: app.getPath('home'),
-          packages: INITIAL_TOOLKIT_PACKAGES,
-          reportIssue: issue => console.warn(`Toolkit package ${issue.toolId}: ${issue.reason} Source: ${issue.path}`)
-        }) }
         persist = true
       } else {
         // Every non-ENOENT path lands here with `rawText` already read: a JSON syntax error, a schema

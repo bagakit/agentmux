@@ -29,6 +29,8 @@
 
 用户希望「Agent CLI 能操作 AgentMux 桌面应用本身」，Agent 和用户交流时能切换界面；理想情况下，Mote 在浮窗里交流的同时，可以改变主画面当前聚焦的 Space 或某个 Goal，也方便 Agent 自行迭代、调试和观察。该能力沿同一公共业务服务的 `app focus`／`app inspect`、`space focus` 与 `goal focus` 接入，具体呈现与输入仍由原 Client owner 执行；不把系统桌面 Computer Use、Browser 操作或 Agent／Run 生命周期并成另一条 Runtime。
 
+Work、Survey 与左下 Mote 面板的导航范围，以及明确跨上下文动作的一次带入语义，只见[Work、Survey 与 Mote 的导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)。本节公共动作继续分别报告选择、呈现和输入，不因入口或共享实体合并各上下文的目标。
+
 - **主画面与对话输入分别成立。** 选中主画面目标不等于真实 caret 已转移。默认导航保留仍在交流的 Mote 浮窗、同一对象／Tab／Region、原 View、真实 caret、草稿与组字，不关闭、重新创建、重选或自动发送其内容。只有调用者明确要求把输入交给精确目标时才尝试输入焦点转移；不能为证明主面导航成功先 blur 浮窗再恢复或挑一个编辑框。
   用户继续点击或输入浮窗，选择该原 Tab 内的精确 Region、原输入与逻辑 lane；浮窗自己的活动 Region、焦点标记与观察须跟随这次局部选择，主面保留的源焦点即使来自同一 Tab 也不能覆盖浮窗的局部选择。固定浮窗仍保留原有的输入与人工操作能力。不能因此清掉主面精确 Space／Zone 地址、改变无关 Workspace／Group 或保留的源焦点，或重新授权另一处 launcher 自动激活。人工在主面明确导航或新建 Tab 仍按原交互执行。
 - **用真实身份导航。** Space／Zone／Tab／Region 只沿[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的真实来源，Goal 沿用原持久 ID。精确子目标可反推父层，父子不一致或多候选不能猜最近、第一张 Tab 或别人的 Agent。导航仅改变既有展示选择；不创建 worktree、Tab、AgentSession、任务或 PMO，不移动 Region，不改执行 cwd／Run／原生句柄，不停止健康 Session。
@@ -39,14 +41,13 @@
 - **观察不改工作。** Agent 可只读取得准确主面与浮窗状态，输出能用于后续精确命令；不触发切换、聚焦、启动／停止、重投、refresh、展开或收起。观察仅含语义身份和呈现／输入状态，不读取草稿正文、终端输入、选区文字或剪贴板；缺事实明确 unknown，不能按配置或记忆填成已观察。
 - **失败保留原能力。** 目标不存在、关联未知、渲染尚未确认、overlay 阻挡或输入不可达分别报告，已应用的展示选择与未确认的真实结果不能混同；服务窗说明失败步骤和现有可用状态，不遮住原工作面、不抢输入，也不因流程观察失败关闭健康 Agent。普通进程重启先恢复原 durable 选择、工作面、浮窗固定目标与 Session 引用，继续原恢复路径；瞬时 caret 不冒充持久化事实。
 
-桌面语义导航 CLI 合同（本机过程资料：`docs/plans/desktop-focus-navigation-cli-design.md`）。本项与 Agent 创建／空间移动、Mote 快捷面 hover 各有独立交付边界，复用各自已有 owner，不重做它们的生命周期。
+命令扩展、缺省建议、现有 source 缺口与实施验收见 [Agent 操作桌面主画面与保留对话输入](#agent-操作桌面主画面与保留对话输入)；桌面语义导航 CLI 合同（本机过程资料：`docs/plans/desktop-focus-navigation-cli-design.md`）。本项与 Agent 创建／空间移动、Mote 快捷面 hover 各有独立交付边界，复用各自已有 owner，不重做它们的生命周期。
 
 ## Agent 通过 CLI 打开文件与控制原工作面
 
 用户要求继续补齐「文件／Editor 打开、Region 展示模式切换、Region 交换」，让 Agent 能用本产品既有 CLI 操作原工作面。文件资源、Agent 的 Session 展示偏好与 Region 的空间表现必须按原 owner 分清，不复制文件服务、catalog、布局或 Runtime。
 
 - 文件按精确 Zone 的真实目录与字面目录相对路径打开，再沿原资源关系映射到既有 filesAPI 的 Workspace 相对路径；Topic 目录不能偷换成隐藏容器根。显示落点使用原 Space／Zone／display Workspace／group 身份，不能按 caller cwd、标题或当前主面猜位置。目录与原资源根映射未确认时如实未知，不改执行事实。文件入口打开或复用原 canonical File Tab／Region；零 Tab 的已有 Zone 可打开第一张 File Tab，不新建 Zone、Agent／Run，不替换 Launcher 或别人的内容。显式显示落点不能把资源根改成显示目录，也不能静默重归属已有 File Tab。
-- 原 Host 的 Files owner 可以确认真实 Zone 目录，同时沿原 Workspace 的逻辑文件命名空间提供读取。此时文件资源回执用 `logicalDirectory` 明确声明相对逻辑目录，`zonePath` 仍保留真实物理目录；空逻辑目录只表示已明确确认的逻辑根。Core 核对原 Host／Workspace／Zone、声明的规范相对目录、请求路径和完整原文档／修订；未声明逻辑映射时仍核原 Workspace 的物理包含范围。声明不授予文件访问权限，不得绕过原 Files owner 对同一对象、目录与路径的确认。
 - 文件默认后台放置，显式导航也默认保留仍合资格的现有 Mote／Terminal／Editor 输入、草稿和组字；旧输入因显示变化失去资格须如实未确认，不能 focus／blur 后恢复来补签。资源创建、读取、实际格式、精确落点与导航是否仍获授权分别说明；异步读取完成前用户已经导航，不能抢回主面或把晚回执指向替换者。文件面已建立但读取失败仍保留原面与准确原因，不能从未获导航授权推断未打开。目录不作为 File 打开，书签源码不顺带开 Browser；媒体和二进制沿真实预览，不冒可编辑 Editor。
 - Terminal／Activity 是 exact SID 的展示偏好，影响该 SID 的全部原投影；File 的 source／diff／preview 是 exact Region 的互斥模式，影响同一 Region 的全部呈现，不影响另一 Region 的同文件视图。合法 opaque ID 按原 own-entry 读取，不把继承属性当实际覆盖。暂缺 Core 快照不能阻断原 durable AgentRegion 的显示选择，不探测 readiness、不猜另一个 Session。CLI 改展示偏好不改主面选择、逻辑 lane、Session／Run 或 cwd，不隐式授权 caret 转移；输入资格变化如实未确认，原 GUI 明确操作保持其既有行为。
 - File 模式由同一个原 Region owner 决定真正正文与菜单状态，不能同时保留 local preview 与 diff 让明确选择被遮盖。Markdown／SVG／Note 文本支持源码、diff 与预览，普通文本／HTML 源码不冒同 Region 的 HTML Browser 预览；媒体与已知二进制只读预览。支持范围来自实际格式与读取事实，未知如实未知；模式已应用与 preview／diff 数据可用分别说明。切换保同一原文档、未保存内容及每 Region view state，projection 模型沿原生命周期可释放／重建；仍合资格的原输入不被抢，失去资格如实未确认，不保存文件或阻断健康 Run。
@@ -132,7 +133,7 @@
 - **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI、HTTP 与 SSH 共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
 - **权威职责与空间来源。** Core 保持无 Electron／React 依赖，持有 Provider、AgentSession、权限、Hook、readiness、语义恢复，以及前端独立的持久空间身份、拓扑、布局、选择与全部绑定；空间与执行身份的含义见[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)。ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Client 消费 Core 空间事实，负责屏幕呈现与真实输入焦点；配置、编辑、文件／Topic 目录、Git 与 Browser 资源能力仍由原 Host／Client owner 提供，经同一公共服务接入。不新增一套 Runtime、Topic／Project／Space／Session registry、持久空间镜像或 CLI 专用业务判断。
 - **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配请求与响应，不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation。丢回执时按原 owner 的精确业务身份对账；未知不当从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
-- **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。 help／skill 的命令语法只出现一次对象与动作，必需与可选参数须与实际 parser 一致；示例替换真实参数值后应能沿该命令调用，不能把注册名再次写入参数说明或仅列一个无法使用的入口。
+- **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。
 
 统一命令树目标如下；表中每个动作仍须服从其原业务 owner 的权限、只读／副作用和恢复边界，是用户已授权实施的公开目标，不是当前已验收能力清单。
 
@@ -150,8 +151,8 @@
 | `mote` | `playbook pmo` |
 | `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
 | `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
-| `device` | `ls`、`link`、`revoke`：仅本机用户管理；`hello`：已认证 Relay 设备命名自身，权限与连接方式见[手机版 Relay 连接](#手机版-relay-连接) |
-| `toolkit` | `ls`、`inspect`、`install`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
+| `device` | `ls`、`invite`、`approve`、`reject`、`revoke`；仅本机管理请求，变更必须有原设备 Authority 验证的实际用户确认 |
+| `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
 
 - **PMO 全局发现完整保留。** `app snapshot` 聚合原 PMO 跨对象观察：真实 Project 资源、Workspace、Topic／Mote／Space／Zone、配置 Executor、活动 Agent、Core Session、Goal、决策与活动事实；按各自来源保留已知、不可用和 unknown，不把不可用伪装成空列表。对象发现必须覆盖原 `list projects/active-agents/sessions` 与 PMO 全局观察的事实，不能只剩调用者的当前 Space／Workspace。配置 Executor 由 `settings executors` 发现，Agent 与 Session 由 `agent` 发现，空间与其资源绑定由 `space` 发现，各项 inspect 按对象提供；Project／Workspace 资源发现由原权威来源供给聚合及关联观察，不能从 Space 名称或单条 Workspace ID 伪造 Project。`goal activity` 只取原 Goal 活动来源，不把 Runtime 日志或跨域 snapshot 当成 Goal 已发生的活动。
 - **分类、Topic 与资料沿原事实发现。** 全局 Category／Topic／Mote 及其资料的发现复用原目录／文件 owner，分类描述、正文与修订来源明确；Topic 对应原 Zone，主分类关系只取 Core 空间图，不把当前活动 Tab、目录路径或调用者 cwd 当归属。未分类与局部 unknown 分别表达，宿主或范围不可用时显式 unknown／不可用，不补一个全局 registry，不借当前项目、默认 Mote 或另一份 Session 列表补齐事实。部分来源失败保留其他已经观察到的结果与原工作面，不宣称全局资料已经完整。知识对象的公共接入见[《Topics 知识库的公共接入》](#topics-知识库的公共接入)。
@@ -196,13 +197,10 @@ HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意�
 Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知识、整 Topic 转移及本地承接结果唯一见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)；本节定义人与 Agent 共用的公共入口，不把业务正文复制为第二份知识库。
 
 - **发现与操作使用同一准确对象。** CUI 提供分类发现、创建、查看与改名，以及 Topic 发现、创建、查看，按明确范围读取／搜索／写入／修订知识、转移 Topic 分类，以及层级承接的预演、应用与结果核对。GUI、IPC、CLI 和其他 Client 接到同一 typed 公共业务服务及原 Host 内容／Core 空间 owner。返回稳定内容 ID、Category Space／Topic Zone 与相关源引用，供后续精确输入；不从标题、cwd、活动 Tab 或默认 Mote 猜目标。全局发现继续保留，具体对象读取沿自身范围，Mote 不混入普通 Topic。
-- **对象分享复用公共空间寻址。** Category 分享的是原 Space，Topic 分享的是原 Zone；名片及链接沿 Core 的同一纯公共格式／解析出口，GUI 菜单只交付原 owner 已确认的准确身份与可读 metadata。名片的 `space inspect --space`／`--zone` 指引、链接的实际导航消费分别复用原空间检查与定位 owner，不另造 Topic 地址 registry、消息目标或归属关系。身份和链接合同只见[寻址与复制](spaces-and-layout.md#寻址与复制)，菜单与图标归[知识库对象合同](spaces-and-layout.md#topics-知识库的层级与沉淀)。CLI 的发现、类型、实际参数与回执必须能真实消费名片目标；仅复制文本、help 或纯格式测试不代替准确对象的检查及导航结果。图标与图片是 client 的个人呈现偏好，选择沿其原持久呈现 owner，图片资产沿准确 Host 文件及共用图片处理保存，不新增 Core 外观或分类账本。外观编辑不改变原 Space／Zone 发现、检查、导航、知识和文件合同；私有图片端口不冒称公开 Avatar 能力。
 - **内容修订与空间提交各有原 revision。** 分类描述与知识正文保存沿原文件／内容修订，主归属转移沿 Core 的 exact-revision 空间提交；回执分别表达实际目标、应用事实、持久确认与局部未知。陈旧目标或 revision 明确拒绝该次动作，原内容与健康工作继续；部分读取保已确认结果，歧义保真实候选。创建／迁移的未知回执沿同一原对象与操作核读，不因失去回执盲建或重放。普通知识读写不隐式启动、发送、续跑 Agent，也不默认注入整库内容。
-- **原文件发现与读取复用 Files。** `topic.knowledge.ls/search` 分别返回知识 `entries`、原文件 `documents` 及 `unavailable`。文件发现只确认名称，片段与修订未读则为空；正文检索返回实际读入范围、命中片段及原修订，引用携带准确 `file.read` 目标与原资源范围，GUI、RPC 和编译 CLI 沿同一回执读取。`file.read` 的可选 `maxBytes` 是读取前／读入中的整文件上限，文档引用带实际检索上限，缺省的一般文件读取保持原能力；CLI 同样可指定该上限。不可读、超限、取消、候选或累计扫描预算耗尽均明确保留未完整观察，不用空结果冒充全范围无匹配。资料范围、原内容保全和文件不自动成为确认知识只定义在[已有资料直接可检索](spaces-and-layout.md#topics-知识库的层级与沉淀)；具体支持格式、限额、参数与 codec 仍从对应源码取得，不另立正文、文件读取器或分类关系 owner。
-- **检索回执与历史共用原搜索 owner。** `topic.knowledge.search` 的 `observation` 保存准确请求、命中数量、耗时和覆盖结果；`readBytes` 仅计原读取 owner 确认的字节，`chargedBytes` 包括无法确认时保守预留，`unconfirmedReads` 明示成本观察缺口，不以预算冒实际读取。停止原因区分结果、候选、字节、观察时限和取消；文件遗漏与 scope 失败保 code/source，不把正文或异常中的原文写进历史。`observation.unavailable` 只说明历史保存失败，与内容搜索的 `unavailable` 分开。只读 `topic.knowledge.history` 经同一 RPC／CLI 查看近期真实执行记录，按原请求 Topic、完整关键词或 search ID 精确过滤；全库请求的 Topic 为 null，不从命中文件猜历史归属，也不要求原资料仍可读才能排障。历史在 Host 应用观测目录保留最多 128 条及 1 MiB，权限仅属主读写；回执表达裁剪和查询分页边界，损坏或不可读原记录保全并给恢复说明，未确认持久保存不冒 saved。此留存不创建知识、启动 Agent、改 Topic 分类或搬原正文目录。
 - **承接预演是实际数据的准确差异。** 公共预演说明受影响的旧空间节点、保留内容身份与原 Zone/Tab/Region、目标分类及原图 revision；应用沿同一 owner，返回备份、预演与实际保存事实。较新数据或原目标变化后重新核对，不以旧预演覆盖用户后来工作；未知结果保原引用与恢复入口。完整迁移的保全约束仍由知识库合同持有。
 
-本节定义 Topics 的公共接入约束；准确 method、参数、codec、命令与 help／skill 从[公共能力来源](../../specs/public-capabilities.md)及对应源码版本取得。源码接线、真实 Host／GUI／CLI 消费、内容保存、迁移验收与当前安装能力分别核对，不能互相代签；当前 `space` 导航或 `file view` 也不能代签完整知识 CUI。
+以上是正在实现的新 Topics 公共能力合同，不声称当前已安装 CLI 已具备完整知识库、分类转移或迁移接口。准确 method、参数、codec、命令与 help／skill 从[公共能力来源](../../specs/public-capabilities.md)及实际候选取得；当前 `space` 导航或 `file view` 不能代签完整 CUI，协议／help 存在也不代签真实 Host、GUI／CLI 消费、保存或迁移验收。
 
 ## Agent-first 的 Space 工作入口
 
@@ -216,7 +214,7 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 
 布局已应用、客户端偏好已写入、宿主 flush 已请求与磁盘耐久性已确认分别报告；耐久性只能由 Core 的[持久空间状态 owner](../../architecture/spatial-state.md)完成耐久写入后确认，不能因为 localStorage 写入或 await IPC 就声称已经落盘。未取得确认时如实报告 unconfirmed，保留原工作面、未保存改动与健康 Agent；客户端偏好、草稿或呈现快照不能替代、覆盖 Core 的空间状态。源移除与目标落点沿同一次 Core 空间提交保存；真实私有普通进程重启后读回同一空间绑定、布局与 Session 引用，才证明恢复验收。CLI 回执保持现有 JSON 输出，身份可原样用于后续命令。
 
-CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace-worktree-cli-design.md`）。上一版 `worktree create/start` 主流程不再是当前方案；技术文档或 proposal 状态不能冒充功能交付。
+具体 grammar、缺省规则、失败保留、请求对账及真实私有重启验收见 [Agent-first 的 Space 工作入口](#agent-first-的-space-工作入口)；CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace-worktree-cli-design.md`）。上一版 `worktree create/start` 主流程不再是当前方案；技术文档或 proposal 状态不能冒充功能交付。
 
 
 ## 手机版 Relay 连接

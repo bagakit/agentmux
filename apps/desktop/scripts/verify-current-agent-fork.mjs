@@ -18,6 +18,7 @@ const receipt = { passed: false, source: 'current production Provider/Core/space
     'Managed native hook config installation is isolated in the fixture. Core creation, environment, reservation, Session store, guide, input and Runtime controls are actual source.',
     'The original Renderer spatial business owner is consumed through a real public service, Client and CLI. No replacement creation or position owner is introduced.',
     'Spatial save consumes the actual Desktop graph converter and Core filesystem spatial owner; an independent process rereads both native Session store and exact durable topology. Full Electron presentation is consumed by the subsequent UI gate.',
+    'The unrelated missing file-resource leaf throws if invoked; no file business is exercised.'
   ] }
 await mkdir(evidence, { recursive: true })
 receipt.verificationInputs = Object.fromEntries(await Promise.all([
@@ -52,7 +53,7 @@ try {
     const name = suite.name + '-' + (mutation || (index ? 'control-after' : 'control')), loadedPath = join(evidence, name + '.loaded.ndjson')
     await writeFile(loadedPath, '')
     let result
-    try { const actual = await run(join(root, 'node_modules/.bin/vitest'), ['run', '--config', suite.config], {
+    try { const actual = await run('pnpm', ['exec', 'vitest', 'run', '--config', suite.config], {
       cwd: root, env: { ...process.env, AGENTMUX_TEST_OBJECT_CLI: join(temporary, 'bin/agentmux'), AMX_FORK_STORE_MODULE: join(temporary, 'dist/store.js'),
         AMX_FORK_SPATIAL_MODULE: join(temporary, 'dist/spatial.js'),
         [suite.mutationKey]: mutation, [suite.loadedKey]: loadedPath }, timeout: 150000, maxBuffer: 4 * 1024 * 1024 }); result = { code: 0, output: actual.stdout + actual.stderr } }
