@@ -21,6 +21,7 @@ import { agent, neighborSid, privateEnvironment, targetSid } from './helpers/wor
 import { fileConfig, fileTopics, startWorkfaceFileFixture, zoneFor } from './helpers/workface-file-fixture'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 import { workfaceMonacoModelCount } from './helpers/workface-monaco-fixture'
 
 const initial = useAppStore.getState(), ownFile = 'apps/desktop/test/workface-file-view-control.test.tsx'
@@ -59,6 +60,9 @@ async function view(mode?: string, region = currentRegion, code = 0) {
 }
 function file(region: string) { const surface = useAppStore.getState().tabs[currentId]?.regions[region]; expect(surface?.kind).toBe('file'); return surface as FileWorkbenchSurface }
 async function mount() {
+  // Exercise real components after their cold module imports, rather than assuming a Suspense commit timing.
+  await Promise.all([import('../src/renderer/src/components/EditorPane'),
+    import('../src/renderer/src/components/FileSourceEditor'), import('../src/renderer/src/components/GitDiffCanvas')])
   await act(async () => root.render(<><div data-file-view="first" data-workbench-tab-id={currentId} data-workbench-region-id={currentRegion}><FileSurfaceView tabId={currentId} surface={file(currentRegion)} /></div>
     <div data-file-view="second" data-workbench-tab-id={currentId} data-workbench-region-id={currentRegion}><FileSurfaceView tabId={currentId} surface={file(currentRegion)} /></div>
     <div data-file-view="neighbor" data-workbench-tab-id={currentId} data-workbench-region-id={otherRegion}><FileSurfaceView tabId={currentId} surface={file(otherRegion)} /></div></>))
@@ -96,7 +100,7 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
     expect(canvases()).toEqual(['preview', 'preview', 'source']); expect(container.querySelector('[data-file-view="first"]')?.textContent).toContain('Unsaved original text')
     expect(protectedFacts()).toEqual(before)
     await act(async () => { expect(await view('diff')).toMatchObject({ effectiveMode: 'diff', data: 'text', content: { status: 'available' }, outcome: 'changed' }) })
-    expect(canvases()).toEqual(['diff', 'diff', 'source']); expect(diff).toHaveBeenCalledExactlyOnceWith('resource', 'shared.md')
+    await vi.waitFor(() => expect(canvases()).toEqual(['diff', 'diff', 'source'])); expect(diff).toHaveBeenCalledExactlyOnceWith('resource', 'shared.md')
     expect(workfaceMonacoModelCount()).toBe(modelBaseline + 4)
     expect([...container.querySelectorAll('[data-workface-diff-side="original"]')].map(node => node.textContent)).toEqual(['Original HEAD bytes', 'Original HEAD bytes'])
     expect([...container.querySelectorAll('[data-workface-diff-side="modified"]')].map(node => node.textContent)).toEqual(['Original worktree bytes', 'Original worktree bytes'])
@@ -200,7 +204,7 @@ it(restoreName, async () => {
     // Positions now belong to Core. Restore its durable record alongside the Renderer draft record.
     expect(payload.spatial.graph.tabs.length).toBeGreaterThan(0)
     await api.spatial.commit({ expectedRevision: 0, graph: payload.spatial.graph })
-    vi.spyOn(api.config, 'get').mockResolvedValue(fileConfig); vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
+    vi.spyOn(api.config, 'get').mockResolvedValue(fileConfig); vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader()); vi.spyOn(api.demands, 'list').mockResolvedValue([])
     vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(fileTopics)
     vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId,
       source: { providerId: 'codex', nativeSessionId: 'private-native-' + control.agentSessionId }, items: [], nextCursor: null }))
