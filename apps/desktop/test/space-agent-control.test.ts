@@ -61,6 +61,20 @@ beforeEach(async () => {
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 
 describe('public Desktop spatial Control owner', () => {
+  it('generates a fixed-width Base58 identity at the real Desktop launch boundary', async () => {
+    useAppStore.setState({ config: structuredClone(config), activeWorkspaceId: 'repo', mainSurface: 'workbench' })
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Creation receipt unavailable'))
+    const zoneId = workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other')
+    const receipt = await control({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' }, destination: { zoneId }, focus: false })
+    if (receipt.operation !== 'agent.open') throw new Error('Wrong operation')
+    expect(created).toHaveBeenCalledTimes(1)
+    const agentSessionId = created.mock.calls[0]![0].agentSessionId!
+    expect(agentSessionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+    expect(useAppStore.getState().spatialRequests[receipt.requestId]!.agentSessionId).toBe(agentSessionId)
+    expect(created.mock.calls[0]![0]).toMatchObject({ workspacePath: _hygiene_fixturePath("other"), createOperationId: receipt.requestId })
+    expect(receipt.issues).toContainEqual(expect.objectContaining({ message: 'Creation receipt unavailable' }))
+  })
+
   it('discovers another Space without navigation or body/readiness reads, and opens its first Tab with one first prompt', async () => {
     useAppStore.setState({ activeWorkspaceId: 'repo', mainSurface: 'workbench', agentComposerDrafts: { untouched: 'kept' } })
     const snapshot = vi.spyOn(api.sessions, 'snapshot')

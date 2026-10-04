@@ -257,7 +257,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     process.stdout.write(id);
   `, sessionStorePath, longId])
   const compactId = create.stdout
-  expect(compactId).toMatch(/^[A-Za-z0-9_-]{16}$/u)
+  expect(compactId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
   const requests: AgentMuxControlRequest[] = []
   const core = await privateRpcCorePort(sessionStorePath, queuePath)
   const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {
@@ -302,7 +302,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
       { operation: 'demand.start', sessionId: compactId },
     ])
     // A new durable identity shares the previously usable prefix. Subsequent processes must refuse.
-    const collisionId = compactId.slice(0, 15) + (compactId.endsWith('A') ? 'B' : 'A')
+    const collisionId = compactId.slice(0, -1) + (compactId.endsWith('A') ? 'B' : 'A')
     await seedSessions(sessionStorePath, [collisionId])
     const before = requests.length
     const refusing = [
