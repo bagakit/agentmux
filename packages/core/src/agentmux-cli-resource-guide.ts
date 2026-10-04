@@ -11,10 +11,26 @@ takes {"expected": {...}} using the complete inspected editable value. Arrays an
 replace that entire field. The service owns legal fields, defaults, identities, references,
 CAS and persistence. IDs and input paths are literal data, with no shell expansion.
 
+Creation-source trust is configured explicitly by a transport-approved user. Read
+settings hosts trusted-sources --host <id> to obtain that Host authority and its public
+key fingerprint. After verifying the source, settings hosts trust-source --host <id>
+--input <file|-> accepts exactly {"sourceRuntimeId":string,"publicKey":string}. Managed
+Agents and devices cannot approve source trust. Opening a remote Agent never silently
+trusts a key or copies the caller capability to the target Host.
+
 Executor refresh takes exact Executor and Host IDs and only checks availability. Available
 means a regular executable was found; missing means no usable executable; check-failed
 retains cause.code/message. It does not launch, stop, resume, save configuration or imply
 Agent health. Use settings hosts test --input <file|-> for an unsaved connection draft.
+settings executors ls lists global saved templates. To choose a remote Executor, use
+settings executors discover --host <id>; routeHostId and runtimeId identify the executing
+Host and descriptors contain its own registered commands and current checks. Unknown
+means not checked; check-failed is not missing. A failed Host query does not prove an
+empty inventory. Custom wrappers need explicit registration: settings executors register
+<id> --host <id> --input <file|-> accepts {"config":{label,providerId,command,args,env,
+injectAgentMuxGuide},"expectedRevision"?:string}. The command is a target Host absolute
+path or PATH command name. Replacing a registered entry requires its configRevision;
+the response never includes args or env. Registration does not install or launch software.
 Exit 0 means the Host diagnostic returned facts, including unsupported/check-failed; it
 does not prove the connection is healthy. Workspace register accepts {hostId,path,name?}; paths remain literal. It
 registers an existing directory, does not run Git/create a worktree, and returns Workspace

@@ -86,11 +86,12 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   const detachedTab = removeWorkbenchRegion(sourceTab, input.regionId)
   if (!detachedTab) return { kind: 'already-sole' }
 
-  // The promoted surface becomes the sole Region of a fresh Tab, keeping its own regionId and workspace.
-  // The new Tab inherits the source Tab's Topic binding: same workspace, same Topic — otherwise a Scratch
+  // The promoted surface keeps its resource identity; the new Tab keeps the source display Workspace.
+  // The new Tab inherits the source Tab's Topic binding: same display Workspace, same Topic — otherwise a Scratch
   // Topic's projection would drop the new Tab out of its Topic (see WorkbenchTab.topicId).
   const newTab: WorkbenchTab = {
     ...createWorkbenchTab(input.mint.tabId, surface),
+    workspaceId: sourceTab.workspaceId,
     ...(sourceTab.topicId ? { topicId: sourceTab.topicId } : {})
   }
 

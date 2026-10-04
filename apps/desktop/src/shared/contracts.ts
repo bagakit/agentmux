@@ -815,6 +815,7 @@ export type WorkspaceSelectionResult = {
 
 export type AgentLaunchInput = {
   executorId: AgentExecutorId
+  executorRevision?: string
   hostId: string
   workspacePath: string
   scratchTopicId?: string
@@ -1023,6 +1024,11 @@ export type RuntimeEndpointWarning = {
 export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure
 } }
+/** Launch outcome crosses Electron as data; a rejected invoke alone cannot prove no start. */
+export type SessionAgentLaunchResult = { ok: true; result: AgentLaunchResult } | { ok: false; error: {
+  code: string; message: string; detail?: string; controlFailure: AgentMuxControlFailure
+  agentSessionId?: string; createOperationId?: string
+} }
 
 export type RuntimeSnapshot = {
   /** Connected hosts whose daemon launch provenance could not be verified. */
@@ -1110,6 +1116,8 @@ export type ExecutorDetection = { input: ExecutorDetectionInput } & (
   | AgentMuxExecutorProbeResult
   | { availability: 'check-failed'; cause: { code: string; message: string }; executable?: undefined }
 )
+export type HostExecutorInventory = import('@agentmux/core').AgentMuxHostExecutorInventory & { routeHostId: string }
+export type HostExecutorConfiguration = import('@agentmux/core').AgentMuxHostExecutorConfiguration & { routeHostId: string }
 
 export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest | import('@agentmux/core/control').MetricsRendererRequest
 export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult | import('@agentmux/core/control').MetricsRendererResult
@@ -1585,6 +1593,8 @@ export type AgentMuxDesktopApi = {
   }
   executors: {
     detect(executorId: AgentExecutorId, hostId: string): Promise<ExecutorDetection>
+    discover(hostId: string): Promise<HostExecutorInventory>
+    register(hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput): Promise<HostExecutorConfiguration>
   }
   control: {
     onRequest(listener: (

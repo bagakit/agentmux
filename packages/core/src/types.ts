@@ -1,5 +1,6 @@
 import type { LaunchOption, LaunchOptionSelection } from './agent-launch-option.js'
 import type { AgentMuxRunExitReason } from './agent-run-exit.js'
+import type { AgentMuxCreationOrigin } from './agent-creation-admission.js'
 export {
   BUILT_IN_AGENT_PROVIDER_IDS,
   type AgentProviderId,
@@ -981,6 +982,9 @@ export type AgentMuxAgentSession = {
 
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
+  /** Source owner verification and target's explicit source-key trust for this initial message. */
+  initialMessageOrigin?: AgentMuxCreationOrigin
+  executorRevision?: string
   /** Complete authenticated creation intent hash; no raw launch secrets are persisted. */
   intentDigest?: string
   /** The actual Run is kept while its Session commit cannot be confirmed. */

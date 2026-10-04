@@ -12,7 +12,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
 ])
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
-type Context = { sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
+type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
   recordDeviceOperation?: (source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => Promise<void>; signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
 type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[]): void; fail(error: unknown): void;
   start(): Promise<void>; close(): void; readonly initialId: string; readonly closed: boolean; readonly eventDestination?: Reader }
@@ -144,6 +144,19 @@ export class AgentMuxHostedRuntimeService {
     const input = record(decodeHostedValue(p.invocation))
     if (typeof input.method !== 'string' || !(AGENTMUX_HOSTED_METHODS as readonly string[]).includes(input.method) || !Array.isArray(input.args) || input.args.length > 12) {
       throw new AgentMuxError('The method is outside the finite SDK surface.', 'INVALID_CONTROL_REQUEST')
+    }
+    if (input.method === 'trustCreationSource') {
+      if (input.args.length !== 1 || context.caller !== undefined || context.principal?.kind !== 'user') {
+        throw new AgentMuxError('Creation-source trust requires one input and a transport-approved user.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const trust = record(input.args[0], ['sourceRuntimeId', 'publicKey'])
+      if (typeof trust.sourceRuntimeId !== 'string' || typeof trust.publicKey !== 'string') {
+        throw new AgentMuxError('Creation-source trust requires an exact Runtime and public key.', 'INVALID_CONTROL_REQUEST')
+      }
+      this.consumer(id)
+      context.signal?.throwIfAborted()
+      return { value: encodeHostedValue(await this.client.trustCreationSource({ sourceRuntimeId: trust.sourceRuntimeId, publicKey: trust.publicKey },
+        { kind: 'user', id: identifier(context.principal.id) })) }
     }
     const original = this.consumer(id), invocation = input as unknown as AgentMuxHostedInvocation
     context.signal?.throwIfAborted()

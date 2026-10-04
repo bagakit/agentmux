@@ -1,6 +1,7 @@
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
+import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
@@ -137,6 +138,8 @@ export type AgentMuxAgentSessionStore = {
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
   loadReopenCorrelations(): Promise<readonly { expectedRetirement: AgentMuxRetiredAgentSession; operationId?: string }[]>
+  /** Original no-Run creation correlation; reading never starts a process or replays input. */
+  loadCreationCorrelation(agentSessionId: string): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null>
   /** Abort must cancel queued or active persistence without a late commit. */
   compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
@@ -1248,6 +1251,7 @@ function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creatio
   if (!['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(String(initialPrompt)) ||
     creation.agentMuxContext !== undefined && !['confirmed', 'unconfirmed', 'unknown'].includes(String(creation.agentMuxContext)) ||
     creation.intentDigest !== undefined && (typeof creation.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.intentDigest)) ||
+    creation.executorRevision !== undefined && (typeof creation.executorRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.executorRevision)) ||
     creation.persistence !== undefined && creation.persistence !== 'unconfirmed') throw new AgentMuxError('Invalid creation receipt.', 'INVALID_AGENT_SESSION_STORE')
   let failure: NonNullable<AgentMuxAgentSession['creation']>['failure']
   if (creation.failure !== undefined) {
@@ -1256,6 +1260,8 @@ function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creatio
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+    ...(creation.initialMessageOrigin === undefined ? {} : { initialMessageOrigin: parseAgentMuxCreationOrigin(creation.initialMessageOrigin) }),
+    ...(creation.executorRevision === undefined ? {} : { executorRevision: creation.executorRevision as string }),
     ...(creation.agentMuxContext === undefined ? {} : { agentMuxContext: creation.agentMuxContext as 'confirmed' | 'unconfirmed' | 'unknown' }),
     ...(creation.intentDigest === undefined ? {} : { intentDigest: creation.intentDigest as string }),
     ...(creation.persistence === undefined ? {} : { persistence: 'unconfirmed' as const }), ...(failure ? { failure } : {}) }
@@ -1265,13 +1271,13 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
     'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'launchOptions'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
-  const creation = creationFact(p.creation), forkedFrom = parseAgentForkSource(p.forkedFrom)
+  const creation = creationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
   if (!creation.intentDigest || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
-    forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared fork intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
+    forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
   return { kind: 'agent', agentSessionId: string(p.agentSessionId, 'agentSessionId'), providerId: string(p.providerId, 'providerId'),
     executorId: string(p.executorId, 'executorId'), hostId: string(p.hostId, 'hostId'), workspacePath: string(p.workspacePath, 'workspacePath', MAX_PATH_BYTES),
     hookBindingId: string(p.hookBindingId, 'hookBindingId'), hookToken: string(p.hookToken, 'hookToken'), capabilityHash: string(p.capabilityHash, 'capabilityHash'),
-    createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, forkedFrom,
+    createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, ...(forkedFrom ? { forkedFrom } : {}),
     ...(p.launchOptions === undefined ? {} : { launchOptions: launchOptionSelection(p.launchOptions) }) }
 }
 
@@ -1880,6 +1886,11 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return reopenCorrelations([...this.reservations.values()])
   }
 
+  async loadCreationCorrelation(agentSessionId: string) {
+    const reservation = this.reservations.get(agentSessionId)
+    return reservation?.kind === 'create' ? structuredClone(reservation) : null
+  }
+
   async compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
     next: AgentMuxStoredAgentSession | null,
@@ -2289,6 +2300,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async loadReopenCorrelations() {
     await this.tail
     return reopenCorrelations((await this.read()).reservations)
+  }
+
+  async loadCreationCorrelation(agentSessionId: string) {
+    await this.tail
+    const reservation = (await this.read()).reservations.find(value => value.agentSessionId === agentSessionId)
+    return reservation?.kind === 'create' ? structuredClone(reservation) : null
   }
 
   async compareAndSwap(

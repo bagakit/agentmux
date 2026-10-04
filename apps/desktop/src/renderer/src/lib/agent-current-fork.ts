@@ -79,5 +79,5 @@ export function currentForkRequest(review: CurrentForkReview, session: CurrentFo
     destination: { ...(location.spaceId ? { spaceId: location.spaceId } : {}), zoneId: location.zoneId,
       displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
       ...(destination === 'tab' ? { newTab: true } : { tabId: origin.tabId, regionId: origin.regionId,
-        split: destination === 'up' ? 'above' : destination === 'down' ? 'below' : destination }) }, focus }
+        split: destination }) }, focus }
 }

@@ -2,10 +2,9 @@ import { ArrowRight, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { currentExecutorDetection } from '../lib/executor-detection'
-import { configuredExecutors } from '../lib/executors'
+import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
 import { focusTakeoverResult, inspectTakeover, takeOverSession, type TakeoverSource } from '../lib/session-takeover'
-import { executorDetectionKey, useAppStore } from '../store'
+import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { AgentAvatar } from './AgentAvatar'
 
@@ -17,11 +16,10 @@ export function SessionTakeoverSurface({ source, active, onClose }: {
 }) {
   const config = useAppStore(state => state.config)
   const detections = useAppStore(state => state.executorDetections)
+  const inventory = useAppStore(state => source.hostId ? state.hostExecutorInventories[source.hostId] : undefined)
   const detect = useAppStore(state => state.detectExecutors)
   const host = config?.hosts.find(item => item.id === source.hostId)
-  const executors = useMemo(() => configuredExecutors(config).map(executor => ({ ...executor,
-    detection: source.hostId ? currentExecutorDetection(detections[executorDetectionKey(source.hostId, executor.id)], executor.id, executor, host) : undefined
-  })), [config?.executors, detections, host, source.hostId])
+  const executors = useMemo(() => executorsForHost(config, source.hostId ?? undefined, detections, inventory), [config?.executors, detections, inventory, host, source.hostId])
   const surface = useRef<HTMLElement>(null)
   const admitted = useRef(false)
   const mounted = useRef(true)
@@ -56,8 +54,8 @@ export function SessionTakeoverSurface({ source, active, onClose }: {
   }, [closing])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
-    if (active && source.hostId && executors.some(item => !item.detection)) void detect(source.hostId)
-  }, [active, source.hostId, executors, detect])
+    if (active && source.hostId && (host?.kind === 'ssh' ? !hostExecutorInventoryMatches(inventory, host) : executors.some(item => !item.detection))) void detect(source.hostId)
+  }, [active, source.hostId, host, inventory, executors, detect])
   useLayoutEffect(() => {
     if (!active || closing || !surface.current) return
     const node = surface.current, parent = node.parentElement

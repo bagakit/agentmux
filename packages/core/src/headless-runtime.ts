@@ -11,6 +11,8 @@ import { defaultAgentMuxControlSocketPath, defaultAgentMuxStateDirectory, defaul
 import { AgentMuxControlServer, type AgentMuxRpcHttpOptions } from './public-rpc-server.js'
 import type { AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
+import { AgentMuxHostExecutorOwner } from './executor-owner.js'
+import { AgentMuxCreationAuthority } from './agent-creation-authority.js'
 import type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
 
 export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
@@ -79,7 +81,11 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       coreClients: async () => [{ hostId: 'local', client: await ready }],
       hostedRuntime: async () => { await ready; return hosted! } })
     await server.start()
-    client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath })
+    client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
+      hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
+        path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()
+      }),
+      creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
     await client.connect()
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop)
     resolveOwner(client)

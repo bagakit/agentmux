@@ -3,12 +3,12 @@ import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-inser
 import { ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
-import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
+import { useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { currentHostCheck } from '../lib/host-check'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
-import { configuredExecutors } from '../lib/executors'
-import { currentExecutorDetection, executorDetectionLabel } from '../lib/executor-detection'
+import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
+import { executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
 import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
@@ -129,6 +129,7 @@ export function NewTabSurface({
     activeWorkspaceId
   }))
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
+  const inventory = useAppStore(state => workspace ? state.hostExecutorInventories[workspace.hostId] : undefined)
   const localHome = useAppStore(state => state.localHome)
   const displayPath = workspace ? applyCopyPathStyle(workspace.path, {
     home: host?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
@@ -151,16 +152,12 @@ export function NewTabSurface({
     launcherId
   })
   const executors = useMemo(
-    () => configuredExecutors(config).map((executor) => ({
-      ...executor,
-      detection: workspace ? currentExecutorDetection(detections[executorDetectionKey(workspace.hostId, executor.id)], executor.id, executor,
-        config?.hosts.find(host => host.id === workspace.hostId)) : undefined
-    })),
-    [config?.executors, config?.hosts, detections, workspace]
+    () => executorsForHost(config, workspace?.hostId, detections, inventory),
+    [config?.executors, config?.hosts, detections, workspace, inventory]
   )
   // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
   const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing').sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
-  const detecting = executors.some((executor) => executor.detection?.state === 'checking')
+  const detecting = inventory?.state === 'checking' || executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
   const sections = { ...DEFAULT_LAUNCHER_SECTIONS,
     terminal: presentation.surface === 'mote' || presentation.surface === 'survey' || presentation.survey ? 'collapsed' as const : 'expanded' as const,
@@ -237,10 +234,10 @@ export function NewTabSurface({
   }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmTerminal?.key, warmKey, sections.terminal])
 
   useEffect(() => {
-    if (!workspace || executors.every((executor) => executor.detection)) return
+    if (!workspace || (host?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, host) : executors.every((executor) => executor.detection))) return
     if (!visible || !presentationActive || !inputRegionActive || controlNavigation) return
     void detectExecutors(workspace.hostId)
-  }, [executors, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace])
+  }, [executors, inventory, host, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace])
 
   useEffect(() => {
     if (installedExecutors.some((executor) => executor.id === executorId)) return
@@ -400,7 +397,10 @@ export function NewTabSurface({
         </div>
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
       </div> : null}
-      {selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
+      {inventory?.state === 'error' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: 'Host Executor discovery failed', mode: `${host?.label ?? workspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
+        restore: 'Refresh agents on this host. Configure custom commands in Settings → Agents on this Host.'
+      } }} /> : selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
       {fileReferencesOpen && workspace && motionActive ? <LauncherFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
         onSelect={appendReference} onClose={() => setFileReferencesOpen(false)} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}

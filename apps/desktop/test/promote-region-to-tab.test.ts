@@ -46,6 +46,25 @@ function expectInvariant(tab: WorkbenchTab): void {
 }
 
 describe('promoteRegionToTab（#487「单独变成一个 tab」）', () => {
+  it('promotes a remote Agent resource into a new Tab in the original local display Workspace', () => {
+    const remote = { regionId: 'remote-region', kind: 'agent' as const, phase: 'attached' as const,
+      workspaceId: 'remote-resource', sessionId: 'remote-session' }
+    const source = addWorkbenchRegion(createWorkbenchTab('source', launcher('local-region')), 'local-region', 'down', remote)
+    const result = promoteRegionToTab({
+      tabs: { source }, layouts: { workspace: createWorkspaceLayout('group-one', ['source']) },
+      workspaceId: 'workspace', tabId: 'source', regionId: 'remote-region', mint: { tabId: 'remote-view' }
+    })
+    expect(result.kind).toBe('promoted')
+    if (result.kind !== 'promoted') throw new Error('The remote Agent projection did not promote')
+    expect(result.target).toEqual({ workspaceId: 'workspace', tabId: 'remote-view', regionId: 'remote-region' })
+    expect(result.tabs['remote-view']!.workspaceId).toBe('workspace')
+    expect(result.tabs['remote-view']!.regions['remote-region']).toBe(remote)
+    expect(findGroup(result.layouts.workspace!, 'group-one')!.tabOrder).toEqual(['source', 'remote-view'])
+    expect(source.regions['remote-region']).toBe(remote)
+    expectInvariant(result.tabs.source!)
+    expectInvariant(result.tabs['remote-view']!)
+  })
+
   it('不变量#2：促升只剩一格的 Tab 是 no-op——它已经就是一张 Tab', () => {
     // 单格 Tab，且布局合法（layout 里有它）。走的是 removeWorkbenchRegion→null 那条 no-op，
     // 不是缺 layout 的守卫。

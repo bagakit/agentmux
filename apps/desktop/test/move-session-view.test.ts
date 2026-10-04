@@ -29,7 +29,8 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 // A projection is a Region carrying a Session inside a View. `agentTab` builds a one-Region View that
-// projects `sessionId` while displaying `workspaceId` — never a cwd, which lives only in Core.
+// projects `sessionId` from its resource `workspaceId`. The View initially displays that same Workspace;
+// its display Workspace can move independently. The cwd lives only in Core.
 function agentTab(tabId: string, regionId: string, workspaceId: string, sessionId: string): WorkbenchTab {
   return createWorkbenchTab(tabId, {
     regionId,
@@ -64,9 +65,10 @@ describe('moveSessionViewToWorkspace', () => {
     expect(result.createdView).toBe(true)
     expect(result.target.workspaceId).toBe('workspace-b')
 
-    // The landed projection carries the same Session and shows the target workspace as display identity.
+    // The landed projection keeps the same Session and resource; its Tab owns the target display identity.
     const landed = findWorkbenchRegion(result.tabs, result.target.regionId)
-    expect(landed?.surface).toMatchObject({ sessionId: 'agent-1', workspaceId: 'workspace-b' })
+    expect(landed?.surface).toMatchObject({ sessionId: 'agent-1', workspaceId: 'workspace-a' })
+    expect(landed?.tab.workspaceId).toBe('workspace-b')
 
     // A View in the target workspace's layout now hosts the moved tab.
     const targetLayout = result.layouts['workspace-b']
@@ -79,7 +81,7 @@ describe('moveSessionViewToWorkspace', () => {
     if (result.kind !== 'moved') return
     const serialized = JSON.stringify(result)
     expect(serialized).not.toContain('workspacePath')
-    // Surfaces carry display identity (workspaceId) and Session identity only.
+    // The Agent surface carries a resource Workspace and Session identity, without copying cwd.
     for (const tab of Object.values(result.tabs)) {
       for (const surface of workbenchSurfaces(tab)) {
         expect(surface).not.toHaveProperty('workspacePath')

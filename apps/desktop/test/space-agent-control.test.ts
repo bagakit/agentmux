@@ -47,6 +47,14 @@ beforeEach(async () => {
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  let spatial: Awaited<ReturnType<typeof api.spatial.read>> = null
+  vi.spyOn(api.spatial, 'read').mockImplementation(async () => structuredClone(spatial))
+  vi.spyOn(api.spatial, 'commit').mockImplementation(async input => {
+    if ((spatial?.revision ?? 0) !== input.expectedRevision) throw new Error('Spatial state changed.')
+    spatial = { schemaVersion: 1, revision: input.expectedRevision + 1, graph: structuredClone(input.graph) }
+    return structuredClone(spatial)
+  })
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(() => () => {})
   dispose = await useAppStore.getState().initialize()
 })
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
@@ -68,7 +76,7 @@ describe('public Desktop spatial Control owner', () => {
     expect(receipt.outcome).toBe('opened')
     expect(receipt.agent).toMatchObject({ cwd: _hygiene_fixturePath("other"), initialPrompt: 'confirmed' })
     expect(receipt.to).toMatchObject({ zoneId, workspaceId: 'other' })
-    expect(receipt.save).toEqual({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
+    expect(receipt.save).toEqual({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null })
     expect(created).toHaveBeenCalledTimes(1)
     expect(created.mock.calls[0]![0]).toMatchObject({ workspacePath: _hygiene_fixturePath("other"), prompt: 'first task', createOperationId: receipt.requestId })
     expect(useAppStore.getState().activeWorkspaceId).toBe('repo')
@@ -76,7 +84,8 @@ describe('public Desktop spatial Control owner', () => {
     expect(snapshot).not.toHaveBeenCalled()
     expect(timeline).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
     const stored = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state
-    expect(stored.restoredWorkbench.tabs[receipt.to!.tabId].space.zoneId).toBe(zoneId)
+    expect(stored.restoredWorkbench).toBeUndefined()
+    expect((await api.spatial.read())!.graph.tabs.find(tab => tab.tabId === receipt.to!.tabId)).toMatchObject({ zoneId })
     expect(stored.spatialRequests[receipt.requestId].agentSessionId).toBe(receipt.agent!.agentSessionId)
     expect(JSON.stringify(stored.spatialRequests)).not.toContain('first task')
   })
@@ -112,7 +121,7 @@ describe('public Desktop spatial Control owner', () => {
     expect(moved.agent).toMatchObject({ agentSessionId: 'a', runId: 'run:a', hostId: 'local', cwd: _hygiene_fixturePath("repo") })
     expect(useAppStore.getState().tabs.source).toBeUndefined()
     expect(Object.keys(useAppStore.getState().tabs.empty!.regions)).toEqual(['source-region'])
-    expect(useAppStore.getState().tabs.duplicate).toEqual(duplicate)
+    expect(useAppStore.getState().tabs.duplicate).toEqual({ ...duplicate, space: { spaceId: directoryIdentity('local', _hygiene_fixturePath("other")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') } })
     expect(useAppStore.getState().sessions).toEqual([session])
     expect(stop).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled()
   })
@@ -179,7 +188,7 @@ describe('public Desktop spatial Control owner', () => {
     expect(await useAppStore.getState().executeControl(same)).toMatchObject({ outcome: 'unchanged' })
     const different = { ...same, destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') } }
     expect(await useAppStore.getState().executeControl(different)).toMatchObject({ issues: [{ code: 'SPACE_REQUEST_CONFLICT' }] })
-    expect(useAppStore.getState().tabs).toEqual({ source })
+    expect(useAppStore.getState().tabs).toEqual({ source: { ...source, space: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("repo")), 'repo') } } })
   })
 
   it('explicit focus navigates from another Workspace/Board to the exact visible target and clears held focus', async () => {
@@ -296,6 +305,50 @@ describe('public Desktop spatial Control owner', () => {
     expect(created).toHaveBeenCalledTimes(1)
   })
 
+  it('launches a selected remote Workspace below a local Region and retains its resource through display moves and operation readback', async () => {
+    const local = createWorkbenchTab('local-tab', { kind: 'agent', phase: 'attached', regionId: 'local-region', workspaceId: 'repo', sessionId: 'local-agent' })
+    useAppStore.setState({ config: { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'fixture.invalid' }],
+      workspaces: [...config.workspaces, { id: 'remote-workspace', hostId: 'remote', name: 'Remote', path: _hygiene_fixturePath("remote/repo"), kind: 'folder' }] },
+      sessions: [agent('local-agent')], tabs: { [local.id]: local }, layouts: { repo: createWorkspaceLayout('local-group', [local.id]) } })
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      const session = { ...agent(input.agentSessionId!, input.workspacePath), hostId: input.hostId,
+        control: { kind: 'agent' as const, hostId: input.hostId, agentSessionId: input.agentSessionId!, run: { runId: 'remote-run' } } }
+      return launch(session, input.createOperationId!)
+    })
+    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (hostId, id) => ({
+      ...agentCreationFixture({ ...agent(id, _hygiene_fixturePath("remote/repo")), hostId }), creation: { createOperationId: 'remote-op', initialPrompt: 'confirmed' }
+    }))
+    const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'remote-only', executionWorkspaceId: 'remote-workspace', prompt: 'once' },
+      destination: { regionId: 'local-region', split: 'down' }, focus: false })
+    const result = await useAppStore.getState().executeControl(input)
+    expect(result).toMatchObject({ operation: 'agent.open', outcome: 'opened', agent: { hostId: 'remote', cwd: _hygiene_fixturePath("remote/repo") },
+      to: { tabId: local.id, workspaceId: 'repo', displayWorkspaceId: 'repo' } })
+    if (result.operation !== 'agent.open') throw new Error('Wrong operation')
+    expect(created).toHaveBeenCalledTimes(1)
+    expect(created.mock.calls[0]![0]).toMatchObject({ hostId: 'remote', workspacePath: _hygiene_fixturePath("remote/repo"), executorId: 'remote-only', prompt: 'once' })
+    expect(created.mock.calls[0]![0]).not.toHaveProperty('forkSource')
+    expect(useAppStore.getState().tabs[local.id]!.regions[result.to!.regionId]).toMatchObject({ workspaceId: 'remote-workspace' })
+    await control({ operation: 'space.mv', fromRegionId: result.to!.regionId, expectedAgentSessionId: result.agent!.agentSessionId,
+      destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other'), newTab: true }, focus: false })
+    const moved = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(surface => surface.kind === 'agent' && surface.sessionId === result.agent!.agentSessionId)
+    expect(moved).toMatchObject({ workspaceId: 'remote-workspace' })
+    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace => workspace.id === 'remote-workspace' ? { ...workspace, path: _hygiene_fixturePath("later/changed") } : workspace) } }))
+    useAppStore.setState({ sessions: [agent(result.agent!.agentSessionId, _hygiene_fixturePath("wrong-local-projection"))] })
+    await useAppStore.getState().executeControl(input)
+    expect(creation).toHaveBeenCalledWith('remote', result.agent!.agentSessionId)
+    expect(created).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses an unknown execution Workspace before layout, resource or creation side effects', async () => {
+    const before = { tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts, spatialRequests: useAppStore.getState().spatialRequests }
+    const created = vi.spyOn(api.sessions, 'launchAgent'), resource = vi.spyOn(api.workspaces, 'createZoneResource')
+    const result = await control({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', executionWorkspaceId: 'missing' },
+      destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("repo")), 'repo'), newTab: true }, focus: false })
+    expect(result).toMatchObject({ outcome: 'unknown', issues: expect.arrayContaining([expect.objectContaining({ code: 'SPACE_EXECUTION_WORKSPACE_UNKNOWN' })]) })
+    expect(created).not.toHaveBeenCalled(); expect(resource).not.toHaveBeenCalled()
+    expect(useAppStore.getState()).toMatchObject(before)
+  })
+
   it('reports admission-only mv as unknown at its actual source, and does not execute it when queried', async () => {
     const source = createWorkbenchTab('source', { regionId: 'r', kind: 'agent', phase: 'attached', workspaceId: 'repo', sessionId: 'a' })
     useAppStore.setState({ sessions: [agent('a')], tabs: { source }, layouts: { repo: createWorkspaceLayout('g', ['source']) },
@@ -304,7 +357,7 @@ describe('public Desktop spatial Control owner', () => {
         target: { spaceId: directoryIdentity('local', _hygiene_fixturePath("other")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') } } } })
     const observed = await control({ operation: 'space.inspect', target: { requestId: 'interrupted' } })
     expect(observed).toMatchObject({ request: { known: true, report: { outcome: 'unknown', to: { tabId: 'source', regionId: 'r' }, issues: [{ code: 'SPACE_PLACEMENT_UNKNOWN' }] } } })
-    expect(useAppStore.getState().tabs).toEqual({ source })
+    expect(useAppStore.getState().tabs).toEqual({ source: { ...source, space: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("repo")), 'repo') } } })
   })
 
   it('puts a new Project Zone first Tab in the exact requested display Group while keeping its execution resource', async () => {

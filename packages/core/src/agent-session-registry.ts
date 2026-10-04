@@ -213,7 +213,7 @@ export class AgentMuxAgentSessionRegistry {
   /** Actual started Run projection; its durable prepared seed remains until commit is confirmed. */
   rememberStartedCreation(value: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
     const session = normalizeStoredAgentSession(value), previous = this.sessions.get(session.agentSessionId)
-    if (!session.creation?.intentDigest || !session.forkedFrom ||
+    if (!session.creation?.intentDigest ||
       previous && !sameRun(previous.run, session.run)) throw new AgentMuxError('Unconfirmed creation does not match the retained real Run.', 'STALE_AGENT_SESSION')
     this.assertAvailable(session)
     if (previous) this.forget(previous)

@@ -19,6 +19,7 @@ import { isAgentDeliveryState } from './agent-message.js'
 import { parseRpcControlResult, rpcRecord } from './rpc-business-codec.js'
 import type { AgentMuxRpcCredentials, AgentMuxRpcMethod } from './public-rpc.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult } from './public-rpc-device.js'
+import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult } from './public-rpc-host-settings.js'
 
 const fail = (): never => { throw new AgentMuxError('Core RPC result is malformed or belongs to another object.', 'CONTROL_PROTOCOL_ERROR') }
 const record = (value: unknown, fields?: readonly string[]) => rpcRecord(value, fields, 'CONTROL_PROTOCOL_ERROR')
@@ -121,6 +122,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>

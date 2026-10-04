@@ -3,6 +3,8 @@ import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
+import { SPLIT_DIRECTIONS } from './split-direction-ssot.js'
+import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
   AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact
@@ -73,7 +75,7 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
   const selected = Object.fromEntries(['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'].filter(key => Object.hasOwn(source, key)).map(key => [key, source[key]]))
   const result: AgentMuxSpaceDestination = selector(selected, code)
   if (Object.hasOwn(source, 'newTab') && bool(source.newTab, 'newTab', code)) result.newTab = true
-  if (Object.hasOwn(source, 'split')) result.split = member(source.split, ['left', 'right', 'above', 'below'], 'split', code)
+  if (Object.hasOwn(source, 'split')) result.split = member(source.split, SPLIT_DIRECTIONS, 'split', code)
   if (result.split && !result.regionId) fail('Split requires an exact Region; discover it with agentmux space ls --zone <zone-id>.', code)
   if (result.newTab && (result.tabId || result.regionId || result.split)) fail('New Tab cannot also target a Tab or Region.', code)
   if (Object.hasOwn(source, 'newZone')) {
@@ -160,12 +162,14 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'prompt', 'agentSessionId', 'source'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'prompt', 'agentSessionId', 'source'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
-      fields(input, ['kind', 'executorId', 'prompt'], code)
+      fields(input, ['kind', 'executorId', 'executionWorkspaceId', 'prompt'], code)
+      if (target.newZone && Object.hasOwn(input, 'executionWorkspaceId')) fail('An execution Workspace cannot be combined with new Zone resources.', code)
       content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code),
+        ...(Object.hasOwn(input, 'executionWorkspaceId') ? { executionWorkspaceId: spaceControlId(input.executionWorkspaceId, 'Execution Workspace', code) } : {}),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
     } else if (input.kind === 'fork-agent') {
       fields(input, ['kind', 'source', 'prompt'], code)
@@ -343,13 +347,15 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
-    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure'], code)
+    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
       providerId: nullableId(item.providerId, 'Provider', code), executorId: nullableId(item.executorId, 'Executor', code), hostId: spaceControlId(item.hostId, 'Host', code),
       cwd: string(item.cwd, 'Execution cwd', code), createOperationId: nullableId(item.createOperationId, 'Creation operation', code),
       initialPrompt: member(item.initialPrompt, ['not-requested', 'confirmed', 'unconfirmed', 'unknown'], 'Initial prompt', code),
       ...(item.agentMuxContext === undefined ? {} : { agentMuxContext: member(item.agentMuxContext, ['confirmed', 'unconfirmed', 'unknown'], 'AgentMux identity reminder', code) }),
       ...(item.creationPersistence === undefined ? {} : { creationPersistence: member(item.creationPersistence, ['unconfirmed'], 'Creation persistence', code) }),
+      ...(item.executorRevision === undefined ? {} : { executorRevision: string(item.executorRevision, 'Executor revision', code, 256) }),
+      ...(item.initialMessageOrigin === undefined ? {} : { initialMessageOrigin: parseAgentMuxCreationOrigin(item.initialMessageOrigin) }),
       ...(item.creationFailure === undefined ? {} : { creationFailure: (() => {
         const failure = fields(item.creationFailure, ['step', 'code', 'message'], code)
         return { step: member(failure.step, ['session-commit', 'hook-bind', 'handshake'], 'Creation step', code),

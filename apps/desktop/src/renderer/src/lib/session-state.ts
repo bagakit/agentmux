@@ -64,7 +64,7 @@ type AgentTimelineRuntimeEvent = RuntimeEvent & {
 
 export type PendingAgentLaunch = {
   /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
-  request?: { executorId: string; hostId?: string; workspacePath?: string; prompt?: string; agentMuxNote?: string }
+  request?: { executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string }
   events: RuntimeEvent[]
   overflowed: boolean
   /** Accepted Core identity while optional display reads are unavailable. */

@@ -5,9 +5,8 @@ import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { currentHostCheck } from '../../lib/host-check'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { configuredExecutors } from '../../lib/executors'
-import { currentExecutorDetection } from '../../lib/executor-detection'
-import { executorDetectionKey, useAppStore } from '../../store'
+import { hostExecutorInventoryMatches, executorsForHost } from '../../lib/executors'
+import { useAppStore } from '../../store'
 import { agentProviderLabel } from '../AgentProviderIcon'
 
 export function WorkspaceSettingsPane({ config, onClose }: {
@@ -24,6 +23,7 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(config.workspaces.length === 0)
   const detections = useAppStore((state) => state.executorDetections)
+  const inventory = useAppStore(state => state.hostExecutorInventories[hostId])
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const hostChecks = useAppStore((state) => state.hostChecks)
   const checkHost = useAppStore((state) => state.checkHost)
@@ -31,12 +31,9 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   const launchAgent = useAppStore((state) => state.launchAgent)
   const readyHosts = config.hosts.filter((host) => currentHostCheck(hostChecks[host.id], host)?.state === 'ready')
   const checkingHosts = config.hosts.some((host) => !hostChecks[host.id] || hostChecks[host.id]?.state === 'checking')
-  const executors = useMemo(() => configuredExecutors(config).map((executor) => ({
-    ...executor,
-    detection: currentExecutorDetection(detections[executorDetectionKey(hostId, executor.id)], executor.id, executor, config.hosts.find(host => host.id === hostId))
-  })), [config.executors, config.hosts, detections, hostId])
-  const readyExecutors = executors.filter((executor) => executor.detection?.state === 'ready')
-  const checking = executors.some((executor) => executor.detection?.state === 'checking')
+  const executors = useMemo(() => executorsForHost(config, hostId, detections, inventory), [config.executors, config.hosts, detections, hostId, inventory])
+  const readyExecutors = executors.filter((executor) => executor.detection?.state !== 'missing')
+  const checking = inventory?.state === 'checking' || executors.some((executor) => executor.detection?.state === 'checking')
   const matchingWorkspaces = config.workspaces.filter((workspace) =>
     `${workspace.name} ${workspace.path} ${workspace.hostId} ${workspace.branch ?? ''}`.toLowerCase().includes(filter.trim().toLowerCase())
   )
@@ -52,14 +49,14 @@ export function WorkspaceSettingsPane({ config, onClose }: {
   }, [hostId, readyHosts])
 
   useEffect(() => {
-    if (executors.every((executor) => executor.detection)) return
+    if (config.hosts.find(host => host.id === hostId)?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, config.hosts.find(host => host.id === hostId)) : executors.every((executor) => executor.detection)) return
     void detectExecutors(hostId)
-  }, [executors, detectExecutors, hostId])
+  }, [executors, inventory, config.hosts, detectExecutors, hostId])
 
   useEffect(() => {
-    if (executorId === 'none' || readyExecutors.some((executor) => executor.id === executorId)) return
+    if (executorId === 'none' || !executors.some(executor => executor.id === executorId && executor.detection?.state === 'missing')) return
     setExecutorId('none')
-  }, [executorId, readyExecutors])
+  }, [executorId, executors])
 
   async function create(): Promise<void> {
     if (creating) return
@@ -98,9 +95,9 @@ export function WorkspaceSettingsPane({ config, onClose }: {
         <header><p>Choose a folder and a host. You can start an agent now or open the project on its own.</p></header>
         <div className="workspace-composer__fields workspace-composer__fields--project">
           <label className="workspace-composer__wide"><span>Project folder</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="Project directory" /></label>
-          <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => setHostId(event.target.value)}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><RadioTower size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
+          <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => { setHostId(event.target.value); setExecutorId('none') }}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><RadioTower size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
           <label><span>Name <em>optional</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" /></label>
-          <label className="workspace-composer__wide"><span>Agent</span><select value={executorId} onChange={(event) => setExecutorId(event.target.value)} disabled={checking}><option value="none">Open without an agent</option>{readyExecutors.map((executor) => <option key={executor.id} value={executor.id}>{executor.label} · {agentProviderLabel(executor.providerId)}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : `${readyExecutors.length} available on this host`}</small></label>
+          <label className="workspace-composer__wide"><span>Agent</span><select value={executorId} onChange={(event) => setExecutorId(event.target.value)} ><option value="none">Open without an agent</option>{readyExecutors.map((executor) => <option key={executor.id} value={executor.id}>{executor.label} · {agentProviderLabel(executor.providerId)}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : inventory?.state === 'error' ? 'Host check failed; known configurations are retained.' : `${readyExecutors.length} configurations on this host`}</small></label>
         </div>
         {error ? <div className="dialog-error">{error}</div> : null}
         <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>

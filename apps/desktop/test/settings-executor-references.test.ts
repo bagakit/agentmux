@@ -13,7 +13,8 @@ import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/ag
 import type { CtxmuxAdapterRun, CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { BROWSER_TOOLBAR_ITEM_ORDER } from '../src/shared/browser-toolbar.js'
-import { CONFIG_CHANGED_CHANNEL, CONFIG_VERSION, type AppConfig, type AgentSessionControl } from '../src/shared/contracts.js'
+import { CONFIG_CHANGED_CHANNEL, CONFIG_VERSION, type AppConfig, type AgentSessionControl, type SessionAgentLaunchResult } from '../src/shared/contracts.js'
+import { unwrapSessionAgentLaunchResult } from '../src/shared/session-agent-launch-result.js'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { ScratchTopics } from '../src/main/scratch-topics.js'
@@ -24,7 +25,7 @@ const ipc = vi.hoisted(() => ({
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
 vi.mock('electron', () => ({
-  app: { getPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), getAppPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), isPackaged: false },
+  app: { getPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), getAppPath: () => new URL('../', import.meta.url).pathname, isPackaged: false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -115,9 +116,10 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       items: [{ id: 'native-item', kind: 'user-message' as const,
         contentParts: [{ kind: 'text' as const, text: '  exact history\n' }] }], nextCursor: null }))
     const template = new AgentProviderRegistry().get('codex')
+    const { providerFork: _nativeFork, ...capabilities } = template.catalog.capabilities
     const provider = (id: string) => defineAgentProvider({
       catalog: { ...template.catalog, id, label: id, executable: id, expectedProcess: id,
-        hookStrategy: { kind: 'none' }, readySignal: { kind: 'foreground-process', expectedProcess: id } },
+        capabilities, hookStrategy: { kind: 'none' }, readySignal: { kind: 'foreground-process', expectedProcess: id } },
       hook: { rules: [], eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' } },
       buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])], readSessionHistoryPage: nativeHistory
     })
@@ -327,12 +329,13 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
       async () => 'unknown', undefined, async () => { throw new Error('No automatic loop is admitted in the Executor reference fixture') })
     ipc.handlers.clear()
     const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-      configStore: disk, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
+      configStore: disk, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     const invoke = async (channel: string, ...values: unknown[]) => {
       const handler = ipc.handlers.get(channel)
       expect(handler).toBeTypeOf('function')
-      return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+      const result = await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+      return channel === 'sessions:launchAgent' ? unwrapSessionAgentLaunchResult(result as SessionAgentLaunchResult) : result
     }
     try {
       expect(ipc.handlers.has('sessions:launchAgent')).toBe(true)
@@ -373,7 +376,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
         .resolves.toEqual({ operation: 'settings.resource.remove', resource: 'executors', id: 'spare', removed: true })
       expect(releasedWith).toHaveLength(1)
       expect(Object.keys(releasedWith[0]!.executors)).toEqual(['kept'])
-      expect(await releaseLaunches[0]).toMatchObject({ error: { message: 'Missing Agent Executor configuration: spare' } })
+      expect(await releaseLaunches[0]).toMatchObject({ error: { code: 'EXECUTOR_UNKNOWN', message: 'Missing Executor on the selected Host: spare' } })
       expect(sender.send).toHaveBeenCalledExactlyOnceWith(CONFIG_CHANGED_CHANNEL, releasedWith[0])
       const saved = JSON.parse(await readFile(disk.filePath, 'utf8')) as AppConfig
       expect(saved.executors).toEqual(releasedWith[0]!.executors)

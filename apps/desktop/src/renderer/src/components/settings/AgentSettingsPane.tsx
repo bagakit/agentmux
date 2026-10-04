@@ -14,13 +14,15 @@ import {
   XCircle
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { quote, split } from 'shlex'
+import { quote } from 'shlex'
 import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatarBadge } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea } from '../ComposerTextarea'
-import { withYoloArgs } from '../../lib/executors'
+import { withYoloArgs, parseExecutorArgs } from '../../lib/executors'
+export { parseExecutorArgs } from '../../lib/executors'
+import { HostExecutorSettings } from './HostExecutorSettings'
 import { currentExecutorDetection, executorDetectionLabel } from '../../lib/executor-detection'
 import { useResourceDrafts } from './use-resource-drafts'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
@@ -91,9 +93,6 @@ export function assertExecutorProviderIdentity(
 
 // Quote and split are one reversible codec. This is argv editing, with no shell execution
 // or environment expansion; adding a flag must preserve every other literal argument.
-export function parseExecutorArgs(text: string): string[] {
-  return split(text)
-}
 
 export function AgentSettingsPane({ config, onSave, executorId, navigationRequest, active = true }: {
   active?: boolean
@@ -105,7 +104,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const detections = useAppStore((state) => active ? state.executorDetections : NO_DETECTIONS)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
-  const initialHost = config.workspaces.find((workspace) => workspace.id === useAppStore.getState().activeWorkspaceId)?.hostId ?? 'local'
+  const initialHost = config.hosts.find(host => host.kind === 'local')?.id ?? 'local'
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [selectedId, setSelectedId] = useState<string | null>(() => executorId ?? Object.keys(config.executors)[0] ?? null)
   const [view, setView] = useState<'library' | 'editor'>(executorId ? 'editor' : 'library')
@@ -114,7 +113,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const [launchOpen, setLaunchOpen] = useState<Record<string, boolean>>({})
   const editor = useRef<HTMLDivElement>(null)
   const consumedNavigation = useRef<SettingsNavigationRequest | string | undefined>(undefined)
-  const [hostId, setHostId] = useState(initialHost)
+  const [hostId] = useState(initialHost)
+  const [scope, setScope] = useState<'templates' | 'host'>('templates')
   const resource = useResourceDrafts(Object.fromEntries(Object.entries(config.executors).map(([id, executor]) =>
     [id, toDraft(executor)])))
   const drafts = resource.value, setDrafts = resource.setValue
@@ -270,12 +270,17 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setPendingEdit({ id, select: true })
   }
 
+  const scopeControl = <label className="settings-compact-field"><span>Executors</span><select aria-label="Executor configuration scope" value={scope} onChange={event => setScope(event.target.value as 'templates' | 'host')}><option value="templates">Global templates</option><option value="host">On a Host</option></select></label>
   return (
+    <div className="settings-pane-stack">
+      <div className="settings-pane-toolbar">{scopeControl}</div>
+      <div hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} /></div>
+      <div hidden={scope !== 'templates'}>
     <div className="settings-pane-stack settings-resource-workbench" data-resource-view={view}>
       <div className="settings-pane-toolbar">
         <span className="settings-resource-count">{filter.query.trim() ? `${matchCount} of ` : ''}{executors.length} {executors.length === 1 ? 'executor' : 'executors'}</span>
         <div className="settings-resource-check-tools">
-            <label className="settings-compact-field"><span>Check on</span><select value={hostId} onChange={(event) => setHostId(event.target.value)}>{config.hosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select></label>
+            <span className="settings-group-note">Local availability</span>
             <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}</button>
         </div>
         <button className="small-button" disabled={providerCatalog.length === 0 || saving} onClick={addExecutor}><Plus size={13} /> Add executor</button>
@@ -289,7 +294,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           }))} />
         <div ref={editor} className="settings-resource-editor">
           <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ArrowLeft size={14} /> All executors</button>
-          <p className="settings-group-note">Checks use saved commands. Save a changed command before refreshing.</p>
+          <p className="settings-group-note">Global templates configure local Desktop launches. Host executors are read and registered separately. Save a changed command before refreshing.</p>
         {executors.filter(({ id }) => id === selectedId).map(({ id, draft, detection }) => {
           const status = statusCopy(detection)
           // Effective appearance is a projection; the editable baseline remains the Executor DTO.
@@ -335,6 +340,6 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
         </div>
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />
-    </div>
+    </div></div></div>
   )
 }

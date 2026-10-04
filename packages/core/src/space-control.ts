@@ -9,7 +9,7 @@ export type AgentMuxSpaceSelector = {
 }
 export type AgentMuxSpaceDestination = AgentMuxSpaceSelector & {
   newTab?: boolean
-  split?: 'left' | 'right' | 'above' | 'below'
+  split?: import('./split-direction-ssot.js').SplitDirection
   newZone?:
     | { kind: 'worktree'; projectId: string; sourceWorkspaceId?: string; path: string; branch: string; createBranch: boolean }
     | { kind: 'directory'; projectId: string; sourceWorkspaceId?: string; path: string }
@@ -132,6 +132,8 @@ export type AgentMuxSpatialSave = {
 }
 export type AgentMuxSpatialIssue = { step: string; code: string; message: string; recovery: string; candidates?: AgentMuxSpaceSelector[] }
 export type AgentMuxSpaceAgentFact = {
+  executorRevision?: string
+  initialMessageOrigin?: import('./agent-creation-admission.js').AgentMuxCreationOrigin
   agentSessionId: string
   runId: string | null
   providerId: string | null
@@ -226,7 +228,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
-      | { kind: 'new-agent'; executorId: string; prompt?: string }
+      | { kind: 'new-agent'; executorId: string; executionWorkspaceId?: string; prompt?: string }
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       | { kind: 'agent-session'; agentSessionId: string };
       destination: AgentMuxSpaceDestination; focus: boolean;

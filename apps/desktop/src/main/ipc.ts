@@ -8,6 +8,7 @@ import type { AgentMuxNameContext } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
+import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
@@ -857,6 +858,14 @@ export async function registerIpc(args: {
   })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, args.runtime))
+  handle('executors:discover', async (hostId: string) => {
+    if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
+    return await args.runtime.discoverExecutors(hostId)
+  })
+  handle('executors:register', async (hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput) => {
+    if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
+    return await args.runtime.configureExecutor(hostId, input)
+  })
   handle('sessions:snapshot', async () => {
     const snapshot = await args.runtime.snapshot(config)
     const preparation = { runtimeBindings: args.runtime.runtimeBindings() }
@@ -873,24 +882,22 @@ export async function registerIpc(args: {
     return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
       args.environmentWarning, app.getPath('home'))
   })
-  handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
-    if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+  handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => sessionAgentLaunchResult(input, async () => {
+    try {
+      if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    } catch (error) {
+      // This local sender check runs before entering Runtime or any launch dispatch.
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)),
+        { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
+    }
     const result = await args.runtime.launchAgent(input, config)
     if (!event.sender.isDestroyed()) return result
-    const primary = Object.assign(
-      new Error('The Desktop View disappeared before its Agent launch was delivered.'),
-      { code: 'CONTROL_OWNER_LOST' }
-    )
-    try {
-      await args.runtime.stopSession({ kind: 'agent', hostId: result.created.hostId, agentSessionId: result.created.agentSessionId, run: result.created.run })
-    } catch (cleanupError) {
-      throw Object.assign(
-        new Error(`${primary.message} Cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`),
-        { code: primary.code, cause: new AggregateError([primary, cleanupError]) }
-      )
-    }
-    throw primary
-  })
+    // The observer disappearing does not authorize stopping an already-created Agent.
+    // Its durable Session and operation remain queryable when the caller reconnects.
+    throw Object.assign(new Error('The Agent was created, but its Desktop View disappeared before receiving the receipt. Inspect the original operation without relaunching.'),
+      { code: 'CONTROL_OWNER_LOST', agentSessionId: result.created.agentSessionId, createOperationId: result.creation?.createOperationId,
+        controlFailure: { disposition: 'unknown', confirmedInputBytes: null } })
+  }))
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
   handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
