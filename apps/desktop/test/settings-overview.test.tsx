@@ -100,20 +100,18 @@ it('Overview, sidebar and actual navigation share every configuration module wit
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const catalog = visibleSettingsSections('')
   expect(catalog.map(entry => entry.id)).toEqual([
-    'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'toolkit', 'agents', 'prompts', 'workspaces', 'hosts', 'devices'
+    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
+    'hosts', 'devices', 'toolkit', 'agents', 'prompts', 'space', 'focus', 'goals', 'survey', 'notes', 'mote'
   ])
   const links = [...overview().querySelectorAll<HTMLButtonElement>('[data-settings-section]')]
   expect(links.map(link => link.dataset.settingsSection)).toEqual(catalog.map(entry => entry.id))
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] p')].map(node => node.textContent))
-    .toEqual(['Preferences', 'Resources', 'Connections'])
-  const artworks = [...overview().querySelectorAll<HTMLImageElement>('.settings-overview__group-art')]
-  expect(artworks.map(image => image.src.split('/').at(-1))).toEqual(['settings-preferences.png', 'settings-resources.png', 'settings-connections.png'])
-  for (const image of artworks) {
-    expect(image.alt).toBe(''); expect(image.getAttribute('aria-hidden')).toBe('true')
-    expect(image.closest('button')).toBeNull()
-    await act(async () => image.dispatchEvent(new Event('error')))
-    expect(image.hidden).toBe(true)
-  }
+    .toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  expect([...overview().querySelectorAll('.settings-overview__group > header h3')].map(node => node.textContent))
+    .toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  expect(overview().querySelectorAll('img')).toHaveLength(1)
+  const banner = connected<HTMLImageElement>('.settings-overview__art', overview())
+  expect(banner.alt).toBe(''); expect(banner.getAttribute('aria-hidden')).toBe('true')
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')]
     .map(node => node.textContent)).toEqual(catalog.map(entry => entry.title))
   expect(mountedPanes()).toEqual([])
