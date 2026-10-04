@@ -69,6 +69,7 @@ import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/age
 import { persist } from 'zustand/middleware'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
+import { sessionNameMetadataRecord, type SessionNameMetadata } from './lib/session-name-metadata'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   type AgentMuxArrangeMode,
@@ -496,6 +497,8 @@ type AppState = {
   config: AppConfig | null
   providerCatalog: AgentCatalogEntry[]
   sessions: SessionSnapshot[]
+  sessionNameMetadata: SessionNameMetadata
+  sessionNameMetadataWarning: RuntimeSnapshot['sessionNameMetadataWarning'] | null
   /** Recovery candidates surfaced by Runtime reconciliation for launcher Resume. */
   recoveryCandidates: AgentSessionRecoveryCandidate[]
   // The create page can render this shell directly, but it stays outside the ordinary
@@ -1991,7 +1994,7 @@ function startSessionMembershipResync(
             if (warning) runtimeEndpointWarnings.push(warning)
           }
           entry.endpointWarnings.clear()
-          return { ...reconciled, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          return { ...reconciled, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
         for (const pending of events) {
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
@@ -2514,12 +2517,21 @@ async function commitDisplayName(target: AgentMuxNameTarget, value: string | nul
   }
 }
 
+const agentRegionExecutionIndex = new WeakMap<readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][], Map<string, import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number]>>()
+
 export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string }
 
 /** The existing Core document owns execution identity; display placement never supplies a Host. */
 export function agentRegionExecution(reference: AgentRegionReference) {
-  return coreSpatialPersistence?.current?.graph.regions.find(region => region.tabId === reference.tabId &&
-    region.regionId === reference.regionId && region.kind === 'agent' && region.agentSessionId === reference.agentSessionId)?.execution ?? null
+  const regions = coreSpatialPersistence?.current?.graph.regions
+  if (!regions) return null
+  let byRegion = agentRegionExecutionIndex.get(regions)
+  if (!byRegion) {
+    byRegion = new Map(regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
+    agentRegionExecutionIndex.set(regions, byRegion)
+  }
+  const region = byRegion.get(JSON.stringify([reference.tabId, reference.regionId]))
+  return region?.kind === 'agent' && region.agentSessionId === reference.agentSessionId ? region.execution ?? null : null
 }
 
 /** An explicit related reader refreshes the original owner, without applying or resaving the graph. */
@@ -2911,6 +2923,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   config: null,
   providerCatalog: [],
   sessions: [],
+  sessionNameMetadata: {},
+  sessionNameMetadataWarning: null,
   recoveryCandidates: [],
   warmTerminal: null,
   unclaimedTerminalSessionIds: [],
@@ -3427,6 +3441,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config,
         providerCatalog,
         sessions: projectRuntimeEndpointSessions(visibleSessions, snapshot.runtimeEndpointWarnings),
+        sessionNameMetadata: snapshot.sessionNameMetadataWarning ? get().sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], get().sessionNameMetadata),
+        sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null,
         recoveryCandidates: snapshot.recoveryCandidates,
         timelines: snapshot.timelines,
         runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,

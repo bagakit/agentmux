@@ -44,7 +44,6 @@ import {
   CTXMUX_MANIFEST_SHA256,
   supportedCtxmuxArtifactPlatform,
   ctxmuxArtifactSource,
-  defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
@@ -66,11 +65,10 @@ const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_PERSISTENT_STATE]: 1,
   [RUNTIME_CAPABILITY_PLANNED_EXEC_UPGRADE_CONTINUITY]: 1
 } as const
-const DAEMON_READY_TIMEOUT_MS = 5_000
-const DAEMON_POLL_INTERVAL_MS = 20
+// This bounds one caller's observation, never the daemon's durable-state recovery.
+const DAEMON_CONNECT_OBSERVATION_MS = 5_000
 const DAEMON_READINESS_MAX_BYTES = 8 * 1024
 const DAEMON_DIAGNOSTIC_MAX_BYTES = 16 * 1024
-const DAEMON_SHUTDOWN_TIMEOUT_MS = 2_000
 const RUN_STATUS_CONCURRENCY = 8
 const execFileAsync = promisify(execFile)
 
@@ -268,10 +266,6 @@ function projectGap(event: AttachmentGapEvent): Pick<CtxmuxAdapterGapEvent, 'cau
   }
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds))
-}
-
 async function mapWithConcurrency<T, R>(
   values: readonly T[],
   concurrency: number,
@@ -316,19 +310,19 @@ function readDaemonReadiness(child: ChildProcess, stream: Readable): Promise<str
     const finish = (error: Error | null, daemonInstanceId?: string): void => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
-      stream.destroy()
+      child.off('exit', onExit)
+      if (!error) stream.destroy()
       if (error) reject(error)
       else resolve(daemonInstanceId as string)
     }
-    const timer = setTimeout(() => {
-      finish(new AgentMuxError(
-        'The spawned CtxMux daemon did not publish its readiness receipt in time.',
-        'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-      ))
-    }, DAEMON_READY_TIMEOUT_MS)
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => finish(new AgentMuxError(
+      `The spawned CtxMux daemon exited before readiness (exit ${code}, signal ${signal}).`,
+      'CTXMUX_UNAVAILABLE'
+    ))
+    child.once('exit', onExit)
     stream.setEncoding('utf8')
     stream.on('data', (chunk: string) => {
+      if (settled) return // Keep draining a failed observation without retaining more bytes.
       content += chunk
       if (Buffer.byteLength(content) > DAEMON_READINESS_MAX_BYTES) {
         finish(new AgentMuxError(
@@ -374,41 +368,6 @@ function readDaemonReadiness(child: ChildProcess, stream: Readable): Promise<str
       'CTXMUX_UNAVAILABLE'
     )))
   })
-}
-
-function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve(true)
-  }
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (exited: boolean): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      child.off('exit', onExit)
-      resolve(exited)
-    }
-    const onExit = (): void => finish(true)
-    const timer = setTimeout(() => finish(false), timeoutMs)
-    child.once('exit', onExit)
-  })
-}
-
-async function terminateSpawnedDaemon(child: ChildProcess): Promise<void> {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
-  child.kill('SIGTERM')
-  if (await waitForChildExit(child, DAEMON_SHUTDOWN_TIMEOUT_MS)) return
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-  if (await waitForChildExit(child, DAEMON_SHUTDOWN_TIMEOUT_MS)) return
-  throw new AgentMuxError(
-    `The spawned CtxMux daemon ${child.pid} did not terminate during failed activation cleanup.`,
-    'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-  )
-}
-
-function ownerReceiptPath(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'owner.json')
 }
 
 export { defaultCtxmuxSocketPath, defaultCtxmuxStateDirectory }
@@ -626,7 +585,7 @@ async function verifyOwnerReceipt(
   runtime: RuntimeIdentity
 ): Promise<void> {
   try {
-    const path = ownerReceiptPath()
+    const path = join(dirname(socketPath), 'owner.json')
     const metadata = await stat(path)
     const receipt: unknown = JSON.parse(await readFile(path, 'utf8'))
     const expected = expectedOwnerReceipt(artifacts, socketPath, stateDirectory, runtime)
@@ -651,7 +610,7 @@ async function writeOwnerReceipt(
   stateDirectory: string,
   runtime: RuntimeIdentity
 ): Promise<void> {
-  const path = ownerReceiptPath()
+  const path = join(dirname(socketPath), 'owner.json')
   const temporaryPath = join(dirname(path), `.owner-${process.pid}-${randomUUID()}.json`)
   try {
     await writeFile(
@@ -664,6 +623,115 @@ async function writeOwnerReceipt(
   } finally {
     await rm(temporaryPath, { force: true })
   }
+}
+
+type DaemonActivation = {
+  child: ChildProcess
+  stateDirectory: string
+  daemonInstanceId: string | null
+  phase: 'readiness' | 'handshake' | 'ready' | 'failed'
+  diagnostic: string
+  error: unknown
+  completion: Promise<void>
+}
+
+// This is only the lifetime of a child spawned by this Core process, not Runtime state or a
+// second cross-process writer lock. ctxmux retains exclusive ownership of its state directory.
+// Keep the record until actual exit, including after an observation or readiness-channel failure.
+const daemonActivations = new Map<string, DaemonActivation>()
+
+function startDaemonActivation(
+  artifacts: VerifiedArtifacts,
+  socketPath: string,
+  stateDirectory: string,
+  onError: (error: AgentMuxError) => void
+): DaemonActivation {
+  const child = spawn(artifacts.daemonPath, [
+    '--socket', socketPath, '--state-dir', stateDirectory, '--readiness-fd', '3'
+  ], {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
+    env: localProcessEnvironment()
+  })
+  child.unref()
+  const activation: DaemonActivation = {
+    child, stateDirectory, daemonInstanceId: null, phase: 'readiness', diagnostic: '',
+    error: null, completion: Promise.resolve()
+  }
+  daemonActivations.set(socketPath, activation)
+  const release = (): void => {
+    if (daemonActivations.get(socketPath) === activation) daemonActivations.delete(socketPath)
+  }
+  child.once('exit', release)
+  child.once('error', () => { if (child.pid === undefined) release() })
+  // Closing this pipe after a caller's observation expires can cause EPIPE in a still-working
+  // durable daemon. Continue draining the bounded diagnostic prefix for this child's lifetime.
+  const stderr = child.stderr
+  if (stderr instanceof Socket) stderr.unref()
+  stderr?.setEncoding('utf8')
+  stderr?.on('data', (chunk: string) => {
+    const remaining = DAEMON_DIAGNOSTIC_MAX_BYTES - Buffer.byteLength(activation.diagnostic)
+    if (remaining <= 0) return
+    activation.diagnostic += Buffer.from(chunk).subarray(0, remaining).toString('utf8')
+    while (Buffer.byteLength(activation.diagnostic) > DAEMON_DIAGNOSTIC_MAX_BYTES) {
+      activation.diagnostic = activation.diagnostic.slice(0, -1)
+    }
+  })
+  stderr?.on('error', (error) => onError(new AgentMuxError(
+    `CtxMux diagnostic channel failed: ${error.message}. Runtime and Run availability are observed separately.`,
+    'CTXMUX_DIAGNOSTIC_CHANNEL_UNAVAILABLE'
+  )))
+  const readiness = child.stdio[3] as Readable | null
+  if (readiness instanceof Socket) readiness.unref()
+  activation.completion = (async () => {
+    if (!readiness) throw new AgentMuxError(
+      'The CtxMux daemon readiness channel was not created.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+    )
+    activation.daemonInstanceId = await readDaemonReadiness(child, readiness)
+    activation.phase = 'handshake'
+    const runtime = await new CtxmuxClient({ socketPath }).runtimeInfo()
+    await confirmDaemonActivation(activation, artifacts, socketPath, stateDirectory, runtime)
+    activation.phase = 'ready'
+  })().catch((error: unknown) => {
+    activation.phase = 'failed'
+    activation.error = withCtxmuxStartupDiagnostic(error, activation.diagnostic)
+    onError(activation.error instanceof AgentMuxError ? activation.error : new AgentMuxError(
+      `CtxMux activation observation failed: ${String(activation.error)}. Retry the same Runtime connection; its process and Runs were kept.`,
+      'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+    ))
+    // Invalid or unavailable observation is not permission to terminate a possibly serving child.
+    // A later public handshake may still use it, with ownership unverified until proved.
+  })
+  return activation
+}
+
+async function confirmDaemonActivation(
+  activation: DaemonActivation,
+  artifacts: VerifiedArtifacts,
+  socketPath: string,
+  stateDirectory: string,
+  runtime: RuntimeIdentity
+): Promise<void> {
+  assertAgentMuxRuntimeCompatibility(runtime)
+  if (activation.stateDirectory !== stateDirectory || runtime.daemonInstanceId !== activation.daemonInstanceId) {
+    throw new AgentMuxError(
+      'The CtxMux socket responder does not match the exact daemon child that AgentMux spawned.',
+      'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+    )
+  }
+  await writeOwnerReceipt(artifacts, socketPath, stateDirectory, runtime)
+}
+
+async function observeDaemonActivation(activation: DaemonActivation): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(withCtxmuxStartupDiagnostic(new AgentMuxError(
+      `CtxMux startup is still unconfirmed at ${activation.phase} (PID ${activation.child.pid ?? 'unknown'}). ` +
+      'The daemon and its readiness observation were kept. Retry the same Runtime connection; no replacement was started.',
+      'CTXMUX_STARTUP_PENDING'
+    ), activation.diagnostic)), DAEMON_CONNECT_OBSERVATION_MS)
+    void activation.completion.then(() => { clearTimeout(timer); resolve() })
+  })
+  if (activation.error !== null) throw activation.error
 }
 
 function decodeChunk(
@@ -750,7 +818,15 @@ export class CtxmuxRunAdapter {
   private client: CtxmuxClient | null = null
   private runtime: RuntimeIdentity | null = null
   /** Compatibility is independent of whether this process owns daemon cleanup rights. */
-  runtimeOwnership: 'owned' | 'unverified' | null = null
+  private ownership: 'owned' | 'unverified' | null = null
+  get runtimeOwnership(): 'owned' | 'unverified' | null {
+    const activation = daemonActivations.get(this.socketPath)
+    if (this.runtime !== null && activation?.phase === 'ready' &&
+      activation.stateDirectory === this.stateDirectory && activation.daemonInstanceId === this.runtime.daemonInstanceId) {
+      return 'owned'
+    }
+    return this.ownership
+  }
   private readonly attachments = new Map<string, LiveAttachment>()
 
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
@@ -789,6 +865,11 @@ export class CtxmuxRunAdapter {
 
   onError(listener: (error: AgentMuxError, runId?: string) => void): () => void {
     this.errorListener = listener
+    // AgentMuxClient installs its observer after connect(). A compatible public listener can
+    // have connected despite an earlier readiness failure; retain that diagnostic for it too.
+    const startupError = daemonActivations.get(this.socketPath)?.error
+    if (startupError !== undefined && startupError !== null) listener(startupError instanceof AgentMuxError
+      ? startupError : new AgentMuxError(String(startupError), 'CTXMUX_OWNER_IDENTITY_UNPROVEN'))
     return () => {
       if (this.errorListener === listener) this.errorListener = null
     }
@@ -819,7 +900,7 @@ export class CtxmuxRunAdapter {
     this.resetConnection()
     this.client = null
     this.runtime = null
-    this.runtimeOwnership = null
+    this.ownership = null
     this.connectionLostListener?.()
   }
 
@@ -839,127 +920,64 @@ export class CtxmuxRunAdapter {
     try {
       runtime = await diagnosticsClient.runtimeInfo()
       assertAgentMuxRuntimeCompatibility(runtime)
-      try {
-        await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
-        this.runtimeOwnership = 'owned'
-      } catch (error) {
-        // A compatible daemon may have been started by an earlier App instance. Receipt ownership
-        // controls cleanup authority, never protocol compatibility or access to existing Runs.
-        if (error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN') {
-          this.runtimeOwnership = 'unverified'
-        } else throw error
-      }
     } catch (error) {
-      // A responding but incompatible Runtime is not an invitation to spawn a replacement.
-      // Hello validation can fail before runtimeInfo returns an identity. Only a
-      // proven dead listener permits launch; a failed handshake never proves death.
-      if (runtime !== null || await probeSocketLiveness(this.socketPath) !== 'dead') throw error
-      const child = spawn(artifacts.daemonPath, [
-        '--socket',
-        this.socketPath,
-        '--state-dir',
-        this.stateDirectory,
-        '--readiness-fd',
-        '3'
-      ], {
-        detached: true,
-        // Readiness proves ownership. Keep draining this child's diagnostic channel afterward;
-        // closing it here gives the durable daemon EPIPE while its Runs are still serving.
-        // Authoritative service/storage state remains on the public Runtime protocol.
-        stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
-        env: localProcessEnvironment()
-      })
-      child.unref()
-      let daemonStderr = ''
-      const stderrStream = child.stderr as Readable | null
-      if (stderrStream instanceof Socket) stderrStream.unref()
-      stderrStream?.setEncoding('utf8')
-      stderrStream?.on('data', (chunk: string) => {
-        const remaining = DAEMON_DIAGNOSTIC_MAX_BYTES - Buffer.byteLength(daemonStderr)
-        if (remaining <= 0) return
-        // Slice bytes before retaining them: a large or multibyte diagnostic must not exceed
-        // the startup buffer budget. Continue draining once that bounded prefix is full.
-        daemonStderr += Buffer.from(chunk).subarray(0, remaining).toString('utf8')
-        while (Buffer.byteLength(daemonStderr) > DAEMON_DIAGNOSTIC_MAX_BYTES) {
-          daemonStderr = daemonStderr.slice(0, -1)
-        }
-      })
-      stderrStream?.on('error', (error) => {
-        this.errorListener?.(new AgentMuxError(
-          `CtxMux diagnostic channel failed: ${error.message}. Runtime and Run availability are observed separately.`,
-          'CTXMUX_DIAGNOSTIC_CHANNEL_UNAVAILABLE'
-        ))
-      })
+      // A failed handshake does not prove death. A live activation also survives a caller's
+      // timeout/disconnect; reuse its exact child even before its socket has been bound.
+      if (runtime !== null) throw error
+      let activation = daemonActivations.get(this.socketPath)
+      if (!activation) {
+        if (await probeSocketLiveness(this.socketPath) !== 'dead') throw error
+        activation = daemonActivations.get(this.socketPath) ?? startDaemonActivation(
+          artifacts, this.socketPath, this.stateDirectory,
+          (diagnostic) => this.errorListener?.(diagnostic)
+        )
+      }
+      if (activation.stateDirectory !== this.stateDirectory) throw new AgentMuxError(
+        'A CtxMux child is already starting at this socket for another state directory. Its process was kept.',
+        'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+      )
+      let observationError: unknown = null
+      try { await observeDaemonActivation(activation) } catch (error) { observationError = error }
       try {
-        const readinessStream = child.stdio[3] as Readable | null
-        if (!readinessStream) {
-          throw new AgentMuxError(
-            'The CtxMux daemon readiness channel was not created.',
-            'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-          )
-        }
-        const spawnedDaemonInstanceId = await readDaemonReadiness(child, readinessStream)
-        const deadline = Date.now() + DAEMON_READY_TIMEOUT_MS
-        let lastError: unknown = null
-        while (Date.now() <= deadline) {
-          if (child.exitCode !== null) {
-            throw new AgentMuxError(
-              `The spawned CtxMux daemon exited before public handshake (exit ${child.exitCode}).`,
-              'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-            )
-          }
-          try {
-            runtime = await diagnosticsClient.runtimeInfo()
-            assertAgentMuxRuntimeCompatibility(runtime)
-            if (runtime.daemonInstanceId !== spawnedDaemonInstanceId) {
-              throw new AgentMuxError(
-                'The CtxMux socket responder does not match the exact daemon child that AgentMux spawned.',
-                'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-              )
-            }
-            lastError = null
-            break
-          } catch (error) {
-            if (error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN') {
-              throw error
-            }
-            lastError = error
-            await delay(DAEMON_POLL_INTERVAL_MS)
-          }
-        }
-        if (lastError !== null || runtime === null) throw lastError
-        try {
-          await writeOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
-          this.runtimeOwnership = 'owned'
-        } catch {
-          // The inherited readiness receipt already proved this exact child. A disk failure
-          // recording provenance must not terminate a compatible daemon or its working Runs.
-          this.runtimeOwnership = 'unverified'
-        }
+        // Readiness/receipt failure cannot withhold a compatible listener that is now serving.
+        runtime = await diagnosticsClient.runtimeInfo()
+        assertAgentMuxRuntimeCompatibility(runtime)
       } catch (error) {
-        const startupError = withCtxmuxStartupDiagnostic(error, daemonStderr)
-        try {
-          await terminateSpawnedDaemon(child)
-        } catch (cleanupError) {
-          throw new AgentMuxError(
-            `CtxMux activation failed and its exact spawned daemon could not be cleaned up: ${startupError instanceof Error ? startupError.message : String(startupError)}; cleanup: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
-            'CTXMUX_OWNER_IDENTITY_UNPROVEN'
-          )
-        }
-        stderrStream?.destroy()
-        throw startupError
+        if (runtime !== null) throw error
+        throw observationError ?? error
       }
     }
     if (runtime === null) {
       throw new AgentMuxError('CtxMux did not report its daemon instance.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN')
     }
-    const client = new CtxmuxClient({
+    const activation = daemonActivations.get(this.socketPath)
+    if (activation?.daemonInstanceId === runtime.daemonInstanceId) {
+      try {
+        // An earlier one-shot public observation or receipt write may have failed. The original
+        // inherited readiness proof can finish ownership on this fresh exact-instance handshake.
+        await confirmDaemonActivation(activation, artifacts, this.socketPath, this.stateDirectory, runtime)
+      } catch (error) {
+        this.errorListener?.(error instanceof AgentMuxError ? error : new AgentMuxError(
+          `CtxMux owner receipt could not be recorded: ${String(error)}. The compatible Runtime remains available.`,
+          'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+        ))
+      }
+    }
+    try {
+      await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
+      this.ownership = 'owned'
+    } catch (error) {
+      // Ownership controls cleanup authority, never protocol compatibility or access to Runs.
+      if (error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN') {
+        this.ownership = 'unverified'
+      } else throw error
+    }
+    this.runtime = runtime
+    this.client = new CtxmuxClient({
       socketPath: this.socketPath,
       expectedRuntimeIdentity: runtime,
       requiredCapabilities: REQUIRED_RUNTIME_CAPABILITIES
     })
-    this.runtime = runtime
-    this.client = client
   }
 
   /** One exact Run, optional observation capability; never a connection or input prerequisite. */
@@ -991,7 +1009,7 @@ export class CtxmuxRunAdapter {
     }
     this.client = null
     this.runtime = null
-    this.runtimeOwnership = null
+    this.ownership = null
   }
 
   disconnect(): void {

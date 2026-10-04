@@ -5,7 +5,8 @@ import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conver
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { AlertTriangle, ArrowRight, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
 import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
-import { useAppStore } from '../store'
+import { agentRegionExecution, useAppStore } from '../store'
+import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
@@ -127,6 +128,10 @@ export function SessionPane({
   const session = useObservedAppStore('sessionPane', observationVisible, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, (state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useObservedAppStore('sessionPane', observationVisible, (state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
+  const nameMetadata = useObservedAppStore('sessionPane', observationVisible, state => sessionNameMetadataFor(state.sessionNameMetadata, sessionId, [
+    linkOrigin.tabId && linkOrigin.regionId ? agentRegionExecution({tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, agentSessionId: sessionId})?.hostId : undefined,
+    session?.hostId, pendingLaunch?.request?.hostId, recoveryCandidate?.hostId
+  ]))
   const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
   const historyHostId = useObservedAppStore('sessionPane', observationVisible, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
   const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
@@ -663,8 +668,8 @@ export function SessionPane({
       : retainedHistory?.state === 'retired' ? executionHostProjection(retainedHistory.hostId, retainedHistory.history?.workspacePath, configuredExecutionHost)
         : executionHostProjection(recoveryCandidate?.hostId, recoveryCandidate?.workspacePath, configuredExecutionHost)
   const preSnapshotHeader = (name = agentInputIdentity ?? (session?.kind === 'terminal' ? session.label : surfaceKind === 'terminal' ? 'Terminal' : agentDisplayName({ userName,
-    firstPrompt: pendingLaunch?.request?.prompt, fallbackLabel: recoveryCandidate?.label ?? sessionId,
-    providerLabel: connectingExecutor?.label ?? sessionId })), executorLabel = agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown') =>
+    firstPrompt: pendingLaunch?.request?.prompt, fallbackLabel: recoveryCandidate?.label ?? nameMetadata?.label ?? 'Agent · name unconfirmed',
+    providerLabel: connectingExecutor?.label ?? (nameMetadata ? agentProviderLabel(nameMetadata.providerId) : 'Agent') })), executorLabel = agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown') =>
     <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
       regionId={linkOrigin.regionId} readOnly={readOnly} portalTargetId={headerPortalTargetId} onHistory={undefined} onTakeOver={onTakeOver} />
@@ -728,7 +733,7 @@ export function SessionPane({
   if (!session && retainedHistory?.state === 'retired' && terminalThemeId) {
     const reference = { hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }
     const metadata = retainedHistory.history
-    const label = userName ?? tabName ?? metadata?.executorId ?? sessionId
+    const label = userName ?? tabName ?? nameMetadata?.label ?? metadata?.executorId ?? 'Agent · name unconfirmed'
     const providerLabel = metadata ? agentProviderLabel(metadata.providerId) : null
     const executorLabel = metadata ? connectingExecutor?.label ?? metadata.executorId : null
     const identityLabel = providerLabel && executorLabel && providerLabel.toLowerCase() !== executorLabel.toLowerCase()

@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { useAppStore } from '../store'
+import { agentRegionExecution, useAppStore } from '../store'
+import { sessionNamesForReferences } from './session-name-metadata'
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { sessionPresentationById, sessionPresentationsAtPath } from './session-presentation'
 import type { WorkbenchTab } from './workbench-tabs'
@@ -21,6 +22,19 @@ export function useWorkbenchTabSessions(tab: WorkbenchTab | undefined) {
       return session ? [session] : []
     })
   }))
+}
+
+/** Names read exact durable execution bindings; they never grant Session or Run capabilities. */
+export function useWorkbenchTabNameMetadata(tab: WorkbenchTab | undefined) {
+  return useAppStore(useShallow(state => sessionNamesForReferences(state.sessionNameMetadata, tab ? Object.values(tab.regions).flatMap(region => {
+    if (region.kind !== 'agent') return []
+    const session = sessionPresentationById(state.sessions).get(region.sessionId)
+    return [{agentSessionId: region.sessionId, hosts: [
+      agentRegionExecution({tabId: tab.id, regionId: region.regionId, agentSessionId: region.sessionId})?.hostId,
+      session?.hostId,
+      state.pendingAgentLaunches[region.sessionId]?.request?.hostId
+    ]}]
+  }) : [])))
 }
 
 /** Keep naming/timeline subscriptions on the same spatial consumers as the Session lookup. */
