@@ -331,8 +331,8 @@
 .pane-drop-overlay--up { inset: var(--pane-tabbar-height) 0 50% 0; }
 .pane-drop-overlay--down { inset: 50% 0 0 0; }
 
-.editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); background: var(--surface-0); }
-.editor-pane--issue { grid-template-rows: 34px auto minmax(0, 1fr); }
+.editor-pane { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 34px auto minmax(0, 1fr); background: var(--surface-0); }
+.editor-file-notices { min-width: 0; }
 .editor-header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap:var(--sp-4); padding:0 var(--sp-4) 0 var(--sp-5); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-micro); }
 .editor-header > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-header__actions { display: flex; align-items: center; gap:var(--sp-2); }
