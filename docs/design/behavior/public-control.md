@@ -50,7 +50,7 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 - 文件按精确 Zone 的真实目录与字面目录相对路径打开，再沿原资源关系映射到既有 filesAPI 的 Workspace 相对路径；Topic 目录不能偷换成隐藏容器根。显示落点使用原 Space／Zone／display Workspace／group 身份，不能按 caller cwd、标题或当前主面猜位置。目录与原资源根映射未确认时如实未知，不改执行事实。文件入口打开或复用原 canonical File Tab／Region；零 Tab 的已有 Zone 可打开第一张 File Tab，不新建 Zone、Agent／Run，不替换 Launcher 或别人的内容。显式显示落点不能把资源根改成显示目录，也不能静默重归属已有 File Tab。
 - 文件默认后台放置，显式导航也默认保留仍合资格的现有 Mote／Terminal／Editor 输入、草稿和组字；旧输入因显示变化失去资格须如实未确认，不能 focus／blur 后恢复来补签。资源创建、读取、实际格式、精确落点与导航是否仍获授权分别说明；异步读取完成前用户已经导航，不能抢回主面或把晚回执指向替换者。文件面已建立但读取失败仍保留原面与准确原因，不能从未获导航授权推断未打开。目录不作为 File 打开，书签源码不顺带开 Browser；媒体和二进制沿真实预览，不冒可编辑 Editor。
 - Terminal／Activity 是 exact SID 的展示偏好，影响该 SID 的全部原投影；File 的 source／diff／preview 是 exact Region 的互斥模式，影响同一 Region 的全部呈现，不影响另一 Region 的同文件视图。合法 opaque ID 按原 own-entry 读取，不把继承属性当实际覆盖。暂缺 Core 快照不能阻断原 durable AgentRegion 的显示选择，不探测 readiness、不猜另一个 Session。CLI 改展示偏好不改主面选择、逻辑 lane、Session／Run 或 cwd，不隐式授权 caret 转移；输入资格变化如实未确认，原 GUI 明确操作保持其既有行为。
-- File 模式由同一个原 Region owner 决定真正正文与菜单状态，不能同时保留 local preview 与 diff 让明确选择被遮盖。Markdown／SVG／Note 文本支持源码、diff 与预览，普通文本／HTML 源码不冒同 Region 的 HTML Browser 预览；媒体与已知二进制只读预览。支持范围来自实际格式与读取事实，未知如实未知；模式已应用与 preview／diff 数据可用分别说明。切换保同一原文档、未保存内容及每 Region view state，projection 模型沿原生命周期可释放／重建；仍合资格的原输入不被抢，失去资格如实未确认，不保存文件或阻断健康 Run。
+- File 模式由同一个原 Region owner 决定真正正文与菜单状态，不能同时保留 local preview 与 diff 让明确选择被遮盖。File 的实际格式与预览范围唯一遵循[《本地文件预览与按格式编辑》](files-and-git.md#本地文件预览与按格式编辑)：HTML 的同 Region 隔离预览与源码分别表达，不能把 HTML 源码显示冒充已经提供预览；普通文本不冒 HTML，媒体与已知二进制只读预览。支持范围来自实际格式与读取事实，未知如实未知；模式已应用与 preview／diff 数据可用分别说明。切换保同一原文档、未保存内容及每 Region view state，projection 模型沿原生命周期可释放／重建；仍合资格的原输入不被抢，失去资格如实未确认，不保存文件或阻断健康 Run。
 - 交换只换同一 Tab entity 内两个 exact Region 在原分割树中的位置，比例、逻辑活动 ID、内容身份及其执行事实保持。同一实体的所有显示 occurrences 共用该布局，回执明确共同作用范围，不因多个位置误报实体歧义，也不宣称只改其中一次呈现。主面保留的源焦点与借出浮窗的局部选择仍按原 presentation 事实，不以复制 surface／内容身份或新建 Run 换位。DOM 与模型依原呈现生命周期，仍合资格输入不被抢；不以 Store ID 代签同 DOM／caret，未知如实未知。
 - 只读模式查询与观察不触发读取、diff、持久写、refresh、Launcher 预热或生命周期。操作回执分别给出已应用、未确认和真实 save 事实；掉回执不能按未执行自动重放，尤其交换不能再执行一次。保存失败保已应用工作面与健康内容，持续服务窗说明哪步失败、当前状态和恢复动作；flush request 不能冒充磁盘 ACK。
 - 普通进程重启先恢复原 File／Agent Region、Tab／group／布局与 Session 引用。Agent 展示偏好沿原持久 owner；File Region 模式沿原临时策略恢复到格式默认，不另建持久模式 Map。读取与握手失败保原面，不把缺快照当已关闭。现有内容的观测与消费成本只随相关实体／occurrences 增长，不读取全量终端输出或为无关会话增加工作。
@@ -151,7 +151,7 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 | `mote` | `playbook pmo` |
 | `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
 | `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
-| `device` | `ls`、`invite`、`approve`、`reject`、`revoke`；仅本机管理请求，变更必须有原设备 Authority 验证的实际用户确认 |
+| `device` | 本机用户管理：`ls`、`link`、`revoke`；已认证加密设备仅以 `hello` 命名自身。授权与撤销沿[手机版 Relay 连接](#手机版-relay-连接) |
 | `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
 
 - **PMO 全局发现完整保留。** `app snapshot` 聚合原 PMO 跨对象观察：真实 Project 资源、Workspace、Topic／Mote／Space／Zone、配置 Executor、活动 Agent、Core Session、Goal、决策与活动事实；按各自来源保留已知、不可用和 unknown，不把不可用伪装成空列表。对象发现必须覆盖原 `list projects/active-agents/sessions` 与 PMO 全局观察的事实，不能只剩调用者的当前 Space／Workspace。配置 Executor 由 `settings executors` 发现，Agent 与 Session 由 `agent` 发现，空间与其资源绑定由 `space` 发现，各项 inspect 按对象提供；Project／Workspace 资源发现由原权威来源供给聚合及关联观察，不能从 Space 名称或单条 Workspace ID 伪造 Project。`goal activity` 只取原 Goal 活动来源，不把 Runtime 日志或跨域 snapshot 当成 Goal 已发生的活动。
