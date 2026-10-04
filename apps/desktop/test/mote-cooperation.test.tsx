@@ -32,7 +32,7 @@ async function text(selector: string, value: string) {
   const input = document.querySelector<HTMLTextAreaElement>(selector)!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
-const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === name)!
+const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => (node.getAttribute('aria-label') || node.textContent) === name)!
 const action = (name: string) => document.querySelector<HTMLButtonElement>('[aria-label="' + name + '"]')!
 const dialog = () => document.querySelector<HTMLElement>('.mote-behavior-dialog')!
 const publicRead = (params: FileReadParams): FileReadResult => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path: rootPath + '/' + params.path }, result: { status: 'read', document: { path: rootPath + '/' + params.path, content: params.path === 'BEHAVIOR.md' ? disk : soulDisk, revision: params.path === 'BEHAVIOR.md' ? diskRevision : soulRevision } } })
