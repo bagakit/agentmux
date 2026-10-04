@@ -7,7 +7,7 @@ import {
   type AgentTerminalScreenEvidenceEvent
 } from './agent-terminal-screen.js'
 import { CtxmuxRunAdapter } from './ctxmux-run-adapter.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, agentMuxCancellationError } from './errors.js'
 import type { AgentMuxAgentSession } from './types.js'
 import { terminalContinuationSteps } from './terminal-continuation.js'
 
@@ -72,8 +72,8 @@ export class AgentScreenEvidenceStore {
     }
   ): Promise<number> {
     const observation = new AbortController()
-    const abort = (): void => observation.abort(new AgentMuxError(
-      'Terminal screen observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED'
+    const abort = (): void => observation.abort(agentMuxCancellationError(
+      'Terminal screen observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED', options.signal?.reason
     ))
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
