@@ -8,7 +8,8 @@ import { normalizeMessageChannel } from './message-origin.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, type AgentMuxRpcFileUploadsOwner, type FileMethod } from './public-rpc-files.js';
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
-import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isFileMethod, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isGitMethod, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type GitMethod } from './public-rpc-git.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
@@ -65,6 +66,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   notebookStore?: AgentMuxNotebookStore
   files?: AgentMuxRpcFilesOwner
+  git?: AgentMuxRpcGitOwner
   fileUploads?: AgentMuxRpcFileUploadsOwner
   topics?: AgentMuxRpcTopicsOwner
 
@@ -125,7 +127,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -380,6 +382,13 @@ export class AgentMuxRpcService {
       }
     }
     const caller = await this.authenticated(context)
+    if (isGitMethod(method)) {
+      const input = parseGitParams(method, params)
+      context.signal?.throwIfAborted()
+      if (!this.ports.git && !this.ports.forwardControl) throw new AgentMuxError('The original Desktop Git owner is unavailable. Original workspaces and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      const result = this.ports.git ? await this.ports.git.call<GitMethod>(method, input, context) : await this.ports.forwardControl!<GitMethod>(method, input, context)
+      return parseGitResult(method, result, input) as AgentMuxRpcResult<M>
+    }
     if (isFileMethod(method)) {
       if (method === 'file.upload' || method === 'file.upload.inspect') {
         const input = method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)

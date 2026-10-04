@@ -4202,6 +4202,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get, swapRegions: (...args) => get().swapRegions(...args),
       closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId), save: saveWorkbenchSelection
     }, request)
+    if (request.operation === 'open.git') {
+      const refuse = (message: string): never => { throw Object.assign(new Error(message), { code: 'INVALID_CONTROL_TARGET' }) }
+      const original = get().config?.workspaces.find(workspace => workspace.id === request.workspaceId)
+      if (!original || original.hostId !== request.expectedResource.hostId || original.path !== request.expectedResource.workspacePath) {
+        refuse('The original Git workspace resource changed. Discover its current Host and path before opening it.')
+      }
+      const lookup = gitBridge()
+      if (!lookup.available) throw Object.assign(new Error(lookup.reason), { code: 'CONTROL_FAILED' })
+      const details = await lookup.bridge.commitDetails(request.workspaceId, { oid: request.oid,
+        ...(request.parentOid ? { parentOid: request.parentOid } : {}) })
+      if (signal?.aborted) throw Object.assign(new Error('The Git open request was cancelled; the original workface is retained.'), { code: 'CONTROL_CANCELLED' })
+      const current = get().config?.workspaces.find(workspace => workspace.id === request.workspaceId)
+      if (!current || current.hostId !== original!.hostId || current.path !== original!.path) refuse('The Git workspace resource changed while reading the commit.')
+      if (details.kind !== 'ready') return refuse('The original workspace is no longer a Git repository.')
+      const snapshot = details.snapshot
+      if (snapshot.hostId !== request.expectedResource.hostId || snapshot.commitOid !== request.oid ||
+          request.parentOid !== undefined && snapshot.parentOid !== request.parentOid) refuse('The Git owner returned a different immutable commit target.')
+      const presentation = get().openGitWorkbench(request.workspaceId, snapshot)
+      await saveWorkbenchSelection(true)
+      return { operation: 'open.git', workspaceId: request.workspaceId, read: { kind: 'ready', snapshot }, presentation }
+    }
     if (request.operation === 'open.file') return await executeWorkfaceFileOpen({
       get,
       topics: async () => get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)

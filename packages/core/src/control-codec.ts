@@ -61,6 +61,7 @@ import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './des
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult } from './browser-task-control.js'
 import { parseBrowserTargetsResult } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
+import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
@@ -394,6 +395,10 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target, ...(owner ? { caller: owner } : {}) }
   }
   if (isSpaceControlOperation(source.operation)) return parseSpaceControlRequest(source)
+  if (source.operation === 'open.git') {
+    const { schemaVersion: _version, requestId: _requestId, operation: _operation, ...params } = source
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'open.git', ...parseGitOpenParams(params) }
+  }
   if (source.operation === 'open.terminal' || source.operation === 'open.browser') {
     const destination = openDestination(source.destination)
     const owner = optionalCaller(source.caller)
@@ -970,6 +975,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     throw new AgentMuxError('Control receipt operation is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const operation: AgentMuxControlRequest['operation'] = source.operation
+  if (operation === 'open.git') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseGitOpenResult(result) }
   if (isToolkitOperation(operation)) {
     const parsed = parseToolkitResult(operation, result)
     settingsResourceBudget(source, 'CONTROL_PROTOCOL_ERROR')
