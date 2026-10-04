@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "rootDir": "../../../../.." },
+  "include": ["../../provider-session-failure.test.ts", "../../codex-error-classification.test.ts"]
+}

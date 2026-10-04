@@ -753,7 +753,8 @@ export function projectRuntimeEvent(
       state: agentDisplayState(core.state),
       source: core.evidence.source,
       observedAt: core.evidence.observedAt,
-      ...(core.detail === undefined ? {} : { detail: core.detail })
+      ...(core.detail === undefined ? {} : { detail: core.detail }),
+      ...(core.failure ? { failure: structuredClone(core.failure) } : {})
     }
     // Compare the actual projection, including removed optional facts, before replacing
     // its collection. A rejected or repeated observation must not wake unrelated consumers.

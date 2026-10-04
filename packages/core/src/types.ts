@@ -115,6 +115,7 @@ export type AgentMuxEvidenceSource =
   | 'terminal-output'
   | 'run-process'
   | 'native-hook'
+  | 'native-transcript'
   | 'acp'
   | 'user'
   | 'agentmux'
@@ -453,7 +454,22 @@ export type AgentPromptExecutionEvidence = {
   id: string
   nativeTurnId?: string
   state: 'idle' | 'working' | 'ended'
-  endReason?: 'interrupted' | 'completed'
+  endReason?: 'interrupted' | 'completed' | 'failed'
+  observedAt?: number
+  failure?: AgentFailure
+  nativeOrdinal?: number
+}
+
+/** A Provider's exact native turn record; never inferred from terminal output. */
+export type AgentProviderSessionStatus = {
+  recordId: string
+  /** Reading a retained snapshot does not prove fresh activity. */
+  initialSnapshot?: true
+  sequence?: number
+  nativeTurnId: string
+  state: 'working' | 'done' | 'error' | 'unknown'
+  nativeObservedAt?: number
+  failure?: AgentFailure
 }
 
 /** Opaque Provider fact captured before native resume, bound by Core to its new Run. */
@@ -1486,6 +1502,7 @@ export type AgentMuxClientEvent = (
       agentSessionId: string
       state: AgentSemanticState
       detail?: string
+      failure?: AgentFailure
       evidence: AgentMuxEvidence
     }
   | {
@@ -1535,6 +1552,15 @@ export type AgentMuxClientEvent = (
 
 ) & { observationOrigin?: AgentMuxObservationOrigin }
 
+export type AgentFailure = {
+  code: string
+  message: string
+  nativeCode?: string
+  httpStatusCode?: number
+  recovery: string
+  nativeTurnId: string
+}
+
 export type AgentStatus = {
   /** Core-owned order of current activity changes within this Run, not a native activity clock. */
   currentActivityRevision?: number
@@ -1548,6 +1574,8 @@ export type AgentStatus = {
   /** Proven entry time for this semantic state; absence is unknown, never inferred from observations. */
   stateEnteredAt?: number
   detail?: string
+  nativeTurnId?: string
+  failure?: AgentFailure
   exitCode?: number
 }
 

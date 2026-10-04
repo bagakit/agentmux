@@ -2,6 +2,7 @@ import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVe
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution } from './codex-prompt-execution.js'
 import { createCodexInteractionResponsePreparation } from './codex-interaction-target.js'
+import { observeCodexSessionStatus } from './codex-session-status.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
@@ -188,6 +189,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     verifyPromptExecutionTransport,
     preparePromptExecutionTransport: createCodexPromptTransportPreparation(verifyPromptExecutionTransport),
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
+    observeSessionStatus: observeCodexSessionStatus,
     planPromptInput: (prompt, context) => ({
       kind: 'render-then-submit',
       // Native async option editors treat a paste as an Other answer. Return to

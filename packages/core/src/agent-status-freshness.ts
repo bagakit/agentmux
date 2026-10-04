@@ -168,6 +168,7 @@ const AGENT_ACTIVITY_STATUS_SOURCE: Record<AgentMuxEvidenceSource, boolean> = {
   'terminal-output': false,
   'run-process': false,
   'native-hook': true,
+  'native-transcript': true,
   acp: true,
   user: false,
   agentmux: false
@@ -301,7 +302,7 @@ export function observeAgent(
 /** Project current activity without rewriting the retained main completion identity. */
 export function currentAgentSemanticStatus(status: AgentStatus | undefined): AgentStatus | undefined {
   if (!status) return undefined
-  if (status.aggregateActivityAt !== undefined && status.aggregateActivityAt >= status.observedAt) {
+  if (!status.failure && status.aggregateActivityAt !== undefined && status.aggregateActivityAt >= status.observedAt) {
     return { ...status, state: 'working', observedAt: status.aggregateActivityAt }
   }
   if (status.state === 'done' && status.idleEvidenceConsumed) {
