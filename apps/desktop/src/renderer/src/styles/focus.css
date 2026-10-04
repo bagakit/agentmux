@@ -411,14 +411,15 @@
 .focus-toolbar__mote-choice:hover, .focus-toolbar__mote-choice[data-state='open'] { background: var(--surface-3); color: var(--text); }
 .focus-toolbar__mote-choice:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-toolbar__mote-warning { color: var(--amber); }
-.focus-chat-mote-menu { width: min(300px, calc(100vw - 16px)); max-height: min(420px, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; }
+.focus-chat-mote-menu { width: min(260px, calc(100vw - 16px)); max-height: min(420px, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; }
 .focus-chat-mote-menu__label, .focus-chat-mote-menu__notice { margin: 0; padding: 6px 8px; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 .focus-chat-mote-menu__notice { color: var(--amber); }
-.focus-chat-mote-menu__item { align-items: flex-start; white-space: normal; }
-.focus-chat-mote-menu .focus-chat-mote-menu__item > .project-rail-row__icon { flex: none; width: 16px; height: 16px; }
-.focus-chat-mote-menu .focus-chat-mote-menu__item > span:last-child { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.focus-chat-mote-menu__item { display: grid; grid-template-columns: 20px minmax(0, 1fr) 12px; gap: 8px; align-items: center; min-height: 32px; padding: 6px 8px; white-space: normal; }
+.focus-chat-mote-menu__icon { display: grid; place-items: center; width: 20px; height: 20px; }
+.focus-chat-mote-menu__icon :is(.space-object-icon, .project-rail-row__icon, svg, img) { width: 20px; height: 20px; }
+.focus-chat-mote-menu .focus-chat-mote-menu__item > .focus-chat-mote-menu__name { min-width: 0; text-align: left; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .focus-chat-mote-menu__item small { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-chat-mote-menu__check { flex: 0 0 12px; }
+.focus-chat-mote-menu__check { display: grid; place-items: center; width: 12px; height: 12px; }
 @container focus-context-area (max-width: 400px) {
   .focus-toolbar__action > span, .focus-toolbar__review > span { display: none; }
   .focus-toolbar__identity small { display: none; }
