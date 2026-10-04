@@ -31,8 +31,8 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () =
 const baseline = useAppStore.getState(), tabId = 'owner-pending-tab'
 const ui: AgentMuxNameContext = { actor: { kind: 'device', id: 'private-editor', verified: true }, source: 'desktop-ui',
   entryPoint: 'spatial:renameLabel', transport: 'electron-ipc', location: { windowId: 'private-editor-window' } }
-type Kind = 'Agent row' | 'Focus Tab' | 'Survey Zone' | 'Workbench Tab' | 'Workbench Agent'
-const kinds: Kind[] = ['Agent row', 'Focus Tab', 'Survey Zone', 'Workbench Tab', 'Workbench Agent']
+type Kind = 'Agent row' | 'Focus Tab' | 'Survey Zone' | 'Workbench Tab'
+const kinds: Kind[] = ['Agent row', 'Focus Tab', 'Survey Zone', 'Workbench Tab']
 type Held = { input: AgentMuxDisplayLabelMutation; result: AgentMuxDisplayLabelResult; release(): void }
 let root: Root | undefined, container: HTMLDivElement, context: FocusContext, zone: AgentMuxZoneFact,
   owner: AgentMuxSpatialStateStore, directory: string, dispose: (() => void) | undefined, held: Held[], focusTrace: unknown[],
@@ -62,7 +62,7 @@ async function request(index: number, expectedValue?: string) {
 }
 async function deliver(index: number) { await act(async () => held[index]!.release()); await settle() }
 function target(kind: Kind): AgentMuxNameTarget {
-  return kind === 'Agent row' || kind === 'Workbench Agent' ? { kind: 'agent-session', id: context.id }
+  return kind === 'Agent row' ? { kind: 'agent-session', id: context.id }
     : kind === 'Focus Tab' || kind === 'Workbench Tab' ? { kind: 'tab', id: tabId } : { kind: 'zone', id: zone.zoneId }
 }
 beforeEach(async () => {
@@ -168,7 +168,7 @@ async function mount(kind: Kind) {
       expect(trigger).toBeTruthy()
       await act(async () => trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 100, clientY: 20 })))
       await settle()
-      const label = kind === 'Agent row' || kind === 'Workbench Agent' ? 'Rename Agent' : 'Rename Tab'
+      const label = kind === 'Agent row' ? 'Rename Agent' : kind === 'Workbench Tab' ? 'Rename tab' : 'Rename Tab'
       const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === label)
       expect(action, label).toBeTruthy(); await act(async () => action!.click()); await settle()
     }

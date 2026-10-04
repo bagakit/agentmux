@@ -160,7 +160,7 @@ describe('Branches 面板', () => {
     expect(without).not.toContain('>main<')
   })
 
-  it('尾标签三岔各自可辨：Current / Worktree / Branch', () => {
+  it('状态图标三岔各自可辨，完整含义由 title 与 aria 保留', () => {
     // 三支都给一个样本，且**当前分支自己也有 worktree**——这样 `isCurrent` 优先于 worktree 这层
     // 顺序也被钉住：把两支调换顺序，main 会显示成 Worktree 而不是 Current。
     const markup = render([
@@ -171,9 +171,20 @@ describe('Branches 面板', () => {
 
     const withWorktree = group(markup, 'Worktrees')
     const without = group(markup, 'Without worktree')
-    expect(withWorktree).toContain('Current')
-    expect(withWorktree).toContain('>Worktree<')
-    expect(without).toContain('Branch')
+    const root = document.createElement('div')
+    root.innerHTML = markup
+    const states = [...root.querySelectorAll('.branch-row__state')]
+    expect(states).toHaveLength(3)
+    expect(states.map((state) => [state.getAttribute('aria-label'), state.getAttribute('title'), state.getAttribute('role')])).toEqual([
+      ['Current branch', 'Current branch', 'img'],
+      ['Worktree', 'Worktree', 'img'],
+      ['Branch without worktree', 'Branch without worktree', 'img']
+    ])
+    expect(states.map((state) => state.textContent)).toEqual(['', '', ''])
+    expect(states.map((state) => state.querySelector('svg')?.getAttribute('class'))).toEqual([
+      'lucide lucide-check', 'lucide lucide-folder-git2', 'lucide lucide-unlink'
+    ])
+    expect(states.map((state) => state.querySelector('svg')?.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true'])
     // 没 worktree 的那条必须显式带上 unbound 修饰——它是"这行还不能直接进"的唯一视觉线索。
     expect(without).toContain('branch-row__state--unbound')
     expect(withWorktree).not.toContain('branch-row__state--unbound')
@@ -202,7 +213,7 @@ describe('Branches 面板', () => {
     expect(without).not.toContain('No worktree')
     expect(without).toContain('branch-row__state--unbound')
     expect(without.match(/\/wt\//g), '没有 worktree 的行却露出了一条 worktree 路径').toBeNull()
-    expect(without, '没有 worktree 的行却打上了 Worktree 尾标签').not.toContain('>Worktree<')
+    expect(without, '没有 worktree 的行却打上了 Worktree 状态').not.toContain('branch-row__state--worktree')
   })
 
   it('不是 git 仓库时说清楚，且一个分组头都不渲染', () => {

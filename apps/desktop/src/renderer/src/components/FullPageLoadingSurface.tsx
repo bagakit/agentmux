@@ -1,9 +1,63 @@
-import { useEffect, useRef, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react'
 import { ChevronRight, RotateCcw, SquareTerminal } from 'lucide-react'
-import { BrandIcon } from './BrandIcon'
-import bannerUrl from '../../../../resources/settings-banner.png'
+import bannerUrl from '../../../../resources/startup-background.png'
 
 export type FullPageLoadingPhase = 'loading' | 'recovering' | 'failed' | 'parked'
+
+/** Local waiting time is presentation, never evidence of Agent or Runtime progress. */
+function WaitingActivity({ surface }: { surface: RefObject<HTMLElement | null> }) {
+  const [seconds, setSeconds] = useState(0)
+  const [visible, setVisible] = useState(true)
+  const activity = useRef<SVGSVGElement>(null)
+  useEffect(() => {
+    const startedAt = Date.now()
+    let inView = true
+    let timer: ReturnType<typeof setInterval> | undefined
+    const tick = () => setSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    function syncVisibility() {
+      if (timer !== undefined) clearInterval(timer)
+      timer = undefined
+      const node = surface.current
+      const style = node && window.getComputedStyle(node)
+      // Retained hosts keep their geometry. Their existing parking CSS pauses
+      // motion even when IntersectionObserver still reports an intersection.
+      const parked = activity.current && window.getComputedStyle(activity.current).animationPlayState === 'paused'
+      const shown = inView && !document.hidden && node?.isConnected === true &&
+        style?.display !== 'none' && style?.visibility !== 'hidden' && !parked
+      setVisible(shown)
+      if (shown) { tick(); timer = setInterval(tick, 1000) }
+    }
+    const observer = typeof IntersectionObserver === 'undefined' ? undefined : new IntersectionObserver(entries => {
+      inView = entries.some(entry => entry.isIntersecting)
+      syncVisibility()
+    })
+    const ancestors = new MutationObserver(() => { observeAncestors(); syncVisibility() })
+    function observeAncestors() {
+      ancestors.disconnect()
+      // Only the current ancestor chain: no subtree scan or unrelated Session
+      // facts. A retained host move rebinds this same presentation consumer.
+      for (let node: HTMLElement | null = surface.current; node; node = node.parentElement) {
+        ancestors.observe(node, { attributes: true, childList: true,
+          attributeFilter: ['class', 'style', 'hidden', 'data-active', 'data-workbench-layout-state'] })
+      }
+    }
+    observeAncestors()
+    if (surface.current) observer?.observe(surface.current)
+    document.addEventListener('visibilitychange', syncVisibility)
+    syncVisibility()
+    return () => {
+      if (timer !== undefined) clearInterval(timer)
+      observer?.disconnect()
+      ancestors.disconnect()
+      document.removeEventListener('visibilitychange', syncVisibility)
+    }
+  }, [surface])
+  return <span className="full-page-loading__waiting" data-waiting-visible={visible} aria-live="off">
+    <RotateCcw ref={activity} className="full-page-loading__activity" size={18} aria-hidden="true" />
+    <span>{seconds >= 15 ? 'Still waiting' : 'Waiting'}</span>
+    <span className="full-page-loading__elapsed" aria-label="Time waiting in this view">{seconds}s</span>
+  </span>
+}
 
 /**
  * Shared full-surface loading stage. It owns presentation only: lifecycle facts,
@@ -79,10 +133,9 @@ export function FullPageLoadingSurface({
       </div> : null}
       <div className="full-page-loading__stage">
         {children ?? <div className="full-page-loading__heading">
+            {busy ? <WaitingActivity key={phase} surface={surfaceRef} /> : null}
             <h1>{title}</h1>
-            <span className={`full-page-loading__mark${busy ? ' full-page-loading__activity' : ''}`} aria-hidden="true">
-              {scope === 'app' ? <BrandIcon size={20} /> : busy ? <RotateCcw size={18} /> : <SquareTerminal size={18} />}
-            </span>
+            {!busy && scope === 'region' ? <span className="full-page-loading__mark" aria-hidden="true"><SquareTerminal size={18} /></span> : null}
         </div>}
         {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
         {children == null && detail ? <p className="full-page-loading__detail">{detail}</p> : null}

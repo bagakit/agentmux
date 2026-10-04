@@ -55,6 +55,7 @@ import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
+import { tabRenameTargets, useWorkbenchTabRename, useWorkbenchTabNameTooltip, WorkbenchTabRenameFeedback } from './WorkbenchTabNaming'
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
@@ -134,11 +135,13 @@ function DragPreview({ tab }: { tab: WorkbenchTab }) {
 function SortableWorkbenchTab({
   tab,
   group,
-  workspaceId
+  workspaceId,
+  visible
 }: {
   tab: WorkbenchTab
   group: TabGroup
   workspaceId: string
+  visible: boolean
 }) {
   const projection = useContext(WorkbenchProjectionContext)
   const mote = useContext(MoteWorkfaceContext)
@@ -267,8 +270,13 @@ function SortableWorkbenchTab({
   }
   // Inline rename reuses the topic-row pattern: a right-click menu entry flips the tab into an input, no
   // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
-  const [rename, setRename] = useState<{ target: 'tab' | 'agent'; id: string; value: string; baseline: { revision: number } } | null>(null)
-  const savingName = useRef(false), renameInput = useRef<HTMLInputElement>(null)
+  const naming = useWorkbenchTabRename({ displayName, targets: tabRenameTargets(tab, sessions, agentNames, timelines),
+    revision: target => projectedNameRevision(useAppStore.getState().nameLabels, target.kind, target.id),
+    save: (target, value, revision) => target.kind === 'tab' ? renameTab(target.id, value, revision) : renameAgent(target.id, value, revision) })
+  const { rename } = naming
+  const renameInput = useRef<HTMLInputElement>(null)
+  const fullTabTooltip = session ? sessionTabTooltip(session, displayName, regionSummary) : surfaceTabTooltip(displayName, regionSummary)
+  const nameTooltip = useWorkbenchTabNameTooltip(displayName, fullTabTooltip.split('\n').slice(1).join('\n'), !visible || bindingMenuOpen || rename !== null || isDragging)
   // Let the closing menu release its focus trap before focusing this editor.
   useEffect(() => {
     if (bindingMenuOpen) return
@@ -353,27 +361,6 @@ function SortableWorkbenchTab({
   const tabsToRight = tabIdsForCloseScope(group.tabOrder, tab.id, 'right')
   const otherTabs = tabIdsForCloseScope(group.tabOrder, tab.id, 'others')
 
-  function beginRename(target: 'tab' | 'agent'): void {
-    // Seed the input with the CURRENT shown name, so an edit refines rather than starts blank. For a
-    // tab that is still on the derived strategy, `tab.name` is empty and the field seeds from displayName.
-    const seed = target === 'tab' ? (tab.name ?? displayName) : displayName
-    const id = target === 'tab' ? tab.id : copyableAgentSessionId
-    if (!id) return
-    setRename({ target, id, value: seed, baseline: { revision: projectedNameRevision(useAppStore.getState().nameLabels, target === 'tab' ? 'tab' : 'agent-session', id) } })
-  }
-
-  async function commitRename(): Promise<void> {
-    if (!rename || savingName.current) return
-    const value = rename.value.trim()
-    savingName.current = true
-    try {
-      const applied = rename.target === 'tab'
-        ? await renameTab(rename.id, value.length > 0 ? value : null, rename.baseline.revision)
-        : await renameAgent(rename.id, value.length > 0 ? value : null, rename.baseline.revision)
-      if (applied) setRename(current => current?.baseline !== rename.baseline ? current
-        : current === rename ? null : { ...current, baseline: { revision: rename.baseline.revision + 1 } })
-    } finally { savingName.current = false }
-  }
 
   return (
     <>
@@ -389,8 +376,8 @@ function SortableWorkbenchTab({
         writeClipboardText={async (text) => {
           await copyTextToClipboard(text, reportError)
         }}
-        onRenameTab={() => beginRename('tab')}
-        {...(copyableAgentSessionId ? { onRenameAgent: () => beginRename('agent') } : {})}
+        onRenameTab={naming.begin}
+        renameLabel={naming.label}
         onClose={() => void requestTabsClose([tab.id])}
         onCloseOthers={() => void requestTabsClose(otherTabs)}
         onCloseLeft={() => void requestTabsClose(tabsToLeft)}
@@ -422,35 +409,34 @@ function SortableWorkbenchTab({
           }`}
           {...(session ? { [DESKTOP_SESSION_ATTRIBUTE]: session.id } : {})}
           style={{ transform: CSS.Translate.toString(transform), transition }}
-          title={
-            session
-              ? sessionTabTooltip(session, displayName, regionSummary)
-              : surfaceTabTooltip(displayName, regionSummary)
-          }
+          {...nameTooltip.props}
           aria-current={mote && group.activeTabId === tab.id ? 'page' : undefined}
           onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : mote ? mote.selectTab(tab.id, group.id) : activateTab(workspaceId, group.id, tab.id, 'local')}
           {...attributes}
           {...listeners}
+          aria-describedby={[attributes['aria-describedby'], nameTooltip.props['aria-describedby']].filter(Boolean).join(' ') || undefined}
         >
           <WorkbenchTabMarks marks={marks} />
           {rename ? (
             <input
               ref={renameInput}
               className="workbench-tab__rename"
-              aria-label={rename.target === 'tab' ? 'Rename tab' : 'Rename agent'}
+              aria-label={rename.label}
               value={rename.value}
-              onChange={(event) => { const value = event.target.value; setRename(current => current ? { ...current, value } : null) }}
+              onChange={event => naming.change(event.target.value)}
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
-              onBlur={commitRename}
+              onBlur={() => void naming.commit('blur')}
               onKeyDown={(event) => {
+                event.stopPropagation()
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return
                 if (event.key === 'Enter') {
                   event.preventDefault()
-                  commitRename()
+                  void naming.commit()
                   return
                 }
                 // 与 Topic 行同一套：拦下每个键不让拖拽 sensor 吞掉空格/方向键；Escape 取消。
-                handleTopicRenameKeyDown(event, { cancel: () => setRename(null) })
+                handleTopicRenameKeyDown(event, { cancel: naming.cancel })
               }}
             />
           ) : (
@@ -473,6 +459,10 @@ function SortableWorkbenchTab({
           </span>
         </button>
       </WorkbenchTabContextMenu>
+      {nameTooltip.content}
+      <WorkbenchTabRenameFeedback anchor={renameInput} notice={visible ? rename?.incomplete ?? null : null}>
+        <ServiceWindowNotice notice={rename?.incomplete ?? null} />
+      </WorkbenchTabRenameFeedback>
       <ConfirmationDialog
         open={pendingClose !== null}
         title={pendingClose?.agentSessionCount
@@ -1129,7 +1119,7 @@ function PaneGroup({
   }
 
   const tabNavigation = <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-    <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} />)}</WorkbenchTabStrip>
+    <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
   </SortableContext>
 
   return (
@@ -1504,7 +1494,7 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
     {groups.map(group => <header key={group.id} className="pane-tabbar pane-tabbar--root" data-workbench-group-id={group.id}>
       <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
         <WorkbenchTabStrip activeTabId={null} tabIds={group.tabOrder}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
-          workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} />] : [])}</WorkbenchTabStrip>
+          workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} visible={visible} />] : [])}</WorkbenchTabStrip>
       </SortableContext>
       {layout?.activeGroupId === group.id ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
     </header>)}

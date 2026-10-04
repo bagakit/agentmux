@@ -26,7 +26,7 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).toContain('Starting the local Runtime.')
     expect(markup.includes('full-page-loading__activity')).toBe(busy === 'true')
     expect(markup).toContain('full-page-loading__atmosphere')
-    expect(markup).toContain('settings-banner.png')
+    expect(markup).toContain('startup-background.png')
     if (phase === 'failed') expect(markup).toContain('Retry startup')
   })
 
@@ -42,7 +42,7 @@ describe('FullPageLoadingSurface', () => {
     expect(markup).toContain('Loading branches')
     expect(markup).toContain('Reading Git truth from Alpha.')
     expect(markup).not.toContain('full-page-loading__atmosphere')
-    expect(markup).not.toContain('settings-banner.png')
+    expect(markup).not.toContain('startup-background.png')
     expect(markup).not.toContain('sessionId')
     expect(markup).not.toContain('runId')
   })
@@ -53,7 +53,7 @@ describe('FullPageLoadingSurface', () => {
       details: { summary: 'Original diagnostics', content: createElement('p', {}, 'Owner facts') },
       actions: createElement('button', {}, 'Original action') }
     const markup = renderToStaticMarkup(createElement(FullPageLoadingSurface, props))
-    const positions = ['Original title', 'full-page-loading__activity', 'Original action', 'Original detail', 'Observed recap', 'Original diagnostics']
+    const positions = ['full-page-loading__activity', 'Original title', 'Original action', 'Original detail', 'Observed recap', 'Original diagnostics']
       .map(text => markup.indexOf(text))
     expect(positions).toHaveLength(6)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))

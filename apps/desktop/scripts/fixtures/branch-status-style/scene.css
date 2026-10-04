@@ -1,0 +1,3 @@
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+.branch-style-scene { width: 100%; height: 100%; display: flex; flex-direction: column; background: var(--surface-0); }
+.branch-style-scene > .branches-panel { flex: 1; height: auto; }

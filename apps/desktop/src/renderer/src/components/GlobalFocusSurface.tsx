@@ -333,7 +333,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             restore: 'The original work surface remains available. Retry its directory to confirm current positions.'
           } }} /> : null}
           <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection}
-            viewOwnership="projection" viewTargets={viewTargets} visible />
+            viewOwnership="projection" viewTargets={viewTargets} visible={visible} />
         </div>
         : presentation?.issue || directoryIssue
           ? <div className="global-session-workspace__empty focus-location-recovery">

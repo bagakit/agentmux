@@ -37,8 +37,9 @@
 .branch-row--selected .selector-row__leading { color: var(--green); }
 .branch-row .selector-row__identity strong { color: inherit; }
 .branch-row .selector-row__identity small { font-family: "SFMono-Regular", monospace; line-height: 12px; }
-.branch-row__state { display: inline-flex; align-items: center; gap:var(--sp-1); padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--green); background: var(--green-bg); font-size: var(--fs-micro); line-height: 13px; white-space: nowrap; }
-.branch-row__state--unbound { color: var(--amber); background: var(--green-bg); }
+.branch-row__state { flex: 0 0 16px; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); }
+.branch-row__state--current { color: var(--green); }
+.branch-row__state--unbound { color: var(--amber); }
 /* 当前分支相对 upstream 的 ↑↓ 计数。三种可见状态各有一色，语义取自 gitSyncBadge 的 kind：
    ahead＝有东西要推（中性提示，蓝），behind＝落后要拉（琥珀，该动手了），diverged＝两侧都有
    （红：pull 会产生 merge/rebase，是三者里唯一需要决策的）。
