@@ -629,14 +629,11 @@ export function reduceSessionLaunchFailed(
   }
 }
 
-/**
- * 连接失联时写进 `status.detail` 的两句话。**这一对必须说两件相反的事**：一句说「在自愈，等着就好」，
- * 一句说「已经放弃，得你动手」。用户对这两种局面的正确反应完全不同，措辞近似就等于把终局伪装成暂时。
- *
- * 导出为 SSOT：守卫据此断言两条互不重叠，且渲染层引用它们而不是手抄字面量（手抄的那份必然漂移）。
- */
+/** Connection service phases share disconnected process observation, with distinct recovery actions. */
 export const CONNECTION_LOST_DETAIL =
   'Reconnecting to this host. Your Agent processes keep running; only this window’s link dropped.'
+export const CONNECTION_RETRYING_DETAIL =
+  'Recovery has slowed to one attempt every 30 seconds. Your Agent processes may still be running; use Resume to retry now.'
 export const CONNECTION_UNRECOVERABLE_DETAIL =
   'Gave up after repeated drops on this host. Your Agent processes may still be running — use Resume to reattach.'
 
@@ -650,17 +647,11 @@ export function projectRuntimeEvent(
     // 单 daemon 语义：这台 Host 的实时连接是所有 Agent 共享的，断了就是全体失联。这里正是那 8 处
     // `disconnected` UX 唯一的触发源——没有它，掉线时用户只会看到一屏冻住的 Agent，毫无交代。
     //
-    // `lost` 与 `unrecoverable` **都**要置 `disconnected`：两者都意味着连接没了。区别不在状态位，
-    // 在 detail 上——它决定用户读到「正在重连」还是「已放弃，请手动处理」。之所以必须两条都接：
-    // 抖动预算用尽时 Core 直接发 `unrecoverable` 而**不再发 lost**（检查点前移，见 client 的
-    // handleConnectionLost），只认 lost 的话连接判死了、整屏 Agent 还挂着 running，那是最坏的谎话。
-    //
-    // `restored` 不在这里改状态：由 republishLiveRunState 补发的 process-state/agent-status 事件把
-    // 每个 run 拉回进程真相，比这里猜一个状态准。
+    // Restored status comes from authoritative per-Run facts, not a guessed healthy state.
     if (core.state === 'restored') return { state }
     const detail = core.state === 'unrecoverable'
       ? CONNECTION_UNRECOVERABLE_DETAIL
-      : CONNECTION_LOST_DETAIL
+      : core.state === 'retrying' ? CONNECTION_RETRYING_DETAIL : CONNECTION_LOST_DETAIL
     return { state: {
       ...state,
       timelines: state.sessions.reduce((timelines, item) => item.kind === 'agent' && item.hostId === event.hostId ? clearLiveTool(timelines, item.id) : timelines, state.timelines),

@@ -1556,10 +1556,11 @@ export type AgentMuxClientEvent = (
        *
        * - `lost`：实时通道断了（socket 错误，或 daemon 关流却没交代 run 下场）。开始有界重连。
        * - `restored`：重连成功、已重新订阅并补发各 run 的当前状态。
-       * - `unrecoverable`：有界重试用尽仍连不上。**响亮的终局**，不是静默——用户需要手动介入。
+       * - `retrying`：高频重试已停止；每 30 秒可取消地重试一次，显式 connect 可立即重试。
+       * - `unrecoverable`：权限或目标等明确错误需要用户处理；不用于重试次数耗尽。
        */
       type: 'connection-state'
-      state: 'lost' | 'restored' | 'unrecoverable'
+      state: 'lost' | 'restored' | 'retrying' | 'unrecoverable'
       /** Endpoint observation failure, not an Agent/Run error. Settles with this connection. */
       diagnostic?: { code: string; message: string }
       evidence: AgentMuxEvidence

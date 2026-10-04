@@ -809,9 +809,14 @@ export class AgentMuxClient {
   private unsubscribeKernelErrors: (() => void) | null = null
   private unsubscribeConnectionLost: (() => void) | null = null
   private reconnecting = false
+  private reconnectGeneration = 0
+  private reconnectController: AbortController | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private connecting: Promise<void> | null = null
+  private connectRequest: Promise<void> | null = null
   private connectionEpoch = 0
   private connected = false
+  private connectionNeedsObservation = false
   /**
    * 跨成功幸存的抖动账（见 ctxmux-reconnect-budget.ts）。刻意**不复用** `connectionEpoch`：
    * 那个只在调用方主动 `disconnect()` 时自增，半死 daemon 的反复抖动一次都不会碰它。
@@ -1005,34 +1010,42 @@ export class AgentMuxClient {
   }
 
   async connect(): Promise<void> {
-    if (this.connected && this.kernel.isConnected()) return
-    this.connected = false
-    if (this.connecting) return await this.connecting
+    if (this.connectRequest) return await this.connectRequest
+    const request = this.connectRequested()
+    this.connectRequest = request
+    try { await request }
+    finally { if (this.connectRequest === request) this.connectRequest = null }
+  }
+
+  private async connectRequested(): Promise<void> {
+    const recovering = this.reconnectController !== null
+    this.cancelReconnect()
     const epoch = this.connectionEpoch
-    const attempt = this.open(epoch)
-    this.connecting = attempt
+    const generation = this.reconnectGeneration
     try {
-      await attempt
-    } finally {
-      if (this.connecting === attempt) this.connecting = null
+      await this.connectOnce(epoch)
+      if (recovering) await this.finishReconnect(epoch, generation)
+    } catch (error) {
+      if (recovering && epoch === this.connectionEpoch && generation === this.reconnectGeneration) this.scheduleSlowReconnect(epoch)
+      throw error
     }
   }
 
+  private async connectOnce(epoch: number): Promise<void> {
+    if (this.connecting) return await this.connecting
+    if (this.connected && this.kernel.isConnected() && !this.connectionNeedsObservation) return
+    if (!this.kernel.isConnected()) this.connected = false
+    const attempt = this.open(epoch)
+    this.connecting = attempt
+    try { await attempt }
+    finally { if (this.connecting === attempt) this.connecting = null }
+  }
+
   private async open(epoch: number): Promise<void> {
+    let phase = 'Runtime connection'
     try {
       await this.kernel.connect()
       this.assertConnectionEpoch(epoch)
-      await this.recoverStaleLifecycles()
-      await this.registry.load('local')
-      const runs = await this.withRunSnapshot(null, () => this.kernel.list(), (snapshot, wasRemoved) => {
-        const current = snapshot.filter(run => !wasRemoved(run.runId))
-        this.backfillEndedRuns(current)
-        for (const run of current) this.runPids.set(run.runId, run.pid)
-        return current
-      })
-      // 这次 list() 是「App 没在跑的时候谁退出了」的唯一到达路径——冷启动时事件流压根还没订阅（下面几行
-      // 才装）。不补台账的话，那些 run 迟到的 hook 会被收下，Agent 永久转圈（见 backfillEndedRuns）。
-      this.synchronizeAgentRuns(runs)
       this.unsubscribeKernel?.()
       this.unsubscribeKernelErrors?.()
       this.unsubscribeConnectionLost?.()
@@ -1055,6 +1068,20 @@ export class AgentMuxClient {
       // 就在这里驱动整套「置 disconnected → 有界重连 → 恢复真相」。这不是某个 run 的语义错误，故与
       // onError 分居两处。
       this.unsubscribeConnectionLost = this.kernel.onConnectionLost(() => this.handleConnectionLost(epoch))
+      phase = 'lifecycle recovery'
+      await this.recoverStaleLifecycles()
+      phase = 'Session store observation'
+      await this.registry.load('local')
+      phase = 'Run observation'
+      const runs = await this.withRunSnapshot(null, () => this.kernel.list(), (snapshot, wasRemoved) => {
+        const current = snapshot.filter(run => !wasRemoved(run.runId))
+        this.backfillEndedRuns(current)
+        for (const run of current) this.runPids.set(run.runId, run.pid)
+        return current
+      })
+      // list() 补齐 App 不在运行期间的终局；刚装好的事件订阅只提供此后的新变化。
+      this.synchronizeAgentRuns(runs)
+      phase = 'Hook restoration'
       await this.tryRestoreHookIngress(runs)
       // Probe every running Session together. A serial `await` here makes N healthy Agents
       // wait behind N ten-second capability windows, which is especially visible when the
@@ -1062,6 +1089,7 @@ export class AgentMuxClient {
       // scoped vanished-Run classification is consumed here. Unknown errors remain fatal, but
       // we wait for all probes to settle first so a slow sibling cannot be abandoned halfway
       // through its cleanup and leave a shared attachment behind.
+      phase = 'terminal capability observation'
       const handshakeErrors: unknown[] = []
       await Promise.all(this.registry.list().map(async (session) => {
         const run = runs.find((candidate) => candidate.runId === session.run.runId)
@@ -1096,16 +1124,21 @@ export class AgentMuxClient {
         }
       }))
       if (handshakeErrors.length > 0) throw handshakeErrors[0]
+      phase = 'pending interaction recovery'
       await this.recoverPendingInteractionResponses(runs)
       this.assertConnectionEpoch(epoch)
       this.connected = true
       // Native status is semantic evidence, independent of terminal Attachment/PTY traffic.
       // Each contribution owns one exact retained source and reads only its changed bytes.
+      phase = 'native status observation'
       await Promise.all(this.registry.list().filter(session => runs.some(run =>
         run.runId === session.run.runId && run.state.type === 'running')).map(session => this.ensureNativeStatusObservation(session)))
       // 缓刑期的起点。写在这里而不是只写在 `restored` 那侧，是因为首次 connect 也是「连接变健康」——
       // 少了这一句，`connectionHealthySince` 会停在 0，于是第一次掉线时 `now - 0` 必然超过缓刑期、
       // 账被无条件清零，跨成功的界永远攒不起来（即：这道界会变成死代码）。
+      this.assertConnectionEpoch(epoch)
+      if (!this.kernel.isConnected()) throw new AgentMuxError('Connection changed during recovery observation.', 'CTXMUX_DISCONNECTED')
+      this.connectionNeedsObservation = false
       this.connectionHealthySince = Date.now()
       for (const session of this.registry.list()) {
         if (runs.some(run => run.runId === session.run.runId && run.state.type === 'running')) {
@@ -1113,37 +1146,28 @@ export class AgentMuxClient {
         }
       }
     } catch (error) {
-      this.kernel.resetConnection()
-      await this.hookServer.stop()
+      if (epoch !== this.connectionEpoch) throw error
+      if (this.kernel.isConnected()) {
+        this.connected = true
+        this.connectionNeedsObservation = true
+        this.publisher.publish({ type: 'agent-error', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
+          message: `${phase} failed: ${error instanceof Error ? error.message : String(error)}. The confirmed Runtime connection and original capabilities were retained; observation will retry.`,
+          evidence: { source: 'agentmux', observedAt: Date.now() } })
+        this.scheduleSlowReconnect(epoch, false)
+      } else {
+        this.connected = false
+        this.kernel.resetConnection()
+      }
       throw error
     }
   }
 
-  /**
-   * 掉线的落点：kernel 报实时连接断了时被调用。做三件事，缺一不可（原则 11：断线绝不静默）：
-   *
-   * 1. `connected = false`——`requireConnected` 从此如实拦下控制操作，不再把请求投进一个死掉的 kernel。
-   * 2. 发 `connection-state: lost`——渲染端据此把本 Host 所有 Agent 置 `disconnected`，让那一整套故障 UX
-   *    真正有触发源（这是本任务的核心价值：用户必须看得见）。
-   * 3. 起一次有界重连。
-   *
-   * `epoch` 守卫：调用方主动 `disconnect()` 会 `connectionEpoch += 1`，让这条迟到的掉线通知失效——
-   * 我们不给一个已被主动关掉、或已被更新一轮连接取代的连接排重连。
-   * `reconnecting` 守卫：重连风暴里（重连过程中又断一次）不重复起第二条重连循环。
-   *
-   * ## 抖动预算的检查点就在这里，而不在重连循环里面
-   *
-   * 半死 daemon（接受连接、握手过、随即又关流）会让每一轮重连都「成功」，于是 `runBoundedReconnect`
-   * 那道单轮的界每次都被重置——单轮有界不等于整体有界。挡它的账在 {@link judgeReconnectFlap}。
-   *
-   * 判决必须在**发 lost 之前**取得。把它放进 `reconnectLoop` 里就晚了：那样每一次抖动仍然会先发一条
-   * `lost` 把整屏 Agent 置灰、再白等一整轮（退避 31.5s + daemon ready + 握手）才拿到终局，用户看到的
-   * 抖动一次都没少。放弃时直接发 `unrecoverable`，跳过 `lost` 与整轮重连：这个状态本身就蕴含「连接
-   * 断了」，渲染端对它的处置是保持失联并等用户手动介入（见 session-state 的 connection-state 分支）。
-   */
+  /** A lost observation invalidates screen evidence, while original Runs and Sessions remain owned by the Runtime. */
   private handleConnectionLost(epoch: number): void {
     if (epoch !== this.connectionEpoch) return
-    if (this.reconnecting) return
+    if (this.reconnecting && !this.connected) return
+    this.cancelReconnect()
+    this.connectionNeedsObservation = false
     const now = Date.now()
     // 连续健康满缓刑期 → 清账。判据是「健康了多久」而非「刚刚 restored」：restored 恰恰是抖动那一刻
     // 发生的事，拿它清账等于永远清得掉，这道界就成了死代码。
@@ -1153,7 +1177,11 @@ export class AgentMuxClient {
     this.connected = false
     for (const runId of this.runPids.keys()) {
       const session = this.registry.findByRun(runRef(runId))
-      if (session && !this.endedRuns.has(runId)) void this.persistActivityBoundary(session, 'lost', now)
+      if (session && !this.endedRuns.has(runId)) void this.persistActivityBoundary(session, 'lost', now).catch(error => {
+        this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+          code: 'CTXMUX_RECONNECT_ACCOUNTING_FAILED', message: `Connection loss accounting failed: ${error instanceof Error ? error.message : String(error)}. Original Session and Runtime recovery remain available.`,
+          evidence: { source: 'agentmux', observedAt: now, run: { runId } } })
+      })
     }
     this.cancelProviderReads()
     this.cancelNativeIdentityCaptures()
@@ -1184,15 +1212,10 @@ export class AgentMuxClient {
     this.promptSubmission.cancelAllReadiness()
     this.screenEvidence.discardAll()
     if (verdict.kind === 'give-up') {
-      // 响亮终局，且**立刻**给出——不再发 lost、不再起重连。用户拿到的是「连不上，请手动处理」，
-      // 而不是第 N 次「重连中…」。恢复入口已经在场（SessionPane 的 Resume / Check again）。
-      this.publisher.publish({
-        type: 'connection-state',
-        state: 'unrecoverable',
-        evidence: { source: 'run-process', observedAt: now }
-      })
+      this.scheduleSlowReconnect(epoch)
       return
     }
+    this.reconnectController = new AbortController()
     this.reconnecting = true
     this.publisher.publish({
       type: 'connection-state',
@@ -1202,57 +1225,96 @@ export class AgentMuxClient {
     void this.reconnectLoop(epoch)
   }
 
-  /**
-   * 有界重连循环。界由纯函数 {@link runBoundedReconnect}/`nextReconnectStep` 给出（指数退避、封顶、
-   * 有限次数），本方法只把「尝试一次连接」与「等待」接给它，并处理两种终局：
-   *
-   * - 连上了：重新订阅（open 内部已 re-subscribe kernel 事件），并**把各 run 的当前状态重新发出去**
-   *   —— 重连不等于状态就对了，掉线期间 run 可能已退出/变化，必须按 daemon 的 list() 真相校正
-   *   （见 republishLiveRunState）。再发 `connection-state: restored`。
-   * - 用尽仍失败：发 `connection-state: unrecoverable`——响亮终局，不静默地永远转圈。
-   */
   private async reconnectLoop(epoch: number): Promise<void> {
+    const controller = this.reconnectController!
+    const generation = this.reconnectGeneration
     const result = await runBoundedReconnect({
-      attempt: async () => {
-        if (epoch !== this.connectionEpoch) {
-          throw new AgentMuxError('Reconnect superseded by a newer connection.', 'CTXMUX_DISCONNECTED')
-        }
-        await this.open(epoch)
-      },
-      sleep: (ms) => this.reconnectSleep(ms)
+      signal: controller.signal,
+      attempt: () => this.connectOnce(epoch),
+      sleep: (ms) => this.reconnectSleep(ms, controller.signal)
     })
-    if (epoch !== this.connectionEpoch) {
-      this.reconnecting = false
-      return
-    }
-    this.reconnecting = false
-    if (result.kind === 'reconnected') {
-      await this.republishLiveRunState()
-      // 这里刻意**不**重置 `connectionHealthySince`：唯一的写入点是 `open()` 成功那一句，重连成功
-      // 走的正是同一条 `open()`，所以那边已经写过了。分两处各写一次的形状必然漂移（其中一条会漏掉
-      // 某条路径），而缓刑期起点算错的后果是这道界静默失效，全绿。要改就改那一处。
-      const restoredAt = Date.now()
-      for (const runId of this.runPids.keys()) {
-        const session = this.registry.findByRun(runRef(runId))
-        if (session && !this.endedRuns.has(runId)) await this.persistActivityBoundary(session, 'restored', restoredAt)
-      }
-      this.publisher.publish({
-        type: 'connection-state',
-        state: 'restored',
-        evidence: { source: 'run-process', observedAt: restoredAt }
-      })
-    } else {
-      this.publisher.publish({
-        type: 'connection-state',
-        state: 'unrecoverable',
-        evidence: { source: 'run-process', observedAt: Date.now() }
-      })
-    }
+    if (controller.signal.aborted || epoch !== this.connectionEpoch) return
+    if (result.kind === 'reconnected') await this.finishReconnect(epoch, generation)
+    else if (result.kind === 'exhausted') this.scheduleSlowReconnect(epoch)
   }
 
-  // 重连退避的等待。抽成一个可被测试覆盖的方法，让重连的「界」端到端可断言而不必等真实的秒级退避。
-  protected reconnectSleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms))
+  private async finishReconnect(epoch: number, generation: number): Promise<void> {
+    const current = (): boolean => epoch === this.connectionEpoch && generation === this.reconnectGeneration
+    if (!current()) return
+    try {
+      await this.republishLiveRunState(current)
+    } catch (error) {
+      if (!current()) return
+      this.publisher.publish({ type: 'agent-error', code: 'CTXMUX_RECONNECT_OBSERVATION_FAILED',
+        message: `The Runtime connection returned, but Run observation failed: ${error instanceof Error ? error.message : String(error)}. Existing capabilities and identities were retained; observation will retry.`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+      this.scheduleSlowReconnect(epoch, false)
+      return
+    }
+    if (!current()) return
+    if (!this.connected || !this.kernel.isConnected()) { this.scheduleSlowReconnect(epoch); return }
+    const restoredAt = Date.now()
+    for (const runId of this.runPids.keys()) {
+      const session = this.registry.findByRun(runRef(runId))
+      if (session && !this.endedRuns.has(runId)) {
+        try { await this.persistActivityBoundary(session, 'restored', restoredAt) }
+        catch (error) {
+          if (!current()) return
+          this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+            code: 'CTXMUX_RECONNECT_ACCOUNTING_FAILED', message: `The Runtime connection returned, but recovery accounting failed: ${error instanceof Error ? error.message : String(error)}. The original Session and input remain available.`,
+            evidence: { source: 'agentmux', observedAt: restoredAt, run: { runId } } })
+        }
+        if (!current()) return
+      }
+    }
+    if (!current() || !this.connected || !this.kernel.isConnected()) return
+    this.cancelReconnect()
+    this.publisher.publish({ type: 'connection-state', state: 'restored',
+      evidence: { source: 'run-process', observedAt: restoredAt } })
+  }
+
+  /** One transport attempt per interval after the fast window, without repeating whole fast windows or UI notices. */
+  private scheduleSlowReconnect(epoch: number, notify = true): void {
+    this.cancelReconnect()
+    if (epoch !== this.connectionEpoch) return
+    const controller = new AbortController()
+    this.reconnectController = controller
+    this.reconnecting = true
+    if (notify) this.publisher.publish({ type: 'connection-state', state: 'retrying',
+      evidence: { source: 'run-process', observedAt: Date.now() } })
+    const generation = this.reconnectGeneration
+    const schedule = (): void => {
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null
+        if (controller.signal.aborted || epoch !== this.connectionEpoch) return
+        void this.connectOnce(epoch).then(async () => {
+          if (!controller.signal.aborted && epoch === this.connectionEpoch) await this.finishReconnect(epoch, generation)
+        }, () => {
+          if (!controller.signal.aborted && epoch === this.connectionEpoch) schedule()
+        })
+      }, 30_000)
+      this.reconnectTimer.unref?.()
+    }
+    schedule()
+  }
+
+  private cancelReconnect(): void {
+    this.reconnectGeneration += 1
+    this.reconnectController?.abort()
+    this.reconnectController = null
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+    this.reconnecting = false
+  }
+
+  protected reconnectSleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      const done = (): void => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve() }
+      const timer = setTimeout(done, ms)
+      timer.unref?.()
+      signal?.addEventListener('abort', done, { once: true })
+      if (signal?.aborted) done()
+    })
   }
 
   /**
@@ -1264,10 +1326,12 @@ export class AgentMuxClient {
    * 收到一条 `running` 的 process-state，把 `disconnected` 洗回真相。少了这一步，重连后一屏 Agent 会
    * 永远停在「已断开」——重连等于没连。
    */
-  private async republishLiveRunState(): Promise<void> {
+  private async republishLiveRunState(isCurrent: () => boolean = () => true): Promise<void> {
     await this.withRunSnapshot(null, () => this.kernel.list(), async (runs, wasRemoved) => {
+      if (!isCurrent()) return
       this.backfillEndedRuns(runs.filter(run => !wasRemoved(run.runId)))
       for (const run of runs) {
+        if (!isCurrent()) return
         if (wasRemoved(run.runId)) continue
         this.runPids.set(run.runId, run.pid)
         const agentSession = this.registry.findByRun(runRef(run.runId))
@@ -1283,6 +1347,7 @@ export class AgentMuxClient {
           // 正是这段代码要修的那个缺陷，在它自己的失败分支上原样复活。进程确实还活着，但这一屏的
           // 「running」说的是「你能看到它的输出」，那一点此刻不成立，报 error 才是诚实的。
           const resumed = await this.resumeLiveAttachment(agentSession.agentSessionId)
+          if (!isCurrent()) return
           if (resumed === 'dead') {
             // 放行是对的（进程还活着，输入照常送达 Agent——第 2 类），但放行必须配告知：上面那条 agent-error
             // 会被后续会话快照的 `>=` 洗白，且它只在 Activity 视图里短暂存在。落一条**可持久**的降级事实，
@@ -1536,11 +1601,14 @@ export class AgentMuxClient {
   }
 
   disconnect(): void {
+    this.cancelReconnect()
     this.cancelProviderReads()
     this.cancelNativeIdentityCaptures()
     this.connectionEpoch += 1
+    this.connectionNeedsObservation = false
     this.connected = false
     this.connecting = null
+    this.connectRequest = null
     this.reconnecting = false
     this.unsubscribeKernel?.()
     this.unsubscribeKernel = null
@@ -1573,6 +1641,7 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    this.cancelReconnect()
     this.reopensDisposed = true
     this.providerReadsDisposed = true
     this.cancelProviderReads()
