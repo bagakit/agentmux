@@ -13,7 +13,7 @@
 | 无 UI 管理本机或远端语义 Runtime | [Core 远程接入](../../packages/core/README.md#远程-runtime)、[`connectHostedAgentMux`](../../packages/core/src/hosted-client.ts) 与 [`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) | [唯一 Hosted 合同](../../packages/core/src/hosted-client-contract.ts)、[Headless owner](../../packages/core/src/headless-runtime.ts)、[Desktop Host connector](../../apps/desktop/src/main/desktop-host.ts) |
 | 在浏览器投影执行事实或 Session Timeline | Core [package exports](../../packages/core/package.json) 中的 `runtime`、`timeline` 等专项入口 | [runtime.ts](../../packages/core/src/runtime.ts)、[session-timeline.ts](../../packages/core/src/session-timeline.ts)；不导入加载 Node Runtime 的包根 |
 | 在 React 客户端复用 Conversation／Composer 呈现 | [共享 UI 包说明](../../packages/client-ui/README.md)，从 `@agentmux/client-ui` 或已导出的 component 子路径导入 | [package exports](../../packages/client-ui/package.json)、[index.ts](../../packages/client-ui/src/index.ts)、[`ClientUiProvider` / `ClientUiPlatform`](../../packages/client-ui/src/platform.tsx)；宿主显式注入平台与业务 props |
-| 复用分屏树计算 | [Layout 包说明](../../packages/layout/README.md)，只从 `@agentmux/layout` 入口导入 | [package exports](../../packages/layout/package.json)、[index.ts](../../packages/layout/src/index.ts)；当前源 TS 入口需要可转译 TS 的宿主 |
+| 复用分屏树计算 | [Layout 包说明](../../packages/layout/README.md)，只从 `@agentmux/layout` 入口导入 | [package exports](../../packages/layout/package.json)、[index.ts](../../packages/layout/src/index.ts)；当前源 TS 入口需要支持该源文件及模块解析的宿主 |
 | 使用独立 Goal／Demand Store，或浏览器侧 Goal 规则 | [Demand 包说明](../../packages/demand/README.md)，`openDemandStore` / `@agentmux/demand/goals` | [package exports](../../packages/demand/package.json)、[demand-store.ts](../../packages/demand/src/demand-store.ts)、[goals.ts](../../packages/demand/src/goals.ts) |
 | 用 AgentMux CLI 操作原工作面 | 当前执行版本的 `--help` / `--skill`；[对象操作指南](../guides/agentmux-cli-object-control.md) 给任务入口和失败处理 | [命令注册与 parser](../../packages/core/src/agentmux-cli-commands.ts)、[help / skill 来源](../../packages/core/src/agentmux-cli-help.ts)、[CLI 接线](../../packages/core/src/agentmux.ts) |
 
@@ -41,11 +41,15 @@
 | Topics 分类内容、主题发现与归属转移 | [Topic 公共类型与严格 codec](../../packages/core/src/public-rpc-topics.ts)；分类内容由 [Host 内容 owner](../../apps/desktop/src/main/topic-knowledge.ts)持有，分类关系由 [Topic 空间适配器](../../apps/desktop/src/main/topic-spatial-owner.ts)提交同一 Core 图 | Main 注入 `AgentMuxRpcServiceOptions.topics`；GUI 经 trusted IPC／preload 的 `topics.call` 消费同一 owner。默认语义 Host 将 CLI 的 typed `topic` 调用经已绑定的 Desktop business transport 转发至原内容 owner，沿同一参数、调用身份与结果校验；没有本地 owner 或已绑定转发端口时如实未知。创建与转移不隐式启动 Agent |
 | Goal／Demand 内容、确认与接受 | [`openDemandStore`](../../packages/demand/src/demand-store.ts)、[Goal 类型与 readiness helpers](../../packages/demand/src/goals.ts) | 原 Main IPC／Renderer owner；公共 `goal.create` 的可选 `goalId`、`goal.discuss`／`goal.confirm`／`goal.accept` 同由 [typed RPC](../../packages/core/src/public-rpc.ts) 与 [对象 CLI](../../packages/core/src/agentmux-cli-commands.ts) 消费，手机沿同 ID；Agent proposal 不代替人类确认／接受 |
 
+### 文件资源的读取、修改与发现
+
 原 Zone 文件的已保存正文与原修订保存沿[文件类型与严格 codec](../../packages/core/src/public-rpc-files.ts)公开。`file read`／`file write` CLI → 公共服务 → Main 注入的 [FileReadOwner](../../apps/desktop/src/main/file-read-owner.ts) 解析准确 Zone／资源，再委托原 [WorkspaceFiles](../../apps/desktop/src/main/workspace-files.ts)；结果保留完整原 revision、Host／Workspace／Zone 与原读取状态；观察未知不冒文件不存在，也不另建 Memory 存储。`file.write` 只保存已有文本文件，要求完整原 revision；`written`／`conflict`／`error`／`unknown` 保真，未知先读同一文件核对，不自动再写。
 
 缺失目标的正文创建沿同一文件 owner 提供 `file.create`，CLI 为 `file create --input FILE|-`；先由 `file.read` 确认目标映射，提交完整原资源、Zone 相对路径、正文与明确的 `expectedRevision:null`。Main 确认映射后委托 `WorkspaceFiles.write` 的排他创建，不覆盖已存在文件；普通文本和 Note 使用同一通用能力，不新增正文 owner。结果沿原 `written`／`conflict`／`error`／`unknown` 与完整资源／revision 表达，未知先读同一准确目标对账，不自动换名或重发。既有 `file.write` 的完整 revision 要求保持。
 
 项目文件名发现沿同一 Files owner：`file ls` CLI → `file.list` → `WorkspaceFiles.listFiles`；结果只含名称、原资源与 complete／partial 原因，应用 Git 忽略规则且不递归目录链接，不读正文或改变焦点。名称相对请求的目录；使用 `file open --zone` 继续时，将原 `file ls --path` 的目录前缀与名称拼接为 Zone 相对路径（默认 `.` 可省略）。未知观察保留原精确打开能力。
+
+### 文件上传与输入边界
 
 设备选择的图片与普通文件沿同一[公共文件类型与 codec](../../packages/core/src/public-rpc-files.ts)提供 `file.upload`／`file.upload.inspect`，CLI 为 `file upload [inspect] --input FILE|-`。公共服务先确认准确原 Host／Session／Run，再委托 Main 注入的 [FileUploadOwner](../../apps/desktop/src/main/file-upload-owner.ts)保存至 Host 指定私有位置并读回；原操作不可覆盖，未知核对不重传。手机 [MobileAttachments](../../apps/mobile/src/conversation/MobileAttachments.tsx) 消费同一回执，再借[共享文件引用插入](../../packages/client-ui/src/lib/composer-file-reference.ts)进入原 Composer；上传本身不发送消息，Core 输入与 Runtime 仍归原 owner。
 
@@ -53,11 +57,25 @@
 
 ## CLI 与服务的当前来源
 
+### 命令注册与业务 owner
+
 [`AGENTMUX_CLI_COMMANDS`](../../packages/core/src/agentmux-cli-commands.ts) 是对象命令的共同注册来源，`parseAgentMuxCliInvocation` 从它解析参数，[help 与运行时技能](../../packages/core/src/agentmux-cli-help.ts) 从它生成说明。[agentmux.ts](../../packages/core/src/agentmux.ts) 处理 endpoint、调用与流输出，业务查询、角色绑定和消息编排进入 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)，不在 CLI 直接读写本地业务事实。公共方法、参数、结果与订阅类型归 [public-rpc.ts](../../packages/core/src/public-rpc.ts)；Main 在 [ipc.ts](../../apps/desktop/src/main/ipc.ts) 注入原 owner 的真实能力。
+
+### 服务传输与接入层
 
 当前 [Server](../../packages/core/src/public-rpc-server.ts) 与 [Client](../../packages/core/src/public-rpc-client.ts) 使用同一 JSON-RPC 2.0 合同，支持默认 Unix socket、显式启用的 HTTP／SSE，SSH stdio 转发到既有 Unix 服务，以及端到端加密 Relay 帧传输。Hosted SDK 通过该服务管理远端 Core Session；它与 ctxmux 的原生 Remote Run 协议是不同接入层，连接条件和分层边界见 [系统接入边界](../architecture/system-ownership.md#当前接入边界)。[对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 持有行为约束；本页不复制对象树，也不以服务入口存在代签所有宿主能力或安装后的可用性。
 
-JSON-lines 单帧编解码和字节上限由 [public-rpc-frame.ts](../../packages/core/src/public-rpc-frame.ts) 持有；官方 [Performance 脚本](../../apps/desktop/resources/toolkit/performance.mjs) 复用该实现，顺序等待 stdout drain。CLI 的同步订阅回调由 [agentmux.ts](../../packages/core/src/agentmux.ts) 限制实际待发送字节，正常 highWaterMark 回压仍接纳合法帧，积压超限才报告并释放本读取者。显式取消或积压失败在释放订阅后丢弃自身待发送输出；普通结束完整 flush。typed Metrics 由 [metrics.ts](../../packages/core/src/metrics.ts) 校验，Settings 不透明叶子由 [settings-resource-json.ts](../../packages/core/src/settings-resource-json.ts) 校验；[control-codec.ts](../../packages/core/src/control-codec.ts) 的 Host Test/list、Executor Refresh 外层不再次按整个回执限深。行为边界沿 [Toolkit 与官方 Performance](../design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具)，实际脚本、公开 CLI／Unix 往返及变异验证入口为 [verify-performance-protocol-boundaries.mjs](../../apps/desktop/scripts/verify-performance-protocol-boundaries.mjs)。
+### 帧、回压与观察成本
+
+JSON-lines 单帧编解码和字节上限由 [public-rpc-frame.ts](../../packages/core/src/public-rpc-frame.ts) 持有；官方 [Performance 脚本](../../apps/desktop/resources/toolkit/performance.mjs) 复用该实现，顺序等待 stdout drain。CLI 的同步订阅回调由 [agentmux.ts](../../packages/core/src/agentmux.ts) 限制实际待发送字节，正常 highWaterMark 回压仍接纳合法帧，积压超限才报告并释放本读取者。
+
+显式取消或积压失败在释放订阅后丢弃自身待发送输出；普通结束完整 flush。
+
+typed Metrics 由 [metrics.ts](../../packages/core/src/metrics.ts) 校验，Settings 不透明叶子由 [settings-resource-json.ts](../../packages/core/src/settings-resource-json.ts) 校验；[control-codec.ts](../../packages/core/src/control-codec.ts) 的 Host Test/list、Executor Refresh 外层不再次按整个回执限深。
+
+行为边界沿 [Toolkit 与官方 Performance](../design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具)，实际脚本、公开 CLI／Unix 往返及变异验证入口为 [verify-performance-protocol-boundaries.mjs](../../apps/desktop/scripts/verify-performance-protocol-boundaries.mjs)。
+
+### 设备与移动连接
 
 手机连接的来源为 [Relay framing](../../packages/core/src/public-rpc-relay.ts)、[有限浏览器 Hosted adapter](../../packages/core/src/relay-hosted.ts)、[设备领域类型及严格解析](../../packages/core/src/public-rpc-device.ts)和 [Host 原 Authority 组合](../../apps/host/src/host.ts)。`agentmux device link` 返回当前完整公有 offer 链接，`device ls` 回读连接与设备事实，`device revoke --device ID` 撤销精确设备；设备命名只沿已认证的 `device hello --name NAME`。GUI 复用原服务，Relay 与手机页面由本机 Host 提供。接入、身份、重连与权限约束唯一沿[《手机版 Relay 连接》](../design/behavior/public-control.md#手机版-relay-连接)，构建成功不代替真机验收。
 
