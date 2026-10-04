@@ -131,6 +131,8 @@ export type AgentMuxAgentSessionStore = {
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
   loadReopenCorrelations(): Promise<readonly { expectedRetirement: AgentMuxRetiredAgentSession; operationId?: string }[]>
+  /** Recover an existing creation identity by its caller operation, including no-Run reservations. */
+  loadCreationSessionId(createOperationId: string): Promise<string | null>
   /** Original no-Run creation correlation; reading never starts a process or replays input. */
   loadCreationCorrelation(agentSessionId: string): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null>
   /** Abort must cancel queued or active persistence without a late commit. */
@@ -1703,6 +1705,16 @@ export function agentLifecycleOperationIdentity(kind: 'create' | 'resume' | 'sto
   return createHash('sha256').update(JSON.stringify(['agentmux-agent-lifecycle-v1', kind, agentSessionId, requestedOperationId])).digest('base64url')
 }
 
+function creationSessionId(sessions: readonly AgentMuxStoredAgentSession[], reservations: readonly AgentMuxLifecycleReservation[], createOperationId: string): string | null {
+  const ids = new Set(sessions.filter(session => session.creation?.createOperationId === createOperationId).map(session => session.agentSessionId))
+  for (const reservation of reservations) {
+    if (reservation.kind === 'create' && (reservation.preparedCreation?.creation?.createOperationId === createOperationId ||
+      agentLifecycleOperationIdentity('create', reservation.agentSessionId, createOperationId) === reservation.operationId)) ids.add(reservation.agentSessionId)
+  }
+  if (ids.size > 1) throw new AgentMuxError('This creation operation names multiple original Sessions. Keep their identities and inspect the original operation.', 'AGENT_CREATION_OPERATION_CONFLICT')
+  return ids.values().next().value ?? null
+}
+
 function reopenCorrelations(reservations: readonly AgentMuxLifecycleReservation[]) {
   return reservations.filter((reservation): reservation is Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> => reservation.kind === 'reopen')
     .map(reservation => ({ expectedRetirement: structuredClone(reservation.expectedRetirement),
@@ -1920,6 +1932,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async loadReopenCorrelations() {
     return reopenCorrelations([...this.reservations.values()])
+  }
+
+  async loadCreationSessionId(createOperationId: string): Promise<string | null> {
+    return creationSessionId([...this.sessions.values()], [...this.reservations.values()], createOperationId)
   }
 
   async loadCreationCorrelation(agentSessionId: string) {
@@ -2385,6 +2401,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async loadReopenCorrelations() {
     await this.tail
     return reopenCorrelations((await this.read()).reservations)
+  }
+
+  async loadCreationSessionId(createOperationId: string): Promise<string | null> {
+    await this.tail
+    const document = await this.read()
+    return creationSessionId(document.sessions, document.reservations, createOperationId)
   }
 
   async loadCreationCorrelation(agentSessionId: string) {

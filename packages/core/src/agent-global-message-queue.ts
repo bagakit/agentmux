@@ -594,6 +594,15 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
+  /** Read the original operation binding through the journal owner's existing index. */
+  async readByOperationId(operationId: string): Promise<DurableAgentMuxMessage | null> {
+    return this.withLock(async () => {
+      await this.ensureLoaded()
+      const messageId = this.operations.get(nonEmpty(operationId, 'Message operation id'))
+      return messageId ? structuredClone(this.messages.get(messageId)!) : null
+    })
+  }
+
   async listAfter(sequence = 0): Promise<readonly DurableAgentMuxMessage[]> {
     return this.withLock(async () => {
       await this.ensureLoaded()

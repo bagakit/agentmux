@@ -8,7 +8,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHoste
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
-  'readDeliveryAttempt',
+  'readDeliveryAttempt', 'resolveAgentCreationSessionId',
   'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
 ])

@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
   hostAgentCreationIntent,
-  deriveAgentSessionId,
   type AgentMuxHostAgentCreateInput,
   AGENTMUX_AGENT_MESSAGING_GUIDANCE,
   agentPromptPredecessor,
@@ -980,7 +979,7 @@ export class RuntimeController {
           ...(request.cols === undefined ? {} : { cols: request.cols }), ...(request.rows === undefined ? {} : { rows: request.rows })
         } : undefined
         if (hostIntent) {
-          hostIntent.agentSessionId = request.agentSessionId ?? await deriveAgentSessionId(hostIntent.createOperationId!)
+          hostIntent.agentSessionId = request.agentSessionId ?? await client.resolveAgentCreationSessionId(hostIntent.createOperationId!)
           if (request.initialMessage) {
             const source = await this.authorizedCallerHost({ agentSessionId: request.initialMessage.callerAgentSessionId, capability: request.initialMessage.capability })
             if (request.initialMessage.threadId) hostIntent.threadId = request.initialMessage.threadId

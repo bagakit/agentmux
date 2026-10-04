@@ -1,28 +1,25 @@
+import { base58 } from '@scure/base'
 import { AgentMuxError } from './errors.js'
 
 /**
- * Canonical durable Session identity: 16 base64url characters with an alphanumeric first character.
- * Rejection sampling preserves each accepted 12-byte sample; effective entropy is about 95.954 bits.
+ * New durable Session identities: 17 Base58 characters, without 0/O/I/l or punctuation.
+ * Each complete 12-byte sample retains 96 bits; left padding also fixes small/leading-zero values.
  * At 10 million Sessions the birthday collision probability is below 10^-12.
  * This module also runs in browser clients; Core and Desktop mint the same identity.
  */
-export function mintAgentSessionId(): string {
-  for (;;) {
-    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(12))
-    const id = globalThis.btoa(String.fromCharCode(...bytes)).replace(/\+/gu, '-').replace(/\//gu, '_')
-    if (/^[A-Za-z0-9]/u.test(id)) return id
-  }
+function encodeAgentSessionId(bytes: Uint8Array): string {
+  return base58.encode(bytes).padStart(17, '1')
 }
 
-/** A stable creation identity uses the same accepted 12-byte canonical space as random minting. */
+export function mintAgentSessionId(): string {
+  return encodeAgentSessionId(globalThis.crypto.getRandomValues(new Uint8Array(12)))
+}
+
+/** New operations derive the same fixed-width space; retries resolve their original durable ID first. */
 export async function deriveAgentSessionId(operationId: string): Promise<string> {
-  for (let nonce = 0; ; nonce++) {
-    const digest = await globalThis.crypto.subtle.digest('SHA-256',
-      new TextEncoder().encode(`agentmux.initial-session.v1:${nonce}:${operationId}`))
-    const bytes = new Uint8Array(digest).slice(0, 12)
-    const id = globalThis.btoa(String.fromCharCode(...bytes)).replace(/\+/gu, '-').replace(/\//gu, '_')
-    if (/^[A-Za-z0-9]/u.test(id)) return id
-  }
+  const digest = await globalThis.crypto.subtle.digest('SHA-256',
+    new TextEncoder().encode(`agentmux.initial-session.v2:${operationId}`))
+  return encodeAgentSessionId(new Uint8Array(digest).slice(0, 12))
 }
 
 /** Exact canonical IDs win; a prefix is usable only while it identifies one known Session. */
