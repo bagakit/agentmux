@@ -2283,6 +2283,37 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   /** 已报过的抢救事件（键是隔离文件的内容寻址路径），防同一份坏字节在一次加载里刷多条告警。 */
   private readonly reportedSalvages = new Set<string>()
 
+  // Only membership needed by a Timeline append is retained. Session bodies remain owned by the original document.
+  private timelineMembership: { identity: string; active: Set<string>; retired: Map<string, AgentMuxRetiredAgentSession> } | null = null
+
+  private async documentIdentity(): Promise<string | null> {
+    try {
+      const metadata = await stat(this.path, { bigint: true })
+      if (!metadata.isFile()) throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      return [metadata.dev, metadata.ino, metadata.size, metadata.mtimeNs, metadata.ctimeNs].join(':')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }
+
+  private rememberTimelineMembership(document: AgentSessionStoreDocument, identity: string): void {
+    this.timelineMembership = { identity, active: new Set(document.sessions.map(session => session.agentSessionId)),
+      retired: new Map(document.retiredAgentSessions.map(session => [session.agentSessionId, session])) }
+  }
+
+  private async timelineMutationAllowed(mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted()
+    const identity = await this.documentIdentity()
+    if (identity === null) { this.timelineMembership = null; return false }
+    if (this.timelineMembership?.identity !== identity) await this.read(signal)
+    signal?.throwIfAborted()
+    const membership = this.timelineMembership
+    if (!membership) throw new AgentMuxError('The original Session membership changed during observation; retry this exact Timeline mutation.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+    const retired = membership.retired.get(mutation.agentSessionId)
+    return membership.active.has(mutation.agentSessionId) || !!retired && acceptedRetiredActivity([retired], mutation)
+  }
+
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
 
   async withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
@@ -2640,9 +2671,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.enqueue(async () => {
       signal?.throwIfAborted()
       const canonicalMutation = normalizeAgentTimelineMutation(mutation)
-      const document = await this.read(signal)
-      if (!document.sessions.some((session) => session.agentSessionId === canonicalMutation.agentSessionId) &&
-        !acceptedRetiredActivity(document.retiredAgentSessions, canonicalMutation)) {
+      if (!await this.timelineMutationAllowed(canonicalMutation, signal)) {
         throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
       }
       const timeline = await this.readTimeline(canonicalMutation.agentSessionId, signal)
@@ -2674,6 +2703,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
     let raw: Buffer
+    const identity = await this.documentIdentity()
     try {
       signal?.throwIfAborted()
       const metadata = await stat(this.path)
@@ -2695,7 +2725,13 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }
       throw error
     }
-    return await this.parseStoreDocument(raw, signal)
+    const document = await this.parseStoreDocument(raw, signal)
+    // A read outside the write lock may straddle an atomic replacement. Never stamp old membership with a new inode.
+    try {
+      if (identity !== null && identity === await this.documentIdentity()) this.rememberTimelineMembership(document, identity)
+      else this.timelineMembership = null
+    } catch { this.timelineMembership = null }
+    return document
   }
 
   /**
@@ -2892,6 +2928,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     pruneTimelines = false
   ): Promise<void> {
     signal?.throwIfAborted()
+    this.timelineMembership = null
     const content = `${JSON.stringify(document, null, 2)}\n`
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     try {
@@ -2900,6 +2937,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (error instanceof DurableWriteError && error.phase === 'after-replace') throw new AgentMuxSessionDurabilityError(error)
       throw error
     }
+    // The caller still holds the original store writer lock, so no compliant writer can replace this identity here.
+    // Cache bookkeeping is advisory: failure must not turn a confirmed durable write into an unknown transaction.
+    try {
+      const identity = await this.documentIdentity()
+      if (identity !== null) this.rememberTimelineMembership(document, identity)
+    } catch { this.timelineMembership = null }
     if (pruneTimelines) await this.maintainTimelineFiles(document)
   }
 
