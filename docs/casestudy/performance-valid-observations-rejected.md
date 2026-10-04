@@ -23,6 +23,8 @@
 
 首轮独立 review 覆盖 parser、公共 RPC／CLI 的 Toolkit 消费和受控 Desktop IPC。测试把合成结果直接交给 owner，没有执行随产品发布的官方脚本，也没有让真实 CLI 写出超过管道 highWaterMark 的合法 Metrics opening。小结果或 renderer unavailable 的 fixture 能通过，却避开现场数据的深度；局部测试没有证明整条实际取数链可用。
 
+集成复验还揭示了一处变异判据缺口：在固定四百毫秒内要求源写入少于五帧，可能因解析或调度较慢而放过忽略回压的实现。源进度还包含管道预取，不能独立证明脚本已停止接纳输出。修正后的私有观察器透明调用原 stdout.write，保留真实字节、回调和返回值；先证实实际 false，再断言消费者未读时只有一个接纳帧，恢复后核对二十帧完整顺序。首次集成 gate 失败保留为失败，不以旧 PASS 覆盖。
+
 ## 修复与可执行约束
 
 官方脚本直接复用公共 `AgentMuxRpcLines`／`rpcEncode`；一次仅处理一个完整帧，输出等待 drain 后才继续读源。它保留订阅身份、顺序、UTF-8、具名 schema、完整字节预算及取消能力，不截取观察来适应包装。
