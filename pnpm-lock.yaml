@@ -107,6 +107,9 @@ importers:
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
+      dompurify:
+        specifier: 3.4.16
+        version: 3.4.16
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
@@ -7098,7 +7101,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.23
-      dompurify: 3.4.8
+      dompurify: 3.4.16
       es-toolkit: 1.52.0
       fastdom: 1.0.12
       katex: 0.16.47
