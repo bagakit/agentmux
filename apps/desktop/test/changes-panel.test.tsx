@@ -186,6 +186,16 @@ function disabled(markup: string, which: 'textarea' | 'submit'): boolean {
  * 状态列、画 `+` 还是 `✓`，它一概不碰。`tsc` 也挡不住——对调的两侧类型完全相同。
  */
 describe('Source Control 面板', () => {
+  it('计数带文件单位，窄栏省略仍保留原文件的完整路径', () => {
+    const markup = render([
+      change('docs/design/long-topic-name-2.md', { worktree: 'M', unstaged: true }),
+      change('docs/design/long-topic-name-11.md', { worktree: 'M', unstaged: true })
+    ])
+    expect(markup).toContain('aria-label="Changed file count">2 files</span>')
+    expect(markup).toContain('Open diff for docs/design/long-topic-name-2.md')
+    expect(markup).toContain('Open diff for docs/design/long-topic-name-11.md')
+  })
+
   it('暂存与未暂存分到各自的组里，且只有未暂存的那条给得出暂存入口', () => {
     const markup = render([
       change('src/staged.ts', { index: 'M', staged: true }),

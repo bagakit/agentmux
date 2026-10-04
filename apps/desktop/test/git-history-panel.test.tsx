@@ -70,6 +70,53 @@ async function select(value: string) {
 function rows() { return [...host.querySelectorAll('[data-history-oid]')].map(row => row.getAttribute('data-history-oid')) }
 
 describe('mounted GitHistoryPanel with production hook and bridge', () => {
+  it('reserves only the tracks crossing each row, keeps wide merges reachable and leaves SVG whitespace transparent to reading', async () => {
+    const f = oid('f'), g = oid('1')
+    history.mockResolvedValue(page([
+      commit(a, 'A simple tip before the wide merge', [b]),
+      commit(b, 'A merge with four real parents', [c, d, e, f]),
+      commit(c, 'First route', [g]), commit(d, 'Second route', [g]),
+      commit(e, 'Third route', [g]), commit(f, 'Final route', [g]),
+      commit(g, 'Shared root after all lanes have closed', [])
+    ]))
+    await render()
+    const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
+    expect(rendered.map(row => row.style.getPropertyValue('--history-graph-width'))).toEqual(['20px', '62px', '62px', '62px', '48px', '34px', '20px'])
+    expect(host.querySelector('svg[aria-label="Loaded commit graph"]')?.getAttribute('width')).toBe('62')
+    expect([...host.querySelectorAll(`[data-child-oid="${b}"]`)].map(edge => edge.getAttribute('data-parent-oid'))).toEqual([c, d, e, f])
+    expect(host.querySelector(`[data-child-oid="${b}"][data-parent-oid="${f}"]`)?.getAttribute('d')).toBe('M 10 36 C 10 42, 52 42, 52 48')
+    expect(getComputedStyle(host.querySelector('.git-history-window')!).position).toBe('relative')
+    const graphStyle = getComputedStyle(host.querySelector('.git-history-graph')!)
+    expect(graphStyle.position).toBe('absolute')
+    expect(graphStyle.zIndex).toBe('1')
+    expect(graphStyle.pointerEvents).toBe('none')
+    expect(getComputedStyle(host.querySelector('.git-history-node')!).pointerEvents).toBe('auto')
+    expect(getComputedStyle(host.querySelector('.git-history-scroll')!).overflow).toBe('auto')
+    // Wider relationships can scroll with their row instead of clipping a fixed graph slot.
+    expect(getComputedStyle(rendered[1]!).minWidth).toBe('calc(62px + 120px)')
+    expect(getComputedStyle(rendered[0]!).paddingLeft).toBe('calc(20px + var(--sp-2))')
+    expect(getComputedStyle(rendered[1]!).containerType).toBe('inline-size')
+  })
+
+  it('lets one ref use its available label width while multiple refs shrink without covering the commit title', async () => {
+    const single = { name: 'refs/heads/feature/a-long-single-branch-name', kind: 'local' as const, oid: a }
+    const second = { name: 'refs/remotes/origin/another-long-name', kind: 'remote' as const, oid: b }
+    history.mockResolvedValue(page([{ ...commit(a, 'One reference', [b]), refs: [single] },
+      { ...commit(b, 'Two references', []), refs: [{ ...single, oid: b }, second] }]))
+    await render()
+    const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
+    expect(rendered.map(row => row.querySelectorAll('.git-history-ref').length)).toEqual([1, 2])
+    for (const ref of host.querySelectorAll<HTMLElement>('.git-history-ref')) {
+      const style = getComputedStyle(ref)
+      expect(style.maxWidth).toBe('100%')
+      expect(style.flexShrink).toBe('1')
+      expect(style.textOverflow).toBe('ellipsis')
+    }
+    expect(Number.parseFloat(getComputedStyle(rendered[0]!.querySelector('strong')!).minWidth)).toBe(0)
+    await act(async () => rendered[0]!.querySelector<HTMLElement>('.git-history-ref')!.focus())
+    expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(single.name)
+  })
+
   it('keeps long messages, refs and hashes on one row and exposes complete metadata on hover', async () => {
     const subject = 'Keep a long commit title readable without wrapping or adding another metadata line'
     const first = commit(a, subject, [b])
