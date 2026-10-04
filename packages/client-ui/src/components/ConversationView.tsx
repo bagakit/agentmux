@@ -19,6 +19,8 @@ type Props = ReadingProps & {
   onReplyQuestion?: ConversationQuestionReply
   renderQuestionNotice?: QuestionNoticeRenderer
   page: AgentSessionHistoryPage
+  /** Already accepted same-source facts; does not change this page or acquire read demand. */
+  questionAnswerContext?: AgentSessionHistoryPage | null
   sessionId: string
   describeSpeaker?: DescribeSpeaker
   onContinue?: (prompt: string) => void
@@ -33,13 +35,21 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
+  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
   if (page.agentSessionId !== sessionId || page.items.length === 0) return null
   const descriptions = new Map(describedRecords.map(record => [record.rawId, record]))
   const answers = new Map<string, string>()
+  if (questionAnswerContext?.agentSessionId === page.agentSessionId &&
+    questionAnswerContext.source.providerId === page.source.providerId &&
+    questionAnswerContext.source.nativeSessionId === page.source.nativeSessionId) {
+    for (const item of questionAnswerContext.items) if (item.kind === 'user-message') {
+      for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
+    }
+  }
+  // The displayed source-order page remains authoritative for answers it contains.
   for (const item of page.items) if (item.kind === 'user-message') {
     for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
   }
