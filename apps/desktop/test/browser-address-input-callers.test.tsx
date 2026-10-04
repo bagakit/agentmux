@@ -79,14 +79,14 @@ it('a late real BrowserPane navigation update preserves a newer human draft and 
   await act(async () => root.render(<BrowserPane tab={{ ...tab, url: 'https://example.test/late' }} visible />))
   expect(input.value).toBe('editing the next address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 7])
   await act(async () => root.render(<BrowserPane tab={{ ...tab, browserId: 'different', url: 'https://example.test/other' }} visible />))
-  expect(input.value).toBe('https://example.test/other')
+  expect(container.querySelector<HTMLInputElement>('input[role="combobox"]')?.value).toBe('https://example.test/other')
 })
 
 it('the actual Launcher input shares resource history and right-click without waiting for a history save', async () => {
   const create = vi.fn(async () => {}); useAppStore.setState({ createBrowser: create })
   vi.mocked(api.browser.recordInputHistory).mockRejectedValueOnce(new Error('history unavailable'))
   await act(async () => root.render(<LauncherSecondarySurfaces workspace={workspace} tabGroupId="group" launcherRef={{ tabId: 'launcher', regionId: 'region' }} launcherId="launcher"
-    sections={{ agents: 'hidden', terminal: 'hidden', browser: 'expanded', note: 'hidden' }} onSectionChange={vi.fn()} warmSession={null} warmPending={false}
+    sections={{ agents: 'hidden', terminal: 'hidden', browser: 'expanded', note: 'hidden' }} onSectionChange={vi.fn()} warmPreview={{ session: null, pending: false, slotHeld: false, state: 'idle' }}
     terminalThemeId="graphite" terminalFontSize={12} visible busy={null} onRun={async (_kind, action) => { await action() }} />))
   await inspectInputContextMenu(); expect(api.browser.listInputHistory).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: workspace.id })
   await fill('human launcher search'); await submit()
@@ -119,7 +119,7 @@ it('the actual compact Browser header expands its original input and only its hu
     const [mode, setMode] = useState<'collapsed' | 'expanded' | 'hidden'>('collapsed')
     return <LauncherSecondarySurfaces workspace={workspace} tabGroupId="group" launcherRef={{ tabId: 'launcher', regionId: 'region' }} launcherId="launcher"
       sections={{ agents: 'hidden', terminal: 'hidden', browser: mode, note: 'hidden' }} onSectionChange={(section, next) => { if (section === 'browser') setMode(next) }}
-      warmSession={null} warmPending={false} terminalThemeId="graphite" terminalFontSize={12} visible busy={null}
+      warmPreview={{ session: null, pending: false, slotHeld: false, state: 'idle' }} terminalThemeId="graphite" terminalFontSize={12} visible busy={null}
       onRun={async (_kind, action) => { await action() }} />
   }
   await act(async () => root.render(<CompactLauncher />))
