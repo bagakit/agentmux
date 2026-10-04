@@ -4092,11 +4092,14 @@ export class AgentMuxClient {
     let transportQualification: AgentPromptTransportQualification | undefined
     try {
       stage('transport-preparation')
-      transportQualification = input.execution === 'immediate' && provider.catalog.capabilities.promptExecution?.immediate === 'interrupt-before-input'
-        ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
+      const strategy = provider.catalog.capabilities.promptExecution?.immediate
+      const preparationMs = strategy === 'native-steer' ? 8_000 : 40_000
+      const deadline = Date.now() + preparationMs
+      transportQualification = input.execution === 'immediate' && (strategy === 'interrupt-before-input' || strategy === 'native-steer')
+        ? await this.observeAgentInputPreparation(session, preparationMs, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
-          () => { preparationStarted = true }, protocolInput)
+          () => { preparationStarted = true }, protocolInput, deadline)
       }, input.signal, protocolInput, release => { releasePreparationObservation = release }) : undefined
     } catch (error) {
       releasePreparationObservation?.()
@@ -4132,18 +4135,31 @@ export class AgentMuxClient {
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification)
           }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation,
-            release => { releasePreparationObservation = release })
+            release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
         } catch (error) {
           const preclaim = protocolInput.preclaim
           if (!transportQualification || !preclaim || preclaim.claimStarted || error !== preclaim.interruption ||
               renderObservation.signal.reason !== preclaim.interruption) throw error
           if (input.signal?.aborted || Date.now() >= transportQualification.deadline) throw promptPreparationFailure(input.signal?.reason ?? error)
-          const current = await this.registry.refresh(session.agentSessionId, session.run)
-          if (!sameRun(current.run, session.run) || current.promptCompletionAdmission?.submissionId === operationId ||
-              current.terminalPromptSubmission?.submissionId === operationId ||
-              (current.promptCompletionAdmission === undefined ? null : current.promptCompletionAdmission.submissionId) !== condition.afterSubmissionId) {
-            throw promptPreparationFailure(new AgentMuxError('The original request changed while its protocol ACK was pending.', 'AGENT_PROMPT_INPUT_UNCONFIRMED'))
+          try {
+            const current = await this.observeAgentInputPreparation(session,
+              Math.max(1, transportQualification.deadline - Date.now()), async signal => {
+                const current = await this.registry.refresh(session.agentSessionId, session.run)
+                signal.throwIfAborted()
+                return current
+              }, input.signal, protocolInput, release => {
+                releasePreparationObservation?.()
+                releasePreparationObservation = release
+              })
+            if (!sameRun(current.run, session.run) || current.promptCompletionAdmission?.submissionId === operationId ||
+                current.terminalPromptSubmission?.submissionId === operationId ||
+                (current.promptCompletionAdmission === undefined ? null : current.promptCompletionAdmission.submissionId) !== condition.afterSubmissionId) {
+              throw new AgentMuxError('The original request changed while its protocol ACK was pending.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+            }
+          } catch (error) {
+            if (error === preclaim.interruption) continue
+            throw promptPreparationFailure(error)
           }
           // Queue behind that protocol operation, retaining this invocation's original
           // ACK boundary and deadline. No qualification or message is recreated.
@@ -5934,7 +5950,8 @@ export class AgentMuxClient {
     renderObservation?: AbortController,
     protocolInput?: AgentPromptProtocolInputBoundary,
     onQueued?: (next?: AbortController) => void,
-    retainPreclaimYield?: (release: (next?: AbortController) => void) => void
+    retainPreclaimYield?: (release: (next?: AbortController) => void) => void,
+    preclaimDeadline?: number
   ): Promise<T> {
     const agentSessionId = requestedSession.agentSessionId
     const lane = this.agentInputTails.get(agentSessionId) ?? {
@@ -5972,13 +5989,26 @@ export class AgentMuxClient {
     const tail = queued.then(() => {}, () => {})
     lane.tail = tail
     this.agentInputTails.set(agentSessionId, lane)
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+    const preclaimExpiry = preclaimDeadline === undefined ? undefined : new Promise<never>((_resolve, reject) => {
+      deadlineTimer = setTimeout(() => {
+        const preclaim = protocolInput?.preclaim
+        // Once claim starts, only its durable input receipt can describe the outcome.
+        if (!preclaim || preclaim.claimStarted) return
+        const error = new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED')
+        protocolInput!.cancelled ??= error
+        renderObservation?.abort(protocolInput!.cancelled)
+        reject(promptPreparationFailure(protocolInput!.cancelled))
+      }, Math.max(1, preclaimDeadline - Date.now()))
+    })
     try {
-      await queued
+      await (preclaimExpiry ? Promise.race([queued, preclaimExpiry]) : queued)
       return result
     } catch (error) {
       this.agentInputCursors.delete(agentSessionId)
       throw error
     } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer)
       const preclaim = protocolInput?.preclaim
       const retained = observation && retainPreclaimYield && preclaim && !preclaim.claimStarted &&
         renderObservation?.signal.reason === preclaim.interruption
