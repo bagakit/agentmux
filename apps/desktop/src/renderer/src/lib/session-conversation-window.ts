@@ -125,6 +125,17 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const window = state.key === key ? state.window : null
   const historicalPage = useMemo(() => window?.page ?? null, [window])
   const page = historicalPage ?? currentContext
+  const newerOutside = useMemo(() => {
+    if (!window) return false
+    if (window.newerOutside) return true
+    const currentTail = recent?.items.at(-1)
+    if (!currentTail || recent!.agentSessionId !== reading?.reference.agentSessionId
+      || recent!.agentSessionId !== window.page.agentSessionId
+      || recent!.source.providerId !== window.page.source.providerId
+      || recent!.source.nativeSessionId !== window.page.source.nativeSessionId) return false
+    const retained = window.page.items.find(item => item.id === currentTail.id)
+    return !retained || JSON.stringify(retained) !== JSON.stringify(currentTail)
+  }, [window, recent, reading?.reference.agentSessionId])
   const pageRef = useRef(page); pageRef.current = page
   function update(next: typeof state) { stateRef.current = next; setState(next) }
   async function read(direction: 'current' | 'earlier'): Promise<void> {
@@ -203,6 +214,6 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     historyBoundary: window?.boundary?.confirmed ? {
       beforeRecordId: window.page.items.some(item => item.id === window.boundary!.recordId) ? window.boundary.recordId : null
     } : null,
-    newerOutside: window?.newerOutside ?? false, hasMore: Boolean(page?.nextCursor),
+    newerOutside, hasMore: Boolean(page?.nextCursor),
     readEarlier: () => void read('earlier'), retry: () => void read(retry.current), showCurrent }
 }

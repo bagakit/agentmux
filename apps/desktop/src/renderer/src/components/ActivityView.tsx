@@ -780,7 +780,6 @@ export function ActivityView({
     {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Submitted-message read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
     {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
-    {readingWindow.newerOutside ? <div role="status" className="activity-feed__read-notice">More recent records remain available via Current.</div> : null}
     {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading || !nativeHistoryPage || !ruler.items.length} read={userMessageRead ? { ...userMessageRead,
       onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
@@ -976,6 +975,10 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
+      {readingWindow.historical ? <div className="activity-feed__reading" data-conversation-current-entry>
+        <span role="status" aria-live="polite">{readingWindow.error ?? (readingWindow.newerOutside ? 'Current records updated or outside this window.' : 'Viewing earlier records.')}</span>
+        <button type="button" className="small-button" disabled={!conversationReading?.enabled} onClick={readingWindow.showCurrent}>Show latest messages</button>
+      </div> : null}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump && !readingWindow.historical ? (
         <button
