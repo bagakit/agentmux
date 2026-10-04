@@ -70,6 +70,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:writeClipboardImage': 'clipboard image',
   'ui:rendererUpdateReady': 'renderer update',
   'ui:spatialLinksReady': 'spatial link readiness',
+  'ui:openObjectLink': 'object link navigation',
   'ui:captureScreenshot': 'screenshot',
   'ui:publishNativeOverlays': 'native floating chrome',
   'ui:listAgentSkills': 'Agent skills',

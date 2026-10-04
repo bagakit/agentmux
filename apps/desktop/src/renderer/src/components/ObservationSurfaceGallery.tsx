@@ -1,5 +1,9 @@
-import { useState } from 'react'
-import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
+import { useEffect, useState } from 'react'
+import type { AppConfig, ComposerShortcut, ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
+import { DEFAULT_MOTE_FACE } from '../../../shared/mote-avatars'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
+import { scratchTopicsScope } from '../lib/scratch-topic-snapshots'
+import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ComposerTextarea } from './ComposerTextarea'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -11,7 +15,8 @@ import type { ComposerQueuedMessage } from './ComposerOutbox'
 import { appendSemanticReference, expandSemanticReferences, encodeSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { composerShortcutForBareWord, composerShortcutSuggestion } from '../../../shared/composer-shortcut-library'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
-import { AgentAvatar } from './AgentAvatar'
+import { AgentAvatar, ExecutorIdentityContext } from './AgentAvatar'
+import { useAppStore } from '../store'
 import { AgentComposerTools } from './AgentComposerTools'
 import { SessionMailbox } from './SessionMailbox'
 import { useServiceNotices } from '../lib/use-service-notices'
@@ -62,6 +67,7 @@ export function ObservationSurfaceGallery() {
         <p>复用原有组件的事实边界，用 Workflow 的层级、密度和观察节奏呈现。</p>
       </header>
       <div className="observation-gallery__grid">
+        <AgentLinksSample />
         <article className="observation-sample observation-sample--conversation">
           <div className="observation-sample__label">Conversation · example states</div>
           <div className="observation-sample__body">
@@ -139,4 +145,66 @@ export function ObservationSurfaceGallery() {
       </article>
     </section>
   )
+}
+
+/** Explicit Gallery observations, never discovery of the user's Sessions or Runtime. */
+function AgentLinksSample() {
+  const currentConfig = useAppStore(state => state.config)
+  const base: AppConfig = currentConfig ?? { version: 9, hosts: [], workspaces: [], executors: {}, appearance: { terminalTheme: 'graphite' },
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
+  const workspace = currentConfig?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID) ??
+    { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: new URL("./gallery-inline-topics", import.meta.url).pathname, name: 'Gallery Topics', kind: 'folder' as const }
+  const mote: ScratchTopicSnapshot = { id: 'launcher:gallery-inline-mote', title: '负责共享对话组件与行内对象呈现的同事',
+    directoryPath: `${workspace.path}/${scratchTopicDirectoryName('launcher:gallery-inline-mote')}`,
+    topicPath: 'gallery-only/topic.md', summary: '', collaborators: [],
+    soul: { path: 'gallery-only/SOUL.md', content: '# Gallery Mote', version: 'gallery' } }
+  const moteTarget = topicSpaceIconTarget(workspace, mote)!
+  const sessions: Extract<SessionSnapshot, { kind: 'agent' }>[] = [
+    { id: 'gallery-linked-reviewer', label: 'Interface reviewer', providerId: 'codex', executorId: 'gallery-reviewer' },
+    { id: 'gallery-linked-builder', label: '负责共享对话组件与行内对象呈现的同事', providerId: 'claude', executorId: 'gallery-builder' }
+  ].map((identity, index) => ({ ...identity, kind: 'agent', hostId: workspace.hostId, workspacePath: index === 1 ? mote.directoryPath : new URL("./projects/amux", import.meta.url).pathname,
+    createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running', latestOutputBytes: 0,
+    status: { state: index === 0 ? 'working' : 'done', source: 'native-hook', observedAt: Date.now() },
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    control: { kind: 'agent', hostId: workspace.hostId, agentSessionId: identity.id, run: { runId: 'gallery-only-' + identity.id } } }))
+  useEffect(() => {
+    const ids = new Set(sessions.map(session => session.id))
+    const before = useAppStore.getState()
+    const snapshot = before.scratchTopicSnapshots[workspace.id]
+    const installed = { scope: scratchTopicsScope(workspace), revision: 1, reading: false, error: null,
+      topics: [...(snapshot?.topics ?? []).filter(topic => topic.id !== mote.id), mote] }
+    const installedConfig = { ...base, workspaces: base.workspaces.some(item => item.id === workspace.id)
+      ? base.workspaces : [...base.workspaces, workspace] }
+    const icon = { ...DEFAULT_MOTE_FACE, palette: 'peach' as const, accessory: 'glasses' as const }
+    useAppStore.setState(state => ({ config: installedConfig,
+      sessions: [...state.sessions.filter(session => !ids.has(session.id)), ...sessions],
+      scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [workspace.id]: installed },
+      spaceObjectIcons: { ...state.spaceObjectIcons, [moteTarget.key]: icon } }))
+    return () => { useAppStore.setState(state => {
+      const topics = { ...state.scratchTopicSnapshots }, icons = { ...state.spaceObjectIcons }
+      if (topics[workspace.id] === installed) {
+        if (snapshot) topics[workspace.id] = snapshot; else delete topics[workspace.id]
+      }
+      if (icons[moteTarget.key] === icon) {
+        const previous = before.spaceObjectIcons[moteTarget.key]
+        if (previous) icons[moteTarget.key] = previous; else delete icons[moteTarget.key]
+      }
+      return { config: state.config === installedConfig ? before.config : state.config,
+        sessions: state.sessions.filter(session => !ids.has(session.id)), scratchTopicSnapshots: topics, spaceObjectIcons: icons }
+    }) }
+  }, [])
+  const config: AppConfig = { ...base, executors: { ...base.executors,
+    'gallery-reviewer': { label: 'Review', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true,
+      avatar: { tint: '#8eaecc' } },
+    'gallery-builder': { label: 'Build', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true,
+      avatar: { tint: '#ccad8e' } } } }
+  return <article className="observation-sample observation-sample--agent-links">
+    <div className="observation-sample__label">Inline Agent links · example observations</div>
+    <ExecutorIdentityContext.Provider value={{ config }}><div className="observation-sample__body">
+      <ConversationMessage speaker={{ role: 'human', id: 'gallery-human' }} name="You" status="complete"
+        content="请让 amux://agent/gallery-linked-reviewer 看一下，再交给 [共享组件同事](amux://agent/gallery-linked-builder)。" />
+      <ConversationMessage speaker={{ role: 'agent', id: 'gallery-author' }} name="Coordinator" providerId="codex" status="complete"
+        content={'正在由 amux://agent/gallery-linked-reviewer 审阅。\n\n- 长名称：amux://agent/gallery-linked-builder\n- 尚无资料：amux://agent/gallery-unobserved\n\n原始引用仍是 `amux://agent/gallery-linked-reviewer`，复制消息保留原文。'} />
+    </div></ExecutorIdentityContext.Provider>
+  </article>
 }

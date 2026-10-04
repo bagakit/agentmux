@@ -44,6 +44,27 @@ button.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outlin
 .agent-identity-popover dt { color: var(--text-3); }
 .agent-identity-popover dd { margin: 0; overflow-wrap: anywhere; }
 .agent-identity-popover p { color: var(--text-2); margin: var(--sp-2) 0 0; overflow-wrap: anywhere; }
+.inline-agent-link { display: inline; }
+button.agent-avatar--inline {
+  width: auto; height: auto; max-width: min(100%, 30ch); padding: 1px 6px 1px 4px; gap: 6px;
+  vertical-align: -3px; border: 1px solid var(--line-soft); border-radius: 6px;
+  background: linear-gradient(var(--overlay-line), transparent), var(--surface-1);
+  box-shadow: inset 0 1px 0 var(--overlay-line); color: var(--text-2);
+  font: inherit; font-size: .92em; line-height: 1.35; text-align: left;
+  transition: background .12s ease, border-color .12s ease;
+}
+button.agent-avatar--inline:hover { border-color: var(--focus-line); background-color: var(--surface-2); }
+.agent-avatar__face { position: relative; display: inline-flex; width: var(--agent-avatar-size); height: var(--agent-avatar-size); flex: 0 0 auto; }
+.agent-avatar__label { text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inline-agent-link__details { border-top: 1px solid var(--line-soft); margin-top: var(--sp-3); padding-top: var(--sp-2); }
+.inline-agent-link__details code { display: block; margin-block: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.inline-agent-link__details .small-button { margin-top: var(--sp-1); }
+.inline-agent-link[data-motion='off'] .semantic-icon-motion,
+.inline-agent-link[data-motion='off'] .semantic-icon { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .inline-agent-link .semantic-icon-motion, .inline-agent-link .semantic-icon { animation: none; }
+  button.agent-avatar--inline { transition: none; }
+}
 .agent-avatar-settings { display: grid; gap: var(--sp-5); padding: var(--sp-4) var(--sp-5) var(--sp-5); }
 .agent-avatar-settings__row { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
 .agent-avatar-settings__name { flex: 1; min-width: 10ch; display: grid; }

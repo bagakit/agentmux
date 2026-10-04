@@ -5,6 +5,8 @@ import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
+import { agentLinkReference, splitAgentLinkReferences } from '../lib/agent-link-reference.js'
+import { useAgentLinkRenderer, type ClientUiPlatform } from '../platform.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -26,6 +28,7 @@ type InlineContext = {
   inputMode: boolean
   readOnly: boolean
   inLink?: boolean
+  renderAgentLink?: ClientUiPlatform['renderAgentLink']
 }
 
 function FileReference({ text, reference, openWorkspaceFile }: {
@@ -38,6 +41,9 @@ function FileReference({ text, reference, openWorkspaceFile }: {
 /** Pasted tokens claim their own narrow syntax before the common Terminal file scanner. */
 function TextWithFileReferences({ text, context }: { text: string; context: InlineContext }) {
   if (context.readOnly || context.inLink) return <>{text}</>
+  if (context.renderAgentLink) return <>{splitAgentLinkReferences(text).map((segment, index) => segment.kind === 'agent'
+    ? <Fragment key={index}>{context.renderAgentLink?.(segment.reference) ?? segment.text}</Fragment>
+    : <TextWithFileReferences key={index} text={segment.text} context={{ ...context, renderAgentLink: undefined }} />)}</>
   const { openWorkspaceFile, readPastedImage, workspaceRoot, homeDir } = context
   const images = readPastedImage ? splitPastedImageReferences(text) : [{ kind: 'text' as const, text }]
   return <>{images.map((image, imageIndex) => {
@@ -62,7 +68,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     const key = `${node.kind}-${index}`
     if (node.kind === 'text') return <TextWithFileReferences key={key} text={node.text} context={context} />
     if (node.kind === 'break') return <br key={key} />
-    if (node.kind === 'code') return <code key={key} className="md-code"><TextWithFileReferences text={node.text} context={context} /></code>
+    if (node.kind === 'code') return <code key={key} className="md-code"><TextWithFileReferences text={node.text} context={{ ...context, renderAgentLink: undefined }} /></code>
     if (node.kind === 'strong') return <strong key={key}><Inline nodes={node.children} context={context} /></strong>
     if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} context={context} /></em>
     if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} context={context} /></del>
@@ -87,6 +93,8 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     }
     const labelContext = { ...context, inLink: true }
     if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
+    const agent = context.renderAgentLink ? agentLinkReference(node.href, inlineLabel(node.children)) : null
+    if (agent) return <Fragment key={key}>{context.renderAgentLink?.(agent) ?? <Inline nodes={node.children} context={labelContext} />}</Fragment>
     if (context.documentMode && node.href.startsWith('#')) {
       let anchor: string
       try { anchor = decodeURIComponent(node.href.slice(1)) } catch { anchor = node.href.slice(1) }
@@ -106,6 +114,10 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
       metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey, clientX: event.clientX, clientY: event.clientY
     })}><Inline nodes={node.children} context={labelContext} /></button>
   })}</>
+}
+
+function inlineLabel(nodes: InlineNode[]): string {
+  return nodes.map(node => 'text' in node ? node.text : 'children' in node ? inlineLabel(node.children) : node.kind === 'break' ? ' ' : '').join('')
 }
 
 function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
@@ -161,8 +173,10 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   /** Root-confined path resolved against the document. A linked image must return noninteractive phrasing content. */
   renderWorkspaceImage?: RenderWorkspaceImage
 }) {
+  const renderAgentLink = useAgentLinkRenderer()
   const isInput = inputMode && !documentMode
   const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly,
+    ...(!readOnly && !documentMode && renderAgentLink ? { renderAgentLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}) }
   if (!documentMode && !isInput && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>

@@ -869,6 +869,11 @@ export async function registerIpc(args: {
     requireTrustedSender('ui:rendererUpdateReady', event)
     args.onRendererUpdateReady?.(token)
   })
+  handleWithEvent('ui:openObjectLink', (event, rawUrl: string) => {
+    requireTrustedSender('ui:openObjectLink', event)
+    if (!args.spatialLinks) throw new Error('Object link navigation is unavailable in this window. The original workface and Agents are kept; retry the exact link in the main Desktop window.')
+    args.spatialLinks.receive(rawUrl)
+  })
   handleWithEvent('ui:spatialLinksReady', event => {
     requireTrustedSender('ui:spatialLinksReady', event)
     args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))

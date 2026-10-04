@@ -24,8 +24,14 @@ export const ExecutorIdentityContext = createContext<{
 }>({ config: null })
 
 /** Every Executor surface shares its artwork, state marker and hover/focus disclosure here. */
-export function AgentAvatar({ label, onOpen, providerId, state, appearance, count, executorId, sessionId, size = 18, detail, onPanelVisibilityChange, actionDisclosure, disclosure, visible = true }: {
+export function AgentAvatar({ label, onOpen, providerId, state, appearance, count, executorId, sessionId, size = 18, detail, onPanelVisibilityChange, actionDisclosure, disclosure, visible = true, inlineLabel, details, mark: identityMark }: {
   label?: string | undefined
+  /** A single inline link trigger shares the existing artwork, status and disclosure. */
+  inlineLabel?: string | undefined
+  /** Supplementary host facts mount only while this same disclosure is open. */
+  details?: ReactNode
+  /** A host-resolved identity (for example a Mote) shares this trigger and status face. */
+  mark?: ReactNode
   onOpen?: (() => void) | undefined
   providerId?: AgentProviderId | undefined
   state?: AgentDisplayState | undefined
@@ -128,7 +134,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     if (pinned.current) return
     closeTimer.current = setTimeout(closeNow, 160)
   }
-  useLayoutEffect(() => { if (actionDisclosure) closeNow() }, [sessionId, visible])
+  useLayoutEffect(() => { if (actionDisclosure || inlineLabel !== undefined) closeNow() }, [sessionId, visible])
   useEffect(() => {
     if (!position || !actionDisclosure) return
     const outside = (event: PointerEvent) => {
@@ -174,7 +180,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       // Scrolling the panel itself must remain possible for long executor details;
       // a scroll of the trigger's ancestor invalidates the fixed anchor.
       if (panel.current?.contains(event.target as Node)) return
-      if (actionDisclosure && pinned.current) show()
+      if (actionDisclosure && pinned.current || inlineLabel !== undefined &&
+        (document.activeElement === trigger.current || panel.current?.contains(document.activeElement))) show()
       else closeNow()
     }
     window.addEventListener('resize', dismiss)
@@ -271,13 +278,23 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     return () => observer.disconnect()
   }, [Boolean(position), Boolean(actionDisclosure)])
 
-  const mark = <>{disclosure?.mark ?? <AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />}
+  const mark = <>{identityMark ?? disclosure?.mark ?? <AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />}
     {avatar?.badge ? <span className="agent-avatar__badge" data-corner={PRESENCE_MARK_CORNERS.badge} data-avatar-badge={avatar.badge}>
       <AgentAvatarBadgeIcon badge={avatar.badge} size={6} />
     </span> : null}</>
+  const face = <>
+      <span className="agent-avatar__contour" aria-hidden="true">
+        {avatar?.tint && identityMark === undefined ? <AgentEnamelFilter id={filterId} tint={avatar.tint} className="agent-avatar__mark" filterClassName="agent-avatar__filters">{mark}</AgentEnamelFilter>
+          : <span className="agent-avatar__mark">{mark}</span>}
+      </span>
+      {displayState === 'working'
+        ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
+        : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
+      {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
+  </>
   const overlayHost = getWindowOverlayHost()
   return <>
-    <Element ref={trigger} className={`agent-avatar${displayState ? ` status status--${displayState}` : ''}`}
+    <Element ref={trigger} className={`agent-avatar${inlineLabel !== undefined ? ' agent-avatar--inline' : ''}${displayState ? ` status status--${displayState}` : ''}`}
       style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}
       type={onOpen || actionDisclosure ? 'button' : undefined} tabIndex={0} role={onOpen || actionDisclosure ? undefined : 'img'} aria-label={actionDisclosure ? `${accessibleName} · Agent status and actions` : accessibleName}
       aria-describedby={position ? panelId : undefined} aria-expanded={actionDisclosure ? Boolean(position) : undefined} aria-controls={actionDisclosure ? panelId : undefined} data-executor-id={resolvedExecutorId}
@@ -297,24 +314,17 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
         const firstAction = panel.current.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
         if (!firstAction) return
         event.preventDefault()
-        firstAction.focus()
+        firstAction.focus({ preventScroll: true })
       }}
       onKeyDown={(event) => { if (event.key === 'Escape') { closeToTrigger(); event.stopPropagation() } }}
       onClick={actionDisclosure ? (event) => {
         event.stopPropagation()
         if (pinned.current) closeToTrigger()
         else { show(); pinned.current = true }
-      } : onOpen ? (event) => { event.stopPropagation(); if (disclosure) closeNow(); onOpen() } : undefined}>
-      <span className="agent-avatar__contour" aria-hidden="true">
-        {avatar?.tint ? <AgentEnamelFilter id={filterId} tint={avatar.tint} className="agent-avatar__mark" filterClassName="agent-avatar__filters">{mark}</AgentEnamelFilter>
-          : <span className="agent-avatar__mark">{mark}</span>}
-      </span>
-      {displayState === 'working'
-        ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
-        : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
-      {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
+      } : onOpen ? (event) => { event.stopPropagation(); if (disclosure || inlineLabel !== undefined) closeNow(); onOpen() } : undefined}>
+      {inlineLabel === undefined ? face : <><span className="agent-avatar__face">{face}</span><span className="agent-avatar__label">{inlineLabel}</span></>}
     </Element>
-    {position && overlayHost ? createPortal(<div ref={panel} id={panelId} className={`agent-identity-popover${actionDisclosure ? ' agent-identity-popover--actions' : disclosure ? ' recent-focus__context-preview' : ''}`} role={disclosure ? 'tooltip' : 'dialog'} aria-label={actionDisclosure ? 'Agent status and actions' : disclosure?.label ?? 'Executor details'}
+    {position && overlayHost ? createPortal(<div ref={panel} id={panelId} className={`agent-identity-popover${actionDisclosure ? ' agent-identity-popover--actions' : disclosure ? ' recent-focus__context-preview' : ''}`} role={disclosure ? 'tooltip' : 'dialog'} aria-label={actionDisclosure ? 'Agent status and actions' : disclosure?.label ?? (inlineLabel === undefined ? 'Executor details' : 'Linked Agent details')}
       style={{ ...position, ...(disclosure ? { visibility: 'hidden' } : {}) }} onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) hideSoon() }}
       onKeyDown={(event) => { if (event.key === 'Escape') { closeToTrigger(); event.stopPropagation() } }}
@@ -325,7 +335,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       {actionDisclosure ? actionDisclosure({ close: closeNow }) : <><dl><dt>Provider</dt><dd>{agentProviderLabel(provider ?? '')}</dd>
         {resolvedExecutorId ? <><dt>Executor</dt><dd>{executor?.label ?? resolvedExecutorId} · {resolvedExecutorId}</dd></> : null}
         {statusLabel ? <><dt>Status</dt><dd>{statusLabel}</dd></> : null}</dl>
-      {statusDetail ? <p>{statusDetail}</p> : null}</>}</>}
+      {statusDetail ? <p>{statusDetail}</p> : null}{details}</>}</>}
     </div>, overlayHost) : null}
   </>
 }

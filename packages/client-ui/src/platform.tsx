@@ -3,6 +3,7 @@ import type { AgentProviderId } from '@agentmux/core'
 import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conversation-speaker.js'
 
 export type ClientUiIconName = 'neutral' | 'working' | 'failed'
+export type AgentLinkReference = { uri: string; agentSessionId: string; label?: string }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
@@ -20,9 +21,16 @@ export type ClientUiPlatform = {
   renderProjectIcon(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderProjectLabel(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderIcon(name: ClientUiIconName, size: number): ReactNode
+  /** Optional inline presentation of an exact Agent URI. The host owns facts and navigation. */
+  renderAgentLink?(reference: AgentLinkReference): ReactNode
 }
 
 const PlatformContext = createContext<ClientUiPlatform | null>(null)
+
+/** Standalone Markdown also works without a host adapter, retaining its original text. */
+export function useAgentLinkRenderer(): ClientUiPlatform['renderAgentLink'] {
+  return useContext(PlatformContext)?.renderAgentLink
+}
 
 /** Each application supplies one explicit adapter; there is no Desktop or browser IO default. */
 export function ClientUiProvider({ platform, children }: { platform: ClientUiPlatform; children: ReactNode }) {
