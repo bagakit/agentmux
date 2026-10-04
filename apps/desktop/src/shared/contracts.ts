@@ -1547,6 +1547,7 @@ export type AgentMuxDesktopApi = {
   }
   files: {
     readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
+    createPublic(params: AgentMuxRpcParams<'file.create'>): Promise<AgentMuxRpcResult<'file.create'>>
     list(workspaceId: string, path?: string, limit?: number): Promise<import('@agentmux/core').FileNameListing>
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>

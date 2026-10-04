@@ -8,7 +8,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, type AgentMuxRpcFileUploadsOwner, type FileMethod } from './public-rpc-files.js';
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
-import { isFileMethod, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
@@ -400,6 +400,14 @@ export class AgentMuxRpcService {
           : await this.ports.fileUploads.inspect(input)
         return parseFileUploadResult(result, input) as AgentMuxRpcResult<M>
       }
+      if (method === 'file.create') {
+        const input = parseFileCreateParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files ? await this.ports.files.create(input) : await this.ports.forwardControl!('file.create', input, context)
+        return parseFileCreateResult(result, input) as AgentMuxRpcResult<M>
+      }
+
       if (method === 'file.write') {
         const input = parseFileWriteParams(params)
         context.signal?.throwIfAborted()

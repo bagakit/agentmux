@@ -22,6 +22,9 @@ export type FileNameListing = { status: 'listed'; files: string[]; complete: boo
 export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileReadUnknown }
 /** Save an existing original text file; null revisions/new-file creation are outside this method. */
 export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResource'> & { expectedResource: FileReadResource; content: string; expectedRevision: string }
+/** Create one absent file at the exact original read mapping; never overwrite existing bytes. */
+export type FileCreateParams = Omit<FileWriteParams, 'expectedRevision'> & { expectedRevision: null }
+export type FileCreateResult = FileWriteResult
 export type FileWriteReceipt =
   | { status: 'written'; revision: string }
   | { status: 'conflict'; observedRevision: string | null }
@@ -46,13 +49,13 @@ export interface AgentMuxRpcFileUploadsOwner {
   upload(params: FileUploadParams): Promise<FileUploadResult>
   inspect(params: FileUploadIdentity): Promise<FileUploadResult>
 }
-export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.write': FileWriteParams;
+export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams;
   'file.upload': FileUploadParams; 'file.upload.inspect': FileUploadIdentity }
-export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.write': FileWriteResult;
+export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult;
   'file.upload': FileUploadResult; 'file.upload.inspect': FileUploadResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; write(params: FileWriteParams): Promise<FileWriteResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.write': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
+export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; write(params: FileWriteParams): Promise<FileWriteResult>; create(params: FileCreateParams): Promise<FileCreateResult> }
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.write': 'long', 'file.create': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
 export function isFileMethod(value: unknown): value is FileMethod { return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_FILE_METHODS, value) }
 
 const uploadFields = ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'] as const
@@ -186,17 +189,26 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
   return p as FileReadResult
 }
 
-export function parseFileWriteParams(value: unknown): FileWriteParams {
+function parseFileMutationParams(value: unknown): Record<string, unknown> {
   const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'content', 'expectedRevision'], code)
   const { content, expectedRevision, ...read } = p
   const original = resource(p.expectedResource, code, true) as FileReadResource
   parseFileReadParams({ ...read, expectedResource: { hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath } })
   parseFileReadResult({ resource: original, result: { status: 'directory' } }, read as FileReadParams)
   if (typeof content !== 'string') invalid('File content must be text.', code)
-  revision(expectedRevision, code)
+  return p
+}
+export function parseFileWriteParams(value: unknown): FileWriteParams {
+  const p = parseFileMutationParams(value)
+  revision(p.expectedRevision, 'INVALID_CONTROL_REQUEST')
   return p as FileWriteParams
 }
-export function parseFileWriteResult(value: unknown, params: FileWriteParams): FileWriteResult {
+export function parseFileCreateParams(value: unknown): FileCreateParams {
+  const p = parseFileMutationParams(value)
+  if (p.expectedRevision !== null) invalid('File creation requires explicit expected absence (null).', 'INVALID_CONTROL_REQUEST')
+  return p as FileCreateParams
+}
+function parseFileMutationResult(value: unknown, params: FileWriteParams | FileCreateParams): FileWriteResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
   const keys = r.status === 'written' ? ['status', 'revision'] : r.status === 'conflict' ? ['status', 'observedRevision']
     : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
@@ -210,3 +222,6 @@ export function parseFileWriteResult(value: unknown, params: FileWriteParams): F
   else { string(r.code, code); if (typeof r.message !== 'string') invalid('File write diagnostics must remain text.', code) }
   return p as FileWriteResult
 }
+
+export function parseFileWriteResult(value: unknown, params: FileWriteParams): FileWriteResult { return parseFileMutationResult(value, params) }
+export function parseFileCreateResult(value: unknown, params: FileCreateParams): FileCreateResult { return parseFileMutationResult(value, params) }
