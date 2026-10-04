@@ -109,11 +109,6 @@ export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' 
  */
 export { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 
-export type AgentMuxMessageQueueOptions = {
-  readonly maxMessages?: number
-  readonly maxBytes?: number
-}
-
 const processQueueTails = new Map<string, Promise<void>>()
 
 export type AgentMuxMessageJournalRecord =
@@ -131,9 +126,6 @@ type JournalCheck = Extract<AgentMuxMessageJournalRecord, { kind: 'consumer-chec
 type JournalAck = Extract<AgentMuxMessageJournalRecord, { kind: 'consumer-ack' }>
 type JournalRecord = AgentMuxMessageJournalRecord
 type DispatchProjection = { readonly sourceMessageId: string; readonly openedAt: number; readonly events: readonly DispatchEvent[] }
-
-const DEFAULT_MAX_MESSAGES = 2_048
-const DEFAULT_MAX_BYTES = 16 * 1024 * 1024
 
 function storageCause(error: unknown, depth = 0): Record<string, unknown> {
   if (!error || typeof error !== 'object') return { message: String(error) }
@@ -279,10 +271,7 @@ export class DurableAgentMuxMessageQueue {
   private readonly journal: JournalRecord[] = []
   private tail: Promise<unknown> = Promise.resolve()
 
-  constructor(
-    readonly path = defaultAgentMuxMessageQueuePath(),
-    private readonly options: AgentMuxMessageQueueOptions = {}
-  ) {
+  constructor(readonly path = defaultAgentMuxMessageQueuePath()) {
     this.queueId = queueIdFor(path)
   }
 
@@ -493,9 +482,6 @@ export class DurableAgentMuxMessageQueue {
     const line = `${JSON.stringify(record)}\n`
     const separator = this.content && !this.content.endsWith('\n') ? '\n' : ''
     const bytes = this.bytes + Buffer.byteLength(separator) + Buffer.byteLength(line)
-    if (bytes > (this.options.maxBytes ?? DEFAULT_MAX_BYTES)) {
-      throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
-    }
     const content = this.content + separator + line
     try { await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true }) }
     catch (error) { throw storageFailure('journal-publish', error) }
@@ -548,12 +534,8 @@ export class DurableAgentMuxMessageQueue {
         if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message id already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
-      const maxMessages = this.options.maxMessages ?? DEFAULT_MAX_MESSAGES
-      const maxBytes = this.options.maxBytes ?? DEFAULT_MAX_BYTES
       const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
-      const encodedBytes = Buffer.byteLength(`${JSON.stringify(record)}\n`)
-      if (this.messages.size >= maxMessages || this.bytes + encodedBytes > maxBytes) throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
       await this.appendRecord(record)
       return this.receipt(this.messages.get(messageId)!)
     }, true)
