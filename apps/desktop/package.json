@@ -66,7 +66,16 @@
     "ws": "8.21.3",
     "zod": "^4.0.0",
     "zustand": "^5.0.0",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "mermaid": "12.1.0",
+    "@viz-js/viz": "3.31.0",
+    "prettier": "3.9.10",
+    "smol-toml": "1.9.1",
+    "@plantuml/core": "1.2026.8",
+    "@excalidraw/excalidraw": "0.18.1",
+    "vega": "6.4.0",
+    "vega-lite": "6.5.0",
+    "vega-interpreter": "2.3.2"
   },
   "devDependencies": {
     "@electron/osx-sign": "2.7.1",
