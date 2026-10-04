@@ -17,8 +17,8 @@ export type WorkbenchProjection = {
   catalog: AgentMuxSpaceCatalog
   /** Current presentation composition; does not create a durable placement or resource. */
   composition?: WorkspaceLayout
-  /** Confirm exact occurrences; otherwise Zone loading uses member preferences. */
-  selectionMode?: 'occurrence'
+  /** A retained parent occurrence can present its Tab while its raw Region is unconfirmed. */
+  selectionMode?: 'occurrence' | 'parent-occurrence'
   selection: readonly WorkbenchProjectionSelection[]
   onSelect(reference: WorkbenchProjectionSelection): void
 }
@@ -54,7 +54,7 @@ export function workbenchProjectionTabReference(scope: WorkbenchProjection, grou
 }
 export function selectWorkbenchProjectionTab(scope: WorkbenchProjection, groupId: string, tab: WorkbenchTab, regionId?: string): void {
   const reference = workbenchProjectionTabReference(scope, groupId, tab, regionId)
-  if (scope.entity.kind === 'zone' && scope.selectionMode !== 'occurrence' || scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference))) scope.onSelect(reference)
+  if (scope.entity.kind === 'zone' && scope.selectionMode === undefined || scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference))) scope.onSelect(reference)
 }
 
 export function sameWorkbenchProjectionSelection(a: WorkbenchProjectionSelection | null, b: WorkbenchProjectionSelection): boolean {
@@ -81,10 +81,16 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
   layout = scope.composition ?? layout
   const issues: string[] = []
   const memberIds = workbenchProjectionTabIds(scope)
-  const automaticZoneSelection = scope.entity.kind === 'zone' && scope.selectionMode !== 'occurrence'
+  const automaticZoneSelection = scope.entity.kind === 'zone' && scope.selectionMode === undefined
   const entityKnown = scope.entity.kind === 'zone' ? Boolean(workbenchProjectionZone(scope)) : memberIds.size > 0
   if (!entityKnown || !layout) return { layout: null, issues: ['The original entity or its display layout is still restoring. Its exact reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
   const members = new Map(scope.catalog.tabs.filter(tab => memberIds.has(tab.tabId)).map(tab => [tab.tabId, tab]))
+  // Zero authoritative members is an empty Zone; missing loaded content is not.
+  if (scope.entity.kind === 'zone' && members.size === 0 && scope.selection.length === 0) {
+    const zone = workbenchProjectionZone(scope)!
+    if (zone.kind === 'unknown') return { layout: null, issues: [zone.issue ?? 'The original Zone resource is still unconfirmed. Its reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
+    return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], unsupportedTabIds: new Set(), selection: [] }
+  }
   const placements = new Map<string, Set<string>>()
   for (const location of scope.entity.kind === 'zone' ? [] : scope.catalog.locations) {
     if (!workbenchProjectionMatches(scope, location) || location.displayWorkspaceId !== scope.displayWorkspaceId || !members.has(location.tabId)) continue
@@ -108,9 +114,15 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
       continue
     }
     const reference = references[0]!
+    const parentLocations = scope.selectionMode === 'parent-occurrence' && scope.entity.kind !== 'region' &&
+      tabs[reference.tabId] && !Object.hasOwn(tabs[reference.tabId]!.regions, reference.regionId)
+      ? scope.catalog.locations.filter(location => workbenchProjectionMatches(scope, location) &&
+        location.displayWorkspaceId === reference.displayWorkspaceId && location.groupId === reference.groupId &&
+        location.tabId === reference.tabId && tabs[reference.tabId]?.regions[location.regionId]) : []
+    const parentConfirmed = parentLocations.length > 0 && new Set(parentLocations.map(location => location.regionId)).size === parentLocations.length
     if (!inTree.has(groupId) || !layout.groups.some(group => group.id === groupId && group.tabOrder.includes(reference.tabId)) ||
-      !scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference)) ||
-      !tabs[reference.tabId]?.regions[reference.regionId]) {
+      !parentConfirmed && (!scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference)) ||
+      !tabs[reference.tabId]?.regions[reference.regionId])) {
       issues.push('The selected original Tab or Region occurrence is still restoring. Its exact reference is kept.')
       continue
     }
@@ -144,7 +156,7 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
   const confirmedActiveGroupId = activeGroupId && selected.has(activeGroupId) && visibleGroupIds.has(activeGroupId) ? activeGroupId
     : selected.size === 1 ? [...selected.keys()][0]
     : selected.has(layout.activeGroupId) && visibleGroupIds.has(layout.activeGroupId) ? layout.activeGroupId : null
-  const projectedActiveGroupId = scope.selectionMode === 'occurrence' ? confirmedActiveGroupId ?? ''
+  const projectedActiveGroupId = scope.selectionMode !== undefined ? confirmedActiveGroupId ?? ''
     : activeGroupId && visibleGroupIds.has(activeGroupId) ? activeGroupId
     : visibleGroupIds.has(layout.activeGroupId) ? layout.activeGroupId : ''
   return { layout: { root, groups, activeGroupId: projectedActiveGroupId }, issues, unsupportedTabIds, selection: [...selected.values()] }

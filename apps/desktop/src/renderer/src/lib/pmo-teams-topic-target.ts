@@ -25,8 +25,8 @@ function nonAgentStatus(region: WorkbenchSurface | undefined): string {
   }
 }
 
-export function moteTargetStatus(tab: WorkbenchTab | undefined, session: SessionSnapshot | undefined, tabId: string | undefined): string {
-  const region = tab?.regions[tab.layout.activeRegionId]
+export function moteTargetStatus(tab: WorkbenchTab | undefined, session: SessionSnapshot | undefined, tabId: string | undefined, regionId: string | null = tab?.layout.activeRegionId ?? null): string {
+  const region = regionId ? tab?.regions[regionId] : undefined
   return session ? sessionStatusLabel(session)
     : !tabId ? 'No Agent yet' : !tab ? 'Restoring context' : nonAgentStatus(region)
 }
@@ -36,6 +36,9 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const topicId = useAppStore(state => pmoTeamsTopicFloatingTargetTopicId(floating, state.tabs))
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector(floating), [floating.targetTopicId, floating.targetTabId])
   const tabId = useAppStore(selectTab)
+  const unresolvedTabs = useAppStore(state => !tabId && floating.targetTabId !== null ? state.tabs : null)
+  const selectionUnconfirmed = useMemo(() => Boolean(unresolvedTabs && Object.values(unresolvedTabs).some(tab =>
+    tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId)), [unresolvedTabs, topicId])
   const tab = useAppStore((state) => {
     const candidate = tabId ? state.tabs[tabId] : undefined
     return candidate?.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topicId ? candidate : undefined
@@ -45,7 +48,10 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   // Unlike activeWorkbenchSurface, a missing active Region must stay unknown;
   // it cannot borrow the title Region's Agent status.
-  const region = tab?.regions[tab.layout.activeRegionId]
+  const reference = floating.reference
+  const regionId = reference ? reference.tabId === tabId ? reference.regionId : undefined
+    : reference === null ? undefined : tab?.layout.activeRegionId
+  const region = regionId ? tab?.regions[regionId] : undefined
   const session = region?.kind === 'agent'
     ? sessions.find((session) => session.id === region.sessionId && session.kind === 'agent')
     : undefined
@@ -56,7 +62,7 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const name = useMemo(() => tab
     ? workbenchTabDisplayName(tab, sessions, names, timelines)
     : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, moteName])
-  const statusText = moteTargetStatus(tab, session, tabId)
+  const statusText = selectionUnconfirmed ? 'Choose discussion' : moteTargetStatus(tab, session, tabId, regionId ?? null)
   const label = name === moteName ? moteName : `${moteName} · ${name}`
   return { topicId, tabId, tab, region, session, name, moteName, label, statusText }
 }

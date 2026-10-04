@@ -1,7 +1,7 @@
 import { rendererPerformance } from '../lib/renderer-performance'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
-import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
+import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
@@ -35,6 +35,10 @@ import {
 import { terminalPathLinksInBuffer, terminalPathLinkAtBufferCell } from '../lib/terminal-link-range'
 import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
+import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
+import { openSessionFileLink } from '../lib/session-link-opening'
+import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
+import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
 import { createTerminalPasteInput, installTerminalPasteSanitizer, pasteIntoTerminal, type TerminalPasteTarget } from '../lib/terminal-paste'
 import {
   terminalCopyOutcome,
@@ -126,7 +130,7 @@ const SEARCH_TOGGLES: ReadonlyArray<{
   { key: 'wholeWord', label: 'Match whole word', glyph: 'ab|' }
 ])
 
-type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number }
+type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number; origin: OpenHttpLinkOrigin; presentation: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'> }
 type TerminalLinkPreviewContent =
   | { kind: 'http'; url: string }
   | { kind: 'file'; label: string; system: boolean }
@@ -210,6 +214,8 @@ export function TerminalView({
   const switchReaderRef = useRef<(() => RendererTabSwitchTerminal | null) | null>(null)
   const presentation = useWorkbenchBrowserPresentation()
   const reference = presentation.reference
+  const displayOrigin: OpenHttpLinkOrigin = reference ? { ...linkOrigin,
+    workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId: reference.tabId } : linkOrigin
   const switchTarget = useMemo(() => reference && linkOrigin.regionId ? { ...reference,
     regionId: linkOrigin.regionId, presentationId: presentation.projection?.presentationId ?? presentation.surface ?? 'space' } : null,
   [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, linkOrigin.regionId, presentation.projection?.presentationId, presentation.surface])
@@ -229,6 +235,10 @@ export function TerminalView({
    * through a ref when the modifier fast-path opens a link from inside the effect closure. */
   const linkOriginRef = useRef(linkOrigin)
   linkOriginRef.current = linkOrigin
+  const displayOriginRef = useRef(displayOrigin)
+  displayOriginRef.current = displayOrigin
+  const presentationRef = useRef(presentation)
+  presentationRef.current = presentation
   /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
   const linkPressRef = useRef<{ x: number; y: number } | null>(null)
   const linkPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -332,7 +342,6 @@ export function TerminalView({
   }, [linkPreview])
   useLayoutEffect(clearLinkPreview, [fontSize])
   const openHttpLink = useAppStore((state) => state.openHttpLink)
-  const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
   const workspaceIsLocal = useAppStore((state) =>
     state.config?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local'
@@ -552,7 +561,7 @@ export function TerminalView({
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
       // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
-        void openHttpLink(linkOriginRef.current, url, 'system').catch(reportError)
+        void openHttpLink(displayOriginRef.current, url, 'system', presentationRef.current).catch(reportError)
         return
       }
       const request = {
@@ -560,7 +569,9 @@ export function TerminalView({
         url,
         x: event.clientX,
         y: event.clientY,
-        terminalGeneration
+        terminalGeneration,
+        origin: displayOriginRef.current,
+        presentation: presentationRef.current
       }
       linkRequestRef.current = request
       setLinkRequest(request)
@@ -672,7 +683,23 @@ export function TerminalView({
                 link: match,
                 local: workspaceIsLocalRef.current,
                 openSystem: (path) => api.files.openSystem(linkOriginRef.current.workspaceId, path),
-                openFile: async (link) => { await openFile(link.path, linkOriginRef.current.tabGroupId, location, linkOriginRef.current.workspaceId) }
+                openFile: async (link) => {
+                  const origin = { ...displayOriginRef.current, sessionId: displayOriginRef.current.sessionId ?? session.id }
+                  const state = useAppStore.getState()
+                  const context = createSessionProjectFileContextSelector(origin.sessionId, origin)(state)
+                  const presentation = presentationRef.current
+                  const local = presentation.surface === 'mote' || presentation.surface === 'survey'
+                  const focus = presentation.surface === 'focus' || presentation.surface === undefined && state.mainSurface === 'agents'
+                  const destination = local || focus && resolveFocusLinkDestination(state.config?.focus?.linkDestination) === 'region' ? 'right' : 'tab'
+                  const filePresentation = { ...presentation, ...(presentation.onSelectRegion ? { onSelectRegion: (regionId: string) => {
+                    const current = presentationRef.current
+                    const parent = (value: WorkbenchPresentation) => value.reference ? { ...value.reference, regionId: origin.regionId! } : null
+                    const heldParent = parent(presentation), currentParent = parent(current)
+                    if (current.surface !== presentation.surface || (heldParent ? !sameWorkbenchProjectionSelection(currentParent, heldParent) : currentParent !== null)) return
+                    current.onSelectRegion?.(regionId)
+                  } } : {}) }
+                  await openSessionFileLink(origin, context, link.path, location, destination, presentation.surface, filePresentation)
+                }
               }).catch(reportError)
             },
             hover: (event: MouseEvent) => {
@@ -1856,7 +1883,7 @@ export function TerminalView({
       </TerminalContextMenu>
       <OpenDestinationPopover
         request={linkRequest}
-        canSplit={Boolean(linkOrigin.tabId && linkOrigin.regionId)}
+        canSplit={Boolean(linkRequest?.origin.tabId && linkRequest.origin.regionId)}
         onDismiss={(requestId) => {
           setLinkRequest((current) => {
             const next = dismissTerminalLinkRequest(current, requestId)
@@ -1869,7 +1896,7 @@ export function TerminalView({
           if (!request || linkRequestRef.current?.id !== request.id) return
           linkRequestRef.current = null
           setLinkRequest((current) => dismissTerminalLinkRequest(current, request.id))
-          void openHttpLink(linkOrigin, request.url, destination).catch(reportError)
+          void openHttpLink(request.origin, request.url, destination, request.presentation).catch(reportError)
         }}
       />
     </Fragment>

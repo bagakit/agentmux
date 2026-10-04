@@ -1,7 +1,9 @@
+import { createRequire } from 'node:module'
 import { act, createElement, Fragment, type ReactNode } from 'react'
 import { createClientUiRoot as createRoot } from '../helpers/client-ui-render'
 import { expect, vi } from 'vitest'
 
+vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // Keep App, Settings, Workbench, SessionPane, Composer and every UI owner real.
 // Native terminal attachment and Markdown rendering are outside this DOM proof.

@@ -107,6 +107,7 @@ export function paneGroupFocusClass(
  * 被夺走恰恰只由后者决定：
  *   - 键盘方向导航（`Cmd+Alt+方向`）搬焦点时，用户看不见的 DOM 焦点还停在原来那格的 xterm/Monaco 上，
  *     不主动搬过去，敲的字就全进了上一格——这正是本判定要修的缺陷（绿环移了、键入没移）。
+ *   - 外部入口显式打开目标（navigation）也搬 caret；鼠标点的是目录入口，并未点进目标编辑器。
  *   - `onPointerDown` 落焦时**不能**搬：浏览器/xterm 的原生 mousedown 已经把 DOM 焦点放到了点中的位置，
  *     这里再 `.focus()` 一次会打断原生行为，还可能在一次文本选择的中途把焦点夺走。
  * 若让表面去读「我现在是不是焦点格」来决定搬 caret，指针点击那一路也会满足条件，于是每次点都夺焦——所以
@@ -115,11 +116,11 @@ export function paneGroupFocusClass(
  *
  * 未知的 cause 保守地**不**搬（返回 false）：宁可少搬一次（用户可再点一下），也不要在不该夺焦时夺焦。
  */
-export const REGION_FOCUS_CAUSES = ['keyboard', 'pointer', 'floating-pointer'] as const
+export const REGION_FOCUS_CAUSES = ['keyboard', 'navigation', 'pointer', 'floating-pointer'] as const
 export type RegionFocusCause = (typeof REGION_FOCUS_CAUSES)[number]
 
 export function regionFocusClaimsCaret(cause: RegionFocusCause): boolean {
-  return cause === 'keyboard'
+  return cause === 'keyboard' || cause === 'navigation'
 }
 
 /**
@@ -141,10 +142,10 @@ export function regionCaretFocusTargets(
 }
 
 /** Keep surviving source leaves readable without selecting a replacement Agent. */
-export function layoutForLogicalRegionFocus(layout: WorkspaceLayout, tabs: Record<string, WorkbenchTab>, retained?: { regionId: string; tabId: string } | null): WorkspaceLayout {
+export function layoutForLogicalRegionFocus(layout: WorkspaceLayout, tabs: Record<string, WorkbenchTab>, retained?: { regionId: string; tabId: string; groupId?: string } | null): WorkspaceLayout {
   if (!retained) return layout
   const source = tabs[retained.tabId]
-  const sourceGroup = source && layout.groups.find(group => group.tabOrder.includes(source.id))
+  const sourceGroup = source && layout.groups.find(group => (!retained.groupId || group.id === retained.groupId) && group.tabOrder.includes(source.id))
   if (sourceGroup) return { ...layout, activeGroupId: sourceGroup.id,
     groups: layout.groups.map(group => group.id === sourceGroup.id ? { ...group, activeTabId: source!.id } : group) }
   return { ...layout, groups: layout.groups.map(group => group.id === layout.activeGroupId ? { ...group, activeTabId: null } : group) }

@@ -35,7 +35,8 @@ import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { TransientErrorNotice } from './components/TransientErrorNotice'
 import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
 import { executionFocusSessionId } from './lib/agent-focus'
-import { executionFocusPresentation } from './lib/focus-tab-projection'
+import { executionFocusPresentation, mainFocusPresentation } from './lib/focus-tab-projection'
+import { mainRegionReference } from './lib/desktop-focus-navigation'
 import { api } from './lib/api'
 import { useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
@@ -108,7 +109,8 @@ function DesktopApp() {
       overlays: { settings: Boolean(settingsRoute), quickSwitcher: quickSwitchOpen },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
-        tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null } : null }
+        tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
+        regionId: floating.reference?.regionId ?? null } : null }
     desktopPresentationCommitted()
   })
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
@@ -161,6 +163,10 @@ function DesktopApp() {
   const surveyCatalog = spatialDirectory.catalog
   const selectMoteReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState(), current = readPmoTeamsTopicFloatingState(), tab = state.tabs[reference.tabId]
+    // A retained callback cannot reopen or retarget a later sidecar View choice.
+    // Async Region completion checks the original Tab's current local Region.
+    if (current && (current.open !== moteFloating.open || current.targetTabId !== moteFloating.targetTabId ||
+      current.targetTopicId !== moteFloating.targetTopicId || JSON.stringify(current.reference) !== JSON.stringify(moteFloating.reference))) return
     const topicId = pmoTeamsTopicFloatingTargetTopicId(current ?? moteFloating, state.tabs)
     if (!tab?.regions[reference.regionId] || tab.topicId !== topicId ||
       !workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
@@ -190,15 +196,27 @@ function DesktopApp() {
     return targets
   }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference,
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
+  const [focusView, setFocusView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
-    useAppStore.getState().selectExecutionFocusReference(reference, agentFocus.execution)
-  }, [agentFocus.execution])
-  const [focusRegionOnly, setFocusRegionOnly] = useState(false)
-  useEffect(() => setFocusRegionOnly(false), [agentFocus.execution.sessionId])
-  const focusPresentation = useMemo(() => mainSurface === 'agents'
-    ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
+    if (useAppStore.getState().selectMainRegion(reference, workbenchSpaceSelection)) setFocusView(value => value === 'region' ? 'region' : 'tab')
+  }, [workbenchSpaceSelection])
+  const selectFocusContext = useCallback((id: string, reference?: WorkbenchProjectionSelection) => {
+    setFocusView(useAppStore.getState().focusExecutionSession(id, reference) ? 'tab' : 'unconfirmed')
+  }, [])
+  useEffect(() => { setFocusView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
+  useEffect(() => { setFocusView(value => value === 'unconfirmed' ? 'tab' : value) }, [mainSurface])
+  const focusRegionOnly = focusView === 'region'
+  // The exact main choice survives closing only its Focus presentation.
+  const mainFocus = useMemo(() => mainSurface === 'agents'
+    ? mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
     : { projection: null, issue: null, references: [] },
-  [mainSurface, agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
+  [mainSurface, workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
+  const focusPresentation = useMemo(() => mainSurface === 'agents' && focusView !== 'closed'
+    ? focusView === 'unconfirmed'
+      ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference))
+      : mainFocus
+    : { projection: null, issue: null, references: [] },
+  [mainSurface, focusView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
   const timelineCurrentReference = useMemo(() => focusTimelineCurrentReference(workbenchSpaceSelection,
     workbenchSpaceSelection ? layouts[workbenchSpaceSelection.workspaceId] : undefined, tabs, surveyCatalog),
   [workbenchSpaceSelection, layouts, tabs, surveyCatalog])
@@ -207,19 +225,25 @@ function DesktopApp() {
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
-    if (!surveyCatalog || !state.surveyZoneSelection || state.surveyZoneSelection.zoneId !== surveySelection?.zoneId) return
+    if (!state.surveyZoneSelection || JSON.stringify(state.surveyZoneSelection) !== JSON.stringify(surveySelection)) return
+    const currentTopics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    const currentCatalog = spatialCatalog(state, currentTopics)
     const tab = state.tabs[reference.tabId]
-    const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, surveyCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
+    const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, currentCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
     const layout = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
-    if (!surveyCatalog || !tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
-      !spatialCatalog(state, surveyTopics ?? []).tabs.some(member => member.tabId === tab.id && member.zoneId === state.surveyZoneSelection!.zoneId)) return
+    if (!tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
+      !currentCatalog.tabs.some(member => member.tabId === tab.id && member.zoneId === state.surveyZoneSelection!.zoneId)) return
+    const surface = tab.regions[reference.regionId]
+    if (surface && isSessionSurface(surface)) state.focusExecutionSession(surface.sessionId, reference, { navigate: false })
     surveyOccurrence.current = reference
     state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
-  }, [surveySelection?.zoneId, surveyCatalog, surveyTopics])
-  const surveyProjection = useMemo(() => surveySelection && surveyCatalog
-    ? resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
-      surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference) : null,
-  [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference])
+  }, [surveySelection])
+  const surveyProjection = useMemo(() => {
+    if (!surveySelection || !surveyCatalog) return null
+    const projection = resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
+      surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference)
+    return projection
+  }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference])
   const surveyCurrentSelection = useMemo(() => surveySelection ? surveyResolvedZoneSelection(surveySelection, surveyProjection, surveyOccurrence.current) : null,
     [surveySelection, surveyProjection])
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
@@ -231,11 +255,12 @@ function DesktopApp() {
   const ordinaryTargets = useMemo(() => {
     const layout = ordinaryObject.layout
     if (!layout || !activeWorkspaceId) return {}
-    const held = retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
+    const reference = mainRegionReference(workbenchSpaceSelection)
+    const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
-    const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId)
+    const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
     return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsRoute }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsRoute, retainedSpatialFocus])
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsRoute, retainedSpatialFocus, workbenchSpaceSelection])
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, WorkbenchViewTarget[]> = {}
     const append = (tabId: string, target: WorkbenchViewTarget) => (targets[tabId] ??= []).push(target)
@@ -488,7 +513,7 @@ function DesktopApp() {
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface currentReference={timelineCurrentReference} visible={focusVisible} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div

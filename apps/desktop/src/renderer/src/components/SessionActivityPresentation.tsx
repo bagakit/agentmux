@@ -3,16 +3,14 @@ import { cloneElement, useCallback, useMemo, useRef, useState, type ComponentPro
 import { useAppStore } from '../store'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
-import { dismissOpenDestinationRequest, type OpenDestination, type OpenHttpLinkOrigin } from '../lib/open-destination'
-import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
-import { isMacPlatform } from '../lib/host-platform'
+import { useSessionLinkOpening } from '../lib/session-link-opening'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { ActivityView } from './ActivityView'
 import { AgentRegionHeader } from './AgentRegionHeader'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { SessionRegionHost } from './SessionRegionHost'
-import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
-import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
+import { OpenDestinationPopover } from './OpenDestinationBar'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 
@@ -45,38 +43,10 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
     { ...origin, workspaceId: reference.displayWorkspaceId }),
   [sessionId, origin, reference.displayWorkspaceId])
   const fileContext = useAppStore(selectFileContext)
-  const openFile = useAppStore(state => state.openFile)
-  const openHttpLink = useAppStore(state => state.openHttpLink)
-  const reportError = useAppStore(state => state.reportError)
   const [service, setService] = useState<string | null>(null)
-  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }) => {
-    selectRegion()
-    if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
-      setService('The rendered file resource or display occurrence changed. The Agent keeps running.')
-      return
-    }
-    void openFile(path, reference.groupId, location,
-      fileContext.project?.workspaceId ?? resourceOrigin.workspaceId, undefined,
-      fileContext.placement ? { ...fileContext.placement, displayWorkspaceId: reference.displayWorkspaceId } : undefined)
-      .then(opened => { if (!opened) setService('The file resource or this display occurrence could not be confirmed.') })
-      .catch(reportError)
-  }, [selectRegion, selectFileContext, fileContext, openFile, reference.groupId,
-    reference.displayWorkspaceId, resourceOrigin.workspaceId, reportError])
-  const [linkRequest, setLinkRequest] = useState<OpenDestinationRequest | null>(null)
-  const nextRequest = useRef(0)
-  const openProseLink = useCallback((url: string, event: LinkClickModifiers) => {
-    selectRegion()
-    if (terminalLinkModifierOpensSystemBrowser(event, isMacPlatform())) {
-      void openHttpLink(origin, url, 'system').catch(reportError)
-    } else setLinkRequest({ id: ++nextRequest.current, url, x: event.clientX, y: event.clientY })
-  }, [selectRegion, openHttpLink, origin, reportError])
-  const chooseDestination = useCallback((destination: OpenDestination) => {
-    if (!linkRequest) return
-    const request = linkRequest
-    setLinkRequest(current => dismissOpenDestinationRequest(current, request.id))
-    selectRegion()
-    void openHttpLink(origin, request.url, destination).catch(reportError)
-  }, [linkRequest, selectRegion, openHttpLink, origin, reportError])
+  const fileOpening = useSessionLinkOpening(origin, setService, selectRegion, target)
+  const openProjectFile = fileOpening.activateFile
+  const openProseLink = fileOpening.activateHttp
   const surfaceRef = useRef<HTMLElement>(null)
   const noteRef = useRef<ConversationAnnotationNoteHandle>(null)
   const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
@@ -112,8 +82,8 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
           {service && eligible ? <div role="status" className="activity-feed__read-notice">{service}</div> : null}
           <div className="agent-terminal-stage" hidden={!eligible} inert={!eligible}>{content}</div>
         </div>
-        <OpenDestinationPopover request={linkRequest} canSplit={Boolean(origin.tabId && origin.regionId)}
-          onDismiss={id => setLinkRequest(current => dismissOpenDestinationRequest(current, id))} onSelect={chooseDestination} />
+        <OpenDestinationPopover request={fileOpening.request} canSplit={fileOpening.canSplit}
+          onDismiss={fileOpening.dismiss} onSelect={fileOpening.choose} />
         <ConversationAnnotationNote ref={noteRef} sessionId={sessionId} regionRef={surfaceRef}
           active={visible && eligible && Boolean(onAnnotate)} {...(onAnnotate ? { onAnnotate } : {})} />
         {composer ? <div className="agent-input-stack" data-input-surface="activity" hidden={!eligible} inert={!eligible}>{composer}</div> : null}

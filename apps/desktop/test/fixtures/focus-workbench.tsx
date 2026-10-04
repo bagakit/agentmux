@@ -3,10 +3,9 @@ import { useCallback, useMemo } from 'react'
 import type { AppConfig, SessionSnapshot } from '../../src/shared/contracts'
 import { GlobalFocusSurface } from '../../src/renderer/src/components/GlobalFocusSurface'
 import { WorkspaceWorkbench } from '../../src/renderer/src/components/WorkspaceWorkbench'
-import { executionFocusPresentation } from '../../src/renderer/src/lib/focus-tab-projection'
+import { mainFocusPresentation } from '../../src/renderer/src/lib/focus-tab-projection'
 import { spatialCatalog } from '../../src/renderer/src/lib/space-agent-control'
 import { scratchTopicsForWorkspace } from '../../src/renderer/src/lib/scratch-topic-snapshots'
-import { isSessionSurface } from '../../src/renderer/src/lib/workbench-surface-kinds'
 import { workbenchProjectionSlotId, type WorkbenchProjection } from '../../src/renderer/src/lib/workbench-projection'
 import type { WorkbenchViewTargets } from '../../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../../src/renderer/src/store'
@@ -24,14 +23,14 @@ export function absoluteFocusFixtureInputs<T extends SessionSnapshot>(config: Ap
 export function FocusWorkbenchFixture({ workspaceId, showGlobal = true }: { workspaceId: string; showGlobal?: boolean }) {
   const state = useAppStore()
   const onSelect = useCallback<WorkbenchProjection['onSelect']>(reference => {
-    const current = useAppStore.getState(), surface = current.tabs[reference.tabId]?.regions[reference.regionId]
-    if (current.mainSurface === 'agents' && surface && isSessionSurface(surface)) current.focusExecutionSession(surface.sessionId, reference)
+    const current = useAppStore.getState()
+    if (current.mainSurface === 'agents') current.selectMainRegion(reference, current.workbenchSpaceSelection)
   }, [])
   const catalog = useMemo(() => spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots,
     state.config?.workspaces.find(workspace => workspace.id === '__scratch__')) ?? []),
   [state.config, state.tabs, state.layouts, state.sessions, state.spaceZoneBindings, state.scratchTopicSnapshots])
-  const presentation = useMemo(() => executionFocusPresentation(state.agentFocus.execution, state.tabs, catalog, onSelect),
-    [state.agentFocus.execution, state.tabs, catalog, onSelect])
+  const presentation = useMemo(() => mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, onSelect),
+    [state.workbenchSpaceSelection, state.tabs, catalog, onSelect])
   const projection = state.mainSurface === 'agents' ? presentation.projection : null
   const reference = projection?.selection[0]
   const viewTargets: WorkbenchViewTargets = reference && projection ? {

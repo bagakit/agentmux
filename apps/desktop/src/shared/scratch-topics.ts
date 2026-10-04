@@ -110,6 +110,8 @@ export type ScratchTopicSnapshot = {
   physicalDirectoryPath?: string
   /** Original durable directory identity, independent of a home relocation. */
   identityDirectoryPath?: string
+  /** Live exact addresses confirmed by the original Main directory owner; not a registry. */
+  confirmedDirectoryPaths?: readonly string[]
   topicPath: string
   title: string
   summary: string
@@ -119,6 +121,9 @@ export type ScratchTopicSnapshot = {
   collaborators: ScratchTopicCollaborator[]
   wiki?: TopicWikiSnapshot
 }
+
+/** Read-only original directory authority; independent of Topic/SOUL sidecar contents. */
+export type ScratchDirectoryFact = Pick<ScratchTopicSnapshot, 'id' | 'identityDirectoryPath' | 'physicalDirectoryPath' | 'confirmedDirectoryPaths' | 'readError'>
 
 export type TopicWikiSnapshot = {
   path: string
@@ -195,23 +200,34 @@ export function scratchWorkspaceFilePath(workspace: { id: string; path: string }
 
 export function scratchTopicIdFromWorkspacePath(
   scratchRoot: string,
-  workspacePath: string
+  workspacePath: string,
+  topics?: readonly ScratchTopicSnapshot[] | null
 ): string | null {
+  if (topics) {
+    const matches = topics.filter(topic => topic.confirmedDirectoryPaths?.includes(workspacePath) || topic.identityDirectoryPath === workspacePath || topic.physicalDirectoryPath === workspacePath)
+    if (matches.length) return matches.length === 1 ? matches[0]!.id : null
+  }
   for (const root of Object.values(scratchTopicStorageRoots(scratchRoot))) {
     if (!workspacePath.startsWith(`${root}/`) && !workspacePath.startsWith(`${root}\\`)) continue
     const relative = workspacePath.slice(root.length + 1)
     if (!relative || relative.includes('/') || relative.includes('\\')) return null
-    return scratchTopicIdFromDirectoryName(relative)
+    const id = scratchTopicIdFromDirectoryName(relative)
+    if (topics) {
+      const topic = topics.find(item => item.id === id)
+      return topic && topic.confirmedDirectoryPaths === undefined && !topic.readError ? id : null
+    }
+    return id
   }
   return null
 }
 
 export function workspaceOwnsSessionPath(
   workspace: { id: string; hostId: string; path: string },
-  session: { hostId: string; workspacePath: string }
+  session: { hostId: string; workspacePath: string },
+  topics?: readonly ScratchTopicSnapshot[] | null
 ): boolean {
   if (workspace.hostId !== session.hostId) return false
   if (workspace.path === session.workspacePath) return true
   return workspace.id === SCRATCH_WORKSPACE_ID &&
-    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) !== null
+    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics) !== null
 }

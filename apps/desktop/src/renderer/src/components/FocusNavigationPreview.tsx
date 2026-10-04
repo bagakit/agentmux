@@ -33,7 +33,7 @@ export function FocusNavigationPreview() {
     {visible.length ? <div className="focus-navigation-preview__rows">{visible.map(context => <div className="focus-navigation-preview__row" data-preview-session={context.id} data-bucket={context.bucket} key={context.id} title={context.originAddress}>
       <span className="focus-navigation-preview__avatar" aria-hidden="true">{context.kind === 'agent' ? <AgentProviderIcon {...(context.providerId ? { providerId: context.providerId } : {})} size={16} /> : <SquareTerminal size={15} />}</span>
       <span className="focus-navigation-preview__copy">
-        <span className="focus-navigation-preview__identity">{context.id === selectedId ? <small className="focus-navigation-preview__viewing">Viewing</small> : null}<strong>{context.name}</strong><small>{context.stateLabel}</small></span>
+        <span className="focus-navigation-preview__identity">{context.id === selectedId ? <small className="focus-navigation-preview__viewing">Focused</small> : null}<strong>{context.name}</strong><small>{context.stateLabel}</small></span>
         <span className="focus-navigation-preview__activity"><span>{context.workspaceName}</span><span aria-hidden="true"> · </span>{context.detail}</span>
       </span>
     </div>)}</div> : <p className="focus-navigation-preview__empty">{disconnected ? 'No active contexts' : 'No execution contexts yet'}</p>}

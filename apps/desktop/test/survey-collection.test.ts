@@ -76,10 +76,10 @@ it('keeps an arbitrary selected execution Zone outside the collection while pres
   const { directory, zoneId } = originalStore(), state = useAppStore.getState()
   const selected = surveyInitialZoneSelection(directory, zoneId, state.layouts, state.tabs, 'workspace')
   state.setSurveyZoneSelection(selected)
-  expect(selected.active).toEqual({ displayWorkspaceId: 'workspace', groupId: 'g', tabId: 'pure-agent', regionId: 'agent-region' })
+  expect(selected.active).toEqual({ tabId: 'pure-agent', regionId: 'agent-region' })
   expect(useAppStore.getState().surveyCollectedZones).toEqual({})
   expect(surveyZoneItems(directory, useAppStore.getState().surveyCollectedZones)).toEqual([])
-  expect(useAppStore.getState().surveyZoneSelection).toBe(selected)
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(selected)
 })
 it('does not mint an unknown explicit target or prune a confirmed reference when discovery is unavailable', () => {
   originalStore()
