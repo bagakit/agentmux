@@ -72,7 +72,7 @@ export function BrowserOperationStatus({
   const description = [identity, label, target].filter(Boolean).join(' · ')
   const canStop = Boolean(operation && !terminal)
   const canTakeControl = canStop && activity.control === 'agent'
-  const canReturnControl = canStop && activity.control === 'human'
+  const canReturnControl = activity.control === 'human'
   return (
     <span className="browser-operation-status" data-phase={phase} data-control={activity.control} data-operation-id={operation?.id}
       data-task-run-id={taskRun?.id} data-task-version={taskRun?.version}>
