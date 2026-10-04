@@ -1399,6 +1399,7 @@ export function recoveryCandidateSession(
     createdAt: candidate.createdAt,
     updatedAt: Math.max(candidate.updatedAt, Date.now()),
     processState: 'interrupted',
+    runUnobserved: true,
     status: {
       state: recovery.kind === 'pending' ? 'disconnected' : 'error',
       source: 'run-process',

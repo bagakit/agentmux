@@ -715,7 +715,7 @@ export function projectRuntimeEvent(
         ownsRunEvent(item, core.agentSessionId, core.run) &&
         core.evidence.observedAt >= item.status.observedAt
           ? (() => {
-              const { interruptionReason: _interruptionReason, ...current } = item
+              const { interruptionReason: _interruptionReason, runUnobserved: _runUnobserved, ...current } = item
               return {
                 ...current,
                 processState: core.state,
