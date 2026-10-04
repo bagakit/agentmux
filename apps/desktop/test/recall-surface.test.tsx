@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { openNotebookPage } from '../src/renderer/src/lib/recall-notebooks'
+import { reconcileNotesStorageResources } from '../src/renderer/src/lib/notes-storage-reconciliation'
 import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook-catalog'
 import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 // @vitest-environment happy-dom
@@ -8,7 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
-import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -807,4 +808,28 @@ it('reopens the original foreign-displayed Note when its hidden resource has no 
   expect(useAppStore.getState().layouts[workspace.id]?.groups.find(group => group.id === groupId)?.tabOrder).toContain(reference.tabId)
   expect(useAppStore.getState().recallZoneSelection?.active).toEqual(reference)
   expect(api.files.write).toHaveBeenCalledTimes(1); healthy()
+})
+
+it('creates the next page in the same original Notebook Zone after a managed directory move and durable round trip', async () => {
+  const files = noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  const before = useAppStore.getState(), reference = before.recallZoneSelection!.active!, zoneId = before.recallZoneSelection!.zoneId
+  const origin = before.tabs[reference.tabId]!.space!, oldResource = before.config!.workspaces.find(item => item.id === NOTES_WORKSPACE_ID)!
+  const moves = [{ from: oldResource.path, to: _hygiene_fixturePath("Notes moved with spaces") }]
+  await act(async () => {
+    const moved = reconcileNotesStorageResources(before, [], moves)
+    const config = { ...before.config!, workspaces: before.config!.workspaces.map(item => item.id === NOTES_WORKSPACE_ID ? { ...item, path: moves[0]!.to } : item) }
+    const graph = desktopSpatialGraph({ ...moved, config }, [])
+    useAppStore.setState({ config, spaceZoneBindings: desktopBindingsFromSpatial(graph) })
+  })
+  expect(useAppStore.getState().spaceZoneBindings[zoneId]?.spaceId).toBe(origin.spaceId)
+  const originalNoteId = before.recallNoteId
+  await dom.click('.survey-notebook-new-page')
+  await vi.waitFor(() => expect(useAppStore.getState().recallNoteId).not.toBe(originalNoteId))
+  await readyNoteRegion()
+  expect(catalog().zones.find(zone => zone.zoneId === zoneId)).toMatchObject({ kind: 'directory', directoryPath: moves[0]!.to })
+  const created = savedNotes().at(-1)!
+  expect(created.target).toMatchObject({ zoneId, sourceSpaceId: origin.spaceId, workspaceId: NOTES_WORKSPACE_ID, directoryPath: moves[0]!.to })
+  expect(useAppStore.getState().tabs[reference.tabId]?.space).toEqual(origin)
+  expect(useAppStore.getState().recallZoneSelection?.zoneId).toBe(zoneId)
+  expect(files.size).toBe(2); expect(Object.keys((await api.notebooks.read()).pages)).toHaveLength(2); healthy()
 })
