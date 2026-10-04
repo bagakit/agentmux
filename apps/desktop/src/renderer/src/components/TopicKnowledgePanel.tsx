@@ -8,6 +8,7 @@ import { scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { openKnowledgeSource } from '../lib/topic-knowledge-actions'
+import { topicKnowledgeObservationKey } from '../lib/topic-knowledge-observation'
 import { useAppStore } from '../store'
 import { TopicKnowledgeEditor, knowledgeSourceLabel, type KnowledgeEditTarget } from './TopicKnowledgeEditor'
 import { TopicMoveDialog, type TopicMoveTarget } from './TopicMoveDialog'
@@ -24,7 +25,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
   active?: boolean | undefined; workspace: WorkspaceRecord; topic?: ScratchTopicSnapshot | undefined; topics?: readonly ScratchTopicSnapshot[] | undefined
 }) {
   const categories = useAppStore(state => state.topicCategories)
-  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const observationKey = useAppStore(state => active ? topicKnowledgeObservationKey(state.spaceZoneBindings, topic?.id) : null)
   const [fact, setFact] = useState<KnowledgeTopic | null>(null), [entries, setEntries] = useState<TopicKnowledgeItem[]>([])
   const [query, setQuery] = useState(''), [search, setSearch] = useState(''), [attempt, setAttempt] = useState(0)
   const [selected, setSelected] = useState<TopicKnowledge | null>(null), [edit, setEdit] = useState<KnowledgeEditTarget | null>(null)
@@ -51,7 +52,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
       setSelectedDocument(previous => previous ? knowledge.documents.find(document => documentKey(document) === documentKey(previous)) ?? (knowledge.unavailable.length ? previous : null) : null)
     }).catch(cause => { if (live) setError(presentError(cause)) }).finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [active, topic?.id, search, attempt, bindings])
+  }, [active, topic?.id, workspace.id, workspace.hostId, workspace.path, search, attempt, observationKey])
   const current = categories.filter(category => fact?.categorySpaceIds.includes(category.spaceId))
   const sourceTopic = selected ? topics.find(candidate => candidate.id === selected.topicId) ?? (topic?.id === selected.topicId ? topic : undefined) : topic
   const rootPath = sourceTopic ? scratchTopicLogicalPath(workspace, sourceTopic) : null

@@ -4,11 +4,11 @@ import { MoteWorkfaceContext, useMoteWorkfaceScope } from '../lib/mote-workface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 /** Mote supplies object context; the shared Space owns files and persona tools. */
-export function MoteWorkface({ workspaceId, topicId, floating = false, onTabSelect, children }: {
+export function MoteWorkface({ workspaceId, topicId, floating = false, visible = true, onTabSelect, children }: {
   workspaceId: string; topicId?: string | undefined; floating?: boolean; visible?: boolean
   onTabSelect?: ((tabId: string, groupId?: string) => void) | undefined; children: ReactNode
 }) {
-  const scope = useMoteWorkfaceScope(workspaceId, topicId)
+  const scope = useMoteWorkfaceScope(workspaceId, topicId, visible)
   const context = useMemo(() => scope ? { ...scope, floating,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
   } : null, [scope, floating, onTabSelect, workspaceId])

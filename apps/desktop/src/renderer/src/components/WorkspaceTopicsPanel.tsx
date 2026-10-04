@@ -84,7 +84,7 @@ export function WorkspaceTopicsPanel({
   const renameScratchTopic = useAppStore((state) => state.renameScratchTopic)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
-  const { topics, error: readError } = useScratchTopics(workspace.id)
+  const { topics, error: readError } = useScratchTopics(workspace.id, visible)
   const [pending, setPending] = useState<string | null>(null)
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
