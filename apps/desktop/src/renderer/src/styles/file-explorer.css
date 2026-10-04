@@ -46,13 +46,16 @@
   align-items: center;
   gap:var(--sp-3);
   padding:0 var(--sp-3);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-3);
-  background: var(--bg);
+  background: var(--surface-0);
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .file-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text-2); background: transparent; font-size: var(--fs-micro); }
-.file-search:focus-within { border-color: var(--focus-line); }
+.file-search:focus-within { border-color: var(--focus-line); background: var(--bg); }
+@media (prefers-reduced-motion: reduce) { .file-search { transition: none; } }
+@media (forced-colors: active) { .file-search { border-color: ButtonText; } }
 .explorer-header__actions button:focus-visible, .tree-row__label:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .file-tree { position: relative; min-height: 0; overflow: auto; padding:var(--sp-1) var(--sp-2) var(--sp-5); outline: none; }
 .file-tree__prefix { display: flow-root; }

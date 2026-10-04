@@ -377,6 +377,7 @@ export function SurfaceToolDock({
       <header className={`surface-tool-activitybar surface-tool-activitybar--space ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
         <nav aria-label="Space tool selection">
+          <LiquidSelectionSurface selected={selectedTool} active={visible} targetAttribute="data-space-tool" />
           {tools.map((tool) => {
             const Icon = tool.icon
             return (
@@ -384,6 +385,7 @@ export function SurfaceToolDock({
                 key={tool.id}
                 type="button"
                 className={selectedTool === tool.id ? 'selected' : ''}
+                data-space-tool={tool.id}
                 aria-label={tool.label}
                 aria-pressed={selectedTool === tool.id}
                 title={`${tool.label} — ${tool.description}`}
