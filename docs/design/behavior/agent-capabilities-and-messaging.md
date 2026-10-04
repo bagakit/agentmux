@@ -369,7 +369,6 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 - **验收修正：发送成功必须意味着收件 Agent 实际收到可读来源和原始正文，且 Core 已按真实 Session/Run 与已解析目标核验身份。** CLI 环境变量只是身份线索，不是权威；Desktop 不得忽略结构化来源后只投递裸正文。可读表达归下节约束，目标的完整关联留在持久事实中。Control requestId 仍只作请求关联；同一消息的重试必须复用稳定的消息身份。
 - **持久队列的唯一写入权属于 AgentMux Core。** 同一路径即使遇到多个进程或多个对象并发，也必须保持全局唯一、递增的顺序号和可重放的完整记录；队列所在位置不得受 ctxmux 版本化临时端点回收影响。失去持久写入确认时明确拒绝入队并告知状态，不能宣称已投递或判定健康 Agent 死亡。
 - **身份授权必须在 Core 里完成，不能把 `AGENTMUX_AGENT_SESSION_ID` 或 Control caller 字段当凭证。** 受管 Agent 的 send 必须携带当前 Run 的 invocation capability，由 Core 核对 capability hash、Session 和 Run；没有 capability 或 capability 属于旧 Run 的请求必须拒绝，健康 Agent 仍可继续工作。
-- **跨 Host 新建仍保留真实初始作者。** 来源 Core 以原权限核验自己的 Session/Run；目标 Core 不将来源 Session 当作本地 Session，也不接收原始 capability 作为通用跨 Host 凭据。目标只沿有明确可信依据的跨 Host 准入消费已核来源，并将来源 owner、作者 Session/Run、目标 owner/Session、原创建 operation 与正文绑定。普通创建参数、来源头或自报的 verified 字段不能提升为认证事实；伪造作者、错误目标或无效授权在产生进程前拒绝。受托转发须可辨谁验证了作者、谁以哪份实际授权转交；转发者的传输认证不冒充目标独立验证来源凭据或签名。原持久消息与投递回执继续持有事实，不另建消息网络或第二份身份账本。
 - **队列写入必须能从写入者崩溃中恢复，且回收不能碰掉新写入者。** 同一路径的跨进程排他性以系统可随进程退出释放的事务锁为准；遗留的孤儿 `.lock` 文件不得阻断新写入。并发恢复后每条消息仍只能占一个唯一、连续的顺序号，健康 Agent 不能永久收到 backpressure。
 - **相同 `messageId` 是重试的幂等身份，跨新的 Control request/operation 与 createdAt 仍返回原 receipt；冲突正文、目标或来源必须拒绝。** Region/Tab 只是寻址输入，落盘 envelope 和收件信封必须写入解析后的真实 recipient Session/Run。
 - `agentmux send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
