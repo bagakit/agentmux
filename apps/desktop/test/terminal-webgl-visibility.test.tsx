@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -47,6 +48,7 @@ vi.mock('@xterm/xterm', async () => {
     }
     open(root: HTMLElement) { this.element = document.createElement('div'); root.append(this.element) }
     focus() {}
+    onUserInput() { return { dispose() {} } }
     onRender() { return { dispose() {} } }
     onSelectionChange() { return { dispose() {} } }
     getSelection() { return '' }
@@ -93,12 +95,12 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
 } } }))
 vi.mock('../src/renderer/src/store', () => {
   const state = {
-    config: null, regionCaretFocus: null,
+    config: null, regionCaretFocus: null, demandPmoTabIds: {}, demands: {}, sessions: [], tabs: {}, layouts: {}, noticeReadReceipts: {},
     clearRegionCaretFocus: vi.fn(), recoverSession: vi.fn(),
     openHttpLink: vi.fn(), openFile: vi.fn(), reportError: vi.fn()
   }
   return { useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
-    getState: () => state
+    getState: () => state, setState: vi.fn()
   }) }
 })
 vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
@@ -169,7 +171,9 @@ async function hiddenOutput(data: string, startByte: number) {
 }
 
 it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshes the same terminal on reveal', async () => {
+  const beforeCosts = rendererPerformance.snapshot().terminalWrites.hidden.count
   await render(true)
+  expect(rendererPerformance.snapshot().terminals).toMatchObject([{ sessionId: session.id, runId: session.control.run.runId, visible: true }])
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(1)
   const terminal = fixture.terminals[0]!
@@ -183,6 +187,8 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   // Split an ANSI parser sequence across separate hidden writes, in byte order.
   await hiddenOutput('\u001b[3', 7)
   await hiddenOutput('1mhidden\u001b[0m', 10)
+  expect(rendererPerformance.snapshot().terminalWrites.hidden.count).toBeGreaterThan(beforeCosts)
+  expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ visible: false, visibleSinceAt: null, liveReady: true, acceptsInput: true, queuedBytes: 0 })
   expect(terminal.written).toEqual(['before ', '\u001b[3', '1mhidden\u001b[0m'])
   expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before hidden')
   expect(terminal.dispose).not.toHaveBeenCalled()
@@ -206,6 +212,7 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(second.disposed).toHaveBeenCalledOnce()
   await act(async () => root!.unmount())
   root = null
+  expect(rendererPerformance.snapshot().terminals).toEqual([])
   expect(terminal.dispose).toHaveBeenCalledOnce()
   expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
   expect(fixture.unsubscribe).toHaveBeenCalledOnce()
@@ -222,4 +229,22 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(1)
   expect(fixture.terminals[0]!.refresh).toHaveBeenCalledWith(0, 23)
+})
+
+it('reports a visible terminal awaiting attachment as unready, then observes the same Run becoming interactive', async () => {
+  const attached = await fixture.attach.getMockImplementation()!()
+  let resolveAttach!: (value: unknown) => void
+  fixture.attach.mockReturnValue(new Promise(resolve => { resolveAttach = resolve }))
+  await act(async () => root!.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin} />))
+  expect(rendererPerformance.snapshot().terminals).toMatchObject([{ runId: 'run-retained', visible: true, revealed: false, liveReady: false, acceptsInput: false, replaying: true, readySinceAt: null }])
+  await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: {
+    type: 'terminal-output', run: session.control.run, data: 'live', dataBytes: new TextEncoder().encode('live'),
+    evidence: { outputByteRange: { startByte: 7, endByte: 11 } }
+  } } as RuntimeEvent))
+  expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ pendingItems: 1, pendingBytes: 4 })
+  await act(async () => { resolveAttach(attached); await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain('before ')) })
+  const current = rendererPerformance.snapshot().terminals[0]!
+  expect(current).toMatchObject({ runId: 'run-retained', visible: true, liveReady: true, acceptsInput: true, replaying: false, pendingItems: 0, pendingBytes: 0 })
+  expect(current.readySinceAt).toBeGreaterThanOrEqual(current.visibleSinceAt!)
+  expect(fixture.attach).toHaveBeenCalledOnce(); expect(fixture.detach).not.toHaveBeenCalled()
 })

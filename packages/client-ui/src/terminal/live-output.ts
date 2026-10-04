@@ -79,6 +79,8 @@ export class TerminalLiveOutputQueue implements Iterable<TerminalLiveItem> {
   }
 
   get length(): number { return this.count }
+  /** Raw queued live bytes; snapshots retain their separate Runtime bound. O(1). */
+  get byteLength(): number { return this.bytes }
 
   *[Symbol.iterator](): Iterator<TerminalLiveItem> {
     for (let node = this.head; node; node = node.next) yield node.item

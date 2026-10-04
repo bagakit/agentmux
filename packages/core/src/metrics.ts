@@ -1,3 +1,5 @@
+import type { RendererPerformanceSnapshot } from './renderer-performance.js'
+export type * from './renderer-performance.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxRuntimeResourceSnapshot } from './types.js'
 import type { RuntimeStorageUsage } from './runtime-storage-usage.js'
@@ -32,7 +34,7 @@ export type MetricsSource<T> = {
   observedAt: number | null; lastSuccessAt: number | null; reason: string | null; data: T | null
 }
 export type MetricsWindow = { windowId: number; webContentsId: number; generation: number }
-export type MetricsRenderer = { window: MetricsWindow; counts: RendererResourceOwnerCounts }
+export type MetricsRenderer = { window: MetricsWindow; counts: RendererResourceOwnerCounts; performance: RendererPerformanceSnapshot }
 export type MetricsRendererRequest = { operation: 'metrics.renderer'; requestId: string; window: MetricsWindow }
 export type MetricsRendererResult = MetricsRenderer & { operation: 'metrics.renderer'; observedAt: number }
 export type MetricsObservation = {
@@ -76,11 +78,36 @@ const array = (parse: Parser): Parser => v => {
 const windowParser = record({ windowId: count, webContentsId: count, generation: count })
 const countsParser = record({ monacoEditors: nullable(count), monacoModels: nullable(count), documents: count,
   runtimeSubscriptions: count, terminalViews: count, terminalAddons: count, terminalListeners: count })
+const boolean: Parser = v => { if (typeof v !== 'boolean') invalid() }
+const timingParser = record({ count, totalMs: number, maxMs: number })
+const consumerParser = record({ checks: count, changes: count, commits: count })
+const visibilityParser = record({ visible: consumerParser, hidden: consumerParser })
+const boundedArray = (max: number, parse: Parser): Parser => v => {
+  if (!Array.isArray(v) || v.length > max) invalid()
+  for (const item of v) parse(item)
+}
+const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
+  selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
+  consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }), sessionEvents: timingParser,
+  terminalWrites: record({ visible: timingParser, hidden: timingParser, stringCodeUnits: count, bytes: count }),
+  inputDelay: record({ state: v => { if (!['observing','unsupported','stopped','unavailable'].includes(v as string)) invalid() },
+    reason: nullable(text), durationThresholdMs: literal(16), timing: timingParser }),
+  longTasks: record({ state: v => { if (!['observing','unsupported','stopped','unavailable'].includes(v as string)) invalid() }, reason: nullable(text), timing: timingParser }),
+  terminals: boundedArray(64, record({ sessionId: identity, runId: identity, regionId: nullable(identity),
+    visible: boolean, visibleSinceAt: nullable(number), readySinceAt: nullable(number), revealed: boolean, liveReady: boolean, acceptsInput: boolean,
+    replaying: boolean, inFlightWrites: count, queuedItems: count, queuedBytes: count, pendingItems: count, pendingBytes: count,
+    cols: count, rows: count, normalLines: count, alternateLines: count })), omittedTerminals: count, unavailableTerminals: count,
+  slowEvents: boundedArray(32, record({ kind: v => { if (!['session-event','terminal-write','long-task','input-delay'].includes(v as string)) invalid() },
+    detail: text, observedAt: number, durationMs: number })),
+  observerCost: record({ snapshots: timingParser, performanceCallbacks: timingParser }) })
+export function parseRendererPerformanceSnapshot(value: unknown): RendererPerformanceSnapshot {
+  performanceParser(value); return value as RendererPerformanceSnapshot
+}
 export function parseRendererResourceOwnerCounts(value: unknown): RendererResourceOwnerCounts {
   countsParser(value); return value as RendererResourceOwnerCounts
 }
 export function parseMetricsRendererResult(value: unknown): MetricsRendererResult {
-  record({ operation: literal('metrics.renderer'), window: windowParser, observedAt: number, counts: countsParser })(value)
+  record({ operation: literal('metrics.renderer'), window: windowParser, observedAt: number, counts: countsParser, performance: performanceParser })(value)
   return value as MetricsRendererResult
 }
 const runParser = record({ runId: identity, hostId: identity, rootPid: count,
@@ -115,7 +142,7 @@ const observationParser = record({ schema: literal('agentmux.metrics.v1'), obser
   window: nullable(windowParser), units: record({ cpu: literal('percent'), rss: literal('KiB'), storage: literal('bytes'),
     cpuAggregate: literal('10s-reading-peak'), rssAggregate: literal('latest') }),
   process: source(array(runParser)), app: source(appParser), runtime: source(array(runtimeParser)),
-  main: source(mainParser), renderer: source(record({ window: windowParser, counts: countsParser })) })
+  main: source(mainParser), renderer: source(record({ window: windowParser, counts: countsParser, performance: performanceParser })) })
 export function parseMetricsObservation(value: unknown): MetricsObservation {
   observationParser(value)
   const result = value as MetricsObservation

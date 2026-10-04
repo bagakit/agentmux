@@ -1,3 +1,4 @@
+import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
@@ -82,58 +83,59 @@ export function AgentSessionComposer({
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
 }) {
+  useObservedConsumerCommit('composer', visible)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(sessionId)
-  const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
-  const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
-  const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
-  const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
-  const archiveAgentSteer = useAppStore((state) => state.archiveAgentSteer)
-  const moveAgentSteer = useAppStore((state) => state.moveAgentSteer)
-  const sendQueuedAgentSteer = useAppStore((state) => state.sendQueuedAgentSteer)
+  const text = useObservedAppStore('composer', visible, (state) => state.agentComposerDrafts[sessionId] ?? '')
+  const setAgentComposerDraft = useObservedAppStore('composer', visible, (state) => state.setAgentComposerDraft)
+  const clearAgentComposerDraftIfUnchanged = useObservedAppStore('composer', visible, (state) => state.clearAgentComposerDraftIfUnchanged)
+  const enqueueAgentSteer = useObservedAppStore('composer', visible, (state) => state.enqueueAgentSteer)
+  const archiveAgentSteer = useObservedAppStore('composer', visible, (state) => state.archiveAgentSteer)
+  const moveAgentSteer = useObservedAppStore('composer', visible, (state) => state.moveAgentSteer)
+  const sendQueuedAgentSteer = useObservedAppStore('composer', visible, (state) => state.sendQueuedAgentSteer)
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
   // the two cannot drift. Each entry carries an operationId for retry correlation; only its text renders.
   // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the
   // selector on every store update (zustand compares by reference) — the `.map` to text happens once per
   // real render below, not inside the selector, so it does not defeat that reference check.
-  const sendingId = useAppStore((state) => state.agentSteerInFlight?.[sessionId])
-  const sendingPhase = useAppStore((state) => state.agentSteerInFlightPhase?.[sessionId])
-  const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
-  const executors = useAppStore((state) => state.config?.executors)
-  const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
-  const lifecycleFailure = useAppStore(state => state.errorNoticeContext?.lifecycle)
-  const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
-  const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
-  const setViewMode = useAppStore((state) => state.setViewMode)
-  const userName = useAppStore((state) => state.agentNames?.[sessionId])
-  const timeline = useAppStore((state) => state.timelines?.[sessionId])
-  const firstPrompt = useAppStore((state) => firstPromptFromTimeline(state.timelines?.[sessionId]))
+  const sendingId = useObservedAppStore('composer', visible, (state) => state.agentSteerInFlight?.[sessionId])
+  const sendingPhase = useObservedAppStore('composer', visible, (state) => state.agentSteerInFlightPhase?.[sessionId])
+  const queuedEntries = useObservedAppStore('composer', visible, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
+  const executors = useObservedAppStore('composer', visible, (state) => state.config?.executors)
+  const session = useObservedAppStore('composer', visible, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const lifecycleFailure = useObservedAppStore('composer', visible, state => state.errorNoticeContext?.lifecycle)
+  const lifecycleMessage = useObservedAppStore('composer', visible, state => state.error ?? state.lastError)
+  const viewMode = useObservedAppStore('composer', visible, state => effectiveSessionViewMode(state, sessionId))
+  const setViewMode = useObservedAppStore('composer', visible, (state) => state.setViewMode)
+  const userName = useObservedAppStore('composer', visible, (state) => state.agentNames?.[sessionId])
+  const timeline = useObservedAppStore('composer', visible, (state) => state.timelines?.[sessionId])
+  const firstPrompt = useObservedAppStore('composer', visible, (state) => firstPromptFromTimeline(state.timelines?.[sessionId]))
   const displayName = session?.kind === 'agent' ? agentDisplayName({
     userName, firstPrompt, fallbackLabel: tabName || session.label, providerLabel: agentProviderLabel(session.providerId)
   }) : undefined
-  const workspace = useAppStore((state) =>
+  const workspace = useObservedAppStore('composer', visible, (state) =>
     state.config?.workspaces.find((item) =>
       session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
     )
   )
-  const activeFile = useAppStore((state) =>
+  const activeFile = useObservedAppStore('composer', visible, (state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined
   )
   // The posture control is drawn purely from the Provider's catalog declaration, looked up by the
   // session's providerId. A Provider that declares none yields undefined, so the composer draws nothing.
-  const postureControl = useAppStore((state) =>
+  const postureControl = useObservedAppStore('composer', visible, (state) =>
     session?.kind === 'agent'
       ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.postureControl
       : undefined
   )
-  const composerOptions = useAppStore((state) => session?.kind === 'agent'
+  const composerOptions = useObservedAppStore('composer', visible, (state) => session?.kind === 'agent'
     ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.composer : undefined)
   // 用户自己的 prompt，按这个 Session 的 Provider 过滤。读的是**实时配置**而不是构造时的快照：
   // 在设置页改完回到 Composer，候选必须已经是新的（本仓「替身写成常量会藏起被测性质」同一族）。
   // 走共用取值层而不是就地 `?? []`：缺席即空、缺 providerId 即通用这两个默认必须只有一处，且它
   // 缺席时返回共享冻结的同一个引用——zustand 按引用比较，就地新建 `[]` 会无限重渲染。
-  const myShortcuts = useAppStore((state) => resolveComposerShortcuts(state.config))
+  const myShortcuts = useObservedAppStore('composer', visible, (state) => resolveComposerShortcuts(state.config))
   const shortcutsHere = composerShortcutsForProvider(
     myShortcuts,
     session?.kind === 'agent' ? session.providerId : undefined
@@ -154,10 +156,10 @@ export function AgentSessionComposer({
   // 识别词：同一批 Shortcut 的**裸** keyword（无 `/`）。同一个 keyword 字段供两处识别（`/` 候选与裸词），
   // 不建第二份注册表——那两份必然漂移，一处认得的词另一处不认。
   const keywordCandidates = shortcutsHere.map((shortcut) => ({ text: shortcut.keyword, description: `${shortcut.label} · Shortcut` }))
-  const send = useAppStore((state) => state.send)
-  const interrupt = useAppStore((state) => state.interrupt)
-  const setPosture = useAppStore((state) => state.setPosture)
-  const reportError = useAppStore((state) => state.reportError)
+  const send = useObservedAppStore('composer', visible, (state) => state.send)
+  const interrupt = useObservedAppStore('composer', visible, (state) => state.interrupt)
+  const setPosture = useObservedAppStore('composer', visible, (state) => state.setPosture)
+  const reportError = useObservedAppStore('composer', visible, (state) => state.reportError)
   // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.

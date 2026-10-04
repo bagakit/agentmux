@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
@@ -144,7 +145,7 @@ async function registered() {
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
   const dispose = await registerIpc({ window: { id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
-    scratchTopics: {} as any, workspaceFiles: { dispose: async () => {} } as any })
+    scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {} } as any })
   cleanup.push(dispose)
   const controlOptions = capturedControlOptions()
   expect(controlOptions?.metrics).toBeDefined()
@@ -182,6 +183,7 @@ describe('registered Main metrics and actual CLI', () => {
     expect(get.frames()[0]).toMatchObject({ ok: true, operation: 'system.metrics.get' })
     expect(samplerState(f.sampler).consumers).toBe(2)
     const snapshot = parseMetricsObservation(get.frames()[0].result.observation)
+    expect(snapshot.renderer.data?.performance).toMatchObject({ recording: 'bounded-lifetime', selectorTiming: 'counts-only', observerCost: { snapshots: { count: expect.any(Number) } } })
     expect(snapshot.process.data).toHaveLength(1)
     expect(snapshot.process.data![0]).toMatchObject({ runId: 'healthy-run', hostId: 'local', rootPid: 100, processCount: 2, rssKib: 96 })
     expect(snapshot.runtime.data).toHaveLength(2)
@@ -207,6 +209,7 @@ describe('registered Main metrics and actual CLI', () => {
     expect(raw.length).toBeGreaterThan(1)
     const frames = first.snapshots()
     expect(frames.length).toBeGreaterThan(0)
+    expect(frames.at(-1)!.params.event.data.renderer.data?.performance.recording).toBe('bounded-lifetime')
     expect(new Set(raw.slice(1).map(frame => frame.params.subscriptionId))).toEqual(new Set([raw[0].result.subscriptionId]))
     expect(raw.slice(1).map(frame => frame.params.method)).toEqual(raw.slice(1).map(() => 'system.metrics.watch'))
     expect(raw.slice(1).map(frame => frame.params.sequence)).toEqual(raw.slice(1).map((_, index) => index + 1))
@@ -334,7 +337,7 @@ describe('same sampler source age and bounded observations', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(read).toHaveBeenCalledOnce(); expect(renderer).toHaveBeenCalledOnce()
     off(); const offNext = sampler.subscribe(v => next.push(v))
-    resolveTable('100 1 64 3'); resolveRenderer({ observedAt: 900, data: { window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: readRendererResourceOwnerCounts() } })
+    resolveTable('100 1 64 3'); resolveRenderer({ observedAt: 900, data: { window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(first).toEqual([]); expect(next).toEqual([])
     expect(renderer).toHaveBeenCalledTimes(2)
@@ -348,7 +351,7 @@ describe('same sampler source age and bounded observations', () => {
     expect(request.operation).toBe('metrics.renderer')
     window = { ...window, generation: 1 }
     bridge.accept({ requestId: request.requestId, ok: true, result: { operation: 'metrics.renderer', window: request.window,
-      observedAt: 1000, counts: readRendererResourceOwnerCounts() } })
+      observedAt: 1000, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
     await expect(reading).rejects.toMatchObject({ code: 'CONTROL_OWNER_LOST' })
     const controller = new AbortController()
     const cancelled = observeRendererResources(bridge, () => window, controller.signal)

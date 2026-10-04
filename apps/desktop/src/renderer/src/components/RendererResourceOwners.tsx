@@ -1,7 +1,13 @@
-import { type ReactNode } from 'react'
+import { rendererPerformance } from '../lib/renderer-performance'
+import { useEffect, type ReactNode } from 'react'
 import { useAgentStatusDecay } from '../lib/agent-status-decay'
 import { TerminalParkingProvider, useTerminalColdParking } from '../lib/terminal-cold-parking-coordinator'
 import { SurfaceMemoryBudgetProvider, useSurfaceMemoryBudget } from '../lib/surface-memory-budget-coordinator'
+
+function PerformanceRecorderOwner() {
+  useEffect(() => rendererPerformance.observeMainThread(), [])
+  return null
+}
 
 function AgentStatusDecayOwner() {
   useAgentStatusDecay()
@@ -39,6 +45,7 @@ export function RendererResourceOwners({ children, workbenchVisible, projectedVi
   measurementActive: boolean
 }) {
   return <>
+    <PerformanceRecorderOwner />
     <AgentStatusDecayOwner />
     <TerminalParkingOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
       <SurfaceMemoryOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
