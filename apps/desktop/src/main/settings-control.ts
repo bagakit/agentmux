@@ -23,7 +23,7 @@ export async function executeSettingsControl(
     if (!selected.length) throw unsupported(request.target ?? '')
     return { operation: request.operation, entries: [...selected.map((setting) => setting.entry(owner.current)), ...(directory ? [directory] : [])], partial: true as const }
   }
-  if (request.key === 'notes.directory' && notes) { const current = await notes.inspect(); const saved = await notes.change({ operationId: request.requestId, expectedDirectory: current.directory, directory: request.value }); return { operation: request.operation, requestId: request.requestId, entry: { key: request.key, kind: 'string', value: saved.directory, default: defaultNotesDirectory() } } }
+  if (request.key === 'notes.directory' && notes) { const current = await notes.inspect(request.requestId); const saved = await notes.change({ operationId: request.requestId, expectedDirectory: current.operation?.expectedDirectory ?? current.directory, directory: request.value }); return { operation: request.operation, requestId: request.requestId, entry: { key: request.key, kind: 'string', value: saved.directory, default: defaultNotesDirectory() } } }
   const setting = settings.find((candidate) => candidate.key === request.key)
   if (!setting) throw unsupported(request.key)
   const saved = await owner.update((current) => setting.apply(current, request.value))

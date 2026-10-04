@@ -416,7 +416,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('app.focus', '--surface space|focus|goals|survey|recall [--input preserve|target]', 'Select a main Surface without silently stealing conversation input.', { '--surface': 'value', '--input': 'value', ...OP }, f => ({ ...operation(f), target: { kind: 'surface', surface: value(f, '--surface', true) }, inputPolicy: value(f, '--input') ?? 'preserve' })),
   { ...empty('mote.playbook.pmo', 'Read the PMO work manual using the actual public commands.'), local: true },
   settings('settings.inspect', '[target]', 'Read supported host settings.'),
-  settings('settings.set', '<key> <value>', 'Set one supported scalar value.', 2),
+  settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts'] as const).flatMap(resource => [
     settings(`settings.${resource}.ls`, '', `List configured ${resource}, not active Sessions.`),
     settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--keyword <code>' : '<id>',
