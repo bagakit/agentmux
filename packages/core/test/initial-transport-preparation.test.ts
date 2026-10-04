@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -31,11 +31,12 @@ async function inputAckWithin<T>(pending: Promise<T>): Promise<T> {
 async function fixture(storePath?: string) {
   const store = storePath ? new AgentMuxFileAgentSessionStore(storePath) : new AgentMuxMemoryAgentSessionStore()
   const stored = (id: string): AgentMuxStoredAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'fixture',
-    executorId: 'fixture', hostId: 'local', workspacePath: upstreamFixturePath("private/preparation"), run: { runId: `${id}-run` },
+    executorId: 'fixture', hostId: 'local', workspacePath: fixturePath("private/preparation"), run: { runId: `${id}-run` },
     retiredRuns: [], hookBindingId: 'binding', hookToken: 'token', createdAt: 1, updatedAt: 1 })
   await store.compareAndSwap(null, stored('prepare'))
   await store.compareAndSwap(null, stored('healthy'))
   const template = new AgentProviderRegistry().get('codex')
+  const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
   let source = 'source-1', pid = 123, cursor = 0, recheck = true, lostAck = false
   let verifyCount = 0, statusesAfterVerify = 0, finalStatusFault: string | undefined
   let finalVerify: ((count: number, context: AgentProviderPromptExecutionContext) => Promise<void>) | undefined
@@ -54,7 +55,7 @@ async function fixture(storePath?: string) {
     context.signal.throwIfAborted()
     return { nativeSourceId: 'source-1', verifyCurrentTransport: async context => { verifyCount++; statusesAfterVerify = 0; await finalVerify?.(verifyCount, context); return recheck } }
   })
-  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...capabilities, promptExecution: { immediate: 'interrupt-before-input' } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (text, context) => ({ kind: 'render-then-submit', payload: text, renderedText: text, submit: '\r',
       ...(context?.execution === 'immediate' ? { prepare: { refresh: '\x1b[I', interrupt: '\x1b', endEvent: 'Interrupt' } } : {}) }),
@@ -68,7 +69,7 @@ async function fixture(storePath?: string) {
   await owner.registry.load('local')
   const writes: Array<{ run: string; data: string }> = [], receipts = new Map<string, { startByte: number; endByte: number }>()
   const run = (id = 'prepare-run') => ({ nativeService: null, runId: id, lifecycleOperationId: null,
-    program: 'fixture', args: [], workspacePath: upstreamFixturePath("private/preparation"), pid, state: { type: 'running' as const },
+    program: 'fixture', args: [], workspacePath: fixturePath("private/preparation"), pid, state: { type: 'running' as const },
     cols: 80, rows: 24, latestOutputBytes: screen.throughByte, firstAvailableByte: 0, acceptedInputBytes: id === 'prepare-run' ? cursor : 0 })
   owner.kernel.isConnected = () => true
   owner.kernel.identity = () => ({ daemonInstanceId: 'prepare-daemon', protocolVersion: 1, buildIdentity: 'test' })
@@ -594,7 +595,7 @@ describe('original immediate transport preparation', () => {
     try {
       const error = await f.submit().then(() => null, value => value)
       expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-      expect(JSON.parse(error.detail)).toEqual({ code: 'SOURCE_READ_UNAVAILABLE', detail: 'source-private',
+      expect(JSON.parse(error.detail)).toEqual({ code: 'SOURCE_READ_UNAVAILABLE', name: 'AgentMuxError', message: 'readonly source unavailable', detail: 'source-private',
         controlFailure: { disposition: 'unknown', confirmedInputBytes: null } })
       expect(f.writes).toEqual([])
       expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
@@ -639,14 +640,14 @@ describe('original immediate transport preparation', () => {
       const error = await rpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: 'prepare' }, text: 'RPC_BODY',
         messageId: 'rpc-phase-message', operationId: 'rpc-phase-operation', execution: 'immediate' }).then(() => null, value => value)
       expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-      expect(JSON.parse(error.detail)).toEqual({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', detail: 'readonly-source' })
+      expect(JSON.parse(error.detail)).toEqual({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', name: 'AgentMuxError', message: 'Readonly native evidence is unavailable.', detail: 'readonly-source' })
       const args = ['agent', 'send', '--to-session', 'prepare', '--text', 'CLI_BODY', '--execution', 'immediate',
         '--operation-id', 'cli-phase-operation', '--message-id', 'cli-phase-message']
       const result = await runCompiledObjectCli(args, objectCliEnvironment(root))
       expect(result.code).not.toBe(0)
       const output = JSON.parse(result.stderr)
       expect(output.error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-      expect(JSON.parse(output.error.detail)).toEqual({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', detail: 'readonly-source' })
+      expect(JSON.parse(output.error.detail)).toEqual({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', name: 'AgentMuxError', message: 'Readonly native evidence is unavailable.', detail: 'readonly-source' })
       const preparationCalls = f.preparation.mock.calls.length
       const retry = await runCompiledObjectCli(args, objectCliEnvironment(root))
       expect(retry.code).not.toBe(0); expect(JSON.parse(retry.stderr).error.code).toBe('AGENT_PROMPT_UNCONFIRMED')
@@ -699,7 +700,7 @@ describe('original immediate transport preparation', () => {
       await expect(hosted.call('runtime.invoke', { fence: hostedTestFence, consumerId: 'phase-consumer', invocation: { method: 'submitAgentPrompt', args: [{
         agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, afterSubmissionId: null, operationId: 'hosted-phase-operation', prompt: 'ORIGINAL_BODY', execution: 'immediate'
       }] } })).rejects.toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED',
-        detail: JSON.stringify({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', detail: 'read-only' }), controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+        detail: JSON.stringify({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', name: 'AgentMuxError', message: 'Readonly provider unavailable.', detail: 'read-only' }), controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
       expect(f.writes).toEqual([])
     } finally { await consumer?.dispose(); await hosted.dispose(); await f.close() }
   })
