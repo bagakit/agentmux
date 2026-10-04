@@ -81,8 +81,8 @@ it('a contributed module reaches Overview, sidebar, compact menu, search and its
   const catalog = visibleSettingsSections('')
   expect(catalog.map(module => module.id)).toEqual([
     'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
-    'hosts', 'devices', 'agents', 'prompts', 'fixture-module',
-    'space', 'focus', 'goals', 'survey', 'notes', 'mote', 'toolkit'
+    'hosts', 'devices', 'toolkit', 'agents', 'prompts', 'fixture-module',
+    'space', 'focus', 'goals', 'survey', 'notes', 'mote'
   ])
   const navigation = settingsNavGroups('').flatMap(group => group.items)
   expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
@@ -227,7 +227,7 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   const row = connected('[data-settings-target="toolkit"]', nav)
   expect(row.previousElementSibling!.textContent).toBe('Mods')
   const groups = settingsNavGroups('')
-  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Connections', 'Resources', 'Work', 'Mote', 'Mods'])
+  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
   expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
   await section('Toolkit Library')
