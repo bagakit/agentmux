@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Unplug, Users } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
@@ -257,7 +258,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <FocusToolbar selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className={`focus-filters${isMacPlatform() ? ' focus-filters--mac' : ''}`}>
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><Search size={13} /><input ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <label className="global-board-search"><Search size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search contexts or amux ID" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <FilterMenu.Root>
             <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
               <ListFilter size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
