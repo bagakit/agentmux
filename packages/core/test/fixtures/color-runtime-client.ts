@@ -6,12 +6,12 @@ import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-prov
 
 const [root, phase] = process.argv.slice(2) as [string, string]
 const template = new AgentProviderRegistry().get('codex')
-const { usage: _usage, providerFork: _providerFork, ...capabilities } = template.catalog.capabilities
 const provider = defineAgentProvider({
   catalog: { ...template.catalog, id: 'color-fixture', label: 'Color fixture', executable: process.execPath,
     expectedProcess: 'node', hookStrategy: { kind: 'none' },
     readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
-    capabilities },
+    capabilities: { terminal: true, timeline: 'unavailable', permission: 'none',
+      providerResume: true, replyCorrelation: 'none' } },
   hook: { rules: [{ events: ['SessionStart'], state: 'working' }], nativeHandle: { sessionIdKeys: ['session_id'] },
     eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' } },
   terminalHandshake: { query: '\x1b[?u', response: '\x1b[?0u' },
