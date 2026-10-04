@@ -74,3 +74,11 @@
 .md-document .md-block-code { border: 1px solid var(--line-soft); box-shadow: none; }
 .md-document .md-block-code[data-language]::before { display: block; content: attr(data-language); margin-bottom: var(--sp-3); color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-meta); }
 .md-document .md-footnotes { margin-top: var(--sp-6); }
+.md-code-container { min-width: 0; }
+.md-math--display { display: block; overflow-x: auto; padding: 8px 0; }
+.md-math-error { display: block; font-size: 12px; color: var(--text-muted); white-space: pre-wrap; }
+.md-block-code .hljs-keyword, .md-block-code .hljs-selector-tag, .md-block-code .hljs-literal { color: var(--purple); }
+.md-block-code .hljs-string, .md-block-code .hljs-attr { color: var(--green-2); }
+.md-block-code .hljs-number, .md-block-code .hljs-built_in { color: var(--amber); }
+.md-block-code .hljs-comment { color: var(--text-muted); font-style: italic; }
+.md-block-code .hljs-title, .md-block-code .hljs-type { color: var(--blue); }

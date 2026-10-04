@@ -1,5 +1,6 @@
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
+import remarkMath from 'remark-math'
 import { unified } from 'unified'
 import type { Definition, FootnoteDefinition, Root, RootContent, PhrasingContent } from 'mdast'
 
@@ -7,6 +8,7 @@ import type { Definition, FootnoteDefinition, Root, RootContent, PhrasingContent
 export type InlineNode =
   | { kind: 'text'; text: string }
   | { kind: 'code'; text: string }
+  | { kind: 'math'; text: string; source: string }
   | { kind: 'break' }
   | { kind: 'strong'; children: InlineNode[] }
   | { kind: 'emphasis'; children: InlineNode[] }
@@ -22,6 +24,7 @@ export type BlockNode =
   | { kind: 'heading'; level: number; anchor: string; sourceMarker?: string; children: InlineNode[] }
   | { kind: 'paragraph'; children: InlineNode[] }
   | { kind: 'code'; language: string | null; text: string }
+  | { kind: 'math'; text: string; source: string }
   | { kind: 'list'; ordered: boolean; start?: number; checked?: (boolean | null)[]; items: BlockNode[][] }
   | { kind: 'quote'; children: BlockNode[] }
   | { kind: 'rule' }
@@ -31,7 +34,7 @@ export type BlockNode =
 export type MarkdownHeading = Extract<BlockNode, { kind: 'heading' }>
 export type MarkdownDocument = { blocks: BlockNode[]; headings: MarkdownHeading[] }
 
-const processor = unified().use(remarkParse).use(remarkGfm)
+const processor = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 type ParseContext = {
   source: string
   definitions: Map<string, Definition>
@@ -48,7 +51,7 @@ function collectDefinitions(node: Root | RootContent, context: ParseContext): vo
   if ('children' in node) for (const child of node.children) collectDefinitions(child as RootContent, context)
 }
 
-function originalText(node: PhrasingContent, context: ParseContext): InlineNode {
+function originalText(node: PhrasingContent, context: ParseContext): Extract<InlineNode, { kind: 'text' }> {
   const start = node.position?.start.offset, end = node.position?.end.offset
   return { kind: 'text', text: start !== undefined && end !== undefined ? context.source.slice(start, end) : '' }
 }
@@ -63,6 +66,9 @@ function inlineFrom(nodes: readonly PhrasingContent[], context: ParseContext): I
         break
       case 'inlineCode':
         out.push({ kind: 'code', text: node.value })
+        break
+      case 'inlineMath':
+        out.push({ kind: 'math', text: node.value, source: originalText(node, context).text })
         break
       case 'strong':
         out.push({ kind: 'strong', children: inlineFrom(node.children, context) })
@@ -137,6 +143,9 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
       case 'code':
         out.push({ kind: 'code', language: node.lang ?? null, text: node.value })
         break
+      case 'math':
+        out.push({ kind: 'math', text: node.value, source: context.source.slice(node.position?.start.offset, node.position?.end.offset) })
+        break
       case 'list': {
         const checked = node.children.map(item => item.checked ?? null)
         out.push({ kind: 'list', ordered: node.ordered === true,
@@ -206,7 +215,7 @@ export function markdownHeadingText(heading: MarkdownHeading): string {
 /** Conversation prose retains literal text unless it contains Markdown signals; files always parse. */
 export function looksLikeMarkdown(source: string): boolean {
   return (
-    /^(#{1,6}\s|\s*[-*+]\s|\s*\d+[.)]\s|```|~~~|>\s|\||---|\*\*\*|\s*\[[^\]]+\]:)/mu.test(source) ||
+    source.includes('$') || /^(#{1,6}\s|\s*[-*+]\s|\s*\d+[.)]\s|```|~~~|>\s|\||---|\*\*\*|\s*\[[^\]]+\]:)/mu.test(source) ||
     /`|\*\*|__|~~|\[[^\]]*\]\(|\[[^\]]*\]\[[^\]]*\]|\[\^[^\]]+\]|(?:^|\s)[*_][^\s*_][^\n]*?[*_](?=\s|[.,!?;:]|$)|\n\s*=+\s*(?:\n|$)| {2,}\n/u.test(source)
   )
 }

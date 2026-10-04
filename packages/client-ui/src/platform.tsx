@@ -4,6 +4,7 @@ import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conve
 
 export type ClientUiIconName = 'neutral' | 'working' | 'failed'
 export type AgentLinkReference = { uri: string; agentSessionId: string; label?: string }
+export type MarkdownDiagramInput = { code: string; language: 'mermaid' | 'dot' | 'gv' | 'drawio' | 'plantuml'; visible: boolean }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
@@ -23,6 +24,8 @@ export type ClientUiPlatform = {
   renderIcon(name: ClientUiIconName, size: number): ReactNode
   /** Optional inline presentation of an exact Agent URI. The host owns facts and navigation. */
   renderAgentLink?(reference: AgentLinkReference): ReactNode
+  /** Optional transient diagram presentation. The host owns cancelable, isolated computation. */
+  renderMarkdownDiagram?(input: MarkdownDiagramInput): ReactNode
 }
 
 const PlatformContext = createContext<ClientUiPlatform | null>(null)
@@ -30,6 +33,10 @@ const PlatformContext = createContext<ClientUiPlatform | null>(null)
 /** Standalone Markdown also works without a host adapter, retaining its original text. */
 export function useAgentLinkRenderer(): ClientUiPlatform['renderAgentLink'] {
   return useContext(PlatformContext)?.renderAgentLink
+}
+
+export function useMarkdownDiagramRenderer(): ClientUiPlatform['renderMarkdownDiagram'] {
+  return useContext(PlatformContext)?.renderMarkdownDiagram
 }
 
 /** Each application supplies one explicit adapter; there is no Desktop or browser IO default. */
