@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { Link2 } from 'lucide-react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { InlineRenameField } from '@agentmux/client-ui/components/InlineRenameField'
@@ -1057,7 +1058,7 @@ export function FileExplorer({
         : <div className="explorer-header"><span>Explorer</span>{toolbar}</div>}
       <label className="file-search">
         <Search size={13} />
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find loaded files" />
+        <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find loaded files" />
         {query ? <button onClick={() => setQuery('')} title="Clear"><X size={11} /></button> : null}
       </label>
       <DndContext
