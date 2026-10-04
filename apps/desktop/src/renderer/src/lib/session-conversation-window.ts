@@ -17,7 +17,12 @@ export type ConversationReading = {
   readCaptured?: boolean
   returnLabel?: string
 }
-type ReadingWindow = { page: AgentSessionHistoryPage; newerOutside: boolean }
+type ReadingWindow = {
+  page: AgentSessionHistoryPage
+  newerOutside: boolean
+  /** The first raw record actually displayed before earlier navigation, never a time/body match. */
+  boundary?: { recordId: string; confirmed: boolean } | null
+}
 const PAGE_COUNT = 3
 const RECORD_COUNT = 400
 const PAGE_BYTES = 12 * 1024 * 1024
@@ -126,6 +131,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     const start = live.current
     if (!start.reading?.enabled || pending.current) return
     const before = stateRef.current.key === start.key ? stateRef.current.window : null
+    const displayed = pageRef.current
     const baseline = direction === 'earlier' ? before?.page ?? start.recent : null
     if (baseline && !baseline.nextCursor) return
     const attempt = ++generation.current
@@ -153,6 +159,15 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       }, pageRef.current)
       const nextWindow: ReadingWindow = { page: nextPage,
         newerOutside: Boolean(baseline && nextPage.items.at(-1)?.id !== baseline.items.at(-1)?.id) }
+      if (direction === 'earlier') {
+        const boundary = before && 'boundary' in before ? before.boundary : displayed
+          && displayed.agentSessionId === nextPage.agentSessionId
+          && displayed.source.providerId === nextPage.source.providerId
+          && displayed.source.nativeSessionId === nextPage.source.nativeSessionId
+          && displayed.items[0] ? { recordId: displayed.items[0].id, confirmed: false } : null
+        nextWindow.boundary = boundary ? { ...boundary,
+          confirmed: boundary.confirmed || nextPage.items.some(item => item.id === boundary.recordId) } : null
+      }
       if (JSON.stringify(nextPage.items).length * 2 > PAGE_BYTES) throw new Error('This original-sequence window exceeds its byte budget. The displayed records are kept.')
       if (!live.current.beforeCommit(nextPage, direction, direction === 'earlier' && !before ? start.recent ?? undefined : undefined)) throw new Error('Move your reading position or clear the selection before changing this window. Your reading position, selected content, records and cursor are kept.')
       update({ key: start.key, window: nextWindow, loading: false, error: null })
@@ -185,6 +200,9 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   }, [key, reading?.enabled, reading?.opened])
   useEffect(() => () => { generation.current++; pending.current = false }, [])
   return { page, captured: captured?.key === key ? captured.items : null, capturedError: captured?.key === key ? captured.error : null, historical: Boolean(window), loading: state.key === key && state.loading, error: state.key === key ? state.error : null,
+    historyBoundary: window?.boundary?.confirmed ? {
+      beforeRecordId: window.page.items.some(item => item.id === window.boundary!.recordId) ? window.boundary.recordId : null
+    } : null,
     newerOutside: window?.newerOutside ?? false, hasMore: Boolean(page?.nextCursor),
     readEarlier: () => void read('earlier'), retry: () => void read(retry.current), showCurrent }
 }

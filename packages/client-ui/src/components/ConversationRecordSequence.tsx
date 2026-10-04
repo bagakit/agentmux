@@ -1,5 +1,5 @@
 import type { AgentSessionHistoryItem } from '@agentmux/core'
-import { useLayoutEffect, useRef, type ReactNode } from 'react'
+import { Fragment, useLayoutEffect, useRef, type ReactNode } from 'react'
 
 /** The host keeps each raw record's original shell, anchor and message body. */
 export type ConversationRecordRenderer = (
@@ -14,15 +14,17 @@ export type ConversationProcessProps = {
 }
 
 export type ConversationProcessRenderer = (props: ConversationProcessProps) => ReactNode
+export type ConversationRecordBoundary = { beforeRecordId: string | null; content: ReactNode }
 
 /** Source order only. Group identity remembers IDs, never another copy of record content. */
 export function ConversationRecordSequence({
-  items, sourceKey, renderRecord, renderProcess
+  items, sourceKey, renderRecord, renderProcess, recordBoundary
 }: {
   items: readonly AgentSessionHistoryItem[]
   sourceKey: string
   renderRecord: ConversationRecordRenderer
   renderProcess?: ConversationProcessRenderer
+  recordBoundary?: ConversationRecordBoundary
 }) {
   const committed = useRef<{ source: string; groups: Map<string, string> }>({
     source: sourceKey, groups: new Map()
@@ -54,6 +56,10 @@ export function ConversationRecordSequence({
   for (const item of items) {
     if (seen.has(item.id)) continue
     seen.add(item.id)
+    if (recordBoundary?.beforeRecordId === item.id) {
+      flush()
+      rows.push(<Fragment key={JSON.stringify([sourceKey, 'boundary'])}>{recordBoundary.content}</Fragment>)
+    }
     if (item.kind !== 'activity') {
       flush()
       rows.push(renderRecord(item))
@@ -68,6 +74,7 @@ export function ConversationRecordSequence({
     }
   }
   flush()
+  if (recordBoundary?.beforeRecordId === null) rows.push(<Fragment key={JSON.stringify([sourceKey, 'boundary'])}>{recordBoundary.content}</Fragment>)
   useLayoutEffect(() => { committed.current = { source: sourceKey, groups } })
   return <>{rows}</>
 }

@@ -5,7 +5,7 @@ import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
-import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer } from './ConversationRecordSequence.js'
+import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
@@ -24,13 +24,14 @@ type Props = ReadingProps & {
   onContinue?: (prompt: string) => void
   locatedMessageKey?: string | null
   renderProcess?: ConversationProcessRenderer
+  recordBoundary?: ConversationRecordBoundary
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   showSource?: boolean
 }
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
@@ -83,7 +84,7 @@ export const ConversationView = memo(function ConversationView({
     </div> : null}
     <ConversationRecordSequence items={records}
       sourceKey={JSON.stringify([sessionId, page.source.providerId, page.source.nativeSessionId])}
-      renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} />
+      renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
   </section>
 })
 

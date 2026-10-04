@@ -114,6 +114,73 @@ afterEach(async () => {
 })
 
 describe('One Activity reading surface over public original-sequence windows', () => {
+ it('places an inline history boundary at the actual wider displayed context without remounting its expanded process or nonempty Range', async () => {
+  const current = await client.sessionHistoryPage(sid, { limit: 30 })
+  const context = await client.sessionHistoryPage(sid, { limit: 100 })
+  const olderContext = await client.sessionHistoryPage(sid, { limit: 100, cursor: context.nextCursor! })
+  const contextItems = [...olderContext.items, ...context.items]
+  expect(current.items[0]!.id).toBe('record-330'); expect(contextItems[0]!.id).toBe('record-160')
+  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current} nativeContextItems={contextItems}
+   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
+  const thread = container.querySelector('.conversation-native-thread')!, viewport = container.querySelector<HTMLElement>('.activity-feed')!
+  const parent = [...thread.querySelectorAll<HTMLElement>('[data-native-record-ids]')].find(node => JSON.parse(node.dataset.nativeRecordIds!).includes('record-250'))!
+  const head = parent.querySelector<HTMLButtonElement>('.wf-head')!
+  await act(async () => head.click())
+  const row = parent.querySelector<HTMLElement>('[data-native-record-id="record-250"]')!
+  const step = row.querySelector<HTMLButtonElement>('[data-observation-step-id="record-250"]')!
+  await act(async () => step.click())
+  const body = row.querySelector<HTMLElement>('.log-turn__body')!
+  const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
+  await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
+  const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Process 250')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 7); window.getSelection()!.addRange(range)
+  expect(window.getSelection()!.toString()).toBe('Process')
+  viewport.getBoundingClientRect = () => rect(100, 200); row.getBoundingClientRect = () => rect(110)
+  const preserved = () => {
+   expect(container.querySelector('.conversation-native-thread')).toBe(thread)
+   expect(row.closest('[data-native-record-ids]')).toBe(parent); expect(parent.isConnected).toBe(true)
+   expect(row.querySelector('.log-turn__body')).toBe(body); expect(body.isConnected).toBe(true)
+   expect(head.getAttribute('aria-expanded')).toBe('true'); expect(step.getAttribute('aria-expanded')).toBe('true'); expect(trace.open).toBe(true)
+   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Process')
+   expect(conversationReadingAnchor(viewport)).toEqual({ kind: 'record', id: 'record-250', offset: 10 })
+  }
+  expect(thread.querySelector('[role="separator"]')).toBeNull()
+  await click('Earlier'); expect(ids()[0]).toBe('record-240'); preserved()
+  expect(thread.querySelector('[role="separator"]')).toBeNull() // The actual displayed origin has not been reached.
+  await click('Earlier'); expect(ids()[0]).toBe('record-150'); preserved()
+  const divider = thread.querySelector<HTMLElement>('.activity-feed__history-divider')!
+  expect(divider).not.toBeNull(); expect(divider.parentElement).toBe(thread)
+  expect(divider.previousElementSibling).not.toBeNull()
+  expect(JSON.parse((divider.previousElementSibling as HTMLElement).dataset.nativeRecordIds!)).toEqual(Array.from({ length: 10 }, (_, n) => `record-${150 + n}`))
+  expect(divider.nextElementSibling).toBe(parent)
+  const previous = await client.sessionHistoryPage(sid, { limit: 1, cursor: olderContext.nextCursor! })
+  expect(previous.items[0]!.id).toBe('record-159')
+  expect(divider.textContent).toBe(`以上是历史消息（${new Date(previous.items[0]!.startedAt!).toLocaleString()}）`)
+  await click('Earlier'); expect(ids()[0]).toBe('record-060'); preserved()
+  expect(thread.querySelector('.activity-feed__history-divider')).toBe(divider); expect(divider.nextElementSibling).toBe(parent)
+  await click('Current'); preserved(); expect(thread.querySelector('[role="separator"]')).toBeNull()
+ })
+ it('marks only a confirmed old-only loaded tail after the current cut is evicted, and does not invent a cut on an initial read', async () => {
+  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  const current = await client.sessionHistoryPage(sid, { limit: 30 })
+  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
+  expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  await click('Earlier')
+  let divider = container.querySelector<HTMLElement>('.activity-feed__history-divider')!
+  expect(divider.nextElementSibling).not.toBeNull()
+  for (let n = 0; n < 4; n++) await click('Earlier')
+  expect(ids()).toHaveLength(400); expect(ids()).not.toContain('record-690')
+  divider = container.querySelector<HTMLElement>('.activity-feed__history-divider')!
+  expect(divider.parentElement?.className).toBe('conversation-native-thread'); expect(divider.nextElementSibling).toBeNull()
+  expect(ids().at(-1)).toBe('record-639')
+  expect(divider.textContent).toBe(`以上是历史消息（${new Date(record(639).timestamp).toLocaleString()}）`)
+  await click('Current'); expect(ids().at(-1)).toBe('record-719'); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  await act(async () => root.unmount()); root = createClientUiRoot(container)
+  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
+   conversationReading={{ reference: control, identity: 'retired-without-current-context', enabled: true, opened: true }} />)
+  expect(ids().length).toBeGreaterThan(0); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+ })
  it('reads from the current Conversation on the first upward wheel, continues original pages and stops at their end', async () => {
   await seed(); await render(pane())
   expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
