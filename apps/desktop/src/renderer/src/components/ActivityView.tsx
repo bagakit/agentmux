@@ -454,6 +454,9 @@ export function ActivityView({
     edgeRef.current = { earlier: false, newer: false, programmaticTop: null }
   }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
   const nativeHistoryPage = readingWindow.page
+  const questionAnswerContext = useMemo(() => recentNativePage
+    ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
+    [recentNativePage, nativeContextItems])
   const historyBoundary = readingWindow.historyBoundary
   const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
   const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
@@ -1019,6 +1022,7 @@ export function ActivityView({
       {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
+        questionAnswerContext={questionAnswerContext}
         {...(historyBoundary && boundaryIndex > 0 ? {
           recordBoundary: { ...historyBoundary, content: <div className="activity-feed__history-divider" role="separator">
             以上是历史消息（{boundaryTime === undefined ? '时间未记录' : new Date(boundaryTime).toLocaleString()}）
