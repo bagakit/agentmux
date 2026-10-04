@@ -131,6 +131,7 @@
 .launcher-browser-input > svg { flex: none; }
 .launcher-browser-field { flex: 1; min-width: 0; display: flex; }
 .launcher-browser-input input { min-width: 0; flex: 1; width: 100%; border: 0; padding: var(--sp-2) 0; background: transparent; color: var(--text); outline: none; font: var(--fs-meta)/1.5 var(--font-sans); }
+.launcher-browser-input input.ui-input:focus-visible { outline: none; }
 .launcher-browser-input:focus-within { border-color: var(--focus-line); }
 .launcher-browser-input input::placeholder { color: var(--text-3); }
 .launcher-browser[data-closing='true'] .launcher-browser-input { animation: launcher-browser-close var(--dur-enter) var(--ease-enter) forwards; }

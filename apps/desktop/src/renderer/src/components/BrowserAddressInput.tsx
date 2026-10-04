@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef, type Ref } from 'react'
 import { X } from 'lucide-react'
@@ -112,7 +113,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   }
 
   return <>
-    <input {...props} ref={input} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={open ? id : undefined} aria-activedescendant={open && selected >= 0 && entries[selected] ? `${id}-${selected}` : undefined}
+    <TextInput {...props} ref={input} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={open ? id : undefined} aria-activedescendant={open && selected >= 0 && entries[selected] ? `${id}-${selected}` : undefined}
       value={composerRenderValue(value, composition)} autoComplete="off"
       onChange={event => { setSelected(-1); ime.change(event.currentTarget.value); if (!composing.current) setOpen(true) }}
       onCompositionStart={event => { composing.current = true; dismiss(); ime.compositionStart(event.currentTarget.value) }}
