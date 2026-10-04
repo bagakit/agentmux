@@ -55,8 +55,10 @@ function createMotionOwner() {
     frame = null
     if (!point) return
     // The set contains only native-visible avatar rigs. Hidden instances are never laid out on pointer input.
-    for (const identity of rigs) {
-      const rig = identity.node.querySelector('.mote-face, .mote-image-follow'), rect = rig?.getBoundingClientRect()
+    const measured = Array.from(rigs, identity => ({ identity,
+      rect: identity.node.querySelector('.mote-face, .mote-image-follow')?.getBoundingClientRect() }))
+    // Read every active rig before any style/dataset write can invalidate the next rig's layout.
+    for (const { identity, rect } of measured) {
       if (!rect || rect.width <= 0 || rect.height <= 0) { reset(identity); continue }
       const dx = point.x - (rect.left + rect.width / 2), dy = point.y - (rect.top + rect.height / 2)
       const reach = Math.max(110, rect.width * 1.65), distance = Math.hypot(dx, dy)

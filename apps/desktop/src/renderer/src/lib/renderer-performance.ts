@@ -1,4 +1,4 @@
-import type { RendererConsumerCost, RendererPerformanceSnapshot, RendererTerminalCost, RendererWorkTiming } from '@agentmux/core/control'
+import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererTerminalCost, RendererWorkTiming } from '@agentmux/core/control'
 import { tabSwitchObservation } from './tab-switch-observation'
 
 const timing = (): RendererWorkTiming => ({ count: 0, totalMs: 0, maxMs: 0 })
@@ -11,6 +11,13 @@ function add(target: RendererWorkTiming, duration: number) {
 export function createRendererPerformance(now = () => performance.now(), wall = Date.now) {
   const startedAt = wall()
   const consumers = { composer: { visible: consumer(), hidden: consumer() }, sessionPane: { visible: consumer(), hidden: consumer() } }
+  const overlay: RendererPerformanceSnapshot['overlay'] = {
+    triggers: { initial: 0, demand: 0, mutation: 0, resize: 0, scroll: 0, toggle: 0, font: 0, collect: 0 },
+    scheduled: 0, coalesced: 0, candidates: 0, geometryReads: 0, nativeDemandCount: null,
+    latestCandidates: null, latestGeometryReads: null, collect: timing()
+  }
+  const requestCost = () => ({ started: 0, completed: 0, failed: 0, pending: 0, wall: timing() })
+  const inputRequests = { user: requestCost(), protocol: requestCost(), paste: requestCost() }
   const sessionEvents = timing()
   const terminalWrites = { visible: timing(), hidden: timing(), stringCodeUnits: 0, bytes: 0 }
   const longTasks: RendererPerformanceSnapshot['longTasks'] = { state: 'stopped', reason: null, timing: timing() }
@@ -31,6 +38,28 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     },
     commit(kind: keyof typeof consumers, visible: boolean) { consumers[kind][visible ? 'visible' : 'hidden'].commits++ },
     start: now,
+    observeInputRequest(kind: keyof typeof inputRequests, request: Promise<unknown>, start: number) {
+      const cost = inputRequests[kind]
+      cost.started++; cost.pending++
+      const settle = (ok: boolean) => {
+        cost.pending--; if (ok) cost.completed++; else cost.failed++
+        add(cost.wall, now() - start)
+      }
+      void request.then(() => settle(true), () => settle(false))
+    },
+    observeOverlay(observation: RendererOverlayObservation) {
+      overlay.triggers[observation.reason]++
+      if (observation.scheduled) overlay.scheduled++
+      if (observation.coalesced) overlay.coalesced++
+      overlay.nativeDemandCount = observation.nativeDemandCount
+      if (observation.candidateCount !== undefined) {
+        overlay.candidates += observation.candidateCount; overlay.latestCandidates = observation.candidateCount
+      }
+      if (observation.geometryReadCount !== undefined) {
+        overlay.geometryReads += observation.geometryReadCount; overlay.latestGeometryReads = observation.geometryReadCount
+      }
+      if (observation.collectMs !== undefined) add(overlay.collect, observation.collectMs)
+    },
     terminalInteraction(detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number) {
       slow('terminal-interaction', detail, duration)
     },
@@ -122,6 +151,8 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         startedAt, observedAt: wall(), recording: 'bounded-lifetime', selectorTiming: 'counts-only', writeTiming: 'parser-callback-wall',
         consumers: { composer: { visible: { ...consumers.composer.visible }, hidden: { ...consumers.composer.hidden } },
           sessionPane: { visible: { ...consumers.sessionPane.visible }, hidden: { ...consumers.sessionPane.hidden } } },
+        inputRequests: { user: { ...inputRequests.user, wall: { ...inputRequests.user.wall } }, protocol: { ...inputRequests.protocol, wall: { ...inputRequests.protocol.wall } }, paste: { ...inputRequests.paste, wall: { ...inputRequests.paste.wall } } },
+        overlay: { ...overlay, triggers: { ...overlay.triggers }, collect: { ...overlay.collect } },
         sessionEvents: { ...sessionEvents }, terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
         inputDelay: { ...inputDelay, timing: { ...inputDelay.timing } },
         longTasks: { ...longTasks, timing: { ...longTasks.timing } }, terminals: current, omittedTerminals: terminals.size - attempted, unavailableTerminals,

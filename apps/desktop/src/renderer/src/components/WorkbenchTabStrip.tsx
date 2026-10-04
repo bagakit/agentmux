@@ -22,25 +22,28 @@ const EMPTY_SCROLL_STATE: WorkbenchTabStripState = {
 
 export function WorkbenchTabStrip({
   activeTabId,
+  visible,
   tabIds,
   children
 }: {
   activeTabId: string | null
+  visible: boolean
   tabIds: readonly string[]
   children: ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollState, setScrollState] = useState(EMPTY_SCROLL_STATE)
   const tabIdsKey = useMemo(() => tabIds.join('\u0000'), [tabIds])
+  const lastReveal = useRef<{ activeTabId: string; tabIdsKey: string } | null>(null)
 
   const updateScrollState = useCallback(() => {
     const element = scrollRef.current
-    if (!element) return
+    if (!visible || !element) return
     const nextState = getWorkbenchTabStripState(element)
     setScrollState((currentState) => (
       sameWorkbenchTabStripState(currentState, nextState) ? currentState : nextState
     ))
-  }, [])
+  }, [visible])
 
   useLayoutEffect(() => {
     updateScrollState()
@@ -48,36 +51,44 @@ export function WorkbenchTabStrip({
 
   useEffect(() => {
     const element = scrollRef.current
-    if (!element) return
+    if (!visible || !element) return
+    let active = true
+    const update = (): void => { if (active) updateScrollState() }
     const handleWheel = (event: globalThis.WheelEvent) => {
+      if (!active) return
       if (element.scrollWidth <= element.clientWidth) return
       if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
       event.preventDefault()
       element.scrollLeft += event.deltaY
     }
-    const observer = new ResizeObserver(updateScrollState)
+    const observer = new ResizeObserver(update)
     observer.observe(element)
-    element.addEventListener('scroll', updateScrollState, { passive: true })
+    element.addEventListener('scroll', update, { passive: true })
     element.addEventListener('wheel', handleWheel, { passive: false })
     return () => {
+      active = false
       observer.disconnect()
-      element.removeEventListener('scroll', updateScrollState)
+      element.removeEventListener('scroll', update)
       element.removeEventListener('wheel', handleWheel)
     }
-  }, [updateScrollState])
+  }, [visible, updateScrollState])
 
   useEffect(() => {
     const element = scrollRef.current
-    if (!element || !activeTabId) return
+    if (!visible || !element || !activeTabId) return
+    if (lastReveal.current?.activeTabId === activeTabId && lastReveal.current.tabIdsKey === tabIdsKey) return
     const activeTab = Array.from(
       element.querySelectorAll<HTMLElement>('[data-workbench-tab-id]')
     ).find((candidate) => candidate.dataset.workbenchTabId === activeTabId)
-    activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [activeTabId, tabIdsKey])
+    if (activeTab) {
+      lastReveal.current = { activeTabId, tabIdsKey }
+      activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
+  }, [visible, activeTabId, tabIdsKey])
 
   function scrollByPage(direction: -1 | 1): void {
     const element = scrollRef.current
-    if (!element) return
+    if (!visible || !element) return
     element.scrollBy({
       left: direction * Math.max(120, element.clientWidth * 0.72),
       behavior: 'smooth'

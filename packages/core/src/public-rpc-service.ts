@@ -15,7 +15,7 @@ import { displayLabel, type AgentMuxNameContext } from './display-label.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import type { AgentMuxClient } from './client.js'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates,
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates, agentMuxControlTimeoutMs,
   type AgentMuxControlHost, type AgentMuxControlRequest, type AgentMuxControlResult,
   type AgentMuxControlCaller, type AgentMuxDemand } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
@@ -891,16 +891,37 @@ export class AgentMuxRpcService {
     assertToolkitResultTarget(request, result); return result
   }
   private async metrics(signal?: AbortSignal): Promise<import('./metrics.js').MetricsObservation> {
+    const metrics = this.ports.metrics
+    if (!metrics) throw new AgentMuxError('Metrics owner is unavailable.', 'METRICS_UNSUPPORTED')
     const controller = new AbortController()
-    const abort = () => controller.abort()
-    signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort()
     let resolve!: (value: import('./metrics.js').MetricsObservation) => void, reject!: (error: unknown) => void
     const first = new Promise<import('./metrics.js').MetricsObservation>((yes, no) => { resolve = yes; reject = no })
     void first.catch(() => {})
-    controller.signal.addEventListener('abort', () => reject(new AgentMuxError('Metrics reader was cancelled.', 'CONTROL_CANCELLED')), { once: true })
-    if (!this.ports.metrics) throw new AgentMuxError('Metrics owner is unavailable.', 'METRICS_UNSUPPORTED')
-    const sub = await this.ports.metrics.subscribe(resolve, error => reject(error ?? new AgentMuxError('Metrics ended before a snapshot.', 'CONTROL_UNAVAILABLE')), controller.signal)
-    try { return await first } finally { signal?.removeEventListener('abort', abort); controller.abort(); sub.dispose() }
+    const cancelled = new Promise<never>((_resolve, cancel) => controller.signal.addEventListener('abort',
+      () => cancel(controller.signal.reason), { once: true }))
+    void cancelled.catch(() => {})
+    const abort = () => controller.abort(new AgentMuxError('Metrics reader was cancelled.', 'CONTROL_CANCELLED'))
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+    const deadline = setTimeout(() => controller.abort(new AgentMuxError('Metrics owner did not answer within its observation budget.',
+      'CONTROL_TIMEOUT')), agentMuxControlTimeoutMs('metrics.get'))
+    let subscription: import('./metrics.js').MetricsSubscription | undefined
+    let released: import('./metrics.js').MetricsSubscription | undefined
+    const release = (value: import('./metrics.js').MetricsSubscription) => {
+      if (released === value) return
+      released = value; value.dispose()
+    }
+    const opening = Promise.resolve().then(() => metrics.subscribe(resolve,
+      error => reject(error ?? new AgentMuxError('Metrics ended before a snapshot.', 'CONTROL_UNAVAILABLE')), controller.signal))
+    // The owner may finish establishing after this read ends. Release that exact late lease.
+    void opening.then(value => { if (controller.signal.aborted) release(value) }, () => {})
+    try {
+      subscription = await Promise.race([opening, cancelled])
+      return await Promise.race([first, cancelled])
+    } finally {
+      clearTimeout(deadline); signal?.removeEventListener('abort', abort); controller.abort()
+      if (subscription) release(subscription)
+    }
   }
   private async sessions(filters: Record<string, unknown>) {
     rpcRecord(filters, NATIVE_FIELDS['agent.ls'])

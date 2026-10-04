@@ -1,3 +1,4 @@
+import type { ClientPerformanceDiagnostics, InputPerformanceSnapshot } from './performance-diagnostics.js'
 import type { RendererPerformanceSnapshot } from './renderer-performance.js'
 export type * from './renderer-performance.js'
 import { AgentMuxError } from './errors.js'
@@ -41,10 +42,19 @@ export type MetricsObservation = {
   schema: 'agentmux.metrics.v1'; observedAt: number
   scope: { kind: 'unix-host'; hostId: 'local'; hostname: string; mainPid: number }
   window: MetricsWindow | null
-  units: { cpu: 'percent'; rss: 'KiB'; storage: 'bytes'; cpuAggregate: '10s-reading-peak'; rssAggregate: 'latest' }
+  units: { cpu: 'percent'; cpuBasis: 'one-logical-core'; rss: 'KiB'; storage: 'bytes'; cpuAggregate: '10s-reading-peak'; rssAggregate: 'latest' }
   process: MetricsSource<RunUsage[]>; app: MetricsSource<AppUsage>
   runtime: MetricsSource<RuntimeUsage[]>; main: MetricsSource<MainResourceOwnerCounts>
+  diagnostics: MetricsSource<PerformanceDiagnostics>
   renderer: MetricsSource<MetricsRenderer>
+}
+export type PerformanceDiagnostics = {
+  main: ClientPerformanceDiagnostics
+  hosts: { hostId: string; data: ClientPerformanceDiagnostics | null; unavailable: string | null }[]
+  omittedHosts: number
+  storage: { location: 'main-user-home-volume'; availableBytes: number; totalBytes: number } | null
+  storageUnavailable: string | null
+  eventLoop: { resolutionMs: 20; generation: number; count: number; meanMs: number | null; maxMs: number | null }
 }
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
@@ -95,6 +105,20 @@ const terminalInteractionParser = record({ observedSinceAt: number,
   lastEvent: nullable(record({ kind: v => { if (!['keydown', 'wheel'].includes(v as string)) invalid() },
     observedAt: number, delayMs: nullable(number), visible: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean,
     buffer: v => { if (!['normal', 'alternate'].includes(v as string)) invalid() }, mouseTrackingMode: identity })) })
+const inputEntryParser = record({ id: count, sessionId: nullable(identity), runId: identity,
+  kind: v => { if (!['user','mouse','protocol','paste','semantic','terminal'].includes(v as string)) invalid() }, bytes: nullable(count),
+  enqueuedAt: number, stage: v => { if (!['queued','current-run','operation','native-input'].includes(v as string)) invalid() },
+  stageMs: number, totalMs: number, result: v => { if (!['pending','completed','failed'].includes(v as string)) invalid() } })
+const inputPerformanceParser = record({ startedAt: number, started: count, completed: count, failed: count, pending: count,
+  kinds: record({ user: count, mouse: count, protocol: count, paste: count, semantic: count, terminal: count }),
+  queueWait: timingParser, currentRun: timingParser, operation: timingParser, nativeInput: timingParser,
+  active: boundedArray(64, inputEntryParser), omittedActive: count, recent: boundedArray(32, inputEntryParser), omittedRecent: count })
+const clientPerformanceParser = record({ processId: count, observedAt: number, input: inputPerformanceParser,
+  carrier: record({ encoded: timingParser, decodedFrames: timingParser, decodedValues: timingParser,
+    encodedBytes: count, encodedFrames: count, decodedBytes: count, rejected: count }) })
+const diagnosticsParser = record({ main: clientPerformanceParser,
+  hosts: boundedArray(64, record({ hostId: identity, data: nullable(clientPerformanceParser), unavailable: nullable(text) })),
+  omittedHosts: count, storage: nullable(record({ location: literal('main-user-home-volume'), availableBytes: count, totalBytes: count })), storageUnavailable: nullable(text), eventLoop: record({ resolutionMs: literal(20), generation: count, count, meanMs: nullable(number), maxMs: nullable(number) }) })
 const consumerParser = record({ checks: count, changes: count, commits: count })
 const visibilityParser = record({ visible: consumerParser, hidden: consumerParser })
 const tabSwitchParser = record({ id: count,
@@ -108,6 +132,10 @@ const tabSwitchParser = record({ id: count,
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
   consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }), sessionEvents: timingParser,
+  inputRequests: record(Object.fromEntries(['user', 'protocol', 'paste'].map(kind => [kind, record({ started: count, completed: count, failed: count, pending: count, wall: timingParser })]))),
+  overlay: record({ triggers: record({ initial: count, demand: count, mutation: count, resize: count, scroll: count, toggle: count, font: count, collect: count }),
+    scheduled: count, coalesced: count, candidates: count, geometryReads: count, nativeDemandCount: nullable(count),
+    latestCandidates: nullable(count), latestGeometryReads: nullable(count), collect: timingParser }),
   terminalWrites: record({ visible: timingParser, hidden: timingParser, stringCodeUnits: count, bytes: count }),
   inputDelay: record({ state: v => { if (!['observing','unsupported','stopped','unavailable'].includes(v as string)) invalid() },
     reason: nullable(text), durationThresholdMs: literal(16), timing: timingParser }),
@@ -159,10 +187,10 @@ function source(parse: Parser): Parser {
 }
 const observationParser = record({ schema: literal('agentmux.metrics.v1'), observedAt: number,
   scope: record({ kind: literal('unix-host'), hostId: literal('local'), hostname: identity, mainPid: count }),
-  window: nullable(windowParser), units: record({ cpu: literal('percent'), rss: literal('KiB'), storage: literal('bytes'),
+  window: nullable(windowParser), units: record({ cpu: literal('percent'), cpuBasis: literal('one-logical-core'), rss: literal('KiB'), storage: literal('bytes'),
     cpuAggregate: literal('10s-reading-peak'), rssAggregate: literal('latest') }),
   process: source(array(runParser)), app: source(appParser), runtime: source(array(runtimeParser)),
-  main: source(mainParser), renderer: source(record({ window: windowParser, counts: countsParser, performance: performanceParser })) })
+  diagnostics: source(diagnosticsParser), main: source(mainParser), renderer: source(record({ window: windowParser, counts: countsParser, performance: performanceParser })) })
 export function parseMetricsObservation(value: unknown): MetricsObservation {
   observationParser(value)
   const result = value as MetricsObservation

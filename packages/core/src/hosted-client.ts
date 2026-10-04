@@ -110,8 +110,14 @@ export async function connectHostedAgentMux(options: {
       args = [args[0], { ...request, source: { ...request.source },
         ...(request.args ? { args: [...request.args] } : {}), ...(request.env ? { env: { ...request.env } } : {}) }, ...args.slice(2)]
     }
-    await connect()
+    if (method === 'clientPerformanceDiagnostics') {
+      if (!stream || !bootstrap) throw new AgentMuxError('Performance owner is not connected.', 'CONTROL_UNAVAILABLE')
+    } else await connect()
     let signal: AbortSignal | undefined, wireArgs = args
+    if (method === 'clientPerformanceDiagnostics') {
+      const options = args[0] as { signal?: AbortSignal } | undefined
+      if (isAbortSignal(options?.signal)) { signal = options.signal; wireArgs = [] }
+    }
     // Cancellation belongs to the exact SDK field. Ordinary data, including env.signal,
     // crosses unchanged; the value codec never classifies fields by their names.
     if (method === 'submitAgentPrompt') {

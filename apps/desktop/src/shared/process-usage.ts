@@ -165,7 +165,7 @@ export function aggregateUsage(
   specs: { cpu: MetricSpec; rss: MetricSpec } = USAGE_METRIC_SPECS
 ): { cpuPercent: number | null; rssKib: number | null } {
   const inWindow = (windowMs: number): UsageSample[] =>
-    samples.filter((sample) => now - sample.observedAt <= windowMs)
+    samples.filter((sample) => sample.observedAt <= now && now - sample.observedAt <= windowMs)
   return {
     cpuPercent: aggregateValues(
       inWindow(specs.cpu.windowMs).map((sample) => sample.cpuPercent),
@@ -185,7 +185,8 @@ export function pruneSamples(
   specs: { cpu: MetricSpec; rss: MetricSpec } = USAGE_METRIC_SPECS
 ): UsageSample[] {
   const longest = Math.max(specs.cpu.windowMs, specs.rss.windowMs)
-  return samples.filter((sample) => now - sample.observedAt <= longest)
+  const limit = Math.ceil(longest / USAGE_SAMPLE_INTERVAL_MS) + 1
+  return samples.filter((sample) => sample.observedAt <= now && now - sample.observedAt <= longest).slice(-limit)
 }
 
 export type { RunUsage, AppProcessRole, AppUsageGroup, AppUsage, MainResourceOwnerCounts, RuntimeUsage } from "@agentmux/core/control"

@@ -68,7 +68,7 @@ import {
   subscribeTerminalSearchCount
 } from '../lib/terminal-search-count'
 import { boundedTerminalHistoryRead, finishTerminalReplayRecovery, terminalContinuationOutcome, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, type TerminalContinuationAbsence } from '../lib/terminal-replay'
-import { hydrateTerminalReplay, recoverTerminalRetainedOutput, restoreTerminalCheckpoint, terminalHistoryBoundary, yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
+import { TERMINAL_REPLAY_BATCH_BYTES, hydrateTerminalReplay, recoverTerminalRetainedOutput, restoreTerminalCheckpoint, terminalHistoryBoundary, yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import {
@@ -343,9 +343,10 @@ export function TerminalView({
   useLayoutEffect(clearLinkPreview, [fontSize])
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const reportError = useAppStore((state) => state.reportError)
-  const workspaceIsLocal = useAppStore((state) =>
-    state.config?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local'
-  )
+  const terminalConfig = useAppStore((state) => state.config)
+  const workspaceIsLocal = useMemo(() =>
+    terminalConfig?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local',
+  [terminalConfig, linkOrigin.workspaceId])
   const workspaceIsLocalRef = useRef(workspaceIsLocal)
   workspaceIsLocalRef.current = workspaceIsLocal
   const regionCaretFocus = useAppStore((state) =>
@@ -370,9 +371,9 @@ export function TerminalView({
   // clickable. Long is bad; dead is worse.
   //
   // A ref keeps it fresh for the attach-effect closure, which does not re-run on config change.
-  const activeWorkspaceRoot = useAppStore((state) =>
-    workspaceRootForPath(state.config ?? null, session) ?? ''
-  )
+  const activeWorkspaceRoot = useMemo(() =>
+    workspaceRootForPath(terminalConfig ?? null, session) ?? '',
+  [terminalConfig, session.kind, session.hostId, session.workspacePath])
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
   const isMac = isMacPlatform()
@@ -1003,7 +1004,9 @@ export function TerminalView({
       }
       replayingContinuation = true
       try {
-        for (const step of steps) {
+        let geometrySteps = 0
+        for (let index = 0; index < steps.length; index += 1) {
+          const step = steps[index]!
           if (disposed) return
           if (step.type === 'restore') {
             if (preserve) continue
@@ -1032,13 +1035,31 @@ export function TerminalView({
             if (preserve && step.resizeRevision <= resizeRevision) continue
             viewport.acceptOwnerSize(step.size)
             resizeRevision = step.resizeRevision
+            // Metadata can reflow long history too. It gets the same host-task opportunity as bytes.
+            if (++geometrySteps >= 16) {
+              geometrySteps = 0
+              await yieldTerminalWork()
+            }
           } else {
+            const batch = [step]
+            let bytes = step.dataBytes.byteLength
+            // Only adjacent raw ranges may share a write; resize/restore and gaps remain barriers.
+            while (bytes < TERMINAL_REPLAY_BATCH_BYTES) {
+              const next = steps[index + 1]
+              if (!next || next.type !== 'data' || next.startByte !== batch.at(-1)!.endByte) break
+              batch.push(next)
+              bytes += next.dataBytes.byteLength
+              index += 1
+            }
+            geometrySteps = 0
             if (preserve) {
-              const composed = composeTerminalLiveOutputWrite([step], cursor)
+              const composed = composeTerminalLiveOutputWrite(batch, cursor)
               if (composed.gap) throw new Error('Refresh does not cover this Region’s displayed byte cursor.')
-              if (composed.dataBytes.byteLength) await writeOutput(composed.dataBytes)
+              if (composed.dataBytes.byteLength) await hydrateTerminalReplay([
+                { dataBytes: composed.dataBytes, endByte: composed.cursor }
+              ], writeOutput)
               cursor = composed.cursor
-            } else cursor = await hydrateTerminalReplay([step], writeOutput) ?? cursor
+            } else cursor = await hydrateTerminalReplay(batch, writeOutput) ?? cursor
           }
         }
         resizeRevision = snapshot.resizeRevision
@@ -1065,6 +1086,7 @@ export function TerminalView({
       // Let same-turn IPC events accumulate so xterm sees one visual write instead of one write
       // per RuntimeEvent. The loop remains bounded and yields between batches when output is large.
       await yieldTerminalWork()
+      let geometrySteps = 0
       while (!disposed && liveOutputQueue.length > 0) {
         const taken = liveOutputQueue.take()
         if (taken.snapshot) {
@@ -1107,6 +1129,10 @@ export function TerminalView({
           }
           viewport.acceptOwnerSize(resize.size)
           resizeRevision = resize.resizeRevision
+          if (++geometrySteps >= 16 && liveOutputQueue.length > 0) {
+            geometrySteps = 0
+            await yieldTerminalWork()
+          }
           continue
         }
         // 重叠三分（整块已有 / 部分已有 / 真的缺了一段）全在 lib 里判，这里只转发：
@@ -1131,6 +1157,7 @@ export function TerminalView({
           cursor = composed.cursor
           continue
         }
+        geometrySteps = 0
         const data = composed.dataBytes
         const nextCursor = composed.cursor
         await writeOutput(data)
@@ -1259,6 +1286,7 @@ export function TerminalView({
         if (!readOnlyRef.current) {
           const startedAt = rendererPerformance.start()
           const request = api.sessions.write(session.control, data, source)
+          rendererPerformance.observeInputRequest(source === 'user' ? 'user' : 'protocol', request, startedAt)
           if (source === 'user') interaction.observeWriteRequest(request, startedAt)
           void request.catch(reportError)
         }
@@ -1268,7 +1296,12 @@ export function TerminalView({
       terminalInputSender({
         accepts: acceptsCurrentInput,
         write: () => {
-          if (!readOnlyRef.current) void api.sessions.paste(session.control, text, terminalData).catch(reportError)
+          if (!readOnlyRef.current) {
+            const startedAt = rendererPerformance.start()
+            const request = api.sessions.paste(session.control, text, terminalData)
+            rendererPerformance.observeInputRequest('paste', request, startedAt)
+            void request.catch(reportError)
+          }
         }
       })(terminalData)
     })

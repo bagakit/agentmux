@@ -462,20 +462,22 @@ export function ActivityView({
   const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
   const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
   const items = readingWindow.captured ?? observedItems
+  const readingEnabled = conversationReading?.enabled !== false
   useLayoutEffect(() => {
     if (conversationReading?.enabled && feedEl && anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
     else if (conversationReading?.enabled && feedEl && followRef.current.following) feedEl.scrollTop = feedEl.scrollHeight
-    if (feedEl) edgeRef.current.programmaticTop = feedEl.scrollTop
+    if (conversationReading?.enabled && feedEl) edgeRef.current.programmaticTop = feedEl.scrollTop
   }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
     if (!conversationReading?.enabled || !(readingWindow.historical || showJump) || !feedEl) return
     const content = feedEl.querySelector('.conversation-native-thread')
     if (!content) return
+    let active = true
     const observer = new ResizeObserver(() => {
-      if (anchorRef.current) { restoreConversationAnchor(feedEl, anchorRef.current); edgeRef.current.programmaticTop = feedEl.scrollTop }
+      if (active && anchorRef.current) { restoreConversationAnchor(feedEl, anchorRef.current); edgeRef.current.programmaticTop = feedEl.scrollTop }
     })
     observer.observe(content)
-    return () => observer.disconnect()
+    return () => { active = false; observer.disconnect() }
   }, [feedEl, conversationReading?.enabled, readingWindow.historical, showJump])
   useEffect(() => {
     if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
@@ -493,7 +495,7 @@ export function ActivityView({
       return !sameSource || !readingWindow.historical && !nativeIds.has(message.rawId)
     })
     return buildActivityEntries(items, observedMessages)
-  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, conversationReading?.nativeSourceFacts])
+  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, Boolean(conversationReading?.nativeSourceFacts)])
   const placed = useMemo(() => placeSegments(segments), [segments])
   const nativeSupplement = (entry: Segment): boolean => entry.kind === 'user-message' && entry.message.source.kind === 'native'
   const observations = placed.reduce((summary, { entry }) => {
@@ -556,13 +558,14 @@ export function ActivityView({
   const currentSessionId = sessionId
 
   useEffect(() => {
+    if (!readingEnabled) return
     if (currentSessionId && lastSessionIdRef.current !== currentSessionId) {
       lastSessionIdRef.current = currentSessionId
       followRef.current = initFollowState()
       setShowJump(false)
       pinToBottom()
     }
-  }, [currentSessionId])
+  }, [currentSessionId, readingEnabled])
 
   const feedGeometry = (): ScrollGeometry | null => {
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
@@ -609,6 +612,7 @@ export function ActivityView({
   // 用户主动往上滚才脱离；内容变长不算——两者都会让"离底部的距离"变大，能区分它们的证据是
   // scrollTop 本身有没有减少。判定在 lib 里，这里只把事件折进去。
   useEffect(() => {
+    if (!readingEnabled) return
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
     if (!(el instanceof HTMLElement)) return
     const handle = (): void => {
@@ -624,11 +628,12 @@ export function ActivityView({
     }
     el.addEventListener('scroll', handle, { passive: true })
     return () => el.removeEventListener('scroll', handle)
-  }, [feedEl, readingWindow.historical, readingWindow.loading, readingWindow.hasMore, readingWindow.hasNewer, conversationReading?.enabled])
+  }, [feedEl, readingWindow.historical, readingWindow.loading, readingWindow.hasMore, readingWindow.hasNewer, readingEnabled])
 
   // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
   // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
   useEffect(() => {
+    if (!readingEnabled) return
     const geometry = feedGeometry()
     if (!geometry || readingWindow.historical) return
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
@@ -645,10 +650,10 @@ export function ActivityView({
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
-  }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical])
+  }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical, readingEnabled])
 
   useEffect(() => {
-    if (!revealRequest || !feedEl) return
+    if (!readingEnabled || !revealRequest || !feedEl) return
     const target = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
       .find(node => node.dataset.messageSourceKey === revealRequest.sourceKey)
     if (target && revealRequest.isCurrent()) expandObservationFor(target)
@@ -670,7 +675,7 @@ export function ActivityView({
       revealRequest.complete(inView)
     })
     return () => cancelAnimationFrame(frame)
-  }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage])
+  }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage, readingEnabled])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
@@ -693,7 +698,7 @@ export function ActivityView({
   const visibleShells = useRef<{ feed: HTMLDivElement; sessionId: string; shells: Set<Element> } | null>(null)
   // Register committed shells once. Disclosure registers only added descendants, never a scroll-frame scan.
   useEffect(() => {
-    if (!feedEl) return
+    if (!readingEnabled || !feedEl) return
     const expected = new Map<string, string[]>()
     const segmentsByIndex = new Map<number, string>()
     for (const segment of placed) for (let index = segment.from; index <= segment.to; index++) segmentsByIndex.set(index, segment.key)
@@ -772,7 +777,7 @@ export function ActivityView({
     })
     mutations.observe(feedEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] })
     return () => { active = false; mutations.disconnect(); resize.disconnect(); observer.disconnect() }
-  }, [rulerRecords, placed, feedEl, sessionId])
+  }, [rulerRecords, placed, feedEl, sessionId, readingEnabled])
 
   const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
   locateRef.current.source = nativeHistoryPage
@@ -982,7 +987,7 @@ export function ActivityView({
           This executor does not provide structured activity. Terminal remains available.
         </div>
       ) : null}
-      {ruler.items.length > 0 ? <Ruler
+      {ruler.items.length > 0 ? <Ruler visible={readingEnabled}
         items={ruler.items}
         scale={scale}
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}

@@ -222,7 +222,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
       <details className="performance-disclosure performance-sources"><summary>Observation details <ChevronDown size={12} /></summary><Facts>
         <dt>Host / Main</dt><dd>{observation ? `${observation.scope.hostname} · ${observation.scope.mainPid}` : '—'}</dd>
         <dt>Execution</dt><dd>{snapshot?.executionId ?? '—'}</dd><dt>Source state</dt><dd>{source?.state ?? 'pending'}</dd>
-        <dt>Observed</dt><dd>{readingTime(source?.observedAt, snapshot?.observedAt)}</dd><dt>CPU · App / Run</dt><dd>Interval average / ps average · 10s reading peak</dd>
+        <dt>Observed</dt><dd>{readingTime(source?.observedAt, snapshot?.observedAt)}</dd><dt>CPU · App / Run</dt><dd>100% = one logical core · interval / ps averages · 10s reading peak</dd>
         <dt>Run RSS</dt><dd>Root + attributed descendants; shared pages may count in multiple processes.</dd>
       </Facts></details>
     </div>

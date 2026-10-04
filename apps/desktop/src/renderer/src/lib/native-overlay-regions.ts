@@ -1,5 +1,7 @@
-import type { NativeBrowserInput, NativeOverlayRegion } from '../../../shared/native-overlay'
+import type { NativeBrowserInput, NativeBrowserVisibility, NativeOverlayRegion } from '../../../shared/native-overlay'
 import { NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT } from '../../../shared/native-overlay'
+import type { RendererOverlayObservation } from '@agentmux/core/control'
+import { boundsOverlap } from '../../../shared/native-overlay'
 import { rendererCssBoundsToWindowDip } from './browser-bounds-sync'
 
 const OPEN_FLOAT = '[data-state="open"], [role="tooltip"], [role="dialog"], [role="menu"], [role="listbox"]'
@@ -8,12 +10,14 @@ const OPEN_FLOAT = '[data-state="open"], [role="tooltip"], [role="dialog"], [rol
 export function observeNativeOverlayRegions(
   body: HTMLElement,
   zoomFactor: () => number,
-  publish: (regions: NativeOverlayRegion[], warning?: string) => void
-): { dispose(): void; handleNativeInput(input: NativeBrowserInput): void } {
+  publish: (regions: NativeOverlayRegion[], warning?: string) => void,
+  observe?: (reading: RendererOverlayObservation) => void
+): { dispose(): void; handleNativeInput(input: NativeBrowserInput): void; setNativeDemand(visibility: NativeBrowserVisibility): void } {
   const ids = new WeakMap<Element, string>()
   let nextId = 0
   let disposed = false
   let frame = 0
+  let nativeDemand: NativeBrowserVisibility | null = null
   let watched: Element[] = []
   let geometry: Element[] = []
   let hoveredStage: Element | undefined
@@ -21,13 +25,28 @@ export function observeNativeOverlayRegions(
   const topLayers = new Set<Element>()
   const topLayerSources = new WeakMap<Element, Element>()
   const win = body.ownerDocument.defaultView!
-  const resize = new ResizeObserver(() => schedule())
+  const resize = new ResizeObserver(() => schedule('resize'))
   const portals = (): Element[] => Array.from(body.children).filter(node => node.id !== 'root')
   const collect = (): void => {
     frame = 0
-    if (disposed) return
+    if (disposed || nativeDemand?.bounds.length === 0) return
+    const started = win.performance.now()
+    let geometryReadCount = 0
+    const styles = new Map<Element, CSSStyleDeclaration>(), rects = new Map<Element, DOMRect>()
+    const styleOf = (node: Element): CSSStyleDeclaration => {
+      let style = styles.get(node)
+      if (!style) { style = win.getComputedStyle(node); styles.set(node, style) }
+      return style
+    }
+    const rectOf = (node: Element): DOMRect => {
+      let rect = rects.get(node)
+      if (!rect) { rect = node.getBoundingClientRect(); rects.set(node, rect); geometryReadCount++ }
+      return rect
+    }
     const nodes: Element[] = []
     for (const portal of portals()) {
+      const style = styleOf(portal)
+      if (portal.hasAttribute('hidden') || style.display === 'none' || style.visibility === 'hidden') continue
       if (portal.matches(OPEN_FLOAT)) nodes.push(portal)
       nodes.push(...portal.querySelectorAll(OPEN_FLOAT))
     }
@@ -35,13 +54,14 @@ export function observeNativeOverlayRegions(
       nodes.push(node)
       // A transparent native layer container exposes its actual painted Portal
       // surfaces. The opened container is bounded; #root stays unscanned.
-      if (win.getComputedStyle(node).pointerEvents === 'none') nodes.push(...node.querySelectorAll(OPEN_FLOAT))
+      if (styleOf(node).pointerEvents === 'none') nodes.push(...node.querySelectorAll(OPEN_FLOAT))
     }
     // A menu's checked item also has data-state=open. Capture its mounted Content once.
     const unique = [...new Set(nodes)]
     const candidates = unique.filter(node => {
-      const rect = node.getBoundingClientRect()
-      const style = win.getComputedStyle(node)
+      const style = styleOf(node)
+      if (style.display === 'none' || style.visibility === 'hidden' || node.getAttribute('data-state') === 'closed') return false
+      const rect = rectOf(node)
       // A transparent full-window wrapper is not a float's painted surface. Its children are.
       return !(rect.width >= win.innerWidth && rect.height >= win.innerHeight &&
         style.backgroundColor === 'rgba(0, 0, 0, 0)' && unique.some(child => child !== node && node.contains(child)))
@@ -61,12 +81,13 @@ export function observeNativeOverlayRegions(
     let pixels = 0
     let warning: string | undefined
     for (const node of floats) {
-      const style = win.getComputedStyle(node)
+      const style = styleOf(node)
       if (style.display === 'none' || style.visibility === 'hidden' || node.getAttribute('data-state') === 'closed') continue
-      const rect = node.getBoundingClientRect()
+      const rect = rectOf(node)
       if (rect.width <= 0 || rect.height <= 0) continue
       activeFloats.push(node)
       const bounds = rendererCssBoundsToWindowDip(rect, zoomFactor())
+      if (nativeDemand && !nativeDemand.bounds.some(native => boundsOverlap(bounds, native))) continue
       const emptyScrim = node.children.length === 0 && (node.textContent ?? '').trim() === '' && style.backgroundColor !== 'rgba(0, 0, 0, 0)'
       // Chrome capture is composited against the Renderer. Only an opaque content box with
       // uniform native-clippable corners may be projected; never invent alpha by colour removal.
@@ -91,7 +112,7 @@ export function observeNativeOverlayRegions(
       let id = ids.get(node)
       if (!id) { id = `chrome-${++nextId}`; ids.set(node, id) }
       const browserStages = Array.from(node.querySelectorAll('[data-native-browser-stage]')).flatMap(stage => {
-        const browserId = stage.getAttribute('data-native-browser-stage'), box = stage.getBoundingClientRect()
+        const browserId = stage.getAttribute('data-native-browser-stage'), box = rectOf(stage)
         if (!browserId || box.width <= 0 || box.height <= 0) return []
         stages.push(stage)
         return [{ browserId, bounds: rendererCssBoundsToWindowDip(box, zoomFactor()) }]
@@ -108,26 +129,46 @@ export function observeNativeOverlayRegions(
     watched = activeFloats
     if (hoveredFloat && !watched.includes(hoveredFloat)) { hoveredFloat = undefined; hoveredStage = undefined }
     publish(regions, warning)
+    observe?.({ reason: 'collect', scheduled: false, coalesced: false, candidateCount: unique.length,
+      geometryReadCount, nativeDemandCount: nativeDemand?.bounds.length ?? null, collectMs: win.performance.now() - started })
   }
-  const schedule = (): void => {
-    if (!disposed && !frame) frame = win.requestAnimationFrame(collect)
+  const schedule = (reason: RendererOverlayObservation['reason']): void => {
+    if (disposed) return
+    const requested = nativeDemand?.bounds.length !== 0
+    const coalesced = requested && Boolean(frame)
+    if (requested && !frame) frame = win.requestAnimationFrame(collect)
+    observe?.({ reason, scheduled: requested && !coalesced, coalesced, nativeDemandCount: nativeDemand?.bounds.length ?? null })
   }
   const observer = new MutationObserver(records => {
     if (records.some(record => record.target === body && record.type === 'childList')) bind()
-    schedule()
+    // Opening/closing/style mutations always refresh. Content below an explicitly
+    // hidden scope cannot repaint native chrome; do not lay out another visible float for it.
+    const relevant = records.some(record => {
+      if (record.target === body || record.type === 'attributes' && ['style', 'class', 'data-state', 'hidden'].includes(record.attributeName ?? '')) return true
+      let node = record.target instanceof Element ? record.target : record.target.parentElement
+      while (node && node !== body) {
+        if (node.hasAttribute('hidden') || node.getAttribute('data-state') === 'closed' || node instanceof win.HTMLElement &&
+          (node.style.display === 'none' || node.style.visibility === 'hidden')) return false
+        if (topLayers.has(node)) break
+        node = node.parentElement
+      }
+      return true
+    })
+    if (relevant) schedule('mutation')
   })
   const bind = (): void => {
     observer.disconnect()
+    if (nativeDemand?.bounds.length === 0) return
     observer.observe(body, { childList: true })
     for (const portal of portals()) observer.observe(portal, {
       subtree: true, childList: true, characterData: true, attributes: true,
-      attributeFilter: ['data-state', 'style', 'class', 'aria-expanded', 'aria-disabled', 'data-native-browser-stage']
+      attributeFilter: ['data-state', 'style', 'class', 'hidden', 'aria-expanded', 'aria-disabled', 'data-native-browser-stage']
     })
     // HTML popovers live in the native DOM top layer, often inside #root. Observe only the opened
     // target named by the toggle event, never terminal/editor content or a whole-document scan.
     for (const node of topLayers) if (node.isConnected) observer.observe(node, {
       subtree: true, childList: true, characterData: true, attributes: true,
-      attributeFilter: ['data-state', 'style', 'class', 'aria-expanded', 'aria-disabled', 'data-native-browser-stage']
+      attributeFilter: ['data-state', 'style', 'class', 'hidden', 'aria-expanded', 'aria-disabled', 'data-native-browser-stage']
     })
   }
   // The same mounted float can close and reopen between capture frames. Its original
@@ -154,24 +195,34 @@ export function observeNativeOverlayRegions(
       if (target === hoveredFloat) clearHover()
     }
     bind()
-    schedule()
+    schedule('toggle')
   }
   const onScroll = (event: Event): void => {
     if (watched.length === 0) return
     const target = event.target
-    if (target === event.currentTarget || target === body.ownerDocument) { schedule(); return }
+    if (target === event.currentTarget || target === body.ownerDocument) { schedule('scroll'); return }
     if (!(target instanceof Element)) return
-    if (watched.some(node => node.contains(target) || target.contains(node) || target.contains(topLayerSources.get(node) ?? null))) schedule()
+    if (watched.some(node => node.contains(target) || target.contains(node) || target.contains(topLayerSources.get(node) ?? null))) schedule('scroll')
   }
+  const onResize = (): void => schedule('resize')
+  const onFont = (): void => schedule('font')
   bind()
   collect()
-  win.addEventListener('resize', schedule)
+  win.addEventListener('resize', onResize)
   win.addEventListener('scroll', onScroll, true)
   body.addEventListener('toggle', onToggle, true)
   body.addEventListener('beforetoggle', onBeforeToggle, true)
   body.addEventListener('pointerleave', onPointerLeave, true)
-  body.ownerDocument.fonts?.addEventListener('loadingdone', schedule)
-  return { handleNativeInput(input) {
+  body.ownerDocument.fonts?.addEventListener('loadingdone', onFont)
+  return { setNativeDemand(visibility) {
+    if (disposed) return
+    nativeDemand = visibility
+    if (visibility.bounds.length === 0) {
+      win.cancelAnimationFrame(frame); frame = 0
+      observer.disconnect(); resize.disconnect(); geometry = []; watched = []
+      clearHover(); publish([]); schedule('demand')
+    } else { bind(); schedule('demand') }
+  }, handleNativeInput(input) {
     if (disposed) return
     const float = input.overlayId ? watched.find(node => ids.get(node) === input.overlayId && node.isConnected && (!node.hasAttribute('popover') || topLayers.has(node)) && node.getAttribute('data-state') !== 'closed' &&
       win.getComputedStyle(node).display !== 'none' && win.getComputedStyle(node).visibility !== 'hidden') : undefined
@@ -234,12 +285,12 @@ export function observeNativeOverlayRegions(
     win.cancelAnimationFrame(frame)
     observer.disconnect()
     resize.disconnect()
-    win.removeEventListener('resize', schedule)
+    win.removeEventListener('resize', onResize)
     win.removeEventListener('scroll', onScroll, true)
     body.removeEventListener('toggle', onToggle, true)
     body.removeEventListener('beforetoggle', onBeforeToggle, true)
     body.removeEventListener('pointerleave', onPointerLeave, true)
-    body.ownerDocument.fonts?.removeEventListener('loadingdone', schedule)
+    body.ownerDocument.fonts?.removeEventListener('loadingdone', onFont)
     publish([])
   } }
 }

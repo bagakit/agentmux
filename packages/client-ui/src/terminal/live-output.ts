@@ -186,9 +186,21 @@ export class TerminalLiveOutputQueue implements Iterable<TerminalLiveItem> {
     let bytes = 0
     while (this.head && !('size' in this.head.item) && !('snapshot' in this.head.item)) {
       const node = this.head
-      if (batch.length > 0 && bytes + node.bytes > limit) break
+      const remaining = limit - bytes
+      if (remaining <= 0) break
+      const item = node.item as TerminalLiveOutputChunk
+      if (node.bytes > remaining) {
+        // Keep the suffix in this same queue node. Views preserve exact bytes (including split
+        // UTF8/ANSI) and a later snapshot/admission still sees its real remaining byte range.
+        const endByte = item.startByte + remaining
+        batch.push({ dataBytes: item.dataBytes.subarray(0, remaining), startByte: item.startByte, endByte })
+        node.item = { dataBytes: item.dataBytes.subarray(remaining), startByte: endByte, endByte: item.endByte }
+        node.bytes -= remaining
+        this.bytes -= remaining
+        break
+      }
       bytes += node.bytes
-      batch.push(node.item as TerminalLiveOutputChunk)
+      batch.push(item)
       this.remove(node)
     }
     return { batch }

@@ -22,7 +22,7 @@ import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
-import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
+import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
@@ -341,6 +341,9 @@ export async function registerIpc(args: {
   }
   const nativeChrome = new NativeOverlaySurfaces(args.window, browsers, warnNativeChrome,
     input => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input) })
+  browsers.onNativeVisibilityChange = visibility => {
+    if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_VISIBILITY_CHANNEL, visibility)
+  }
   browsers.onNativeInput = (owner, input) => nativeChrome.forwardBrowserInput(owner, input)
   const currentMetricsWindow = (): import('@agentmux/core/control').MetricsWindow | null => {
     if (args.window.isDestroyed() || args.window.webContents.isDestroyed() || args.window.webContents.isLoadingMainFrame()) return null
@@ -349,6 +352,7 @@ export async function registerIpc(args: {
   }
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
+    observeDiagnostics: signal => args.runtime.performanceDiagnostics(signal),
     observeRenderer: signal => observeRendererResources(controlBridge, currentMetricsWindow, signal),
     processOwners: () => ({
       rendererPids: [...args.window.webContents.mainFrame.framesInSubtree
@@ -910,6 +914,10 @@ export async function registerIpc(args: {
   handleWithEvent('ui:captureScreenshot', async (event) => {
     requireTrustedSender('ui:captureScreenshot', event)
     return await captureComposerScreenshot(app.getPath('home'))
+  })
+  handleWithEvent('ui:nativeBrowserVisibility', event => {
+    requireTrustedSender('ui:nativeBrowserVisibility', event)
+    return browsers.nativeBrowserVisibility()
   })
   handleWithEvent('ui:publishNativeOverlays', async (event, regions: NativeOverlayRegion[]) => {
     requireTrustedSender('ui:publishNativeOverlays', event)

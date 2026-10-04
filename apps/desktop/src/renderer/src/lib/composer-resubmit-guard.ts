@@ -25,3 +25,32 @@ export function isDuplicateResubmit(last: LastSubmit, text: string, now: number,
 export function recordSubmit(text: string, now: number): LastSubmit {
   return { text, at: now }
 }
+
+/** Application-run guard: one expiry wake-up, only still-live accepted prompts. */
+export class ComposerResubmitGuard {
+  private readonly submissions = new Map<string, NonNullable<LastSubmit>>()
+  private expiry: ReturnType<typeof setTimeout> | undefined
+
+  isDuplicate(sessionId: string, text: string): boolean {
+    return isDuplicateResubmit(this.submissions.get(sessionId) ?? null, text, performance.now(), RESUBMIT_WINDOW_MS)
+  }
+
+  record(sessionId: string, text: string): void {
+    this.submissions.set(sessionId, { text, at: performance.now() })
+    if (this.expiry === undefined) this.scheduleExpiry()
+  }
+
+  private scheduleExpiry(): void {
+    const now = performance.now()
+    let next = Infinity
+    for (const [id, submission] of this.submissions) {
+      const expires = submission.at + RESUBMIT_WINDOW_MS
+      if (expires <= now) this.submissions.delete(id)
+      else next = Math.min(next, expires)
+    }
+    this.expiry = next === Infinity ? undefined : setTimeout(() => {
+      this.expiry = undefined
+      this.scheduleExpiry()
+    }, Math.max(0, next - now))
+  }
+}

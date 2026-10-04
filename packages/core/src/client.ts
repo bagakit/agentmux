@@ -1,3 +1,4 @@
+import { createInputPerformanceRecorder, hostedCarrierPerformance, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { deliveryFailure, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
 import type { AgentMuxRunStorageObservation } from './run-storage-observation.js'
@@ -2049,7 +2050,7 @@ export class AgentMuxClient {
       this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
       await this.ensureNativeStatusObservation(next)
       return { session: cloneSession(next), confirmation: structuredClone(next.nativeConfirmation!), persisted: true, current: true }
-    })
+    }, { kind: 'semantic', bytes: null })
   }
 
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
@@ -2694,6 +2695,14 @@ export class AgentMuxClient {
       processId: null,
       instanceId: identity.daemonInstanceId
     }
+  }
+
+  private readonly inputPerformance = createInputPerformanceRecorder()
+
+  /** Local costs only; does not connect, probe or change any Run. */
+  async clientPerformanceDiagnostics(options?: { signal?: AbortSignal }): Promise<ClientPerformanceDiagnostics> {
+    options?.signal?.throwIfAborted()
+    return { processId: process.pid, observedAt: Date.now(), input: this.inputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }
   }
 
   async runtimeDiagnostics(): Promise<AgentMuxRuntimeDiagnostics> {
@@ -4855,8 +4864,7 @@ export class AgentMuxClient {
             } : message
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification)
-          }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation,
-            release => { releasePreparationObservation = release }, transportQualification?.deadline)
+          }, { kind: 'semantic', bytes: null }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation, release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
         } catch (error) {
           const preclaim = protocolInput.preclaim
@@ -5030,7 +5038,7 @@ export class AgentMuxClient {
         prepared,
         renderObservation.signal
       )
-    }, renderObservation)
+    }, { kind: 'semantic', bytes: null }, renderObservation)
   }
 
   /**
@@ -5338,7 +5346,7 @@ export class AgentMuxClient {
         )
       }
       if (run.state.type === 'running') {
-        await this.serializeAgentInput(session, recover)
+        await this.serializeAgentInput(session, recover, { kind: 'semantic', bytes: null })
         continue
       }
       try {
@@ -6158,7 +6166,7 @@ export class AgentMuxClient {
           undefined,
           message
         )
-      }, renderObservation)
+      }, { kind: 'semantic', bytes: null }, renderObservation)
       return true
     } catch (error) {
       // publish 本身若抛，异常会穿出这个方法，而调用点在 create/resume 的 try 内、且在内层 rollback
@@ -6622,6 +6630,8 @@ export class AgentMuxClient {
           appliedByteRange: cursor === null ? null : { startByte: cursor, endByte: cursor },
           acceptedThroughByte: cursor
         }
+      }, {
+        kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : 'user', bytes: 0
       })
     }
     // Capture only observers present when this write entered. Whole mouse controls may
@@ -6637,7 +6647,7 @@ export class AgentMuxClient {
     const operationId = randomUUID()
     this.cancelPromptRenderObservation(requestedSession, source,
       rawInputCancellationDetail(requestedSession, data, operationId, inputKind), mousePreparation)
-    return await this.serializeAgentInput(requestedSession, async (session, run) => {
+    return await this.serializeAgentInput(requestedSession, async (session, run, diagnostic) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
       // This lane already read the current Run. Another public Client may have
@@ -6678,9 +6688,9 @@ export class AgentMuxClient {
       await observeNativeInput('unknown')
       let result: Awaited<ReturnType<typeof this.kernel.input>>
       try {
-        result = await this.kernel.input(session.run.runId, {
+        result = await diagnostic.measure('native-input', () => this.kernel.input(session.run.runId, {
           ownerInstanceId: this.kernel.identity().daemonInstanceId, operationId, expectedByte, data
-        })
+        }))
       } catch (error) {
         for (const observation of protocolObservers) observation.protocolInput!.invalid = true
         if (error instanceof AgentMuxError && error.detail === 'not_applied') await observeNativeInput('not_applied')
@@ -6735,6 +6745,8 @@ export class AgentMuxClient {
         appliedByteRange: result.appliedByteRange,
         acceptedThroughByte: result.run.acceptedInputBytes
       }
+    }, {
+      kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : mousePreparation ? 'mouse' : 'user', bytes: Buffer.byteLength(data)
     })
   }
 
@@ -6823,7 +6835,8 @@ export class AgentMuxClient {
 
   private async serializeAgentInput<T>(
     requestedSession: AgentMuxAgentSession,
-    operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => Promise<T>,
+    operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun, diagnostic: InputPerformanceHandle) => Promise<T>,
+    diagnosticInput: { kind: 'semantic'; bytes: null } | { kind: 'user' | 'mouse' | 'protocol' | 'paste'; bytes: number },
     renderObservation?: AbortController,
     protocolInput?: AgentPromptProtocolInputBoundary,
     onQueued?: (next?: AbortController) => void,
@@ -6843,10 +6856,13 @@ export class AgentMuxClient {
     if (observation) lane.renderObservations.add(observation)
     // Transfer the original ACK observation synchronously, without an unobserved gap.
     onQueued?.(renderObservation)
+    const diagnostic = this.inputPerformance.begin({ sessionId: agentSessionId, runId: requestedSession.run.runId,
+      kind: diagnosticInput.kind, bytes: diagnosticInput.bytes })
     const previous = lane.tail
     beginPromptPreparationPhase(protocolInput, 'input-lane')
     let result!: T
     const queued = previous.catch(() => {}).then(async () => {
+      diagnostic.dequeue()
       const session = this.requireAgentSession(agentSessionId)
       if (!sameRun(session.run, requestedSession.run)) {
         throw new AgentMuxError('Agent Session changed before Input was accepted.', 'STALE_AGENT_SESSION')
@@ -6857,7 +6873,7 @@ export class AgentMuxClient {
           renderObservation?.signal.aborted) throw promptPreparationFailure(protocolInput.cancelled)
       completePromptPreparationPhase(protocolInput)
       beginPromptPreparationPhase(protocolInput, 'current-run')
-      const run = await this.requireCurrentAgentRun(session)
+      const run = await diagnostic.measure('current-run', () => this.requireCurrentAgentRun(session))
       completePromptPreparationPhase(protocolInput)
       if (run.state.type !== 'running') {
         throw new AgentMuxError(
@@ -6865,8 +6881,9 @@ export class AgentMuxClient {
           'STALE_AGENT_SESSION'
         )
       }
-      result = await operation(session, run)
-    })
+      diagnostic.stage('operation')
+      result = await diagnostic.measure('operation', () => operation(session, run, diagnostic))
+    }).then(() => { diagnostic.settle(true) }, error => { diagnostic.settle(false); throw error })
     const tail = queued.then(() => {}, () => {})
     lane.tail = tail
     this.agentInputTails.set(agentSessionId, lane)

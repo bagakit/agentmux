@@ -1478,6 +1478,7 @@ export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 export const SESSION_HISTORY_OBSERVATION_CHANNEL = 'agentmux:session-history-observation'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
+export const NATIVE_BROWSER_VISIBILITY_CHANNEL = 'ui:nativeBrowserVisibility'
 export const NATIVE_BROWSER_INPUT_CHANNEL = 'ui:nativeBrowserInput'
 export const NATIVE_OVERLAY_WARNING_CHANNEL = 'ui:nativeOverlayWarning'
 export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
@@ -1610,6 +1611,8 @@ export type AgentMuxDesktopApi = {
     decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
   }
   ui: {
+    nativeBrowserVisibility(): Promise<import('./native-overlay').NativeBrowserVisibility>
+    onNativeBrowserVisibility(listener: (visibility: import('./native-overlay').NativeBrowserVisibility) => void): () => void
     publishNativeOverlays(regions: import('./native-overlay').NativeOverlayRegion[]): Promise<import('./native-overlay').NativeOverlayReceipt>
     onNativeOverlayWarning(listener: (warning: string) => void): () => void
     onNativeBrowserInput(listener: (input: import('./native-overlay').NativeBrowserInput) => void): () => void

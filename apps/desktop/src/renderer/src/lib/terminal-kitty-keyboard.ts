@@ -16,10 +16,12 @@
 export type KittyKeyboardState = {
   readonly stack: readonly number[]
   readonly pending: string
+  readonly inactiveStack: readonly number[]
+  readonly screen: 'normal' | 'alternate'
 }
 
 export function initialKittyKeyboardState(): KittyKeyboardState {
-  return { stack: [], pending: '' }
+  return { stack: [], inactiveStack: [], screen: 'normal', pending: '' }
 }
 
 /**
@@ -30,8 +32,12 @@ export function initialKittyKeyboardState(): KittyKeyboardState {
  */
 const MAX_PENDING = 32
 
+// The original protocol permits a terminal-chosen bound, evicts the oldest entry on overflow,
+// and requires independent main/alternate stacks: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
+export const KITTY_KEYBOARD_STACK_LIMIT = 16
+
 // `CSI > flags u` 推入、`CSI < number u` 弹出、`CSI = flags ; mode u` 修改栈顶。
-const KITTY_SEQUENCE = /\u001b\[([>=<])([0-9;]*)u/g
+const KITTY_SEQUENCE = /\u001b(?:\[(?:([>=<])([0-9;]*)u|\?([0-9;]*)([hl]))|c)/g
 
 function numbers(params: string): number[] {
   if (params === '') return []
@@ -55,31 +61,54 @@ export function readKittyKeyboardOutput(
   chunk: string
 ): KittyKeyboardState {
   const combined = state.pending + chunk
-  const stack = [...state.stack]
+  let stack = state.stack
+  let inactiveStack = state.inactiveStack
+  let screen = state.screen
   let lastEnd = 0
   KITTY_SEQUENCE.lastIndex = 0
   for (let match = KITTY_SEQUENCE.exec(combined); match; match = KITTY_SEQUENCE.exec(combined)) {
+    lastEnd = match.index + match[0].length
+    if (match[0] === '\u001bc') {
+      stack = []
+      inactiveStack = []
+      screen = 'normal'
+      continue
+    }
+    if (match[3] !== undefined) {
+      if (!numbers(match[3]).some(mode => mode === 47 || mode === 1047 || mode === 1049)) continue
+      const nextScreen = match[4] === 'h' ? 'alternate' : 'normal'
+      if (nextScreen !== screen) {
+        ;[stack, inactiveStack] = [inactiveStack, stack]
+        screen = nextScreen
+      }
+      continue
+    }
     const [kind, params] = [match[1]!, numbers(match[2]!)]
+    // Ordinary output never clones the existing stack. A protocol operation alone owns a copy.
+    const next = [...stack]
     if (kind === '>') {
-      stack.push(params[0] ?? 0)
+      if (next.length === KITTY_KEYBOARD_STACK_LIMIT) next.shift()
+      next.push(params[0] ?? 0)
     } else if (kind === '<') {
       // 缺省弹一层。弹空栈不是错误——程序可能比我们更早开始运行，我们只见到了后半段。
-      for (let remaining = params[0] ?? 1; remaining > 0 && stack.length > 0; remaining -= 1) {
-        stack.pop()
+      for (let remaining = params[0] ?? 1; remaining > 0 && next.length > 0; remaining -= 1) {
+        next.pop()
       }
     } else {
-      const next = applySet(stack[stack.length - 1] ?? 0, params[0] ?? 0, params[1] ?? 1)
-      if (stack.length === 0) stack.push(next)
-      else stack[stack.length - 1] = next
+      const flags = applySet(next[next.length - 1] ?? 0, params[0] ?? 0, params[1] ?? 1)
+      if (next.length === 0) next.push(flags)
+      else next[next.length - 1] = flags
     }
-    lastEnd = match.index + match[0].length
+    stack = next
   }
 
   // 末尾可能有半条被 chunk 边界切断的序列，留到下一段拼上。
   const tail = combined.slice(lastEnd)
   const escape = tail.lastIndexOf('\u001b')
   const pending = escape === -1 ? '' : tail.slice(escape)
-  return { stack, pending: pending.length > MAX_PENDING ? '' : pending }
+  const nextPending = pending.length > MAX_PENDING ? '' : pending
+  if (stack === state.stack && inactiveStack === state.inactiveStack && screen === state.screen && nextPending === state.pending) return state
+  return { stack, inactiveStack, screen, pending: nextPending }
 }
 
 /**

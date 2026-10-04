@@ -1,6 +1,7 @@
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { execFile } from 'node:child_process'
 import { app } from 'electron'
-import type { MetricsRenderer } from '@agentmux/core/control'
+import type { MetricsRenderer, PerformanceDiagnostics } from '@agentmux/core/control'
 import {
   USAGE_SAMPLE_INTERVAL_MS,
   aggregateUsage,
@@ -35,12 +36,14 @@ export type ProcessTableReader = () => Promise<string>
 
 export type ProcessResourceObservationSources = {
   observeRuntime(): Promise<RuntimeUsage[]>
+  observeDiagnostics?(signal: AbortSignal): Promise<Omit<PerformanceDiagnostics, 'eventLoop'>>
   processOwners(): { rendererPids: readonly number[]; browserPids: readonly number[] }
   mainOwners(): MainResourceOwnerCounts
   observeRenderer?(signal: AbortSignal): Promise<{ observedAt: number; data: MetricsRenderer }>
 }
 
 export type ResourceSample = UsageSnapshot & {
+  diagnostics: { observedAt: number | null; data: PerformanceDiagnostics | null; unavailable: string | null }
   processObservedAt: number | null; appObservedAt: number | null; runtimeObservedAt: number | null
   mainObservedAt: number | null; mainUnavailable: string | null
   renderer: { observedAt: number | null; data: MetricsRenderer | null; unavailable: string | null }
@@ -68,14 +71,18 @@ export class ProcessResourceSampler {
   private latest: ResourceSample | null = null
   private runtimeObservedAt: number | null = null
   private renderer: ResourceSample['renderer'] = { observedAt: null, data: null, unavailable: null }
+  private diagnostics: ResourceSample['diagnostics'] = { observedAt: null, data: null, unavailable: null }
+  private diagnosticsInFlight: Promise<void> | null = null
+  private diagnosticsController: AbortController | null = null
+  private readonly eventLoop = monitorEventLoopDelay({ resolution: 20 })
   private rendererInFlight: Promise<void> | null = null
   private rendererController: AbortController | null = null
   private observationSources: ProcessResourceObservationSources | null = null
   private runtime: RuntimeUsage[] | null = null
   private runtimeUnavailable: string | null = null
   private runtimeInFlight: Promise<void> | null = null
-  private readonly appProcesses = new Set<string>()
   private readonly appSamples = new Map<string, UsageSample[]>()
+  private appCpuCounters = new Map<string, { seconds: number; at: number }>()
   /**
    * 「这次采样属于哪一段观察」。
    *
@@ -92,7 +99,8 @@ export class ProcessResourceSampler {
   constructor(
     private readonly readTable: ProcessTableReader = readProcessTable,
     private readonly now: () => number = Date.now,
-    private readonly appMetrics: () => Electron.ProcessMetric[] = () => app.getAppMetrics()
+    private readonly appMetrics: () => Electron.ProcessMetric[] = () => app.getAppMetrics(),
+    private readonly cpuNow: () => number = () => performance.now()
   ) {}
 
   /** Wire the existing Main owners once; none of these readers run while the panel is closed. */
@@ -125,6 +133,7 @@ export class ProcessResourceSampler {
   subscribe(onSample: (snapshot: ResourceSample) => void): () => void {
     this.subscribers.add(onSample)
     if (this.timer === null) {
+      this.eventLoop.reset(); this.eventLoop.enable()
       void this.observeRuntime(this.generation)
       // 立刻采一次，否则面板要空等一个周期才有数。
       void this.sampleOnce()
@@ -144,6 +153,9 @@ export class ProcessResourceSampler {
   private stop(): void {
     if (this.timer !== null) clearInterval(this.timer)
     this.timer = null
+    this.eventLoop.disable(); this.eventLoop.reset()
+    this.diagnosticsController?.abort()
+    this.diagnostics = { observedAt: null, data: null, unavailable: null }
     // 样本一并丢掉：面板再打开时，旧样本描述的是另一段时间。
     this.samples.clear()
     this.latest = null
@@ -152,8 +164,8 @@ export class ProcessResourceSampler {
     this.runtimeObservedAt = null
     this.renderer = { observedAt: null, data: null, unavailable: null }
     this.rendererController?.abort()
-    this.appProcesses.clear()
     this.appSamples.clear()
+    this.appCpuCounters.clear()
     // 递增之后，任何在途采样落地时都会发现自己属于上一段观察，从而不写回刚清掉的东西。
     this.generation += 1
   }
@@ -189,6 +201,17 @@ export class ProcessResourceSampler {
   private sampleApp(observedAt: number): AppUsage {
     try {
       const metrics = [...new Map(this.appMetrics().map((metric) => [metric.pid, metric])).values()]
+      const at = this.cpuNow(), nextCounters = new Map<string, { seconds: number; at: number }>()
+      const cpuByPid = new Map<number, number | null>()
+      for (const metric of metrics) {
+        const key = `${metric.pid}:${metric.creationTime}`, seconds = metric.cpu.cumulativeCPUUsage
+        const previous = this.appCpuCounters.get(key)
+        const valid = seconds !== undefined && Number.isFinite(seconds) && seconds >= 0
+        cpuByPid.set(metric.pid, valid && previous && seconds >= previous.seconds && at > previous.at
+          ? 100_000 * (seconds - previous.seconds) / (at - previous.at) : null)
+        if (valid) nextCounters.set(key, { seconds, at })
+      }
+      this.appCpuCounters = nextCounters
       const owners = this.observationSources?.processOwners()
       const rendererPids = new Set(owners?.rendererPids ?? [])
       const browserPids = new Set(owners?.browserPids ?? [])
@@ -215,13 +238,11 @@ export class ProcessResourceSampler {
           role,
           processCount: owned.length,
           rssKib,
-          cpuPercent: owned.length === 0 ? 0 : this.appCpu(role, owned, observedAt, rssKib)
+          cpuPercent: owned.length === 0 ? 0 : this.appCpu(role, owned, observedAt, rssKib, cpuByPid)
         }
       })
       const rssKib = metrics.reduce((sum, metric) => sum + metric.memory.workingSetSize, 0)
-      const cpuPercent = metrics.length === 0 ? 0 : this.appCpu('total', metrics, observedAt, rssKib)
-      this.appProcesses.clear()
-      for (const metric of metrics) this.appProcesses.add(`${metric.pid}:${metric.creationTime}`)
+      const cpuPercent = metrics.length === 0 ? 0 : this.appCpu('total', metrics, observedAt, rssKib, cpuByPid)
       return { processCount: metrics.length, rssKib, cpuPercent, groups, unavailable: null }
     } catch (error) {
       return {
@@ -234,13 +255,15 @@ export class ProcessResourceSampler {
     }
   }
 
-  private appCpu(key: string, metrics: readonly Electron.ProcessMetric[], observedAt: number, rssKib: number): number | null {
-    // Electron's first reading is 0 without an interval. A new/reused PID must warm up again.
-    if (metrics.some((metric) => !this.appProcesses.has(`${metric.pid}:${metric.creationTime}`))) return null
+  private appCpu(key: string, metrics: readonly Electron.ProcessMetric[], observedAt: number, rssKib: number,
+    cpuByPid: ReadonlyMap<number, number | null>): number | null {
+    // No processor-denominator guess. Counter absence/reset, first interval or reused PID is unknown CPU;
+    // the successful memory/process reading remains live.
+    if (metrics.some(metric => cpuByPid.get(metric.pid) == null)) return null
     const next = pruneSamples([...(this.appSamples.get(key) ?? []), {
       observedAt,
       rssKib,
-      cpuPercent: metrics.reduce((sum, metric) => sum + metric.cpu.percentCPUUsage, 0)
+      cpuPercent: metrics.reduce((sum, metric) => sum + cpuByPid.get(metric.pid)!, 0)
     }], observedAt)
     this.appSamples.set(key, next)
     return aggregateUsage(next, observedAt).cpuPercent
@@ -260,6 +283,7 @@ export class ProcessResourceSampler {
 
   private async runSample(generation: number): Promise<void> {
     void this.observeRenderer(generation)
+    this.observeDiagnostics(generation)
     let rows = null
     let unavailable: string | null = null
     try {
@@ -272,6 +296,7 @@ export class ProcessResourceSampler {
     }
 
     const observedAt = this.now()
+    const windowAt = this.cpuNow()
     const roots = [...this.runPids].map(([runId, { pid, hostId }]) => ({ key: runId, pid, hostId }))
     const usage = rows ? rollUpSubtrees(rows, roots) : null
     const runs: RunUsage[] = usage ? [] : this.latest?.runs ?? []
@@ -280,13 +305,13 @@ export class ProcessResourceSampler {
       const history = this.samples.get(runId) ?? []
       const next = subtree
         ? pruneSamples([...history, {
-            observedAt,
+            observedAt: windowAt,
             rssKib: subtree.rssKib,
             cpuPercent: subtree.cpuPercent
-          }], observedAt)
+          }], windowAt)
         : []
       this.samples.set(runId, next)
-      const { cpuPercent, rssKib } = aggregateUsage(next, observedAt)
+      const { cpuPercent, rssKib } = aggregateUsage(next, windowAt)
       runs.push({
         runId,
         hostId,
@@ -300,7 +325,7 @@ export class ProcessResourceSampler {
       })
     }
 
-    const application = this.sampleApp(observedAt)
+    const application = this.sampleApp(windowAt)
     let mainOwners = this.latest?.mainOwners ?? null
     let mainObservedAt = this.latest?.mainObservedAt ?? null
     let mainUnavailable: string | null = null
@@ -320,6 +345,7 @@ export class ProcessResourceSampler {
       processObservedAt: unavailable ? this.latest?.processObservedAt ?? null : observedAt,
       appObservedAt: application.unavailable ? this.latest?.appObservedAt ?? null : observedAt,
       runtimeObservedAt: this.runtimeObservedAt,
+      diagnostics: this.diagnostics,
       renderer: this.renderer
     }
     this.notify()
@@ -329,6 +355,40 @@ export class ProcessResourceSampler {
     const snapshot = this.latest
     if (!snapshot) return
     for (const subscriber of this.subscribers) subscriber(snapshot)
+  }
+
+  private observeDiagnostics(generation: number): void {
+    if (this.diagnosticsInFlight) return
+    const controller = new AbortController(), sources = this.observationSources
+    this.diagnosticsController = controller
+    const deadline = setTimeout(() => controller.abort(new Error('Performance owner observation timed out')), 2000)
+    this.diagnosticsInFlight = Promise.resolve().then(async () => {
+      let reading: Promise<Omit<PerformanceDiagnostics, 'eventLoop'>> | undefined
+      try {
+        if (!sources?.observeDiagnostics) throw new Error('Performance owners are not connected')
+        const cancelled = new Promise<never>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true }))
+        reading = sources.observeDiagnostics(controller.signal)
+        const data = await Promise.race([reading, cancelled])
+        if (generation !== this.generation || controller.signal.aborted) return
+        const count = this.eventLoop.count
+        this.diagnostics = { observedAt: this.now(), unavailable: null, data: { ...data,
+          eventLoop: { resolutionMs: 20, generation, count, meanMs: count ? this.eventLoop.mean / 1e6 : null,
+            maxMs: count ? this.eventLoop.max / 1e6 : null } } }
+        this.eventLoop.reset()
+      } catch (error) {
+        if (generation !== this.generation) return
+        this.diagnostics = { ...this.diagnostics, unavailable: String(error).slice(0, 4096) }
+      }
+      if (this.latest) { this.latest = { ...this.latest, diagnostics: this.diagnostics }; this.notify() }
+      // Report the deadline now, but keep one real read in flight until its I/O settles.
+      // Cancellation must not create a new accumulation of diagnostic requests.
+      if (reading && controller.signal.aborted) await reading.catch(() => {})
+    }).finally(() => {
+      clearTimeout(deadline)
+      this.diagnosticsInFlight = null
+      if (this.diagnosticsController === controller) this.diagnosticsController = null
+      if (generation !== this.generation && this.subscribers.size > 0) this.observeDiagnostics(this.generation)
+    })
   }
 
   private observeRenderer(generation: number): void {

@@ -1,24 +1,55 @@
+import { hostedCarrierPerformance } from './performance-diagnostics.js'
 import { AgentMuxError } from './errors.js'
+import { Buffer } from 'node:buffer'
+
+type TransferBudget = { minimumBytes: number }
+function reserveTransferBytes(budget: TransferBudget | undefined, bytes: number): void {
+  if (!budget) return
+  budget.minimumBytes += bytes
+  if (budget.minimumBytes > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES) throw new AgentMuxError(
+    'This observation exceeds its reader budget; the original Run remains live.', 'RUNTIME_READER_BUDGET_EXCEEDED')
+}
 
 /** JSON preserves ordered bytes and optional tuple arguments; text is never re-encoded as output. */
 export function encodeHostedValue(value: unknown): unknown {
-  if (value === undefined) return { $agentmuxValue: 'undefined' }
+  return encodeValue(value)
+}
+function encodeValue(value: unknown, budget?: TransferBudget): unknown {
+  if (value === undefined) {
+    reserveTransferBytes(budget, 28)
+    return { $agentmuxValue: 'undefined' }
+  }
   if (value instanceof Uint8Array) {
+    // A lower bound before allocating base64/JSON. The final UTF-8 check below
+    // remains authoritative for escaping and the complete logical envelope.
+    reserveTransferBytes(budget, 4 * Math.ceil(value.byteLength / 3))
     return { $agentmuxValue: 'bytes', data: encodeBase64(value) }
   }
-  if (Array.isArray(value)) return value.map(encodeHostedValue)
+  if (Array.isArray(value)) {
+    reserveTransferBytes(budget, 2 + Math.max(0, value.length - 1))
+    return value.map(item => encodeValue(item, budget))
+  }
   if (value && typeof value === 'object') {
+    reserveTransferBytes(budget, 2)
     // A valid SDK dictionary can contain our marker key. Escape that ordinary record
     // once so its data cannot be mistaken for an undefined/bytes transport value.
     if (Object.hasOwn(value, '$agentmuxValue')) {
-      return { $agentmuxValue: 'record', entries: Object.entries(value).map(([key, item]) => [key, encodeHostedValue(item)]) }
+      return { $agentmuxValue: 'record', entries: Object.entries(value).map(([key, item]) => {
+        reserveTransferBytes(budget, key.length)
+        return [key, encodeValue(item, budget)]
+      }) }
     }
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, encodeHostedValue(item)]))
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      reserveTransferBytes(budget, key.length + 3)
+      return [key, encodeValue(item, budget)]
+    }))
   }
   if (typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint' ||
     typeof value === 'number' && !Number.isFinite(value)) {
     throw new AgentMuxError('This SDK argument cannot cross a public RPC connection.', 'INVALID_CONTROL_REQUEST')
   }
+  if (typeof value === 'string') reserveTransferBytes(budget, value.length + 2)
+  else reserveTransferBytes(budget, String(value).length)
   return value
 }
 
@@ -50,9 +81,7 @@ import type { AgentMuxHostedTransferChunk } from './hosted-client-contract.js'
 export const AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES = 48 * 1024
 export const AGENTMUX_HOSTED_TRANSFER_MAX_BYTES = 32 * 1024 * 1024
 export function encodeBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
-  return btoa(binary)
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
 }
 function isBase64(data: string): boolean {
   const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
@@ -63,19 +92,24 @@ export function decodeBase64(data: string): Uint8Array {
   if (!isBase64(data)) {
     throw new AgentMuxError('RPC bytes are not valid base64.', 'CONTROL_PROTOCOL_ERROR')
   }
-  const binary = atob(data)
-  return Uint8Array.from(binary, character => character.charCodeAt(0))
+  return new Uint8Array(Buffer.from(data, 'base64'))
 }
 /** An observation carrier, never a replay ledger or a byte authority. */
 export function hostedTransfer(value: unknown, transferId: string): AgentMuxHostedTransferChunk[] {
-  const bytes = new TextEncoder().encode(JSON.stringify(encodeHostedValue(value)))
-  if (bytes.length > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES) throw new AgentMuxError(
-    'This observation exceeds its reader budget; the original Run remains live.', 'RUNTIME_READER_BUDGET_EXCEEDED')
+  const start = performance.now()
+  let bytes: Uint8Array
+  try { bytes = new TextEncoder().encode(JSON.stringify(encodeValue(value, { minimumBytes: 0 }))) }
+  catch (error) { hostedCarrierPerformance.rejected(); throw error }
+  if (bytes.length > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES) {
+    hostedCarrierPerformance.rejected()
+    throw new AgentMuxError('This observation exceeds its reader budget; the original Run remains live.', 'RUNTIME_READER_BUDGET_EXCEEDED')
+  }
   const chunks: AgentMuxHostedTransferChunk[] = []
   for (let offset = 0; offset < bytes.length; offset += AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES) {
     const end = Math.min(bytes.length, offset + AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES)
     chunks.push({ transferId, index: chunks.length, dataBase64: encodeBase64(bytes.subarray(offset, end)), final: end === bytes.length })
   }
+  hostedCarrierPerformance.encoded(performance.now() - start, bytes.length, chunks.length)
   return chunks
 }
 export class AgentMuxHostedTransferReader {
@@ -88,17 +122,21 @@ export class AgentMuxHostedTransferReader {
     if (this.id === null) { this.id = chunk.transferId; this.index = 0 }
     if (this.id !== chunk.transferId || chunk.index !== this.index++) throw new AgentMuxError(
       'Runtime transfer sequence does not match this reader.', 'CONTROL_PROTOCOL_ERROR')
+    const frameStart = performance.now()
     const bytes = decodeBase64(chunk.dataBase64)
+    hostedCarrierPerformance.frame(performance.now() - frameStart, bytes.length)
     if (bytes.length > AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES || (this.length += bytes.length) > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES) {
       throw new AgentMuxError('Runtime transfer exceeds its reader budget.', 'CONTROL_PROTOCOL_ERROR')
     }
     this.chunks.push(bytes)
     if (!chunk.final) return undefined
+    const valueStart = performance.now()
     const value = new Uint8Array(this.length)
     let offset = 0
     for (const part of this.chunks) { value.set(part, offset); offset += part.length }
     this.id = null; this.index = 0; this.length = 0; this.chunks = []
-    return decodeHostedValue(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(value)))
+    try { return decodeHostedValue(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(value))) }
+    finally { hostedCarrierPerformance.value(performance.now() - valueStart) }
   }
 }
 
@@ -132,6 +170,7 @@ export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransfer
   const p = wireRecord(value, ['transferId', 'index', 'dataBase64', 'final'])
   wireString(p.transferId); wireCount(p.index)
   if (typeof p.final !== 'boolean' || typeof p.dataBase64 !== 'string' ||
+    p.dataBase64.length > 4 * Math.ceil(AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES / 3) ||
     !isBase64(p.dataBase64)) throw new AgentMuxError(
       'Runtime transfer frame is malformed.', 'CONTROL_PROTOCOL_ERROR')
   return p as AgentMuxHostedTransferChunk

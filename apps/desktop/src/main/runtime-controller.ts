@@ -1,3 +1,4 @@
+import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
 import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
@@ -5,6 +6,7 @@ import { checkInHumanObservation, type CheckInObservation } from './agent-schedu
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
+  createInputPerformanceRecorder, hostedCarrierPerformance,
   hostAgentCreationIntent,
   type AgentMuxHostAgentCreateInput,
   AGENTMUX_AGENT_MESSAGING_GUIDANCE,
@@ -407,6 +409,14 @@ export class RuntimeController {
 
   setTerminalViewColors(colors: TerminalOscColorQueryReplyColors): void {
     this.terminalViewColors = { ...colors }
+  }
+
+  private readonly terminalInputPerformance = createInputPerformanceRecorder()
+  private readonly performanceObservation = new MainPerformanceDiagnostics()
+
+  async performanceDiagnostics(signal: AbortSignal) {
+    return this.performanceObservation.observe([...this.hosts.values()], () => ({ processId: process.pid, observedAt: Date.now(),
+      input: this.terminalInputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }), signal)
   }
 
   resourceOwnerCounts(): { sessionAttachmentOwners: number; sessionAttachmentLeases: number } {
@@ -2168,23 +2178,27 @@ export class RuntimeController {
     data: AgentMuxRunInputData
   ): Promise<void> {
     const key = terminalInputKey(control.hostId, control.runId)
+    const diagnostic = this.terminalInputPerformance.begin({ sessionId: null, runId: control.runId, kind: 'terminal',
+      bytes: typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength })
     const previous = this.terminalInputTails.get(key) ?? Promise.resolve()
     const operation = previous.catch(() => {}).then(async () => {
+      diagnostic.dequeue()
       let expectedByte = this.terminalInputCursors.get(key)
       if (expectedByte == null) {
-        const run = (await client.listRuns()).find((candidate) => candidate.runId === control.runId)
+        const run = (await diagnostic.measure('current-run', () => client.listRuns())).find((candidate) => candidate.runId === control.runId)
         if (!run || run.acceptedInputBytes === null) {
           throw new Error(`Terminal Input cursor is unavailable: ${control.runId}`)
         }
         expectedByte = run.acceptedInputBytes
       }
+      diagnostic.stage('operation')
       try {
-        const accepted = await client.writeTerminal(control.run, {
+        const accepted = await diagnostic.measure('native-input', () => client.writeTerminal(control.run, {
           ownerInstanceId: client.runtimeIdentity().instanceId,
           operationId: randomUUID(),
           expectedByte,
           data
-        })
+        }))
         if (accepted.acceptedThroughByte !== null) {
           this.terminalInputCursors.set(key, accepted.acceptedThroughByte)
         }
@@ -2192,7 +2206,7 @@ export class RuntimeController {
         this.terminalInputCursors.delete(key)
         throw error
       }
-    })
+    }).then(() => { diagnostic.settle(true) }, error => { diagnostic.settle(false); throw error })
     const tail = operation.then(() => {}, () => {})
     this.terminalInputTails.set(key, tail)
     void tail.finally(() => {

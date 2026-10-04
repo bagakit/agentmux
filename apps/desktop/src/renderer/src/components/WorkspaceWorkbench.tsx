@@ -35,7 +35,7 @@ import {
 import { createPortal } from 'react-dom'
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
+import { createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
@@ -1153,7 +1153,7 @@ function PaneGroup({
   }
 
   const tabNavigation = <SortableContext items={[...orderedTabIds]} strategy={horizontalListSortingStrategy}>
-    <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={orderedTabIds}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
+    <WorkbenchTabStrip visible={surfaceVisible} activeTabId={group.activeTabId} tabIds={orderedTabIds}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
   </SortableContext>
 
   return (
@@ -1527,7 +1527,7 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
   return <>
     {groups.map(group => <header key={group.id} className="pane-tabbar pane-tabbar--root" data-workbench-group-id={group.id}>
       <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-        <WorkbenchTabStrip activeTabId={null} tabIds={group.tabOrder}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
+        <WorkbenchTabStrip visible={visible} activeTabId={null} tabIds={group.tabOrder}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
           workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} visible={visible} />] : [])}</WorkbenchTabStrip>
       </SortableContext>
       {layout?.activeGroupId === group.id ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
@@ -1615,8 +1615,9 @@ export function WorkspaceWorkbench({
     : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
   const presentedAgentIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [tabs])
-  const activityPresentable = useAppStore(useShallow(state => Object.fromEntries(presentedAgentIds.map(id =>
-    [id, sessionPresentationById(state.sessions).get(id)?.kind === 'agent' && effectiveSessionViewMode(state, id) !== 'terminal']))))
+  const presentedModes = useMemo(() => presentedAgentIds.map(id => [id, createSessionViewModeSelector(id)] as const), [presentedAgentIds])
+  const activityPresentable = useAppStore(useShallow(state => Object.fromEntries(presentedModes.map(([id, mode]) =>
+    [id, sessionPresentationById(state.sessions).get(id)?.kind === 'agent' && mode(state) !== 'terminal']))))
   const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => (target.surface === 'space' || target.surface === 'mote') && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
   const ordinaryLayouts = useAppStore(useShallow(state => Object.fromEntries(ordinaryDisplayIds.map(id => [id, state.layouts[id]]))))
