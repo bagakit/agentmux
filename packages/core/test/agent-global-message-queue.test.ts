@@ -75,8 +75,9 @@ describe('Core-owned durable A2A global message queue', () => {
     expect(first?.kind).toBe('message')
     if (first?.kind !== 'message') throw new Error('Expected the actual original message record')
     const { promptCondition: _condition, ...historical } = first
-    await writeFile(durable.path, JSON.stringify(historical) + '\n')
-    const reopened = new DurableAgentMuxMessageQueue(durable.path)
+    const historicalPath = join(dirname(durable.path), 'original-history.ndjson')
+    await writeFile(historicalPath, JSON.stringify(historical) + '\n')
+    const reopened = new DurableAgentMuxMessageQueue(historicalPath)
     const capture = vi.fn(async () => ({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null }))
     await expect(reopened.preparePrompt(message.messageId, capture)).rejects.toMatchObject({
       code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
