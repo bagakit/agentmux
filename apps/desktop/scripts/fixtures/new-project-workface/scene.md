@@ -2,7 +2,7 @@
 
 Run `node apps/desktop/scripts/verify-new-project-workface.mjs`. The command preserves a local evidence directory and prints its `receipt.json` location. This is a source-based private Electron proof, with a private profile, real ConfigOwner registration and real Core spatial filesystem owner.
 
-The scene consumes the existing contracts for [entity and display bindings](../../../../../docs/design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定), [initial Launcher](../../../../../docs/design/behavior/spaces-and-layout.md#初始-launcher紧凑可定制的工作起点) and [recovery service windows](../../../../../docs/design/presentation/session-recovery.md#session-恢复服务窗与单目标-attach). It does not define new behavior.
+The scene consumes the existing contracts for [entity and display bindings](../../../../../docs/design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定), [initial Launcher](../../../../../docs/design/behavior/workface-launcher.md#launcher-工作起点) and [recovery service windows](../../../../../docs/design/presentation/session-recovery.md#session-恢复服务窗与单目标-attach). It does not define new behavior.
 
 1. Initialize the actual App and invoke production `openProjectFolder`. Record the selected Workspace's empty Group and its existing virtual Launcher and Composer before any durable Tab is created.
 2. Invoke production `openLauncher` separately, retain its exact Tab/Group/Region and enter a nonempty original draft. Apply an explicit old `spaceId:null/zoneId:null` selection after normal project discovery supplies the Zone. Capture normal and narrow workfaces.

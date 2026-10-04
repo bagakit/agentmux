@@ -1,12 +1,12 @@
 # Message Tool 真实 Renderer 采图场景
 
-本说明对应 [main.cjs](./main.cjs) 的 `composer-visual` probe。设计预期只读取当前 SSOT：交互合同的 [主观审美端到端验证](../../../../../docs/design/agentmux-desktop-interaction.md#agent-主观审美的端到端验证)、[Composer 静息形态与主操作](../../../../../docs/design/agentmux-desktop-interaction.md#composer-静息形态与主操作)、[内置任务持续推进](../../../../../docs/design/agentmux-desktop-interaction.md#内置任务持续推进aftertime-使用需求)，以及密度合同的 [主观审美判断边界](../../../../../docs/design/agentmux-surface-density.md#agent-主观审美的判断边界)、[Composer 状态与队列密度](../../../../../docs/design/agentmux-surface-density.md#composer-状态与队列密度)、[Composer 静息密度与主操作](../../../../../docs/design/agentmux-surface-density.md#composer-静息密度与主操作)、[持续推进观察界面](../../../../../docs/design/agentmux-surface-density.md#持续推进观察界面)。Mailbox 场景还读取交互合同的 [悬停访问与最近顺序](../../../../../docs/design/agentmux-desktop-interaction.md#悬停访问与最近顺序)。此处不复制设计规则。
+本说明对应 [main.cjs](./main.cjs) 的 `composer-visual` probe。设计预期只读取当前 SSOT：交互合同的 [主观审美端到端验证](../../../../../docs/design/behavior/shared-rules.md#agent-主观审美的端到端验证)、[Composer 静息形态与主操作](../../../../../docs/design/behavior/conversation-input.md#composer-静息形态与主操作)、[内置任务持续推进](../../../../../docs/design/behavior/conversation-input.md#内置任务持续推进aftertime-使用需求)，以及密度合同的 [主观审美判断边界](../../../../../docs/design/presentation/shared-rules.md#agent-主观审美的判断边界)、[Composer 状态与队列密度](../../../../../docs/design/presentation/conversation-input.md#composer-状态与队列密度)、[Composer 静息密度与主操作](../../../../../docs/design/presentation/conversation-input.md#composer-静息密度与主操作)、[持续推进观察界面](../../../../../docs/design/presentation/conversation-input.md#持续推进观察界面)。Mailbox 场景还读取交互合同的 [悬停访问与最近顺序](../../../../../docs/design/behavior/conversation-input.md#悬停访问与最近顺序)。此处不复制设计规则。
 
 ## 真实入口与操作
 
 [entry.tsx](./entry.tsx) 复用 [agent-region-actions 的入口](../agent-region-actions/entry.tsx)，初始化真实 store 与分割布局，挂载 `WorkspaceWorkbench → SessionPane → AgentSessionComposer`。使用产品 `styles/index.css`；HTML 仅设置宿主根容器的尺寸与布局，不改组件样式。驱动在私有 Vite/Electron Renderer 中通过可信鼠标、触摸、键盘、组字与文本输入操作左侧 Composer，右侧 Region 留在完整画面中。
 
-每轮建立左右双 Region，分别以每格约 640 和 320 的宽度采集；对应 Renderer 视口为 1281×740 和 641×740。场景随 [持续推进与邮箱共享入口](../../../../../docs/design/agentmux-desktop-interaction.md#持续推进与邮箱共享入口) 更新，两种宽度各执行以下操作并采完整 PNG：
+每轮建立左右双 Region，分别以每格约 640 和 320 的宽度采集；对应 Renderer 视口为 1281×740 和 641×740。场景随 [持续推进与邮箱共享入口](../../../../../docs/design/behavior/conversation-input.md#持续推进与邮箱共享入口) 更新，两种宽度各执行以下操作并采完整 PNG：
 
 | 状态 / 文件名后缀 | 实际操作 | 观察对象 |
 | --- | --- | --- |

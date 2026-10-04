@@ -1,6 +1,6 @@
 # Mote 快捷入口场景
 
-行为与身份来源：[交互 SSOT《Mote 快捷入口与当前协调上下文》](../../../../../docs/design/agentmux-desktop-interaction.md#mote-快捷入口与当前协调上下文)。按钮锚点、去除独立 title、全部对象选择、长名称、32px 底栏和投影密度来源：[密度 SSOT 同章](../../../../../docs/design/agentmux-surface-density.md#mote-快捷入口与当前协调上下文)。
+行为与身份来源：[交互 SSOT《Mote 快捷入口与当前协调上下文》](../../../../../docs/design/behavior/motes-and-coordination.md#mote-快捷入口与当前协调上下文)。按钮锚点、去除独立 title、全部对象选择、长名称、32px 底栏和投影密度来源：[密度 SSOT 同章](../../../../../docs/design/presentation/motes-and-coordination.md#mote-快捷入口与当前协调上下文)。
 
 `node apps/desktop/scripts/verify-mote-shortcut.mjs` 从当前源码私有编译完整 App，用自己的 Chromium profile 依次启动两个真实 Electron 进程。
 
