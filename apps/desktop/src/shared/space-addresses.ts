@@ -139,7 +139,8 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
       Array.isArray(directoryContext) && directoryContext.length === 2 && directoryContext[0] === workspace.hostId &&
       typeof directoryContext[1] === 'string' && (directoryContext[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(directoryContext[1]) || directoryContext[1].startsWith('\\\\')) ? directoryContext[1] : undefined) : undefined)
     const fact: AgentMuxZoneFact = workspace && (!originalHome || resourcePath) ? {
-      zoneId, workspaceId, kind: resourcePath ? 'home' : workspace.kind === 'worktree' ? 'worktree' : 'directory',
+      // A confirmed directory anchor changes the resource, not the Zone's original kind.
+      zoneId, workspaceId, kind: resourcePath && originalHome ? 'home' : workspace.kind === 'worktree' ? 'worktree' : 'directory',
       hostId: workspace.hostId, directoryPath: resourcePath ?? workspace.path, branch: workspace.branch ?? null
     } : { zoneId, workspaceId, kind: 'unknown', hostId: null, directoryPath: null, branch: null,
       issue: 'The original Zone resource context is unavailable; its identity and bindings are retained.' }
