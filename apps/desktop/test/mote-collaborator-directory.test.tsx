@@ -106,7 +106,7 @@ it('configured portrait size reaches the original directory without replacing id
   seed(); await dom.render(tree())
   const roster = dom.container.querySelector<HTMLElement>(selector)!, before = useAppStore.getState()
   const rows = [...roster.querySelectorAll('[data-space-nav]')]
-  expect(roster.style.getPropertyValue('--mote-directory-avatar-size')).toBe('36px')
+  expect(roster.style.getPropertyValue('--mote-directory-avatar-size')).toBe('45px')
   for (const moteDirectoryAvatarSize of [48, 24]) {
     await act(async () => useAppStore.setState({ config: { ...before.config!, moteDirectoryAvatarSize } }))
     expect(roster.style.getPropertyValue('--mote-directory-avatar-size')).toBe(`${moteDirectoryAvatarSize}px`)
@@ -128,7 +128,7 @@ it('original Settings previews size locally, retains failed draft and saves it d
   useAppStore.setState({ config: f.owner.current })
   const save = vi.spyOn(api.config, 'save').mockImplementation((next, expected) => f.owner.edit(expected, next))
   await dom.render(<SettingsPanel initialSection="mote" onClose={() => {}} />)
-  expect(dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')?.value).toBe('36')
+  expect(dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')?.value).toBe('45')
   await moveSize(44)
   expect(dom.container.querySelector('output')?.textContent).toBe('44px')
   expect((dom.container.querySelector('.mote-directory-settings') as HTMLElement).style.getPropertyValue('--mote-directory-avatar-size')).toBe('44px')
@@ -161,5 +161,29 @@ it('a concurrent size edit rejects the stale save and preserves the local draft 
   expect(dom.container.querySelector('[role="alert"]')).not.toBeNull()
   expect(dom.container.querySelector('output')?.textContent).toBe('44px')
   expect(f.owner.current.moteDirectoryAvatarSize).toBe(40)
+  expect((await f.disk()).moteDirectoryAvatarSize).toBe(40)
+})
+
+it('actual silhouette presets and the fine slider share one draft, saved through the original owner', async () => {
+  const f = await configOwnerFixture(), publish = f.publish.getMockImplementation()!
+  f.publish.mockImplementation(config => { publish(config); useAppStore.getState().setConfig(config) })
+  useAppStore.setState({ config: f.owner.current })
+  const save = vi.spyOn(api.config, 'save').mockImplementation((next, expected) => f.owner.edit(expected, next))
+  await dom.render(<SettingsPanel initialSection="mote" onClose={() => {}} />)
+  expect(dom.container.querySelector('output')?.textContent).toBe('45px')
+  for (const size of [24, 32, 40, 48]) {
+    const button = dom.container.querySelector<HTMLButtonElement>(`[aria-label="${size}px avatar"]`)!
+    const silhouette = button.querySelector<HTMLElement>('.mote-directory-sizes__silhouette')!
+    expect(silhouette.style.width).toBe(`${size}px`); expect(silhouette.querySelector('svg')).not.toBeNull()
+    await dom.click(`[aria-label="${size}px avatar"]`)
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')?.value).toBe(String(size))
+    expect(f.owner.current.moteDirectoryAvatarSize).toBeUndefined()
+  }
+  await moveSize(45)
+  expect(dom.container.querySelector('[aria-pressed="true"][aria-label$="px avatar"]')).toBeNull()
+  await dom.click('[aria-label="40px avatar"]')
+  await dom.click('.settings-pane-actions button')
+  await act(async () => { await save.mock.results.at(-1)!.value })
   expect((await f.disk()).moteDirectoryAvatarSize).toBe(40)
 })

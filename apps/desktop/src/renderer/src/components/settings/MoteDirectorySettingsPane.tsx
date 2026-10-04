@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { ArrowUpRight, List, Users } from 'lucide-react'
+import { ArrowUpRight, List, UserRound, Users } from 'lucide-react'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_VIEW_IDS, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_MIN, MOTE_DIRECTORY_AVATAR_SIZE_MAX, type MoteDirectoryView } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
@@ -32,6 +32,10 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
           <span className="mote-directory-settings__choice"><input type="radio" name="mote-directory-view" value={value} checked={draft.value.view === value} onChange={() => draft.setField('view', value)} />
             {value === 'collaborators' ? <Users size={14} /> : <List size={14} />}{moteDirectoryViewLabel(value)}</span>
         </label>)}
+      </fieldset>
+      <fieldset className="mote-directory-sizes"><legend className="sr-only">Avatar size presets</legend>
+        {[24, 32, 40, 48].map(size => <button type="button" key={size} aria-label={`${size}px avatar`} aria-pressed={draft.value.avatarSize === size}
+          onClick={() => draft.setField('avatarSize', size)}><span className="mote-directory-sizes__silhouette" style={{ width: size, height: size }} aria-hidden="true"><UserRound size={size * .7} strokeWidth={1.5} /></span><small>{size}</small></button>)}
       </fieldset>
       <label className="mote-directory-size"><span>Avatar size</span><input type="range" min={MOTE_DIRECTORY_AVATAR_SIZE_MIN} max={MOTE_DIRECTORY_AVATAR_SIZE_MAX} step={1} value={draft.value.avatarSize}
         onChange={event => draft.setField('avatarSize', Number(event.target.value))} /><output>{draft.value.avatarSize}px</output></label>

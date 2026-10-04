@@ -5,20 +5,20 @@
 .mote-directory .mote-directory-more.icon-button { display: inline-flex; opacity: .55; pointer-events: auto; }
 .mote-directory-more.icon-button:hover, .mote-directory-more.icon-button:focus-visible { opacity: 1; }
 .mote-directory-current { flex: 0 0 auto; color: var(--text-2); }
-.mote-directory[data-mote-directory-view="collaborators"] { grid-template-columns: repeat(auto-fill, minmax(min(var(--mote-directory-avatar-size, 36px), 100%), var(--mote-directory-avatar-size, 36px))); gap: 4px 6px; padding: 3px 2px 2px; }
+.mote-directory[data-mote-directory-view="collaborators"] { grid-template-columns: repeat(auto-fill, minmax(min(var(--mote-directory-avatar-size, 45px), 100%), var(--mote-directory-avatar-size, 45px))); gap: 4px 6px; padding: 3px 2px 2px; }
 .mote-directory[data-mote-directory-view="collaborators"] .space-mote-entry { min-width: 0; }
 .mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry { position: relative; display: block; min-width: 0; }
-.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; min-height: calc(var(--mote-directory-avatar-size, 36px) + 20px); padding: 3px 0; text-align: center; border-radius: var(--radius); }
-.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row :is(.space-object-icon, .mote-identity-motion) { width: var(--mote-directory-avatar-size, 36px); height: var(--mote-directory-avatar-size, 36px); flex: 0 0 var(--mote-directory-avatar-size, 36px); border-radius: 50%; }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; min-height: calc(var(--mote-directory-avatar-size, 45px) + 20px); padding: 3px 0; text-align: center; border-radius: var(--radius); }
+.mote-directory[data-mote-directory-view="collaborators"] .space-mote-row :is(.space-object-icon, .mote-identity-motion) { width: var(--mote-directory-avatar-size, 45px); height: var(--mote-directory-avatar-size, 45px); flex: 0 0 var(--mote-directory-avatar-size, 45px); border-radius: 50%; }
 .mote-directory[data-mote-directory-view="collaborators"] .space-mote-row .space-object-icon { overflow: hidden; background: var(--surface-2); }
 .mote-directory[data-mote-directory-view="collaborators"] .space-mote-row :is(.space-object-icon__avatar, .mote-face, .space-object-icon > svg) { width: 100%; height: 100%; }
 .mote-directory[data-mote-directory-view="collaborators"] .space-object-icon__avatar { object-fit: cover; border-radius: 50%; }
-.mote-directory[data-mote-directory-view="collaborators"] .project-rail-row__identity { flex: 0 0 auto; width: var(--mote-directory-avatar-size, 36px); max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-row__identity { flex: 0 0 auto; width: var(--mote-directory-avatar-size, 45px); max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 1px; }
 .mote-directory[data-mote-directory-view="collaborators"] .project-rail-row__identity strong { width: 100%; font-size: 8.5px; line-height: 1.2; overflow: hidden; white-space: nowrap; text-overflow: clip; }
 .mote-directory[data-mote-directory-view="collaborators"] .mote-directory-more.icon-button { position: absolute; right: 1px; top: 1px; width: 20px; height: 22px; opacity: 0; }
 .mote-directory[data-mote-directory-view="collaborators"] .space-mote-entry:is(:hover, :focus-within) .mote-directory-more { opacity: 1; }
 .mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry > :is(.space-pin, .space-mote-edit) { display: none; }
-.mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry > .project-activity { position: absolute; right: -4px; top: calc(var(--mote-directory-avatar-size, 36px) - 14px); bottom: auto; width: 20px; height: 20px; padding: 2px; }
+.mote-directory[data-mote-directory-view="collaborators"] .project-rail-entry > .project-activity { position: absolute; right: -4px; top: calc(var(--mote-directory-avatar-size, 45px) - 14px); bottom: auto; width: 20px; height: 20px; padding: 2px; }
 .mote-directory[data-mote-directory-view="collaborators"] .project-activity__metric { min-width: 16px; height: 16px; }
 .mote-directory[data-mote-directory-view="collaborators"] .project-activity__metric > :first-child { width: 12px; height: 12px; }
 .mote-directory[data-mote-directory-view="collaborators"] .project-activity__metric > strong { margin-left: 6px; font-size: 8px; }
@@ -38,9 +38,23 @@
 .mote-directory-settings__preview[data-view="list"] b { width: 54px; }
 .mote-directory-settings__choice { display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--text-2); font-size: var(--fs-meta); }
 .mote-directory-settings__choice input { margin: 0; accent-color: var(--accent); }
-.mote-directory-settings > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.mote-directory-settings > legend, .mote-directory-sizes > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.mote-directory-settings__preview[data-view="collaborators"] i { width: var(--mote-directory-avatar-size, 36px); height: var(--mote-directory-avatar-size, 36px); }
+.mote-directory-settings__preview[data-view="collaborators"] i { width: var(--mote-directory-avatar-size, 45px); height: var(--mote-directory-avatar-size, 45px); }
 .mote-directory-size { display: flex; align-items: center; gap: 12px; padding: 12px 0 2px; color: var(--text-2); font-size: var(--fs-meta); }
 .mote-directory-size input { flex: 1; min-width: 40px; accent-color: var(--accent); }
 .mote-directory-size output { width: 34px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-3); }
+
+.mote-directory[data-mote-directory-view="list"] .space-mote-row { min-height: calc(var(--mote-directory-avatar-size, 45px) + 8px); gap: 8px; }
+.mote-directory[data-mote-directory-view="list"] .space-mote-row :is(.space-object-icon, .mote-identity-motion) { width: var(--mote-directory-avatar-size, 45px); height: var(--mote-directory-avatar-size, 45px); flex: 0 0 var(--mote-directory-avatar-size, 45px); border-radius: 50%; }
+.mote-directory[data-mote-directory-view="list"] .space-mote-row :is(.space-object-icon__avatar, .mote-face, .space-object-icon > svg) { width: 100%; height: 100%; }
+.mote-directory-sizes { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 12px 0 0; padding: 0; border: 0; }
+.mote-directory-sizes button { display: flex; flex-direction: column; align-items: center; justify-content: end; gap: 5px; min-height: 74px; width: 64px; flex: 0 0 64px; padding: 6px; border: 1px solid transparent; border-radius: var(--radius); color: var(--text-3); background: transparent; cursor: pointer; }
+.mote-directory-sizes button:is(:hover, [aria-pressed="true"]) { background: var(--surface-2); color: var(--text); }
+.mote-directory-sizes button[aria-pressed="true"] { border-color: var(--focus-line); }
+.mote-directory-sizes button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mote-directory-sizes__silhouette { display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-soft); }
+.mote-directory-sizes small { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+
+.mote-directory-settings__preview[data-view="collaborators"] > span { max-width: calc((100% - 20px) / 3); }
+.mote-directory-settings__preview[data-view="collaborators"] i { max-width: 100%; height: auto; aspect-ratio: 1; }

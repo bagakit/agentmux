@@ -406,7 +406,7 @@ export const PROJECT_RAIL_DENSITY_DEFAULT: ProjectRailDensity = 'default'
 export const MOTE_DIRECTORY_VIEW_IDS = ['collaborators', 'list'] as const
 export type MoteDirectoryView = (typeof MOTE_DIRECTORY_VIEW_IDS)[number]
 export const MOTE_DIRECTORY_VIEW_DEFAULT: MoteDirectoryView = 'collaborators'
-export const MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT = 36
+export const MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT = 45
 export const MOTE_DIRECTORY_AVATAR_SIZE_MIN = 24
 export const MOTE_DIRECTORY_AVATAR_SIZE_MAX = 48
 

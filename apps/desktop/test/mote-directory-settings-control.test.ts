@@ -73,8 +73,8 @@ it('real CLI discovers, bounds, persists and reloads avatar size through public 
     return JSON.parse(result.stdout)
   }
   try {
-    expect(await run('inspect', 'moteDirectoryAvatarSize')).toMatchObject({ ok: true, operation: 'settings.inspect', result: { entries: [{ key: 'moteDirectoryAvatarSize', kind: 'number', value: 36, default: 36, enum: Array.from({ length: 25 }, (_, i) => 24 + i) }] } })
-    await run('set', 'moteDirectoryAvatarSize', '36')
+    expect(await run('inspect', 'moteDirectoryAvatarSize')).toMatchObject({ ok: true, operation: 'settings.inspect', result: { entries: [{ key: 'moteDirectoryAvatarSize', kind: 'number', value: 45, default: 45, enum: Array.from({ length: 25 }, (_, i) => 24 + i) }] } })
+    await run('set', 'moteDirectoryAvatarSize', '45')
     expect(await f.bytes()).toBe(before); expect(f.save).not.toHaveBeenCalled()
     await run('set', 'moteDirectoryAvatarSize', '44')
     expect((await new ConfigStore(f.store.filePath).get()).moteDirectoryAvatarSize).toBe(44)
@@ -98,7 +98,7 @@ it('ConfigStore rejects out-of-contract avatar values and config edit recognizes
   const f = await configOwnerFixture(), original = f.owner.current
   for (const moteDirectoryAvatarSize of [23, 49, 36.5]) await expect(f.store.save({ ...original, moteDirectoryAvatarSize })).rejects.toThrow()
   await f.owner.update(c => ({ ...c, copyPathsAsAbsolute: true }))
-  await f.owner.edit({ ...original, moteDirectoryAvatarSize: 36 }, { ...original, moteDirectoryAvatarSize: 24 })
+  await f.owner.edit({ ...original, moteDirectoryAvatarSize: 45 }, { ...original, moteDirectoryAvatarSize: 24 })
   expect(f.owner.current.moteDirectoryAvatarSize).toBe(24)
   expect(f.owner.current.copyPathsAsAbsolute).toBe(true)
 })
