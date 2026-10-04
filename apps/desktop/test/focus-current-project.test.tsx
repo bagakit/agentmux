@@ -66,24 +66,24 @@ it('uses the confirmed resource for a foreign File; missing Region and unknown r
  await act(async()=>useAppStore.setState(s=>({sessions:[lost],tabs:{...s.tabs,[retained.id]:retained}})))
  await render(refs.file!);expect(container.querySelector('.focus-project-lanes__row[data-recovery="unknown"]')).not.toBeNull();expect(currentRows()).toHaveLength(0)
 })
-it('orders actual same-state cards by task activity, leaves unknown last and preserves equal-time order and DOM',async()=>{
+it('keeps entry order and original DOM when same-group task activity changes',async()=>{
  const base={...moteAgent('older',null),status:{state:'working' as const,source:'native-hook' as const,observedAt:Date.now()}},now=Date.now()-10000
- const sessions=['unknown','older','newer','tie'].map(id=>({...base,id,control:{...base.control,agentSessionId:id,run:{runId:'original-'+id}}}))
+ const sessions=['unknown','older','newer','tie'].map(id=>({...base,id,...(id==='unknown'?{}:{semanticStatus:{...base.status,stateEnteredAt:now+(id==='older'?0:1000)}}),control:{...base.control,agentSessionId:id,run:{runId:'original-'+id}}}))
  const item=(id:string,time:number)=>({agentSessionId:id,revision:1,items:[{id:id+'-input',agentSessionId:id,kind:'user_message' as const,source:'native-hook' as const,status:'complete' as const,title:'Input',content:'Original '+id,createdAt:time,updatedAt:time}]})
  await act(async()=>useAppStore.setState({sessions,timelines:{older:item('older',now),newer:item('newer',now+1000),tie:item('tie',now+1000)}}));await render(null)
  expect(ids()).toEqual(['newer','tie','older','unknown']);const nodes=new Map([...container.querySelectorAll<HTMLElement>('.focus-context')].map(n=>[n.dataset.sessionId,n]))
  const before=useAppStore.getState();await act(async()=>useAppStore.setState(s=>({sessions:s.sessions.map(session=>({...session,latestOutputBytes:session.latestOutputBytes+10,status:{...session.status,observedAt:Date.now()}}))})))
  expect(ids()).toEqual(['newer','tie','older','unknown']);for(const[id,n]of nodes)expect(container.querySelector(`[data-session-id="${id}"]`)).toBe(n)
- await act(async()=>useAppStore.setState(s=>({timelines:{...s.timelines,older:item('older',now+2000)}})));expect(ids()).toEqual(['older','newer','tie','unknown'])
+ await act(async()=>useAppStore.setState(s=>({timelines:{...s.timelines,older:item('older',now+2000)}})));expect(ids()).toEqual(['newer','tie','older','unknown'])
  expect(useAppStore.getState().agentFocus).toBe(before.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
  const contexts=createFocusProjectionSelector()(useAppStore.getState()).contexts,copy=[...contexts];groupFocusContexts(contexts);expect(contexts).toEqual(copy)
 })
-it('uses the same activity ordering in the actual expanded Disconnected project',async()=>{
+it('keeps unconfirmed initial entry order in the actual expanded Disconnected project',async()=>{
  const now=Date.now()-10000,sessions=['offline-old','offline-new'].map(id=>({...moteAgent(id,null),processState:'interrupted' as const,status:{state:'disconnected' as const,source:'native-hook' as const,observedAt:2}}))
  const timelines=Object.fromEntries(sessions.map((s,i)=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:s.id+'-event',agentSessionId:s.id,kind:'assistant_message' as const,source:'native-hook' as const,status:'complete' as const,title:'Reply',content:'Retained reply',createdAt:now+i*1000,updatedAt:now+i*1000}]}]))
  await act(async()=>useAppStore.setState({sessions,timelines}));await render(null)
  const trigger=container.querySelector<HTMLButtonElement>('.focus-disconnected-projects__toggle')!;expect(trigger).not.toBeNull();await act(async()=>trigger.click())
- expect([...container.querySelectorAll<HTMLElement>('.focus-disconnected-projects__cards .focus-context')].map(n=>n.dataset.sessionId)).toEqual(['offline-new','offline-old'])
+ expect([...container.querySelectorAll<HTMLElement>('.focus-disconnected-projects__cards .focus-context')].map(n=>n.dataset.sessionId)).toEqual(['offline-old','offline-new'])
 })
 it('reuses grouped activity ordering in the actual Space Agents tool without a second comparator',async()=>{
  const now=Date.now()-10000,sessions=['older','newer'].map(id=>({...moteAgent(id,null),status:{state:'working' as const,source:'native-hook' as const,observedAt:Date.now()}}))
@@ -92,4 +92,65 @@ it('reuses grouped activity ordering in the actual Space Agents tool without a s
  await act(async()=>root.render(<WorkspaceAgentsTool workspace={moteConfig.workspaces[1]!} sessions={sessions} onOpen={onOpen}/>))
  const rows=[...container.querySelectorAll<HTMLButtonElement>('.workspace-agent-row')];expect(rows.map(row=>row.dataset.sessionId)).toEqual(['newer','older'])
  await act(async()=>rows[0]!.click());expect(onOpen).toHaveBeenCalledWith('newer');expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+})
+
+it('re-entry moves to the front; search, source-array order, same-group substate and rename retain entry order',async()=>{
+ let now=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>now)
+ const session=(id:string,state:'working'|'starting'|'waiting',enteredAt:number)=>({...moteAgent(id,null),status:{state,source:'native-hook' as const,observedAt:now},semanticStatus:{state,source:'native-hook' as const,observedAt:now,stateEnteredAt:enteredAt}})
+ await act(async()=>useAppStore.setState({sessions:[session('first','working',now-1000),session('second','working',now-2000)],timelines:{}}));await render(null)
+ expect(ids()).toEqual(['first','second']);const first=container.querySelector('[data-session-id="first"]')!,second=container.querySelector('[data-session-id="second"]')!
+ now+=100
+ await act(async()=>useAppStore.setState(s=>({sessions:[session('second','starting',now),s.sessions[0]!],agentNames:{second:'Renamed second'}})))
+ expect(ids()).toEqual(['first','second']);expect(container.querySelector('[data-session-id="first"]')).toBe(first);expect(container.querySelector('[data-session-id="second"]')).toBe(second)
+ const search=container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+ const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!
+ await act(async()=>{set.call(search,'second');search.dispatchEvent(new Event('input',{bubbles:true}))});expect(ids()).toEqual(['second'])
+ await act(async()=>{set.call(search,'');search.dispatchEvent(new Event('input',{bubbles:true}))});expect(ids()).toEqual(['first','second'])
+ now+=100
+ await act(async()=>useAppStore.setState({sessions:[session('first','working',now-1000),session('second','waiting',now)]}));expect(ids()).toEqual(['first']);expect(ids('attention')).toEqual(['second'])
+ now+=100
+ await act(async()=>useAppStore.setState({sessions:[session('first','working',now-1000),session('second','working',now)]}));expect(ids()).toEqual(['second','first'])
+ expect(document.activeElement).toBe(input);expect([input.selectionStart,input.selectionEnd]).toEqual([2,8])
+})
+it('pending Attention entry never borrows a Working timestamp; removing the request is a real re-entry',async()=>{
+ let now=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>now)
+ const working={...moteAgent('pending',null),status:{state:'working' as const,source:'native-hook' as const,observedAt:now},semanticStatus:{state:'working' as const,source:'native-hook' as const,observedAt:now,stateEnteredAt:now-100}}
+ const waiting={...moteAgent('waiting',null,'waiting'),status:{state:'waiting' as const,source:'native-hook' as const,observedAt:now},semanticStatus:{state:'waiting' as const,source:'native-hook' as const,observedAt:now,stateEnteredAt:now-1000}}
+ await act(async()=>useAppStore.setState({sessions:[{...working,pendingInteraction:{id:'request',kind:'permission',title:'Allow editing?',operation:'edit'} as never},waiting],timelines:{}}));await render(null)
+ expect(ids('attention')).toEqual(['waiting','pending'])
+ now+=100
+ await act(async()=>useAppStore.setState({sessions:[working,waiting]}));expect(ids()).toEqual(['pending'])
+ now+=100
+ await act(async()=>useAppStore.setState({sessions:[{...working,pendingInteraction:{id:'request',kind:'permission',title:'Allow editing?',operation:'edit'} as never},waiting]}));expect(ids('attention')).toEqual(['pending','waiting'])
+})
+it('new Run or execution workspace is a new entry, while initial unknown order stays stable',async()=>{
+ let now=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>now)
+ const a={...moteAgent('a',null),status:{state:'working' as const,source:'native-hook' as const,observedAt:now}},b={...moteAgent('b',null),status:{state:'working' as const,source:'native-hook' as const,observedAt:now}}
+ await act(async()=>useAppStore.setState({sessions:[a,b],timelines:{}}));await render(null);expect(ids()).toEqual(['a','b'])
+ now+=100
+ await act(async()=>useAppStore.setState({sessions:[{...b,control:{...b.control,run:{runId:'new-run-b'}}},a]}));expect(ids()).toEqual(['b','a'])
+ now+=100
+ const changed={...a,workspacePath:_hygiene_fixturePath("checkout")}
+ await act(async()=>useAppStore.setState(s=>({config:{...s.config!,workspaces:[...s.config!.workspaces,{id:'new-home',hostId:'local',path:_hygiene_fixturePath("checkout"),name:'Checkout',kind:'folder'}]},sessions:[changed,s.sessions[0]!]})))
+ const select=createFocusProjectionSelector(),one=select(useAppStore.getState());expect(one.contexts).toHaveLength(2)
+ // The same mounted projection has retained both exact identities and original Runs.
+ expect(container.querySelectorAll('[data-session-id="a"]')).toHaveLength(1);expect(container.querySelectorAll('[data-session-id="b"]')).toHaveLength(1)
+ expect(useAppStore.getState().sessions[0]!.control.run.runId).toBe(a.control.run.runId)
+})
+
+it('late first discovery seeds its confirmed entry time or stable unknown order, not arrival time',async()=>{
+ let now=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>now)
+ const session=(id:string,enteredAt?:number)=>({...moteAgent(id,null),status:{state:'working' as const,source:'native-hook' as const,observedAt:now},...(enteredAt===undefined?{}:{semanticStatus:{state:'working' as const,source:'native-hook' as const,observedAt:now,stateEnteredAt:enteredAt}})})
+ const first=session('first',now-1000),second=session('second',now-2000)
+ await act(async()=>useAppStore.setState({sessions:[first,second],timelines:{}}));await render(null)
+ const nodes=new Map([...container.querySelectorAll<HTMLElement>('.focus-context')].map(n=>[n.dataset.sessionId,n]))
+ now+=100
+ const late=session('late',now-3000),unknown=session('unknown')
+ await act(async()=>useAppStore.setState({sessions:[unknown,late,first,second]}))
+ expect(ids()).toEqual(['first','second','late','unknown'])
+ now+=100
+ await act(async()=>useAppStore.setState(s=>({sessions:[...s.sessions].reverse(),timelines:{late:{agentSessionId:'late',revision:1,items:[{id:'latest-reply',agentSessionId:'late',kind:'assistant_message',source:'native-hook',status:'complete',title:'Reply',content:'Late discovered old conversation with a new reply',createdAt:now,updatedAt:now}]}}})))
+ expect(ids()).toEqual(['first','second','late','unknown'])
+ for(const[id,node]of nodes)expect(container.querySelector(`[data-session-id="${id}"]`)).toBe(node)
+ expect(document.activeElement).toBe(input);expect([input.selectionStart,input.selectionEnd]).toEqual([2,8])
 })
