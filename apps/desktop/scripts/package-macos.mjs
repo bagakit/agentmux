@@ -272,6 +272,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await materializeDependency(desktopRoot, 'luxon', join(appResources, 'node_modules', 'luxon'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
   await materializeDependency(desktopRoot, 'ws', join(appResources, 'node_modules', 'ws'))
+  await materializeDependency(desktopRoot, 'yaml', join(appResources, 'node_modules', 'yaml'))
   await materializeDependency(coreRoot, '@agentmux/relay', join(appResources, 'node_modules', '@agentmux', 'relay'))
   const outBin = join(appResources, 'out', 'bin')
   await mkdir(outBin, { recursive: true })
