@@ -81,7 +81,7 @@ export class AgentMuxNotesStorage {
         catalog = applyNotebookChange(catalog, { expectedRevision: catalog.revision, operationId: input.operationId + ':' + page.noteId, change: { kind: 'relocate', noteId: page.noteId, from: r, resource: to } }, { kind: 'user', id: 'notes-directory-owner' }, Date.now())
       }
       if (!adoption) {
-        const registeredFiles = new Set(files.map(file => file.source)), noteIds = new Set(resourceChanges.map(change => change.noteId))
+        const registeredFiles = new Set(files.map(file => file.source)), noteIds = new Set(Object.keys(catalog.pages))
         const collect = async (directory: string) => {
           for (const entry of await readdir(directory, { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT' && directory === sourceRoot) return []; throw error })) {
             const source = join(directory, entry.name)
