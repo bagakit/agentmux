@@ -20,6 +20,7 @@
 .launcher-resume__search:focus-within { box-shadow: 0 0 0 1px var(--focus-line); }
 .launcher-resume__search > svg { flex: none; }
 .launcher-resume__search input { border: 0; background: transparent; color: var(--text); padding: 0; min-width: 0; flex: 1; font-size: var(--fs-body); outline: none; }
+.launcher-resume__search input:focus-visible { outline: none; }
 .launcher-resume__search input::placeholder { color: var(--text-3); }
 .launcher-resume__body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); overflow: hidden; }
 .launcher-resume__body:has(.launcher-resume__empty) { grid-template-columns: minmax(0, 1fr); }
@@ -82,3 +83,5 @@
   .launcher-resume__header { padding-top: var(--sp-4); }
   .launcher-resume__header p { display: none; }
 }
+
+@media (forced-colors: active) { .launcher-resume__search:focus-within { outline: 1px solid Highlight; outline-offset: -1px; } }
