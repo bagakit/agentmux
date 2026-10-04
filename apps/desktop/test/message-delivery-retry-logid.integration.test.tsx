@@ -235,7 +235,52 @@ it('keeps only the actual in-flight message busy, and a second explicit choice n
   expect(submit).toHaveBeenCalledTimes(2)
 })
 
-it('offers stale-Run Send but specifically rejects every click without replacing its condition or dispatching to the new target', async () => {
+it.each(['card', 'mailbox'] as const)('sends a never-dispatched old-Run message through the current same Session from %s', async surface => {
+  const reaction = { code: 'continue', replySource: { kind: 'captured' as const, agentSessionId: sid, recordId: 'original-record' } }
+  const stale = entry(originalOp, { runId: 'old-run', promptCondition: null, enqueuedAt: 100, reaction })
+  const neighbor = entry('neighbor')
+  const draft = 'Keep the separate current composer draft'
+  useAppStore.setState({ agentSteerQueues: { [sid]: [neighbor, stale] }, agentComposerDrafts: { [sid]: draft } })
+  let dispatched: AgentSteerQueueEntry | undefined
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async () => { dispatched = structuredClone(original()) })
+  await dom.render(<AgentSessionComposer sessionId={sid} />)
+  if (surface === 'mailbox') await showMailbox()
+  expect((surface === 'card' ? card() : row()).textContent).toContain('待手动发送')
+  expect((surface === 'card' ? card() : row()).textContent).not.toContain('原 Run 不可投递')
+  await click(action(surface === 'card' ? card() : row(), surface === 'card' ? '立即发送这条待发消息' : 'Send queued message immediately'))
+  await settled(() => expect(submit).toHaveBeenCalledOnce())
+  expect(submit.mock.calls[0]!.slice(0, 4)).toEqual([
+    composerSession().control, body, originalOp, { expectedRun: composerSession().control.run, afterSubmissionId: null }
+  ])
+  expect(dispatched).toMatchObject({ operationId: originalOp, text: body, runId: 'run-agent-1', enqueuedAt: 100,
+    reaction, execution: 'immediate', sourceChannel: 'message-tool' })
+  expect(queue()).toEqual([neighbor])
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe(draft)
+})
+
+it('keeps an old-Run never-dispatched selection paused on background wake until the user chooses Send', async () => {
+  const stale = entry(originalOp, { runId: 'old-run', promptCondition: null })
+  delete stale.awaitingExplicitSend
+  useAppStore.setState({ agentSteerQueues: { [sid]: [stale] } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+  await act(async () => { await useAppStore.getState().flushAgentSteerQueue(sid) })
+  expect(queue()).toEqual([stale])
+  expect(api.sessions.refresh).not.toHaveBeenCalled()
+  expect(submit).not.toHaveBeenCalled()
+})
+
+it('retains a missing historical condition across explicit Send after a Run change', async () => {
+  const stale = entry(originalOp, { runId: 'old-run' })
+  delete stale.promptCondition
+  useAppStore.setState({ agentSteerQueues: { [sid]: [stale] } })
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+  await expect(useAppStore.getState().sendQueuedAgentSteer(sid, originalOp)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect(original()).toMatchObject(stale)
+  expect(original().promptCondition).toBeUndefined()
+  expect(submit).not.toHaveBeenCalled()
+})
+
+it('offers stale-Run Send for an unknown old operation but preserves its exact condition without dispatching to the new target', async () => {
   const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
   const stale = entry(originalOp, { runId: 'old-run', promptCondition: { expectedRun: { runId: 'old-run' }, afterSubmissionId: 'old-predecessor' } })
   useAppStore.setState({ agentSteerQueues: { [sid]: [stale] } })
