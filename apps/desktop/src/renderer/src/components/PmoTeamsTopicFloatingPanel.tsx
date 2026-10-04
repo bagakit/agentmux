@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pinPmoTeamsTopicFloating,
-  createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, PMO_FLOATING_TAB_SLOT_PREFIX,
+  floatingMoteDefaultSelection, createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, PMO_FLOATING_TAB_SLOT_PREFIX,
   readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingTargetTopicId,
   resolvePmoTeamsTopicFloatingSize, type PmoTeamsTopicFloatingSize,
   type PmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
@@ -342,7 +342,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
 
   const selectMote = useCallback((topicId: string, tabId: string | undefined) => {
     spaceActionRef.current?.abort()
-    setFloating({ open: true, preview: false, targetTopicId: topicId, targetTabId: tabId })
+    const next = { open: true, preview: false, targetTopicId: topicId, targetTabId: tabId }
+    setFloating(readPmoTeamsTopicFloatingState()?.targetTopicId === topicId ? next : floatingMoteDefaultSelection(next))
   }, [setFloating])
   const selectFileReference = useCallback((topicId: string, reference: WorkbenchProjectionSelection) => {
     setFloating({ targetTopicId: topicId, targetTabId: reference.tabId, reference })

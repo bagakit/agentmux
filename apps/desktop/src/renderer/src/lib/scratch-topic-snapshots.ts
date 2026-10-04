@@ -67,7 +67,7 @@ export function scratchTopicInvalidation(workspace: Pick<WorkspaceRecord, 'id' |
     const entry = matches.sort((a, b) => b.directory.length - a.directory.length)[0]!
     const suffix = changed.slice(entry.directory.length).replace(/^\//, '')
     if (!suffix || suffix === '.agentmux/directory-identity.json' || suffix.startsWith('.agentmux/directory-identity.')) return 'catalog'
-    return suffix === 'topic.md' || suffix === 'SOUL.md' || suffix === '.agents' || suffix.startsWith('.agents/') ||
+    return suffix === 'topic.md' || suffix === 'SOUL.md' || suffix === 'MOTE.md' || suffix === '.agents' || suffix.startsWith('.agents/') ||
       ['.agentmux/topic-wiki.md', '.agentmux/topic-wiki.json', '.agentmux/mote-state.json'].includes(suffix) ? entry.id : null
   }
   const relative = roots.find(root => changed.startsWith(root + '/'))

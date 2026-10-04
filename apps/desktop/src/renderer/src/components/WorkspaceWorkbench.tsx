@@ -1,3 +1,6 @@
+import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { Pin } from 'lucide-react'
+import { motePinnedTab, moteTabOrder, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { workbenchProjectionTabReference } from '../lib/workbench-projection'
@@ -304,7 +307,10 @@ function SortableWorkbenchTab({
 
   async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
     const tabsById = useAppStore.getState().tabs
-    const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId))
+    const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId) &&
+      !motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tabId))
+    if (currentTabIds.length !== tabIds.length && tabIds.some(tabId => motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tabId)))
+      useAppStore.getState().reportError(new Error('The default conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
     if (currentTabIds.length === 0 || closing) return
     const dirtyCount = new Set(currentTabIds.flatMap((tabId) => {
       const candidate = tabsById[tabId]
@@ -466,14 +472,14 @@ function SortableWorkbenchTab({
             tabIndex={0}
             className="workbench-tab__close"
             aria-label={`Close ${displayName}`}
-            title={`Close ${displayName}`}
+            title={motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? 'Default conversation · unset in Profile to close' : `Close ${displayName}`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => void requestClose(event)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') void requestClose(event as never)
             }}
           >
-            <X size={11} />
+            {motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? <Pin size={11} aria-label="Default conversation" /> : <X size={11} />}
           </span>
         </button>
       </WorkbenchTabContextMenu>
@@ -736,6 +742,12 @@ function WorkbenchRegionContent({
   primaryPresentationHostId?: string | undefined
 }) {
   const browserPresentation = useWorkbenchBrowserPresentation()
+  const mote = useContext(MoteWorkfaceContext)
+  const actualTopic = useAppStore(state => {
+    const resource = state.config?.workspaces.find(item => item.id === tab.workspaceId)
+    return tab.topicId ? scratchTopicsForWorkspace(state.scratchTopicSnapshots, resource)?.find(item => item.id === tab.topicId) : undefined
+  })
+  const actualDefaults = useMoteDefaultConversation(actualTopic, tab.workspaceId, surfaceVisible)
   const focusRegion = useAppStore((state) => state.focusRegion)
   const retainedRegionId = useWorkbenchRetainedRegionId()
   const closeRegion = useAppStore((state) => state.closeRegion)
@@ -763,6 +775,11 @@ function WorkbenchRegionContent({
   // 关这一格的唯一决定出口：脏就先弹「未保存确认」，否则直接关。鼠标点 X 与键盘 Cmd+W（经 requestCloseRegion
   // 意图落到这里）都走它——「关这一格要不要确认」只此一处判定，键盘不会再像从前那样绕开脏检查静默丢改动。
   function requestRegionClose(): void {
+    const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
+    if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
+      motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {
+      reportError(new Error('The default conversation stays open here. Unset it in this Mote’s Profile → Quick mode before closing its Region.'), { kind: 'indeterminate' }); return
+    }
     if (dirty) setConfirmingClose(true)
     else void closeRegion(tab.workspaceId, tab.id, node.regionId)
   }
@@ -1083,7 +1100,8 @@ function PaneGroup({
     disabled: projection?.placementConfirmed === false,
     data: { kind: 'pane', groupId: group.id } satisfies DropData
   })
-  const tabs = group.tabOrder.flatMap((id) => (tabsById[id] ? [tabsById[id]] : []))
+  const orderedTabIds = moteTabOrder(group.tabOrder, mote?.defaultConversation, workspaceId, group.id)
+  const tabs = orderedTabIds.flatMap((id) => (tabsById[id] ? [tabsById[id]] : []))
   const allGroup = allLayout.groups.find((candidate) => candidate.id === group.id)
   const bodyTabs = (allGroup?.tabOrder ?? group.tabOrder).flatMap((id) => (
     tabsById[id] ? [tabsById[id]] : []
@@ -1136,8 +1154,8 @@ function PaneGroup({
     }
   }
 
-  const tabNavigation = <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-    <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
+  const tabNavigation = <SortableContext items={[...orderedTabIds]} strategy={horizontalListSortingStrategy}>
+    <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={orderedTabIds}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
   </SortableContext>
 
   return (

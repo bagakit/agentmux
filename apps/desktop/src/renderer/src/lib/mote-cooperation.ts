@@ -198,7 +198,7 @@ export async function saveMoteBehaviorPreferences(scope: MoteWorkfaceScope, pref
   await saveMoteFile(scope, path, behavior, serializeMoteBehaviorDocument(behavior.content, preferences), open, stillCurrent, exact)
 }
 
-async function saveMoteFile(scope: MoteWorkfaceScope, path: string, saved: FileDocument, next: string,
+export async function saveMoteFile(scope: MoteWorkfaceScope, path: string, saved: FileDocument, next: string,
   open: (path: string) => Promise<unknown>, stillCurrent: () => boolean,
   exact: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>): Promise<FileDocument> {
   const key = documentKey(scope.workspace.id, path), before = useAppStore.getState()

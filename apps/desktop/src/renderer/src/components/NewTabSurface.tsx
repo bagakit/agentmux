@@ -1,3 +1,6 @@
+import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
+import { scratchTopicsForWorkspace, scratchTopicKind } from '../lib/scratch-topic-snapshots'
+import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
@@ -79,11 +82,20 @@ export function NewTabSurface({
     document.addEventListener('visibilitychange', changed)
     return () => document.removeEventListener('visibilitychange', changed)
   }, [visible, presentationActive])
+  const mote = useContext(MoteWorkfaceContext)
+  const moteId = useAppStore(state => {
+    const tab = tabId ? state.tabs[tabId] : undefined
+    const topicId = tabId ? tab?.topicId : mote?.topic.id
+    const resourceId = tabId ? tab?.workspaceId : mote?.workspace.id
+    const workspace = state.config?.workspaces.find(item => item.id === resourceId)
+    return topicId && scratchTopicKind(topicId, scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)) === 'mote' ? topicId : undefined
+  })
+  const moteExecutor = useAppStore(state => moteDefaultExecutor(state, tabId ? state.tabs[tabId]?.workspaceId ?? '' : mote?.workspace.id ?? '', moteId))
   const [executorId, setExecutorId] = useState(() => {
     const surface = tabId && regionId ? useAppStore.getState().tabs[tabId]?.regions[regionId] : undefined
-    return surface?.kind === 'launcher' ? surface.executorId ?? 'codex' : 'codex'
+    return surface?.kind === 'launcher' ? surface.executorId ?? moteExecutor ?? 'codex' : moteExecutor ?? 'codex'
   })
-  const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string } | null>(null)
+  const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string; moteId?: string | undefined } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   // Every Launcher has an input owner, including a Workspace's first empty Tab Group.
   const launcherId = warmLauncherId({ tabGroupId, regionId })
@@ -104,7 +116,7 @@ export function NewTabSurface({
   const topicPreparation = useAppStore(state => tabId ? state.tabs[tabId]?.topicPreparation : undefined)
   const primaryBotUnconfirmed = useAppStore(state => Boolean(tabId && prompt && state.tabs[tabId]?.topicId === PMO_TEAMS_TOPIC_ID &&
     primaryMoteHasBot(state) && !primaryMoteExecutorId(state)))
-  const explicitExecutorChoice = manualChoice?.regionId === regionId && manualChoice?.executorId === executorId
+  const explicitExecutorChoice = Boolean(moteExecutor || manualChoice?.regionId === regionId && manualChoice?.moteId === moteId && manualChoice?.executorId === executorId)
   const displayedExecutorId = primaryBotUnconfirmed && !explicitExecutorChoice ? '' : executorId
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
@@ -186,9 +198,9 @@ export function NewTabSurface({
   }, [sections.agents, motionActive])
   function chooseExecutor(id: string) {
     if (launcherRef && workspace) useAppStore.getState().setLauncherExecutionWorkspace(launcherRef, workspace.id, id)
-    setManualChoice({ regionId, executorId: id })
+    setManualChoice({ regionId, executorId: id, moteId })
     setExecutorId(id)
-    if (workspace) saveExecutor(workspace.id, id)
+    if (workspace && !moteId) saveExecutor(workspace.id, id)
   }
   const explicitSavedExecutor = useAppStore(state => {
     const surface = tabId && regionId ? state.tabs[tabId]?.regions[regionId] : undefined
@@ -196,8 +208,11 @@ export function NewTabSurface({
   })
   useEffect(() => {
     if (explicitSavedExecutor) setExecutorId(explicitSavedExecutor)
-    else if (savedExecutor && (!manualChoice || manualChoice.regionId !== regionId)) setExecutorId(savedExecutor)
-  }, [workspace?.id, savedExecutor, explicitSavedExecutor])
+    else if (!manualChoice || manualChoice.regionId !== regionId || manualChoice.moteId !== moteId) {
+      if (moteExecutor) setExecutorId(moteExecutor)
+      else if (savedExecutor) setExecutorId(savedExecutor)
+    }
+  }, [workspace?.id, savedExecutor, explicitSavedExecutor, moteExecutor, moteId])
 
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
   // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
@@ -246,10 +261,11 @@ export function NewTabSurface({
   }, [executors, inventory, host, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace])
 
   useEffect(() => {
+    if (moteId && (explicitSavedExecutor || moteExecutor || manualChoice?.moteId === moteId)) return
     if (installedExecutors.some((executor) => executor.id === executorId)) return
     const first = installedExecutors[0]
     if (first) setExecutorId(first.id)
-  }, [executorId, installedExecutors])
+  }, [executorId, installedExecutors, moteId, explicitSavedExecutor, moteExecutor, manualChoice])
 
   async function run<T>(kind: 'agent' | 'terminal' | 'browser' | 'note', action: () => Promise<T>): Promise<void> {
     if (busy) return
@@ -375,6 +391,7 @@ export function NewTabSurface({
       </div> : null}
 
       {sections.agents === 'expanded' ? <>
+        {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
         <AgentExecutorPicker executors={executors} selected={displayedExecutorId || null}
           active={visible && presentationActive} onSelect={chooseExecutor} />
         <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}

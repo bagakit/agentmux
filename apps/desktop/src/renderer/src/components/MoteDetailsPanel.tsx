@@ -1,3 +1,5 @@
+import { MoteQuickMode } from './MoteQuickMode'
+import { MOTE_QUICK_MODE_PATH } from '../../../shared/mote-quick-mode'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowRight, ChevronDown, FileText, Pencil, Plus } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
@@ -126,7 +128,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
     }).catch(error => { if (currentNote.current === noteRequest) setIssue(presentError(error)) })
       .finally(() => { if (currentNote.current === noteRequest) setLoading(false) })
   }, [active, noteRequest])
-  const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && ![MOTE_SOUL_PATH, MOTE_BEHAVIOR_PATH, 'topic.md'].includes(entry.name))
+  const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && ![MOTE_SOUL_PATH, MOTE_BEHAVIOR_PATH, MOTE_QUICK_MODE_PATH, 'topic.md'].includes(entry.name))
   const recent = notes.filter(entry => typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs))
     .sort((a, b) => b.mtimeMs! - a.mtimeMs!).slice(0, 3)
   const emptyIdeas = !!tree.rootCache && !tree.rootCache.loading && !tree.rootError && notes.length === 0
@@ -138,6 +140,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
       <MoteBehaviorSummary scope={scope} active={active} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      <MoteQuickMode scope={scope} reference={reference} onOpenPath={onOpenPath} active={active} />
       <MoteCurrentWork scope={scope} reference={reference} active={active} />
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}

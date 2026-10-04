@@ -1,3 +1,4 @@
+import type { MoteQuickMode } from './mote-quick-mode'
 export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Topics'
 /** Durable home of the default Mote. This identity does not change with its product name. */
@@ -122,6 +123,7 @@ export type ScratchTopicSnapshot = {
   /** Confirmed independently of optional detail reads; absent means unconfirmed. */
   kind?: 'mote' | 'topic'
   soul?: { path: string; content: string; version: string }
+  quickMode?: MoteQuickMode
   moteArchive?: MoteArchiveState
   readError?: string
   collaborators: ScratchTopicCollaborator[]
