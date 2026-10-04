@@ -29,6 +29,7 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  * 让本表的键随那个常量一起变。
  */
 export const PRIVILEGED_SENDER_LABELS = {
+  'files:createPublic': 'original file creation',
   'files:readPublic': 'original file read',
   'schedule:list': 'Agent arrangement',
   'schedule:inspect': 'Agent arrangement',
@@ -41,6 +42,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'spaceObjects:previewAvatar': 'object image preview',
   'spaceObjects:saveAvatar': 'object image save',
   'spaceObjects:readAvatar': 'object image read',
+  'notesStorage:inspect': 'notes directory',
+  'notesStorage:change': 'notes directory changes',
   'notebook:read': 'notebook directory',
   'notebook:apply': 'notebook changes',
   'spatial:read': 'spatial state',

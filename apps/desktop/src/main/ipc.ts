@@ -1,3 +1,5 @@
+import { NotesStorageOwner } from './notes-storage-owner.js'
+import { NOTES_WORKSPACE_ID } from '../shared/notes-library.js'
 import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
 import { SpaceObjectImages } from './space-object-images.js'
 import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
@@ -8,7 +10,7 @@ import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
-import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
+import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
@@ -256,6 +258,10 @@ export async function registerIpc(args: {
       if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
+  const fileObservations = new FileObservationRegistry()
+  const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
+  const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notesStorage:changed', snapshot) }, notesStorage)
+  const notesStorageReady = notesStorageOwner.initialize().catch(error => process.stderr.write('Notes directory recovery remains available: ' + String(error) + '\n'))
   const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({
     stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades')
   }), configOwner, args.runtime)
@@ -358,7 +364,7 @@ export async function registerIpc(args: {
     }
   })
 
-  const fileObservations = new FileObservationRegistry()
+
   const channels: string[] = []
   let acceptingControl = true
   const controlBridge = new DesktopControlIpcBridge({
@@ -418,7 +424,7 @@ export async function registerIpc(args: {
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
-    if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
+    if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner, notesStorageOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
     if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
     if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, args.runtime)
@@ -662,8 +668,9 @@ export async function registerIpc(args: {
   handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
     await files.listFiles(workspace(config, workspaceId), path, limit)
   )
-  const publicFiles = new FileReadOwner({ files, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  const publicFiles = new FileReadOwner({ files: { read: files.read.bind(files), listFiles: files.listFiles.bind(files), write: (owner, input) => notesStorageOwner.write(owner, input, actual => files.write(actual, input)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
+  handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     requireTrustedSender('files:readPublic', event)
     return await publicFiles.read(input)
@@ -683,7 +690,7 @@ export async function registerIpc(args: {
     return await readBookmark(kind, bytes, runProcess)
   })
   handle('files:write', async (workspaceId: string, input: WorkspaceFileWriteInput) =>
-    await files.write(workspace(config, workspaceId), input)
+    notesStorageOwner.write(workspace(config, workspaceId), input, actual => files.write(actual, input))
   )
   handle('files:observe', async (workspaceId: string, path: string) => {
     const key = `${workspaceId}\0${path}`
@@ -767,11 +774,13 @@ export async function registerIpc(args: {
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
-  const notebookStore = new AgentMuxNotebookStore()
+  const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
+  handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
+  handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { requireTrustedSender('notesStorage:change', event); return notesStorageOwner.change(input) })
   const disposeNotebook = notebookStore.subscribe(observation => {
     if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
   })
-  handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); return notebookStore.read() })
+  handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); await notesStorageReady; return notebookStore.read() })
   handleWithEvent('notebook:apply', async (event, input: NotebookWrite) => {
     requireTrustedSender('notebook:apply', event)
     return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })

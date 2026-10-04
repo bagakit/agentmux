@@ -76,6 +76,11 @@ import type {
 } from '../shared/git-contracts.js'
 
 const api: AgentMuxPreloadApi = {
+  notesStorage: {
+    inspect: operationId => ipcRenderer.invoke('notesStorage:inspect', operationId),
+    change: input => ipcRenderer.invoke('notesStorage:change', input),
+    onChange: listener => { const receive = (_event: unknown, snapshot: import('@agentmux/core/notebook-store').NotesStorageSnapshot) => listener(snapshot); ipcRenderer.on('notesStorage:changed', receive); return () => ipcRenderer.removeListener('notesStorage:changed', receive) }
+  },
   notebooks: {
     read: () => ipcRenderer.invoke('notebook:read'),
     apply: input => ipcRenderer.invoke('notebook:apply', input),

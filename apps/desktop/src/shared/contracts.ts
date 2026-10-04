@@ -1498,6 +1498,7 @@ export type SessionQuestionReplyInput = Omit<AgentMuxSessionQuestionReplyInput,
 export type AgentMuxDesktopApi = {
   git: import('./git-contracts').GitProjectIdentityApi
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi
+  notesStorage: import('@agentmux/core/notebook-store').NotesStorageApi
   spatial: {
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>

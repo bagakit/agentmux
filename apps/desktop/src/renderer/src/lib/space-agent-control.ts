@@ -188,7 +188,8 @@ export function zoneContext(state: SpatialWorkbench, topics: readonly ScratchTop
   if (saved) {
     if (saved.workspaceId !== zone.workspaceId) failure('SPACE_CONTEXT_UNKNOWN', 'The saved Zone context contradicts its resource Workspace; its original facts are retained.')
     const originalTopic = saved.topicId && saved.directoryPath === zone.directoryPath && homeZoneId(saved.spaceId) === zone.zoneId
-    if (zone.kind === 'home' && zone.hostId && zone.directoryPath && !originalTopic && saved.spaceId !== directoryIdentity(zone.hostId, zone.directoryPath)) {
+    const originalDirectory = saved.directoryPath === zone.directoryPath && workspaceZoneId(saved.spaceId, saved.workspaceId) === zone.zoneId
+    if (zone.kind === 'home' && zone.hostId && zone.directoryPath && !originalTopic && !originalDirectory && saved.spaceId !== directoryIdentity(zone.hostId, zone.directoryPath)) {
       failure('SPACE_CONTEXT_UNKNOWN', 'The saved home context contradicts its confirmed resource; its original facts are retained.')
     }
     return saved.spaceId
