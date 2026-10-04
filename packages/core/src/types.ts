@@ -16,6 +16,15 @@ import type { AgentProviderId, BuiltInAgentProviderId } from './agent-provider-i
 import { RISK_TIERS, type RiskTier } from './risk-tier.js'
 export { RISK_TIERS, type RiskTier }
 
+/** Observation callbacks finish synchronously; async work belongs to a Consumer-owned bounded queue. */
+export type AgentMuxClientEventListener<Result = void> = (event: AgentMuxClientEvent) =>
+  Result & (Result extends PromiseLike<unknown> ? never : unknown)
+
+export type AgentMuxClientEventListenerOptions = {
+  /** Called when this Consumer is detached. Fix the callback and explicitly register it again. */
+  onError?(error: { code: string; message: string }): void
+}
+
 export type AgentExecutorId = string
 
 /** A user-facing launch configuration backed by one Provider implementation. */

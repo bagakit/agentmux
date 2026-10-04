@@ -1,5 +1,6 @@
 import type { AgentMuxClient } from './client.js'
 import type { AgentCatalogEntry, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRuntimeIdentity,
+  AgentMuxClientEventListener, AgentMuxClientEventListenerOptions,
   AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle } from './types.js'
 import type { AgentMuxRpcStreamParams } from './public-rpc.js'
 import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
@@ -37,7 +38,7 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   readonly providers: { catalog(): AgentCatalogEntry[]; get(id: string): { catalog: AgentCatalogEntry } }
   connect(): Promise<void>
   dispose(): Promise<void>
-  onEvent(listener: (event: AgentMuxClientEvent) => void): () => void
+  onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
   forwardRpc?: AgentMuxHostedForwardRpc
   disconnect(): void

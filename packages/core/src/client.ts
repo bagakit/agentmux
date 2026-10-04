@@ -149,6 +149,8 @@ import type {
   AgentMuxNativeSessionConfirmation,
   AgentPromptMessageContent,
   AgentMuxClientEvent,
+  AgentMuxClientEventListener,
+  AgentMuxClientEventListenerOptions,
   AgentMuxObservationOrigin,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
@@ -1584,10 +1586,11 @@ export class AgentMuxClient {
   /**
    * Registers a synchronous observation callback. Copy work into a
    * Consumer-owned bounded queue before returning if asynchronous handling is
-   * required. Promise-returning callbacks are detached on their first event.
+   * required. Promise-returning callbacks are detached with a diagnostic; fix and explicitly
+   * subscribe again. Other Consumers and Run capabilities remain available.
    */
-  onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
-    return this.publisher.onEvent(listener)
+  onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void {
+    return this.publisher.onEvent(listener, options)
   }
 
   /** A scoped, fresh observation; intentionally available before Runtime connection or repair. */

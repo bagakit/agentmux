@@ -4,6 +4,8 @@ import type {
   AgentMuxAcpEvent,
   AgentMuxAgentSession,
   AgentMuxClientEvent,
+  AgentMuxClientEventListener,
+  AgentMuxClientEventListenerOptions,
   AgentMuxEvidence,
   AgentMuxInteractionRequest,
   AgentMuxObservationOrigin,
@@ -19,8 +21,6 @@ function runRef(value: { runId: string }) {
   return { runId: value.runId }
 }
 
-const MAX_EVENT_LISTENERS = 64
-
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
     (typeof value === 'object' || typeof value === 'function') &&
@@ -29,25 +29,24 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   )
 }
 
+function reportConsole(error: unknown): void {
+  try { console.error(error) } catch { /* Diagnostic sinks cannot take over healthy publication. */ }
+}
+
 export class AgentMuxClientEventPublisher {
-  private readonly listeners = new Set<(event: AgentMuxClientEvent) => void>()
-  private readonly statusListeners = new Set<(event: AgentMuxClientEvent) => void>()
+  private readonly listeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
+  private readonly statusListeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
+  private publishingDiagnostic = false
 
   /** Low-frequency owner facts; these listeners never join ordered-byte dispatch. */
-  onStatusEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
-    if (!this.statusListeners.has(listener) && this.statusListeners.size >= MAX_EVENT_LISTENERS) {
-      throw new AgentMuxError('AgentMux Client status listener limit reached.', 'CLIENT_EVENT_LISTENER_LIMIT')
-    }
-    this.statusListeners.add(listener)
-    return () => this.statusListeners.delete(listener)
+  onStatusEvent<Result>(listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}): () => void {
+    this.statusListeners.set(listener, options)
+    return () => { this.statusListeners.delete(listener) }
   }
 
-  onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
-    if (!this.listeners.has(listener) && this.listeners.size >= MAX_EVENT_LISTENERS) {
-      throw new AgentMuxError('AgentMux Client event listener limit reached.', 'CLIENT_EVENT_LISTENER_LIMIT')
-    }
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+  onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}): () => void {
+    this.listeners.set(listener, options)
+    return () => { this.listeners.delete(listener) }
   }
 
   dispose(): void {
@@ -58,19 +57,40 @@ export class AgentMuxClientEventPublisher {
   publish(event: AgentMuxClientEvent): void {
     const listeners = event.type === 'agent-error' || event.type === 'connection-state'
       ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
-    for (const listener of listeners) {
+    const failures: AgentMuxError[] = []
+    for (const [listener, options] of listeners) {
+      let failure: AgentMuxError | undefined
       try {
-        const result = (listener as (value: AgentMuxClientEvent) => unknown)(event)
+        const result = listener(event)
         if (isPromiseLike(result)) {
-          this.listeners.delete(listener)
-          this.statusListeners.delete(listener)
+          // Own no async queue and contain rejection from callers that bypass the type contract.
           void Promise.resolve(result).catch(() => {})
+          failure = new AgentMuxError('This event Consumer returned a Promise and was detached. Agent and Runtime capabilities remain available. Move async work into a Consumer-owned bounded queue, then explicitly subscribe again.', 'CLIENT_EVENT_LISTENER_ASYNC')
         }
       } catch {
-        // A Consumer callback cannot become part of Run transport or Agent
-        // lifecycle control. The Consumer owns reporting its callback failure.
+        // A synchronous Consumer failure is local to this event; retain its subscription.
+        continue
       }
+      if (!failure) continue
+      this.listeners.delete(listener)
+      this.statusListeners.delete(listener)
+      failures.push(failure)
+      // Report directly to this Consumer even when it is the only subscriber. Reporting
+      // itself cannot take over publication or create an unhandled rejected Promise.
+      try {
+        if (!options.onError) reportConsole(failure)
+        else {
+          const result = (options.onError as (error: AgentMuxError) => unknown)(failure)
+          if (isPromiseLike(result)) void Promise.resolve(result).catch(error => { reportConsole(error) })
+        }
+      } catch (error) { reportConsole(error) }
     }
+    if (this.publishingDiagnostic || !failures.length) return
+    this.publishingDiagnostic = true
+    try {
+      for (const failure of failures) this.publish({ type: 'agent-error', code: failure.code,
+        message: failure.message, evidence: { source: 'agentmux', observedAt: Date.now() } })
+    } finally { this.publishingDiagnostic = false }
   }
 
   publishRunState(run: AgentMuxRun, agentSessionId?: string, observationOrigin?: AgentMuxObservationOrigin): void {
