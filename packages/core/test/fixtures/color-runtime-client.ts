@@ -6,7 +6,7 @@ import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-prov
 
 const [root, phase] = process.argv.slice(2) as [string, string]
 const template = new AgentProviderRegistry().get('codex')
-const { usage: _usage, ...capabilities } = template.catalog.capabilities
+const { usage: _usage, providerFork: _providerFork, ...capabilities } = template.catalog.capabilities
 const provider = defineAgentProvider({
   catalog: { ...template.catalog, id: 'color-fixture', label: 'Color fixture', executable: process.execPath,
     expectedProcess: 'node', hookStrategy: { kind: 'none' },
