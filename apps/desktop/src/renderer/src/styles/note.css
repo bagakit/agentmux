@@ -40,9 +40,8 @@
 .note-reference__source .note-text-button { max-width: 100%; overflow-wrap: anywhere; text-align: left; font-size: 11px; }
 .note-reference__excerpt { margin: 8px 0 0 !important; white-space: pre-wrap; }
 .note-embedded-content { margin-top: 8px; }
-.note-reference-picker { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
-.note-reference-picker > input { width: 100%; border: 0; background: transparent; color: var(--text); outline: none; font: inherit; }
-.note-reference-picker > input:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.note-reference-picker { margin: 0 0 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
+.note-reference-picker > input { width: 100%; padding: 3px 8px; border: 0; background: transparent; color: var(--text); outline: none; font: inherit; }
 .note-reference-picker__results { max-height: 260px; overflow: auto; }
 .note-reference-picker__row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
 .note-reference-picker__row > span { flex: 1; min-width: 0; }
