@@ -1,6 +1,6 @@
 # Launcher Mote preference scene
 
-Owning behavior: [Initial Launcher](../../../../../docs/design/behavior/spaces-and-layout.md#初始-launcher紧凑可定制的工作起点), including the most recent explicit Mote choice and the retained archived target. Presentation: [Launcher density](../../../../../docs/design/presentation/spaces-and-layout.md#初始-launcher-的现代工作台密度), including the shared avatar and bounded archive feedback.
+Owning behavior: [Initial Launcher](../../../../../docs/design/behavior/workface-launcher.md#launcher-工作起点), including the most recent explicit Mote choice and the retained archived target. Presentation: [Launcher density](../../../../../docs/design/presentation/spaces-and-layout.md#初始-launcher-的现代工作台密度), including the shared avatar and bounded archive feedback.
 
 ```sh
 node apps/desktop/scripts/verify-launcher-launchpad.mjs --scenes=mote-preference --output=.tmp/launcher-mote-preference/visual

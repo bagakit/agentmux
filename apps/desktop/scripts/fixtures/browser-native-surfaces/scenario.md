@@ -1,6 +1,6 @@
 # Browser 原生浮层与最窄工具栏
 
-行为约束：[交互 SSOT《Browser 任务能力与可复用资产》](../../../../../docs/design/agentmux-desktop-interaction.md#browser-任务能力与可复用资产)。控件语言：[密度 SSOT《Browser 任务工具与证据的紧凑呈现》](../../../../../docs/design/agentmux-surface-density.md#browser-任务工具与证据的紧凑呈现)。本场景沿已有 canonical launch/cleanup，以 private userData 从实际入口创建 Browser；不替换 bridge、不写 Store 或 durable 工作面、不改变用户运行副本。
+行为约束：[交互 SSOT《Browser 任务能力与可复用资产》](../../../../../docs/design/behavior/browser-workface.md#browser-任务能力与可复用资产)。控件语言：[密度 SSOT《Browser 任务工具与证据的紧凑呈现》](../../../../../docs/design/presentation/browser-workface.md#browser-任务工具与证据的紧凑呈现)。本场景沿已有 canonical launch/cleanup，以 private userData 从实际入口创建 Browser；不替换 bridge、不写 Store 或 durable 工作面、不改变用户运行副本。
 
 ```sh
 node apps/desktop/scripts/verify-browser-overlay-visibility.mjs
