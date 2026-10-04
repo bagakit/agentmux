@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   seedMoteWorkface(); useAppStore.setState({ mainSurface: 'workbench', activeWorkspaceId: scratchWorkspace.id })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([entry])
-  vi.spyOn(api.files, 'readPublic').mockImplementation(async params => material(params, params.path === 'SOUL.md' ? soul : '# Saved idea'))
+  vi.spyOn(api.files, 'readPublic').mockImplementation(async params => material(params, params.path === 'SOUL.md' ? soul : params.path === 'BEHAVIOR.md' ? behavior.DEFAULT_MOTE_BEHAVIOR : '# Saved idea'))
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(moteTopics)
@@ -55,7 +55,7 @@ async function mount() {
 }
 it('nonempty Details ignores selected Session bookkeeping and never parses closed SOUL Markdown', async () => {
   await mount()
-  const parse = vi.spyOn(behavior, 'parseMoteBehaviorBlock')
+  const parse = vi.spyOn(behavior, 'parseMoteBehaviorDocument')
   for (let index = 0; index < 20; index++) await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === defaultAgent.id ? { ...session, updatedAt: session.updatedAt + 1, latestOutputBytes: index + 1 } : session) })))
   console.info('T003-fixed-cost', JSON.stringify({ events: 20, commits: renders, behaviorParses: parse.mock.calls.length, closedMarkdownRenders: markdown.renders }))
   expect(renders).toBe(0); expect(parse).not.toHaveBeenCalled(); expect(markdown.renders).toBe(0)
@@ -119,7 +119,7 @@ async function input(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelec
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: Error) => void; const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail }); return { promise, resolve, reject } }
 
 it('actual status/source updates remain visible without reparsing the saved behavior', async () => {
-  await mount(); const parse = vi.spyOn(behavior, 'parseMoteBehaviorBlock')
+  await mount(); const parse = vi.spyOn(behavior, 'parseMoteBehaviorDocument')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === defaultAgent.id ? { ...session, status: { state: 'waiting', source: 'user', observedAt: 99 } } : session) })))
   expect(container.querySelector('.mote-details__status')?.textContent).toBe('waiting')
   expect(container.querySelector('.mote-details__status .status')?.getAttribute('title')).toBe('waiting · user')
@@ -151,7 +151,7 @@ it('hidden Profile retains original chooser, question, expanded Goal and minutes
   await input(chooser, goal.id); await input(minutes, '47'); await input(question, 'Keep my current question')
   const reads = vi.mocked(api.demands.list).mock.calls.length, inspections = vi.mocked(api.continuousProgress.goals).mock.calls.length
   await renderDetails(false); renders = 0
-  const parse = vi.spyOn(behavior, 'parseMoteBehaviorBlock'), files = vi.mocked(api.files.readPublic), before = files.mock.calls.length
+  const parse = vi.spyOn(behavior, 'parseMoteBehaviorDocument'), files = vi.mocked(api.files.readPublic), before = files.mock.calls.length
   for (let value = 1; value <= 5; value++) {
     await revision(value)
     await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === defaultAgent.id ? { ...session, label: 'Hidden current name ' + value, updatedAt: value } : session) })))
@@ -170,12 +170,12 @@ it('hidden Profile retains original chooser, question, expanded Goal and minutes
 it('same-scope pending SOUL and goal inspection finish normally through hide without duplicate delivery', async () => {
   const saved = deferred<FileReadResult>(), goals = deferred<Awaited<ReturnType<typeof api.demands.list>>>()
   let params!: FileReadParams
-  vi.mocked(api.files.readPublic).mockImplementation(input => { params = input; return saved.promise })
+  vi.mocked(api.files.readPublic).mockImplementation(input => { if (input.path !== 'BEHAVIOR.md') return Promise.resolve(material(input, '# Pending original completed')); params = input; return saved.promise })
   vi.mocked(api.demands.list).mockReturnValue(goals.promise)
   await renderDetails(); expect(api.files.readPublic).toHaveBeenCalledTimes(1); expect(api.demands.list).toHaveBeenCalledTimes(1)
   await renderDetails(false); await renderDetails(); await renderDetails(false)
   expect(api.files.readPublic).toHaveBeenCalledTimes(1); expect(api.demands.list).toHaveBeenCalledTimes(1)
-  await act(async () => { saved.resolve(material(params, '# Pending original completed')); goals.resolve([]) })
+  await act(async () => { saved.resolve(material(params, behavior.DEFAULT_MOTE_BEHAVIOR)); goals.resolve([]) })
   await renderDetails()
   expect(api.files.readPublic).toHaveBeenCalledTimes(1); expect(api.demands.list).toHaveBeenCalledTimes(1)
   expect(container.textContent).not.toContain('Reading saved behavior')
@@ -305,11 +305,11 @@ it('an uncertain original Goal mutation retains its exact retry operation across
 
 it('the actual StrictMode effect replay retains the admitted saved-material response', async () => {
   const pending = deferred<FileReadResult>(); let params!: FileReadParams
-  vi.mocked(api.files.readPublic).mockImplementation(request => { params = request; return pending.promise })
+  vi.mocked(api.files.readPublic).mockImplementation(request => { if (request.path !== 'BEHAVIOR.md') return Promise.resolve(material(request, '# Strict original saved SOUL')); params = request; return pending.promise })
   await act(async () => root.unmount()); root = createDomRoot(container)
   await act(async () => root.render(<StrictMode><DesktopClientUiProvider><MoteDetailsPanel scope={scope} onOpenPath={openPath} onCreateNote={createNote} /></DesktopClientUiProvider></StrictMode>))
   expect(api.files.readPublic).toHaveBeenCalledTimes(1)
-  await act(async () => pending.resolve(material(params, '# Strict original saved SOUL')))
+  await act(async () => pending.resolve(material(params, behavior.DEFAULT_MOTE_BEHAVIOR)))
   expect(container.textContent).not.toContain('Reading saved behavior')
   await act(async () => { const details = container.querySelector<HTMLDetailsElement>('.mote-details__soul')!; details.open = true; details.dispatchEvent(new Event('toggle')) })
   expect(container.textContent).toContain('Strict original saved SOUL')

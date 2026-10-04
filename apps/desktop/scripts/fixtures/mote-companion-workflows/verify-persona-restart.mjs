@@ -46,7 +46,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { passed: false, source: {}, rendererCapture: relative(root, capturePath), rendererCaptureSha: sha(await readFile(capturePath)), cases: [],
   reusedCooperationSource,
   captures: await Promise.all([...captureOwners.keys()].map(async file => ({ file: relative(root, file), sha256: sha(await readFile(file)) }))),
-  boundary: 'Exact original Renderer-created Launcher/Space/Zone/Group/Region and unsent bytes, saved and initialized again by the original Workbench/LauncherState and real filesystem Core Spatial owner in distinct Node processes. Reused cooperation observations identify their unchanged Source and original capture separately. Behavior-only case also uses original Store.saveDocument to the original Main WorkspaceFiles atomic filesystem owner, then reads canonical saved block/full revision in two fresh processes. No live Session, Run, Native, model or installed App qualification.' }
+  boundary: 'Exact original Renderer-created Launcher/Space/Zone/Group/Region and unsent bytes, saved and initialized again by the original Workbench/LauncherState and real filesystem Core Spatial owner in distinct Node processes. Reused cooperation observations identify their unchanged Source and original capture separately. Behavior-only case also uses original Store.saveDocument to the original Main WorkspaceFiles atomic filesystem owner, then reads the saved behavior Markdown/full revision in two fresh processes. No live Session, Run, Native, model or installed App qualification.' }
 try {
   const alias = { '@agentmux/layout': join(root, 'packages/layout/src/index.ts') }
   for (const name of ['core', 'demand']) {

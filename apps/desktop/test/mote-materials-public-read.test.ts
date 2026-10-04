@@ -11,6 +11,7 @@ import { parseFileListParams, parseFileListResult, parseFileReadParams, parseFil
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { WorkspaceFiles } from '../src/main/workspace-files'
+import { DEFAULT_MOTE_BEHAVIOR, parseMoteBehaviorDocument, serializeMoteBehaviorDocument } from '../src/shared/mote-behavior'
 import { FileReadOwner } from '../src/main/file-read-owner'
 
 const cleanups: Array<() => Promise<unknown>> = []
@@ -232,4 +233,25 @@ it('discovers file.write in actual CLI help and refuses unauthorized HTTP before
   const help = await cli(f.root, ['--help', 'file', 'write'])
   expect(help.code).toBe(0); expect(help.stdout).toContain('--resource JSON'); expect(help.stdout).toContain('zonePath')
   const skill = await cli(f.root, ['--skill']); expect(skill.code).toBe(0); expect(skill.stdout).toContain('file write')
+})
+
+it('actual public Files and compiled CLI read and save original behavior YAML and Markdown with exact revision conflict', async () => {
+  const f = await fixture(), path = 'BEHAVIOR.md'
+  const original = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, { engagement: 'I', information: 'N', decisions: 'T', approach: 'P', custom: '## Human additions\nPlease keep examples concrete.\n' })
+  await writeFile(join(f.root, 'mote', path), original)
+  const args = ['--endpoint', 'unix:' + f.server.path, 'file', 'read', '--zone', 'original-zone', '--space', 'mote-space', '--path', path, '--host', 'local', '--workspace', f.workspace.id, '--workspace-path', f.root]
+  const readOutput = await cli(f.root, args); expect(readOutput.code, readOutput.stderr).toBe(0)
+  const read = JSON.parse(readOutput.stdout).result
+  expect(read).toMatchObject({ resource: { path: 'mote/BEHAVIOR.md' }, result: { status: 'read', document: { content: original } } })
+  expect(parseMoteBehaviorDocument(read.result.document.content)).toMatchObject({ status: 'valid', code: 'INTP' })
+  const changed = serializeMoteBehaviorDocument(original, { engagement: 'E', information: 'N', decisions: 'F', approach: 'P', custom: '## Human additions\nUse short examples with reasons.\n' })
+  const writeArgs = ['--endpoint', 'unix:' + f.server.path, 'file', 'write', '--zone', 'original-zone', '--space', 'mote-space', '--path', path, '--resource', JSON.stringify(read.resource), '--expected-revision', read.result.document.revision]
+  const saved = await cli(f.root, writeArgs, changed); expect(saved.code, saved.stderr).toBe(0)
+  expect(JSON.parse(saved.stdout)).toMatchObject({ ok: true, result: { result: { status: 'written' } } })
+  expect(await readFile(join(f.root, 'mote', path), 'utf8')).toBe(changed)
+  const conflict = await cli(f.root, writeArgs, original)
+  expect(JSON.parse(conflict.stdout)).toMatchObject({ result: { result: { status: 'conflict' } } })
+  expect(await readFile(join(f.root, 'mote', path), 'utf8')).toBe(changed)
+  f.observe.mockResolvedValue(null)
+  expect(await f.client.call('file.read', { ...f.params, path })).toMatchObject({ resource: null, result: { status: 'unknown' } })
 })

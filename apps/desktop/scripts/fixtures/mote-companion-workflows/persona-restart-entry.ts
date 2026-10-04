@@ -19,7 +19,7 @@ const { useAppStore, prepareRendererUpdate } = await import('../../../src/render
 const { useLauncherState } = await import('../../../src/renderer/src/lib/launcher-state')
 const { desktopSpatialGraph } = await import('../../../src/renderer/src/lib/desktop-spatial-state')
 const { documentKey } = await import('../../../src/renderer/src/lib/workbench-tabs')
-const { parseMoteBehaviorBlock } = await import('../../../src/renderer/src/lib/mote-behavior')
+const { parseMoteBehaviorDocument } = await import('../../../src/renderer/src/lib/mote-behavior')
 const owner = new AgentMuxSpatialStateStore(join(directory!, 'spatial-state.json'))
 api.config.get = async () => input.config
 api.spatial.read = () => owner.readForLayout()
@@ -88,7 +88,7 @@ if (input.behavior) {
   assert.equal(read.status, 'read')
   if (read.status !== 'read') throw new Error('The original saved file readback is unconfirmed')
   assert.equal(read.document.content, input.behavior.content)
-  const block = parseMoteBehaviorBlock(read.document.content)
+  const block = parseMoteBehaviorDocument(read.document.content)
   assert.equal(block.status, 'valid')
   behavior = { document: read.document, block }
 }

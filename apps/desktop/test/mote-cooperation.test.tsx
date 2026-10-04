@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import type { FileReadParams, FileReadResult } from '@agentmux/core'
-import { parseMoteBehaviorBlock, replaceMoteBehaviorBlock } from '../src/renderer/src/lib/mote-behavior'
+import { parseMoteBehaviorDocument, serializeMoteBehaviorDocument, DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_LINK } from '../src/renderer/src/lib/mote-behavior'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { api } from '../src/renderer/src/lib/api'
@@ -14,15 +14,16 @@ import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { warmLauncherId } from '../src/renderer/src/lib/warm-terminal-preview'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
-let app: MoteAppFixture, disk: string, diskRevision: string
-const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = rootPath + '/SOUL.md', revision = 'sha256:' + 'a'.repeat(64)
+let app: MoteAppFixture, disk: string, diskRevision: string, soulDisk: string, soulRevision: string
+const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = rootPath + '/BEHAVIOR.md', revision = 'sha256:' + 'a'.repeat(64)
 beforeEach(() => {
-  disk = '# Original SOUL\nKeep my existing words.\n'; diskRevision = revision
+  disk = DEFAULT_MOTE_BEHAVIOR; soulDisk = '# Original SOUL\nKeep my existing words.\n\n' + MOTE_BEHAVIOR_LINK + '\n'; diskRevision = revision
+  soulRevision = revision
   app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
   useLauncherState.setState({ drafts: {} })
   vi.spyOn(api.files, 'readPublic').mockImplementation(async params => publicRead(params))
-  vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path, content: disk, revision: diskRevision } }))
-  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { disk = input.content; diskRevision = 'sha256:' + 'b'.repeat(64); return { status: 'written', revision: diskRevision } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, requested) => ({ status: 'read', document: { path: requested, content: requested === path ? disk : soulDisk, revision: requested === path ? diskRevision : soulRevision } }))
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { if (input.path === path) disk = input.content; else soulDisk = input.content; diskRevision = 'sha256:' + 'b'.repeat(64); return { status: 'written', revision: diskRevision } })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([]); vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
 })
 afterEach(async () => { await app.dispose() })
@@ -34,7 +35,7 @@ async function text(selector: string, value: string) {
 const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === name)!
 const action = (name: string) => document.querySelector<HTMLButtonElement>('[aria-label="' + name + '"]')!
 const dialog = () => document.querySelector<HTMLElement>('.mote-behavior-dialog')!
-const publicRead = (params: FileReadParams): FileReadResult => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path }, result: { status: 'read', document: { path, content: disk, revision: diskRevision } } })
+const publicRead = (params: FileReadParams): FileReadResult => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path: rootPath + '/' + params.path }, result: { status: 'read', document: { path: rootPath + '/' + params.path, content: params.path === 'BEHAVIOR.md' ? disk : soulDisk, revision: params.path === 'BEHAVIOR.md' ? diskRevision : soulRevision } } })
 async function studio() { await moteClick(action('Edit behavior settings')) }
 async function trial() { await studio(); await moteClick(action('Try a cooperation question')) }
 async function choices() { for (const value of ['I', 'N', 'F', 'J']) await moteClick(dialog().querySelector<HTMLInputElement>('input[value="' + value + '"]')!) }
@@ -79,17 +80,16 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     await act(async () => useAppStore.setState({ openLauncher: () => defaultTab.id }))
     await act(async () => { expect(openMoteDiscussionDraft(scope(), 'Must not reach old Session')).toBeNull() }); expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
   })
-  it('stages selected preferences after the untouched original SOUL and saves through the actual Editor revision protocol', async () => {
-    const original = '# My original SOUL\nKeep all custom content exactly.\n\n## Cooperation preferences\nOld preference remains.\n\n## Idea feedback\nOriginal note and revision remain.\n'; disk = original
+  it('saves selected preferences in BEHAVIOR while preserving original SOUL and reopening all selected choices', async () => {
+    const original = '# My original SOUL\nKeep all custom content exactly.\n\n## Cooperation preferences\nOld preference remains.\n\n## Idea feedback\nOriginal note and revision remain.\n'; soulDisk = original + MOTE_BEHAVIOR_LINK + '\n'
 
     const write = vi.mocked(api.files.write)
     await app.mount(); expect(details().querySelector('.mote-behavior-summary select, .mote-behavior-summary textarea')).toBeNull(); expect(details().textContent).toContain('Choose how we work together.')
-    await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Use concrete examples.'); await moteClick(button('Review changes'))
+    await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Use concrete examples.'); await moteClick(button('Save'))
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path), doc = state.documents[key]!
-    expect(doc.content.startsWith(original)).toBe(true); expect(doc.content).toContain('Use concrete examples.'); expect(doc.revision).toBe(revision)
-    expect(state.dirtyDocuments[key]).toBe(true); expect(write).not.toHaveBeenCalled(); expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull(); expect(parseMoteBehaviorBlock(doc.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
+    expect(soulDisk.startsWith(original)).toBe(true); expect(doc.content).toContain('Use concrete examples.'); expect(doc.revision).toBe(diskRevision)
+    expect(state.dirtyDocuments[key]).not.toBe(true); expect(write).toHaveBeenCalledTimes(1); expect(details().textContent).toContain('MBTI style · INFJ'); expect(parseMoteBehaviorDocument(doc.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
     const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
-    await act(async () => state.saveDocument(tab.id, tab.layout.activeRegionId)); await settleMoteApp()
     expect(write).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, { path, content: doc.content, expectedRevision: revision })
     expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true); expect(details().textContent).toContain('MBTI style · INFJ')
     expect(details().textContent).not.toContain('Save there to apply it')
@@ -129,15 +129,15 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     useAppStore.setState({ tabs, layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: { ...state.layouts[SCRATCH_WORKSPACE_ID]!,
       groups: state.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => !!tabs[id]), activeTabId: null })) } },
       workbenchSpaceSelection: { workspaceId: SCRATCH_WORKSPACE_ID, spaceId, zoneId: homeZoneId(spaceId), groupId: 'mote-group', topicId: PMO_TEAMS_TOPIC_ID, tabId: null, regionId: null } })
-    await app.mount(); await studio(); await choices(); await moteClick(button('Review changes'))
+    await app.mount(); await studio(); await choices(); await moteClick(button('Save'))
     const current = useAppStore.getState(), selected = current.workbenchSpaceSelection!
     expect(current.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeDefined(); expect(selected.tabId).not.toBeNull()
     const file = current.tabs[selected.tabId!]!
     expect(selected.groupId).toBe('mote-group'); expect(file.topicId).toBe(PMO_TEAMS_TOPIC_ID)
     expect(file.regions[selected.regionId!]).toMatchObject({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path })
     expect(Object.keys(current.tabs)).toHaveLength(Object.keys(tabs).length + 1)
-    expect(parseMoteBehaviorBlock(current.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]!.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
-    expect(vi.mocked(api.files.write)).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+    expect(parseMoteBehaviorDocument(current.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]!.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
+    expect(vi.mocked(api.files.write)).toHaveBeenCalledTimes(1); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('keeps a saved unknown target distinct from an empty Mote and does not stage through another Group', async () => {
     const original = useAppStore.getState(), selected = original.workbenchSpaceSelection!
@@ -146,13 +146,13 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
       groups: original.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => !!tabs[id]), activeTabId: null })) } },
       workbenchSpaceSelection: { ...selected, tabId: 'saved-unknown-target', regionId: 'saved-unknown-region' } })
     await app.mount(); const state = useAppStore.getState()
-    await studio(); await choices(); await moteClick(button('Review changes'))
+    await studio(); await choices(); await moteClick(button('Save'))
     expect(Object.keys(useAppStore.getState().documents)).toHaveLength(0); expect(useAppStore.getState().tabs).toBe(state.tabs)
     expect(document.querySelector('.mote-behavior-dialog')).not.toBeNull(); expect(vi.mocked(api.files.write)).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
   })
   it('retains later explicit choices and extra text while the initial saved read is pending', async () => {
     await app.mount()
-    disk = replaceMoteBehaviorBlock(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'Old saved extra.' })
+    disk = serializeMoteBehaviorDocument(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'Old saved extra.' })
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
     await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Later unsent preference.')
@@ -162,11 +162,12 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined(); expect(api.files.write).not.toHaveBeenCalled()
   })
   it('keeps unknown Save unconfirmed until the original Check saved file verifies the same attempt', async () => {
-    await app.mount(); await studio(); await choices(); await moteClick(button('Review changes'))
+    await app.mount(); await studio(); await choices(); /* Save follows the controlled receipt loss below. */
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
-    const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
-    vi.mocked(api.files.write).mockImplementation(async (_workspace, input) => { disk = input.content; diskRevision = 'sha256:' + 'e'.repeat(64); return { status: 'unknown', code: 'RECEIPT_LOST', message: 'The write receipt is unconfirmed.' } })
-    await act(async () => state.saveDocument(tab.id, tab.layout.activeRegionId)); await settleMoteApp()
+    vi.mocked(api.files.write).mockImplementation(async (_workspace, input) => { if (input.path === path) disk = input.content; else soulDisk = input.content; diskRevision = 'sha256:' + 'e'.repeat(64); return { status: 'unknown', code: 'RECEIPT_LOST', message: 'The write receipt is unconfirmed.' } })
+    await moteClick(button('Save'))
+    const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
+    expect(dialog()).not.toBeNull(); expect(dialog().textContent).toContain('Saving is unconfirmed')
     expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
     expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull(); expect(details().textContent).toContain('Saved behavior is unconfirmed')
     expect(details().textContent).not.toContain('Save there to apply it')
@@ -175,40 +176,41 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(useAppStore.getState().documentIssues[key]).toBeUndefined(); expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
     expect(api.files.write).toHaveBeenCalledTimes(1); expect(details().textContent).toContain('MBTI style · INFJ')
     expect(details().textContent).not.toContain('Save there to apply it')
-    await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="I"]')!.checked).toBe(true)
+    await moteClick(action('Close behavior settings')); await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="I"]')!.checked).toBe(true)
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.stop).not.toHaveBeenCalled()
   })
   it('preserves an existing unsaved original Editor paragraph when reviewing a behavior block', async () => {
-    await app.mount(); await studio(); await moteClick(action('Open original SOUL file'))
+    await app.mount(); await studio(); await moteClick(action('Open original behavior file'))
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
     const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
     const originalDraft = disk + '\nAn original unsaved paragraph.\n'
     await act(async () => state.updateDocument(tab.id, originalDraft, tab.layout.activeRegionId))
-    await studio(); await choices(); await moteClick(button('Review changes'))
-    expect(useAppStore.getState().documents[key]!.content.startsWith(originalDraft)).toBe(true)
-    expect(parseMoteBehaviorBlock(useAppStore.getState().documents[key]!.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
+    await studio(); await choices(); await moteClick(button('Save'))
+    expect(useAppStore.getState().documents[key]!.content).toBe(originalDraft)
+    expect(dialog().textContent).toContain('MBTI style · INFJ')
+    expect(dialog().textContent).toContain('unsaved or unconfirmed draft')
     expect(disk).not.toContain('agentmux:mote-behavior:'); expect(api.files.write).not.toHaveBeenCalled()
   })
   it('refuses later original document edits during the review read and keeps both the form and draft', async () => {
-    await app.mount(); await studio(); await moteClick(action('Open original SOUL file')); await studio(); await choices()
+    await app.mount(); await studio(); await moteClick(action('Open original behavior file')); await studio(); await choices()
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
     const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
-    await moteClick(button('Review changes'))
+    await moteClick(button('Save'))
     const later = disk + '\nLater original Editor input.\n'; await act(async () => state.updateDocument(tab.id, later, tab.layout.activeRegionId))
     await act(async () => finish(publicRead(captured))); await settleMoteApp()
     expect(useAppStore.getState().documents[key]!.content).toBe(later); expect(dialog().textContent).toContain('MBTI style · INFJ')
-    expect(dialog().textContent).toContain('original draft are kept'); expect(api.files.write).not.toHaveBeenCalled()
+    expect(dialog().textContent).toContain('unsaved or unconfirmed draft'); expect(api.files.write).not.toHaveBeenCalled()
   })
   it('rejects a late same-Mote read lifetime after rereading without replacing the newer saved choices', async () => {
     await app.mount(); let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
     await studio(); await moteClick(action('Extra preferences'))
-    disk = replaceMoteBehaviorBlock(disk, { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: 'Current saved preference.' })
+    disk = serializeMoteBehaviorDocument(disk, { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: 'Current saved preference.' })
     // The still-reading request can be explicitly replaced through the same original read owner.
-    await moteClick(button('Review changes')); await moteClick(button('Reread SOUL'))
-    const current = disk; disk = replaceMoteBehaviorBlock(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'STALE FIRST REQUEST' })
+    await moteClick(button('Save')); await moteClick(button('Reread settings'))
+    const current = disk; disk = serializeMoteBehaviorDocument(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'STALE FIRST REQUEST' })
     const stale = publicRead(captured); disk = current
     await act(async () => finish(stale)); await settleMoteApp()
     expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Current saved preference.')
@@ -221,7 +223,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id })); await settleMoteApp()
     await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id })); await settleMoteApp()
     await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'New A lifetime input.')
-    const current = disk; disk = replaceMoteBehaviorBlock(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'OLD A SECRET' })
+    const current = disk; disk = serializeMoteBehaviorDocument(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'OLD A SECRET' })
     const stale = publicRead(captured); disk = current
     await act(async () => finish(stale)); await settleMoteApp()
     expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('New A lifetime input.')
@@ -233,7 +235,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     await text('[aria-label="Custom cooperation preferences"]', 'Earlier submitted preference.')
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
-    await moteClick(button('Review changes')); await text('[aria-label="Custom cooperation preferences"]', 'Later form input stays here.')
+    await moteClick(button('Save')); await text('[aria-label="Custom cooperation preferences"]', 'Later form input stays here.')
     await act(async () => finish(publicRead(captured))); await settleMoteApp()
     expect(dialog()).not.toBeNull()
     expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Later form input stays here.')
@@ -241,7 +243,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(api.files.write).not.toHaveBeenCalled()
     await moteClick(button('Cancel')); await studio(); await choices()
     vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
-    await moteClick(button('Review changes')); await moteClick(action('Try a cooperation question'))
+    await moteClick(button('Save')); await moteClick(action('Try a cooperation question'))
     await text('[aria-label="Cooperation trial question"]', 'A later trial question stays here.')
     await act(async () => finish(publicRead(captured))); await settleMoteApp()
     expect(dialog()).not.toBeNull(); expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('A later trial question stays here.')
@@ -251,7 +253,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     await app.mount(); await studio(); await choices()
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
-    await moteClick(button('Review changes'))
+    await moteClick(button('Save'))
     await act(async () => {
       useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', customTab.id)
       useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id)
@@ -262,4 +264,121 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined(); expect(api.files.write).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
   })
+})
+
+const legacySoul = `# My original SOUL
+Keep the original custom introduction.
+<!-- agentmux:mote-behavior:begin v1 INFJ -->
+## Collaboration behavior
+
+- Organize your thinking first, then respond with focus and ask when needed.
+- Connect the bigger picture, patterns and possibilities; distinguish them from confirmed facts.
+- Stay truthful while considering people, relationships and the values that matter to me.
+- Once the direction is clear, suggest steps, decision points and completion signals.
+
+### Extra preferences
+Keep original examples.
+
+My current directions, original custom SOUL text and extra preferences take priority. These choices do not grant new actions or change factual standards.
+<!-- agentmux:mote-behavior:end -->
+My original trailing note.
+`
+async function legacySetup() {
+  soulDisk = legacySoul; let exists = false
+  vi.mocked(api.files.readPublic).mockImplementation(async params => {
+    if (params.path === 'BEHAVIOR.md' && !exists) return { ...publicRead(params), result: { status: 'deleted' } }
+    return publicRead(params)
+  })
+  vi.spyOn(api.files, 'create').mockImplementation(async (_workspace, input) => {
+    expect(input).toEqual({ path, kind: 'file' }); if (exists) throw new Error('Already exists')
+    exists = true; disk = ''; return { status: 'created' } as never
+  })
+  vi.mocked(api.files.write).mockImplementation(async (_workspace, input) => {
+    const next = 'sha256:' + (await import('node:crypto')).createHash('sha256').update(input.content).digest('hex')
+    if (input.path === path) { disk = input.content; diskRevision = next } else { soulDisk = input.content; soulRevision = next }
+    return { status: 'written', revision: next }
+  })
+}
+it('explicitly imports the original saved style before linking SOUL and saving newly selected preferences', async () => {
+  await legacySetup(); await app.mount()
+  expect(details().textContent).toContain('MBTI style · INFJ'); expect(details().textContent).toContain('original SOUL')
+  await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="I"]')!.checked).toBe(true)
+  await moteClick(button('Cancel')); expect(api.files.create).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
+  await studio(); for (const value of ['E', 'N', 'F', 'P']) await moteClick(dialog().querySelector<HTMLInputElement>('input[value="' + value + '"]')!)
+  await moteClick(button('Save')); await settleMoteApp()
+  expect(api.files.create).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(api.files.write).mock.calls.map(([, input]) => input.path)).toEqual([path, rootPath + '/SOUL.md', path])
+  expect(parseMoteBehaviorDocument(vi.mocked(api.files.write).mock.calls[0]![1].content)).toMatchObject({ status: 'valid', code: 'INFJ' })
+  expect(parseMoteBehaviorDocument(disk)).toMatchObject({ status: 'valid', code: 'ENFP', preferences: { custom: 'Keep original examples.' } })
+  expect(soulDisk).toBe('# My original SOUL\nKeep the original custom introduction.\n' + MOTE_BEHAVIOR_LINK + '\nMy original trailing note.\n')
+  expect(document.querySelector('.mote-behavior-dialog')).toBeNull(); expect(details().textContent).toContain('MBTI style · ENFP')
+  await studio(); for (const value of ['E', 'N', 'F', 'P']) expect(dialog().querySelector<HTMLInputElement>('input[value="' + value + '"]')!.checked).toBe(true)
+  expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+it('retains both original files and later choices through an interrupted SOUL link and resumes after original receipt recovery', async () => {
+  await legacySetup(); const write = vi.mocked(api.files.write), original = write.getMockImplementation()!
+  write.mockImplementation(async (workspace, input) => {
+    const result = await original(workspace, input)
+    return input.path.endsWith('/SOUL.md') ? { status: 'unknown', code: 'RECEIPT_LOST', message: 'The SOUL receipt is unknown.' } : result
+  })
+  await app.mount(); await studio(); for (const value of ['E', 'N', 'F', 'P']) await moteClick(dialog().querySelector<HTMLInputElement>('input[value="' + value + '"]')!)
+  await moteClick(button('Save')); await settleMoteApp()
+  expect(dialog().textContent).toContain('SOUL reference is unconfirmed'); expect(dialog().textContent).toContain('MBTI style · ENFP')
+  expect(parseMoteBehaviorDocument(disk)).toMatchObject({ code: 'INFJ' }); expect(write).toHaveBeenCalledTimes(2)
+  const state = useAppStore.getState(), soulPath = rootPath + '/SOUL.md', key = documentKey(SCRATCH_WORKSPACE_ID, soulPath)
+  const file = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === soulPath))!
+  expect(state.documentIssues[key]?.kind).toBe('write-unknown')
+  await act(async () => state.reloadDocument(file.id, file.layout.activeRegionId)); await settleMoteApp()
+  expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+  write.mockImplementation(original); await moteClick(button('Reread settings')); await moteClick(button('Save')); await settleMoteApp()
+  expect(parseMoteBehaviorDocument(disk)).toMatchObject({ code: 'ENFP' }); expect(document.querySelector('.mote-behavior-dialog')).toBeNull()
+})
+it('does not fall back to an old style when the new behavior file is damaged', async () => {
+  soulDisk = legacySoul; disk = '---\nversion: 2\npreferences: {engagement: E}\n---\nOriginal damaged content'
+  await app.mount(); expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull()
+  await studio(); await choices(); await moteClick(button('Save'))
+  expect(dialog()).not.toBeNull(); expect(api.files.write).not.toHaveBeenCalled(); expect(disk).toContain('version: 2')
+})
+
+it('review counter: the original behavior system file is not a recent idea', async () => {
+  vi.mocked(api.files.readDirectory).mockResolvedValue([{ name: 'BEHAVIOR.md', path, isDirectory: false, mtimeMs: 1000 }] as never)
+  await app.mount(); await settleMoteApp()
+  expect(details().querySelector('.mote-details__recent')!.textContent).not.toContain('BEHAVIOR')
+  expect(details().querySelector('.mote-details__recent')!.textContent).toContain('0')
+})
+
+it('review counter: confirmed custom-only Markdown remains visible in Profile without inventing an MBTI code', async () => {
+  disk = '---\nversion: 1\npreferences: {}\n---\nKeep my manual collaboration notes visible.'
+  await app.mount(); await settleMoteApp()
+  expect(parseMoteBehaviorDocument(disk)).toMatchObject({ status: 'valid', code: null })
+  expect(details().textContent).toContain('Keep my manual collaboration notes visible.')
+  expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull()
+})
+
+it('keeps ordinary user notes in both Profile and Ideas while excluding the behavior system file', async () => {
+  vi.mocked(api.files.readDirectory).mockResolvedValue([
+    { name: 'BEHAVIOR.md', path, isDirectory: false, mtimeMs: 1000 },
+    { name: 'experiment.md', path: rootPath + '/experiment.md', isDirectory: false, mtimeMs: 2000 }
+  ] as never)
+  await app.mount(); await settleMoteApp()
+  expect(details().querySelector('.mote-details__recent')!.textContent).toContain('experiment')
+  expect(details().querySelector('.mote-details__recent')!.textContent).not.toContain('BEHAVIOR')
+  await moteClick(action('View ideas and saved materials'))
+  expect(details().querySelector('.mote-details__notes')!.textContent).toContain('experiment')
+  expect(details().querySelector('.mote-details__notes')!.textContent).not.toContain('BEHAVIOR')
+})
+it('shows a saved partial preference without inventing its missing axes or MBTI code', async () => {
+  disk = '---\nversion: 1\npreferences:\n  engagement: I\n---\nKeep these partial notes.'
+  await app.mount(); await settleMoteApp()
+  expect(details().querySelector('.mote-behavior-summary__choices')!.children).toHaveLength(1)
+  expect(details().textContent).toContain('Keep these partial notes.')
+  expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull()
+})
+
+it('prefills all four saved choices from the original file when opening settings', async () => {
+  disk = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: 'Keep my chosen style.' })
+  await app.mount(); await studio()
+  expect([...dialog().querySelectorAll<HTMLInputElement>('input:checked')].map(input => input.value)).toEqual(['I', 'N', 'F', 'J'])
+  expect(dialog().textContent).toContain('INFJ')
+  expect(api.files.write).not.toHaveBeenCalled()
 })
