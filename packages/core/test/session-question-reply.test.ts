@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -20,6 +20,7 @@ import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 import type { AgentMuxAgentSession } from '../src/types.js'
 
 const source = { providerId: 'codex', nativeSessionId: 'question-native-source' }
+const trustedQuestionHookContext = { processNativeHandle: { kind: 'provider' as const, providerId: source.providerId, sessionId: source.nativeSessionId } }
 const nativeQuestion = { type: 'agentMessage', id: 'native-async-call', phase: 'final_answer', delivery: 'async', text: 'Exact original question summary',
   questions: [{ title: 'Choose a direction\n保留正文', options: ['Keep original', 'Revise'] }, { title: 'Free text answer' }] }
 const request = codexQuestionRequest(nativeQuestion)!
@@ -38,7 +39,7 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
 
 type NativeRequest = { method: string; params: Record<string, unknown> }
 async function fixture(mode = 'normal') {
-  const directory = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-question-test-"))
+  const directory = await mkdtemp(fixturePath("tmp/amux-question-test-"))
   const workspace = join(directory, 'workspace'); await mkdir(workspace)
   const callsPath = join(directory, 'calls.jsonl'), script = join(directory, 'native.mjs')
   const entries = [
@@ -116,7 +117,80 @@ createInterface({input:process.stdin}).on('line',line=>{
     } }
 }
 
+async function activeFixture(state: 'working' | 'unknown' = 'working') {
+  const h = await fixture()
+  await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('question-session')),
+    agentSessionId: 'question-session', operationId: 'original-active-turn', prompt: 'Original active request' })
+  const previous = (await loadAgentSessions(h.store))[0]!
+  const current = { ...previous, updatedAt: previous.updatedAt + 1 }
+  if (state === 'unknown') delete current.semanticStatus
+  else current.semanticStatus = { state: 'working', source: 'native-hook', observedAt: current.updatedAt, stateEnteredAt: current.updatedAt }
+  await h.store.compareAndSwap(previous, current)
+  await h.inner.registry.load('local')
+  expect(h.client.agentSession('question-session').semanticStatus?.state).toBe(state === 'unknown' ? undefined : state)
+  return { ...h, input: { ...h.input, ...agentPromptCondition(h.client.agentSession('question-session')) } }
+}
+
 describe('native asynchronous question facts and normal user replies', () => {
+  it.each(['working', 'unknown'] as const)('admits an explicit exact question reply during an uncertain %s turn without widening ordinary prompts', async state => {
+    const h = await activeFixture(state)
+    expect(h.input.afterSubmissionId).toBe('original-active-turn')
+    expect(h.writes).toHaveLength(2)
+    await expect(h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('question-session')),
+      agentSessionId: 'question-session', operationId: 'ordinary-not-authorized', prompt: 'Unrelated ordinary request' }))
+      .rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+    expect(h.writes).toHaveLength(2)
+    const receipt = await h.client.replySessionQuestion(h.input).catch(error => ({ code: error.code, message: error.message }))
+    expect(receipt).toMatchObject({ outcome: 'submitted', operationId: h.input.operationId })
+    expect(h.writes.slice(2).map(write => write.data)).toEqual([buildPromptInputPayload(raw), '\r'])
+    const stored = (await loadAgentSessions(h.store))[0]!
+    expect(stored.run).toEqual({ runId: 'question-run' })
+    expect(stored.pendingInteraction).toBeUndefined()
+    expect(stored.semanticStatus?.state).not.toBe('done')
+    expect(stored.promptCompletionAdmission).toMatchObject({ submissionId: h.input.operationId, acknowledged: true, uncertainTurn: true })
+    expect(stored.terminalPromptDelivery?.reason).toBe('turn-end-unconfirmed')
+    await h.client.replySessionQuestion(h.input)
+    expect(h.writes).toHaveLength(4)
+  })
+  it('respects an explicit refusal to continue an uncertain question turn', async () => {
+    const h = await activeFixture()
+    expect(await errorCode(h.client.replySessionQuestion({ ...h.input, allowUncertainTurn: false }))).toBe('AGENT_TURN_END_UNCONFIRMED')
+    expect(h.writes).toHaveLength(2)
+    expect(h.client.agentSession('question-session').run).toEqual({ runId: 'question-run' })
+  })
+  it('keeps the authoritative synchronous interaction fence for an explicit async reply', async () => {
+    const h = await activeFixture(), previous = (await loadAgentSessions(h.store))[0]!
+    const observed = h.client.providers.get('codex').normalizeHook({ agentSessionId: 'question-session', runId: 'question-run',
+      providerId: 'codex', eventName: 'PreToolUse', receiptId: 'original-sync-question', payload: {
+        session_id: source.nativeSessionId, tool_name: 'request_user_input', tool_input: { questions: [{ question: 'Current synchronous question', options: [{ label: 'Keep' }, { label: 'Revise' }] }] }
+      } }, trustedQuestionHookContext)
+    expect(observed.interaction?.kind).toBe('question')
+    await h.store.compareAndSwap(previous, { ...previous, pendingInteraction: { request: observed.interaction! }, updatedAt: Math.max(previous.updatedAt + 1, observed.interaction!.evidence.observedAt) })
+    await h.inner.registry.load('local')
+    await expect(h.client.replySessionQuestion(h.input)).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
+    expect(h.writes).toHaveLength(2)
+    expect(h.client.agentSession('question-session').pendingInteraction?.request.id).toBe('original-sync-question')
+  })
+  it('keeps the exact predecessor fence for an explicit active question reply', async () => {
+    const h = await activeFixture()
+    await expect(h.client.replySessionQuestion({ ...h.input, afterSubmissionId: null })).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+    expect(h.writes).toHaveLength(2)
+  })
+  it('reconciles an explicit retry with the same applied question payload instead of sending it twice', async () => {
+    const h = await activeFixture(), original = h.inner.kernel.input.bind(h.inner.kernel)
+    let loseReceipt = true
+    vi.spyOn(h.inner.kernel, 'input').mockImplementation(async (...args) => {
+      const result = await original(...args)
+      if (loseReceipt) { loseReceipt = false; throw new AgentMuxError('Private applied payload receipt was lost.', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown') }
+      return result
+    })
+    await expect(h.client.replySessionQuestion(h.input)).rejects.toBeDefined()
+    expect(h.writes.slice(2).map(write => write.data)).toEqual([buildPromptInputPayload(raw)])
+    await h.client.replySessionQuestion(h.input)
+    expect(h.writes.slice(2).map(write => write.data)).toEqual([buildPromptInputPayload(raw), '\r'])
+    await h.client.replySessionQuestion(h.input)
+    expect(h.writes).toHaveLength(4)
+  })
   it('public reply consumes the current same-Run editor snapshot in its actual Provider input plan', async () => {
     const h = await fixture('expanded')
     await h.client.replySessionQuestion(h.input)
@@ -322,7 +396,7 @@ describe('native asynchronous question facts and normal user replies', () => {
     expect((await loadAgentSessions(h.store))[0]!.promptCompletionAdmission?.intent?.message?.userContent).toBe(raw)
   })
   it('CLI discovers a typed reply; public RPC admits trusted manual origin and result codec binds every reference', async () => {
-    const h = await fixture(), file = join(h.directory, 'reply.json')
+    const h = await activeFixture(), file = join(h.directory, 'reply.json')
     const { commandOverride: _command, args: _args, authorHuman: _human, sourceDevice: _device, ...input } = h.input
     await writeFile(file, JSON.stringify(input))
     const cli = await parseAgentMuxCliInvocation(['agent', 'question', 'reply', '--input', file])
@@ -336,7 +410,8 @@ describe('native asynchronous question facts and normal user replies', () => {
     const receipt = await service.call('agent.question.reply', cli.params as typeof input, { principal: { kind: 'user', id: 'local-private-user' }, transport: 'unix' })
     expect(submit).toHaveBeenCalledOnce()
     expect((await loadAgentSessions(h.store))[0]!.promptCompletionAdmission?.intent?.message?.sourceChannel).toBe('cli')
-    expect((await h.store.loadTimeline('question-session')).items[0]!.sourceChannel).toBe('cli')
+    expect((await h.store.loadTimeline('question-session')).items.at(-1)!.sourceChannel).toBe('cli')
+    expect(h.writes.slice(2).map(write => write.data)).toEqual([buildPromptInputPayload(raw), '\r'])
     expect(parseRpcNativeResult('agent.question.reply', receipt, input)).toEqual(receipt)
     expect(() => parseRpcNativeResult('agent.question.reply', { ...receipt, source: { ...source, nativeSessionId: 'foreign' } }, input)).toThrow()
   })
@@ -360,13 +435,13 @@ describe('native asynchronous question facts and normal user replies', () => {
     const provider = new AgentProviderRegistry().get('codex')
     const base = { agentSessionId: 'question-session', runId: 'question-run', providerId: 'codex', eventName: 'PreToolUse' }
     const asynchronous = provider.normalizeHook({ ...base, receiptId: 'async', payload: {
-      tool_name: 'request_user_input_async', tool_input: { questions: nativeQuestion.questions }
-    } }, {})
+      session_id: source.nativeSessionId, tool_name: 'request_user_input_async', tool_input: { questions: nativeQuestion.questions }
+    } }, trustedQuestionHookContext)
     expect(asynchronous.status.state).toBe('working')
     expect(asynchronous.interaction).toBeUndefined()
     const synchronous = provider.normalizeHook({ ...base, receiptId: 'sync', payload: {
-      tool_name: 'request_user_input', tool_input: { questions: [{ question: 'Original synchronous question', options: [{ label: 'Keep' }, { label: 'Revise' }] }] }
-    } }, {})
+      session_id: source.nativeSessionId, tool_name: 'request_user_input', tool_input: { questions: [{ question: 'Original synchronous question', options: [{ label: 'Keep' }, { label: 'Revise' }] }] }
+    } }, trustedQuestionHookContext)
     expect(synchronous.status.state).toBe('waiting')
     expect(synchronous.interaction).toMatchObject({ kind: 'question', id: 'sync' })
   })

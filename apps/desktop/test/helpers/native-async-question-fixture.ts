@@ -270,6 +270,13 @@ createInterface({input:process.stdin}).on('line',line=>{
     input,
     directory,
     invocation,
+    beginWorking: async () => {
+      await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('question-session')), agentSessionId: 'question-session', operationId: 'original-active-turn', prompt: 'Original active request' });
+      const previous = (await loadAgentSessions(store))[0]!;
+      await store.compareAndSwap(previous, { ...previous, updatedAt: previous.updatedAt + 1, semanticStatus: { state: 'working', source: 'native-hook', observedAt: previous.updatedAt + 1, stateEnteredAt: previous.updatedAt + 1 } });
+      await inner.registry.load('local');
+      return agentPromptCondition(client.agentSession('question-session'));
+    },
     waitNative: async () => {
       await vi.waitFor(async () => expect(await readFile(join(directory, 'ready'), 'utf8')).toBe('ready'), {
         timeout: 5000,

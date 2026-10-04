@@ -200,12 +200,16 @@ it('actual public Provider page produces a visible async card outside a collapse
 });
 it('choices only draft; explicit submit crosses actual Renderer→Main→Core and preserves exact native answer wire', async () => {
   const h = await fixture('unanswered');
+  const condition = await h.beginWorking();
+  const original = useAppStore.getState().sessions[0]!;
+  if (original.kind !== 'agent') throw new Error('The exact question fixture must be an Agent Session');
+  useAppStore.setState({ sessions: [{ ...original, promptSubmissionPredecessor: condition.afterSubmissionId, status: { state: 'working', source: 'native-hook', observedAt: 2 } }] });
   const send = await bridge(h);
   const page = await h.client.sessionHistoryPage('question-session', h.invocation);
   await render(thread(page));
   await click('Keep original');
   expect(send).not.toHaveBeenCalled();
-  expect(h.writes).toHaveLength(0);
+  expect(h.writes).toHaveLength(2);
   expect(button('Submit reply').disabled).toBe(false);
   await text('Typed precise answer\n保留空白');
   await click('Submit reply');
@@ -224,7 +228,7 @@ it('choices only draft; explicit submit crosses actual Renderer→Main→Core an
     recordId: nativeQuestion.id,
     source: page.source,
     turnId: 'question-turn',
-    afterSubmissionId: null,
+    afterSubmissionId: 'original-active-turn',
     expectedRun: control.run
   });
   expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('UNSENT ORIGINAL DRAFT');

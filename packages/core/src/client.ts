@@ -3928,7 +3928,7 @@ export class AgentMuxClient {
     })
   }
 
-  /** Uses ordinary input admission, never a pending Hook or an A2A message envelope. */
+  /** Exact manual answers explicitly continue an active turn unless the caller declines; never a pending Hook or A2A envelope. */
   async replySessionQuestion(input: AgentMuxSessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt> {
     this.requireConnected()
     const condition = validateAgentPromptCondition(input)
@@ -3976,7 +3976,7 @@ export class AgentMuxClient {
         ...(input.sourceDevice === undefined ? {} : { sourceDevice: input.sourceDevice }),
         ...(input.sourceChannel === undefined ? {} : { sourceChannel: input.sourceChannel }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
-        ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) },
+        allowUncertainTurn: input.allowUncertainTurn ?? true },
         undefined, current => {
           const native = current.nativeHandle
           if (current.providerId !== source.providerId || native?.kind !== 'provider' || native.providerId !== source.providerId || native.sessionId !== source.nativeSessionId) {
