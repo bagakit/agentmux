@@ -23,17 +23,17 @@ export class NotesStorageOwner {
     return this.reconcile(await this.storage.change(input))
   }
   async write<T>(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, save: (owner: WorkspaceRecord) => Promise<T>): Promise<T> {
-    if (workspace.id !== NOTES_WORKSPACE_ID && (workspace.id !== SCRATCH_WORKSPACE_ID || !input.path.endsWith('.note.json'))) return save(workspace)
+    if (workspace.id !== NOTES_WORKSPACE_ID && (workspace.id !== SCRATCH_WORKSPACE_ID || input.path.includes('/') || !input.path.endsWith('.note.json'))) return save(workspace)
     return this.storage.withLock(async () => {
       const current = await this.inspect()
-      if (current.operation?.phase === 'prepared') throw Object.assign(new Error('The original Notes directory move needs recovery before another Note write. Your draft and existing pages are retained.'), { code: 'NOTEBOOK_BUSY' })
+      if (current.operation && (workspace.id === NOTES_WORKSPACE_ID || current.operation.resourceChanges.some(change => change.from.workspaceId === workspace.id && change.from.workspacePath === workspace.path && change.from.path === input.path))) throw Object.assign(new Error('The original Notes directory move needs recovery before another Note write. Your draft and existing pages are retained.'), { code: 'NOTEBOOK_BUSY' })
       const relocation = current.resourceChanges.find(change => change.from.workspaceId === workspace.id && change.from.workspacePath === workspace.path && change.from.path === input.path && change.from.workspaceId !== change.to.workspaceId)
       if (relocation) throw Object.assign(new Error('This Note now belongs to its confirmed Notes directory. Its draft is retained; refresh the original resource before saving.'), { code: 'NOTE_RESOURCE_CHANGED' })
       if (workspace.id === NOTES_WORKSPACE_ID && workspace.path !== current.directory) throw Object.assign(new Error('The pinned Notes directory changed before this write. Your original resource and draft are retained; inspect the current directory before retrying.'), { code: 'NOTE_RESOURCE_CHANGED' })
       return save(workspace)
     })
   }
-  private async reconcile(snapshot: NotesStorageSnapshot) {
+  async confirmResources(snapshot: NotesStorageSnapshot) {
     const state = await this.spatial.readForLayout()
     if (state) {
       const graph = reconcileNotesSpatialResources(state.graph, snapshot.resourceChanges, snapshot.directoryChanges)
@@ -43,6 +43,9 @@ export class NotesStorageOwner {
       if (original?.path === snapshot.directory) return current
       return { ...current, workspaces: [...current.workspaces.filter(w => w.id !== NOTES_WORKSPACE_ID), { id: NOTES_WORKSPACE_ID, name: NOTES_WORKSPACE_NAME, hostId: 'local', kind: 'folder' as const, path: snapshot.directory }] }
     })
-    this.publish(snapshot); return snapshot
+    return snapshot
+  }
+  private async reconcile(snapshot: NotesStorageSnapshot) {
+    await this.confirmResources(snapshot); this.publish(snapshot); return snapshot
   }
 }

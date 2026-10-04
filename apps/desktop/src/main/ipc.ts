@@ -259,7 +259,7 @@ export async function registerIpc(args: {
     }
   })
   const fileObservations = new FileObservationRegistry()
-  const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
+  const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { await notesStorageOwner.confirmResources(await notesStorage.inspect()); for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
   const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notesStorage:changed', snapshot) }, notesStorage)
   const notesStorageReady = notesStorageOwner.initialize().catch(error => process.stderr.write('Notes directory recovery remains available: ' + String(error) + '\n'))
   const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({

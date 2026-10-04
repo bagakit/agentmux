@@ -623,7 +623,7 @@ export class AgentMuxRpcService {
     rpcRecord(p, fields)
     switch (method) {
       case 'notebook.ls': result = {state:await this.notebooks.read()}; break
-      case 'notebook.inspect': result = { ...inspectNotebook(await this.notebooks.read(), p), ...(p.operationId && this.notebooks.storage ? { storageOperation: (await this.notebooks.storage.inspect(String(p.operationId))).operation } : {}) }; break
+      case 'notebook.inspect': result = { ...inspectNotebook(await this.notebooks.read(), p), ...(this.notebooks.storage ? { storageOperation: (await this.notebooks.storage.inspect(p.operationId ? String(p.operationId) : undefined)).operation } : {}) }; break
       case 'notebook.apply': {
         const actor:import('./notebook-catalog.js').NotebookActor|undefined=caller?{kind:'agent',id:caller.agentSessionId}:context.principal?{kind:context.principal.kind,id:context.principal.id}:undefined
         if(!actor)throw new AgentMuxError('Notebook writing requires the authenticated original user, device or Agent. Knowledge and Runs are retained.', 'CONTROL_PERMISSION_DENIED')

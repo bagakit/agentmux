@@ -359,7 +359,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         const state = parseNotebookState(p.state)
         const { storageOperation, ...knowledge } = p
         if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
-        if (storageOperation !== undefined && storageOperation !== null && parseNotesStorageOperation(storageOperation).operationId !== input.operationId) fail()
+        if (storageOperation !== undefined && storageOperation !== null) { const original = parseNotesStorageOperation(storageOperation); if (input.operationId !== undefined && original.operationId !== input.operationId) fail() }
         break
       }
 

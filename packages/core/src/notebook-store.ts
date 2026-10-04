@@ -38,7 +38,7 @@ export class AgentMuxNotebookStore {
     return this.write(input, actor)
   }
   private async write(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
-    if (this.storage) { const storage = await this.storage.inspect(); if (storage.operation?.phase === 'prepared') throw new AgentMuxError('The original Notes directory change needs recovery. Saved pages and unrelated work remain available.', 'NOTEBOOK_BUSY'); this.currentPath = storage.catalogPath }
+    if (this.storage) { const storage = await this.storage.inspect(); if (storage.operation) throw new AgentMuxError('The original Notes directory change needs recovery. Saved pages and unrelated work remain available.', 'NOTEBOOK_BUSY'); this.currentPath = storage.catalogPath }
     await mkdir(dirname(this.path),{recursive:true,mode:0o700})
     const lock=await open(this.path+'.lock','a+',0o600)
     try{

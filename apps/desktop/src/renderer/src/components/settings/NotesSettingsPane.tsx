@@ -14,7 +14,7 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
 }) {
   const [storage, setStorage] = useState<NotesStorageSnapshot | null>(null), [directory, setDirectory] = useState(''), [directoryIssue, setDirectoryIssue] = useState<string | null>(null), [moving, setMoving] = useState(false)
   const [intent, setIntent] = useState<import('@agentmux/core/notebook-store').NotesStorageChange | null>(null)
-  useEffect(() => { let active = true; void api.notesStorage.inspect().then(value => { if (active) { setStorage(value); setDirectory(value.operation?.phase === 'prepared' ? value.operation.directory : value.directory); if (value.operation?.phase === 'prepared') setIntent(value.operation) } }).catch(error => { if (active) setDirectoryIssue(String(error)) }); return () => { active = false } }, [])
+  useEffect(() => { let active = true; void api.notesStorage.inspect().then(value => { if (active) { setStorage(value); setDirectory(value.operation?.phase === 'prepared' ? value.operation.directory : value.directory); if (value.operation) setIntent(value.operation) } }).catch(error => { if (active) setDirectoryIssue(String(error)) }); return () => { active = false } }, [])
   async function moveDirectory() {
     if (!storage || moving) return
     const original = intent ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: directory.trim() }; setIntent(original); setMoving(true); setDirectoryIssue(null)
