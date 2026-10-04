@@ -161,6 +161,10 @@
     "./relay-hosted": {
       "types": "./dist/relay-hosted.d.ts",
       "import": "./dist/relay-hosted.js"
+    },
+    "./delivery-attempt": {
+      "types": "./dist/delivery-attempt.d.ts",
+      "import": "./dist/delivery-attempt.js"
     }
   },
   "bin": {

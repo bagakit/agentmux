@@ -1,3 +1,5 @@
+import { DeliveryAttemptStore } from './delivery-attempt-store.js'
+import { deliveryFailure, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
 import type { AgentMuxRunStorageObservation } from './run-storage-observation.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
@@ -621,6 +623,7 @@ export class AgentMuxClient {
   private readonly kernel: CtxmuxRunAdapter
   private readonly controlSocketPath: string
   private readonly registry: AgentMuxAgentSessionRegistry
+  private readonly deliveryAttempts: DeliveryAttemptStore
   private readonly store: AgentMuxAgentSessionStore
   private readonly messageQueue: DurableAgentMuxMessageQueue
   private readonly publisher = new AgentMuxClientEventPublisher()
@@ -726,6 +729,8 @@ export class AgentMuxClient {
       ? new AgentProviderRegistry(options.providers)
       : createDefaultAgentMuxPluginRegistry(options.plugins).providers
     this.store = options.store ?? new AgentMuxFileAgentSessionStore()
+    this.deliveryAttempts = new DeliveryAttemptStore(join(this.store instanceof AgentMuxFileAgentSessionStore
+      ? dirname(this.store.path) : defaultAgentMuxStateDirectory(), 'delivery-attempts'))
     // An implicit Session store is Runtime-local, not the durable message queue authority.
     const adoptedFileStore = this.store instanceof AgentMuxFileAgentSessionStore &&
       (options.store !== undefined || Boolean(process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()))
@@ -3875,8 +3880,14 @@ export class AgentMuxClient {
   }
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
-    if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
-    await this.submitPromptInternal(input)
+    await this.submitPromptInternal(input, undefined, undefined, false, () => {
+      if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
+    })
+  }
+
+  /** Read the original failed invocation, including while its Agent or Runtime is unavailable. */
+  async readDeliveryAttempt(logId: string): Promise<DeliveryAttemptLookup> {
+    return await this.deliveryAttempts.read(logId)
   }
 
   /** Save an exact future message through the same durable Session owner as Input. */
@@ -3974,8 +3985,62 @@ export class AgentMuxClient {
     }
   }
 
-  private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string, assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false): Promise<void> {
+  private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
+    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, assertInput?: () => void): Promise<void> {
+    const startedAt = Date.now()
+    const id = (value: unknown): string | null => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value) ? value : null
+    let sourceDevice: import('./types.js').AgentOperationDevice | undefined
+    try { if (input?.sourceDevice !== undefined) sourceDevice = normalizeOperationDevice(input.sourceDevice) } catch { /* Invalid provenance remains unavailable in this diagnostic. */ }
+    const captured = {
+      agentSessionId: id(input?.agentSessionId), operationId: id(input?.operationId), expectedRunId: id(input?.expectedRun?.runId),
+      afterSubmissionId: id(input?.afterSubmissionId), conditionAvailable: id(input?.expectedRun?.runId) !== null &&
+        (input?.afterSubmissionId === null || id(input?.afterSubmissionId) !== null),
+      promptDigest: typeof input?.prompt === 'string' ? createHash('sha256').update(input.prompt).digest('hex') : null,
+      execution: input?.execution === undefined ? 'default' as const : input.execution === 'default' || input.execution === 'immediate' ? input.execution : null,
+      ...(sourceDevice ? { sourceDevice } : {})
+    }
+    let stage = 'validation'
+    try {
+      assertInput?.()
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, questionReply, value => { stage = value })
+    } catch (error) {
+      // All observations below come from this invocation's failure boundary. Missing
+      // projections stay missing; they do not authorize replay of the logical message.
+      const { operationId, agentSessionId } = captured
+      let session: AgentMuxAgentSession | undefined
+      try { if (agentSessionId) session = this.registry.get(agentSessionId) } catch { /* Exact projection unavailable. */ }
+      const phase = (value: import('./types.js').AgentTerminalInputPhaseState | undefined): DeliveryInputPhase | null =>
+        value ? { operationId: value.operationId, startByte: value.inputByteRange.startByte,
+          endByte: value.inputByteRange.endByte, acknowledged: value.acknowledged, notApplied: value.notApplied === true } : null
+      const admission = session?.promptCompletionAdmission, submission = session?.terminalPromptSubmission
+      const matching = operationId !== null && submission?.submissionId === operationId ? submission : undefined
+      const record: DeliveryAttempt = {
+        ...captured, logId: `delivery-${randomUUID()}`, source: 'core', hostId: session?.hostId ?? null,
+        startedAt, failedAt: Date.now(), stage, error: deliveryFailure(error),
+        ...(session ? { observation: { source: 'core-session-projection' as const, observedAt: Date.now(), runId: session.run.runId,
+          submissionId: admission?.submissionId ?? null,
+          admissionAcknowledged: admission?.submissionId === operationId ? admission.acknowledged ?? null : null,
+          payload: phase(matching?.payload), submit: phase(matching?.submit) } } : {})
+      }
+      let issue: string | null = null
+      try { issue = (await this.deliveryAttempts.record(record)).issue }
+      catch (diagnosticError) { issue = `Delivery diagnostic could not be retained: ${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)}` }
+      const original = error && typeof error === 'object' ? error as { code?: unknown; detail?: unknown } : null
+      const failure = deliveryFailure(error)
+      const message = error instanceof Error ? error.message : String(error)
+      const reported = new AgentMuxError(issue ? `${message} ${issue}` : message,
+        typeof original?.code === 'string' ? original.code : (error instanceof Error ? error.name : 'AGENT_PROMPT_FAILED'),
+        typeof original?.detail === 'string' ? original.detail : undefined, failure.controlFailure, record.logId)
+      Object.defineProperty(reported, 'cause', { value: error, configurable: true })
+      throw reported
+    }
+  }
+
+  private async performPromptSubmission(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
+    assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false, stage: (value: string) => void = () => {}): Promise<void> {
+    stage('connection')
     this.requireConnected()
+    stage('validation')
     if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_PROMPT')
     }
@@ -4020,6 +4085,7 @@ export class AgentMuxClient {
     let preparationStarted = false
     let transportQualification: AgentPromptTransportQualification | undefined
     try {
+      stage('transport-preparation')
       transportQualification = input.execution === 'immediate'
         ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
         const run = await this.requireCurrentAgentRun(session)
@@ -4037,6 +4103,7 @@ export class AgentMuxClient {
       for (;;) {
         const renderObservation = new AbortController()
         try {
+          stage('input-coordination')
           delivered = await this.serializeAgentInput(session, async (current, run) => {
             let plan = ordinaryPlan
             if (questionReply) {
@@ -4077,6 +4144,7 @@ export class AgentMuxClient {
         }
       }
       if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      stage('receipt')
       await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
     } finally { releasePreparationObservation?.() }
   }

@@ -191,6 +191,8 @@ type NativeParams = TopicParameterMap & FileParameterMap & ScheduleParamsMap & A
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
   'agent.output': { agentSessionId: string; afterByte?: number; follow?: boolean }
+  'message.delivery.inspect': { logId: string; hostId?: string }
+  'message.delivery.report': { hostId: string; record: import('./delivery-attempt.js').DeliveryAttempt }
   'message.inbox.check': { limit: number }
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
   'message.dispatch.open': { sourceMessageId: string }
@@ -231,6 +233,8 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
+  'message.delivery.inspect': import('./delivery-attempt.js').DeliveryAttemptLookup
+  'message.delivery.report': import('./delivery-attempt.js').DeliveryAttemptLookup
   'message.inbox.check': Awaited<ReturnType<AgentMuxClient['checkDeliveries']>>
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
@@ -270,6 +274,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
+  'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
@@ -290,7 +295,7 @@ type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
 export type AgentMuxRpcStreamInitial<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcStreamInitialMap[M]
 export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'end'; data: unknown }
-  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; evidence?: import('./types.js').AgentMuxEvidence } }
+  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; logId?: string; evidence?: import('./types.js').AgentMuxEvidence } }
   | (M extends AgentMuxHostedStreamMethod ? Extract<AgentMuxHostedStreamEvent, { type: 'snapshot' }>
     : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }

@@ -31,9 +31,9 @@ const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
 
 function promptFailureCauseDetail(error: unknown): string {
   const cause = error instanceof AgentMuxError
-    ? { code: error.code, ...(error.detail === undefined ? {} : { detail: error.detail }),
+    ? { code: error.code, name: error.name, message: error.message, ...(error.detail === undefined ? {} : { detail: error.detail }),
       ...(error.controlFailure === undefined ? {} : { controlFailure: error.controlFailure }) }
-    : { code: error instanceof Error ? error.name : 'unknown' }
+    : { code: error instanceof Error ? error.name : 'unknown', message: error instanceof Error ? error.message : String(error) }
   return JSON.stringify(cause)
 }
 
