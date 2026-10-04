@@ -1,0 +1,4 @@
+.structured-preview__record { padding:var(--sp-3) 0; border-bottom:1px solid var(--line-soft); }
+.structured-preview__line { color:var(--text-3); font-size:var(--fs-meta); font-family:var(--font-ui, sans-serif); }
+.structured-preview__diagnostic { color:var(--amber-text); background:var(--surface-1); padding:var(--sp-3) var(--sp-5); font-size:var(--fs-meta); overflow-wrap:anywhere; }
+.file-data-preview select { max-width:100%; color:var(--text); background:var(--surface-1); border:1px solid var(--line-soft); border-radius:var(--radius-sm); font:inherit; padding:2px 4px; }
