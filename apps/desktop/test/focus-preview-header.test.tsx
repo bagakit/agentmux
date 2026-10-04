@@ -44,7 +44,7 @@ let root: Root, container: HTMLDivElement, sessionIds: string[]
 
 // Same existing App projection seam: one Workbench owner survives surface/Focus changes.
 // No new App seam is added by this slice. Both sides load their actual Global/Workbench callers.
-function Workface({ showGlobal = true }: { showGlobal?: boolean }) { return <FocusWorkbenchFixture workspaceId={workspaceId} showGlobal={showGlobal} /> }
+function Workface({ showGlobal = true, level = 'tab' }: { showGlobal?: boolean; level?: 'tab' | 'region' }) { return <><div id="legacy-focus-target-header" /><FocusWorkbenchFixture workspaceId={workspaceId} showGlobal={showGlobal} level={level} /></> }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -85,14 +85,14 @@ function item(menu: HTMLElement, text: string) {
   expect(found, `actual ${text}`).toBeDefined(); return found!
 }
 
-it('keeps the original Region name and controls visible in the Focus bar without a second local header row', async () => {
+it('keeps the original single-Agent name and controls in its Region just like a split', async () => {
   await mount()
   expect(toolbar().querySelector('.focus-toolbar__identity strong')!.textContent).toBe(name)
-  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(1)
-  expect(region().querySelectorAll('.agent-region-header')).toHaveLength(0)
-  expect(toolbar().querySelectorAll('.agent-region-header__name')).toHaveLength(1)
-  expect(toolbar().querySelector('.agent-region-header__name')!.textContent).toBe(name)
-  expect(toolbar().querySelector('.agent-region-header')!.getAttribute('aria-label')).toContain(sessionIds[0]!)
+  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
+  expect(region().querySelectorAll('.agent-region-header')).toHaveLength(1)
+  expect(region().querySelectorAll('.agent-region-header__name')).toHaveLength(1)
+  expect(region().querySelector('.agent-region-header__name')!.textContent).toBe(name)
+  expect(region().querySelector('.agent-region-header')!.getAttribute('aria-label')).toContain(sessionIds[0]!)
   expect(region().querySelectorAll('[aria-label="Close split"]')).toHaveLength(0)
 })
 
@@ -102,16 +102,16 @@ it('runs History/return and observation refresh through the same SessionPane, pr
   await mount(); const originalPaint = region().querySelector('[data-terminal-paint]')
   expect(history.mock.calls).toEqual([[useAppStore.getState().sessions[0]!.control, { limit: 30 }]])
   const initialReads = history.mock.calls.length
-  await openAgentHistory(toolbar())
-  expect(region().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
-  expect(history.mock.calls.slice(initialReads)).toEqual([[useAppStore.getState().sessions[0]!.control, undefined]])
-  const back = region().querySelector<HTMLButtonElement>('.session-history__toolbar button'); expect(back?.textContent?.trim()).toBe('Terminal')
+  await openAgentHistory(region())
+  expect(region().querySelector('[aria-label="Return to Terminal"]')).not.toBeNull()
+  expect(history.mock.calls.slice(initialReads)).toEqual([[useAppStore.getState().sessions[0]!.control, { limit: 100 }]])
+  const back = region().querySelector<HTMLButtonElement>('[aria-label="Return to Terminal"]'); expect(back?.textContent?.trim()).toBe('Return')
   await act(async () => back!.click())
-  expect(region().querySelector('.session-history:not([hidden])[aria-label="Conversation history"]')).toBeNull()
+  expect(region().querySelector('[aria-label="Return to Terminal"]')).toBeNull()
   expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
-  const menu = await regionMenu(toolbar())
+  const menu = await regionMenu(region())
   await act(async () => item(menu, 'Refresh observation').click()); expect(paint.refresh).toHaveBeenCalledTimes(1)
-  const again = await regionMenu(toolbar())
+  const again = await regionMenu(region())
   expect(again.dataset.ownerRegionId).toBe(regionId); expect(again.dataset.agentSessionId).toBe(sessionIds[0])
   await act(async () => item(again, 'Copy Region Address').click())
   expect(copy).toHaveBeenCalledExactlyOnceWith(formatRegionAddress(regionId))
@@ -142,7 +142,7 @@ it('keeps multi-Agent headers/real Panels and the exact original Region menu whi
 it('retains the original single owner across History, Space, Focus rename and projection close without adding Tab close', async () => {
   const stop = vi.spyOn(api.sessions, 'stop'), close = vi.spyOn(useAppStore.getState(), 'closeRegion')
   await mount(); const before = useAppStore.getState(), originalPaint = region().querySelector('[data-terminal-paint]')
-  await openAgentHistory(toolbar())
+  await openAgentHistory(region())
   const identity = toolbar().querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
   await act(async () => { identity.focus(); identity.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })) })
   const focusMenu = document.querySelector<HTMLElement>('[role="menu"]')!; expect(focusMenu).not.toBeNull()
@@ -156,14 +156,15 @@ it('retains the original single owner across History, Space, Focus rename and pr
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   await act(async () => toolbar().querySelector<HTMLButtonElement>('[aria-label="View in Space"]')!.click())
   expect(localHeaderName()).toBe(name)
-  expect(region().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
+  expect(region().querySelector('[aria-label="Return to Terminal"]')).not.toBeNull()
   expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
   await act(async () => useAppStore.getState().setMainSurface('agents'))
-  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(1)
-  expect(region().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
+  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
+  expect(region().querySelector('[aria-label="Return to Terminal"]')).not.toBeNull()
   await act(async () => toolbar().querySelector<HTMLButtonElement>('[aria-label="Close Focus workspace"]')!.click())
   expect(document.activeElement).toBe(container.querySelector('[aria-label="Search contexts"]'))
-  expect(executionFocusSessionId(useAppStore.getState().agentFocus)).toBeNull()
+  expect(executionFocusSessionId(useAppStore.getState().agentFocus)).toBe(executionFocusSessionId(before.agentFocus))
+  expect(container.querySelector('.focused-tab-workspace')).toBeNull()
   expect(localHeaderName()).toBe(name)
   expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
@@ -175,7 +176,7 @@ it('returns a retained but currently unconfirmed durable owner to its original l
   await mount(); const originalPaint = region().querySelector('[data-terminal-paint]'), before = useAppStore.getState()
   await act(async () => useAppStore.setState({ layouts: {} }))
   const notice = container.querySelector('.focus-location-recovery')!
-  expect(notice.textContent).toContain('No work surface occurrence is currently confirmed')
+  expect(notice.textContent).toContain('The selected object has no confirmed Region occurrence')
   expect(notice.textContent).toContain('The original Session and work surfaces are retained')
   expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
   expect(localHeaderName()).toBe(name)
@@ -213,8 +214,8 @@ it('keeps mixed file/Agent controls local and the original dirty-close cancellat
 it('does no further slot lookup or History I/O for unrelated observation timestamp or DOM output after attachment', async () => {
   const lookup = vi.spyOn(document, 'getElementById'), history = vi.spyOn(api.sessions, 'historyPage')
   const headerLookups = () => lookup.mock.calls.filter(([id]) => id === 'focus-workspace-slot-header').length
-  await mount(); const host = toolbar().querySelector('.agent-region-header-host'), beforeLookups = headerLookups()
-  expect(host).not.toBeNull(); expect(beforeLookups).toBeGreaterThan(0)
+  await mount(); const host = region().querySelector('.agent-region-header-host'), beforeLookups = headerLookups()
+  expect(host).not.toBeNull(); expect(beforeLookups).toBe(0)
   expect(history.mock.calls).toEqual([[useAppStore.getState().sessions[0]!.control, { limit: 30 }]])
   const initialReads = history.mock.calls.length
   const before = useAppStore.getState(), originalPaint = region().querySelector('[data-terminal-paint]')
@@ -225,7 +226,7 @@ it('does no further slot lookup or History I/O for unrelated observation timesta
     container.append(document.createElement('span')); await new Promise(resolve => setTimeout(resolve, 0))
   })
   expect(headerLookups()).toBe(beforeLookups); expect(history.mock.calls.slice(initialReads)).toEqual([])
-  expect(toolbar().querySelector('.agent-region-header-host')).toBe(host); expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
+  expect(region().querySelector('.agent-region-header-host')).toBe(host); expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
 })
 
 it('keeps the local Header until a delayed controlled Focus slot arrives, then moves the same host and paint once', async () => {
@@ -245,11 +246,33 @@ it('keeps a durable Region identity and original connecting surface when its Ses
   const before = useAppStore.getState()
   useAppStore.setState({ sessions: before.sessions.filter(session => session.id !== sessionIds[0]) })
   await mount()
-  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(1)
-  expect(toolbar().querySelector('.agent-region-header__name')!.textContent).toBe(name)
-  expect(toolbar().querySelector('.agent-region-header')!.getAttribute('data-agent-session-id')).toBe(sessionIds[0])
+  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
+  expect(region().querySelector('.agent-region-header__name')!.textContent).toBe(name)
+  expect(region().querySelector('.agent-region-header')!.getAttribute('data-agent-session-id')).toBe(sessionIds[0])
   expect(region().querySelector('[data-agent-surface-mode="connecting"]')).not.toBeNull()
   expect(region().querySelector('[role="status"]')).not.toBeNull()
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual([sessionIds[1]])
+})
+
+
+it('keeps exact local identity when the same split changes between complete Tab and Region-only presentation', async () => {
+  const before = useAppStore.getState(), tab = addWorkbenchRegion(before.tabs[tabId]!, regionId, 'right', {
+    regionId: 'split-neighbor', kind: 'agent', phase: 'attached', workspaceId, sessionId: sessionIds[1]!
+  })
+  useAppStore.setState({ tabs: { ...before.tabs, [tabId]: tab } })
+  await mount()
+  const originalHeader = region().querySelector('.agent-region-header'), originalPaint = region().querySelector('[data-terminal-paint]')
+  expect(originalHeader).not.toBeNull();expect(localHeaderName()).toBe(name)
+  const originalTabs = useAppStore.getState().tabs, originalDrafts = useAppStore.getState().agentComposerDrafts, originalMounts = { ...paint.mounts }
+  expect(originalMounts[sessionIds[0]!]).toBeGreaterThan(0); expect(originalMounts[sessionIds[1]!]).toBeGreaterThan(0)
+  await act(async () => root.render(<Workface level="region" />))
+  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
+  expect(region().querySelector('.agent-region-header')).toBe(originalHeader)
+  expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
+  expect(container.querySelector('#legacy-focus-target-header')!.childElementCount).toBe(0)
+  await act(async () => root.render(<Workface />))
+  expect(localHeaderName()).toBe(name);expect(region().querySelector('.agent-region-header')).toBe(originalHeader)
+  expect(useAppStore.getState().tabs).toBe(originalTabs);expect(useAppStore.getState().agentComposerDrafts).toBe(originalDrafts)
+  expect(paint.mounts).toEqual(originalMounts)
 })
