@@ -1,0 +1,43 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/client-ui/components/*": [
+        "packages/client-ui/src/components/*.tsx"
+      ],
+      "@agentmux/client-ui/platform": [
+        "packages/client-ui/src/platform.tsx"
+      ],
+      "@agentmux/client-ui/*": [
+        "packages/client-ui/src/lib/*.ts"
+      ],
+      "@agentmux/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@agentmux/core/*": [
+        "packages/core/src/*.ts"
+      ],
+      "@agentmux/demand": [
+        "packages/demand/src/index.ts"
+      ],
+      "@agentmux/demand/*": [
+        "packages/demand/src/*.ts"
+      ],
+      "@agentmux/relay": [
+        "packages/relay/src/index.ts"
+      ],
+      "@agentmux/client-ui": [
+        "packages/client-ui/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../../../packages/client-ui/src/components/ConversationMessage.tsx",
+    "../../../../../packages/client-ui/src/lib/conversation-speaker.ts",
+    "../../../src/renderer/src/components/SessionPane.tsx",
+    "../../../test/conversation-sender-identity.integration.test.tsx",
+    "../conversation-sender-context/public-inputs.fixture.ts",
+    "../../../src/renderer/src/global.d.ts"
+  ]
+}

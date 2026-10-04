@@ -10,6 +10,7 @@
  */
 
 import type { AgentProviderId, AgentSessionUserMessage } from '@agentmux/core'
+import { parseAgentMuxMessagePrefix, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ReactNode } from 'react'
 
 /**
@@ -122,4 +123,25 @@ export function speakerOfUserMessage(message: AgentSessionUserMessage): Conversa
     return { role: 'agent', id: message.author.agentSessionId }
   }
   return { role: 'unknown', id: UNKNOWN_SPEAKER_ID }
+}
+
+/** A recorded Agent wins over a declared reference; this never changes recorded authorship. */
+export function conversationAgentReference(speaker: ConversationSpeaker | undefined, prefix: AgentMuxMessagePrefix | null):
+  { speaker: ConversationSpeaker; declared: boolean } | undefined {
+  if (speaker?.role === 'agent' && speaker.id.length > 0) return { speaker, declared: false }
+  if (speaker?.role === 'unknown' && prefix?.declaredAgentSessionId) {
+    return { speaker: { role: 'agent', id: prefix.declaredAgentSessionId }, declared: true }
+  }
+  return undefined
+}
+
+/** Only the existing bounded input projection is examined; no source or identity is discovered. */
+export function agentSessionIdsOfUserMessages(messages: readonly AgentSessionUserMessage[]): string[] {
+  const ids = new Set<string>()
+  for (const message of messages) {
+    const speaker = speakerOfUserMessage(message)
+    const reference = conversationAgentReference(speaker, speaker.role === 'unknown' ? parseAgentMuxMessagePrefix(message.content) : null)
+    if (reference) ids.add(reference.speaker.id)
+  }
+  return [...ids]
 }

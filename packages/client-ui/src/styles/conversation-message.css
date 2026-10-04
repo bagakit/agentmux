@@ -287,3 +287,14 @@
 .log-turn__declared-context > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 .log-turn__declared-context[open] > summary svg { transform: rotate(90deg); }
 .log-turn__declared-context > pre { margin: var(--sp-2) 0; padding: var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The exact address stays beside the readable name, separate from full-message Copy. */
+.log-turn__sender { display: flex; flex: 1 1 160px; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0; }
+.log-turn__sender .log-turn__who { flex: 0 1 auto; min-width: 0; }
+.log-turn__sender-id { position: relative; display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; color: var(--text-3); }
+.log-turn__sender-id code { min-width: 0; overflow-wrap: anywhere; white-space: normal; font: var(--fs-micro)/1.5 var(--font-mono); user-select: text; }
+.log-turn__id-copy { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 2px; color: inherit; background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
+.log-turn__id-copy:hover { color: var(--text); background: var(--surface-3); }
+.log-turn__id-copy:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.log-turn__sender-id[data-copy-state='copied'] .log-turn__id-copy { color: var(--green-text); }
+.log-turn__id-copy-error { position: absolute; z-index: 1; inset-inline-start: 0; top: 100%; padding: 2px var(--sp-2); white-space: nowrap; color: var(--red-text); background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-micro); }
