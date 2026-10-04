@@ -64,3 +64,54 @@ it('keeps both recoverable drafts through a real disk observation, persistence h
   const renamed = reduceFileRename(hydrated, to.workspaceId, to.path, 'renamed.note.json')
   expect(renamed.retainedDocumentDrafts?.[documentKey(to.workspaceId, 'renamed.note.json')]?.[0]).toMatchObject({ content: 'SOURCE UNSAVED', path: 'renamed.note.json' })
 })
+it('releases the old pending save after exact Note relocation and checks the current file before retrying', async () => {
+  const initial = restoredConflict(), tab = initial.tabs['original-tab']!
+  useAppStore.setState({ ...original, config: { ...await api.config.get(), workspaces: [{ id: from.workspaceId, hostId: 'local', kind: 'folder', path: from.workspacePath, name: 'Topics' }, { id: to.workspaceId, hostId: 'local', kind: 'folder', path: to.workspacePath, name: 'Recall' }] },
+    tabs: { [tab.id]: { ...tab, regions: { ...tab.regions, 'original-region': { kind: 'file', regionId: 'original-region', workspaceId: from.workspaceId, path: from.path } } } },
+    layouts: initial.layouts, documents: { [oldKey]: { path: from.path, content: 'ORIGINAL UNSAVED', revision: 'old-disk' } }, dirtyDocuments: { [oldKey]: true } }, true)
+  let written!: () => void
+  const write = vi.spyOn(api.files, 'write').mockImplementation(() => new Promise(resolve => { written = () => resolve({ status: 'written', revision: 'written-old-root' }) }))
+  vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+  vi.spyOn(api.files, 'observe').mockResolvedValue({ status: 'unavailable' } as never)
+  const saving = useAppStore.getState().saveDocument(tab.id, 'original-region')
+  await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
+  await (await import('../src/renderer/src/store')).applyNotesStorageSnapshot({ directory: to.workspacePath, catalogPath: to.workspacePath + '/notebooks.json', operation: null, resourceChanges: [change], directoryChanges: [] })
+  written(); await saving
+  expect(useAppStore.getState().savingDocuments[key]).toBe(false)
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  expect(useAppStore.getState().documents[key]?.revision).toBe('old-disk')
+  expect(useAppStore.getState().documentIssues[key]).toMatchObject({ kind: 'read-error', code: 'NOTE_SAVE_RELOCATED' })
+  const read = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path: to.path, content: 'ORIGINAL UNSAVED', revision: 'current-disk' } })
+  await useAppStore.getState().reloadDocument(tab.id, 'original-region')
+  expect(read).toHaveBeenCalledWith(to.workspaceId, to.path)
+  expect(useAppStore.getState().documentIssues[key]).toMatchObject({ kind: 'changed', observed: { content: 'ORIGINAL UNSAVED', revision: 'current-disk' } })
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  await useAppStore.getState().reloadDocument(tab.id, 'original-region')
+  expect(useAppStore.getState().documents[key]?.revision).toBe('current-disk')
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+  expect(write).toHaveBeenCalledTimes(1)
+})
+it('checks the exact moved write-unknown resource without inventing a saved result', async () => {
+  const mapped = restoredConflict(), tab = mapped.tabs['original-tab']!
+  const unknown = { kind: 'write-unknown' as const, code: 'NO_RECEIPT', message: 'No save receipt', attempted: { content: 'EXACT ATTEMPT', expectedRevision: 'old-disk', generation: 5, resource: { hostId: from.hostId, path: from.workspacePath } } }
+  const result = reconcileNotesStorageResources({ ...original, config: { ...await api.config.get(), workspaces: [{ id: to.workspaceId, hostId: 'local', kind: 'folder', path: to.workspacePath, name: 'Recall' }] },
+    tabs: { [tab.id]: { ...tab, regions: { ...tab.regions, 'original-region': { kind: 'file', regionId: 'original-region', workspaceId: from.workspaceId, path: from.path } } } },
+    documents: { [oldKey]: { path: from.path, content: 'LATER INPUT', revision: 'old-disk' } }, dirtyDocuments: { [oldKey]: true }, documentGenerations: { [oldKey]: 6 }, documentIssues: { [oldKey]: unknown } }, [change])
+  useAppStore.setState(result, true)
+  expect(useAppStore.getState().documentIssues[key]).toMatchObject({ kind: 'write-unknown', attempted: { content: 'EXACT ATTEMPT', resource: { path: to.workspacePath } } })
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  const read = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path: to.path, content: 'EXACT ATTEMPT', revision: 'current-disk' } })
+  await useAppStore.getState().reloadDocument(tab.id, 'original-region')
+  expect(read).toHaveBeenCalledWith(to.workspaceId, to.path)
+  expect(useAppStore.getState().documents[key]?.content).toBe('LATER INPUT')
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+})
+it('does not authorize checking an unknown save that belongs to another resource', () => {
+  const initial = restoredConflict(), tab = initial.tabs['original-tab']!
+  const issue = { kind: 'write-unknown' as const, code: 'NO_RECEIPT', message: 'No receipt', attempted: { content: 'UNKNOWN ATTEMPT', expectedRevision: 'disk', generation: 1, resource: { hostId: 'remote', path: _hygiene_fixturePath("foreign") } } }
+  const mapped = reconcileNotesStorageResources({ ...original, tabs: { [tab.id]: { ...tab, regions: { ...tab.regions, 'original-region': { kind: 'file', regionId: 'original-region', workspaceId: from.workspaceId, path: from.path } } } },
+    documents: { [oldKey]: { path: from.path, content: 'ORIGINAL DRAFT', revision: 'disk' } }, dirtyDocuments: { [oldKey]: true }, documentIssues: { [oldKey]: issue } }, [change])
+  expect(mapped.documentIssues[key]).toEqual(issue)
+  expect(mapped.dirtyDocuments[key]).toBe(true)
+})
