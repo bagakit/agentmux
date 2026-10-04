@@ -18,6 +18,10 @@
       "types": "./dist/session-history-content.d.ts",
       "import": "./dist/session-history-content.js"
     },
+    "./prompt-preparation": {
+      "types": "./dist/prompt-preparation.d.ts",
+      "import": "./dist/prompt-preparation.js"
+    },
     "./sharing": {
       "types": "./dist/sharing.d.ts",
       "import": "./dist/sharing.js"

@@ -390,3 +390,4 @@
 .composer-outbox__inline { margin: 0 var(--sp-3) var(--sp-3); min-width: 0; }
 .composer-outbox__actions { margin-top: 0; }
 .composer-outbox [data-archived="true"] .composer-mailbox__row { color: var(--text-2); }
+.composer-pending__retry { min-width: 0; margin: 5px 0; color: var(--text-2); font: var(--fs-meta, 12px)/1.45 var(--font-ui, sans-serif); overflow-wrap: anywhere; }

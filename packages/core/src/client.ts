@@ -304,6 +304,8 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   /** Explicit choice for this message only: the previous turn may still be running. */
   allowUncertainTurn?: boolean
   execution?: import('./types.js').AgentPromptExecution
+  /** A finite explicit preparation retry retains the original source/input fence. */
+  preparationRetry?: import('./prompt-preparation.js').AgentPromptPreparationRetryFence
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
   expectedCompletionId?: string
   /** Exact saved future-message intent; never authorizes interruption or uncertain turns. */
@@ -4742,6 +4744,12 @@ export class AgentMuxClient {
     if (input.execution === 'immediate' && (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined)) {
       throw new AgentMuxError('Automatic admission cannot authorize native interruption.', 'INVALID_AGENT_PROMPT')
     }
+    if (input.preparationRetry && (typeof input.preparationRetry !== 'object' || Array.isArray(input.preparationRetry) ||
+        Object.keys(input.preparationRetry).some(key => key !== 'inputByte' && key !== 'nativeSourceId') ||
+        input.execution !== 'immediate' || !Number.isSafeInteger(input.preparationRetry.inputByte) ||
+        input.preparationRetry.inputByte < 0 || typeof input.preparationRetry.nativeSourceId !== 'string' || !input.preparationRetry.nativeSourceId || input.preparationRetry.nativeSourceId.length > 4096)) {
+      throw new AgentMuxError('Preparation retry requires the original finite input and native-source fence.', 'INVALID_AGENT_PROMPT')
+    }
     const content = input.prompt
     if (input.expectedFutureIntent !== undefined && (input.expectedCompletionId !== undefined || input.authorHuman === true || input.allowUncertainTurn ||
         !input.expectedFutureIntent.intentId || !Number.isSafeInteger(input.expectedFutureIntent.occurrenceAt) || input.expectedFutureIntent.occurrenceAt < 0 || input.expectedInputByte === undefined)) {
@@ -4788,7 +4796,7 @@ export class AgentMuxClient {
         ? await this.observeAgentInputPreparation(session, preparationMs, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
-          () => { preparationStarted = true }, protocolInput, deadline)
+          () => { preparationStarted = true }, protocolInput, deadline, input.preparationRetry)
       }, input.signal, protocolInput, release => { releasePreparationObservation = release }) : undefined
     } catch (error) {
       releasePreparationObservation?.()
@@ -6850,7 +6858,30 @@ export class AgentMuxClient {
         const preclaim = protocolInput?.preclaim
         // Once claim starts, only its durable input receipt can describe the outcome.
         if (!preclaim || preclaim.claimStarted) return
-        const error = new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED', promptPreparationObservationDetail(protocolInput))
+        const pane = preclaim.observation?.pane
+        if (protocolInput?.invalid || pane?.evidenceGeneration !== this.screenEvidence.generation(agentSessionId)) delete preclaim.wait
+        if (preclaim.wait) {
+          try {
+            const current = this.requireAgentSession(agentSessionId)
+            if (current.run.runId !== preclaim.wait.runId || !this.screenEvidence.currentCompleteFrame(current)) delete preclaim.wait
+          }
+          catch { delete preclaim.wait }
+        }
+        const completed = preclaim.completedPaneTimeout
+        let completedCurrent = Boolean(completed && !protocolInput?.invalid && !protocolInput?.cancelled &&
+          !completed?.signal?.aborted && !renderObservation?.signal.aborted &&
+          pane?.evidenceGeneration === this.screenEvidence.generation(agentSessionId))
+        if (completedCurrent) {
+          try {
+            const current = this.requireAgentSession(agentSessionId)
+            completedCurrent = current.run.runId === completed!.runId &&
+              this.screenEvidence.currentCompleteFrame(current)?.evidenceGeneration === pane?.evidenceGeneration
+          }
+          catch { completedCurrent = false }
+        }
+        const error = completedCurrent ? completed!.error
+          : completed?.signal?.aborted ? completed.signal.reason
+            : new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED', promptPreparationObservationDetail(protocolInput))
         protocolInput!.cancelled ??= error
         renderObservation?.abort(protocolInput!.cancelled)
         reject(promptPreparationFailure(protocolInput!.cancelled))

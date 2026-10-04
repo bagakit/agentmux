@@ -362,7 +362,7 @@ export class AgentMuxRpcService {
       !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) {
       throw new AgentMuxError('A client diagnostic report needs its transport-authenticated user or device.', 'CONTROL_PERMISSION_DENIED')
     }
-    if (method === 'message.pending.edit' || method === 'message.pending.send' ||
+    if (method === 'message.pending.edit' || method === 'message.pending.send' || method === 'message.pending.stop' ||
         method === 'message.pending.archive' || method === 'message.pending.restore' || method === 'agent.question.reply') {
       if (context.caller !== undefined || !context.principal ||
           !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' ||

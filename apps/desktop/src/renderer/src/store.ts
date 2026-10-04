@@ -1,3 +1,5 @@
+import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
+import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
 import { moteDefaultExecutor, moteDefaultConversation } from './lib/mote-quick-preferences'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
@@ -436,6 +438,7 @@ export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
 type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
 // A click's diagnostic follows its one ordered consumer; it never grants input.
+const preparationRetryCalls = new Map<string, AbortController>()
 const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 
@@ -460,6 +463,8 @@ export type AgentSteerQueueEntry = {
   error?: string
   errorCode?: string
   logId?: string
+  preparationWait?: PromptPreparationRetryProgress
+  preparationInputNotApplied?: true
   /** Restart pauses execution authority independently of the original delivery failure. */
   awaitingExplicitSend?: true
   /** Retain this exact intent and its delivery facts outside active queue consumption. */
@@ -480,8 +485,8 @@ function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, ph
     enqueuedAt: entry.enqueuedAt ?? null, status: entry.status,
     phase: entry.operationId === inFlightId ? phase ?? 'preparing' : null,
     editable: !confirmed && agentSteerCanEdit(entry, inFlightId),
-    delivery: confirmed ? 'confirmed' : entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
-    errorCode: entry.errorCode ?? null, error: entry.error ?? null, ...(entry.logId ? { logId: entry.logId } : {}), archived: entry.archived === true }
+    delivery: confirmed ? 'confirmed' : entry.promptCondition === null || entry.preparationInputNotApplied ? 'not-submitted' : 'unconfirmed',
+    errorCode: entry.errorCode ?? null, error: entry.error ?? null, ...(entry.logId ? { logId: entry.logId } : {}), ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}), archived: entry.archived === true }
 }
 
 /** One admission and its labels share the original execution choice, including unknown old input. */
@@ -1090,6 +1095,7 @@ type AppState = {
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
+  cancelAgentSteerPreparation(sessionId: string, operationId: string): boolean
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
@@ -3456,7 +3462,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
       // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
       set((state) => state.loading ? ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues)
-        .map(([sessionId, entries]) => [sessionId, entries.map(entry => ({ ...entry,
+        .map(([sessionId, entries]) => [sessionId, entries.map(({ preparationWait: _wait, ...entry }) => ({ ...entry,
           status: entry.status === 'restoring' ? 'restoring' as const : 'deferred' as const,
           awaitingExplicitSend: true as const
         }))])) }) : state)
@@ -4295,7 +4301,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return session
     }
     requireActive()
-    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send' ||
+    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send' || request.operation === 'message.pending.stop' ||
         request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
       const session = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
       const records = (): AgentMuxPendingMessage[] => {
@@ -4308,6 +4314,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (request.operation === 'message.pending.ls') return { operation: request.operation, agentSessionId: session.id, messages: records() }
       const before = records().find(item => item.pendingId === request.pendingId)
       if (!before) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original pending message is no longer available. No new message was created.')
+      if (request.operation === 'message.pending.stop') {
+        const changed = get().cancelAgentSteerPreparation(session.id, request.pendingId)
+        const message = records().find(item => item.pendingId === request.pendingId)
+        if (!message || message.preparationWait?.state !== 'stopped') {
+          throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message has no active preparation backoff to stop. Its message and Run are kept.')
+        }
+        return { operation: request.operation, agentSessionId: session.id, message, changed }
+      }
       if (request.operation === 'message.pending.edit') {
         get().editQueuedAgentSteer(session.id, request.pendingId, request.expectedText, request.text)
         const message = records().find(item => item.pendingId === request.pendingId)!
@@ -8688,8 +8702,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       manualSteerAttempts.set(attemptKey, attempt)
       set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
         [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
-          if (item.operationId !== operationId || !item.awaitingExplicitSend) return item
-          const { awaitingExplicitSend: _pause, ...pending } = item
+          if (item.operationId !== operationId) return item
+          const { awaitingExplicitSend: _pause, preparationWait: _wait, preparationInputNotApplied: _safe, ...pending } = item
           return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
         }) } }))
       attempt.stage = 'ordered-queue'
@@ -8722,6 +8736,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } finally {
       if (manualSteerAttempts.get(attemptKey) === attempt) manualSteerAttempts.delete(attemptKey)
     }
+  },
+  cancelAgentSteerPreparation(sessionId, operationId) {
+    const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
+    const active = preparationRetryCalls.get(JSON.stringify([sessionId, operationId]))
+    if (!active || active.signal.aborted || entry?.preparationWait?.state !== 'waiting') return false
+    active.abort()
+    set(state => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]:
+      (state.agentSteerQueues[sessionId] ?? []).map(item => item.operationId === operationId
+        ? { ...item, preparationWait: { ...entry.preparationWait!, state: 'stopped', nextAttemptAt: null } } : item) } }))
+    return true
   },
   flushAgentSteerQueue(sessionId, explicitOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
@@ -8923,11 +8947,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               afterSubmissionId: condition.afterSubmissionId, conditionAvailable: true, execution: pending.execution ?? 'default' })
             deliveryAttempt.stage = 'core-submit'
             dispatchStarted = true
-            await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
-              explicitAttempt ? { allowUncertainTurn: true,
-                ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
-                : pending.execution === 'immediate' ? { execution: 'immediate' } : undefined,
-              pending.origin === 'manual', pending.agentMuxNote, pending.sourceChannel, pending.goalContinuation ? { goalId: pending.goalContinuation.goalId, loopId: pending.goalContinuation.loopId } : undefined)
+            const retryKey = JSON.stringify([sessionId, entry.operationId]), retryCall = new AbortController()
+            preparationRetryCalls.set(retryKey, retryCall)
+            const retryTarget = session, retryMessage = pending
+            const currentRetryIntent = () => {
+              const current = get(), target = current.sessions.find(item => item.id === sessionId)
+              const original = current.agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
+              return target?.kind === 'agent' && target.processState === 'running' && !target.pendingInteraction &&
+                target.hostId === attemptHostId && target.control.hostId === attemptHostId && target.control.agentSessionId === attemptSessionId &&
+                target.control.run.runId === attemptRunId && Boolean(original && matchesAttempt(original)) &&
+                !confirmedSteerDelivery(current.timelines[sessionId], sessionId, entry.operationId)
+            }
+            try {
+              await submitWithPreparationRetry({ agentSessionId: attemptSessionId, runId: attemptRunId!, operationId: entry.operationId,
+                explicit: explicitAttempt && pending.execution === 'immediate', signal: retryCall.signal, current: currentRetryIntent,
+                refresh: async () => {
+                  const fresh = await api.sessions.refresh(retryTarget.control)
+                  return fresh.kind === 'agent' && fresh.processState === 'running' && !fresh.pendingInteraction &&
+                    fresh.hostId === attemptHostId && fresh.control.hostId === attemptHostId && fresh.control.agentSessionId === attemptSessionId &&
+                    fresh.control.run.runId === condition.expectedRun.runId && fresh.promptSubmissionPredecessor === condition.afterSubmissionId
+                },
+                progress: preparationWait => set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                  [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item => matchesAttempt(item) ? { ...item, preparationWait } : item) } })),
+                submit: preparationRetry => api.sessions.submitPrompt(retryTarget.control, retryMessage.text, retryMessage.operationId, condition,
+                  explicitAttempt ? { allowUncertainTurn: true,
+                    ...(retryMessage.execution === 'immediate' ? { execution: 'immediate' as const } : {}), ...(preparationRetry ? { preparationRetry } : {}) }
+                    : retryMessage.execution === 'immediate' ? { execution: 'immediate' } : undefined,
+                  retryMessage.origin === 'manual', retryMessage.agentMuxNote, retryMessage.sourceChannel,
+                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined)
+              })
+            } finally { if (preparationRetryCalls.get(retryKey) === retryCall) preparationRetryCalls.delete(retryKey) }
             deliveryAttempt.stage = 'receipt-confirmation'
             if (pending.goalContinuation) await api.continuousProgress.initialGoalInput({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, pending.goalContinuation.loopId, pending.operationId, 'confirm')
             drain.submitted.add(entry.operationId)
@@ -8968,8 +9017,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     // An old completion cannot decorate a replacement Run, condition or body
                     // which happens to reuse the same local operation ID.
                     if (!matchesAttempt(item)) return item
-                    const { errorCode: _oldCode, ...retained } = item
-                    return { ...retained, ...(unadmitted ? { promptCondition: null } : {}),
+                    const { errorCode: _oldCode, preparationWait: oldWait, preparationInputNotApplied: _safe, ...retained } = item
+                    const wait = readAgentPromptPreparationWait(error), safeWait = wait?.retrySafe && wait.operationId === entry.operationId &&
+                      wait.agentSessionId === attemptSessionId && wait.runId === attemptRunId && deliveryFailure(error).controlFailure?.disposition === 'not_applied' &&
+                      deliveryFailure(error).controlFailure?.confirmedInputBytes === 0
+                    return { ...retained, ...(safeWait ? { preparationInputNotApplied: true as const, ...(oldWait ? { preparationWait: oldWait } : {}) } : {}),
+                      ...(unadmitted ? { promptCondition: null } : {}),
                       status: item.status === 'restoring' ? 'restoring' : 'deferred', awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
                       ...(failure.code ? { errorCode: failure.code } : {}) }
                   })
