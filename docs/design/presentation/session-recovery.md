@@ -98,6 +98,7 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共用同一套
 - 本机与远端 Runtime 共享同一套状态语汇：`live`、`unverified`、`historical/interrupted` 和 `retired` 必须可区分，不能把远端不可达或探测超时压成绿色的运行中，也不能用空白工作面代替未知状态。
 - 远端 endpoint、Host 和可信身份属于低频元信息，放进既有 tooltip、context menu、服务窗或详情面，不新增一条常驻 Remote bar、第二套 Tab chrome 或重复的 Session/Run 标签。布局、Agent 名称和状态仍由原有工作面承担。
 - 远端 Runtime 使用现有紧凑服务窗表达连接、握手、能力探测和恢复阶段；告示说明失败步骤、当前保留的事实和可执行动作，不覆盖终端、输入区或焦点。恢复成功后收敛为轻量状态，不留下第二个恢复面板。
+- 自动连接提醒首层保留准确 Host 名称、问题、轻量展开入口与原连接设置动作，已读后仍可辨所属连接；技术原文与其余恢复说明在明确展开面可读。启动错误首层使用简短摘要，技术原文与各项未确认范围按需阅读，不以两条长横幅重复压缩工作面。数量与已读语义只见[《我们的流程坏了，不等于 Agent 坏了》](../behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)，复用[服务提醒与结果信息的轻量控件](settings-and-observation.md#服务提醒与结果信息的轻量控件)。
 - Linux headless Runtime 不引入桌面专属视觉组件。Desktop 只渲染统一的 Runtime/Session 投影，远端服务的 Provider、Hook、权限和 semantic resume 细节不在工作面复制一份。
 
 ## 断电恢复中的状态与附着反馈
