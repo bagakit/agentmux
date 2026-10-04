@@ -36,6 +36,15 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 
 const thumb = () => container.querySelector<HTMLImageElement>('.md-conversation-image__thumb')
 const full = () => document.querySelector<HTMLImageElement>('.md-conversation-image__full')
+function expectDecodeFailure(reference: string, content: string = reference) {
+  expect(container.querySelector('.md-conversation-image__reference')?.textContent).toBe(reference)
+  const failure = container.querySelector('.md-conversation-image__failure[role="status"]')
+  expect(failure?.textContent).toBe('Recorded image could not be decoded.')
+  expect(failure?.querySelector('button[aria-label="Retry image"]')).not.toBeNull()
+  const prose = container.cloneNode(true) as HTMLElement
+  prose.querySelectorAll('.md-conversation-image__failure').forEach(node => node.remove())
+  expect(prose.textContent).toBe(content)
+}
 async function renderActual(path: string) {
   const reader = vi.fn((target: string) => readPastedImage(home, target))
   const content = `before @${path} after`
@@ -52,7 +61,7 @@ describe('the original pasted-image owner after browser decode', () => {
     expect(image).not.toBeNull()
     expect(await reader.mock.results[0]!.value).toEqual({ dataUrl: 'data:image/png;base64,aGVsbG8=' })
     await act(async () => image!.dispatchEvent(new Event('error')))
-    expect(container.textContent).toBe(content)
+    expectDecodeFailure(`@${badPath}`, content)
     expect(container.querySelector('.md-conversation-image')).toBeNull()
     expect(thumb()).toBeNull(); expect(full()).toBeNull()
   })
@@ -68,7 +77,7 @@ describe('the original pasted-image owner after browser decode', () => {
     await act(async () => image!.dispatchEvent(new Event('error')))
     expect(full()).toBeNull(); expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(container.querySelector('.md-conversation-image')).toBeNull()
-    expect(container.textContent).toBe(content)
+    expectDecodeFailure(`@${goodPath}`, content)
   })
 
   it('keeps valid bytes available for thumbnail, enlargement and Escape', async () => {
@@ -91,7 +100,7 @@ describe('the original pasted-image owner after browser decode', () => {
     const commits: Array<{ path: string; src: string | null }> = []
     function Observe({ path, read }: { path: string; read: ReadPastedImage }) {
       useLayoutEffect(() => { commits.push({ path, src: thumb()?.getAttribute('src') ?? null }) }, [path, read])
-      return createElement(ConversationImage, { path, text: `@${path}`, readPastedImage: read })
+      return createElement(ConversationImage, { path, text: `@${path}`, readImage: read })
     }
     await act(async () => root.render(createElement(Observe, { path: goodPath, read: reader })))
     expect(thumb()).not.toBeNull()
@@ -111,7 +120,7 @@ describe('the original pasted-image owner after browser decode', () => {
   it('isolates retained decode and dialog callbacks from a previous loaded image', async () => {
     const image = (await readPastedImage(home, goodPath))!
     const reader: ReadPastedImage = vi.fn(async () => image)
-    await act(async () => root.render(createElement(ConversationImage, { path: goodPath, text: `@${goodPath}`, readPastedImage: reader })))
+    await act(async () => root.render(createElement(ConversationImage, { path: goodPath, text: `@${goodPath}`, readImage: reader })))
     const trigger = container.querySelector<HTMLButtonElement>('.md-conversation-image')!
     expect(trigger).not.toBeNull()
     // Deliberately retain the actual loaded React callbacks. Dispatching on a disconnected DOM
@@ -136,7 +145,7 @@ describe('the original pasted-image owner after browser decode', () => {
     expect(full()).not.toBeNull()
     const oldFullError = retainError(full()!)
 
-    await act(async () => root.render(createElement(ConversationImage, { path: badPath, text: `@${badPath}`, readPastedImage: reader })))
+    await act(async () => root.render(createElement(ConversationImage, { path: badPath, text: `@${badPath}`, readImage: reader })))
     expect(full()).toBeNull()
     const newTrigger = container.querySelector<HTMLButtonElement>('.md-conversation-image')!
     expect(newTrigger).not.toBeNull()
@@ -146,9 +155,9 @@ describe('the original pasted-image owner after browser decode', () => {
     expect(full()).not.toBeNull()
     expect(full()!.getAttribute('alt')).toBe(badPath)
     await act(async () => full()!.dispatchEvent(new Event('error')))
-    expect(container.textContent).toBe(`@${badPath}`)
+    expectDecodeFailure(`@${badPath}`)
     await act(async () => { oldThumbError(); oldFullError(); oldOpen(true) })
-    expect(container.textContent).toBe(`@${badPath}`)
+    expectDecodeFailure(`@${badPath}`)
     expect(thumb()).toBeNull(); expect(full()).toBeNull()
   })
 
@@ -157,9 +166,9 @@ describe('the original pasted-image owner after browser decode', () => {
     let resolveOld!: (value: PastedImage | null) => void
     const old = new Promise<PastedImage | null>(resolve => { resolveOld = resolve })
     const reader: ReadPastedImage = vi.fn(path => path === badPath ? old : Promise.resolve(image))
-    await act(async () => root.render(createElement(ConversationImage, { path: badPath, text: `@${badPath}`, readPastedImage: reader })))
+    await act(async () => root.render(createElement(ConversationImage, { path: badPath, text: `@${badPath}`, readImage: reader })))
     expect(container.textContent).toBe(`@${badPath}`)
-    await act(async () => root.render(createElement(ConversationImage, { path: goodPath, text: `@${goodPath}`, readPastedImage: reader })))
+    await act(async () => root.render(createElement(ConversationImage, { path: goodPath, text: `@${goodPath}`, readImage: reader })))
     expect(thumb()!.getAttribute('alt')).toBe(goodPath)
     await act(async () => resolveOld({ dataUrl: 'data:image/png;base64,aGVsbG8=' }))
     expect(thumb()).not.toBeNull()
