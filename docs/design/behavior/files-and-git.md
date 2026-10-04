@@ -1,6 +1,6 @@
 # 文件、编辑与 Git
 
-本文集中本主题的交互与行为要求。已确认约束定义必须成立的结果，不代表当前实现通过验收；提案、历史与当轮授权状态按正文的明确范围阅读。
+本文定义准确 Host／Workspace 资源上的文件编辑、修订保存、Git 审阅与 PR，以及文件打开目的地。文件和 Git 事实由宿主业务 owner 持有，Desktop 负责授权与呈现；展示位置不改变资源地址或 Session 执行 cwd。要求与当前实现分别表达，本文不代签交付验收。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/files-and-git.md)
 
