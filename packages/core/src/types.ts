@@ -500,7 +500,7 @@ export type AgentCapabilities = {
   providerResume: boolean
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
   /** Declared native immediate semantics; absence keeps ordinary prompt input available. */
-  promptExecution?: { immediate: 'interrupt-before-input' }
+  promptExecution?: { immediate: 'interrupt-before-input' | 'native-steer' }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *

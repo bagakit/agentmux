@@ -166,7 +166,7 @@ export type AgentProvider = {
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
-  inspectPromptExecution?(screen: AgentTerminalScreenSnapshot): AgentPromptExecutionContext
+  inspectPromptExecution?(screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']): AgentPromptExecutionContext
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
   preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
@@ -209,7 +209,7 @@ export type AgentProviderDefinition = {
     args: readonly string[]
   ) => string[]
   planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }) => AgentPromptInputPlan
-  inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot) => AgentPromptExecutionContext
+  inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
   preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
@@ -324,6 +324,21 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         'INVALID_AGENT_PROVIDER',
         `providerId=${catalogSeed.id} hasRenderMatcher=${hasRenderMatcher} rendersTwoPhase=${rendersTwoPhase}`
       )
+    }
+  }
+  const immediateStrategy = catalogSeed.capabilities.promptExecution?.immediate
+  if (immediateStrategy !== undefined) {
+    if (immediateStrategy !== 'interrupt-before-input' && immediateStrategy !== 'native-steer') {
+      throw new AgentMuxError('Provider immediate strategy is invalid.', 'INVALID_AGENT_PROVIDER')
+    }
+    for (const probe of ['probe', 'probe\nsecond-line']) {
+      const plan = definition.planPromptInput?.(probe, { execution: 'immediate' })
+      if (plan?.kind !== 'render-then-submit' ||
+          Boolean(plan.prepare) !== (immediateStrategy === 'interrupt-before-input') ||
+          !definition.inspectPromptExecution ||
+          immediateStrategy === 'native-steer' && (!definition.readPromptExecutionEvidence || !definition.verifyPromptExecutionTransport)) {
+        throw new AgentMuxError('Provider immediate strategy and its native input contribution are inconsistent.', 'INVALID_AGENT_PROVIDER')
+      }
     }
   }
   const launchOptionDeclarations = definition.launchOptions ?? []
@@ -441,8 +456,10 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     },
     planPromptInput(prompt, context) {
       const plan = definition.planPromptInput?.(prompt, context) ?? { kind: 'single-phase' as const, data: `${prompt}\r` }
+      const strategy = catalog.capabilities.promptExecution?.immediate
       if (context?.execution === 'immediate' &&
-          (plan.kind !== 'render-then-submit' || !plan.prepare || !definition.inspectPromptExecution)) {
+          (!strategy || plan.kind !== 'render-then-submit' ||
+           Boolean(plan.prepare) !== (strategy === 'interrupt-before-input') || !definition.inspectPromptExecution)) {
         throw new AgentMuxError(`${catalog.label} has no safe native immediate input plan. The message and healthy Run are retained; ordinary terminal input remains available.`,
           'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
       }

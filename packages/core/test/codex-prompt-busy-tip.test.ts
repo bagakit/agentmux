@@ -74,9 +74,9 @@ async function controlledClient(output: string, authenticatedTurn = true) {
   await draw(output)
   let working = true, cursor = 0
   const writes: Array<{ operationId: string; data: string; expectedByte: number }> = []
-  const provider = defineAgentProvider({ catalog: { ...original.catalog, id: 'tip-control', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  const provider = defineAgentProvider({ catalog: { ...original.catalog, capabilities: { ...original.catalog.capabilities, promptExecution: {immediate: 'interrupt-before-input'} }, id: 'tip-control', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: original.terminalPromptRender!,
-    planPromptInput: original.planPromptInput!, inspectPromptExecution: inspectCodexPromptExecution,
+    planPromptInput: (prompt, context) => ({...original.planPromptInput(prompt), ...(context?.execution === 'immediate' ? {prepare: {refresh: '\x1b[I',interrupt: '\x1b',endEvent: 'Interrupt'}} : {})}), inspectPromptExecution: inspectCodexPromptExecution,
     preparePromptExecutionTransport: async () => ({ nativeSourceId: 'original-source', verifyCurrentTransport: async () => true }),
     verifyPromptExecutionTransport: async () => true,
     readPromptExecutionEvidence: async () => ({ sourceId: 'original-source', id: working ? 'original-working' : 'original-end',

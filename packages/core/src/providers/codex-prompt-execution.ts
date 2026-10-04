@@ -1,14 +1,16 @@
-import type { AgentPromptExecutionContext, AgentTerminalScreenSnapshot } from '../types.js'
+import type { AgentCapabilities, AgentPromptExecutionContext, AgentTerminalScreenSnapshot } from '../types.js'
 
 /** Codex 0.160.1's ordinary bottom pane, not its transcript or a historical prompt.
  * A clipped native preview is not evidence of an empty native queue. Require spare
  * viewport above the complete status/composer/footer group before using Escape.
  * Placeholder spans are dim; actual draft cells (including after the cursor) are not.
  */
-export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot): AgentPromptExecutionContext {
+export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot, strategy: NonNullable<AgentCapabilities['promptExecution']>['immediate'] = 'interrupt-before-input'): AgentPromptExecutionContext {
   const { lines, cursor, cols, rows } = screen
-  if (cols < 50 || rows < 16 || cursor.row < 8 || cursor.row >= rows - 1) return 'unavailable'
-  if (lines.some(line => /^\s*• (?:Messages to be submitted|Queued messages|Rejected messages|Pending questions)/u.test(line.text))) return 'unavailable'
+  const steering = strategy === 'native-steer'
+  if (steering ? cols < 3 || rows < 3 || cursor.row < 0 || cursor.row >= rows - 1 :
+      cols < 50 || rows < 16 || cursor.row < 8 || cursor.row >= rows - 1) return 'unavailable'
+  if (!steering && lines.some(line => /^\s*• (?:Messages to be submitted|Queued messages|Rejected messages|Pending questions)/u.test(line.text))) return 'unavailable'
   const composer = lines[cursor.row]
   if (!composer || composer.wrapped || !/^\s*› /u.test(composer.text)) return 'unavailable'
   const markerColumn = composer.cells.findIndex(cell => cell.chars === '›')
@@ -37,6 +39,59 @@ export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot)
     if (hintLine!.cells.slice(labelColumn).some(cell => cell.chars.trim() && !cell.dim)) return 'unavailable'
   }
   if (lines.slice(footerRow + 2).some(line => line.text.trim())) return 'unavailable'
+  if (steering) {
+    // Enter contributes to the native regular turn. It neither interrupts nor
+    // drains native queued inputs, so their preview and spare rows are not an
+    // authorization requirement. The complete footer still identifies the main
+    // composer; an active modal/draft cannot impersonate it.
+    let currentRow = cursor.row - 1
+    const skipSpace = () => { while (currentRow >= 0 && !lines[currentRow]?.text.trim()) currentRow-- }
+    const dimBody = (row: number) => lines[row]?.cells.every(cell => !cell.chars.trim() || cell.dim)
+    skipSpace()
+    // Only the contiguous native preview immediately above this composer is
+    // skipped. Its dim entries and exact header belong to one local group; a
+    // Working line elsewhere in the transcript never authorizes this input.
+    if (/^    \S.* edit last queued message$/u.test(lines[currentRow]?.text ?? '') && dimBody(currentRow)) currentRow--
+    let preview = false
+    for (let section = 0; section < 3; section++) {
+      skipSpace()
+      if (!/^ {2}↳ |^ {4}\S/u.test(lines[currentRow]?.text ?? '')) break
+      let entries = 0
+      while (currentRow >= 0 && /^ {2}↳ |^ {4}\S/u.test(lines[currentRow]?.text ?? '')) {
+        if (!dimBody(currentRow)) return 'unavailable'
+        if (/^ {2}↳ /u.test(lines[currentRow]!.text)) entries++
+        currentRow--
+      }
+      if (!entries) return 'unavailable'
+      let continuation = ''
+      while (/^  (?!↳)\S/u.test(lines[currentRow]?.text ?? '')) {
+        continuation = lines[currentRow]!.text.trim() + ' ' + continuation
+        currentRow--
+      }
+      const header = lines[currentRow]
+      const group = ((header?.text.trim() ?? '') + ' ' + continuation).trim()
+      if (header?.cells.find(cell => cell.chars === '•')?.dim !== true ||
+          !/^• (?:Messages to be submitted after next tool call(?: \(press .+ to interrupt and send immediately\))?|Queued follow-up inputs)$/u.test(group)) return 'unavailable'
+      preview = true
+      currentRow--
+    }
+    skipSpace()
+    const detail = lines[currentRow]
+    const nativeTip = Boolean(detail && !detail.wrapped && /^  └ Tip: \S/u.test(detail.text) &&
+      detail.text.search(/\S/u) === markerColumn + 2 && detail.cells[markerColumn + 2]?.dim &&
+      detail.cells.slice(markerColumn + 4).every(cell => !cell.chars.trim() || !cell.dim))
+    if (nativeTip) currentRow--
+    const statusLine = lines[currentRow]
+    const status = statusLine?.text.trim() ?? ''
+    if (statusLine?.wrapped) return 'unavailable'
+    if (/^• (?:Working|Running)\b/u.test(status) &&
+        /\b(?:esc|escape|f\d+) to (?:interrupt|cancel)\)/iu.test(status) &&
+        !/\b(?:review|compact(?:ing)?|hook)\b/iu.test(status) &&
+        (preview || cursor.row - currentRow === (nativeTip ? 4 : 3))) return 'interruptible'
+    if (preview || nativeTip || hint.startsWith('tab to queue') ||
+        /to interrupt|pending|queued|↳|approval|question|hook|review|compact(?:ing)?|^\d+[.)] /iu.test(status)) return 'unavailable'
+    return 'idle'
+  }
   let statusRow = cursor.row - 1
   while (statusRow >= 0 && !lines[statusRow]?.text.trim()) statusRow--
   // The native busy indicator can append one Tip row below its header. This

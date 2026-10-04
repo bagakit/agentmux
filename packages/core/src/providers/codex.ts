@@ -172,7 +172,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, replyCorrelation: 'none',
-        promptExecution: { immediate: 'interrupt-before-input' },
+        promptExecution: { immediate: 'native-steer' },
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
     }),
@@ -193,8 +193,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       // the original main composer only for an exact question reply on this visible editor.
       payload: (context?.intent === 'question-reply' && codexQuestionAnswers([{ type: 'text', text: prompt }]) ? codexQuestionComposerNavigation(context.terminalScreen) : '') + buildPromptInputPayload(prompt),
       renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
-      submit: '\r',
-      ...(context?.execution === 'immediate' ? { prepare: { refresh: '\u001b[I', interrupt: '\u001b', endEvent: 'Interrupt' } } : {})
+      // The native composer submits into its active turn; interruption is not part of this input.
+      submit: '\r'
     }),
     interaction,
     prepareInteractionResponse: createCodexInteractionResponsePreparation(interaction.planResponse),

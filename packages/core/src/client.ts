@@ -4092,7 +4092,7 @@ export class AgentMuxClient {
     let transportQualification: AgentPromptTransportQualification | undefined
     try {
       stage('transport-preparation')
-      transportQualification = input.execution === 'immediate'
+      transportQualification = input.execution === 'immediate' && provider.catalog.capabilities.promptExecution?.immediate === 'interrupt-before-input'
         ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,

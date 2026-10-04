@@ -462,7 +462,7 @@ function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, ph
 export function agentSteerExecution(entry: AgentSteerQueueEntry,
   capabilities: Extract<SessionSnapshot, { kind: 'agent' }>['capabilities']): AgentPromptExecution {
   return entry.execution ?? (entry.promptCondition === null &&
-    capabilities.promptExecution?.immediate === 'interrupt-before-input' ? 'immediate' : 'default')
+    (capabilities.promptExecution?.immediate === 'interrupt-before-input' || capabilities.promptExecution?.immediate === 'native-steer') ? 'immediate' : 'default')
 }
 
 type AppState = {
@@ -8356,7 +8356,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               if (!explicitAttempt && (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected')) return
               if (!explicitAttempt && fresh.status.state === 'working') return
               const execution = explicitAttempt ? (pending.execution ?? 'default') : 'default'
-              if (execution === 'immediate' && fresh.capabilities.promptExecution?.immediate !== 'interrupt-before-input') {
+              if (execution === 'immediate' && fresh.capabilities.promptExecution?.immediate !== 'interrupt-before-input' && fresh.capabilities.promptExecution?.immediate !== 'native-steer') {
                 throw new Error('The original immediate-send capability is unconfirmed for this Run. Your original message and execution choice are kept; retry Send or use the terminal.')
               }
               set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
