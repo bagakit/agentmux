@@ -244,8 +244,10 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
         <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'work').map(renderPlugin)}
         </div>
-        <div className="surface-navigation__utilities" role="group" aria-label="Recall, Survey and settings">
+        <div className="surface-navigation__utilities" role="group" aria-label="Survey and Recall">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'survey').map(renderPlugin)}
+        </div>
+        <div className="surface-navigation__settings" role="group" aria-label="App settings">
           <button
             type="button"
             className="surface-navigation__slot"
