@@ -27,6 +27,7 @@ import { MoteWorkface } from './components/MoteWorkface'
 import { moteWorkbenchProjection } from './lib/mote-workbench-projection'
 import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { desktopSurface } from './lib/desktop-focus-navigation'
+import { focusTimelineCurrentReference } from './lib/focus-timeline-current'
 import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
 import { SCRATCH_WORKSPACE_ID } from '../../shared/scratch-topics'
 import { ProjectRail } from './components/ProjectRail'
@@ -198,6 +199,9 @@ function DesktopApp() {
     ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab')
     : { projection: null, issue: null, references: [] },
   [mainSurface, agentFocus.execution, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
+  const timelineCurrentReference = useMemo(() => focusTimelineCurrentReference(workbenchSpaceSelection,
+    workbenchSpaceSelection ? layouts[workbenchSpaceSelection.workspaceId] : undefined, tabs, surveyCatalog),
+  [workbenchSpaceSelection, layouts, tabs, surveyCatalog])
   const focusProjection = focusPresentation.projection
   const focusTab = focusProjection?.selection.length === 1 ? tabs[focusProjection.selection[0]!.tabId] : null
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
@@ -484,7 +488,7 @@ function DesktopApp() {
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
-              {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
+              {mainSurface === 'agents' ? <GlobalFocusSurface currentReference={timelineCurrentReference} visible={focusVisible} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (
                 <div
