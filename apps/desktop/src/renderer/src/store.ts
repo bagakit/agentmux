@@ -832,6 +832,7 @@ type AppState = {
     options?: SpatialControlOptions
   ): Promise<AgentMuxControlResult>
   selectSession(id: string, tabGroupId?: string): void
+  prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
   setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
@@ -5219,6 +5220,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
       displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
+  },
+  prepareWorkbenchLayout(workspaceId) {
+    const state = get(), layout = state.layouts[workspaceId]
+    if (layout) return layout
+    if (!state.config?.workspaces.some(workspace => workspace.id === workspaceId)) throw new Error('The exact file resource is unavailable. Its original workface is kept; reconnect it before preparing a display.')
+    const created = createWorkspaceLayout(newTabGroupId())
+    set(current => ({ layouts: { ...current.layouts, [workspaceId]: current.layouts[workspaceId] ?? created } }))
+    return get().layouts[workspaceId]!
   },
   createWorkbenchZone(input) {
     return createSpatialZone({ get, patch: patch => set(patch),

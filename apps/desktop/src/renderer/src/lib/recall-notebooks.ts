@@ -30,15 +30,14 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
   const catalog = catalogNow(), zone = catalog.zones.find(z => z.zoneId === page.workface?.zoneId)
   if (!zone) throw new Error('This page’s work surface is unavailable. Its saved Note and history remain in this Notebook.')
   const layout = before.layouts[page.resource.workspaceId]
-  if (!layout) throw new Error('This Note’s work surface is restoring. Its saved page is kept; try opening it again.')
   const matches = catalog.locations.filter(location => {
     const region = before.tabs[location.tabId]?.regions[location.regionId]
     return location.zoneId === zone.zoneId && region?.kind === 'file' && region.workspaceId === page.resource.workspaceId && region.path === page.resource.path
   })
-  const inCurrentGroup = matches.filter(location => location.displayWorkspaceId === page.resource.workspaceId && location.groupId === layout.activeGroupId)
+  const inCurrentGroup = matches.filter(location => location.displayWorkspaceId === page.resource.workspaceId && location.groupId === layout?.activeGroupId)
   const selectedMatches = selectedReference ? matches.filter(location => sameWorkbenchProjectionSelection(location, selectedReference)) : []
   const reference = selectedMatches.length === 1 ? selectedMatches[0] : inCurrentGroup.length === 1 ? inCurrentGroup[0] : matches.length === 1 ? matches[0] : undefined
-  const groupId = reference?.groupId ?? layout.activeGroupId, displayWorkspaceId = reference?.displayWorkspaceId ?? page.resource.workspaceId
+  const displayWorkspaceId = reference?.displayWorkspaceId ?? page.resource.workspaceId
   const heldBook = before.recallNotebookId, heldNote = before.recallNoteId
   const initial = surveyInitialZoneSelection(catalog, zone.zoneId, before.layouts, before.tabs, page.resource.workspaceId)
   before.setRecallZoneSelection(initial)
@@ -49,6 +48,7 @@ export async function openNotebookPage(page: NotebookPage, onSelectReference?: (
   if (matches.length && !reference) throw new Error('This page is already open in multiple locations. Choose its Tab in the work surface, then reopen from this Notebook. Your page and all locations are kept.')
   const current = useAppStore.getState()
   if (current.recallNotebookId !== heldBook || current.recallNoteId !== heldNote || current.recallZoneSelection !== heldSelection) return false
+  const groupId = reference?.groupId ?? current.prepareWorkbenchLayout(displayWorkspaceId).activeGroupId
   const projection: WorkbenchProjection = { entity: { kind: 'zone', zoneId: zone.zoneId }, presentationId: 'recall-workbench',
     displayWorkspaceId, catalog: catalogNow(), selection: [], onSelect(reference) {
       const now = useAppStore.getState()
