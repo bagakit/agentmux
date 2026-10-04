@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { FolderOpen, X } from 'lucide-react'
 import { useState } from 'react'
@@ -31,7 +32,7 @@ export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; l
           <Dialog.Close className="icon-button" disabled={busy} aria-label="Close folder editor"><X size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">Open a directory on {label}.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void open() }}>
-          <label className="project-group-dialog__name">Folder path<input autoFocus value={path} disabled={busy} onChange={event => setPath(event.target.value)} placeholder="Project directory" /></label>
+          <label className="project-group-dialog__name">Folder path<TextInput autoFocus value={path} disabled={busy} onChange={event => setPath(event.target.value)} placeholder="Project directory" /></label>
           {issue ? <p role="alert" className="project-group-dialog__issue">{issue}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button>
             <button type="submit" className="small-button confirmation-dialog__confirm--neutral" disabled={busy || !path.trim()}>{busy ? 'Opening…' : 'Open Folder'}</button></footer>
