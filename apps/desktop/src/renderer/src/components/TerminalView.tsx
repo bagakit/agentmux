@@ -1,3 +1,4 @@
+import { rendererPerformance } from '../lib/renderer-performance'
 import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
@@ -239,6 +240,8 @@ export function TerminalView({
   const canControlRunRef = useRef(canControlRun)
   canControlRunRef.current = canControlRun
   // A pending semantic request belongs to its card; it cannot close the native terminal.
+  const visibleSinceRef = useRef<number | null>(visible ? Date.now() : null)
+  useLayoutEffect(() => { visibleSinceRef.current = visible ? Date.now() : null }, [visible])
   const acceptsInput = true
   const acceptsInputRef = useRef(acceptsInput)
   acceptsInputRef.current = acceptsInput
@@ -595,11 +598,14 @@ export function TerminalView({
       }, 350)
     }
     async function writeTerminal(data: string | Uint8Array): Promise<void> {
+      const observationStarted = rendererPerformance.start()
+      const observationVisible = visibleRef.current
       linkPreviewWrites++
       clearLinkPreview()
       try {
         await terminalWrite(terminal, data)
       } finally {
+        rendererPerformance.terminalWrite(observationVisible, data, observationStarted)
         linkPreviewWrites--
         if (terminalGenerationRef.current === terminalGeneration) clearLinkPreview()
       }
@@ -725,7 +731,9 @@ export function TerminalView({
     let disposed = false
     let observedOutput = false
     let attachmentId: string | null = null
+    let revealed = false
     let readyForLiveOutput = false
+    let readySinceAt: number | null = null
     let replayingContinuation = true
     let observationPending = false
     let continuationKnown = false
@@ -793,6 +801,13 @@ export function TerminalView({
     let liveDrain: Promise<void> | null = null
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
+    const releasePerformance = rendererPerformance.registerTerminal(() => ({
+      sessionId: session.id, runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null,
+      visible: visibleRef.current, visibleSinceAt: visibleSinceRef.current, readySinceAt,
+      revealed, liveReady: readyForLiveOutput, acceptsInput: acceptsCurrentInput(), replaying: replayingContinuation,
+      inFlightWrites: linkPreviewWrites, queuedItems: liveOutputQueue.length, queuedBytes: liveOutputQueue.byteLength, pendingItems: pending.length, pendingBytes: pending.length ? pendingBytes : 0,
+      cols: terminal.cols, rows: terminal.rows, normalLines: terminal.buffer.normal.length, alternateLines: terminal.buffer.alternate.length
+    }))
     let droppedPendingThrough = 0
     let droppedPendingResize: AgentMuxTerminalResize | null = null
     // 下游程序自己声明的 kitty keyboard 状态，决定 Shift+Enter 送 CSI-u 还是退回 ESC+CR。
@@ -1274,7 +1289,6 @@ export function TerminalView({
      * 用户，并置 `revealOverdue` 让服务窗说清情况。用 `setTimeout` 而非 `setInterval`——后者是
      * 常驻开销，且在 retention 测试的黑名单里。
      */
-    let revealed = false
     const reveal = (forced = false, clearNotice = true): void => {
       if (disposed) return
       if (!revealed) {
@@ -1371,6 +1385,7 @@ export function TerminalView({
           finishReplay: () => viewport.endReplay(hasReplay),
           releaseLiveOutput: async () => {
             readyForLiveOutput = true
+            readySinceAt = Date.now()
             replayingContinuation = false
             if (!disposed) setLiveOutputReady(true)
             if (droppedPendingResize && droppedPendingResize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(droppedPendingResize)
@@ -1484,6 +1499,7 @@ export function TerminalView({
       }
       if (pasteTargetRef.current === pasteInput) pasteTargetRef.current = null
       terminal.dispose()
+      releasePerformance()
       resourceOwners.release()
     }
   }, [session.control.run.runId, session.id, themeId])

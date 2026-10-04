@@ -1,3 +1,4 @@
+import { performanceFixture } from './helpers/renderer-performance.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -73,8 +74,10 @@ describe('public metrics Control owner', () => {
     reordered.window = { windowId: 1, webContentsId: 2, generation: 3 }
     reordered.renderer = { state: 'available', observedAt: 950, lastSuccessAt: 950, reason: null,
       data: { window: { generation: 3, windowId: 1, webContentsId: 2 }, counts: { monacoEditors: null, monacoModels: 0,
-        documents: 1, runtimeSubscriptions: 1, terminalViews: 1, terminalAddons: 0, terminalListeners: 0 } } }
+        documents: 1, runtimeSubscriptions: 1, terminalViews: 1, terminalAddons: 0, terminalListeners: 0 }, performance: performanceFixture() } }
     expect(parseMetricsObservation(reordered).renderer.data!.counts.documents).toBe(1)
+    reordered.renderer.data!.performance.sessionEvents.totalMs = Number.NaN
+    expect(() => parseMetricsObservation(reordered)).toThrow()
   })
   it('get finally releases on complete output while the actual peer is still half-open', async () => {
     let serverSocket!: Socket

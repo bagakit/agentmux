@@ -77,5 +77,5 @@ export async function observeRendererResources(
     value.windowId !== window.windowId || value.webContentsId !== window.webContentsId || value.generation !== window.generation)) {
     throw new AgentMuxError('Renderer observation belongs to an ended generation.', 'CONTROL_OWNER_LOST')
   }
-  return { observedAt: result.observedAt, data: { window: result.window, counts: result.counts } }
+  return { observedAt: result.observedAt, data: { window: result.window, counts: result.counts, performance: result.performance } }
 }

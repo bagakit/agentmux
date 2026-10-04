@@ -1,3 +1,4 @@
+import { rendererPerformance } from './lib/renderer-performance'
 import { startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { deliveryFailure } from '@agentmux/core/delivery-attempt'
 import { recordMessageDeliveryFailure } from './lib/message-delivery-diagnostics'
@@ -3132,7 +3133,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const disposeControl = api.control.onRequest((request, signal) => request.operation === 'continuous-progress.observeInput'
       ? readContinuousProgressInput(get(), request, signal)
       : request.operation === 'metrics.renderer'
-        ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), counts: readRendererResourceOwnerCounts() }
+        ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
         : get().executeControl(request, signal))
     const disposeSpatialLinkIssues = api.ui.onSpatialLinkIssue(message => get().reportError(new Error(message)))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
@@ -8797,6 +8798,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await entry.promise
   },
   applyEvent(event) {
+    const observationStarted = rendererPerformance.start()
+    try {
     const core = event.event
     if (event.endpointWarning !== undefined && !(core.type === 'connection-state' && core.state === 'restored' && event.endpointWarning === null)) set((state) => {
       const runtimeEndpointWarnings = runtimeEndpointWarningsAfterEvent(state.runtimeEndpointWarnings, event)
@@ -8870,6 +8873,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : core.type === 'agent-status' && freshCompletion ? core.agentSessionId : undefined
       if (sessionId && get().agentSteerQueues[sessionId]?.length) void get().flushAgentSteerQueue(sessionId)
     }
+    } finally { rendererPerformance.sessionEvent(event.event.type, observationStarted) }
   },
   decayStaleAgentStatuses(now) {
     set((state) => {

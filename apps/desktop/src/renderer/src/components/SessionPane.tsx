@@ -1,3 +1,4 @@
+import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
@@ -109,6 +110,8 @@ export function SessionPane({
   onPresentationSelected?: ((target: WorkbenchViewTarget) => void) | undefined
   linkOrigin: OpenHttpLinkOrigin
 }) {
+  const observationVisible = visible || presentations.some(target => target.visible !== false)
+  useObservedConsumerCommit('sessionPane', observationVisible)
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const [takeoverSelection, setTakeoverSelection] = useState<string | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
@@ -121,11 +124,11 @@ export function SessionPane({
     useAppStore.getState().focusRegion(mailboxOrigin.workspaceId, mailboxOrigin.tabId!, linkOrigin.regionId,
       primaryPresentation.surface === 'mote' ? 'floating-pointer' : 'pointer', mailboxOrigin.tabGroupId)
   }
-  const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
-  const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
-  const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
+  const session = useObservedAppStore('sessionPane', observationVisible, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, (state) => state.pendingAgentLaunches[sessionId])
+  const recoveryCandidate = useObservedAppStore('sessionPane', observationVisible, (state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
-  const historyHostId = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
+  const historyHostId = useObservedAppStore('sessionPane', observationVisible, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
   const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
   const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && surfaceKind === 'agent' && visible && !parked && linkOrigin.tabId && linkOrigin.regionId
     ? { agentSessionId: sessionId, tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
@@ -137,32 +140,32 @@ export function SessionPane({
     : unobservedReference ? unobservedReference.source?.hostId
       : pendingLaunch ? pendingLaunch.request?.hostId
       : retainedHistory?.state === 'retired' ? retainedHistory.hostId : recoveryCandidate?.hostId
-  const configuredExecutionHost = useAppStore(state => state.config?.hosts.find(host => host.id === executionHostId))
-  const runtimeHostUnavailable = useAppStore(state => (state.runtimeEndpointWarnings ?? []).some(
+  const configuredExecutionHost = useObservedAppStore('sessionPane', observationVisible, state => state.config?.hosts.find(host => host.id === executionHostId))
+  const runtimeHostUnavailable = useObservedAppStore('sessionPane', observationVisible, state => (state.runtimeEndpointWarnings ?? []).some(
     warning => warning.hostId === executionHostId && warning.availability !== 'connected'))
   const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId ?? retainedHistory?.history?.executorId)
-  const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
-  const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
-  const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
-  const sourceWorkspaceId = useAppStore(state => linkOrigin.tabId ? state.tabs[linkOrigin.tabId]?.workspaceId : undefined)
+  const connectingExecutor = useObservedAppStore('sessionPane', observationVisible, (state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
+  const connectingAppearance = useObservedAppStore('sessionPane', observationVisible, (state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
+  const tabName = useObservedAppStore('sessionPane', observationVisible, (state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
+  const sourceWorkspaceId = useObservedAppStore('sessionPane', observationVisible, state => linkOrigin.tabId ? state.tabs[linkOrigin.tabId]?.workspaceId : undefined)
   const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId,
     visible || presentations.some(target => target.visible !== false))
-  const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
-  const timelineSnapshot = useAppStore((state) => state.timelines[sessionId])
-  const userName = useAppStore((state) => state.agentNames?.[sessionId])
-  const appendAgentComposerDraft = useAppStore((state) => state.appendAgentComposerDraft)
-  const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
-  const autoFocus = useAppStore(state => {
+  const timeline = useObservedAppStore('sessionPane', observationVisible, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
+  const timelineSnapshot = useObservedAppStore('sessionPane', observationVisible, (state) => state.timelines[sessionId])
+  const userName = useObservedAppStore('sessionPane', observationVisible, (state) => state.agentNames?.[sessionId])
+  const appendAgentComposerDraft = useObservedAppStore('sessionPane', observationVisible, (state) => state.appendAgentComposerDraft)
+  const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, (state) => state.config?.appearance.terminalTheme)
+  const autoFocus = useObservedAppStore('sessionPane', observationVisible, state => {
     if (!visible || readOnly || state.retainedSpatialFocus || state.workbenchNavigationInputPolicy || state.mainSurface !== 'workbench' ||
       state.activeWorkspaceId !== mailboxOrigin.workspaceId || !mailboxOrigin.tabId || !linkOrigin.regionId) return false
     const choice = state.workbenchSpaceSelection
     return choice?.workspaceId === mailboxOrigin.workspaceId && choice.groupId === mailboxOrigin.tabGroupId &&
       choice.tabId === mailboxOrigin.tabId && choice.regionId === linkOrigin.regionId
   })
-  const terminalFontSize = useAppStore(
+  const terminalFontSize = useObservedAppStore('sessionPane', observationVisible,
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
-  const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
+  const viewMode = useObservedAppStore('sessionPane', observationVisible, state => effectiveSessionViewMode(state, sessionId))
   const activitySourceKey = session?.kind === 'agent' ? JSON.stringify([session.control.hostId, session.id, session.control.run.runId]) : sessionId
   const activityLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
   const activityContent = useRef<ReactElement<ComponentProps<typeof ActivityView>> | null>(null)
@@ -365,7 +368,7 @@ export function SessionPane({
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
   const speakerIds = useMemo(() => [...new Set([sessionId, ...userMessages.flatMap(message =>
     message.author.kind === 'agent' ? [message.author.agentSessionId] : [])])], [sessionId, userMessages])
-  const speakerFacts = useAppStore(useShallow(state => activityDemand ? speakerIds.flatMap(id => {
+  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, useShallow(state => activityDemand ? speakerIds.flatMap(id => {
     const sender = sessionPresentationById(state.sessions).get(id)
     if (!sender || sender.kind !== 'agent') return [id]
     const workspaces = state.config?.workspaces ?? []
@@ -407,9 +410,9 @@ export function SessionPane({
     }
   }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
   )
-  const refreshSession = useAppStore((state) => state.refreshSession)
-  const recoverSession = useAppStore((state) => state.recoverSession)
-  const respondInteraction = useAppStore((state) => state.respondInteraction)
+  const refreshSession = useObservedAppStore('sessionPane', observationVisible, (state) => state.refreshSession)
+  const recoverSession = useObservedAppStore('sessionPane', observationVisible, (state) => state.recoverSession)
+  const respondInteraction = useObservedAppStore('sessionPane', observationVisible, (state) => state.respondInteraction)
   const annotateMessage = (annotation: ConversationAnnotation): void => {
     // 「把一段引文送进当前草稿」这个决定归 store 的 `appendAgentComposerDraft` 所有——
     // 浏览器标注那条 dock 动作走的就是它。这里此前手写了一份读-改-写（`getState()` +
@@ -435,14 +438,14 @@ export function SessionPane({
   // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (fixtureRoot/repo/sub) is
   // owned by no workspace exactly, and answering '' there would make its absolute path links
   // unclickable. See the same note in TerminalView.
-  const openFile = useAppStore((state) => state.openFile)
-  const reportError = useAppStore((state) => state.reportError)
-  const activeWorkspaceRoot = useAppStore((state) =>
+  const openFile = useObservedAppStore('sessionPane', observationVisible, (state) => state.openFile)
+  const reportError = useObservedAppStore('sessionPane', observationVisible, (state) => state.reportError)
+  const activeWorkspaceRoot = useObservedAppStore('sessionPane', observationVisible, (state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
   const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, mailboxOrigin),
     [sessionId, mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, mailboxOrigin.sessionId])
-  const fileContext = useAppStore(selectFileContext)
+  const fileContext = useObservedAppStore('sessionPane', observationVisible, selectFileContext)
   const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)
   useEffect(() => { setFileLinkIssue(null) }, [fileContext])
   const fileOrigin = useMemo(() => ({ ...mailboxOrigin, sessionId }), [mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, sessionId])
@@ -496,7 +499,7 @@ export function SessionPane({
     setObservationMounted(refresh !== null)
   }, [])
   const [recovering, setRecovering] = useState(false)
-  const reopenRetiredSession = useAppStore(state => state.reopenRetiredSession)
+  const reopenRetiredSession = useObservedAppStore('sessionPane', observationVisible, state => state.reopenRetiredSession)
   const retainedReopenRef = useRef<object | null>(null)
   const retainedUnconfirmedIntent = useRef<string | null>(null)
   const clearedRetainedIntent = useRef<string | null>(null)
