@@ -178,8 +178,17 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
     const groups = groupFocusContexts(rows)
     const counts: FocusLaneCounts = [groups.attention.length, groups.working.length, groups.results.length, groups.idle.length]
-    return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Other context states">
-      {buckets.filter(bucket => bucket === 'disconnected' || (counts.some(count => count > 0) && groups[bucket].length === 0)).map(bucket => {
+    const sparse = counts.reduce((total, count) => total + count, 0) === 1
+    const groupHeader = (bucket: FocusColumn, inline = false) => {
+      const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[bucket]
+      const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
+      const label = neutral?.label ?? meta.label
+      const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
+      return <header className="focus-context-group__header" data-bucket={bucket} data-visible-state={inline || undefined} title={countDescription} aria-label={countDescription} key={bucket}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong><span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span></span></header>
+    }
+    return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Context states">
+      {buckets.filter(bucket => bucket === 'disconnected' || sparse || (counts.some(count => count > 0) && groups[bucket].length === 0)).map(bucket => {
+        if (bucket !== 'disconnected' && groups[bucket].length > 0) return groupHeader(bucket, true)
         const meta = bucketMeta[bucket], Icon = meta.icon
         return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · ${groups[bucket].length}`} aria-label={`${meta.label} · ${groups[bucket].length}`} key={bucket}>
           {bucket === 'disconnected' ? <FocusDisconnectedGroup contexts={groups.disconnected} laneId={lane.id} onReveal={openDisconnected} /> : <Icon size={12} aria-hidden="true" />}
@@ -187,13 +196,12 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
       })}
     </div></div>{counts.some(count => count > 0) ? <FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
       buckets.map((bucket, index) => {
-        const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[bucket]
+        const meta = bucketMeta[bucket], grouped = groups[bucket]
         if (bucket === 'disconnected' || grouped.length === 0) return null
         const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
         const label = neutral?.label ?? meta.label
-        const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
-        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
-          <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong><span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span></span></header>
+        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
+          {!sparse ? groupHeader(bucket) : null}
             <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
         </section>
       })
