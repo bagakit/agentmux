@@ -1,7 +1,7 @@
 import { GitPullRequestArrow, LoaderCircle, X } from 'lucide-react'
 import type { FormEvent, ReactElement } from 'react'
 import type { PrLaunchPlan } from '../lib/pr-launch'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 
 export type PrLaunchSurfaceProps = {
   /** The one plan from the one readiness read, or null when nothing has been asked for yet. */

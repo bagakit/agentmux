@@ -19,7 +19,7 @@ import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatar
 import { executorDetectionKey, useAppStore } from '../../store'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
-import { ComposerTextarea } from '../ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { withYoloArgs, parseExecutorArgs } from '../../lib/executors'
 export { parseExecutorArgs } from '../../lib/executors'
 import { HostExecutorSettings } from './HostExecutorSettings'

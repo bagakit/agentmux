@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ScheduleParamsMap } from '@agentmux/core'
 import { parseAgentScheduleCalendar, DEFAULT_AGENT_SCHEDULE_CHECK_IN, type AgentScheduleCalendar } from '@agentmux/core/schedule'
 import { api } from '../lib/api'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 
 export type CalendarScheduleStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 type Pending = { action: 'create'; params: ScheduleParamsMap['schedule.create'] } | { action: 'pause' | 'resume' | 'cancel'; params: ScheduleParamsMap['schedule.pause'] }

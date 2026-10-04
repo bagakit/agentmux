@@ -17,7 +17,7 @@ import { useAppStore } from '../store'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
 import { useLauncherState } from '../lib/launcher-state'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useResourceDrafts } from './settings/use-resource-drafts'
 

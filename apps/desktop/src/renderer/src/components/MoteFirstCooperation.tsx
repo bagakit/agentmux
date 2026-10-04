@@ -1,4 +1,4 @@
-import { InputGroup } from '@agentmux/client-ui/input'
+import { ComposerTextarea, InputGroup } from '@agentmux/client-ui/input'
 import { ArrowRight, LoaderCircle } from 'lucide-react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useEffect, useRef, useState } from 'react'
@@ -8,7 +8,6 @@ import { prepareMoteCooperationDraft } from '../lib/mote-cooperation'
 import { useLauncherState } from '../lib/launcher-state'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { ComposerTextarea } from './ComposerTextarea'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { isMacPlatform } from '../lib/host-platform'
 

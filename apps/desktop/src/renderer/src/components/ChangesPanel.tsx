@@ -26,7 +26,7 @@ import { workspaceRelativeGitPath } from '../lib/git-path-coordinates'
 import { gitChangeClass, gitChangeLabel, type GitChangeClass } from '../lib/git-porcelain-status'
 import { beginPrLaunch, type PrLaunchPlan } from '../lib/pr-launch'
 import { useAppStore } from '../store'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { PrLaunchSurface } from './PrLaunchSurface'
 
 const CHANGE_MARK: Record<GitChangeClass, string> = {

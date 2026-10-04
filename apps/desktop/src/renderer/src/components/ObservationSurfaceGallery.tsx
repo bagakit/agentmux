@@ -5,7 +5,7 @@ import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../shared
 import { scratchTopicsScope } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
 import { SemanticIcon } from './semantic-icons'

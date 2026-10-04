@@ -4,7 +4,7 @@ import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { CalendarScheduleControl } from './CalendarScheduleControl'
 

@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { ComposerTextarea } from '../ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { Camera, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '../../../../shared/user-profile'

@@ -3,7 +3,7 @@ import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useStat
 import { X } from 'lucide-react'
 import type { BrowserInputHistorySnapshot, BrowserInputHistoryTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
-import { composerCompositionHandlers, composerRenderValue, type ComposerCompositionState } from '../lib/composer-composition'
+import { composerCompositionHandlers, composerRenderValue, type ComposerCompositionState } from '@agentmux/client-ui/composer-composition'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
