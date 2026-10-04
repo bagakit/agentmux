@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { AlertTriangle, SlidersHorizontal, X } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -82,8 +83,8 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
           </label>
         })}
         {names && onNameChange ? <fieldset className="launch-refine__names"><legend>Optional names</legend>
-          <label>Agent<input aria-label="Agent name" placeholder="Automatic" value={names.agentName} disabled={disabled} onChange={event => onNameChange('agentName', event.target.value)} /></label>
-          <label>Tab<input aria-label="Tab name" placeholder="Automatic" value={names.tabName} disabled={disabled} onChange={event => onNameChange('tabName', event.target.value)} /></label>
+          <label>Agent<TextInput aria-label="Agent name" placeholder="Automatic" value={names.agentName} disabled={disabled} onChange={event => onNameChange('agentName', event.target.value)} /></label>
+          <label>Tab<TextInput aria-label="Tab name" placeholder="Automatic" value={names.tabName} disabled={disabled} onChange={event => onNameChange('tabName', event.target.value)} /></label>
         </fieldset> : null}
       </div>
     </Dialog.Content></Dialog.Portal> : null}
