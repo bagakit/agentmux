@@ -141,7 +141,7 @@ Project 是来源项目事实，Workspace 是特定 Host 上登记的实际工�
 
 ### 左下角导航、Space 与 Goals
 
-窗口只有一组主导航，固定顺序为 **Mote、Space、Focus、Goals、Survey、Recall**，在所有主工作面及 Project Rail 开合状态下都位于窗口左下角。Survey 的职责和 Browser 入口归属见[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)。
+窗口只有一组主导航，固定顺序为 **Mote、Space、Focus、Goals、Survey、Recall**，在所有主工作面及 Project Rail 开合状态下都位于窗口左下角。Know 组内 Survey 在 Recall 之前；Settings 位于 Know 组之外，与 Recall 保有可辨分隔，不夹在 Survey 与 Recall 之间。Survey 的职责和 Browser 入口归属见[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)。
 
 - **Mote** 是固定协调对象的快捷入口：打开或收起同一快捷面，保留当前主工作面的选中状态和执行焦点。Mote 排第一不意味着启动默认进入 Mote；启动仍恢复用户上一次工作面。PMO 是其初始化默认角色之一，产品身份见[《Space、Folder 与 Topic》](#spacefolder-与-topic)。
 - **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space。Space 作为共同外层产品对象，其 Folder、Mote 与知识分类的定义见[《Space、Folder 与 Topic》](#spacefolder-与-topic)；Workspace 继续表达底层工作区对象。
