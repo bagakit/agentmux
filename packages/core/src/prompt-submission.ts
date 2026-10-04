@@ -55,7 +55,40 @@ export type AgentPromptProtocolInputBoundary = {
   invalid: boolean
   cancelled?: Error
   /** Invocation-local lane release; closed before any claim may be persisted. */
-  preclaim?: { interruption: Error; claimStarted: boolean }
+  preclaim?: { interruption: Error; claimStarted: boolean; observation?: {
+    phase: AgentPromptPreparationPhase
+    phaseEnteredAt: number
+    lastCompletedPhase: AgentPromptPreparationPhase | null
+    lastPhaseCompletedAt: number | null
+    deadline: number
+    pane: { predicateEvaluations: number; predicateEvaluationsCapped: boolean; lastPredicateResult: boolean | null
+      frameObservedAt: number | null; outputThroughByte: number | null; geometryRevision: number | null
+      evidenceGeneration: number | null; authoritative: boolean | null; completeFrameAvailable: true | null } | null
+  } }
+}
+
+/** Diagnostic locations within one original preclaim budget; never input authority. */
+export type AgentPromptPreparationPhase = 'input-lane' | 'current-run' | 'submission-store' |
+  'session-refresh' | 'current-pane' | 'native-transport-verifier' | 'final-run-status' | 'claim-entry'
+
+export function beginPromptPreparationPhase(boundary: AgentPromptProtocolInputBoundary | undefined, phase: AgentPromptPreparationPhase): void {
+  const preclaim = boundary?.preclaim
+  if (!preclaim?.observation || preclaim.claimStarted) return
+  preclaim.observation.phase = phase
+  preclaim.observation.phaseEnteredAt = Date.now()
+}
+
+export function completePromptPreparationPhase(boundary: AgentPromptProtocolInputBoundary | undefined): void {
+  const preclaim = boundary?.preclaim
+  if (!preclaim?.observation || preclaim.claimStarted) return
+  preclaim.observation.lastCompletedPhase = preclaim.observation.phase
+  preclaim.observation.lastPhaseCompletedAt = Date.now()
+}
+
+/** Serialize now: a later return must not change the original emitted timeout. */
+export function promptPreparationObservationDetail(boundary: AgentPromptProtocolInputBoundary | undefined): string | undefined {
+  const observation = boundary?.preclaim?.observation
+  return observation ? JSON.stringify({ preclaimObservation: observation }) : undefined
 }
 
 export type AgentPromptTransportQualification = Readonly<{
@@ -241,75 +274,87 @@ export class AgentPromptSubmissionCoordinator {
     transportQualification?: AgentPromptTransportQualification
   ): Promise<AgentPromptMessageContent | undefined> {
     try {
+      const boundary = transportQualification?.protocolInput
+      beginPromptPreparationPhase(boundary, 'submission-store')
       return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
-        let current = await this.deps.registry.refresh(session.agentSessionId, session.run)
-        let currentRun = await this.deps.kernel.status(run.runId)
-        this.deps.assertAgentRun(current, currentRun)
-        if (currentRun.state.type !== 'running') {
-          throw new AgentMuxError('Agent Run is not running.', 'AGENT_RUN_NOT_RUNNING')
-        }
-        const previous = current.promptCompletionAdmission
-        const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
-          !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
         try {
-          const predecessor = previous === undefined ? null : previous.submissionId
-          if (predecessor !== submissionId &&
-            (predecessor === undefined || predecessor !== condition.afterSubmissionId)) {
-            throw new AgentMuxError('A later prompt admission has replaced this message\'s original condition. Its delivery is unknown; your message and the current Run are kept.',
-              'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+          completePromptPreparationPhase(boundary)
+          beginPromptPreparationPhase(boundary, 'session-refresh')
+          let current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+          completePromptPreparationPhase(boundary)
+          beginPromptPreparationPhase(boundary, 'current-run')
+          let currentRun = await this.deps.kernel.status(run.runId)
+          completePromptPreparationPhase(boundary)
+          this.deps.assertAgentRun(current, currentRun)
+          if (currentRun.state.type !== 'running') {
+            throw new AgentMuxError('Agent Run is not running.', 'AGENT_RUN_NOT_RUNNING')
           }
-          if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId ||
-            (previous && unfinished && !previous.notApplied && !current.terminalPromptSubmission?.submit.notApplied)) {
-            if (!previous?.intent || !previous.submissionId || !sameRun(previous.intent.run, current.run)) {
-              throw new AgentMuxError('The original prompt Input request cannot be confirmed. Its message and Run are kept; use the terminal while delivery is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+          const previous = current.promptCompletionAdmission
+          const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
+            !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
+          try {
+            const predecessor = previous === undefined ? null : previous.submissionId
+            if (predecessor !== submissionId &&
+              (predecessor === undefined || predecessor !== condition.afterSubmissionId)) {
+              throw new AgentMuxError('A later prompt admission has replaced this message\'s original condition. Its delivery is unknown; your message and the current Run are kept.',
+                'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
             }
-            if (previous.submissionId === submissionId && previous.intent.message === undefined && message !== undefined) {
-              throw new AgentMuxError('Original message source facts are unconfirmed. The original Input and healthy Agent are kept; use the terminal while its source is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+            if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId ||
+              (previous && unfinished && !previous.notApplied && !current.terminalPromptSubmission?.submit.notApplied)) {
+              if (!previous?.intent || !previous.submissionId || !sameRun(previous.intent.run, current.run)) {
+                throw new AgentMuxError('The original prompt Input request cannot be confirmed. Its message and Run are kept; use the terminal while delivery is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+              }
+              if (previous.submissionId === submissionId && previous.intent.message === undefined && message !== undefined) {
+                throw new AgentMuxError('Original message source facts are unconfirmed. The original Input and healthy Agent are kept; use the terminal while its source is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+              }
+              if (previous.submissionId === submissionId && (previous.intent.prompt !== prompt ||
+                  promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message) ||
+                  (previous.intent.execution ?? 'default') !== execution)) {
+                throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+              }
+              if (unfinished) await this.publishDeliveryDegrade(current, {
+                state: 'unverified', mode: 'degraded', reason: 'input-unconfirmed',
+                submissionId: previous.submissionId, run: { ...current.run }, observedAt: Date.now()
+              })
+              // The old Core is excluded, but Native may still own its request. Join that exact
+              // request; a fresh cursor or a changed Provider plan cannot replace it.
+              try {
+                if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
+                await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
+                  previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession)
+              } catch (error) {
+                const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
+                const refreshOnlySettled = settled.promptCompletionAdmission?.submissionId === previous.submissionId &&
+                  settled.promptCompletionAdmission.frameRefresh?.acknowledged && settled.terminalPromptSubmission === undefined
+                const submitRejected = settled.terminalPromptSubmission?.submissionId === previous.submissionId &&
+                  settled.terminalPromptSubmission.submit.notApplied
+                if (previous.submissionId === submissionId ||
+                  settled.promptCompletionAdmission?.submissionId !== previous.submissionId ||
+                  (!refreshOnlySettled && !submitRejected)) throw error
+                // Only a different intent proceeds after confirmed harmless refresh
+                // or an actual rejected submit. The old prompt remains unsent.
+              }
+              if (previous.submissionId === submissionId) return structuredClone(previous.intent.message)
+              current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+              currentRun = await this.deps.kernel.status(run.runId)
+              this.deps.assertAgentRun(current, currentRun)
             }
-            if (previous.submissionId === submissionId && (previous.intent.prompt !== prompt ||
-                promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message) ||
-                (previous.intent.execution ?? 'default') !== execution)) {
-              throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+            await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
+              expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification)
+            return structuredClone(message)
+          } catch (error) {
+            if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
+              (previous?.submissionId === submissionId || previous &&
+                (previous.submissionId === undefined || unfinished && previous.submissionId === condition.afterSubmissionId))) {
+              await this.publishDeliveryDegrade(current, { state: 'unverified', mode: 'degraded',
+                reason: 'input-unconfirmed', submissionId: previous?.submissionId ?? submissionId,
+                run: { ...current.run }, observedAt: Date.now() })
             }
-            if (unfinished) await this.publishDeliveryDegrade(current, {
-              state: 'unverified', mode: 'degraded', reason: 'input-unconfirmed',
-              submissionId: previous.submissionId, run: { ...current.run }, observedAt: Date.now()
-            })
-            // The old Core is excluded, but Native may still own its request. Join that exact
-            // request; a fresh cursor or a changed Provider plan cannot replace it.
-            try {
-              if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
-              await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
-                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession)
-            } catch (error) {
-              const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
-              const refreshOnlySettled = settled.promptCompletionAdmission?.submissionId === previous.submissionId &&
-                settled.promptCompletionAdmission.frameRefresh?.acknowledged && settled.terminalPromptSubmission === undefined
-              const submitRejected = settled.terminalPromptSubmission?.submissionId === previous.submissionId &&
-                settled.terminalPromptSubmission.submit.notApplied
-              if (previous.submissionId === submissionId ||
-                settled.promptCompletionAdmission?.submissionId !== previous.submissionId ||
-                (!refreshOnlySettled && !submitRejected)) throw error
-              // Only a different intent proceeds after confirmed harmless refresh
-              // or an actual rejected submit. The old prompt remains unsent.
-            }
-            if (previous.submissionId === submissionId) return structuredClone(previous.intent.message)
-            current = await this.deps.registry.refresh(session.agentSessionId, session.run)
-            currentRun = await this.deps.kernel.status(run.runId)
-            this.deps.assertAgentRun(current, currentRun)
+            throw error
           }
-          await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification)
-          return structuredClone(message)
-        } catch (error) {
-          if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
-            (previous?.submissionId === submissionId || previous &&
-              (previous.submissionId === undefined || unfinished && previous.submissionId === condition.afterSubmissionId))) {
-            await this.publishDeliveryDegrade(current, { state: 'unverified', mode: 'degraded',
-              reason: 'input-unconfirmed', submissionId: previous?.submissionId ?? submissionId,
-              run: { ...current.run }, observedAt: Date.now() })
-          }
-          throw error
+        } finally {
+          // The original store also awaits lock cleanup after its callback.
+          beginPromptPreparationPhase(boundary, 'submission-store')
         }
       })
     } catch (error) {
@@ -611,12 +656,16 @@ export class AgentPromptSubmissionCoordinator {
       const remaining = qualified ? qualified.deadline - Date.now() : 8_000
       const signals = [AbortSignal.timeout(Math.max(1, remaining)), ...(renderSignal ? [renderSignal] : []), ...(signal ? [signal] : [])]
       const context = { ...nativeContext, ...(nativeSourceId ? { nativeSourceId } : {}), signal: AbortSignal.any(signals) }
+      beginPromptPreparationPhase(qualified?.protocolInput, 'native-transport-verifier')
       const confirmed = await observePromptTransport(context.signal, async () => qualified
         ? await qualified.transport.verifyCurrentTransport(context)
         : !provider.verifyPromptExecutionTransport || await provider.verifyPromptExecutionTransport(context))
+      completePromptPreparationPhase(qualified?.protocolInput)
       if (!confirmed) throw new AgentMuxError('The native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
       if (qualified) {
+        beginPromptPreparationPhase(qualified.protocolInput, 'final-run-status')
         const fresh = await observePromptTransport(context.signal, () => this.deps.kernel.status(run.runId))
+        completePromptPreparationPhase(qualified.protocolInput)
         this.deps.assertAgentRun(session, fresh)
         context.signal.throwIfAborted()
         if (fresh.state.type !== 'running' || fresh.pid !== qualified.processId ||
@@ -637,11 +686,35 @@ export class AgentPromptSubmissionCoordinator {
         const nativeSourceId = transportQualification?.transport.nativeSourceId ??
           (await observePromptTransport(preparationSignal, async () => await provider.readPromptExecutionEvidence?.(context)))?.sourceId
         if (!nativeSourceId) throw new AgentMuxError('The current native input source is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        const boundary = transportQualification?.protocolInput
+        beginPromptPreparationPhase(boundary, 'current-pane')
+        const observation = boundary?.preclaim?.observation
+        if (observation) observation.pane = { predicateEvaluations: 0, predicateEvaluationsCapped: false, lastPredicateResult: null,
+          frameObservedAt: null, outputThroughByte: null, geometryRevision: null,
+          evidenceGeneration: null, authoritative: null, completeFrameAvailable: null }
         await observePromptTransport(preparationSignal, () => this.deps.screenEvidence.wait(session, run.latestOutputBytes, false,
-          screen => Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(screen.snapshot(), 'native-steer') !== 'unavailable',
+          screen => {
+            const result = Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(screen.snapshot(), 'native-steer') !== 'unavailable'
+            const pane = observation?.pane
+            if (pane) {
+              // Align the last result and finite owner facts to this same predicate.
+              // The original requireCompleteFrame gate has already passed; no second snapshot.
+              pane.frameObservedAt = Date.now()
+              pane.outputThroughByte = screen.throughByte
+              pane.geometryRevision = screen.geometryRevision
+              pane.evidenceGeneration = this.deps.screenEvidence.generation(session.agentSessionId)
+              pane.authoritative = screen.authoritative
+              pane.completeFrameAvailable = true
+              if (pane.predicateEvaluations < 65_535) pane.predicateEvaluations++
+              else pane.predicateEvaluationsCapped = true
+              pane.lastPredicateResult = result
+            }
+            return result
+          },
           { timeoutMs: Math.max(1, remaining), requireCompleteFrame: true, signal: preparationSignal,
             timeoutMessage: 'The current native composer is unconfirmed; ordinary terminal input remains available.',
             terminalMessage: 'The original Agent Run ended before native steering.' }))
+        completePromptPreparationPhase(boundary)
         await verifyTransport(nativeSourceId, true)
         preparationSignal.throwIfAborted()
       } catch (error) {
@@ -904,6 +977,7 @@ export class AgentPromptSubmissionCoordinator {
         updatedAt: Date.now()
       }
     }
+    beginPromptPreparationPhase(transportQualification?.protocolInput, 'claim-entry')
     let current = await this.deps.updateExactAgentSession(
       session.agentSessionId, session.run, claimPromptReadiness
     )

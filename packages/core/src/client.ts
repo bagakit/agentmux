@@ -79,7 +79,15 @@ import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './ag
 import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
-import { AgentPromptSubmissionCoordinator, promptPreparationFailure, type AgentPromptTransportQualification, type AgentPromptProtocolInputBoundary } from './prompt-submission.js'
+import {
+  AgentPromptSubmissionCoordinator,
+  promptPreparationFailure,
+  beginPromptPreparationPhase,
+  completePromptPreparationPhase,
+  promptPreparationObservationDetail,
+  type AgentPromptTransportQualification,
+  type AgentPromptProtocolInputBoundary
+} from './prompt-submission.js'
 import {
   CTXMUX_COMMIT,
   CTXMUX_VERSION,
@@ -4443,7 +4451,11 @@ export class AgentMuxClient {
       throw error
     }
     try {
-      if (transportQualification) protocolInput.preclaim = { interruption: new Error('Read-only input preparation yielded for its terminal protocol ACK.'), claimStarted: false }
+      if (transportQualification) protocolInput.preclaim = {
+        interruption: new Error('Read-only input preparation yielded for its terminal protocol ACK.'), claimStarted: false,
+        observation: { phase: 'input-lane', phaseEnteredAt: Date.now(), lastCompletedPhase: null,
+          lastPhaseCompletedAt: null, deadline: transportQualification.deadline, pane: null }
+      }
       let delivered: AgentPromptMessageContent | undefined
       for (;;) {
         const renderObservation = new AbortController()
@@ -4453,11 +4465,13 @@ export class AgentMuxClient {
             let plan = ordinaryPlan
             if (questionReply) {
               let terminalScreen: AgentTerminalScreenSnapshot | undefined
+              beginPromptPreparationPhase(protocolInput, 'current-pane')
               await this.screenEvidence.wait(current, run.latestOutputBytes, false, screen => {
                 terminalScreen = screen.snapshot(); return true
               }, { timeoutMs: SESSION_HISTORY_TIMEOUT_MS, timeoutMessage: 'Question input surface is unconfirmed; ordinary terminal input remains available.',
                 terminalMessage: 'The original question Run ended.', requireCompleteFrame: true,
                 ...(input.signal ? { signal: input.signal } : {}) })
+              completePromptPreparationPhase(protocolInput)
               plan = provider.planPromptInput(outbound, { intent: 'question-reply', ...(terminalScreen ? { terminalScreen } : {}) })
             }
             const savedMessage = input.expectedFutureIntent ? current.futurePromptIntents?.[input.expectedFutureIntent.intentId]?.message : undefined
@@ -6344,6 +6358,7 @@ export class AgentMuxClient {
     // Transfer the original ACK observation synchronously, without an unobserved gap.
     onQueued?.(renderObservation)
     const previous = lane.tail
+    beginPromptPreparationPhase(protocolInput, 'input-lane')
     let result!: T
     const queued = previous.catch(() => {}).then(async () => {
       const session = this.requireAgentSession(agentSessionId)
@@ -6354,7 +6369,10 @@ export class AgentMuxClient {
       // later transport read can replace it with an unrelated connection error.
       if (protocolInput?.cancelled && protocolInput.preclaim && !protocolInput.preclaim.claimStarted &&
           renderObservation?.signal.aborted) throw promptPreparationFailure(protocolInput.cancelled)
+      completePromptPreparationPhase(protocolInput)
+      beginPromptPreparationPhase(protocolInput, 'current-run')
       const run = await this.requireCurrentAgentRun(session)
+      completePromptPreparationPhase(protocolInput)
       if (run.state.type !== 'running') {
         throw new AgentMuxError(
           'Agent Run exited before Input could be accepted.',
@@ -6372,7 +6390,7 @@ export class AgentMuxClient {
         const preclaim = protocolInput?.preclaim
         // Once claim starts, only its durable input receipt can describe the outcome.
         if (!preclaim || preclaim.claimStarted) return
-        const error = new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED')
+        const error = new AgentMuxError('Original input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED', promptPreparationObservationDetail(protocolInput))
         protocolInput!.cancelled ??= error
         renderObservation?.abort(protocolInput!.cancelled)
         reject(promptPreparationFailure(protocolInput!.cancelled))
