@@ -1,0 +1,1 @@
+Pinned official draw.io 32.4.1 viewer distribution. Extracted without modification from draw.war; manifest.json records each original file hash. Apache-2.0 LICENSE and original img/shapes/stencils LICENSE restrictions are retained. Only this subset is shipped; no hosted viewer fallback.
