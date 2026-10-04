@@ -1,4 +1,4 @@
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { workspaceFileFormat, WORKSPACE_SOURCE_LANGUAGE_IDS } from '../../../shared/workspace-file-format'
 import { workspaceFileExtension } from '../../../shared/workspace-file-preview'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
@@ -51,7 +51,9 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   '.ps1': 'powershell',
   '.yaml': 'yaml',
   '.yml': 'yaml',
-  '.toml': 'ini',
+  '.toml': 'toml',
+  '.tex': 'latex',
+  '.typ': 'typst',
   '.ini': 'ini',
   '.cfg': 'ini',
   '.conf': 'ini',
@@ -91,7 +93,7 @@ const FILENAME_TO_LANGUAGE: Record<string, string> = {
 }
 
 export const DETECTABLE_LANGUAGE_IDS = Object.freeze(
-  [...new Set([...Object.values(EXT_TO_LANGUAGE), ...Object.values(FILENAME_TO_LANGUAGE), 'plaintext'])]
+  [...new Set([...Object.values(EXT_TO_LANGUAGE), ...Object.values(FILENAME_TO_LANGUAGE), ...WORKSPACE_SOURCE_LANGUAGE_IDS, 'plaintext'])]
     .sort()
 )
 

@@ -3,7 +3,7 @@ import { useDeferredValue, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, ChevronsUpDown, Search } from 'lucide-react'
 import type { Node } from 'jsonc-parser'
 import { readJsonPreview } from '../lib/file-json-preview'
-import { readDelimitedPreview } from '../lib/file-delimited-preview'
+import { readDelimitedPreview, type DelimitedDialect } from '../lib/file-delimited-preview'
 import { FilePreviewState } from './FilePreviewState'
 import '../styles/file-data-preview.css'
 
@@ -45,7 +45,8 @@ function JsonContent({ content, comments }: { content: string; comments: boolean
 }
 
 function DelimitedContent({ content, delimiter }: { content: string; delimiter: ',' | '\t' }) {
-  const parsed = useMemo(() => readDelimitedPreview(content, delimiter), [content, delimiter])
+  const [dialect, setDialect] = useState<DelimitedDialect>(delimiter === '\t' ? '\t' : 'auto')
+  const parsed = useMemo(() => readDelimitedPreview(content, dialect), [content, dialect])
   const [header, setHeader] = useState(true)
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase())
@@ -62,6 +63,9 @@ function DelimitedContent({ content, delimiter }: { content: string; delimiter: 
   const labels = header ? parsed.rows[0]! : []
   return <section className="file-data-preview file-data-preview--table" aria-label={delimiter === '\t' ? 'TSV preview' : 'CSV preview'}>
     <div className="file-data-preview__bar">
+      <label>Separator <select aria-label="Table separator" value={dialect} onChange={event => { setDialect(event.target.value as DelimitedDialect); setPage(0) }}>
+        <option value="auto">Auto</option><option value=",">Comma</option><option value=";">Semicolon</option><option value={'\t'}>Tab</option><option value="|">Pipe</option>
+      </select></label>
       <label className="file-data-preview__search"><Search size={12} aria-hidden="true" /><TextInput aria-label="Filter table rows" placeholder="Filter rows" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
       <button className="small-button" aria-pressed={header} onClick={() => { setHeader(value => !value); setPage(0) }}><ChevronsUpDown size={12} />Header row</button>
     </div>

@@ -11,6 +11,7 @@ import { registerAstroLanguage } from './lib/monaco-languages/register-astro'
 import { registerJsonlLanguage } from './lib/monaco-languages/register-jsonl'
 import { registerSvelteLanguage } from './lib/monaco-languages/register-svelte'
 import { registerVueLanguage } from './lib/monaco-languages/register-vue'
+import { registerFileFormatLanguages } from './lib/monaco-languages/register-file-formats'
 
 self.MonacoEnvironment = {
   getWorker(_moduleId, label) {
@@ -26,6 +27,7 @@ registerVueLanguage(monaco)
 registerSvelteLanguage(monaco)
 registerAstroLanguage(monaco)
 registerJsonlLanguage(monaco)
+registerFileFormatLanguages(monaco)
 
 const unregisteredDetectedLanguages = getUnregisteredDetectedLanguageIds(
   monaco.languages.getLanguages().map((language) => language.id)
