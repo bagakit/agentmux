@@ -487,7 +487,7 @@ export function removeSessionProjection(
  * 启动那侧对同一个候选是「保留 + 恢复」，两侧必须对同一个 Core 概念给出同一个语义。
  */
 export function runtimeSnapshotHostUnavailable(snapshot: RuntimeSnapshot, hostId: string): boolean {
-  return (snapshot.runtimeEndpointWarnings ?? []).some((warning) => warning.hostId === hostId && warning.availability !== 'connected')
+  return (snapshot.runtimeEndpointWarnings ?? []).some((warning) => warning.scope !== 'observation' && warning.hostId === hostId && warning.availability !== 'connected')
 }
 
 /** Availability is a display projection. It never replaces cached Run/native facts or their clocks. */
@@ -495,7 +495,7 @@ export function projectRuntimeEndpointSessions(
   sessions: SessionSnapshot[],
   warnings: RuntimeEndpointWarning[] | undefined
 ): SessionSnapshot[] {
-  const unavailable = new Map((warnings ?? []).filter(warning => warning.availability !== 'connected').map(warning => [warning.hostId, warning]))
+  const unavailable = new Map((warnings ?? []).filter(warning => warning.scope !== 'observation' && warning.availability !== 'connected').map(warning => [warning.hostId, warning]))
   if (unavailable.size === 0) return sessions
   let changed = false
   const projected = sessions.map(session => {
@@ -565,7 +565,8 @@ export function reduceAgentMembershipSnapshot(
  */
 export function reduceTerminalMembershipSnapshot(
   state: SessionProjectionState,
-  snapshot: RuntimeSnapshot
+  snapshot: RuntimeSnapshot,
+  protectedSessionIds: ReadonlySet<string> = new Set()
 ): SessionProjectionState {
   if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) return state
 
@@ -587,7 +588,7 @@ export function reduceTerminalMembershipSnapshot(
     // cannot authorize its removal merely because an unrelated local snapshot is nonempty.
     const ownerUnconfirmed = previous ? runtimeSnapshotHostUnavailable(snapshot, previous.hostId)
       : (snapshot.runtimeEndpointWarnings ?? []).some(warning => warning.availability !== 'connected')
-    if (!ownerUnconfirmed && !canonicalIds.has(sessionId)) projected = removeSessionProjection(projected, sessionId)
+    if (!ownerUnconfirmed && !protectedSessionIds.has(sessionId) && !canonicalIds.has(sessionId)) projected = removeSessionProjection(projected, sessionId)
   }
 
   const canonicalById = new Map(canonicalTerminals.map((session) => [session.id, session]))

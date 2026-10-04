@@ -20,7 +20,8 @@ import {
   type AgentMuxAgentSession,
   type AgentMuxAgentContinuityResult,
   type AgentMuxAgentSessionStore,
-  type AgentMuxRuntimeProjection
+  type AgentMuxRuntimeProjection,
+  type AgentSessionHistoryDescriptor
 } from '@agentmux/core'
 // 衰减判据从 core 的 node-free 子路径取，而不是在测试里手抄阈值：阈值刻意不导出（它没有产品
 // 调用方），所以「带回的时刻对不对」只能由 core 自己回答。
@@ -224,7 +225,7 @@ const runtimeFixture = vi.hoisted(() => {
         return { catalog: { capabilities } }
       })
     }
-    readonly sessionHistorySources = vi.fn(async () => [])
+    readonly sessionHistorySources = vi.fn(async (): Promise<AgentSessionHistoryDescriptor[]> => [])
     readonly runtimeProjection = vi.fn(async (): Promise<AgentMuxRuntimeProjection> => ({ hostId: 'fixture', subjects: [] }))
     readonly runtimeSubject = vi.fn(async (target: { kind: 'agent-session' | 'terminal-run'; agentSessionId?: string; runId?: string }) => {
       const projection = await this.runtimeProjection()
@@ -465,6 +466,164 @@ describe('RuntimeController configuration transaction', () => {
       await controller.write({ kind: 'terminal', hostId: 'local', runId: 'healthy-terminal', run: { runId: 'healthy-terminal' } }, 'Still working', 'user')
       expect(client.writeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: 'healthy-terminal' }, expect.objectContaining({ data: 'Still working' }))
     } finally { await controller.dispose() }
+  })
+
+  it('isolates a failed first Host Provider observation and keeps the other Host catalog and input', async () => {
+    const controller = await configuredController()
+    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const [first, healthy] = runtimeFixture.FakeClient.instances
+    const failure = new AgentMuxError('Original Provider RPC ended before response.', 'CONTROL_UNAVAILABLE')
+    const catalog = new AgentProviderRegistry().catalog()
+    first!.connect.mockRejectedValue(failure)
+    healthy!.providers.catalog.mockReturnValue(catalog)
+    const originalHost = controller.executionHost('remote'), originalSession = healthy!.agentSession()
+    try {
+      await expect(controller.providerCatalog()).resolves.toEqual(catalog)
+      expect(catalog.length).toBeGreaterThan(0)
+      expect(first!.providers.catalog).not.toHaveBeenCalled()
+      expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ hostId: 'local',
+        step: 'Reading Provider catalog', availability: 'unverified', message: failure.message }))
+      expect(controller.executionHost('remote')).toBe(originalHost)
+      expect(healthy!.agentSession()).toEqual(originalSession)
+      healthy!.listRuns.mockResolvedValue([{ runId: 'original-healthy-run', acceptedInputBytes: 0 }])
+      await controller.write({ kind: 'terminal', hostId: 'remote', runId: 'original-healthy-run',
+        run: { runId: 'original-healthy-run' } }, 'original healthy input', 'user')
+      expect(healthy!.writeTerminal).toHaveBeenCalledExactlyOnceWith({ runId: 'original-healthy-run' },
+        expect.objectContaining({ data: 'original healthy input' }))
+      for (const client of [first!, healthy!]) {
+        expect(client.dispose).not.toHaveBeenCalled(); expect(client.stopAgent).not.toHaveBeenCalled()
+        expect(client.stopTerminal).not.toHaveBeenCalled()
+      }
+    } finally { await controller.dispose() }
+  })
+
+  it('isolates retained History observations without requiring a Runtime connection', async () => {
+    const controller = await configuredController()
+    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const [healthy, failing] = runtimeFixture.FakeClient.instances
+    const history: AgentSessionHistoryDescriptor[] = [{ agentSessionId: 'original-retired', hostId: 'local', state: 'retired', retiredAt: 3 }]
+    healthy!.sessionHistorySources.mockResolvedValue(history)
+    failing!.sessionHistorySources.mockRejectedValue(new Error('The retained Store observation failed.'))
+    await vi.waitFor(() => expect(failing!.connected).toBe(true))
+    healthy!.connect.mockClear(); failing!.connect.mockClear()
+    try {
+      await expect(controller.sessionHistorySources({ observation: true })).resolves.toEqual({ sources: history,
+        warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', availability: 'connected' })] })
+      await expect(controller.sessionHistorySources()).rejects.toThrow('retained Store observation failed')
+      expect(healthy!.connect).not.toHaveBeenCalled(); expect(failing!.connect).not.toHaveBeenCalled()
+      expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ hostId: 'remote',
+        step: 'Reading retained History sources', availability: 'connected' }))
+      expect((await controller.snapshot(config)).runtimeEndpointWarnings).toContainEqual(expect.objectContaining({ hostId: 'remote',
+        step: 'Reading retained History sources', availability: 'connected' }))
+    } finally { await controller.dispose() }
+  })
+
+  it('keeps failed Provider and History steps independent until the exact observation succeeds', async () => {
+    const controller = await configuredController()
+    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const [, remote] = runtimeFixture.FakeClient.instances
+    await vi.waitFor(() => expect(remote!.connected).toBe(true))
+    remote!.providers.catalog.mockImplementation(() => { throw new Error('Provider bootstrap read failed') })
+    remote!.sessionHistorySources.mockRejectedValue(new Error('History Store read failed'))
+    try {
+      await controller.providerCatalog(); await controller.sessionHistorySources({ observation: true })
+      const warnings = () => controller.endpointWarningSnapshot().filter(warning => warning.hostId === 'remote')
+      expect(warnings().map(warning => [warning.step, warning.availability])).toEqual([
+        ['Reading Provider catalog', 'connected'], ['Reading retained History sources', 'connected']
+      ])
+      await controller.snapshot(config)
+      remote!.eventListener?.({ type: 'connection-state', state: 'restored' })
+      expect(warnings()).toHaveLength(2)
+      remote!.providers.catalog.mockReturnValue([])
+      await controller.providerCatalog()
+      expect(warnings().map(warning => warning.step)).toEqual(['Reading retained History sources'])
+      remote!.sessionHistorySources.mockResolvedValue([])
+      await controller.sessionHistorySources()
+      expect(warnings()).toEqual([])
+    } finally { await controller.dispose() }
+  })
+
+  it.each(['Provider', 'History'] as const)('reports an all-Host %s observation failure as the original error', async (step) => {
+    const controller = await configuredController()
+    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const [first, second] = runtimeFixture.FakeClient.instances
+    await vi.waitFor(() => expect(second!.connected).toBe(true))
+    const failure = new AgentMuxError('Original observation failure.', 'CONTROL_UNAVAILABLE')
+    for (const client of [first!, second!]) {
+      if (step === 'Provider') client.connect.mockRejectedValue(failure)
+      else client.sessionHistorySources.mockRejectedValue(failure)
+    }
+    try {
+      await expect(step === 'Provider' ? controller.providerCatalog() : controller.sessionHistorySources()).rejects.toBe(failure)
+      if (step === 'History') await expect(controller.sessionHistorySources({ observation: true })).rejects.toBe(failure)
+      else await expect(controller.providerCatalog({ observation: true })).rejects.toBe(failure)
+      expect(controller.endpointWarningSnapshot()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ hostId: 'local', message: failure.message }),
+        expect.objectContaining({ hostId: 'remote', message: failure.message })
+      ]))
+    } finally { await controller.dispose() }
+  })
+
+  it.each(['Provider', 'History'] as const)('rejects a retired Host %s observation without contaminating its replacement', async (step) => {
+    const controller = await configuredController()
+    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const original = runtimeFixture.FakeClient.instances[1]!
+    await vi.waitFor(() => expect(original.connected).toBe(true))
+    const observation = deferred<void>()
+    if (step === 'Provider') original.connect.mockImplementationOnce(async () => { await observation.promise })
+    else original.sessionHistorySources.mockImplementationOnce(async () => { await observation.promise; return [{ agentSessionId: 'retired-owner-data', hostId: 'local', state: 'active' }] })
+    const pending = step === 'Provider' ? controller.providerCatalog({ observation: true }) : controller.sessionHistorySources({ observation: true })
+    const changed: AppConfig = { ...config, hosts: [config.hosts[0]!, { ...remoteHost, hostname: 'replacement.example.test' }] }
+    try {
+      controller.commit(await controller.prepare(changed))
+      const replacement = runtimeFixture.FakeClient.instances[2]!
+      observation.resolve()
+      if (step === 'Provider') expect(await pending).toEqual({ catalog: [], warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
+      else expect(await pending).toEqual({ sources: [], warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
+      expect(original.providers.catalog).not.toHaveBeenCalled()
+      expect(controller.endpointWarningSnapshot().filter(warning => warning.hostId === 'remote')).toEqual([])
+      expect(replacement.sessionHistorySources).not.toHaveBeenCalled()
+      expect(replacement.providers.catalog).not.toHaveBeenCalled()
+    } finally { observation.resolve(); await pending.catch(() => {}); await controller.dispose() }
+  })
+
+  it.each(['Provider', 'History'] as const)('retains the successful Host and the read-cut warning when a completed %s owner is replaced', async (step) => {
+    const controller = await configuredController()
+    const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
+    controller.commit(await controller.prepare(config))
+    const [waiting, completed] = runtimeFixture.FakeClient.instances
+    await vi.waitFor(() => expect(completed!.connected).toBe(true))
+    const release = deferred<void>()
+    const registry = new AgentProviderRegistry().catalog()
+    const retainedProvider = registry.filter(entry => entry.id === 'claude'), oldProvider = registry.filter(entry => entry.id === 'codex')
+    if (step === 'Provider') {
+      waiting!.connect.mockImplementationOnce(async () => { await release.promise })
+      waiting!.providers.catalog.mockReturnValue(retainedProvider)
+      completed!.providers.catalog.mockReturnValue(oldProvider)
+    } else {
+      waiting!.sessionHistorySources.mockImplementationOnce(async () => { await release.promise; return [{ agentSessionId: 'retained-cut', hostId: 'local', state: 'active' }] })
+      completed!.sessionHistorySources.mockResolvedValue([{ agentSessionId: 'old-owner-data', hostId: 'local', state: 'active' }])
+    }
+    const pending = step === 'Provider' ? controller.providerCatalog({ observation: true }) : controller.sessionHistorySources({ observation: true })
+    try {
+      await vi.waitFor(() => expect(step === 'Provider' ? completed!.providers.catalog : completed!.sessionHistorySources).toHaveBeenCalledOnce())
+      controller.commit(await controller.prepare({ ...config, hosts: [config.hosts[0]!, { ...remoteHost, hostname: 'replacement.example.test' }] }))
+      // A fresh read has already confirmed the replacement. The older cut cannot overwrite it.
+      if (step === 'Provider') await controller.providerCatalog()
+      else await controller.sessionHistorySources()
+      release.resolve()
+      const cut = await pending
+      if (step === 'Provider') {
+        expect(cut).toEqual({ catalog: retainedProvider, warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
+      } else expect(cut).toEqual({ sources: [{ agentSessionId: 'retained-cut', hostId: 'local', state: 'active' }],
+        warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
+      expect(controller.endpointWarningSnapshot().filter(warning => warning.hostId === 'remote')).toEqual([])
+    } finally { release.resolve(); await pending.catch(() => {}); await controller.dispose() }
   })
 
   it('prepares the changed Host projection before commit and confirms its endpoint in the background', async () => {

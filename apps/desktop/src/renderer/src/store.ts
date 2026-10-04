@@ -420,8 +420,10 @@ export type ErrorNoticeContext = {
   startupSessionSnapshot?: {
     sessionIds: readonly string[]
     remainingMessage: string | null
-    missingRuntimeFacts?: true
+    failureMessage?: string
   }
+  /** The original Provider read owns its retry and may settle only this warning. */
+  startupProviderCatalog?: { warningMessage: string }
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -1782,7 +1784,7 @@ type SessionMembershipEventBuffer = {
   // volume or historical Run generations. Timeline mutations need their canonical reader.
   retainedFacts: Map<string, BufferedSessionEvent>
   timelineGaps: Set<string>
-  endpointWarnings: Map<string, { warning: RuntimeEndpointWarning | null; restored: boolean }>
+  endpointWarnings: Map<string, { hostId: string; warning: RuntimeEndpointWarning | null; restored: boolean }>
   overflowed: boolean
   sequence: number
 }
@@ -1793,6 +1795,7 @@ type SessionMembershipResync = SessionMembershipEventBuffer & {
   cancelDelay: (() => void) | null
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
+const MAX_STARTUP_OBSERVATION_ATTEMPTS = 4
 let regionCaretFocusNonce = 0
 let sessionMembershipResync: SessionMembershipResync | null = null
 let runtimeSubscriptionCount = 0
@@ -1813,8 +1816,9 @@ function enqueueSessionMembershipEvent(
   event: RuntimeEvent,
   pendingLaunchAgentSessionId: string | null = null
 ): void {
-  if (event.endpointWarning !== undefined) entry.endpointWarnings.set(event.hostId, {
-    warning: event.endpointWarning, restored: event.event.type === 'connection-state' && event.event.state === 'restored'
+  if (event.endpointWarning !== undefined) entry.endpointWarnings.set(JSON.stringify([event.hostId,
+    event.endpointWarning?.scope === 'observation' ? event.endpointWarning.step : null]), {
+    hostId: event.hostId, warning: event.endpointWarning, restored: event.event.type === 'connection-state' && event.event.state === 'restored'
   })
   entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence })
   if (entry.events.length <= MAX_SESSION_MEMBERSHIP_EVENTS) return
@@ -1859,44 +1863,108 @@ function delaySessionMembershipRead(entry: SessionMembershipResync, milliseconds
   })
 }
 
-function runtimeEndpointWarningsAfterEvent(
-  warnings: RuntimeEndpointWarning[] | undefined, event: RuntimeEvent
+function runtimeEndpointWarningsAfterObservation(
+  warnings: RuntimeEndpointWarning[] | undefined, hostId: string, warning: RuntimeEndpointWarning | null | undefined
 ): RuntimeEndpointWarning[] | undefined {
-  if (event.endpointWarning === undefined) return warnings
-  const retained = (warnings ?? []).filter((warning) => warning.hostId !== event.hostId)
-  return event.endpointWarning === null ? retained : [...retained, event.endpointWarning]
+  if (warning === undefined) return warnings
+  const retained = (warnings ?? []).filter(previous => previous.hostId !== hostId || (warning?.scope === 'observation'
+    ? previous.scope !== 'observation' || previous.step !== warning.step : previous.scope === 'observation'))
+  return warning === null ? retained : [...retained, warning]
 }
 
-function startupSnapshotConfirmsSessions(
-  snapshot: RuntimeSnapshot, sessionIds: readonly string[], tabs: PersistedWorkbench['tabs'], config: AppConfig | null
-): boolean {
-  const originalRegions = coreSpatialPersistence?.current?.graph.regions
-  if (sessionIds.length === 0 || !config || !originalRegions) return false
-  const canonicalByIdentity = new Map(snapshot.sessions.map(session => [JSON.stringify([session.hostId, session.id]), session]))
-  return sessionIds.every((id) => {
-    const references = Object.values(tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface =>
-      (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === id ? [{ tab, surface }] : []))
-    return references.length > 0 && references.every(({ tab, surface }) => {
-      const original = originalRegions.find(region => region.tabId === tab.id && region.regionId === surface.regionId &&
-        region.kind === surface.kind && (surface.kind === 'agent' ? region.agentSessionId === id : region.runId === id))
-      // Display moves may change Workspace/Host. Only the original Core Region's
-      // execution fact identifies this Session; Native launch ownership is separate.
-      const hostId = original?.execution?.hostId
-      if (!hostId || !config.hosts.some(host => host.id === hostId)) return false
-      const session = canonicalByIdentity.get(JSON.stringify([hostId, id]))
-      return session?.kind === surface.kind && !runtimeSnapshotHostUnavailable(snapshot, hostId)
-    })
-  })
+function originalSavedSessionExecutions(tabs: PersistedWorkbench['tabs'], config: AppConfig | null): Map<string, { kind: SessionSnapshot['kind']; hostId: string } | null> {
+  // These indexes live only for this observation. Read original Core occurrences
+  // once, rather than rescan every saved Region for each Runtime fact.
+  const regions = new Map((coreSpatialPersistence?.current?.graph.regions ?? []).map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
+  const hosts = new Set(config?.hosts.map(host => host.id))
+  const references = new Map<string, { kind: SessionSnapshot['kind']; hostId: string } | null>()
+  for (const tab of Object.values(tabs)) for (const surface of workbenchSurfaces(tab)) {
+    if (surface.kind !== 'agent' && surface.kind !== 'terminal') continue
+    const original = regions.get(JSON.stringify([tab.id, surface.regionId]))
+    const matches = original?.kind === surface.kind && (surface.kind === 'agent'
+      ? original.agentSessionId === surface.sessionId : original.runId === surface.sessionId)
+    const hostId = matches ? original.execution?.hostId : undefined
+    let execution = hostId && hosts.has(hostId) ? { kind: surface.kind, hostId } : null
+    const prior = references.get(surface.sessionId)
+    // Every saved occurrence must agree; a missing fact or another Host cannot
+    // borrow the first occurrence's execution identity.
+    if (references.has(surface.sessionId) && (!prior || !execution || prior.kind !== execution.kind || prior.hostId !== execution.hostId)) execution = null
+    references.set(surface.sessionId, execution)
+  }
+  return references
+}
+
+function startupSnapshotForSavedReferences(snapshot: RuntimeSnapshot, tabs: PersistedWorkbench['tabs'], config: AppConfig | null): { snapshot: RuntimeSnapshot; rejectedSavedIds: Set<string> } {
+  const references = originalSavedSessionExecutions(tabs, config)
+  const rejectedSavedIds = new Set<string>()
+  if (!references.size) return { snapshot, rejectedSavedIds }
+  // Keep unrelated new Sessions. A same-ID fact can bind a saved Region only if
+  // every original occurrence has this exact kind and Core execution Host.
+  const accepts = (kind: SessionSnapshot['kind'], hostId: string, id: string) => {
+    const execution = references.get(id)
+    const keep = !references.has(id) || execution?.kind === kind && execution.hostId === hostId
+    if (!keep) rejectedSavedIds.add(id)
+    return keep
+  }
+  const sessions = snapshot.sessions.filter(session => accepts(session.kind, session.hostId, session.id))
+  const recoveryCandidates = snapshot.recoveryCandidates.filter(candidate => accepts('agent', candidate.hostId, candidate.agentSessionId))
+  // Timelines are keyed only by SID. If another Host supplied the same SID in
+  // this cut, its timeline cannot be attributed to the original execution.
+  return { snapshot: { ...snapshot,
+    sessions: sessions.filter(session => !rejectedSavedIds.has(session.id)),
+    recoveryCandidates: recoveryCandidates.filter(candidate => !rejectedSavedIds.has(candidate.agentSessionId)),
+    timelines: Object.fromEntries(Object.entries(snapshot.timelines).filter(([id]) => !rejectedSavedIds.has(id))) }, rejectedSavedIds }
+}
+
+function startupSnapshotConfirmedSessionIds(snapshot: RuntimeSnapshot, tabs: PersistedWorkbench['tabs'], config: AppConfig | null): Set<string> {
+  const references = originalSavedSessionExecutions(tabs, config), confirmed = new Set<string>()
+  for (const session of snapshot.sessions) {
+    const original = references.get(session.id)
+    if (original?.kind === session.kind && original.hostId === session.hostId && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)) confirmed.add(session.id)
+  }
+  for (const candidate of snapshot.recoveryCandidates) {
+    const original = references.get(candidate.agentSessionId)
+    // A trusted exact candidate confirms a durable Agent waiting for recovery,
+    // never a live Run or permission to execute. Terminal identity is separate.
+    if (original?.kind === 'agent' && original.hostId === candidate.hostId && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId)) confirmed.add(candidate.agentSessionId)
+  }
+  return confirmed
+}
+
+function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: readonly string[], tabs: PersistedWorkbench['tabs'], config: AppConfig | null): boolean {
+  const confirmed = startupSnapshotConfirmedSessionIds(snapshot, tabs, config)
+  return sessionIds.length > 0 && sessionIds.every(id => confirmed.has(id))
 }
 
 function retiredHistoryReferenceIds(sources: readonly AgentSessionHistoryDescriptor[], tabs: AppState['tabs'], config: AppConfig | null): Set<string> {
-  const retired = new Map(sources.filter(source => source.state === 'retired').map(source => [source.agentSessionId, source]))
-  return new Set(Object.values(tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => {
-    if (surface.kind !== 'agent') return []
-    const source = retired.get(surface.sessionId)
-    const hostId = config?.workspaces.find(workspace => workspace.id === surface.workspaceId)?.hostId
-    return source && source.hostId === hostId ? [surface.sessionId] : []
-  })))
+  const references = originalSavedSessionExecutions(tabs, config)
+  return new Set(sources.flatMap(source => {
+    const original = references.get(source.agentSessionId)
+    return source.state === 'retired' && original?.kind === 'agent' && original.hostId === source.hostId ? [source.agentSessionId] : []
+  }))
+}
+
+function runtimeEndpointWarningsAfterMetadataRead(warnings: RuntimeEndpointWarning[] | undefined, step: string, observed: RuntimeEndpointWarning[]): RuntimeEndpointWarning[] {
+  return [...(warnings ?? []).filter(warning => warning.scope !== 'observation' || warning.step !== step), ...observed]
+}
+
+function settleStartupProviderCatalog(entry: SessionMembershipResync, catalog: AppState['providerCatalog'], warnings: RuntimeEndpointWarning[]): void {
+  useAppStore.setState(state => {
+    const notice = entry.startupNotice, producer = notice?.startupProviderCatalog
+    const observed = { providerCatalog: catalog, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(state.runtimeEndpointWarnings, 'Reading Provider catalog', warnings) }
+    if (!notice || !producer || state.errorNoticeContext !== notice) return observed
+    const original = notice.startupSessionSnapshot?.remainingMessage ?? state.error
+    // This exact producer is recorded at initialization. Never use text matching
+    // to claim a later reportError or to clear an unrelated warning.
+    const remaining = original?.replace(producer.warningMessage, '').trim() || null
+    const { startupProviderCatalog: _settled, ...retained } = notice
+    const source = retained.startupSessionSnapshot
+    const updated = { ...retained, summary: startupNoticeSummary(remaining, source?.sessionIds.length ?? 0),
+      ...(source ? { startupSessionSnapshot: { ...source, remainingMessage: remaining } } : {}) }
+    entry.startupNotice = updated
+    const message = source ? [remaining, source.failureMessage, missingSavedRuntimeFactsNotice(source.sessionIds.length)].filter(Boolean).join(' ') : remaining
+    return { ...observed, error: message, lastError: message, errorNoticeContext: message ? updated : null }
+  })
 }
 
 /** Presentation of the original startup producer, never a second Runtime fact. */
@@ -1914,7 +1982,7 @@ function startSessionMembershipResync(
   options: { reportFailure?: boolean; recoverSavedAgents?: boolean; restoredHostId?: string } = {}
 ): void {
   const currentNotice = useAppStore.getState().errorNoticeContext
-  const startupNotice = currentNotice?.startupSessionSnapshot ? currentNotice : null
+  const startupNotice = currentNotice?.startupSessionSnapshot || currentNotice?.startupProviderCatalog ? currentNotice : null
   if (sessionMembershipResync) {
     sessionMembershipResync.recoverSavedAgents ||= options.recoverSavedAgents === true
     if (options.restoredHostId) sessionMembershipResync.restoredHostIds.add(options.restoredHostId)
@@ -1933,19 +2001,79 @@ function startSessionMembershipResync(
   if (event) enqueueSessionMembershipEvent(entry, event)
   sessionMembershipResync = entry
   let retryDelay = 50
+  let startupObservationAttempts = 0
+  let providerAttempts = 0
+  let historyAttempts = 0
+  let restoredProviderRead = false
   const attemptedStartupRecovery = new Set<string>()
   void (async () => {
     try {
       while (sessionMembershipResync === entry) {
+        const providerRestored = restoredProviderRead || entry.events.some(({ event }) => event.event.type === 'connection-state'
+          && event.event.state === 'restored' && useAppStore.getState().runtimeEndpointWarnings?.some(warning =>
+            warning.hostId === event.hostId && warning.scope === 'observation' && warning.step === 'Reading Provider catalog'))
+        restoredProviderRead = false
         // Everything already queued happened before this snapshot and is covered by its
         // canonical baseline. Only events that arrive while the snapshot is in flight
         // need ordered replay afterward.
         resetSessionMembershipRead(entry)
-        const snapshot = await api.sessions.snapshot()
+        const providerPending = entry.startupNotice?.startupProviderCatalog
+          && useAppStore.getState().errorNoticeContext === entry.startupNotice
+        if (entry.startupNotice && useAppStore.getState().errorNoticeContext === entry.startupNotice
+          && (entry.startupNotice.startupSessionSnapshot || providerPending)) startupObservationAttempts++
+        let snapshotResult: PromiseSettledResult<RuntimeSnapshot>
+        let providerRefreshed = false
+        let providerObservation: { warnings: RuntimeEndpointWarning[] } | undefined
+        const partialProviderPending = options.reportFailure === false && useAppStore.getState().runtimeEndpointWarnings?.some(warning =>
+          warning.scope === 'observation' && warning.step === 'Reading Provider catalog')
+        if (providerRestored || (providerPending || partialProviderPending) && providerAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS) {
+          providerAttempts++
+          const [runtime, catalog] = await Promise.allSettled([api.sessions.snapshot(), api.providers.list({ observation: true })])
+          snapshotResult = runtime
+          if (sessionMembershipResync !== entry) return
+          if (catalog.status === 'fulfilled') {
+            settleStartupProviderCatalog(entry, catalog.value.catalog, catalog.value.warnings)
+            providerObservation = catalog.value
+            providerRefreshed = true
+          }
+        } else {
+          // Keep the established healthy membership path to one await. A Provider
+          // retry adds concurrency only when that original observation failed.
+          try { snapshotResult = { status: 'fulfilled', value: await api.sessions.snapshot() } }
+          catch (reason) { snapshotResult = { status: 'rejected', reason } }
+        }
         if (sessionMembershipResync !== entry) return
+        if (snapshotResult.status === 'rejected') {
+          const ownsStartupNotice = entry.startupNotice && useAppStore.getState().errorNoticeContext === entry.startupNotice
+          if (ownsStartupNotice && startupObservationAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS) {
+            await delaySessionMembershipRead(entry, retryDelay)
+            retryDelay = Math.min(1000, retryDelay * 2)
+            continue
+          }
+          if (!ownsStartupNotice) throw snapshotResult.reason
+          return
+        }
+        const savedCut = startupSnapshotForSavedReferences(snapshotResult.value, useAppStore.getState().tabs, useAppStore.getState().config)
+        let snapshot = savedCut.snapshot
+        // An omitted diagnostic is not proof that its metadata producer succeeded.
+        // Preserve the prior cut until that exact reader returns its new receipt.
+        for (const warning of useAppStore.getState().runtimeEndpointWarnings ?? []) if (warning.scope === 'observation'
+          && !snapshot.runtimeEndpointWarnings?.some(current => current.scope === 'observation' && current.hostId === warning.hostId && current.step === warning.step)) {
+          snapshot = { ...snapshot, runtimeEndpointWarnings: [...snapshot.runtimeEndpointWarnings ?? [], warning] }
+        }
+        if (providerObservation) snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
+          snapshot.runtimeEndpointWarnings, 'Reading Provider catalog', providerObservation.warnings) }
         let historySources: readonly AgentSessionHistoryDescriptor[] = []
-        if (entry.startupNotice?.startupSessionSnapshot) {
-          try { historySources = await api.sessions.historySources() }
+        const restoredHistory = useAppStore.getState().runtimeEndpointWarnings?.some(warning => warning.scope === 'observation'
+          && warning.step === 'Reading retained History sources' && entry.restoredHostIds.has(warning.hostId))
+        if (entry.startupNotice?.startupSessionSnapshot || restoredHistory && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS) {
+          historyAttempts++
+          try {
+            const observed = await api.sessions.historySources({ observation: true })
+            historySources = observed.sources
+            snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
+              snapshot.runtimeEndpointWarnings, 'Reading retained History sources', observed.warnings) }
+          }
           catch { /* A failed metadata read cannot settle the original unknown-facts notice. */ }
         }
         if (sessionMembershipResync !== entry) return
@@ -1970,12 +2098,12 @@ function startSessionMembershipResync(
         const timelineGaps = new Set(entry.timelineGaps)
         entry.timelineGaps.clear()
         useAppStore.setState((state) => {
-          const protectedAgentSessionIds = new Set(events.flatMap((pending) => (
+          const protectedAgentSessionIds = new Set([...savedCut.rejectedSavedIds, ...events.flatMap((pending) => (
             pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId]
               : sessionEventAgentId(pending.event) ? [sessionEventAgentId(pending.event)!] : []
-          )))
+          ))])
           let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
-          projected = reduceTerminalMembershipSnapshot(projected, snapshot)
+          projected = reduceTerminalMembershipSnapshot(projected, snapshot, savedCut.rejectedSavedIds)
           for (const candidate of startupCandidates) {
             if (projected.sessions.some((session) => session.id === candidate.agentSessionId)) continue
             const decision = agentStartupRecoveryDecision({
@@ -2003,26 +2131,29 @@ function startSessionMembershipResync(
             membershipGap ||= pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored'
             if (reduced.timelineGapSessionId) timelineGaps.add(reduced.timelineGapSessionId)
           }
-          // The adopted canonical facts settle only the original empty-facts producer. Pending
-          // projections/candidates are not Session facts; an unrelated Host does not own this notice.
+          // Exact original live, pending and retired identities settle only this
+          // observation producer. An unrelated Host cannot confirm the reference.
           const notice = entry.startupNotice
           const source = notice?.startupSessionSnapshot
           let resolvedStartupNotice: Partial<AppState> = {}
-          if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0 && !readOverflowed) {
+          if (source && state.errorNoticeContext === notice && !readOverflowed) {
             const currentReferences = persistedSessionSurfaceIds(projectPersistedWorkbench(projected))
             const retiredReferences = retiredHistoryReferenceIds(historySources, projected.tabs, state.config)
-            const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id)
-              && !startupSnapshotConfirmsSessions(snapshot, [id], state.tabs, state.config))
+            const confirmedReferences = startupSnapshotConfirmedSessionIds(snapshot, state.tabs, state.config)
+            const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id) && !confirmedReferences.has(id))
             if (unresolved.length === 0) {
+              const { startupSessionSnapshot: _settled, ...retained } = notice
+              const updated = { ...retained, summary: startupNoticeSummary(source.remainingMessage) }
+              entry.startupNotice = updated
               resolvedStartupNotice = {
                 error: source.remainingMessage,
                 lastError: source.remainingMessage,
-                errorNoticeContext: source.remainingMessage ? { kind: 'indeterminate', summary: startupNoticeSummary(source.remainingMessage) } : null
+                errorNoticeContext: source.remainingMessage ? updated : null
               }
-            } else if (source.missingRuntimeFacts && unresolved.length !== source.sessionIds.length) {
+            } else if (unresolved.length !== source.sessionIds.length) {
               const updated = { ...notice, summary: startupNoticeSummary(source.remainingMessage, unresolved.length), startupSessionSnapshot: { ...source, sessionIds: unresolved } }
               entry.startupNotice = updated
-              const message = [source.remainingMessage, missingSavedRuntimeFactsNotice(unresolved.length)].filter(Boolean).join(' ')
+              const message = [source.remainingMessage, source.failureMessage, missingSavedRuntimeFactsNotice(unresolved.length)].filter(Boolean).join(' ')
               resolvedStartupNotice = { error: message, lastError: message, errorNoticeContext: updated }
             }
           }
@@ -2032,11 +2163,10 @@ function startSessionMembershipResync(
           }
           let runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
             pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
-              ? warnings : runtimeEndpointWarningsAfterEvent(warnings, pending.event), snapshot.runtimeEndpointWarnings ?? [])
-          for (const [hostId, { warning, restored }] of entry.endpointWarnings) {
+              ? warnings : runtimeEndpointWarningsAfterObservation(warnings, pending.event.hostId, pending.event.endpointWarning), snapshot.runtimeEndpointWarnings ?? [])
+          for (const { hostId, warning, restored } of entry.endpointWarnings.values()) {
             if (restored && warning === null) continue
-            runtimeEndpointWarnings = (runtimeEndpointWarnings ?? []).filter(item => item.hostId !== hostId)
-            if (warning) runtimeEndpointWarnings.push(warning)
+            runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(runtimeEndpointWarnings, hostId, warning)
           }
           entry.endpointWarnings.clear()
           return { ...reconciled, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
@@ -2064,7 +2194,7 @@ function startSessionMembershipResync(
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) {
           const current = useAppStore.getState(), session = current.sessions.find((item) => item.id === sessionId)
           if (session && restoredDuringRead.has(session.hostId)) continue
-          if (!session || current.runtimeEndpointWarnings?.some(warning => warning.hostId === session.hostId && warning.availability !== 'connected')) continue
+          if (!session || current.runtimeEndpointWarnings?.some(warning => warning.scope !== 'observation' && warning.hostId === session.hostId && warning.availability !== 'connected')) continue
           const pending = current.agentSteerQueues[sessionId]?.find((item) => !item.archived && !item.awaitingExplicitSend &&
             (item.runId === undefined || steerEntryTargetsRun(item, session.control.run.runId)))
           if (entry.restoredHostIds.has(session.hostId) && pending && pending.promptCondition !== null) {
@@ -2078,9 +2208,21 @@ function startSessionMembershipResync(
           void current.flushAgentSteerQueue(sessionId)
         }
         for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
+        restoredProviderRead = [...restoredDuringRead].some(hostId => useAppStore.getState().runtimeEndpointWarnings?.some(warning =>
+          warning.hostId === hostId && warning.scope === 'observation' && warning.step === 'Reading Provider catalog'))
         // Recovery above can publish events while its public API call is pending. Drain those
         // queued facts before releasing this resync owner, just as events during snapshot reads.
-        if (!membershipGap && entry.events.length === 0 && !entry.overflowed) return
+        const retryProvider = entry.startupNotice?.startupProviderCatalog
+          && useAppStore.getState().errorNoticeContext === entry.startupNotice
+          && providerAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS
+        const retryPartialProvider = options.reportFailure === false && providerAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS
+          && useAppStore.getState().runtimeEndpointWarnings?.some(warning => warning.scope === 'observation' && warning.step === 'Reading Provider catalog')
+        const retryStartupSnapshot = entry.startupNotice?.startupSessionSnapshot
+          && useAppStore.getState().errorNoticeContext === entry.startupNotice
+          && startupObservationAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS
+        const retryRestoredHistory = historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && useAppStore.getState().runtimeEndpointWarnings?.some(warning => warning.scope === 'observation'
+          && warning.step === 'Reading retained History sources' && entry.restoredHostIds.has(warning.hostId))
+        if (!membershipGap && entry.events.length === 0 && !entry.overflowed && !retryProvider && !retryPartialProvider && !retryStartupSnapshot && !retryRestoredHistory && !providerRefreshed && !restoredProviderRead) return
         // One owner/one read, with a yield and capped backoff under sustained pressure.
         await delaySessionMembershipRead(entry, retryDelay)
         retryDelay = Math.min(1000, retryDelay * 2)
@@ -3263,7 +3405,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const [configResult, initialSnapshotResult, providerCatalogResult, demandResult] = await Promise.allSettled([
         api.config.get(),
         api.sessions.snapshot(),
-        api.providers.list(),
+        api.providers.list({ observation: true }),
         api.demands.list()
       ])
       if (configResult.status === 'rejected') throw configResult.reason
@@ -3272,6 +3414,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? [],
         runtimeEndpointWarnings: initialSnapshotResult.value.runtimeEndpointWarnings ?? []
       })
+      if (providerCatalogResult.status === 'fulfilled') set(state => ({ runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
+        state.runtimeEndpointWarnings, 'Reading Provider catalog', providerCatalogResult.value.warnings) }))
       // 本机 home 从快照里学（渲染层没有 process/os）。拿不到就保留旧值——不缩写好过按空串猜边界。
       if (initialSnapshotResult.status === 'fulfilled' && initialSnapshotResult.value.localHome !== undefined) {
         set({ localHome: initialSnapshotResult.value.localHome })
@@ -3279,26 +3423,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const startupWarnings: string[] = []
       let emptySessionSnapshotWarning: string | null = null
       let missingRuntimeReferenceIds: string[] | null = null
+      let snapshotFailureMessage: string | undefined
+      let providerCatalogWarning: string | undefined
       let snapshot = initialSnapshotResult.status === 'fulfilled'
-        ? initialSnapshotResult.value
+        ? startupSnapshotForSavedReferences(initialSnapshotResult.value, get().restoredWorkbench?.tabs ?? {}, configResult.value).snapshot
         : emptyRuntimeSnapshot()
+      if (providerCatalogResult.status === 'fulfilled') snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
+        snapshot.runtimeEndpointWarnings, 'Reading Provider catalog', providerCatalogResult.value.warnings) }
       let snapshotVerified = initialSnapshotResult.status === 'fulfilled'
       if (initialSnapshotResult.status === 'rejected') {
-        startupWarnings.push(startupWorkflowWarning(
+        snapshotFailureMessage = startupWorkflowWarning(
           'Runtime Session snapshot',
           initialSnapshotResult.reason,
           'The saved Workbench remains visible; Session status will reconcile when the Runtime is available.'
-        ))
+        )
+        emptySessionSnapshotWarning = snapshotFailureMessage
       }
       const providerCatalog = providerCatalogResult.status === 'fulfilled'
-        ? providerCatalogResult.value
+        ? providerCatalogResult.value.catalog
         : []
       if (providerCatalogResult.status === 'rejected') {
-        startupWarnings.push(startupWorkflowWarning(
+        providerCatalogWarning = startupWorkflowWarning(
           'Provider catalog lookup',
           providerCatalogResult.reason,
-          'Existing Sessions remain usable; restart startup to restore Provider choices for new Agents.'
-        ))
+          'Existing Sessions remain usable; the original Provider directory will be checked automatically when its owner is available.'
+        )
+        startupWarnings.push(providerCatalogWarning)
       }
       if (demandResult.status === 'rejected') {
         startupWarnings.push(startupWorkflowWarning(
@@ -3313,7 +3463,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         try {
           const next = await api.sessions.snapshot()
           snapshotVerified = true
-          return next
+          return startupSnapshotForSavedReferences(next, get().restoredWorkbench?.tabs ?? {}, get().config ?? configResult.value).snapshot
         } catch (error) {
           snapshotVerified = false
           startupWarnings.push(startupWorkflowWarning(
@@ -3456,8 +3606,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         && hasAttachedSessionView(workbench.tabs, id))
       if (snapshotVerified && !emptySessionSnapshotWarning && unobservedSavedSessions.length > 0) {
         try {
-          const historySources = await api.sessions.historySources()
-          const retiredReferences = retiredHistoryReferenceIds(historySources, workbench.tabs, config)
+          const observed = await api.sessions.historySources({ observation: true })
+          snapshot = { ...snapshot, runtimeEndpointWarnings: runtimeEndpointWarningsAfterMetadataRead(
+            snapshot.runtimeEndpointWarnings, 'Reading retained History sources', observed.warnings) }
+          const retiredReferences = retiredHistoryReferenceIds(observed.sources, workbench.tabs, config)
           unobservedSavedSessions = unobservedSavedSessions.filter(id => !retiredReferences.has(id))
         } catch (error) {
           startupWarnings.push(startupWorkflowWarning('Saved conversation metadata', error,
@@ -3516,10 +3668,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         errorNoticeContext: startupError ? {
           kind: 'indeterminate',
           summary: startupNoticeSummary(otherStartupError || null, emptySessionSnapshotWarning ? (missingRuntimeReferenceIds ?? [...persistedSessionIds]).length : 0),
+          ...(providerCatalogWarning ? { startupProviderCatalog: { warningMessage: providerCatalogWarning } } : {}),
           ...(emptySessionSnapshotWarning ? { startupSessionSnapshot: {
             sessionIds: missingRuntimeReferenceIds ?? [...persistedSessionIds],
             remainingMessage: otherStartupError || null,
-            ...(missingRuntimeReferenceIds ? { missingRuntimeFacts: true as const } : {})
+            ...(snapshotFailureMessage ? { failureMessage: snapshotFailureMessage } : {})
           } } : {})
         } : null,
         errorDismissed: false
@@ -3529,16 +3682,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       booting = false
       for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
       for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
-      for (const [hostId, { warning }] of pendingSessionEvents.endpointWarnings) {
+      for (const { hostId, warning } of pendingSessionEvents.endpointWarnings.values()) {
         set(state => {
-          const warnings = (state.runtimeEndpointWarnings ?? []).filter(item => item.hostId !== hostId)
-          if (warning) warnings.push(warning)
+          const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, hostId, warning)
           return { runtimeEndpointWarnings: warnings, sessions: projectRuntimeEndpointSessions(state.sessions, warnings) }
         })
       }
-      if (pendingSessionEvents.overflowed || !snapshotVerified || emptySessionSnapshotWarning) {
-        startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: !snapshotVerified || Boolean(emptySessionSnapshotWarning) })
-      }
+      // Catalog observations may finish after the initial Runtime cut. Read their
+      // current diagnostics through the same reader after publishing the workface;
+      // a successful catalog does not broaden recovery authorization.
+      startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: !snapshotVerified || Boolean(emptySessionSnapshotWarning) })
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
@@ -8472,7 +8625,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
           if (session?.kind !== 'agent') { refuseSelections('UNKNOWN_AGENT_SESSION', 'The original Agent Session disappeared before queue dispatch.'); return }
           const sessionHostId = session.hostId
-          const endpointIssue = state.runtimeEndpointWarnings?.find(warning => warning.hostId === sessionHostId && warning.availability !== 'connected')
+          const endpointIssue = state.runtimeEndpointWarnings?.find(warning => warning.scope !== 'observation' && warning.hostId === sessionHostId && warning.availability !== 'connected')
           if (endpointIssue && drain.explicitSteers.size === 0) { refuseSelections('CONTROL_UNAVAILABLE', `Original Host ${sessionHostId} endpoint is ${endpointIssue.availability}: ${endpointIssue.message}`); return }
           const currentRunId = session.control.run.runId
           const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
@@ -9043,7 +9196,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
     const core = event.event
     if (event.endpointWarning !== undefined && !(core.type === 'connection-state' && core.state === 'restored' && event.endpointWarning === null)) set((state) => {
-      const runtimeEndpointWarnings = runtimeEndpointWarningsAfterEvent(state.runtimeEndpointWarnings, event)
+      const runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
     })
     if (core.type === 'connection-state' && core.state === 'restored') {

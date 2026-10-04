@@ -19,6 +19,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import type { Root } from 'react-dom/client'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
+import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 
 const initial = useAppStore.getState(), id = 'original-session'
 const endpoint: RuntimeEndpointWarning = { hostId: 'local', availability: 'unverified', step: 'Confirming semantic Host',
@@ -41,8 +42,8 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); useAppStore.setState(initial, true); releases = []
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader()); vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: id, source: { providerId: 'codex', nativeSessionId: 'fixture-native' }, items: [], nextCursor: null })
   vi.spyOn(api.sessions, 'timeline').mockResolvedValue({ agentSessionId: id, revision: 0, items: [] })
   directory = await mkdtemp(join(tmpdir(), 'agentmux-owner-warning-'))
@@ -90,7 +91,7 @@ describe('actual canonical restore consumers with cleanup provenance warning', (
 
   it('a late canonical cut projects honest pending detail and requests original recovery despite cleanup warning', async () => {
     const later = deferred<RuntimeSnapshot>(), recovery = deferred<Awaited<ReturnType<typeof api.sessions.recover>>>()
-    releases.push(() => later.resolve(empty()), () => recovery.resolve({ kind: 'unavailable', reason: 'native-handle-unavailable', agentSessionId: id, previousRun: { runId: `run-${id}` } }))
+    releases.push(() => later.resolve(empty()), () => recovery.resolve({ kind: 'unavailable', reason: 'native-handle-unavailable', agentSessionId: id, previousRun: { runId: `run-${id}` }, evidence: { kind: 'run-ended', state: 'exited', observedAt: Date.now() } }))
     vi.spyOn(api.sessions, 'snapshot').mockResolvedValueOnce(empty()).mockReturnValue(later.promise)
     const recover = vi.spyOn(api.sessions, 'recover').mockReturnValue(recovery.promise)
     dispose = await useAppStore.getState().initialize()
@@ -101,7 +102,7 @@ describe('actual canonical restore consumers with cleanup provenance warning', (
     expect(projected.status.detail).toContain('The Agent is not running')
     expect(recover).toHaveBeenCalledOnce(); expect(recover.mock.calls[0]![0]).toEqual(recent().control)
     expect(recover.mock.calls[0]![1]).toBe(_hygiene_fixturePath("repo")); retained()
-    recovery.resolve({ kind: 'unavailable', reason: 'native-handle-unavailable', agentSessionId: id, previousRun: recent().control.run }); await ticks()
+    recovery.resolve({ kind: 'unavailable', reason: 'native-handle-unavailable', agentSessionId: id, previousRun: recent().control.run, evidence: { kind: 'run-ended', state: 'exited', observedAt: Date.now() } }); await ticks()
     expect(useAppStore.getState().sessions[0]?.status.continuityReason).toBe('native-handle-unavailable')
     expect(useAppStore.getState().sessions[0]?.control).toEqual(recent().control)
   })
@@ -119,7 +120,7 @@ describe('actual canonical restore consumers with cleanup provenance warning', (
   it('SessionPane uses actual Host availability for detail while its manual Resume invokes original Store recovery independently', async () => {
     useAppStore.setState({ loading: false, sessions: [recent()], tabs: original.tabs, layouts: original.layouts,
       runtimeOwnershipWarnings: ['local'], runtimeEndpointWarnings: [], recoveryCandidates: [], timelines: {} })
-    const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'unavailable', reason: 'native-handle-unavailable', agentSessionId: id, previousRun: recent().control.run })
+    const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'unavailable', reason: 'native-handle-unavailable', agentSessionId: id, previousRun: recent().control.run, evidence: { kind: 'run-ended', state: 'exited', observedAt: Date.now() } })
     const read = vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...empty(), sessions: [recent()] })
     await mount()
     expect(container.textContent).not.toContain('Runtime identity is unverified')

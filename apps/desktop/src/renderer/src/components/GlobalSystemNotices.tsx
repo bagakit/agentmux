@@ -107,7 +107,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
   const sessionNotices: ServiceNoticeItem[] = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id],
     { message: lifecycleMessage, failure: lifecycleFailure })
-    .filter(item => item.id !== 'connection' || !(endpointWarnings ?? []).some(warning => warning.hostId === session.hostId && warning.availability !== 'connected'))
+    .filter(item => item.id !== 'connection' || !(endpointWarnings ?? []).some(warning => warning.scope !== 'observation' && warning.hostId === session.hostId && warning.availability !== 'connected'))
     .map(item => ({ ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
       action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } })))
   if (lifecycleMessage && lifecycleFailure?.step === 'launch') sessionNotices.push({

@@ -2,9 +2,9 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
 import {expect,it,vi} from 'vitest'
-import {AgentMuxMemoryAgentSessionStore,type AgentMuxClient,type AgentSessionHistoryPage,type AgentSessionHistoryObservationHandle} from '@agentmux/core'
+import {AgentMuxMemoryAgentSessionStore,loadSessionHistorySources,AgentProviderRegistry,type AgentMuxClient,type AgentSessionHistoryPage,type AgentSessionHistoryObservationHandle} from '@agentmux/core'
 import type {BrowserWindow,IpcMainInvokeEvent} from 'electron'
-import type {AgentMuxPreloadApi,AgentSessionControl,AppConfig} from '../src/shared/contracts'
+import type {AgentMuxPreloadApi,AgentSessionControl,AppConfig,RuntimeEndpointWarning} from '../src/shared/contracts'
 import {SESSION_HISTORY_OBSERVATION_CHANNEL} from '../src/shared/contracts'
 import type {ConfigStore} from '../src/main/config-store'
 import type {ScratchTopics} from '../src/main/scratch-topics'
@@ -14,7 +14,7 @@ const preload=vi.hoisted(()=>({api:null as AgentMuxPreloadApi|null,invoke:vi.fn(
 vi.mock('electron',()=>({
  contextBridge:{exposeInMainWorld:(_name:string,api:AgentMuxPreloadApi)=>{preload.api=api}},
  ipcRenderer:{invoke:preload.invoke,on:(channel:string,listener:Function)=>preload.receivers.set(channel,listener),removeListener:(channel:string,listener:Function)=>{if(preload.receivers.get(channel)===listener)preload.receivers.delete(channel)},off:vi.fn(),send:vi.fn()},webFrame:{getZoomFactor:()=>1},
- app:{getPath:()=>_hygiene_fixturePath("isolated-history-ipc-test")},
+ app:{getPath:()=>_hygiene_fixturePath("isolated-history-ipc-test"),getAppPath:()=>_hygiene_fixturePath("isolated-history-ipc-test"),isPackaged:false},
  ipcMain:{handle:(channel:string,handler:Function)=>preload.handlers.set(channel,handler),removeHandler:(channel:string)=>preload.handlers.delete(channel),on:vi.fn(),removeListener:vi.fn()},
  clipboard:{},dialog:{},nativeImage:{},shell:{}
 }))
@@ -38,8 +38,11 @@ async function owner(){
  workspacePath:_hygiene_fixturePath("synthetic"),run:control.run,retiredRuns:[],hookBindingId:'private-binding',hookToken:'private-token',createdAt:1,updatedAt:1,
  nativeHandle:{kind:'provider',providerId:'codex',sessionId:'native-main'}})
  const controller=new RuntimeController(store, localRuntimeConnector)
- const client={observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
- controller.commit({hosts:[{id:control.hostId,client:client as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ const client={providers:new AgentProviderRegistry(),sessionHistorySources:vi.fn(async()=>loadSessionHistorySources(store)),observeSessionHistory:vi.fn(),sessionHistoryPage:vi.fn().mockResolvedValue(page),writeAgent:vi.fn().mockResolvedValue(undefined),connect:vi.fn().mockResolvedValue(undefined),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn().mockResolvedValue(undefined)}
+ controller.commit({hosts:[{id:control.hostId,config:{id:control.hostId,kind:'ssh',label:'Private',hostname:'synthetic.invalid'},client:client as unknown as AgentMuxClient,executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ // A controlled, already-confirmed owner header isolates IPC metadata behavior.
+ // Installing it after commit avoids inventing a background connection in this fixture.
+ Object.assign(client,{runtimeOwnerIdentity:()=>({availability:'connected'})})
  const config:AppConfig={...structuredClone(DEFAULT_CONFIG),executors:{
  'specific-codex':{providerId:'codex',label:'Specific Codex',command:_hygiene_fixturePath("synthetic/specific-codex"),args:['--config','model="specific"'],env:{CODEX_HOME:_hygiene_fixturePath("synthetic/specific-home")},injectAgentMuxGuide:false},
  'other-codex':{providerId:'codex',label:'Other Codex',command:_hygiene_fixturePath("synthetic/other-codex"),args:[],env:{CODEX_HOME:_hygiene_fixturePath("synthetic/other-home")},injectAgentMuxGuide:false}
@@ -51,8 +54,8 @@ it('actual preload/registered IPC/RuntimeController use trusted exact durable Ex
  client.connect.mockRejectedValue(new Error('synthetic Runtime is temporarily unavailable'))
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:77,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({window:{webContents:sender} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
- configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{} as ScratchTopics,
+ const dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
   const handler=preload.handlers.get('sessions:historyPage')
@@ -68,6 +71,64 @@ it('actual preload/registered IPC/RuntimeController use trusted exact durable Ex
   })
  }finally{await dispose()}
 })
+it('actual snapshot IPC preserves separate observation steps and the unverified Runtime cut', async () => {
+ const {controller,config}=await owner()
+ const reading:RuntimeEndpointWarning={hostId:'synthetic-host',step:'Reading retained History sources',scope:'observation',availability:'connected',
+  code:'CONTROL_UNAVAILABLE',message:'Original Store read failed',recovery:'Retry original metadata read'}
+ const catalog:RuntimeEndpointWarning={...reading,step:'Reading Provider catalog',availability:'unverified',message:'Original catalog read failed'}
+ const runtime:RuntimeEndpointWarning={hostId:reading.hostId,step:'Connecting to Runtime',availability:'connected',code:'CONTROL_UNAVAILABLE',
+  message:'Connection completed after this cut',recovery:'Read the current Runtime cut'}
+ vi.spyOn(controller,'snapshot').mockResolvedValue({sessions:[],timelines:{},recoveryCandidates:[],runtimeEndpointWarnings:[
+  reading,catalog,{...runtime,availability:'unverified',message:'Runtime was omitted from the read cut'}]})
+ vi.spyOn(controller,'endpointWarningSnapshot').mockReturnValue([reading,catalog,runtime])
+ vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ const sender=Object.assign(new EventEmitter(),{id:78,isDestroyed:()=>false,send:vi.fn()})
+ const dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+  configStore:{get:async()=>config,save:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
+  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
+ try{
+  preload.invoke.mockImplementation((channel:string,...args:unknown[])=>preload.handlers.get(channel)!({sender},...args))
+  const snapshot=await preload.api!.sessions.snapshot()
+  expect(snapshot.runtimeEndpointWarnings).toEqual([reading,catalog,{...runtime,availability:'unverified',message:'Runtime was omitted from the read cut'}])
+ }finally{await dispose()}
+})
+
+it('actual preload and IPC distinguish partial History observations from strict complete catalogue reads', async () => {
+ const {controller,client,config}=await owner()
+ const failure=new Error('Other Host retained Store read failed')
+ const other={sessionHistorySources:vi.fn().mockRejectedValue(failure),connect:vi.fn(),onEvent:vi.fn().mockReturnValue(vi.fn()),dispose:vi.fn()}
+ controller.commit({hosts:[{id:'other',config:{id:'other',kind:'ssh',label:'Other',hostname:'other.invalid'},client:other as unknown as AgentMuxClient,
+  executionHost:{kind:'local',dispose:vi.fn()} as never}],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ Object.assign(other,{runtimeOwnerIdentity:()=>({availability:'connected'})})
+ vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
+ const sender=Object.assign(new EventEmitter(),{id:79,isDestroyed:()=>false,send:vi.fn()})
+ const dispose=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
+  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
+ try{
+  preload.invoke.mockImplementation((channel:string,...args:unknown[])=>preload.handlers.get(channel)!({sender},...args))
+  const observed=await preload.api!.sessions.historySources({observation:true})
+  expect(observed.sources.map(source=>[source.hostId,source.agentSessionId])).toEqual([[control.hostId,control.agentSessionId]])
+  expect(observed.warnings).toEqual([expect.objectContaining({hostId:'other',scope:'observation',message:failure.message})])
+  expect(preload.invoke).toHaveBeenLastCalledWith('sessions:historySources',{observation:true})
+  await expect(preload.api!.sessions.historySources()).rejects.toBe(failure)
+  expect(preload.invoke).toHaveBeenLastCalledWith('sessions:historySources')
+  await expect(preload.handlers.get('sessions:historySources')!({sender},{observation:true,hostId:'guessed'})).rejects.toThrow('exact observation mode')
+  expect(client.connect).not.toHaveBeenCalled();expect(other.connect).not.toHaveBeenCalled()
+  await controller.write(control,'still healthy exact input','user')
+  expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({agentSessionId:control.agentSessionId,expectedRun:control.run,data:'still healthy exact input',source:'user'})
+  other.connect.mockRejectedValue(failure)
+  const providerRead=await preload.api!.providers.list({observation:true})
+  expect(providerRead.catalog).toEqual(client.providers.catalog())
+  expect(providerRead.catalog.length).toBeGreaterThan(0)
+  expect(providerRead.warnings).toEqual([expect.objectContaining({hostId:'other',scope:'observation',step:'Reading Provider catalog',message:failure.message})])
+  expect(preload.invoke).toHaveBeenLastCalledWith('providers:list',{observation:true})
+  await expect(preload.api!.providers.list()).resolves.toEqual(providerRead.catalog)
+  expect(preload.invoke).toHaveBeenLastCalledWith('providers:list')
+  await expect(preload.handlers.get('providers:list')!({sender},{observation:false})).rejects.toThrow('exact observation mode')
+ }finally{await dispose()}
+})
+
 it('picks only Renderer page fields and never accepts a command/environment override from IPC input',async()=>{
  const {controller,client,config}=await owner()
  await controller.sessionHistoryPage(control,{cursor:'opaque',limit:5,commandOverride:_hygiene_fixturePath("untrusted/command"),args:['untrusted'],env:{CODEX_HOME:_hygiene_fixturePath("untrusted/home")}} as never,config)
@@ -121,8 +182,8 @@ it('actual trusted IPC/preload observation owns its token, filters other notices
  const {controller,client,config}=await owner()
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:88,isDestroyed:()=>false,send:vi.fn((channel:string,payload:unknown)=>preload.receivers.get(channel)?.({},payload))})
- const disposeIpc=await registerIpc({window:{webContents:sender} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
- configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{} as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
+ const disposeIpc=await registerIpc({window:{webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  let deliver!:(event:unknown)=>void
  let ready!:(handle:AgentSessionHistoryObservationHandle)=>void
  client.observeSessionHistory.mockImplementation(async(_id,listener)=>{deliver=listener;return await new Promise(resolve=>{ready=resolve})})

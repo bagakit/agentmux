@@ -6,8 +6,9 @@ export function runtimeEndpointNotice(warning: RuntimeEndpointWarning, label: st
   openHost: (hostId: string) => void): ServiceNoticeItem {
   const upgrade = warning.code === 'REMOTE_CORE_UPGRADE_REQUIRED'
   const connected = warning.availability === 'connected'
+  const observation = warning.scope === 'observation'
   return {
-    id: warning.hostId,
+    id: JSON.stringify([warning.hostId, warning.step]),
     cause: JSON.stringify([warning.step, warning.code]),
     notice: { kind: 'indeterminate', notice: {
       step: `${label}: ${warning.step}`,
@@ -15,11 +16,12 @@ export function runtimeEndpointNotice(warning: RuntimeEndpointWarning, label: st
       restore: warning.recovery
     } },
     summary: {
-      step: `${label}: ${upgrade ? 'Remote service needs an update' : connected ? 'Connection settings need attention' : 'Connection could not be verified'}`,
-      mode: upgrade ? 'This service uses an older Core interface. The connection has not been restored.' :
+      step: `${label}: ${observation ? warning.step : upgrade ? 'Remote service needs an update' : connected ? 'Connection settings need attention' : 'Connection could not be verified'}`,
+      mode: observation ? 'This observation could not be completed. It does not determine whether this Host’s Agents are running.' :
+        upgrade ? 'This service uses an older Core interface. The connection has not been restored.' :
         connected ? 'The Runtime is connected. A settings step could not be completed.' :
           'AgentMux could not verify this connection. Its Agents’ running state is unconfirmed.',
-      restore: upgrade ? 'Open this connection’s settings to check whether the service can be safely upgraded.' :
+      restore: observation ? warning.recovery : upgrade ? 'Open this connection’s settings to check whether the service can be safely upgraded.' :
         'Review this connection’s settings and test it again.'
     },
     action: { label: 'Connection settings', run: () => openHost(warning.hostId) }

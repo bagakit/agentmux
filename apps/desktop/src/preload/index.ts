@@ -276,7 +276,8 @@ const api: AgentMuxPreloadApi = {
     }
   },
   providers: {
-    list: () => ipcRenderer.invoke('providers:list')
+    list: (options?: { observation: true }) => options === undefined
+      ? ipcRenderer.invoke('providers:list') : ipcRenderer.invoke('providers:list', options)
   },
   executors: {
     detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId),
@@ -341,7 +342,8 @@ const api: AgentMuxPreloadApi = {
       return unwrapSessionAgentLaunchResult(result)
     },
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input).then(unwrapSessionLaunchResult),
-    historySources: () => ipcRenderer.invoke('sessions:historySources'),
+    historySources: (options?: { observation: true }) => options === undefined
+      ? ipcRenderer.invoke('sessions:historySources') : ipcRenderer.invoke('sessions:historySources', options),
     confirmNativeSession: (session, input) => ipcRenderer.invoke('sessions:confirmNativeSession', session, input),
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
