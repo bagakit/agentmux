@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { DATA_PREVIEW_MAX_COLUMNS } from '../../lib/file-data-preview'
-import { readStructuredPreview, type StructuredDataKind } from '../../lib/file-formats/data-parse'
+import type { StructuredDataKind } from '../../lib/file-formats/data-parse'
+import { requestStructuredPreview } from '../../lib/file-formats/data-structured-request'
 import type { DataNode, DataRecord, StructuredPreview } from '../../lib/file-formats/data-model'
 import { FilePreviewState } from '../FilePreviewState'
 import '../../styles/file-data-preview.css'
@@ -82,11 +83,12 @@ export function StructuredDataPreview({ content, kind, visible = true, ownerKey 
   useEffect(() => {
     if (!visible) return
     let cancelled = false
+    const lifetime = new AbortController()
     // Admit work after paint; cleanup cancels queued work and prevents late imports/results publishing.
-    const timer = setTimeout(() => { void readStructuredPreview(kind, content).then(parsed => {
+    const timer = setTimeout(() => { void requestStructuredPreview(kind, content, lifetime.signal).then(parsed => {
       if (!cancelled) setResult({ request, parsed })
     }, () => { if (!cancelled) setResult({ request, parsed: { status: 'invalid', message: 'Unable to read this preview. The complete source remains editable.' } }) }) }, 0)
-    return () => { cancelled = true; clearTimeout(timer) }
+    return () => { cancelled = true; lifetime.abort(); clearTimeout(timer) }
   }, [request, visible, kind, content])
   if (!visible) return null
   if (result?.request !== request) return <FilePreviewState title="Reading structured data" detail="The source remains editable." />
