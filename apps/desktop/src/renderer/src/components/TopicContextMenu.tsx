@@ -8,7 +8,6 @@ import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectCont
 type TopicMenuActions = {
   pinned: boolean
   onCopyPath(): void
-  onCopyCard(): void
   onCopyLink(): void
   onRename(): void
   onReveal(): void
@@ -32,7 +31,6 @@ function topicMenuItems(Item: typeof ContextMenu.Item, Separator: typeof Context
     <Separator className="tab-context-menu__separator" />
     <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><Pencil size={14} /><span>Rename Topic</span></Item>
     <Separator className="tab-context-menu__separator" />
-    <Item className="tab-context-menu__item" onSelect={actions.onCopyCard}><Copy size={14} /><span>Copy Topic card</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><Link size={14} /><span>Copy Topic link</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onReveal}><Crosshair size={14} /><span>Reveal in Files</span></Item>
     <Item className="tab-context-menu__item" onSelect={actions.onCopyPath}><Copy size={14} /><span>Copy Topic Path</span></Item>

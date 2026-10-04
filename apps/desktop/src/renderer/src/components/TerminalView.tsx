@@ -102,7 +102,6 @@ import { TerminalContextMenu } from './TerminalContextMenu'
 import { TerminalReplayGapNotice, TERMINAL_GAP_NOTICE } from './TerminalReplayGapNotice'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { terminalIdentityMenuActions } from '../lib/terminal-identity-menu'
-import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import type { MouseTrackingMode } from '../lib/terminal-selection-mode'
@@ -1747,7 +1746,6 @@ export function TerminalView({
           // 恰恰不是聚焦的那一格（分屏下尤其），从 store 取会复制出邻座的身份。
           sessionId: session.id,
           sessionKind: session.kind,
-          sharingMetadata: () => resolveAgentSharingMetadata(session.id, useAppStore.getState()),
           // 复用全 renderer 唯一那个写剪贴板的出口（clipboard-copy.ts），与上面三条 Copy 同一条路。
           writeClipboardText: async (text) => { await copyTextToClipboard(text, reportError) }
         })}

@@ -203,7 +203,8 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       const target = nav.requested as Record<string, unknown>
       if (Object.keys(target).length !== Object.keys(request.target).length ||
         Object.entries(request.target).some(([key, value]) => target[key] !== value) ||
-        (actual.input as Record<string, unknown>).policy !== request.inputPolicy) fail()
+        (actual.input as Record<string, unknown>).policy !== request.inputPolicy ||
+        nav.expectedAgentSessionId !== request.expectedAgentSessionId) fail()
       break
     }
     case 'promote.region': if (request.target.kind === 'region' && actual.regionId !== request.target.regionId) fail(); break

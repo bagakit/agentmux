@@ -9,7 +9,6 @@ import {
   FolderSymlink,
   LayoutGrid,
   Pencil,
-  Send,
   ListX,
   PanelLeftClose,
   PanelRightClose,
@@ -23,8 +22,7 @@ import {
   type MoveSessionViewTarget
 } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '@agentmux/layout'
-import { formatMessagingAddress, formatSessionAddress, formatTabAddress } from '../lib/agent-address'
-import type { AgentSharingMetadata } from '@agentmux/core/sharing'
+import { formatSessionAddress, formatTabAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import {
@@ -34,87 +32,37 @@ import {
 } from './workbench-split-menu-icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
-/**
- * 每个动作一个稳定 id：作 React key，也是将来配图标 / 记遥测该用的键。
- *
- * 为什么不拿 `label` 当键：这个菜单里有一项（reveal）的显示文案**跟平台走**（Finder /
- * File Explorer / File Manager），于是「稳定的键」与「画出来的字」是两件事。曾经把两者压在
- * 一个 `label` 联合里、再用一个可选的 `displayLabel` 覆盖显示——那个形状有两个毛病：
- *
- * 1. 联合里那个中性值 `'Reveal in File Manager'` **逐字等于** Linux 上真正要显示的文案，
- *    于是「忘了传 displayLabel」在 mac 上看起来完全正常（掉回中性值），只在 Windows 上说错话。
- *    一个可选字段 + 一个恰好合法的兜底 = 静默降级。
- * 2. 组件里因此躺着一份平台文案的字面量，而平台文案的 SSOT 在 `lib/host-platform.ts`。
- *
- * 现在 `label` **就是**要画出来的字、必填，id 单独一列。谁也不再兼任对方。
- */
 type WorkbenchTabActionId =
   | 'copy-tab-address'
   | 'copy-session-address'
-  | 'message-agent'
   | 'copy-path'
   | 'copy-relative-path'
   | 'reveal'
 
 type WorkbenchTabCopyAction = {
   id: WorkbenchTabActionId
-  /** 画出来的字。reveal 那项由组件按平台算好传进来，其余都是固定文案。 */
   label: string
-  icon: typeof Send
+  icon: typeof Copy
   onSelect(): Promise<void>
 }
 
-/**
- * 菜单里画哪几项、什么顺序——**这就是那份清单本身**，不是 JSX 里的一串三元表达式。
- *
- * 与 RegionContextMenu 同一个理由，且本仓实测过：可选项若由 `{model.sessionAddress ? (` 这种
- * 渲染层条件决定在场，`{false && model.sessionAddress ? (` 就能在源码 grep 全绿之下把那一项从界面
- * 上彻底抹掉——Radix 的 Content 默认关闭且在 Portal 里，renderToStaticMarkup 渲不出它，"真挂载
- * 点一下"这条路在本仓走不通。所以把在场与顺序降成 `entries` 数据：JSX 只 map，条件判断无处可写，
- * 而这份数组跑得到、断言得着（点了发生什么、该出现时出现、不该出现时不出现，三者都咬得住）。
- */
 export type WorkbenchTabMenuEntry = { kind: 'action'; action: WorkbenchTabCopyAction }
 
-/**
- * 复制出去的是寻址方式，不是 id。裸 id 把工作留给接收方——它得先猜出这是哪一层身份、
- * 再想该配哪个 flag——而那正是这次复制本该省掉的一步。地址一律来自 `agent-address`，
- * 与 Region 菜单同源：同一个 Session 从两处复制出来必须逐字一致。
- *
- * 文件 Tab 与 Agent Tab 共用**这一份** items 定义，按 Tab 类型切：文件 Tab 才有路径复制与
- * 「在文件管理器中显示」，承载唯一 Agent 的 Tab 才有 Session 地址与交接。两套清单会各自漂移，
- * 所以只有一套，条件加在这里而不是渲染层。
- */
+/** Only a Tab containing one unique Agent can expose an unambiguous Agent link. */
 export type WorkbenchTabCopyModel = {
   tabAddress: WorkbenchTabCopyAction
-  /**
-   * 按意图命名的交接入口。它排在地址项前面：用户来这个菜单，绝大多数时候想的是"把这个 Agent
-   * 交出去"，而不是"我要哪一层身份"——后者是达成前者的手段，不该占据第一位。
-   */
-  handoff?: WorkbenchTabCopyAction
-  /** 只有这张 View 恰好承载唯一一个 Agent 时才有无歧义的 Session 地址可给。 */
   sessionAddress?: WorkbenchTabCopyAction
-  /** 文件 Tab 才有：复制绝对路径 / 相对路径 / 在文件管理器中显示。其余类型缺席。 */
   copyPath?: WorkbenchTabCopyAction
   copyRelativePath?: WorkbenchTabCopyAction
   reveal?: WorkbenchTabCopyAction
-  /** 菜单真正要画出来的东西，按显示顺序。 */
   entries: readonly WorkbenchTabMenuEntry[]
 }
 
-/**
- * 文件 Tab 的路径与「在文件管理器中显示」所需的一切。缺席即非文件 Tab，那三项整组不出现。
- * `revealLabel` 由组件按平台算好传进来（Finder / File Explorer / File Manager），
- * `onReveal` 已经把 workspaceId+path 闭包进去——本模块不碰 api、不认平台。
- */
 export type WorkbenchTabFileActions = {
   path: string
   workspaceRoot: string
   revealLabel: string
   onReveal(): Promise<void>
-  /**
-   * 本机 home（用于把绝对路径缩写成 `~`）与「要绝对路径」这一档。文件 Tab 只在本机 workspace 才有
-   * （WorkspaceWorkbench 对非本机返回 undefined），所以这里的绝对路径缩写无需再判主机。
-   */
   home: string
   copyPathsAsAbsolute: boolean | undefined
 }
@@ -122,13 +70,11 @@ export type WorkbenchTabFileActions = {
 export function createWorkbenchTabCopyModel({
   tabId,
   agentSessionId,
-  sharingMetadata,
   file,
   writeClipboardText
 }: {
   tabId: string
   agentSessionId: string | null
-  sharingMetadata?: (() => AgentSharingMetadata) | undefined
   file?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
 }): WorkbenchTabCopyModel {
@@ -142,26 +88,17 @@ export function createWorkbenchTabCopyModel({
   const actions: Omit<WorkbenchTabCopyModel, 'entries'> = {
     tabAddress: {
       id: 'copy-tab-address',
-      label: 'Copy Tab Address',
+      label: 'Copy Tab Link',
       icon: Crosshair,
-      onSelect: async () => copy(formatTabAddress(tabId), 'Copy Tab Address')
+      onSelect: async () => copy(formatTabAddress(tabId), 'Copy Tab Link')
     },
     ...(agentSessionId
       ? {
-          // 同一个交接意图，从 Tab 菜单进来时没有"哪一格"这个信息，于是解析成 Session 地址：
-          // 它在 View 被关掉、移动、分屏之后依然指向同一个 Agent。
-          handoff: {
-            id: 'message-agent' as const,
-            label: 'Message this Agent',
-            icon: Send,
-            onSelect: async () =>
-              copy(formatMessagingAddress({ agentSessionId, ...sharingMetadata?.() }), 'Message this Agent')
-          },
           sessionAddress: {
             id: 'copy-session-address' as const,
-            label: 'Copy Session Address',
+            label: 'Copy Agent Link',
             icon: Copy,
-            onSelect: async () => copy(formatSessionAddress(agentSessionId, sharingMetadata?.()), 'Copy Session Address')
+            onSelect: async () => copy(formatSessionAddress(agentSessionId), 'Copy Agent Link')
           }
         }
       : {}),
@@ -202,17 +139,12 @@ export function createWorkbenchTabCopyModel({
   return { ...actions, entries: workbenchTabMenuEntries(actions) }
 }
 
-/**
- * 由在场的动作派生出显示顺序。交接排第一（那是用户来这个菜单的主要意图），随后是各级地址；
- * 文件 Tab 的路径复制与「显示」跟在地址之后。这份派生是唯一决定「谁在场、什么顺序」的地方。
- */
 function workbenchTabMenuEntries(
   model: Omit<WorkbenchTabCopyModel, 'entries'>
 ): readonly WorkbenchTabMenuEntry[] {
   const ordered: (WorkbenchTabCopyAction | undefined)[] = [
-    model.handoff,
-    model.tabAddress,
     model.sessionAddress,
+    model.tabAddress,
     model.copyPath,
     model.copyRelativePath,
     model.reveal
@@ -228,7 +160,6 @@ export function WorkbenchTabContextMenu({
   canMoveToNewGroup,
   tabId,
   copyableAgentSessionId,
-  sharingMetadata,
   fileActions,
   writeClipboardText,
   onRenameTab,
@@ -254,7 +185,6 @@ export function WorkbenchTabContextMenu({
   canMoveToNewGroup: boolean
   tabId: string
   copyableAgentSessionId: string | null
-  sharingMetadata?: (() => AgentSharingMetadata) | undefined
   // 文件 Tab 才传；非文件 Tab 缺席，路径复制与「显示」整组不出现。
   fileActions?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
@@ -266,16 +196,7 @@ export function WorkbenchTabContextMenu({
   onCloseLeft(): void
   onCloseRight(): void
   onMoveToNewGroup(direction: SplitDirection): void
-  /**
-   * 这张 Tab 现在有几格。预设只增不减，故它决定「重排」那一节列不列得出来——判定只住在
-   * `workbenchRegionPresetMenu`（见那份注释）。注意必须是**被右键点中的这张** Tab 的格数，
-   * 不是当前活动 Tab 的：在非活动 Tab 上右键时，用活动 Tab 的格数会按错的容量过滤预设。
-   */
   regionCount: number
-  /**
-   * 重排。形参是引擎自己那个三档 union（`AgentMuxArrangeMode`），不是裸的 preset——这一节里既有
-   * 预设（补格子）也有均分／当前格优先（只重排已在场的格），两者都从这一个口子出去（#486）。
-   */
   onArrange(mode: AgentMuxArrangeMode): void
   // 目的地来自纯模型。承载不了 Session 的 View、或没有别的 workspace 时为空——
   // 搬过去是 no-op，故以缺席表达而非禁用的假按钮。
@@ -289,7 +210,6 @@ export function WorkbenchTabContextMenu({
   const copyModel = createWorkbenchTabCopyModel({
     tabId,
     agentSessionId: copyableAgentSessionId,
-    sharingMetadata,
     ...(fileActions ? { file: fileActions } : {}),
     writeClipboardText
   })

@@ -1,4 +1,4 @@
-import { formatZoneAddress, formatAmuxSpatialLink } from '@agentmux/core/sharing'
+import { formatZoneAddress } from '@agentmux/core/sharing'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
@@ -306,17 +306,14 @@ export function WorkspaceTopicsPanel({
               }
               action(logicalPath)
             }
-            function copyTopicAddress(asLink: boolean): void {
+            function copyTopicAddress(): void {
               const address = originalTopicAddress(workspace, topic, bindings)
               if (!address) { reportError(new Error('The original Topic identity is unconfirmed. Refresh Topics and retry copying its address.')); return }
-              void copyTextToClipboard(asLink
-                ? formatAmuxSpatialLink({ kind: 'zone', zoneId: address.zoneId })
-                : formatZoneAddress({ zoneId: address.zoneId, label: topic.title }), reportError)
+              void copyTextToClipboard(formatZoneAddress({ zoneId: address.zoneId }), reportError)
             }
             const menuActions = {
               pinned,
-              onCopyCard: () => copyTopicAddress(false),
-              onCopyLink: () => copyTopicAddress(true),
+              onCopyLink: copyTopicAddress,
               onCopyPath: () => withLogicalPath(path => {
                 const absolute = scratchWorkspaceFilePath(workspace, topics, path)
                 if (absolute === null) { reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry copying its path.')); return }
@@ -425,7 +422,6 @@ function SortableTopicItem({
   pinned,
   children,
   onCopyPath,
-  onCopyCard,
   onCopyLink,
   onRename,
   onReveal,
@@ -442,7 +438,6 @@ function SortableTopicItem({
   pinned: boolean
   children: ReactNode
   onCopyPath(): void
-  onCopyCard(): void
   onCopyLink(): void
   onRename(): void
   onReveal(): void
@@ -461,7 +456,6 @@ function SortableTopicItem({
     <TopicContextMenu
       pinned={pinned}
       onCopyPath={onCopyPath}
-      onCopyCard={onCopyCard}
       onCopyLink={onCopyLink}
       onRename={onRename}
       onReveal={onReveal}

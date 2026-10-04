@@ -64,7 +64,7 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
 }
 
 export function parseDesktopFocusRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxControlFocusRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'inputPolicy'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'inputPolicy', 'expectedAgentSessionId'], code)
   if (source.schemaVersion !== 5 || source.operation !== 'focus') fail('Desktop focus request is invalid.', code)
   const target = parseDesktopFocusTarget(source.target, code)
   const inputPolicy = Object.hasOwn(source, 'inputPolicy')
@@ -72,7 +72,13 @@ export function parseDesktopFocusRequest(value: unknown, code: Code = 'INVALID_C
   if (inputPolicy === 'target' && (target.kind !== 'space' || (!target.tabId && !target.regionId))) {
     fail('Input target requires one exact existing Tab or Region.', code)
   }
-  const request = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code), operation: 'focus' as const, target, inputPolicy }
+  const expectedAgentSessionId = Object.hasOwn(source, 'expectedAgentSessionId')
+    ? spaceControlId(source.expectedAgentSessionId, 'Expected Agent Session ID', code) : undefined
+  if (expectedAgentSessionId !== undefined && (target.kind !== 'space' || !target.regionId || target.regionId === 'self')) {
+    fail('An expected Agent Session requires one exact Region.', code)
+  }
+  const request = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code), operation: 'focus' as const, target, inputPolicy,
+    ...(expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId }) }
   budget(request, code)
   return request
 }
@@ -132,12 +138,13 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   const source = fields(value, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
   if (source.schemaVersion !== 5 || source.operation !== 'focus' || source.ok !== true) fail('Desktop focus receipt is invalid.', code)
   const body = fields(source.result, ['navigation', 'presentation', 'input', 'floating', 'overlays', 'focus', 'partial', 'save', 'issues'], code)
-  const nav = fields(body.navigation, ['state', 'requested', 'selection'], code)
+  const nav = fields(body.navigation, ['state', 'requested', 'selection', 'expectedAgentSessionId'], code)
   const caret = fields(body.input, ['policy', 'outcome', 'before', 'after'], code)
   const saved = fields(body.save, ['layoutApplied', 'localStorageWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
   const result: Omit<AgentMuxDesktopFocusResult, 'operation'> = {
     navigation: { state: member(nav.state, ['applied', 'unchanged', 'rejected', 'unconfirmed'], 'Navigation', code),
-      requested: parseDesktopFocusTarget(nav.requested, code), selection: selection(nav.selection, code) },
+      requested: parseDesktopFocusTarget(nav.requested, code), selection: selection(nav.selection, code),
+      ...(Object.hasOwn(nav, 'expectedAgentSessionId') ? { expectedAgentSessionId: spaceControlId(nav.expectedAgentSessionId, 'Expected Agent Session ID', code) } : {}) },
     presentation: presentation(body.presentation, code), input: { policy: member(caret.policy, ['preserve', 'target'], 'Input policy', code),
       outcome: member(caret.outcome, ['preserved', 'transferred', 'unavailable', 'unconfirmed'], 'Input outcome', code), before: input(caret.before, code), after: input(caret.after, code) },
     floating: floating(body.floating, code), overlays: overlays(body.overlays, code), focus: focus(body.focus, code), partial: boolean(body.partial, 'Partial', code),
@@ -151,6 +158,9 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     }, code)
   }
   const { navigation, input: observedInput } = result
+  if (navigation.expectedAgentSessionId !== undefined && (navigation.requested.kind !== 'space' || !navigation.requested.regionId || navigation.requested.regionId === 'self')) {
+    fail('An expected Agent Session requires one exact Region.', code)
+  }
   if (observedInput.policy === 'target' && (navigation.requested.kind !== 'space' ||
     (!navigation.requested.tabId && !navigation.requested.regionId))) fail('Input target requires an exact Tab or Region.', code)
   if ((navigation.state === 'applied' || navigation.state === 'unchanged')) {

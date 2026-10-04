@@ -56,6 +56,7 @@ export type AgentMuxDesktopFocusResult = {
   navigation: {
     state: 'applied' | 'unchanged' | 'rejected' | 'unconfirmed'
     requested: AgentMuxDesktopFocusTarget
+    expectedAgentSessionId?: string
     selection: AgentMuxDesktopSelection
   }
   presentation: AgentMuxDesktopPresentation
