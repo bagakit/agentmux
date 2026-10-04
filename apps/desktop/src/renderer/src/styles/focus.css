@@ -440,9 +440,10 @@
   .focus-toolbar__identity small { display: none; }
 }
 
-.recent-focus__resize { position: absolute; top: -3px; left: 0; right: 0; height: 6px; z-index: 5; cursor: row-resize; touch-action: none; }
-.recent-focus__resize::after { content: ''; position: absolute; top: 2px; left: calc(50% - 14px); width: 28px; height: 2px; border-radius: 1px; background: var(--text-3); opacity: .5; }
+.recent-focus__resize { position: relative; flex: 0 0 8px; height: 8px; z-index: 5; cursor: row-resize; touch-action: none; }
+.recent-focus__resize::after { content: ''; position: absolute; top: 3px; left: calc(50% - 20px); width: 40px; height: 2px; border-radius: 1px; background: var(--text-3); opacity: .7; }
 .recent-focus__resize:hover, .recent-focus__resize:focus-visible { background: var(--line); outline: none; }
+.recent-focus__resize:hover::after, .recent-focus__resize:focus-visible::after { background: var(--text-2); opacity: 1; }
 
 .focus-context-group__bucket { display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; font-size: var(--fs-micro); }
 .focus-project-lanes__recovery { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80px; }
