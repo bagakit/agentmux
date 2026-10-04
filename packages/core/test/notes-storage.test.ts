@@ -70,6 +70,16 @@ describe('one durable Notes directory operation', () => {
     expect((await new AgentMuxNotebookStore(undefined, f.storage).read()).pages['written-unregistered']).toBeUndefined()
     expect(await readFile(join(f.original, 'project.txt'), 'utf8')).toBe('unrelated project')
   })
+  it('retains ambiguous managed bytes whose identity already belongs to a foreign registered Note', async () => {
+    const f = await fixture(), foreignRoot = join(f.root, 'project'); await mkdir(foreignRoot)
+    const store = new AgentMuxNotebookStore(join(f.original, 'notebooks.json'))
+    await store.apply({ expectedRevision: f.before.revision, operationId: 'foreign-page', change: { kind: 'register', noteId: 'foreign-note', title: 'Project note', resource: { hostId: 'local', workspaceId: 'project', workspacePath: foreignRoot, path: 'foreign.note.json' } } }, { kind: 'user', id: 'original-user' })
+    const bytes = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'foreign-note', content: 'Keep ambiguous bytes' })
+    await writeFile(join(f.original, 'unregistered.note.json'), bytes)
+    await expect(f.storage.change({ operationId: 'ambiguous-identity', expectedDirectory: f.original, directory: f.target })).rejects.toMatchObject({ code: 'NOTES_STORAGE_UNCONFIRMED' })
+    expect((await f.storage.inspect()).directory).toBe(f.original); expect(await readFile(join(f.original, 'unregistered.note.json'), 'utf8')).toBe(bytes)
+    expect((await store.read()).pages['foreign-note']?.resource.workspaceId).toBe('project')
+  })
   it('keeps original prepared operation recoverable if bytes change after the first copy fails', async () => {
     const f = await fixture(); await mkdir(f.target); await writeFile(join(f.target, 'one.note.json'), 'occupied')
     await expect(f.storage.change({ operationId: 'prepared-original', expectedDirectory: f.original, directory: f.target })).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
