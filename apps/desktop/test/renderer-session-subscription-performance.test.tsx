@@ -80,6 +80,34 @@ async function updateBackgroundStatus(observedAt: number) {
 }
 
 describe('mounted Renderer session subscription cost', () => {
+  it('does not rebuild window work surfaces for Browser navigation or loading snapshots', async () => {
+    const browser = { id: 'browser', browserId: 'browser', kind: 'browser' as const,
+      regionId: 'browser-region', workspaceId: 'workspace', navigationId: 'navigation',
+      url: 'https://example.test/original', title: 'Original', profileId: 'profile',
+      driving: false, appLinkPrompt: null, loading: false, canGoBack: false, canGoForward: false,
+      viewport: 'responsive' as const, error: null }
+    const tab = createWorkbenchTab('browser-tab', browser)
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+    await act(async () => root.render(<App />))
+    expect(container.querySelectorAll('[data-workspace-probe]').length).toBeGreaterThan(0)
+    expect(counters.workspace).toBeGreaterThan(0)
+    const before = counters.workspace
+    for (let index = 0; index < 12; index++) {
+      await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: {
+        ...browser, navigationId: `navigation-${index}`, title: `Page ${index}`,
+        url: `https://example.test/${index}`, loading: index % 2 === 0
+      } }))
+    }
+    expect(useAppStore.getState().tabs[tab.id]?.regions['browser-region']).toMatchObject({
+      title: 'Page 11', url: 'https://example.test/11', navigationId: 'navigation-11', loading: false
+    })
+    expect(counters.workspace - before).toBe(0)
+    await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'closed', id: 'browser' }))
+    expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
+    expect(counters.workspace).toBeGreaterThan(before)
+    expect(useAppStore.getState().sessions.find(session => session.id === 'visible')?.control.run.runId).toBe('run-visible')
+  })
+
   it('keeps unrelated Session status, naming and timeline updates outside a mounted Tab consumer', async () => {
     const tab = useAppStore.getState().tabs.tab!
     let renders = 0

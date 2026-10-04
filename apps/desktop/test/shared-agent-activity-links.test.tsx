@@ -324,7 +324,9 @@ it('original file context retains its related metadata memo and invalidates real
       const state = useAppStore.getState(), context = selector(state)
       expect(context.kind).toBe('session'); expect(context.placement).toBeDefined()
       const baseline = { catalog: catalogRead.mock.calls.length, context: contextRead.mock.calls.length, pages: scene.reads.mock.calls.length }
-      expect(baseline.catalog).toBeGreaterThan(0); expect(baseline.context).toBeGreaterThan(0)
+      // Mounted Panes already populated this immutable structural graph. A new Pane
+      // reuses it while still resolving its own resource context.
+      expect(baseline.catalog).toBe(0); expect(baseline.context).toBeGreaterThan(0)
       const body = occurrence.presentation.querySelector<HTMLElement>('.log-turn__body')!
       expect(body).not.toBeNull(); expect(body.textContent!.length).toBeGreaterThan(0)
       const range = document.createRange(); range.selectNodeContents(body); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
@@ -340,10 +342,16 @@ it('original file context retains its related metadata memo and invalidates real
       const changedHost = selector({ ...state, sessions: [{ ...scene.session, hostId: 'unconfirmed-other-host' }] })
       expect(changedHost.kind).toBe('unconfirmed'); expect(changedHost.placement).toBeUndefined()
       const beforeReturn = catalogRead.mock.calls.length
-      expect(selector(state).kind).toBe('session'); expect(catalogRead.mock.calls.length).toBeGreaterThan(beforeReturn)
+      const restoredContext = selector(state)
+      expect(restoredContext.kind).toBe('session'); expect(restoredContext.placement).toEqual(context.placement)
+      expect(catalogRead.mock.calls.length).toBe(beforeReturn)
       const beforePath = catalogRead.mock.calls.length
-      selector({ ...state, sessions: [{ ...scene.session, workspacePath: scene.session.workspacePath + '/subdirectory' }] })
-      expect(catalogRead.mock.calls.length).toBeGreaterThan(beforePath)
+      const cwdWorkspace = state.config!.workspaces.find(workspace => workspace.id === occurrence.displayId)!
+      expect(cwdWorkspace.path).not.toBe(context.workspaceRoot)
+      const changedPath = selector({ ...state, sessions: [{ ...scene.session, workspacePath: cwdWorkspace.path }] })
+      expect(changedPath.kind).toBe('session'); expect(changedPath.workspaceRoot).toBe(cwdWorkspace.path)
+      expect(changedPath.placement).toEqual(context.placement)
+      expect(catalogRead.mock.calls.length).toBe(beforePath)
       const current = useAppStore.getState(), raw = current.scratchTopicSnapshots[scene.workspace.id]!
       await act(async () => useAppStore.setState({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [scene.workspace.id]: { ...raw, topics: null } } }))
       expect(selector(useAppStore.getState()).kind).toBe('unconfirmed')
