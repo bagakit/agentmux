@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '../src/control-host.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import type { AgentExecutorConfig } from '../src/types.js'
@@ -36,6 +37,36 @@ describe('target Host Executor owner', () => {
       { executorId: 'claude', source: 'provider-default', command: 'claude', availability: 'missing' }
     ] })
     await expect(readFile(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('retains a growing registry over former count and byte caps through restart, public RPC and the actual CLI', async () => {
+    const f = await fixture()
+    const values = Object.fromEntries(Array.from({ length: 300 }, (_, index) => [
+      `wrapper-${index}`, config('codex', { env: { PRIVATE_VALUE: 'x'.repeat(4096) } })
+    ]))
+    await writeFile(f.path, JSON.stringify({ schema: 'agentmux.host-executors.v1', runtimeId: 'target-runtime', executors: values }))
+    expect((await stat(f.path)).size).toBeGreaterThan(1024 * 1024)
+    await f.owner.configure({ executorId: 'next-wrapper', config: config('codex') })
+    const reopened = new AgentMuxHostExecutorOwner({ path: f.path, runtimeId: 'target-runtime', catalog: () => catalog })
+    expect((await reopened.resolve('wrapper-299')).config).toEqual(values['wrapper-299'])
+    const server = new AgentMuxControlServer({ execute: async request => {
+      if (request.operation !== 'list.agents') throw new Error('Only Executor inventory is requested')
+      const inventory = await reopened.list()
+      return { operation: 'list.agents', agents: inventory.executors.map(({ executorId, label, providerId, availability }) => ({ executorId, label, providerId, availability })) }
+    } }, join(f.root, 'control.sock'))
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    try {
+      const observed = await rpc.call('app.snapshot', { include: ['executors'], limit: 500 })
+      expect(observed.unavailable).toEqual([])
+      expect(observed.executors).toHaveLength(303)
+      expect(observed.executors.at(-1)?.executorId).toBe('next-wrapper')
+      const result = await exec(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'app', 'snapshot', '--include', 'executors', '--limit', '500'], {
+        env: { ...process.env, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined, AGENTMUX_RUNTIME_DIRECTORY: f.root, AGENTMUX_ENV: undefined }, timeout: 5000
+      })
+      expect(JSON.parse(result.stdout).result.executors).toEqual(observed.executors)
+      expect(JSON.stringify(observed)).not.toContain('PRIVATE_VALUE')
+    } finally { await rpc.dispose(); await server.stop() }
   })
 
   it('keeps same-ID configurations and execution on their exact Host, using registered PATH instead of the service PATH', async () => {
