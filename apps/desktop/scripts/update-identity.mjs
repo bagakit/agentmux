@@ -29,6 +29,7 @@ export async function sourceUpdateIdentity(root) {
     shell: await hashTree(root, [
       'apps/desktop/src/main', 'apps/desktop/src/preload', 'apps/desktop/src/shared',
       'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts', 'apps/desktop/scripts',
+      'packages/git/src', 'packages/git/package.json', 'packages/git/tsconfig.build.json',
       'packages/core/src', 'packages/core/package.json', 'packages/core/scripts', 'packages/core/bin',
       'pnpm-lock.yaml'
     ]),

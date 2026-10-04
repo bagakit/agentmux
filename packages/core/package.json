@@ -191,6 +191,7 @@
   ],
   "dependencies": {
     "@agentmux/demand": "workspace:*",
+    "@agentmux/git": "workspace:*",
     "@bufbuild/protobuf": "1.10.1",
     "@noble/hashes": "2.4.0",
     "@scure/base": "2.2.0",

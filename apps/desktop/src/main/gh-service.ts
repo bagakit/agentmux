@@ -14,7 +14,8 @@ import type {
   PrBaseSource,
   PrReadiness
 } from '../shared/git-contracts.js'
-import { gitFailureMessage, scrubGitCredentials, type GitService } from './git-service.js'
+import type { GitService } from './git-service.js'
+import { gitFailureMessage, scrubGitCredentials } from '@agentmux/git'
 import { FALLBACK_BASE_REF, parseRemoteHead, plainBranchName, remoteHeadArgs } from '../shared/base-ref.js'
 
 /**

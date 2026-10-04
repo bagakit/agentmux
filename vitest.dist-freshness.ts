@@ -118,7 +118,7 @@ export async function staleDistComplaint(packageDirectory: string, entry = 'dist
 export async function assertWorkspaceDistBuiltFromCurrentSource(root: string): Promise<void> {
   // Demand's pure subpath is now consumed by both Core and Renderer. A fresh Core alone cannot
   // prove that the Goal validators being exercised belong to the current source.
-  for (const [directory, entry] of [['core', 'dist/index.js'], ['demand', 'dist/src/index.js']] as const) {
+  for (const [directory, entry] of [['core', 'dist/index.js'], ['demand', 'dist/src/index.js'], ['git', 'dist/index.js']] as const) {
     const complaint = await staleDistComplaint(resolve(root, 'packages', directory), entry)
     if (complaint) throw new Error(complaint)
   }

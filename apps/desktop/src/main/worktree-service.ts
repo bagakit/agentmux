@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
-import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from './git-service.js'
+import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '@agentmux/git'
 import type {
   AppConfig,
   CreateWorktreeForBranchInput,
