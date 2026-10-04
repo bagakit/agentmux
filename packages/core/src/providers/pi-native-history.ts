@@ -142,6 +142,6 @@ export async function readPiSessionHistoryPage(context: AgentProviderSessionHist
       parent = entry.parentId as string
     }
     const nextCursor = parent === undefined ? (await reader.verifyUnchanged(), null) : await reader.nextCursor(parent)
-    return { source: context.source, items: items.reverse(), nextCursor }
+    return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor }
   } finally { await reader.close() }
 }

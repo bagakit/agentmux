@@ -501,7 +501,7 @@ export async function readKimiSessionHistoryPage(
     const nextCursor = await reader.nextCursor()
     return {
       source: context.source,
-      items: items.reverse(),
+      items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))),
       nextCursor
     }
   } finally {

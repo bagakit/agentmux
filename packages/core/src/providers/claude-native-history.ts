@@ -128,6 +128,6 @@ export async function readClaudeSessionHistoryPage(context: AgentProviderSession
       items.push(convert(entry.value, entry.start))
     }
     const nextCursor = await reader.nextCursor()
-    return { source: context.source, items: items.reverse(), nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
+    return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
   } finally { await reader.close() }
 }

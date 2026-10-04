@@ -356,6 +356,7 @@ export async function readAntigravitySessionHistoryPage(
             }
           }
         } finally {
+          compactReader.adoptContent(fullReader)
           await fullReader.close()
         }
       }
@@ -386,7 +387,7 @@ export async function readAntigravitySessionHistoryPage(
 
     return {
       source: context.source,
-      items: items.reverse(),
+      items: await Promise.all(items.reverse().map(item => compactReader.materializeItem(item))),
       nextCursor
     }
   } finally {

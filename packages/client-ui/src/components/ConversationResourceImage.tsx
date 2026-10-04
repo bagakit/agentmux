@@ -21,7 +21,8 @@ export function ConversationResourceImage({ part, partIndex, record, readResourc
       resource.recordId !== recordId || resource.turnId !== turnId || resource.partIndex !== partIndex || resource.reference !== reference) {
       throw new Error('Image response belongs to another recorded resource.')
     }
-    if (resource.result.status !== 'read') throw new Error(resource.result.message)
+    if (resource.result.status !== 'read') throw new Error(resource.result.status === 'unavailable'
+      ? resource.result.message : 'This image response contains text instead of recorded image bytes.')
     return { dataUrl: `data:${resource.result.mimeType};base64,${resource.result.dataBase64}` }
   }, [readResource, source.providerId, source.nativeSessionId, recordId, turnId, partIndex, reference])
   return <div className="log-turn__resource log-turn__resource--image">

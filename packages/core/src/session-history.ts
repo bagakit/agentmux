@@ -157,10 +157,16 @@ export function normalizeSessionHistoryPage(
           ...(part.name === undefined ? {} : { name: nonempty(part.name) }),
           ...(part.failed === undefined ? {} : { failed: part.failed }) }
       }
-      if (part.kind !== 'resource' || !['image', 'audio', 'file', 'other'].includes(part.resourceType as string)) return invalid()
+      if (part.kind !== 'resource' || !['image', 'audio', 'file', 'other', 'text'].includes(part.resourceType as string)) return invalid()
       if (part.label !== undefined && typeof part.label !== 'string') return invalid()
-      return { kind: 'resource', resourceType: part.resourceType as 'image' | 'audio' | 'file' | 'other',
-        reference: nonempty(part.reference), ...(part.label === undefined ? {} : { label: part.label }) }
+      const content = part.content === undefined ? undefined : object(part.content)
+      if (part.resourceType === 'text' ? !content : content !== undefined) return invalid()
+      if (content && (content.encoding !== 'json-utf8' || !['text', 'reasoning', 'tool-call', 'tool-result', 'resource'].includes(String(content.kind)) ||
+        !Number.isSafeInteger(content.byteLength) || (content.byteLength as number) < 1 || typeof content.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(content.sha256))) return invalid()
+      return { kind: 'resource', resourceType: part.resourceType as 'image' | 'audio' | 'file' | 'other' | 'text',
+        reference: nonempty(part.reference), ...(part.label === undefined ? {} : { label: part.label }),
+        ...(content === undefined ? {} : { content: { encoding: 'json-utf8' as const,
+          kind: content.kind as 'text' | 'reasoning' | 'tool-call' | 'tool-result' | 'resource', byteLength: content.byteLength as number, sha256: content.sha256 as string } }) }
     })
     if (item.title !== undefined && typeof item.title !== 'string') return invalid()
     const startedAt = optionalTime(item.startedAt)

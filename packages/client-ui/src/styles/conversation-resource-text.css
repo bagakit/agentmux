@@ -1,0 +1,8 @@
+.conversation-resource-text { margin: var(--sp-3) 0; min-width: 0; }
+.conversation-resource-text__controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.conversation-resource-text__controls button { display: inline-flex; align-items: center; gap: var(--sp-2); padding: 4px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.conversation-resource-text__controls button:hover { color: var(--text); }
+.conversation-resource-text__controls button:focus-visible { outline: 1px solid var(--text-2); outline-offset: 3px; }
+.conversation-resource-text__controls button:disabled { cursor: progress; }
+.conversation-resource-text__controls span { color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-resource-text__error { color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
