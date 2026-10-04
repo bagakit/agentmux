@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
@@ -190,7 +191,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       <button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><Link2 size={14} /><span>Reference block</span></button>
     </div>
     {picker ? <section className="note-reference-picker" aria-label="Choose an original block">
-      <input aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
+      <TextInput aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
       <p className="note-scope">{knowledge.scope === 'complete' ? 'Confirmed Note scope' : 'Loaded Notes only · more sources may exist'}</p>
       <div className="note-reference-picker__results">{candidates.map(({ source, block, target }) => <div className="note-reference-picker__row" key={JSON.stringify([source.location.workspaceId, source.location.path, block.blockId])} title={`${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`}>
         <span><strong title={block.text}>{block.text || 'Empty block'}</strong><small>{source.location.path}</small></span>
