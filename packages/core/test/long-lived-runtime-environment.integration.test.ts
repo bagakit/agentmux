@@ -1,6 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -30,7 +30,7 @@ function gone(pid: number): boolean {
   }
 }
 async function privateRuntime(run: (root: string, activation: RuntimeActivation, clients: AgentMuxClient[], pids: number[]) => Promise<void>): Promise<void> {
-  const root = await mkdtemp(fixturePath("tmp/amx-color-run-"))
+  const root = await realpath(await mkdtemp(fixturePath("tmp/amx-color-run-")))
   let activation: RuntimeActivation | undefined
   const clients: AgentMuxClient[] = [], pids: number[] = []
   try {
