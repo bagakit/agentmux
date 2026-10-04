@@ -7,6 +7,7 @@ import { parseAgentForkSource } from './agent-fork.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseFileReadCommand } from './agentmux-cli-files.js'
+import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
@@ -111,6 +112,9 @@ const name = (f: Flags): string | null => {
   return f.booleans.has('--clear') ? null : value(f, '--name', true)!
 }
 const SAVE_NOTICE = 'A missing complete reply leaves the operation unconfirmed. Read back the exact business identity before deciding; do not automatically retry a write. Save requests do not prove disk durability.'
+const GIT_TARGET = { '--workspace': 'data', '--host': 'data', '--workspace-path': 'data' } as const
+const gitTarget = (f: Flags) => ({ workspaceId: id(f, '--workspace', true), expectedResource: { hostId: id(f, '--host', true), workspacePath: value(f, '--workspace-path', true)! } })
+const gitCommit = (f: Flags) => ({ ...gitTarget(f), oid: value(f, '--oid', true)!, ...(f.values.has('--parent') ? { parentOid: value(f, '--parent', true)! } : {}) })
 
 function openPlacement(f: Flags): Record<string, unknown> {
   const selected = one(f, [...Object.keys(SPLIT_FLAG_DIRECTIONS), '--tab', '--in-region'], 'Open')
@@ -325,6 +329,20 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (split !== undefined && !isSplitDirection(split)) invalid('--split must be left, right, up or down.')
     return { ...operation(f), path: value(f, '--path', true), ...selector(f), ...(split === undefined ? {} : { split }), focus: focus(f) }
   }, 'Without --tab/--region/--split, open in a new Tab. A Region destination requires the exact existing Tab, anchor Region, Display Workspace and Group together. The returned placement names the actual File Region, which may differ from the anchor. --focus controls navigation independently; its default is background. ' + SAVE_NOTICE),
+  command('git.history', '--workspace ID --host ID --workspace-path PATH [--ref REF] [--limit N] [--cursor JSON]', 'Read a fixed original repository history page without changing checkout or Agent cwd.',
+    { ...GIT_TARGET, '--ref': 'data', '--limit': 'value', '--cursor': 'data' }, f => parseGitParams('git.history', { ...gitTarget(f),
+      ...(f.values.has('--ref') ? { ref: value(f, '--ref', true)! } : {}), ...numbers(f, { '--limit': 'limit' }),
+      ...(f.values.has('--cursor') ? { cursor: jsonValue(value(f, '--cursor', true)!, 'History cursor') } : {}) }) as unknown as Record<string, unknown>,
+    'Discover workspace ID, hostId and path from app snapshot. Use the returned nextCursor unchanged to continue the same fixed heads; refresh by omitting cursor. Page size is 1–100. No fetch or Git write occurs.'),
+  command('git.commit', '--workspace ID --host ID --workspace-path PATH --oid OID [--parent OID]', 'Read the full fixed commit message, parents and changed files.',
+    { ...GIT_TARGET, '--oid': 'data', '--parent': 'data' }, f => parseGitParams('git.commit', gitCommit(f)) as unknown as Record<string, unknown>,
+    'Use a complete commit OID from git history. Omitted parent selects the first direct parent; a root has null parent. A selected parent must be a direct parent. Files are in entries; no checkout or index write occurs.'),
+  command('git.diff', '--workspace ID --host ID --workspace-path PATH --input FILE|-', 'Read one file diff using its complete original fixed comparison descriptor.',
+    { ...GIT_TARGET, '--input': 'data' }, async f => parseGitParams('git.diff', { ...gitTarget(f), input: await readControlJsonInput(value(f, '--input', true)!, 'Git diff descriptor') }) as unknown as Record<string, unknown>,
+    'Input is UTF-8 JSON: {kind:"commit",snapshot:COMMIT_SNAPSHOT,file:{path:ENTRY_PATH,origPath:ENTRY_ORIG_PATH}} from git commit, or an original branch comparison descriptor. Keep both rename paths and the returned snapshot; labels and current HEAD are not substitutes. Binary or large sides are explicit.'),
+  command('git.open', '--workspace ID --host ID --workspace-path PATH --oid OID [--parent OID] [--operation-id ID]', 'Open the exact fixed commit in its original Git reading workbench.',
+    { ...GIT_TARGET, '--oid': 'data', '--parent': 'data', ...OP }, f => ({ ...parseGitOpenParams(gitCommit(f)), ...operation(f) }),
+    'Reads are readonly. Opening changes presentation through the existing Desktop control bridge and returns read and presentation facts separately. A missing reply leaves presentation unconfirmed; inspect app snapshot and the exact Git Region before another open. Existing Agents and workspaces remain available.'),
   command('file.read', '--zone ID --path PATH --host ID --workspace ID --workspace-path PATH [--space ID] [--max-bytes N]', 'Read the original Zone-relative file with its exact resource and saved revision. An optional byte cap refuses oversized bodies before reading them.',
     { '--zone': 'data', '--path': 'data', '--host': 'data', '--workspace': 'data', '--workspace-path': 'data', '--space': 'data', '--max-bytes': 'value' },
     f => parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,

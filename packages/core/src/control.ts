@@ -1,4 +1,5 @@
 import type { DemandContentReference } from '@agentmux/demand'
+import type { GitOpenParams, GitOpenResult } from './public-rpc-git.js'
 export type { DemandContentReference } from '@agentmux/demand'
 import type { ContinuousProgressLoop } from './continuous-progress-scheduler.js'
 import type { PendingMessageControlRequest, PendingMessageControlResult } from './pending-message-control.js'
@@ -593,6 +594,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlInspectRegionRequest
   | AgentMuxControlOpenTerminalRequest
   | AgentMuxControlOpenBrowserRequest
+  | (RequestBase & GitOpenParams & { operation: 'open.git' })
   | AgentMuxControlSendRequest
   | AgentMuxControlFocusRequest
   | AgentMuxControlArrangeRequest
@@ -695,6 +697,7 @@ export type AgentMuxControlResult =
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
   | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
+  | ({ operation: 'open.git' } & GitOpenResult)
   | { operation: 'send'; agentSessionId: string }
   | AgentMuxDesktopFocusResult
   | { operation: 'arrange'; tab: AgentMuxInspectedTab }
@@ -942,6 +945,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'inspect.region': 'short',
   'agent.open': 'long',
   'open.file': 'long',
+  'open.git': 'long',
   'agent.view': 'long',
   'space.view': 'long',
   'file.format': 'long',

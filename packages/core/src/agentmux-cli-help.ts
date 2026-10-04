@@ -8,6 +8,15 @@ export { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 const syntax = (entry: AgentMuxCliCommand) => `agentmux ${entry.method.replaceAll('.', ' ')}${entry.usage ? ' ' + entry.usage : ''}`
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
+const GIT_GUIDE = `Discover the original workspace ID, hostId and path with agentmux app snapshot.
+Pass all three to git history, commit, diff and open; an endpoint or current cwd is not that target.
+History pages bind fixed roots. Reuse nextCursor unchanged; omit cursor to refresh.
+Commit reads return the full message, all direct parents, a chosen-parent snapshot and entries.
+Use a complete OID, and preserve snapshot plus both file paths for git diff --input FILE|-.
+Reading never checks out, stages or writes Git. git open changes Desktop presentation only;
+read and presentation are separate facts. Missing presentation replies remain unconfirmed.
+Inspect app snapshot and space inspect for the exact existing Git Region before another open.
+Wrong or unavailable targets reject only this request; existing workspaces and Agents remain available.`
 
 const SPATIAL_GUIDE = `## Delegation and opening playbook (advisory)
 "subagent" can mean Provider-native delegation or an independent AgentMux Session.
@@ -192,6 +201,7 @@ export function agentMuxCommandHelp(path: string): string | null {
   if (!selected.length) return null
   const exact = selected.find(entry => entry.method === path)
   const guide = path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
+    : path === 'git' || path.startsWith('git.') ? GIT_GUIDE
     : path === 'space' || path.startsWith('space.') || path === 'agent.open' || path === 'file.open' ? SPATIAL_GUIDE
     : path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
     : path === 'settings' || path.startsWith('settings.') ? AGENTMUX_SETTINGS_RESOURCE_GUIDE
@@ -222,6 +232,8 @@ ${list(AGENTMUX_CLI_COMMANDS)}
 ${COMMON}
 
 ${SPATIAL_GUIDE}
+
+${GIT_GUIDE}
 
 Agent-first workflow:
 1. Inspect Project resources and the intended Space separately with app snapshot and space inspect.

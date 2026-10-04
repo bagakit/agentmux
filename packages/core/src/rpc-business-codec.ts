@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { parseGitOpenResult } from './public-rpc-git.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
   type AgentMuxControlResult, type AgentMuxControlCaller } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
@@ -138,6 +139,11 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     if (refs?.some(ref => !demand.contentRefs?.some(saved => saved.hostId === ref.hostId && saved.workspaceId === ref.workspaceId && saved.zoneId === ref.zoneId))) fail()
   }
   switch (request.operation) {
+    case 'open.git': {
+      const { operation: _operation, ...body } = result as Extract<AgentMuxControlResult, { operation: 'open.git' }>
+      parseGitOpenResult(body, request)
+      break
+    }
     case 'demand.create':
       if (actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== (actual.demand as Record<string, unknown>)?.id ||
           request.demandId !== undefined && (actual.demand as Record<string, unknown>)?.id !== request.demandId) fail()

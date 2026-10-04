@@ -5,6 +5,7 @@ import { SpaceObjectImages } from './space-object-images.js'
 import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
 import { homedir } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
+import { GitPublicControl } from './git-public-control.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
@@ -1590,6 +1591,7 @@ export async function registerIpc(args: {
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,
     files: publicFiles,
+    git: new GitPublicControl({ config: () => config, git }),
     fileUploads: new FileUploadOwner(join(homedir(), '.agentmux', 'attachments')),
     topics: topicKnowledge,
 
