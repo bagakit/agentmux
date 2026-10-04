@@ -217,6 +217,7 @@ export class AgentTerminalScreenEvidence {
   private completeFrame: { startByte: number; endByte: number } | null = null
   private failure: AgentTerminalScreenFailure | null = null
   private disposed = false
+  private disposalReason: Error | undefined
 
   constructor(cols: number, rows: number, frame: AgentTerminalFrameMarkers | null, initialByte = 0,
     authoritative = initialByte === 0, resizeRevision = 0) {
@@ -326,8 +327,9 @@ export class AgentTerminalScreenEvidence {
       }
       const inspect = (): void => {
         if (settled) return
+        if (options.signal?.aborted) return abort()
         if (this.failure) return fail(this.failureError(this.failure, options))
-        if (this.disposed) return abort()
+        if (this.disposed) return this.disposalReason ? fail(this.disposalReason) : abort()
         if (!replayFlushed) return
         if (!this.screen.authoritative) return fail(new AgentMuxError(
           'Earlier terminal output is no longer retained; the current screen cannot be fully reconstructed yet.',
@@ -360,9 +362,10 @@ export class AgentTerminalScreenEvidence {
     })
   }
 
-  dispose(): void {
+  dispose(reason?: Error): void {
     if (this.disposed) return
     this.disposed = true
+    this.disposalReason = reason
     this.notify()
     this.screen.dispose()
   }

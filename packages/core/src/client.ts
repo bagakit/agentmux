@@ -4334,7 +4334,7 @@ export class AgentMuxClient {
     }
     const applied = await this.resizeTerminal(expectedRun, cols, rows)
     // 屏幕几何变了，长命屏幕证据随之失效；下一次观察按新尺寸重建。
-    this.screenEvidence.discard(agentSessionId)
+    this.screenEvidence.discard(agentSessionId, { source: 'resize', runId: expectedRun.runId })
     // 但**作废不等于恢复**（#660，与 #628 同族、触发点不同）：`discard()` 里的 `evidence.dispose()`
     // 同步 `notify()`，挂在这具证据上的 `wait()` 的 `inspect()` 看到 `disposed` 走 `abort()`，于是在途的
     // readiness 观察以 AGENT_PROMPT_READINESS_CANCELLED 结束——而 `observeReadiness` 的 `.catch` 对这个码

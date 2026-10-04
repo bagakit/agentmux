@@ -16,6 +16,22 @@ import { terminalContinuationSteps } from './terminal-continuation.js'
 // pair stays unknown until a real later frame, never a guessed frame or a Run cap.
 const FRAME_OBSERVATION_LOOKBACK_BYTES = 64 * 1024
 
+type ScreenInvalidation = {
+  runId: string | null
+  source: 'resize' | 'rebuild' | 'run-replaced' | 'discard' | 'disconnect'
+  beforeGeneration: number
+  generation: number
+  // Only a continuous chain of owner-confirmed same-Run invalidations can continue a read.
+  recoverableFromGeneration: number | null
+}
+
+class ScreenObservationInvalidated extends AgentMuxError {
+  constructor(readonly invalidation: ScreenInvalidation, phase: 'handshake' | 'frame-scan' | 'registered-wait') {
+    super('Terminal screen observation was invalidated.', 'AGENT_PROMPT_READINESS_CANCELLED',
+      JSON.stringify({ ...invalidation, phase }))
+  }
+}
+
 type ScreenEvidenceDeps = {
   kernel: CtxmuxRunAdapter
   providers: AgentProviderRegistry
@@ -53,6 +69,7 @@ export class AgentScreenEvidenceStore {
    * 计数器按 Session 各一个整数，生命周期与会话相同。
    */
   private readonly generations = new Map<string, number>()
+  private readonly invalidations = new Map<string, ScreenInvalidation>()
 
   constructor(private readonly deps: ScreenEvidenceDeps) {}
 
@@ -72,6 +89,7 @@ export class AgentScreenEvidenceStore {
     }
   ): Promise<number> {
     const observation = new AbortController()
+    const deadline = options.timeoutMs === undefined ? undefined : Date.now() + options.timeoutMs
     const abort = (): void => observation.abort(agentMuxCancellationError(
       'Terminal screen observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED', options.signal?.reason
     ))
@@ -80,6 +98,13 @@ export class AgentScreenEvidenceStore {
     const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
       observation.abort(new AgentMuxError(options.timeoutMessage, 'AGENT_PROMPT_RENDER_TIMEOUT'))
     }, options.timeoutMs)
+    const checkObservation = (): void => {
+      if (options.signal?.aborted) abort()
+      if (!observation.signal.aborted && deadline !== undefined && Date.now() >= deadline) {
+        observation.abort(new AgentMuxError(options.timeoutMessage, 'AGENT_PROMPT_RENDER_TIMEOUT'))
+      }
+      observation.signal.throwIfAborted()
+    }
     let cancel!: () => void
     const cancelled = new Promise<never>((_resolve, reject) => {
       cancel = () => reject(observation.signal.reason)
@@ -87,26 +112,45 @@ export class AgentScreenEvidenceStore {
       if (observation.signal.aborted) cancel()
     })
     const read = async (): Promise<number> => {
-      observation.signal.throwIfAborted()
-      const evidence = await this.ensure(
-        session,
-        Math.max(0, outputBoundaryByte - FRAME_OBSERVATION_LOOKBACK_BYTES),
-        options.checkpointFrameFence
-      )
-      // A cancelled handshake may finish later; it must not install an orphan waiter.
-      observation.signal.throwIfAborted()
-      return await evidence.wait({
-        boundaryByte: outputBoundaryByte,
-        requireOutputAfterBoundary,
-        predicate,
-        ...(options.requireCompleteFrame ? { requireCompleteFrame: true } : {}),
-        timeoutMessage: options.timeoutMessage,
-        terminalMessage: options.terminalMessage,
-        signal: observation.signal,
-        ...(options.requireFrameAfterBoundary === undefined
-          ? {}
-          : { requireFrameAfterBoundary: options.requireFrameAfterBoundary })
-      })
+      for (;;) {
+        checkObservation()
+        try {
+          const evidence = await this.ensure(
+            session,
+            Math.max(0, outputBoundaryByte - FRAME_OBSERVATION_LOOKBACK_BYTES),
+            options.checkpointFrameFence
+          )
+          // A cancelled handshake may finish later; it must not install an orphan waiter.
+          checkObservation()
+          return await evidence.wait({
+            boundaryByte: outputBoundaryByte,
+            requireOutputAfterBoundary,
+            predicate,
+            ...(options.requireCompleteFrame ? { requireCompleteFrame: true } : {}),
+            timeoutMessage: options.timeoutMessage,
+            terminalMessage: options.terminalMessage,
+            signal: observation.signal,
+            ...(options.requireFrameAfterBoundary === undefined
+              ? {}
+              : { requireFrameAfterBoundary: options.requireFrameAfterBoundary })
+          })
+        } catch (error) {
+          checkObservation()
+          const latest = this.invalidations.get(session.agentSessionId)
+          if (!(error instanceof ScreenObservationInvalidated) ||
+            error.invalidation.runId !== session.run.runId ||
+            latest?.runId !== session.run.runId || latest.recoverableFromGeneration === null ||
+            latest.recoverableFromGeneration > error.invalidation.beforeGeneration) throw error
+          // Yield to cancellation and the one original deadline, even during a rapid rebuild storm.
+          await new Promise<void>(resolve => setImmediate(resolve))
+          checkObservation()
+          const afterYield = this.invalidations.get(session.agentSessionId)
+          if (afterYield?.runId !== session.run.runId || afterYield.recoverableFromGeneration === null ||
+            afterYield.recoverableFromGeneration > error.invalidation.beforeGeneration) {
+            throw this.invalidationError(session.agentSessionId, error.invalidation.beforeGeneration, 'registered-wait')
+          }
+        }
+      }
     }
     try {
       // One budget includes attachment creation and the actual screen observation.
@@ -131,7 +175,7 @@ export class AgentScreenEvidenceStore {
       }
       const building = this.builds.get(session.agentSessionId)
       if (!building) break
-      await building.catch(() => {})
+      await building
     }
     const build = this.build(session, startByte, frameFence)
     this.builds.set(session.agentSessionId, build)
@@ -149,7 +193,11 @@ export class AgentScreenEvidenceStore {
     startByte: number,
     frameFence?: { outputByte: number; resizeRevision: number }
   ): Promise<AgentTerminalScreenEvidence> {
-    this.discard(session.agentSessionId)
+    const previous = this.evidence.get(session.agentSessionId)
+    this.discard(session.agentSessionId, {
+      source: previous && previous.runId !== session.run.runId ? 'run-replaced' : 'rebuild',
+      runId: session.run.runId
+    })
     const generation = this.generations.get(session.agentSessionId) ?? 0
     const matcher = this.deps.providers.get(session.providerId).terminalPromptRender
     let evidence: AgentTerminalScreenEvidence | null = null
@@ -157,6 +205,15 @@ export class AgentScreenEvidenceStore {
     const forward = (event: AgentTerminalScreenEvidenceEvent): void => {
       if (evidence) evidence.accept(event)
       else pending.push(event)
+    }
+    const invalidationError = (phase: 'handshake' | 'frame-scan'): Error => {
+      // A real terminal failure queued during a superseded handshake/scan must
+      // not disappear when the same-Run geometry invalidation is continued.
+      const failure = pending.find(event => event.type === 'gap' || event.type === 'error' || event.type === 'exit')
+      if (failure?.type === 'error') return failure.error
+      if (failure?.type === 'gap') return new AgentMuxError('Terminal screen evidence was evicted from CtxMux replay.', 'OUTPUT_GAP')
+      if (failure?.type === 'exit') return new AgentMuxError('The observed Agent Run exited.', 'AGENT_PROMPT_RENDER_FAILED')
+      return this.invalidationError(session.agentSessionId, generation, phase)
     }
     const observation = await this.deps.kernel.observeOutput(session.run.runId, startByte, (event) => {
       if (event.type === 'data') {
@@ -180,11 +237,9 @@ export class AgentScreenEvidenceStore {
     // 握手期间被作废了（掉线 / Run 更换）：这条 Attachment 挂在已经死掉的连线上，登记它就是留一具
     // `failed === false` 的尸体给 `ensure()` 复用。关掉它并抛，让调用方走与「观察被取消」相同的出口。
     if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
+      const error = invalidationError('handshake')
       await observation.close().catch(() => {})
-      throw new AgentMuxError(
-        'Terminal screen observation was cancelled.',
-        'AGENT_PROMPT_READINESS_CANCELLED'
-      )
+      throw error
     }
     const continuation = observation.terminal
     const size = continuation.type === 'basic-vt' ? continuation.checkpoint.size
@@ -222,7 +277,7 @@ export class AgentScreenEvidenceStore {
         }
       }
       if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
-        throw new AgentMuxError('Terminal screen observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED')
+        throw invalidationError('frame-scan')
       }
       for (const step of terminalContinuationSteps(observation)) {
         if (step.type === 'resized') built.accept({ ...step, cols: step.size.cols, rows: step.size.rows })
@@ -285,15 +340,39 @@ export class AgentScreenEvidenceStore {
     return current ? { ...current, evidenceGeneration: this.generation(session.agentSessionId) } : null
   }
 
-  discard(agentSessionId: string): void {
+  private invalidationError(agentSessionId: string, generation: number,
+    phase: 'handshake' | 'frame-scan' | 'registered-wait'): ScreenObservationInvalidated {
+    const invalidation = this.invalidations.get(agentSessionId)
+    return new ScreenObservationInvalidated({
+      runId: invalidation?.runId ?? null, source: invalidation?.source ?? 'discard',
+      beforeGeneration: generation, generation: this.generation(agentSessionId),
+      recoverableFromGeneration: invalidation?.recoverableFromGeneration ?? null
+    }, phase)
+  }
+
+  discard(agentSessionId: string, cause?: {
+    source: ScreenInvalidation['source']; runId: string
+  }): void {
     // 世代**无条件**递增，且排在早退之前：在途的 build 此刻还没有 entry，只有让它的世代过期才拦得住
     // 它事后登记（见 `generations` 的说明）。写成「有 entry 才递增」会让那条路径原封不动地留着。
-    this.generations.set(agentSessionId, (this.generations.get(agentSessionId) ?? 0) + 1)
+    const beforeGeneration = this.generation(agentSessionId)
+    const generation = beforeGeneration + 1
+    const previous = this.invalidations.get(agentSessionId)
+    const recoverable = cause?.source === 'resize' || cause?.source === 'rebuild'
+    this.invalidations.set(agentSessionId, {
+      runId: cause?.runId ?? this.evidence.get(agentSessionId)?.runId ?? previous?.runId ?? null,
+      source: cause?.source ?? 'discard', beforeGeneration, generation,
+      recoverableFromGeneration: recoverable
+        ? previous?.runId === cause.runId && previous.generation === beforeGeneration &&
+          previous.recoverableFromGeneration !== null ? previous.recoverableFromGeneration : beforeGeneration
+        : null
+    })
+    this.generations.set(agentSessionId, generation)
     const entry = this.evidence.get(agentSessionId)
     if (!entry) return
     this.evidence.delete(agentSessionId)
     entry.close()
-    entry.evidence.dispose()
+    entry.evidence.dispose(this.invalidationError(agentSessionId, beforeGeneration, 'registered-wait'))
   }
 
   discardAll(): void {
@@ -303,7 +382,7 @@ export class AgentScreenEvidenceStore {
       ...this.evidence.keys(),
       ...this.builds.keys()
     ])) {
-      this.discard(agentSessionId)
+      this.discard(agentSessionId, { source: 'disconnect', runId: this.evidence.get(agentSessionId)?.runId ?? '' })
     }
     this.builds.clear()
   }
