@@ -29,9 +29,6 @@ await verifyRendererSourceMutations({
       after: `warning: operation.warning })
         void entry
       },
-      recordTarget:` },
-    { label: 'human-takeover-blocks-read-only-extraction', file,
-      before: 'takeover.at !== null && BROWSER_ACTION_PAGE_CALLS.has(name)',
-      after: "takeover.at !== null && (BROWSER_ACTION_PAGE_CALLS.has(name) || name === 'extractStructured')" }
+      recordTarget:` }
   ]
 })

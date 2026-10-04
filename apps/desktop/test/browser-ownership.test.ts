@@ -6,20 +6,9 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 
 /**
- * T-012 的地基判据：**Agent 自己的动作不产生 `input-event`**。
- *
- * 整个「人抢回方向盘」的设计押在这一条上。驱动路只用 `Accessibility.*` / `DOM.*` / `Runtime.*`
- * 三个 CDP 域，动作是页面内 JS 的 `this.click()` / `dispatchEvent(...)`——脚本发起的 DOM 事件，
- * 不走原生输入管线。如果这一条不成立，`input-event` 就不是「真人碰过」的信号，而是「有人动过」，
- * 于是 Agent 每点一下就把自己判成被接管，功能当场变成噪音。
- *
- * 这一条**只能在真机上判**：假的 webContents 想不发什么就不发什么，用它跑出来的绿是自证。
- *
- * 反向的一半同样承重：`sendInputEvent` 之后**必须**收到事件。少了它，「Agent 动作零事件」与
- * 「监听器根本没挂上」长得一模一样，而后者会让整份实现静默失效（MEMORY「长命观察者建立后
- * 死亡是静默的」是同一族）。
- *
- * `sendInputEvent` 不是真人的手，但它进的是同一个原生输入入口——这是本机能构造的最接近的东西。
+ * Native input/dispatch probe: verifies the sampled semantic DOM actions and the native
+ * sendInputEvent boundary with a real Electron page. An input-event is not authenticated
+ * human intent and does not grant control; Browser handoff requires an explicit action.
  */
 
 const ELECTRON_BINARY: string = createRequire(import.meta.url)('electron') as unknown as string

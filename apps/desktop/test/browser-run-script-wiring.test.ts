@@ -220,23 +220,25 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
 }
 
 /**
- * 让派发层在**第一次**被调用时顺手模拟一次真人输入，并记下每次调用的名字。
+ * 让派发层在**第一次**被调用时顺手模拟一次显式停止，并记下每次调用的名字。
  *
- * 接管信号必须从主进程这一侧发出，因为程序跑在它自己的子进程里，够不到 webContents。挂在
+ * 停止请求必须从主进程这一侧发出，因为程序跑在它自己的子进程里，够不到 webContents。挂在
  * 第一次调用上是为了拿到确定的时序：「第一次动作发生过、之后的一个都没有」正是这套设计
  * 承诺的那句话。
  *
  * 放在模块级而不是某个 describe 里：驱动位那一族也要用它——「被掐断的运行有没有把驱动位还原」
  * 和「掐断之后动作停不停」是同一次接管的两个侧面，两处各写一份会漂。
  */
-function takeoverOnFirstCall(contents: any, type = 'mouseDown'): string[] {
+function stopOnFirstCall(manager: BrowserViewManager, sentEvents: () => any[]): string[] {
   const seen: string[] = []
   let fired = false
   createDispatch.mockImplementationOnce(() => async (name: string) => {
     seen.push(name)
     if (!fired) {
       fired = true
-      contents.emit('input-event', { type })
+      const operationId = sentEvents().filter(event => event.browser?.id === 'b1').at(-1)?.browser.activity.operation?.id
+      expect(operationId).toBeTruthy()
+      await manager.stopOperationById(operationId)
     }
     return `dispatched:${name}`
   })
@@ -547,17 +549,17 @@ describe('runScript waiting follows the Core capability effects', () => {
     } finally { manager.dispose() }
   }, 30_000)
 
-  it('completing a wait never overwrites human takeover', async () => {
+  it('completing a wait never overwrites explicit Stop', async () => {
     const { manager, contents, sentEvents } = await managerWithBrowser()
     const phases: string[] = []
     createDispatch.mockImplementationOnce(() => async name => {
-      if (name === 'waitForElement') contents.emit('input-event', { type: 'mouseDown' })
+      if (name === 'waitForElement') await manager.stopOperationById(sentEvents().at(-1)?.browser.activity.operation.id)
       phases.push(sentEvents().at(-1)?.browser.activity.operation.phase)
       return true
     })
     try {
       const report = await manager.runScript('b1', 'await waitForElement(); return await pageInfo()')
-      expect(phases).toEqual(['human', 'human'])
+      expect(phases).toEqual(['stopped'])
       expect(report.outcome.kind).toBe('stopped')
       expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
     } finally { manager.dispose() }
@@ -663,284 +665,107 @@ describe('runScript 把页面调用交给派发层', () => {
   }, 30_000)
 })
 
-/**
- * T-012：人伸手把方向盘抢回去之后，Agent 明确停下。
- *
- * 判在这一层而不是派发层，因为要判的正是 manager 那三件事：**拦在 onPageCall 这道必经之路上**、
- * **结局压成 `stopped`**、**监听器跟着这一次运行走**。派发层对「有没有人碰过这个 view」一无所知。
- *
- * 「Agent 的动作不产生 input-event」那条地基在 browser-ownership.test.ts 上真机判——这里喂的是
- * 合成事件，证不了那件事，也不打算证。
- */
-describe('runScript：人接管之后，动作停、观察放行', () => {
-  it('人点了一下之后 click 被拒，而这之前的 click 正常执行', async () => {
-    const { manager, contents } = await managerWithBrowser()
-    const seen = takeoverOnFirstCall(contents)
-
-    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
-
-    // 正向：接管**之前**那次真的做了。少了这一半，一个「永远拒绝」的实现也会绿——而那等于
-    // Agent 从此再也驱动不了任何页面。
-    expect(seen, '接管之前那次 click 没落到派发层上').toEqual(['click'])
-    // 反向：之后那次没落下去。只判结局的话，一个「照点不误、最后才把结局改个名」的实现也会绿。
-    expect(seen, '接管之后那次 click 照样点下去了').toHaveLength(1)
-    expect(report.outcome.kind, '接管之后的运行没被降级').toBe('stopped')
-  }, 30_000)
-
-  it('接管之后 snapshot 照样放行，js 和 cdp 被拒', async () => {
-    // 放行观察是设计的一半：程序被打断之后最该做的事就是看一眼页面再报告。把 snapshot 也拦掉，
-    // 它只能瞎猜着退出。两个逃生口按动作算——它们能做任何事，漏掉任何一个等于没拦。
-    const { manager, contents } = await managerWithBrowser()
-    const seen = takeoverOnFirstCall(contents)
-
-    const report = await manager.runScript('b1', `
-      await click("@e1")
-      const outcomes = []
-      for (const [label, run] of [
-        ['snapshot', () => snapshot()],
-        ['pageInfo', () => pageInfo()],
-        ['js', () => js('1')],
-        ['cdp', () => cdp('Runtime.evaluate', {})]
-      ]) {
-        try { await run(); outcomes.push(label + ':allowed') }
-        catch (error) { outcomes.push(label + ':refused') }
-      }
-      return outcomes
-    `)
-
-    // 程序把拒绝吞了照常 return，所以 result 拿得到——而结局仍然被压成 stopped（下一条判）。
-    expect(report.result, `程序没跑到底：${JSON.stringify(report.outcome)}`).toEqual([
-      'snapshot:allowed',
-      'pageInfo:allowed',
-      'js:refused',
-      'cdp:refused'
-    ])
-    // 放行的两个真的落到派发层上了，不是被上层伪造成一次成功。
-    expect(seen, '放行的观察没真的执行').toEqual(['click', 'snapshot', 'pageInfo'])
-  }, 30_000)
-
-  it('接管之后，能力表里每个改页面的能力都被拒，每个只读的都放行', async () => {
-    // **这条来自一次存活的变异。** 上面两条各自手挑了几个名字（click / js / cdp / snapshot /
-    // pageInfo），于是把 `navigate` 整类从接管拒绝集合里删掉——也就是「人把页面抢回去之后，
-    // Agent 仍然能 gotoUrl 把它导走」——44 个测试全绿，没有一条发现。手挑名字的判据只覆盖被挑中
-    // 的那几个，而漏掉的那一类恰恰是最容易在重构里丢掉的。
-    //
-    // 所以这里**遍历能力表**，按 `effect` 算期望：act ∪ navigate 必须被拒，observe 必须放行。
-    // 期望不是手写的第二份清单，而是从同一张表按类别算出来的；表变了这条自动跟着变。
-    //
-    // `wait` 不在内：等待既不读也不改，拦不拦它都没有可观察的差别，而 `wait(0)` 在替身上要真的
-    // 等——那只会让这条测试变慢，不会让它变准。
-    const { manager, contents } = await managerWithBrowser()
-
-    // 每个能力一次调用，参数给到能过派发层形参检查的最小形状。名字从表来，调用形状按名字给。
-    const callFor: Record<string, string> = {
-      snapshot: 'snapshot()',
-      snapshotText: 'snapshotText()',
-      pageInfo: 'pageInfo()',
-      extractStructured: 'extractStructured({fields:[{key:"title",type:"string",source:{selector:"h1",read:"text"}}]})',
-      readResult: 'readResult({})',
-      readDownload: 'readDownload({})',
-      uploadFiles: 'uploadFiles("@e1", ["export.bin"])',
-      download: 'download("@e1", {path: "export.bin"})',
-      captureScreenshot: 'captureScreenshot()',
-      elementContext: 'elementContext("@e1")',
-      click: 'click("@e1")',
-      fillInput: 'fillInput("@e1", "x")',
-      typeText: 'typeText("x")',
-      pressKey: 'pressKey("Enter")',
-      hover: 'hover("@e1")',
-      scroll: 'scroll("@e1")',
-      gotoUrl: 'gotoUrl("https://example.invalid/")',
-      js: 'js("1")',
-      cdp: 'cdp("Runtime.evaluate", {})'
-    }
-
-    // 判据的作用对象：表里 act/navigate/observe 三类的名字，且每一类都必须非空——某一类取空时
-    // 下面对它的断言一条不跑，而那正是本条要防的那个缺陷（MEMORY「空集合上的谓词断言恒成立」）。
-    const mustRefuse = [
-      ...browserPageCapabilityNames('act'),
-      ...browserPageCapabilityNames('navigate')
-    ].filter((name) => name in callFor)
-    const mustAllow = browserPageCapabilityNames('observe').filter((name) => name in callFor)
-    expect(browserPageCapabilityNames('act').length, 'act 类是空的——判据在对空气生效').toBeGreaterThan(0)
-    expect(
-      browserPageCapabilityNames('navigate').length,
-      'navigate 类是空的——正是这一类被删掉时本条必须红'
-    ).toBeGreaterThan(0)
-    expect(mustAllow.length, 'observe 类是空的——放行那一半没有作用对象').toBeGreaterThan(0)
-    // 表里每个名字都得有调用形状，否则新增能力会静默不被这条覆盖。`wait` 整类豁免——它们在替身上
-    // 要真的等，只会让这条变慢不会变准；豁免按**类别**算而不是点名 `'wait'` 这一个字面量，
-    // 否则 `waitForElement` 这些同类的名字会被当成"漏了调用形状"。
-    const waitClass = new Set(browserPageCapabilityNames('wait'))
-    expect(
-      BROWSER_PAGE_CAPABILITY_NAMES.filter((name) => !waitClass.has(name) && !(name in callFor)),
-      '能力表里有名字没给调用形状——它不在这条判据的覆盖面里'
-    ).toEqual([])
-
-    // 接管只在此刻挂上：`mockImplementationOnce` 是全局排队的，上面任一条断言抛出都会把这个
-    // 没被消费的实现留给**下一个测试**去取，于是隔壁 5 条会莫名变红而真凶在这里。
-    takeoverOnFirstCall(contents)
-
-    const probes = [...mustRefuse, ...mustAllow]
-    const report = await manager.runScript(
-      'b1',
-      `
-      await click("@e1")
-      const outcomes = []
-      for (const [label, run] of [
-${probes.map((name) => `        ['${name}', () => ${callFor[name]}]`).join(',\n')}
-      ]) {
-        try { await run(); outcomes.push(label + ':allowed') }
-        catch (error) { outcomes.push(label + ':' + (/took control/i.test(String(error && error.message)) ? 'refused' : 'other')) }
-      }
-      return outcomes
-    `
-    )
-
-    const got = new Map(
-      (report.result as string[]).map((entry) => {
-        const [name, verdict] = entry.split(':')
-        return [name!, verdict!]
-      })
-    )
-    // 非空自检：程序没跑到底的话 got 是空 Map，下面两个循环一条不跑。
-    expect(got.size, `程序没跑到底：${JSON.stringify(report.outcome)}`).toBe(probes.length)
-
-    for (const name of mustRefuse) {
-      expect(got.get(name), `${name} 会改页面，但人接管之后它没被拒——页面已经不是 Agent 的了`)
-        .toBe('refused')
-    }
-    for (const name of mustAllow) {
-      expect(got.get(name), `${name} 只是观察，接管之后不该拒——程序会瞎猜着退出`).toBe('allowed')
-    }
-  }, 30_000)
-
-  it('程序把拒绝 try/catch 吞了照常 return，结局仍然是 stopped', async () => {
-    // 这条是承重的，与 `endedReason` 那段注释里的是同一个陷阱：判在脚本层会被这个 catch 吃掉。
-    const { manager, contents } = await managerWithBrowser()
-    takeoverOnFirstCall(contents)
-
-    const report = await manager.runScript(
-      'b1',
-      'await click("@e1"); try { await click("@e2") } catch (error) { } return "done"'
-    )
-
-    expect(report.outcome.kind, '被接管却报成功——Agent 会以为它的程序跑完了').toBe('stopped')
-    const message = report.outcome.kind === 'stopped' ? report.outcome.message : ''
-    // 文案点名的恢复动作必须是「再跑一次」：它真能走通，而"去改设置"不成比例（人从没要求
-    // 禁用自动化），照 browser-automation-setting-reachable.test.ts 的房规。
-    expect(message, '没说清是人接管了').toMatch(/took control/i)
-    expect(message, '没告诉 Agent 下一步能干什么').toMatch(/run the program again/i)
-    expect(message, '没提先看一眼页面').toMatch(/snapshot\(\)/)
-  }, 30_000)
-
-  it('被接管不报 indeterminate，也不报 script-failed', async () => {
-    // 三支各有各的下一步，折并任意两支都会让 Agent 走错方向：
-    // - indeterminate 说的是"做到哪一步不知道"，而这里知道——拦在必经之路上，之后一个都没跑。
-    // - script-failed 是在把人的动作记到 Agent 程序头上，还叫它去改一段本来没错的代码。
-    //   这一支只有在覆写被放进 `if (run.completed)` 里面时才会冒出来：程序**没吞**拒绝的时候，
-    //   错是抛着出来的，落进 browserRunOutcomeFromFailure。两条路必须汇到同一个结局。
-    const { manager, contents } = await managerWithBrowser()
-
-    takeoverOnFirstCall(contents)
-    const swallowed = await manager.runScript(
-      'b1',
-      'await click("@e1"); try { await click("@e2") } catch (error) { } return "done"'
-    )
-    takeoverOnFirstCall(contents)
-    manager.returnControl('b1')
-    const thrown = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
-
-    for (const [label, report] of [['吞了的', swallowed], ['没吞的', thrown]] as const) {
-      expect(report.outcome.kind, `${label}那次报成了 ${report.outcome.kind}`).toBe('stopped')
-    }
-    // 结局一样，`result` 不一样：吞了的那次程序真的 return 了东西（观察放行就是为了让它能这么做），
-    // 没吞的那次根本没跑到 return。两边都填一个值，或者两边都丢掉，都是在说谎。
-    expect(swallowed.result, '程序吞掉拒绝后 return 的东西被丢了——等于逼它再跑一遍').toBe('done')
-    expect(thrown.result, '程序没跑到 return 却报出了返回值').toBeUndefined()
-  }, 30_000)
-
-  it('鼠标飘过不算接管——只有有意的输入才算', async () => {
-    // 少了这条，一个「什么 input-event 都算」的实现会让上面几条全绿，而那等于人把指针挪过屏幕
-    // Agent 就停。这是一个会让整个功能变成噪音的假阳性，而且没人会当它是 bug。
-    const { manager, contents } = await managerWithBrowser()
-    const seen: string[] = []
-    createDispatch.mockImplementationOnce(() => async (name: string) => {
-      seen.push(name)
-      for (const type of ['mouseMove', 'mouseEnter', 'pointerMove', 'pointerRawUpdate', 'mouseLeave']) {
-        contents.emit('input-event', { type })
-      }
-      return `dispatched:${name}`
+describe('explicit Browser control', () => {
+  it('the built CLI stops the exact live operation through the public socket and actual client branch', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'amx-explicit-cli-'))
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json')))
+    let dispatchFinished!: () => void
+    const stepSaved = new Promise<void>(resolve => { dispatchFinished = resolve })
+    const finishStep = journal.finishStep.bind(journal)
+    const observedFinish = vi.spyOn(journal, 'finishStep').mockImplementation(async (...args) => {
+      try { return await finishStep(...args) } finally { dispatchFinished() }
     })
-
-    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
-
-    expect(seen, '指针飘过之后的动作被拦了').toEqual(['click', 'click'])
-    expect(report.outcome.kind, '指针飘过就被判成接管了——这功能会吵到没法用').toBe('completed')
-  }, 30_000)
-
-  it('监听器跟着这一次运行走，不跟着 entry 走', async () => {
-    // 挂在整个 entry 生命周期上的话，人平时正常用浏览器就一直在写这个字段，下一次 run 一启动
-    // 就以为自己被接管了。这条连跑两次来判：第一次的输入不许影响第二次。
-    const { manager, contents } = await managerWithBrowser()
-    const ordinaryPointerListeners = [...contents.listeners.get('input-event') ?? []]
-    expect(ordinaryPointerListeners).toHaveLength(1)
-
-    takeoverOnFirstCall(contents)
-    const first = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
-    expect(first.outcome.kind, '第一次没被判接管——这条判据在对空气生效').toBe('stopped')
-
-    manager.returnControl('b1')
-    const second = await manager.runScript('b1', 'await click("@e1"); return "done"')
-
-    expect(second.outcome.kind, '上一次的接管漏到了下一次运行——监听器没摘干净').toBe('completed')
-    expect(contents.listeners.get('input-event') ?? [], 'run-owned input listener leaked into the window pointer owner')
-      .toEqual(ordinaryPointerListeners)
-  }, 30_000)
-
-  it('人接管后必须显式交还方向盘，交还会清掉锁', async () => {
-    const { manager, contents } = await managerWithBrowser()
-    takeoverOnFirstCall(contents)
-    const stopped = await manager.runScript('b1', 'await click("@e1"); return "done"')
-    expect(stopped.outcome.kind).toBe('stopped')
-    await expect(manager.runScript('b1', 'return "blocked"')).rejects.toThrow(/return control/i)
-    manager.returnControl('b1')
-    const resumed = await manager.runScript('b1', 'return "resumed"')
-    expect(resumed.outcome.kind).toBe('completed')
-  }, 30_000)
-
-  /**
-   * 接管拒绝必须是**机器可判的**，不是一句散文。
-   *
-   * 设计约束原话：「这条拒绝要带类型化的原因，让协议客户端能把『人在用这一页』与『出故障了』
-   * 分开，而不是收到一句散文」。判码而不是判 message：正则匹配那句英文在改文案时会红，而在
-   * 「码丢了、文案没动」时**不会**——而后者正是机读侧唯一在乎的那个退化。
-   *
-   * 这一条同时守住「Agent 不得靠重试静默夺回页面」：重试的次数与拒绝的形态无关，所以下面连着
-   * 判三次，并且判它三次都是同一个码、页面始终没被夺回。
-   */
-  it('接管拒绝带类型化的码，且重试拿不回页面（人不交还就一直拒）', async () => {
-    const { manager, contents } = await managerWithBrowser()
-    takeoverOnFirstCall(contents)
-    expect((await manager.runScript('b1', 'await click("@e1"); return "done"')).outcome.kind).toBe('stopped')
-
-    const codes: unknown[] = []
-    for (const attempt of [1, 2, 3]) {
-      // 重试三次。Agent 靠重试夺回页面是被明确禁止的，所以三次必须**全部**被拒、且是同一个理由。
-      await expect(
-        manager.runScript('b1', `return "retry ${attempt}"`),
-        `第 ${attempt} 次重试没有被拒——Agent 靠重试夺回了页面`
-      ).rejects.toThrow()
-      const failure = await manager.runScript('b1', `return "retry ${attempt}"`).catch((error: unknown) => error)
-      codes.push((failure as { code?: unknown }).code)
+    const { manager, sentEvents } = await managerWithBrowser(journal)
+    const source = await readFile(new URL('../src/renderer/src/store.ts', import.meta.url), 'utf8')
+    const from = source.indexOf("    if (request.operation === 'browser.stop')")
+    const until = source.indexOf("    // browser.subscribe", from)
+    expect(from).toBeGreaterThan(0); expect(until).toBeGreaterThan(from)
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+    const execute = new AsyncFunction('request', 'api', source.slice(from, until))
+    const api = { browser: { stopOperationById: (id: string) => manager.stopOperationById(id), getOperation: (id: string) => manager.getOperation(id) } }
+    const socketPath = join(directory, 'control.sock')
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], execute: async request =>
+      projectBrowserControlResult(await execute(request, api)) })
+    let release!: () => void, entered!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const ready = new Promise<void>(resolve => { entered = resolve })
+    const calls: string[] = []
+    createDispatch.mockImplementationOnce(() => async name => { calls.push(name); entered(); await held; return null })
+    const operationId = 'op:public-explicit-stop'
+    let pending: ReturnType<BrowserViewManager['runScript']> | undefined
+    try {
+      await server.start()
+      pending = manager.runScript('b1', 'await snapshot(); await click("@e1")', undefined, undefined, operationId)
+      await ready
+      const reply = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'stop', '--operation-id', operationId], objectCliEnvironment(directory))
+      expect(reply.code, reply.stderr).toBe(0)
+      expect(JSON.parse(reply.stdout).result.runOperation).toMatchObject({ id: operationId, browserId: 'b1', phase: 'stopped' })
+      expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
+      expect((await pending).outcome.kind).toBe('stopped')
+      expect(calls).toEqual(['snapshot'])
+      const inspect = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'inspect', '--operation-id', operationId], objectCliEnvironment(directory))
+      expect(inspect.code, inspect.stderr).toBe(0)
+      expect(JSON.parse(inspect.stdout).result.runOperation).toMatchObject({ id: operationId, phase: 'stopped' })
+      await expect(manager.runScript('b1', 'return 1')).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
+    } finally {
+      release(); await pending; await server.stop()
+      // Stop ends the child before its held page call finishes. Preserve the real journal write.
+      if (calls.length > 0) await stepSaved
+      observedFinish.mockRestore(); manager.dispose(); await rm(directory, {recursive: true, force: true})
     }
-    // 钉死整份：只判"第一次带码"会放过"重试之后降级成裸 Error"。
-    expect(codes, '接管拒绝不是类型化的（或重试之后码变了/丢了）')
-      .toEqual(['BROWSER_HUMAN_CONTROL_ACTIVE', 'BROWSER_HUMAN_CONTROL_ACTIVE', 'BROWSER_HUMAN_CONTROL_ACTIVE'])
+  }, 30_000)
 
-    // 另一半：人明确交还之后照样能跑。缺这一半的话，「一直拒」与「彻底坏了」在判据眼里一样。
-    manager.returnControl('b1')
-    expect((await manager.runScript('b1', 'return "resumed"')).outcome.kind).toBe('completed')
+  for (const type of ['mouseDown', 'mouseUp', 'mouseWheel', 'keyDown', 'rawKeyDown', 'char', 'touchStart', 'pointerDown', 'mouseMove']) {
+    it(`ordinary native ${type} never takes control or cancels the program`, async () => {
+      const { manager, contents, sentEvents } = await managerWithBrowser()
+      const listeners = [...contents.listeners.get('input-event') ?? []]
+      const calls: string[] = []
+      createDispatch.mockImplementationOnce(() => async name => {
+        calls.push(name)
+        contents.emit('input-event', { type })
+        expect(sentEvents().at(-1)?.browser.activity.control).toBe('agent')
+        expect(sentEvents().at(-1)?.browser.driving).toBe(true)
+        return null
+      })
+      try {
+        const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+        expect(report.outcome.kind).toBe('completed')
+        expect(report.result).toBe('done')
+        expect(calls).toEqual(['click', 'click'])
+        expect(sentEvents().at(-1)?.browser.activity.control).toBe('agent')
+        expect(contents.listeners.get('input-event') ?? []).toEqual(listeners)
+      } finally { manager.dispose() }
+    }, 30_000)
+  }
+
+  it('explicit Stop ends the original program even when its code catches errors', async () => {
+    const { manager, sentEvents } = await managerWithBrowser()
+    const calls = stopOnFirstCall(manager, sentEvents)
+    try {
+      const report = await manager.runScript('b1', 'await click("@e1"); try { await click("@e2") } catch {} return "done"', undefined, undefined, 'op:explicit-catch')
+      expect(report.outcome.kind).toBe('stopped')
+      expect(calls).toEqual(['click'])
+      expect(sentEvents().at(-1)?.browser.activity.control).toBe('human')
+      expect(report.runOperation.phase).toBe('stopped')
+      expect(report.outcome.kind === 'stopped' && report.outcome.message).toMatch(/stopped explicitly/i)
+    } finally { manager.dispose() }
+  }, 30_000)
+
+  it('a fresh run requires explicit Return; Return does not replay the old program', async () => {
+    const { manager, sentEvents } = await managerWithBrowser()
+    const calls = stopOnFirstCall(manager, sentEvents)
+    try {
+      const stopped = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "old"', undefined, undefined, 'op:explicit-return')
+      expect(stopped.outcome.kind).toBe('stopped')
+      for (const attempt of [1, 2, 3]) {
+        await expect(manager.runScript('b1', `return ${attempt}`)).rejects.toMatchObject({ code: 'BROWSER_HUMAN_CONTROL_ACTIVE' })
+      }
+      manager.returnControl('b1')
+      expect(calls).toEqual(['click'])
+      expect(stopped.runOperation.phase).toBe('stopped')
+      expect(await manager.runScript('b1', 'return "fresh"')).toMatchObject({ outcome: {kind: 'completed'}, result: 'fresh' })
+      expect(calls).toEqual(['click'])
+    } finally { manager.dispose() }
   }, 30_000)
 })
 
@@ -980,9 +805,9 @@ describe('runScript：驱动状态推到渲染进程', () => {
     // 比不画更糟：它让人以为 Agent 还在动，从而不敢去碰那个页面。
     const { manager, contents, sentEvents } = await managerWithBrowser()
     const before = drivingSequence(sentEvents()).length
-    takeoverOnFirstCall(contents)
+    stopOnFirstCall(manager, sentEvents)
 
-    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"')
+    const report = await manager.runScript('b1', 'await click("@e1"); await click("@e2"); return "done"', undefined, undefined, 'op:explicit-driving')
 
     expect(report.outcome.kind, '这条没走到接管那条路上，判据在对空气生效').toBe('stopped')
     expect(drivingSequence(sentEvents()).slice(before), '被掐断的运行没把驱动位还原').toEqual([
@@ -1592,18 +1417,18 @@ describe('Browser RSI：及时交接与单一运行者', () => {
     return { calls, entered, release }
   }
 
-  it('真人输入当时就推送 control=human，不等挂起的 page call 结束', async () => {
+  it('显式停止立即推送 control=human，不等挂起的 page call 结束', async () => {
     const { manager, contents, sentEvents } = await managerWithBrowser()
     const held = holdNextCall()
     const pending = manager.runScript('b1', 'await wait(1000); await click("@e1")')
     try {
       await held.entered
       const before = sentEvents().length
-      contents.emit('input-event', { type: 'mouseDown' })
+      await manager.stopOperationById(sentEvents().at(-1)?.browser.activity.operation.id)
       const handoffEvents = sentEvents().slice(before)
       expect(handoffEvents).toHaveLength(1)
       expect(handoffEvents[0]).toMatchObject({
-        type: 'updated', browser: { driving: false, activity: { control: 'human', operation: { phase: 'human' } } }
+        type: 'updated', browser: { driving: false, activity: { control: 'human', operation: { phase: 'stopped' } } }
       })
     } finally {
       held.release()
@@ -2507,7 +2332,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
     } finally { await f.close() }
   }, 30_000)
 
-  it('refuses native download action after human input without preventing read-only continuation', async () => {
+  it('refuses native download action after explicit Stop', async () => {
     const f = await fixture()
     try {
       f.install()
@@ -2518,14 +2343,14 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
         const dispatch = f.actualDispatch(context)
         return async (name, args) => {
           const result = await dispatch(name, args)
-          if (name === 'snapshot') f.contents.emit('input-event', { type: 'mouseDown' })
+          if (name === 'snapshot') await f.manager.stopOperationById(f.sentEvents().at(-1)?.browser.activity.operation.id)
           return result
         }
       })
       const blocked = await f.manager.runScript('b1', `const page = await snapshot(); await readDownload(${JSON.stringify(reference)}); return await download(page.nodes[0].ref, {path:"must-not-publish.bin",timeoutMs:100})`)
       expect(blocked.outcome.kind).toBe('stopped')
       expect(f.clicks()).toBe(1)
-      expect(blocked.runOperation.steps).toEqual([expect.objectContaining({ method: 'snapshot' }), expect.objectContaining({ method: 'readDownload', status: 'completed' })])
+      expect(blocked.runOperation.steps).toEqual([expect.objectContaining({ method: 'snapshot' })])
       expect(f.contents.session.listenerCount('will-download')).toBe(0)
       await expect(readFile(join(f.root, 'must-not-publish.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await f.close() }
@@ -2740,7 +2565,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
     } finally { await f.close() }
   }, 30_000)
 
-  for (const boundary of ['stop', 'human-takeover'] as const) {
+  for (const boundary of ['stop', 'return-during-IO'] as const) {
     it(`does not assign files after ${boundary} while the real Workspace snapshot IO is still pending`, async () => {
       const f = await fixture()
       let releaseIO!: () => void
@@ -2764,14 +2589,15 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
         expect(f.assignments()).toBe(0)
         await f.manager.create('b2', 'https://example.invalid/healthy', f.workspace.id)
         expect(await f.manager.runScript('b2', 'return 71')).toMatchObject({result:71,outcome:{kind:'completed'}})
-        if (boundary === 'stop') await f.manager.stopOperationById(`upload-held-${boundary}`)
-        else f.contents.emit('input-event', {type:'mouseDown'})
+        await f.manager.stopOperationById(`upload-held-${boundary}`)
+        if (boundary === 'return-during-IO') f.manager.returnControl('b1')
         releaseIO()
         const report = await pending
         await vi.waitFor(() => expect(uploadSettled).toBe(true))
         expect(f.assignments()).toBe(0)
         expect(f.staged()).toEqual([])
         expect(report.outcome.kind).toBe('stopped')
+        expect(f.sentEvents().at(-1)?.browser.activity.control).toBe(boundary === 'return-during-IO' ? 'agent' : 'human')
         expect(f.contents.isDestroyed()).toBe(false)
         f.manager.returnControl('b1')
         expect(await f.manager.runScript('b1', 'return 67')).toMatchObject({result:67,outcome:{kind:'completed'}})
@@ -2779,14 +2605,14 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
     }, 30_000)
   }
 
-  it('refuses file selection after actual human takeover before the owner can assign files', async () => {
+  it('refuses file selection after explicit Stop before the owner can assign files', async () => {
     const f = await fixture()
     try {
       createDispatch.mockImplementationOnce(context => {
         const dispatch = f.actualDispatch(context)
         return async (name,args) => {
           const result = await dispatch(name,args)
-          if (name === 'snapshot') f.contents.emit('input-event',{type:'mouseDown'})
+          if (name === 'snapshot') await f.manager.stopOperationById(f.sentEvents().at(-1)?.browser.activity.operation.id)
           return result
         }
       })
