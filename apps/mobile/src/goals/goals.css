@@ -6,7 +6,7 @@
 .mobile-goals h3 { font-size: 14px; margin-block: 0 6px; }
 .mobile-goals button, .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font: inherit; color: inherit; background: var(--surface-1, #20242c); border: 1px solid var(--line, #414650); border-radius: 8px; min-height: 44px; padding: 8px 10px; }
 .mobile-goals button { cursor: pointer; }
-.mobile-goals :focus-visible { outline: 2px solid var(--mobile-accent, #8de3ae); outline-offset: 2px; }
+.mobile-goals :focus-visible:not(.ui-input) { outline: 2px solid var(--mobile-accent, #8de3ae); outline-offset: 2px; }
 .mobile-goals-filters input { flex: 1; min-width: 0; }
 .mobile-goals-filters select { max-width: 42%; }
 .mobile-goals-list { list-style: none; padding: 0; margin-block: 6px; }
