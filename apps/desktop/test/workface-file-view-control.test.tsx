@@ -81,7 +81,7 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
     expect(read).not.toHaveBeenCalled(); expect(diff).not.toHaveBeenCalled(); expect(setter).not.toHaveBeenCalled(); expect(active).not.toHaveBeenCalled()
     expect(fixture!.flush).not.toHaveBeenCalled(); expect(protectedFacts()).toEqual(before); fixture!.noLifecycle()
   })
-  it.each(['data.json', 'data.jsonc', 'data.csv', 'data.tsv'])('reports %s reader support through real CLI and updates the original Region', async path => {
+  it.each(['data.json', 'data.jsonc', 'data.csv', 'data.tsv', 'page.html', 'page.HTM'])('reports %s reader support through real CLI and updates the original Region', async path => {
     await arrange(path)
     expect(await view()).toMatchObject({ effectiveMode: 'source', supportedModes: ['source', 'diff', 'preview'], data: 'text' })
     const original = useAppStore.getState().documents[documentKey('resource', path)]
@@ -168,7 +168,7 @@ describe.skipIf(restoring)('File Region modes through the compiled CLI and actua
     expect(input.value).toContain('Current readable source'); expect(canvases()).toEqual(['preview', 'preview', 'source'])
   })
   it('rejects unsupported previews and keeps declared media, known binary and unknown content facts honest without another read', async () => {
-    await arrange('plain.html'); const before = protectedFacts(), count = vi.mocked(api.files.read).mock.calls.length
+    await arrange('plain.ts'); const before = protectedFacts(), count = vi.mocked(api.files.read).mock.calls.length
     expect(await view('preview', currentRegion, 1)).toMatchObject({ supportedModes: ['source', 'diff'], effectiveMode: 'source', outcome: 'refused' })
     expect(protectedFacts()).toEqual(before); expect(api.files.read).toHaveBeenCalledTimes(count)
     await arrange('photo.png'); await mount(); expect(canvases()).toEqual(['bytes-preview', 'bytes-preview', 'bytes-preview'])

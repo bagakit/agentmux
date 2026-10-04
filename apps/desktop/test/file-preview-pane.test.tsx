@@ -15,6 +15,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { composerConfig } from './helpers/composer-dom-fixture'
+import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement
@@ -186,6 +187,71 @@ describe('real format preview pane', () => {
 
 })
 
+it.each(['report.html', 'report.HTM'])('previews the current %s draft in its original FileRegion without saving or creating a Browser', async path => {
+  const { file, id, key } = seed(path, '<h1>Saved original</h1>')
+  // Chromium and the HTTP owner verify actual page loading; this controlled URL avoids fake network IO.
+  const open = vi.spyOn(api.files, 'openHtmlPreview').mockResolvedValue({ id: 'html-current', url: 'about:blank#html-current' })
+  const release = vi.spyOn(api.files, 'releaseHtmlPreview').mockResolvedValue(undefined)
+  const write = vi.spyOn(api.files, 'write'), browser = vi.spyOn(useAppStore.getState(), 'createBrowser')
+  await render(<FileSurfaceView tabId={id} surface={file} />)
+  const content = '<h1>Current unsaved draft</h1><script>document.body.dataset.ready="yes"</script>'
+  await act(async () => useAppStore.getState().updateDocument(id, content, file.regionId))
+  const before = useAppStore.getState(), original = before.documents[key]
+  await click('Preview current content')
+  expect(open).toHaveBeenCalledExactlyOnceWith('workspace', path, content)
+  const frame = container.querySelector('iframe')!
+  expect(frame).not.toBeNull(); expect(frame.src).toBe('about:blank#html-current')
+  expect(frame.getAttribute('sandbox')).toBe('allow-scripts'); expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
+  expect(container.querySelector('textarea')).toBeNull()
+  expect(write).not.toHaveBeenCalled(); expect(browser).not.toHaveBeenCalled()
+  expect(useAppStore.getState().documents[key]).toBe(original)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  await click('Show source')
+  expect(container.querySelector('iframe')).toBeNull(); expect(container.querySelector('textarea')?.value).toBe(content)
+  expect(release).toHaveBeenCalledExactlyOnceWith('html-current')
+  await click('Preview current content'); await render(<FileSurfaceView tabId={id} surface={file} visible={false} />)
+  expect(container.querySelector('iframe')).toBeNull(); expect(release).toHaveBeenCalledTimes(2)
+})
+
+it('keeps HTML source available after preview failure and retries the current buffer', async () => {
+  const { file, id, key } = seed('report.html', '<h1>Recoverable original</h1>')
+  const open = vi.spyOn(api.files, 'openHtmlPreview').mockRejectedValueOnce(new Error("Error invoking remote method 'files:openHtmlPreview': Error: Preview listener unavailable"))
+    .mockResolvedValue({ id: 'recovered', url: 'about:blank#recovered' })
+  vi.spyOn(api.files, 'releaseHtmlPreview').mockResolvedValue(undefined)
+  await render(<FileSurfaceView tabId={id} surface={file} />); await click('Preview current content')
+  expect(container.textContent).toContain('Preview listener unavailable')
+  expect(container.textContent).not.toContain('files:openHtmlPreview')
+  expect(container.textContent).not.toContain('Error invoking remote method')
+  expect(container.querySelector('[aria-label="Show source"]')).not.toBeNull()
+  await click('Retry preview')
+  expect(open).toHaveBeenCalledTimes(2); expect(container.querySelector('iframe')).not.toBeNull()
+  await click('Show source'); expect(container.querySelector('textarea')?.value).toBe('<h1>Recoverable original</h1>')
+  expect(useAppStore.getState().documents[key]?.revision).toBe('original')
+})
+
+it('releases a late HTML response after hiding and never displays a replaced workspace resource', async () => {
+  const { file, id } = seed('report.html', '<h1>Original resource</h1>')
+  const pending: Array<(value: { id: string; url: string }) => void> = []
+  const open = vi.spyOn(api.files, 'openHtmlPreview').mockImplementation(() => new Promise(resolve => pending.push(resolve)))
+  const release = vi.spyOn(api.files, 'releaseHtmlPreview').mockResolvedValue(undefined)
+  await render(<FileSurfaceView tabId={id} surface={file} />); await click('Preview current content')
+  await render(<FileSurfaceView tabId={id} surface={file} visible={false} />)
+  await act(async () => pending[0]!({ id: 'late-hidden', url: 'about:blank#late' }))
+  expect(container.querySelector('iframe')).toBeNull(); expect(release).toHaveBeenCalledWith('late-hidden')
+  await render(<FileSurfaceView tabId={id} surface={file} />)
+  const config = useAppStore.getState().config!
+  await act(async () => {
+    useAppStore.setState({ config: { ...config, workspaces: config.workspaces.map(item => item.id === 'workspace' ? { ...item, path: _hygiene_fixturePath("other-root") } : item) } })
+    useAppStore.setState({ config })
+  })
+  expect(open).toHaveBeenCalledTimes(3)
+  await act(async () => pending[1]!({ id: 'stale-resource', url: 'about:blank#stale' }))
+  expect(container.querySelector('iframe')).toBeNull(); expect(release).toHaveBeenCalledWith('stale-resource')
+  await act(async () => pending[2]!({ id: 'current-resource', url: 'about:blank#current' }))
+  expect(container.querySelector('iframe')?.src).toBe('about:blank#current')
+})
+
 async function options() {
   const trigger = container.querySelector<HTMLElement>('[aria-label="File options"]')!
   expect(trigger).not.toBeNull()
@@ -234,11 +300,14 @@ it('keeps the original exact Save and conflict Reload owners accessible in compa
 it('uses the original HTML saved-preview action from keyboard overflow while preserving the unsaved original File', async () => {
   const {file,id,key}=seed('page.html','<h1>saved</h1>')
   const create=vi.spyOn(useAppStore.getState(),'createBrowser').mockResolvedValue(undefined)
-  await render(<FileSurfaceView tabId={id} surface={file} />)
+  await render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null,
+    reference: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: id, regionId: file.regionId } }}>
+    <FileSurfaceView tabId={id} surface={file} />
+  </WorkbenchPresentationContext.Provider>)
   await act(async()=>useAppStore.getState().updateDocument(id,'<h1>unsaved source</h1>',file.regionId))
   const before=useAppStore.getState().documents[key]
   await options(); await chooseOption('Preview saved file')
-  expect(create).toHaveBeenCalledExactlyOnceWith('group',undefined,_hygiene_fixturePath("repo/page.html"),undefined,'workspace')
+  expect(create).toHaveBeenCalledExactlyOnceWith('group',undefined,_hygiene_fixturePath("repo/page.html"),undefined,'workspace','workspace')
   expect(useAppStore.getState().documents[key]).toBe(before)
   expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
 })
