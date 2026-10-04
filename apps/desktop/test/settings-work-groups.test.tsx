@@ -5,7 +5,7 @@ import { DEFAULT_NOTEBOOK_ID, emptyNotebookState } from '@agentmux/core/notebook
 vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ default: () => <textarea /> }))
 import { SettingsPanel, visibleSettingsSections } from '../src/renderer/src/components/SettingsPanel'
 import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
-import { GlobalSurveySurface } from '../src/renderer/src/components/GlobalSurveySurface'
+import { GlobalRecallSurface } from '../src/renderer/src/components/GlobalRecallSurface'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { api } from '../src/renderer/src/lib/api'
@@ -16,7 +16,7 @@ const dom = composerDOM()
 beforeEach(() => {
   requestPmoTeamsTopicFloatingClose()
   useAppStore.setState({ config: structuredClone(composerConfig), sessions: [composerSession()], tabs: {}, layouts: {}, loading: false,
-    mainSurface: 'workbench', surveyNotebookId: 'research', surveyNoteId: 'research-page',
+    mainSurface: 'workbench', recallNotebookId: 'research', recallNoteId: 'research-page',
     surveyZoneSelection: { zoneId: 'retained-webpage', selection: [], active: null },
     detectExecutors: async () => {}, checkHost: async () => {} })
   const library = emptyNotebookState()
@@ -27,7 +27,10 @@ beforeEach(() => {
   useNotebookLibrary.setState({ state: library, issue: null })
 })
 const section = (id: string) => dom.click(`nav [data-settings-target="${id}"]`)
-const open = (id: string) => dom.click(`[data-settings-pane="${id}"] .small-button`)
+const open = async (id: string) => {
+  const button = [...dom.container.querySelectorAll<HTMLButtonElement>(`[data-settings-pane="${id}"] .small-button`)].find(button => button.textContent?.startsWith('Open '))!
+  expect(button).toBeDefined(); await act(async () => button.click())
+}
 
 it('the real catalog and Overview expose Work and peer Mote; keyword discovery points to first-class modules', async () => {
   expect(settingsNavGroups('').map(group => group.title)).toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
@@ -51,7 +54,7 @@ it('Survey and Mote use original surface and floating owners; navigation does no
   await open('survey')
   expect(useAppStore.getState().mainSurface).toBe('survey')
   expect(useAppStore.getState().surveyZoneSelection).toBe(initial.surveyZoneSelection)
-  expect(useAppStore.getState().surveyNotebookId).toBe('research')
+  expect(useAppStore.getState().recallNotebookId).toBe('research')
   await section('mote'); await open('mote')
   expect(readPmoTeamsTopicFloatingState().open).toBe(true)
   requestPmoTeamsTopicFloatingClose()
@@ -69,12 +72,13 @@ it('Notes leaves a retained webpage selection and opens actual original Notebook
   await dom.render(<SettingsPanel onClose={close} initialSection="notes" />)
   await open('notes')
   const current = useAppStore.getState()
-  expect(current.mainSurface).toBe('survey')
-  expect(current.surveyNotebookId).toBe(DEFAULT_NOTEBOOK_ID)
-  expect(current.surveyNoteId).toBeNull()
-  expect(current.surveyZoneSelection).toBeNull()
+  expect(current.mainSurface).toBe('recall')
+  expect(current.recallNotebookId).toBe(DEFAULT_NOTEBOOK_ID)
+  expect(current.recallNoteId).toBeNull()
+  expect(current.surveyZoneSelection).toBe(initial.surveyZoneSelection)
+  expect(current.recallZoneSelection).toBeNull()
   expect(close).toHaveBeenCalledOnce()
-  await dom.render(<GlobalSurveySurface catalog={null} projection={null} selection={current.surveyZoneSelection} />)
+  await dom.render(<GlobalRecallSurface catalog={null} projection={null} selection={current.recallZoneSelection} />)
   expect(dom.container.querySelector('.survey-notebook-home')).not.toBeNull()
   expect(dom.container.textContent).toContain('随手记')
   expect(dom.container.textContent).toContain('Saved from research')
@@ -94,7 +98,7 @@ it('visiting the new management modules keeps the original Space draft and cause
   for (const id of ['mote', 'survey', 'notes']) await section(id)
   const trigger = dom.container.querySelector('[aria-label="Settings section"]')!
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Notes')
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Recall')
   expect(document.querySelector('[role="menu"]')?.textContent).toContain('Mote Club')
   const space = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent === 'Space')!
   await act(async () => space.click())

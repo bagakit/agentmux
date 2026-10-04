@@ -506,7 +506,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     useAppStore.setState({ mainSurface: 'agents' }); release(registered); await opening
     expect(useAppStore.getState().mainSurface).toBe('agents')
     await openKnowledgeSource(notebook)
-    expect(useAppStore.getState()).toMatchObject({ mainSurface: 'survey', surveyNotebookId: notebookId })
+    expect(useAppStore.getState()).toMatchObject({ mainSurface: 'recall', recallNotebookId: notebookId })
     expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   })
   it('rejects a source Chat claim pointing to another Topic before navigation and uses general Space provenance for unknown objects', async () => {

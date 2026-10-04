@@ -1,6 +1,7 @@
 import { win32 as _hygiene_win32 } from "node:path"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
+import { NOTES_WORKSPACE_ID } from '../src/shared/notes-library'
 import { SCRATCH_WORKSPACE_ID, type WorkspaceRecord } from '../src/shared/contracts'
 import {
   PROJECT_RAIL_MAX_DEPTH,
@@ -233,4 +234,14 @@ describe('分组的折叠状态键', () => {
     // 用户折叠一个没有分组头的项目，然后再也找不到它。
     expect(projectGroupKey({ hostId: 'local', groupPath: null })).toBeNull()
   })
+})
+
+
+it('keeps the managed Notes resource available without presenting it as a Project in any project consumer', () => {
+  const notes: WorkspaceRecord = {id:NOTES_WORKSPACE_ID,hostId:'local',name:'Recall',path:_hygiene_fixturePath("notes"),kind:'folder'}
+  const project: WorkspaceRecord = {id:'project',hostId:'local',name:'Existing project',path:_hygiene_fixturePath("project"),kind:'folder'}
+  const workspaces = [notes,project]
+  expect(projectWorkspaces(workspaces).flatMap(project => project.workspaces)).toEqual([project])
+  expect(projectRailNavigation(workspaces).projects.flatMap(project => project.workspaces)).toEqual([project])
+  expect(workspaces[0]).toBe(notes)
 })
