@@ -14,4 +14,8 @@ ACK 观察委托真实 FileStore CAS，成功后同步冻结候选快照。按 e
 
 每个 Client 在 connect 前登记。在途未收口时保私有默认路径和 Native，不先恢复 env。finally 关闭新操作，有界等在途实际结束，经已持有公开 Client 收口 exact Session/Run、确认无 running Run，再 dispose 全部 Client、确认 Hook 退出；只对本次 ChildProcess 发正常 SIGINT 并等 close，最后普通删除已完成 Root、恢复 env。没有 SIGTERM/SIGKILL、宿主进程扫描或 force 删除。任何未知/超时/清理错误保 Root 与真实错误；尚有在途认证读取时 auth 保 600，不能提前清除，须由该测试 owner 后继处理。
 
-本次 T022 维护只运行 `AGENTMUX_REAL_CODEX_E2E=0` 的 fixture/readiness owning。原真实 case 的 skip 不是 real PASS；历史 R1 live-getter 失败、R2 idle Ctrl+C 后第二 `/exit` 未 ACK 的真实失败保留，不授权第三次实验。单元测试用真实 FileStore 与独占临时路径验证观察/清理承重点，fake ChildProcess 不启动 Native。产品、vendor、当前 GUI 物理输入/滚动、活跃取消、连续阅读和性能均不在本次维护验收内。
+## 结果与范围
+
+默认 skip 只表示未执行真实用例，不能报告为 real PASS。fixture／readiness 单元检查与真实 lifecycle 结果分别记录；fake ChildProcess 不启动 Native，不能代替真实恢复与退出证据。一次失败不授权自动追加实验，后续运行仍须具备上述隔离前提与当前任务授权。
+
+本指南只定义该测试的运行与清理边界，不证明当前 GUI 输入、活跃取消、连续阅读或性能已通过。候选、失败现场及本轮覆盖范围留在对应验收证据中，不成为后来任务的进度或许可。
