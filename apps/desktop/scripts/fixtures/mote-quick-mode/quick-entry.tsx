@@ -69,12 +69,14 @@ function reset() {
   disk[rootPath + '/MOTE.md'] = initialQuick; calls.length = 0; unknown = false
   useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {
-    fixture: { label: 'Thoughtful colleague', providerId: 'fixture', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true },
-    analyst: { label: 'Research partner', providerId: 'fixture', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } },
+    fixture: { label: 'Thoughtful colleague', providerId: 'codex', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true },
+    analyst: { label: 'Research partner', providerId: 'claude', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true }, missing: { label: 'Writing partner', providerId: 'codex', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } },
     tabs: { [launcher.id]: launcher, [tab.id]: tab, [other.id]: other }, layouts: { [workspace.id]: createWorkspaceLayout('mote-group', [launcher.id, tab.id, other.id]) }, sessions: [session], documents: {}, dirtyDocuments: {}, documentIssues: {},
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', viewModes: { [session.id]: 'activity' }, agentComposerDrafts: { [session.id]: 'An original unsent question stays here.', 'launcher-region': 'Another original question.', 'analyst-region': 'Analyst draft.' }, scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), topics: [quickTopic(), secondTopic], revision: 0, error: null, reading: false } }, workspaceFileRevisions: {},
     workbenchSpaceSelection: { workspaceId: workspace.id, groupId: 'mote-group', tabId: tab.id, regionId: 'original-region', topicId: topic.id, spaceId, zoneId },
     prewarmTerminal: async () => {}, detectExecutors: async () => {}, launchAgent: async () => { throw Error('No Run may be launched by this Renderer proof') }, reportError: error => { calls.push({ operation: 'error' }); console.warn(String(error)) } })
+  const config = useAppStore.getState().config!
+  useAppStore.setState({ executorDetections: Object.fromEntries(Object.entries(config.executors).map(([id, executor]) => ['local\0'+id, { state: id === 'fixture' ? 'ready' : id === 'missing' ? 'missing' : 'error', input: { executorId: id, providerId: executor.providerId, command: executor.command, host: config.hosts[0]! } }])) })
 }
 reset()
 function Scene() {
@@ -85,6 +87,7 @@ function Scene() {
   const materials = useMoteMaterialsActions(scope, { reference })
   Object.assign(window, { moteQuick: {
     theme: (light: boolean) => { document.documentElement.dataset.appearance = light ? 'light' : 'dark' },
+    missingExecutor: () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); if (parsed.status !== 'valid') throw Error('Original config unavailable'); disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, { ...parsed.defaults, executorId: 'saved-unavailable-executor' }); useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[workspace.id]!, topics: [quickTopic(), secondTopic], revision: 1 } } }) },
     reset: () => { reset(); setEpoch(value => value + 1) }, unknown: () => { unknown = true },
     enter: () => useAppStore.getState().openScratchTopic(topic.id, workspace.id),
     facts: () => { const state = useAppStore.getState(); return { defaults: quickTopic().quickMode, disk, drafts: state.agentComposerDrafts, tabs: state.tabs, layouts: state.layouts, selection: state.workbenchSpaceSelection, calls } },

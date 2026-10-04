@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 const selectFields = process.argv.includes('--select-fields')
+const executorPicker = process.argv.includes('--executor-picker')
 app.setPath('userData', path.join(privateRoot, 'userData'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const result = { passed: false, pid: process.pid, images: [], operations: [], errors: [], restartInputs: [] }
@@ -26,18 +27,46 @@ app.whenReady().then(async () => {
       assert.equal(facts.overflow, false); assert.equal(facts.drafts['original-display-session'], 'An original unsent question stays here.'); assert.equal(facts.drafts['analyst-region'], 'Analyst draft.')
       await fs.writeFile(path.join(evidence,name+'.png'),(await win.webContents.capturePage()).toPNG()); result.images.push(name+'.png'); result.operations.push({ name, ...facts })
     }
-    const edit = async (expected = 'fixture') => { await click('[aria-label="Edit quick mode"]'); for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog[aria-busy=true]") || document.body.textContent.includes("Reading MOTE.md")');i++) await pause(30); assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`), expected) }
+    const edit = async (expected = 'fixture') => { await click('[aria-label="Edit quick mode"]'); for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog[aria-busy=true]") || document.body.textContent.includes("Reading MOTE.md")');i++) await pause(30); assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`), expected) }
     await read('moteQuick.enter()'); await pause(180)
     assert.equal(await read('moteQuick.facts().selection.tabId'), 'original-discussion')
     assert.equal(await read('document.querySelector(".pane-tabbar .workbench-tab")?.dataset.workbenchTabId'), 'original-discussion')
+    if (executorPicker) {
+      for (const light of [false, true]) {
+        await read(`moteQuick.theme(${light})`)
+        const mode = light ? 'light-narrow' : 'dark-wide'
+        win.setContentSize(light ? 320 : 1080, light ? 820 : 850)
+        await capture('executor-profile-' + mode)
+        await edit(); await click('[aria-label="Executor for new chat"]')
+        const facts = await read(`({ menu:document.querySelector('[role="menu"]')?.textContent, selected:document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.dataset.value, native:document.querySelectorAll('.mote-quick-mode-dialog select').length })`)
+        assert.equal(facts.native, 0); assert.equal(facts.selected, 'fixture')
+        for (const text of ['Codex · Available', 'Claude · Check failed', 'Codex · Not installed']) assert.ok(facts.menu.includes(text), facts.menu)
+        await capture('executor-menu-' + mode)
+        await key('Escape'); assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Executor for new chat')
+        assert.equal(await read(`!!document.querySelector('.mote-quick-mode-dialog')`), true)
+        await key('Escape')
+      }
+      await edit(); await click('[aria-label="Executor for new chat"]'); await key('R')
+      assert.ok((await read(`document.activeElement?.textContent`)).startsWith('Research partner'))
+      await key('Return'); assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`), 'analyst')
+      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
+      await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
+      await click('[data-capture-save]'); await pause(150)
+      assert.equal(await read('moteQuick.facts().defaults.defaults.executorId'), 'analyst')
+      await edit('analyst'); await capture('executor-saved-reopened-light-narrow'); await key('Escape')
+      await read('moteQuick.missingExecutor()'); await edit('saved-unavailable-executor')
+      await click('[aria-label="Executor for new chat"]'); await capture('executor-missing-saved-light-narrow')
+      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 1)
+      result.passed = true; return
+    }
     if (selectFields) {
       for (const light of [false, true]) {
         await read(`moteQuick.theme(${light})`)
         const mode = light ? 'light' : 'dark'
         win.setContentSize(light ? 320 : 1080, light ? 820 : 850)
-        await edit(); await read(`document.addEventListener('pointerdown',e=>window.menuPointer=e.target.outerHTML,{once:true})`); await click('[aria-label="Default Agent"]'); result.menuDebug = await read(`({target:window.menuPointer,open:document.querySelector('[aria-label="Default Agent"]')?.dataset.state,menus:[...document.querySelectorAll('[role="menu"]')].map(n=>({label:n.getAttribute('aria-label'),count:n.querySelectorAll('[role="menuitemradio"]').length})),focused:document.activeElement.getAttribute('role')})`); assert.equal(result.menuDebug.menus.length, 1, JSON.stringify(result.menuDebug)); await capture('agent-menu-' + mode)
+        await edit(); await read(`document.addEventListener('pointerdown',e=>window.menuPointer=e.target.outerHTML,{once:true})`); await click('[aria-label="Executor for new chat"]'); result.menuDebug = await read(`({target:window.menuPointer,open:document.querySelector('[aria-label="Executor for new chat"]')?.dataset.state,menus:[...document.querySelectorAll('[role="menu"]')].map(n=>({label:n.getAttribute('aria-label'),count:n.querySelectorAll('[role="menuitemradio"]').length})),focused:document.activeElement.getAttribute('role')})`); assert.equal(result.menuDebug.menus.length, 1, JSON.stringify(result.menuDebug)); await capture('agent-menu-' + mode)
         assert.equal(await read(`document.querySelector('[role="menu"]')?.closest('[data-overlay-host]') !== null`), true)
-        await key('Escape'); assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Default Agent')
+        await key('Escape'); assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Executor for new chat')
         assert.equal(await read(`!!document.querySelector('.mote-quick-mode-dialog')`), true)
         await click('.mote-quick-mode-dialog [aria-label="Default conversation"]'); result.conversationMenuDebug = await read(`({open:document.querySelector('.mote-quick-mode-dialog [aria-label="Default conversation"]')?.dataset.state,menus:[...document.querySelectorAll('[role="menu"]')].map(n=>({label:n.getAttribute('aria-label'),count:n.querySelectorAll('[role="menuitemradio"]').length})),focused:document.activeElement.getAttribute('role')})`); assert.equal(result.conversationMenuDebug.menus.length,1,JSON.stringify(result.conversationMenuDebug)); await capture('conversation-menu-' + mode); await key('Escape'); await key('Escape')
         assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
@@ -49,9 +78,9 @@ app.whenReady().then(async () => {
         await click('[aria-label="Goal continuation Agent"]'); await read(`(()=>{const a=document.querySelector('[aria-label="Goal continuation Agent"]').getBoundingClientRect(),b=document.querySelector('.goals-continuation input[type=number]').getBoundingClientRect();if(a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom)throw Error('Executing Agent overlaps interval input')})()`); await capture('execution-agent-menu-' + mode); await key('Escape')
         await click('[data-mote-goal="choice-experiment"] .mote-current-work__copy')
       }
-      await edit(); await click('[aria-label="Default Agent"]'); await key('R')
-      assert.equal(await read(`document.activeElement?.textContent`), 'Research partner')
-      await key('Return'); assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`), 'analyst')
+      await edit(); await click('[aria-label="Executor for new chat"]'); await key('R')
+      assert.ok((await read(`document.activeElement?.textContent`)).startsWith('Research partner'))
+      await key('Return'); assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`), 'analyst')
       assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
       await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
       await click('[data-capture-save]'); await pause(150)
@@ -71,9 +100,9 @@ app.whenReady().then(async () => {
       await key('Escape')
       assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'),0)
     }
-    await edit(); await click('[aria-label="Default Agent"]'); await click('[role="menuitemradio"][data-value="analyst"]'); await pause(100)
+    await edit(); await click('[aria-label="Executor for new chat"]'); await click('[role="menuitemradio"][data-value="analyst"]'); await pause(100)
     // The first focused selector is the original configured Agent choice.
-    assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`), 'analyst')
+    assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`), 'analyst')
     await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
     await read(`document.addEventListener('pointerdown',event=>window.quickClickTarget=event.target.outerHTML,{once:true})`); await click('[data-capture-save]'); result.saveClick={zoom:win.webContents.getZoomFactor(),target:await read('window.quickClickTarget')} 
     for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog")');i++) await pause(30)
@@ -82,7 +111,7 @@ app.whenReady().then(async () => {
     assert.equal(await read('Object.values(moteQuick.facts().disk).some(v=>v.includes("# User notes\\nKeep this paragraph."))'),true)
     await capture('saved-profile-original-editor')
     await click('[aria-label="Edit quick mode"]'); await pause(180)
-    assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`),'analyst'); await capture('saved-settings-reopened'); await key('Escape')
+    assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`),'analyst'); await capture('saved-settings-reopened'); await key('Escape')
     await read('moteQuick.enter()'); await pause(140)
     assert.equal(await read('moteQuick.facts().selection.tabId'),'original-discussion')
     result.restartInputs.push({ name: 'quick-default-retained', state: await read('moteQuick.restartInput()') })

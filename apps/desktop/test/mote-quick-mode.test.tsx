@@ -136,7 +136,7 @@ describe('quick-mode original consumer counterexamples', () => {
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
     await app.mount()
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
-    const agent = document.querySelector<HTMLButtonElement>('[aria-label="Default Agent"]')!, selected = document.querySelector<HTMLButtonElement>('[aria-label="Default conversation"]')!
+    const agent = document.querySelector<HTMLButtonElement>('[aria-label="Executor for new chat"]')!, selected = document.querySelector<HTMLButtonElement>('[aria-label="Default conversation"]')!
     expect(agent.dataset.value).toBe('fixture'); expect(JSON.parse(selected.dataset.value!)).toEqual(conversation)
     await chooseField(agent, 'fixture'); expect(read).toHaveBeenCalled()
     await moteClick(document.querySelector<HTMLElement>('[aria-label="Close quick mode"]')!)
