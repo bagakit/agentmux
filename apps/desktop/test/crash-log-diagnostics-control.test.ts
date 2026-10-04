@@ -1,5 +1,8 @@
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { mkdtemp, readFile, rm, chmod, mkdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -47,6 +50,9 @@ import { RuntimeController } from '../src/main/runtime-controller.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { CrashLog } from '../src/main/crash-log.js'
+import { reportQuitDisposalFailure } from '../src/main/quit-disposal-failure.js'
+import { runOwnerDisposals } from '../src/main/owner-disposal.js'
 
 const directories: string[] = []
 afterEach(async () => { vi.mocked(shell.showItemInFolder).mockReset(); vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true }))) })
@@ -70,11 +76,16 @@ async function registered() {
     async () => { throw new Error('Host diagnostic cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
   const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    configStore: store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
+    configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   const execute = ipc.execute!
   const native = ipc.handlers.get('ui:revealCrashLog')!
   expect(execute).toBeTypeOf('function'); expect(native).toBeTypeOf('function')
+  // Observe initial owner publications before measuring traffic caused by a diagnostics query.
+  await vi.waitFor(() => {
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'notebook:changed')).toBe(true)
+    expect(sender.send.mock.calls.some(([channel]) => channel === 'spatial:changed')).toBe(true)
+  })
   return { config, runtime, prepare, commit, attach, sender, dispose, execute,
     root, native: () => native({ sender } as unknown as IpcMainInvokeEvent),
     bytes: () => readFile(store.filePath, 'utf8') }
@@ -162,4 +173,46 @@ describe('registered Main crash log diagnostics share one fixed-path owner', () 
       expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(join(f.root, 'crash-log.ndjson'))
     } finally { await rpc.dispose(); await server.stop(); await f.dispose() }
   })
+
+  it('actual public CLI discovers and reveals the same retained quit diagnostic with nested original owner failure', async () => {
+    const f = await registered(), core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
+    const socket = join(f.root, 'quit-control.sock'), server = new core.AgentMuxControlServer({ execute: f.execute }, socket)
+    await server.start()
+    const path = join(f.root, 'crash-log.ndjson'), log = new CrashLog(path), stderr: string[] = []
+    const original = new Error('original file observer EIO')
+    let failure: unknown
+    try {
+      await runOwnerDisposals([{ owner: 'file-observations', dispose: () => { throw original } }], 'IPC owners failed')
+    } catch (error) { failure = error }
+    expect(failure).toBeInstanceOf(AggregateError)
+    reportQuitDisposalFailure(new AggregateError([failure], 'Desktop owner disposal failed'), {
+      persistDiagnostic: record => log.appendSync(record), stderr: { write: line => stderr.push(line) }, appVersion: 'cli-proof', pid: 4242
+    })
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
+    const cli = fileURLToPath(new URL('../../../packages/core/dist/agentmux.js', import.meta.url))
+    const execute = promisify(execFile)
+    async function invoke(action: 'inspect' | 'reveal') {
+      const output = await execute(process.execPath, [cli, 'system', 'crash-log', action], {
+        env: { ...env, AGENTMUX_RPC_ENDPOINT: `unix:${socket}`, AGENTMUX_ENV: '1' }, timeout: 10_000, maxBuffer: 256 * 1024
+      })
+      const receipts = output.stdout.split('\n').filter(line => line.startsWith('{'))
+      expect(receipts).toHaveLength(1)
+      return JSON.parse(receipts[0]!) as { ok: boolean; operation: string; result: { path: string; outcome?: string; requested?: boolean } }
+    }
+    try {
+      const inspect = await invoke('inspect')
+      expect(inspect).toMatchObject({ ok: true, operation: 'system.crash-log.inspect', result: { path, outcome: 'present' } })
+      const bytes = await readFile(inspect.result.path, 'utf8'), record = JSON.parse(bytes.trim())
+      expect(record).toMatchObject({ kind: 'quit-disposal-failure', phase: 'dispose-owners', appVersion: 'cli-proof', pid: 4242 })
+      expect(record.detail).toContain('file-observations')
+      expect(record.detail).toContain(original.message)
+      expect(stderr.join('')).toContain(original.message)
+      expect(JSON.stringify(inspect)).not.toContain(original.message)
+      const reveal = await invoke('reveal')
+      expect(reveal).toMatchObject({ ok: true, operation: 'system.crash-log.reveal', result: { path, requested: true } })
+      expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(path)
+      expect(await readFile(path, 'utf8')).toBe(bytes)
+    } finally { await server.stop(); await f.dispose() }
+  })
+
 })

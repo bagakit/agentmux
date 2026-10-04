@@ -9,7 +9,9 @@ import { pathToFileURL } from 'node:url'
 const repository = resolve(import.meta.dirname, '../../..')
 const desktop = join(repository, 'apps/desktop')
 const requireDesktop = createRequire(join(desktop, 'package.json'))
-const output = join(repository, '.tmp/renderer-crash-recovery', ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
+const output = process.env.AGENTMUX_RECOVERY_EVIDENCE_DIR
+  ? resolve(process.env.AGENTMUX_RECOVERY_EVIDENCE_DIR)
+  : join(repository, '.tmp/renderer-crash-recovery', ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(output, { recursive: true })
 const { build } = await import(pathToFileURL(requireDesktop.resolve('vite')).href)
 const sources = {
@@ -28,8 +30,10 @@ const mutations = [
   { name: 'green' },
   { name: 'dead-renderer-save-mutant', file: sources.persistence, from: 'if (window.isDestroyed() || window.webContents.isDestroyed() || window.webContents.isCrashed()) return', to: 'if (window.isDestroyed() || window.webContents.isDestroyed()) return' },
   { name: 'live-save-error-swallowed-mutant', file: sources.persistence, from: 'throw error', to: 'return' },
-  { name: 'cancel-reloads-mutant', file: sources.recovery, from: 'if (response === 0) window.reload()', to: 'if (response === 0 || response === 2) window.reload()' },
-  { name: 'closed-window-getter-mutant', file: sources.recovery, from: 'contents.removeListener(', to: 'window.webContents.removeListener(' }
+  { name: 'cancel-reloads-mutant', file: sources.recovery, from: 'if (response === 0) {', to: 'if (response === 0 || response === 2) {' },
+  { name: 'closed-window-getter-mutant', file: sources.recovery, from: 'contents.removeListener(', to: 'window.webContents.removeListener(' },
+  { name: 'live-recovery-refused-mutant', file: sources.recovery, from: '!explicit && !contents.isCrashed()', to: '!contents.isCrashed()' },
+  { name: 'reload-checkpoint-skipped-mutant', file: sources.recovery, from: 'await prepareWindowWorkbench(window, "reload")', to: 'await Promise.resolve()' }
 ]
 for (const mutation of mutations) {
   let hits = 0
@@ -51,14 +55,29 @@ for (const mutation of mutations) {
 }
 
 const page = join(output, 'workbench.html')
-await writeFile(page, `<!doctype html><html><body><h1>Private recovery verification</h1><p>This window does not connect to a Runtime or user Session.</p><pre id="workbench"></pre><script>
+const pageEntry = join(output, 'private-workbench.mjs')
+await writeFile(pageEntry, `
+import { createElement } from ${JSON.stringify(requireDesktop.resolve('react'))}
+import { createRoot } from ${JSON.stringify(requireDesktop.resolve('react-dom/client'))}
+import { flushSync } from ${JSON.stringify(requireDesktop.resolve('react-dom'))}
 const storageKey = 'private-crash-recovery-workbench'
 const persisted = localStorage.getItem(storageKey)
 window.__restoredExistingWorkbench = !!persisted
 if (!persisted) localStorage.setItem(storageKey, JSON.stringify({tabs:['tab-original'],groups:['group-original'],regions:['region-original'],focus:'region-original',split:[0.4,0.6],session:'session-original',draft:'retained draft'}))
-document.querySelector('#workbench').textContent = localStorage.getItem(storageKey)
-window.agentmuxPrepareRendererUpdate = async () => {}
-</script></body></html>`)
+window.__workbench = JSON.parse(localStorage.getItem(storageKey))
+window.agentmuxPrepareRendererUpdate = async () => {
+  if (window.__saveFailure) throw new Error('private storage unavailable')
+  localStorage.setItem(storageKey, JSON.stringify(window.__workbench))
+}
+const root = createRoot(document.querySelector('#workbench'))
+flushSync(() => root.render(createElement('pre', null, JSON.stringify(window.__workbench))))
+window.__unmountReactRoot = () => root.unmount()
+`)
+await build({ configFile: false, logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, build: {
+  outDir: join(output, 'page'), emptyOutDir: true,
+  lib: { entry: pageEntry, formats: ['iife'], name: 'PrivateWorkbench', fileName: () => 'workbench.js' }
+} })
+await writeFile(page, `<!doctype html><html><body><div id="workbench"></div><script src="page/workbench.js"></script></body></html>`)
 const harness = join(output, 'harness.cjs')
 await writeFile(harness, `
 const assert = require('node:assert/strict')
@@ -73,7 +92,7 @@ const { prepareWindowWorkbenchForQuit } = require(join(compiled, 'persistence.cj
 const { applicationMenuTemplate } = require(join(compiled, 'menu.cjs'))
 app.setPath('userData', stateDirectory)
 app.setName('AgentMux Private Crash Verification')
-const result = { mode, notices: [], quitRequests: 0, reloadRequests: 0 }
+const result = { mode, pid: process.pid, electronVersion: process.versions.electron, notices: [], quitRequests: 0, reloadRequests: 0 }
 let complete = false
 let allowingQuit = false
 let completedCode = 0
@@ -114,7 +133,7 @@ async function waitFor(predicate) {
   }
 }
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: mode === 'native', width: 1050, height: 700, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+  const window = new BrowserWindow({ show: mode.endsWith('native'), width: 1050, height: 700, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
   quitOwner = window
   await window.loadFile(page)
   const readWorkbench = () => window.webContents.executeJavaScript("localStorage.getItem('private-crash-recovery-workbench')")
@@ -130,7 +149,7 @@ app.whenReady().then(async () => {
     executeJavaScript: async () => { throw new Error('private storage unavailable') } })
   await assert.rejects(prepareWindowWorkbenchForQuit({ isDestroyed: () => false, webContents: alive }), /private storage unavailable/)
   let action = 2
-  let nativePending = mode === 'native'
+  let nativePending = mode.endsWith('native')
   let quitting = false
   let completedNotices = 0
   const noticeDialog = { showMessageBox: async (parent, options) => {
@@ -158,7 +177,7 @@ app.whenReady().then(async () => {
   result.saveRequests = 0
   const originalExecute = window.webContents.executeJavaScript.bind(window.webContents)
   window.webContents.executeJavaScript = (script, ...args) => {
-    if (script === 'window.agentmuxPrepareRendererUpdate("quit")') result.saveRequests++
+    if (/^window\\.agentmuxPrepareRendererUpdate\\(/.test(script)) result.saveRequests++
     return originalExecute(script, ...args)
   }
   let quitPreparation
@@ -166,6 +185,41 @@ app.whenReady().then(async () => {
     result.quitRequests++
     quitPreparation = prepareWindowWorkbenchForQuit(window).then(() => { quitting = true; result.quitPrepared = true })
   }, () => quitting)
+  const view = applicationMenuTemplate(true, undefined, () => { void recover() }).find(item => item.label === 'View')
+  const recoveryItem = view.submenu.find(item => item.label === 'Recover interface')
+  assert.ok(recoveryItem)
+  if (mode.startsWith('live')) {
+    await window.webContents.executeJavaScript('window.__unmountReactRoot()')
+    result.blankRoot = await window.webContents.executeJavaScript('document.querySelector("#workbench").childElementCount === 0')
+    result.rendererCrashed = window.webContents.isCrashed()
+    assert.equal(result.blankRoot, true)
+    assert.equal(result.rendererCrashed, false)
+    assert.equal(result.notices.length, 0, 'A live blank Renderer must not be declared crashed automatically')
+    recoveryItem.click(); await recover()
+    assert.equal(result.notices[0]?.message, 'Recover the interface', 'Explicit recovery must be available while Renderer is alive')
+    assert.equal(result.reloadRequests, 0, 'Keep window must leave the blank root and data intact')
+    result.pendingDraft = 'Unsaved recovery draft from process ' + process.pid
+    assert.notEqual(JSON.parse(result.before).draft, result.pendingDraft)
+    await window.webContents.executeJavaScript('window.__workbench.draft = ' + JSON.stringify(result.pendingDraft) + '; window.__saveFailure = true')
+    action = 0
+    recoveryItem.click(); await recover()
+    assert.equal(result.notices.at(-1)?.message, 'The workbench save is unconfirmed')
+    assert.equal(result.reloadRequests, 0, 'Unconfirmed save must retain the original Renderer')
+    assert.equal(await readWorkbench(), result.before, 'Failed save must not replace the durable workbench')
+    assert.equal(result.quitRequests, 0)
+    await window.webContents.executeJavaScript('window.__saveFailure = false')
+    const reloaded = new Promise(resolve => window.webContents.once('did-finish-load', resolve))
+    recoveryItem.click(); await reloaded
+    assert.equal(result.reloadRequests, 1)
+    assert.equal(result.saveRequests, 2, 'Both reload attempts must use the existing workbench checkpoint')
+    result.after = await readWorkbench()
+    result.restoredExistingWorkbench = await window.webContents.executeJavaScript('window.__restoredExistingWorkbench')
+    result.renderedWorkbench = await window.webContents.executeJavaScript('document.querySelector("#workbench").textContent')
+    assert.equal(result.restoredExistingWorkbench, true)
+    assert.equal(result.renderedWorkbench, result.after)
+    assert.deepEqual(JSON.parse(result.after), { ...JSON.parse(result.before), draft: result.pendingDraft })
+    finish(0); return
+  }
   window.webContents.forcefullyCrashRenderer()
   await waitFor(() => window.webContents.isCrashed())
   await waitFor(() => completedNotices > 0)
@@ -177,12 +231,8 @@ app.whenReady().then(async () => {
   assert.equal(result.saveRequests, 0, 'A dead Renderer must not be asked for JavaScript persistence')
   action = 0
   const loaded = new Promise(resolve => window.webContents.once('did-finish-load', resolve))
-  const view = applicationMenuTemplate(true, undefined, () => { void recover() }).find(item => item.label === 'View')
-  const recoveryItem = view.submenu.find(item => item.label === 'Recover interface')
-  assert.ok(recoveryItem)
   recoveryItem.click()
   await loaded
-  await recover()
   assert.equal(result.reloadRequests, 1)
   result.after = await readWorkbench()
   result.restoredExistingWorkbench = await window.webContents.executeJavaScript('window.__restoredExistingWorkbench')
@@ -227,9 +277,16 @@ assert.equal(green.before, green.after)
 const restart = await run('new-process-restart', 'green', 'retained-user-data', 'restart')
 assert.equal(restart.code, 0, JSON.stringify(restart))
 assert.equal(restart.before, green.before)
+assert.notEqual(restart.pid, green.pid)
+const live = await run('live-root-unmount', 'green', 'live-retained-user-data', process.argv.includes('--native') ? 'live-native' : 'live')
+assert.equal(live.code, 0, JSON.stringify(live))
+const liveRestart = await run('live-new-process-restart', 'green', 'live-retained-user-data', 'restart')
+assert.equal(liveRestart.code, 0, JSON.stringify(liveRestart))
+assert.equal(liveRestart.before, live.after)
+assert.notEqual(liveRestart.pid, live.pid)
 const red = []
 for (const mutation of mutations.slice(1)) {
-  const result = await run(mutation.name, mutation.name, mutation.name + '-state', 'mutation')
+  const result = await run(mutation.name, mutation.name, mutation.name + '-state', mutation.name.startsWith('live-') || mutation.name.startsWith('reload-') ? 'live' : 'mutation')
   assert.equal(result.code, 1, `${mutation.name} must reject the broken behavior: ${JSON.stringify(result)}`)
   red.push({ mutation: mutation.name, result })
 }
@@ -239,7 +296,7 @@ for (const [name, file] of Object.entries(sources)) assert.equal(await readFile(
 await writeFile(join(output, 'receipt.json'), JSON.stringify({
   schema: 'agentmux.renderer-crash-recovery-proof.v1', passed: true,
   sourceSHA256: Object.fromEntries(Object.entries(original).map(([name, text]) => [name, createHash('sha256').update(text).digest('hex')])),
-  productCallers: ['apps/desktop/src/main/index.ts'], green, restart, red, restored,
-  boundary: 'Real isolated Electron Renderer crashes, Main/native recovery notice, reload and a new process retaining nonempty localStorage. No user Runtime or Session is contacted. Real AgentMux workbench recovery and healthy Run preservation are consumed separately by Root; native screenshot requires independent review.'
+  productCallers: ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main/renderer-crash-recovery.ts'], green, restart, live, liveRestart, red, restored,
+  boundary: 'Real isolated Electron Renderer crashes and React root.unmount while Renderer remains alive; production Main/menu/checkpoint helpers, reload and a new process retaining nonempty localStorage. No user Runtime or Session is contacted. This private page does not prove production NoteFileView or actual AgentMux Survey; Root consumes those separately. Native screenshot requires independent review.'
 }, null, 2) + '\n')
-console.log(`Renderer crash recovery passed with four rejected mutations. Evidence: ${join(output, 'receipt.json')}`)
+console.log(`Renderer recovery passed with ${red.length} rejected mutations. Evidence: ${join(output, 'receipt.json')}`)

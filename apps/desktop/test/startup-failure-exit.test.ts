@@ -230,10 +230,10 @@ describe('index.ts 的壳只是一句转发', () => {
     )
   })
 
-  it('两个失败入口都还走这个壳', () => {
-    // 引导期的 catch 与 before-quit 的清理失败。少一个的症状是那条路径静默退出。
+  it('只有引导期失败走启动失败壳，退出清理有自己的诊断', () => {
+    // 退出清理失败不是启动失败；只保留真实 bootstrap 的调用。
     // 数的是**调用**：声明写作 `const exitAfterFailure = (`，不匹配这个模式。
-    expect(source.split('exitAfterFailure(').length - 1).toBeGreaterThanOrEqual(2)
+    expect(source.split('exitAfterFailure(').length - 1).toBe(1)
   })
 
   it('index.ts 不再自己拼那段文案——取值层只有一处', () => {

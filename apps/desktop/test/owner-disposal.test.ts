@@ -11,17 +11,17 @@ describe('runOwnerDisposals', () => {
 
     let settled = false
     const disposal = runOwnerDisposals([
-      () => {
+      { owner: 'focus', dispose: () => {
         calls.push('focus')
         throw new Error('focus cleanup failed')
-      },
-      async () => {
+      } },
+      { owner: 'files', dispose: async () => {
         calls.push('files')
         await laterCleanup()
-      },
-      () => {
+      } },
+      { owner: 'handlers', dispose: () => {
         calls.push('handlers')
-      }
+      } }
     ], 'Desktop cleanup failed').finally(() => {
       settled = true
     })
@@ -32,7 +32,7 @@ describe('runOwnerDisposals', () => {
 
     await expect(disposal).rejects.toMatchObject({
       message: 'Desktop cleanup failed',
-      errors: [expect.objectContaining({ message: 'focus cleanup failed' })]
+      errors: [expect.objectContaining({ message: 'Owner focus disposal failed', cause: expect.objectContaining({ message: 'focus cleanup failed' }) })]
     })
     expect(calls).toEqual(['focus', 'files', 'handlers'])
   })
