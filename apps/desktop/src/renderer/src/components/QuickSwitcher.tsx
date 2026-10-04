@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as Dialog from '@radix-ui/react-dialog'
 import { CornerDownLeft, FileCode2, Globe2, Search, PanelsTopLeft, SquareTerminal } from 'lucide-react'
@@ -129,7 +130,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           <div className="quick-switch__input">
             <Search size={15} />
             {/* autoFocus is honest here: the dialog exists only to take this query. */}
-            <input
+            <TextInput
               autoFocus
               value={query}
               placeholder="Search sessions, tabs or amux ID…"
