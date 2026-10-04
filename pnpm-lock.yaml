@@ -8,7 +8,7 @@ overrides:
   '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
 
 patchedDependencies:
-  '@xterm/xterm@6.1.0-beta.303': 25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1
+  '@xterm/xterm@6.1.0-beta.303': b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1
 
 importers:
 
@@ -79,25 +79,25 @@ importers:
         version: 3.31.3
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.300
-        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))
+        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))
       '@xterm/addon-search':
         specifier: 0.17.0-beta.300
-        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))
+        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
-        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))
       '@xterm/addon-web-links':
         specifier: 0.13.0-beta.300
-        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))
+        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.299
-        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))
+        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))
       '@xterm/headless':
         specifier: ^5.5.0
         version: 5.5.0
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+        version: 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
@@ -387,7 +387,7 @@ importers:
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+        version: 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.8)
@@ -4234,29 +4234,29 @@ snapshots:
 
   '@xmldom/xmldom@0.9.12': {}
 
-  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))':
+  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
 
-  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))':
+  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
 
-  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))':
+  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
 
-  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))':
+  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
 
-  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1))':
+  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)
 
   '@xterm/headless@5.5.0': {}
 
-  '@xterm/xterm@6.1.0-beta.303(patch_hash=25ccf3cf7a781f679b14c516e6ce1a1d2b27a89dd7ca13627f69ef0a5d6d21b1)': {}
+  '@xterm/xterm@6.1.0-beta.303(patch_hash=b22911d619ceff034793ba65c0d0bbb3501047117f3cd7fd77d4c802c151b5e1)': {}
 
   ansi-regex@5.0.1: {}
 
