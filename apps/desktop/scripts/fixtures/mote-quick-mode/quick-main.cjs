@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 const selectFields = process.argv.includes('--select-fields')
+const recoveryPolicy = process.argv.includes('--recovery-policy')
 const executorPicker = process.argv.includes('--executor-picker')
 app.setPath('userData', path.join(privateRoot, 'userData'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -31,6 +32,27 @@ app.whenReady().then(async () => {
     await read('moteQuick.enter()'); await pause(180)
     assert.equal(await read('moteQuick.facts().selection.tabId'), 'original-discussion')
     assert.equal(await read('document.querySelector(".pane-tabbar .workbench-tab")?.dataset.workbenchTabId'), 'original-discussion')
+    if (recoveryPolicy) {
+      await capture('main-profile-startup-dark-wide'); await edit();
+      assert.equal(await read('!!document.querySelector("[aria-label=\\\"Reconnect conversation\\\"]")'), false)
+      await capture('main-policy-fixed-dark-wide'); await key('Escape')
+      await win.loadFile(html, { query: { workspacePath: path.join(privateRoot, 'workspace', '.agentmux', 'scratch'), moteId: 'launcher:research-companion' } })
+      await pause(250); await read('moteQuick.enter()'); await pause(180)
+      await edit(); assert.equal(await read('document.querySelector("[aria-label=\\\"Reconnect conversation\\\"]").dataset.value'), 'on-open')
+      await click('[aria-label="Reconnect conversation"]'); await capture('companion-policy-menu-dark-wide'); await key('Escape'); await key('Escape')
+      await read('moteQuick.theme(true)'); win.setContentSize(320,820); await edit()
+      await click('[aria-label="Reconnect conversation"]'); await capture('companion-policy-menu-light-narrow')
+      await click('[role="menuitemradio"][data-value="startup"]')
+      assert.equal(await read('document.querySelector("[aria-label=\\\"Reconnect conversation\\\"]").dataset.value'), 'startup')
+      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
+      await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
+      await click('[data-capture-save]'); await pause(180)
+      assert.equal(await read('moteQuick.facts().defaults.defaults.recovery'), 'startup'); await capture('companion-policy-saved-profile-light-narrow')
+      await edit(); assert.equal(await read('document.querySelector("[aria-label=\\\"Reconnect conversation\\\"]").dataset.value'), 'startup')
+      await capture('companion-policy-reopened-light-narrow'); await key('Escape')
+      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 1)
+      result.passed = true; return
+    }
     if (executorPicker) {
       for (const light of [false, true]) {
         await read(`moteQuick.theme(${light})`)

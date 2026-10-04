@@ -26,9 +26,10 @@ import '../mote-companion-workflows/persona-scene.css'
 const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath) throw Error('An isolated original workspace is required.')
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' as const }
-const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
+const moteId = new URLSearchParams(location.search).get('moteId') ?? PMO_TEAMS_TOPIC_ID
+const rootPath = scratchTopicDirectoryName(moteId)
 const soul = '# Mote\n\nA thoughtful collaborator. Keep original decisions and ask before changing direction.\n\n' + MOTE_BEHAVIOR_LINK + '\n'
-const topic: ScratchTopicSnapshot = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: workspace.path + '/' + rootPath,
+const topic: ScratchTopicSnapshot = { id: moteId, title: moteId === PMO_TEAMS_TOPIC_ID ? 'Mote' : 'Research companion', summary: '', directoryPath: workspace.path + '/' + rootPath,
   topicPath: workspace.path + '/' + rootPath + '/topic.md', collaborators: [], soul: { path: workspace.path + '/' + rootPath + '/SOUL.md', content: soul, version: 'display-only' } }
 const secondTopic = { ...topic, id: 'launcher:analyst', title: 'Analyst', directoryPath: workspace.path + '/' + scratchTopicDirectoryName('launcher:analyst') }
 const topics = [topic, secondTopic], spaceId = directoryIdentity('local', topic.directoryPath), zoneId = homeZoneId(spaceId)
@@ -71,7 +72,7 @@ function reset() {
   useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {
     fixture: { label: 'Thoughtful colleague', providerId: 'codex', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true },
     analyst: { label: 'Research partner', providerId: 'claude', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true }, missing: { label: 'Writing partner', providerId: 'codex', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } },
-    tabs: { [launcher.id]: launcher, [tab.id]: tab, [other.id]: other }, layouts: { [workspace.id]: createWorkspaceLayout('mote-group', [launcher.id, tab.id, other.id]) }, sessions: [session], documents: {}, dirtyDocuments: {}, documentIssues: {},
+    loading: false, tabs: { [launcher.id]: launcher, [tab.id]: tab, [other.id]: other }, layouts: { [workspace.id]: createWorkspaceLayout('mote-group', [launcher.id, tab.id, other.id]) }, sessions: [session], documents: {}, dirtyDocuments: {}, documentIssues: {},
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', viewModes: { [session.id]: 'activity' }, agentComposerDrafts: { [session.id]: 'An original unsent question stays here.', 'launcher-region': 'Another original question.', 'analyst-region': 'Analyst draft.' }, scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), topics: [quickTopic(), secondTopic], revision: 0, error: null, reading: false } }, workspaceFileRevisions: {},
     workbenchSpaceSelection: { workspaceId: workspace.id, groupId: 'mote-group', tabId: tab.id, regionId: 'original-region', topicId: topic.id, spaceId, zoneId },
     prewarmTerminal: async () => {}, detectExecutors: async () => {}, launchAgent: async () => { throw Error('No Run may be launched by this Renderer proof') }, reportError: error => { calls.push({ operation: 'error' }); console.warn(String(error)) } })
