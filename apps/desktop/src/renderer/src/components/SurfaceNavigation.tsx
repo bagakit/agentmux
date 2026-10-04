@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Search, LayoutDashboard, SquareTerminal, Users } from 'lucide-react'
+import { Search, LayoutDashboard, SquareTerminal, Users, BookOpen } from 'lucide-react'
 import { PmoTeamsTopicEntry } from './PmoTeamsTopicEntry'
 import type { MainSurface } from '../store'
 import { MOTE_TYPE_NAME } from '../../../shared/scratch-topics'
 
 export type SurfaceNavigationPlugin =
   | {
-      id: 'survey' | 'space' | 'focus' | 'goals'
+      id: 'recall' | 'survey' | 'space' | 'focus' | 'goals'
       kind: 'surface'
       navigationContext: 'work' | 'survey'
       label: string
@@ -76,13 +76,18 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
     surface: 'board'
   },
   {
+    id: 'recall', kind: 'surface', navigationContext: 'survey', label: 'Recall',
+    ariaLabel: 'Recall: keep and revisit knowledge', title: 'Recall — keep and revisit knowledge',
+    tooltip: 'Keep, connect and revisit what you learn', icon: BookOpen, surface: 'recall'
+  },
+  {
     id: 'survey',
     kind: 'surface',
     navigationContext: 'survey',
     label: 'Survey',
-    ariaLabel: 'Survey: browse and manage pages',
-    title: 'Survey — browse and manage pages',
-    tooltip: 'Browse the web and manage pages',
+    ariaLabel: 'Survey: browse and explore',
+    title: 'Survey — browse and explore',
+    tooltip: 'Explore the web and collect early results',
     icon: Search,
     surface: 'survey'
   }

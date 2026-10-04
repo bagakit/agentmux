@@ -1,13 +1,13 @@
 /* Navigation and controls use one light material; original content keeps its own surface. */
-.global-survey-surface, .survey-topic-menu {
+:is(.global-survey-surface, .global-recall-surface), .survey-topic-menu {
   --survey-glass: color-mix(in srgb, var(--surface-1) 92%, transparent);
   --survey-edge: color-mix(in srgb, var(--text) 11%, transparent);
 }
-.global-survey-surface {
+:is(.global-survey-surface, .global-recall-surface) {
   display: flex; height: 100%; min-width: 0; min-height: 0; overflow: hidden;
   color: var(--text); background: var(--surface-0); gap: 0; padding: 0;
 }
-.global-survey-surface[hidden], .survey-management[hidden], .survey-tabs[hidden] { display: none; }
+:is(.global-survey-surface, .global-recall-surface)[hidden], .survey-management[hidden], .survey-tabs[hidden] { display: none; }
 .survey-navigation, .survey-management, .survey-start-input, .survey-topic-menu {
   background: linear-gradient(135deg, var(--wash-1), transparent 48%), var(--survey-glass);
   backdrop-filter: blur(20px) saturate(110%); border: 1px solid var(--survey-edge);
@@ -95,7 +95,7 @@
 .survey-history-recovery { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); margin: 0; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--survey-edge); color: var(--text-2); background: var(--wash-1); font-size: var(--fs-meta); line-height: 1.5; }
 .survey-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
 .survey-page-content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface-0); }
-.global-survey-surface .browser-toolbar { border-bottom: 1px solid var(--survey-edge); }
+:is(.global-survey-surface, .global-recall-surface) .browser-toolbar { border-bottom: 1px solid var(--survey-edge); }
 .browser-toolbar__empty-address { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
 .survey-start { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-6); min-width: 0; min-height: 0; padding: var(--sp-7); }
 .survey-start-mark { display: grid; place-items: center; color: var(--text-2); width: 48px; height: 48px; border-radius: var(--radius-lg); background: var(--wash-1); box-shadow: inset 0 1px var(--wash-2); }
@@ -123,10 +123,10 @@
 }
 @container survey-list (max-width: 112px) {
   /* A narrow rail puts its toggle below the shared macOS window-control row. */
-  .global-survey-surface[data-native-window-controls="true"] .survey-titlebar { height: 72px; flex-basis: 72px; align-items: flex-end; padding: 0 0 var(--sp-2); }
+  :is(.global-survey-surface, .global-recall-surface)[data-native-window-controls="true"] .survey-titlebar { height: 72px; flex-basis: 72px; align-items: flex-end; padding: 0 0 var(--sp-2); }
 }
-@supports not (backdrop-filter: blur(1px)) { .global-survey-surface, .survey-topic-menu { --survey-glass: var(--surface-1); } }
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .global-survey-surface, .survey-topic-menu { --survey-glass: var(--surface-1); --survey-edge: var(--line); } }
+@supports not (backdrop-filter: blur(1px)) { :is(.global-survey-surface, .global-recall-surface), .survey-topic-menu { --survey-glass: var(--surface-1); } }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { :is(.global-survey-surface, .global-recall-surface), .survey-topic-menu { --survey-glass: var(--surface-1); --survey-edge: var(--line); } }
 
 .survey-page-content > .survey-relation-notice { flex: none; padding: var(--sp-3) var(--sp-5); }
 @media (max-height: 480px) { .survey-navigation { gap: var(--sp-2); } .survey-start { gap: var(--sp-4); padding: var(--sp-5); } }
@@ -224,3 +224,9 @@
 .notebook-create-dialog input:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .notebook-create-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 .notebook-create-issue { font-size: 12px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
+
+/* Recall uses the same first-Pane geometry while owning an independent directory. */
+.recall-notebook-actions { display: flex; gap: 2px; }
+.recall-start .survey-start-heading { display: grid; justify-items: center; gap: 12px; }
+.recall-start .survey-start-heading > svg { color: var(--text-muted); }
+.global-recall-surface .survey-sidebar-actions { grid-template-columns: 1fr; }

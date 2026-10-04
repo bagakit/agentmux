@@ -23,6 +23,7 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
+import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { MoteWorkface } from './components/MoteWorkface'
@@ -117,9 +118,10 @@ function DesktopApp() {
         regionId: floating.reference?.regionId ?? null } : null }
     desktopPresentationCommitted()
   })
+  const recallSelection = useAppStore(state => state.recallZoneSelection)
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
-  const surveyNotebookId = useAppStore(state => state.surveyNotebookId)
-  const surveyNoteId = useAppStore(state => state.surveyNoteId)
+  const recallNotebookId = useAppStore(state => state.recallNotebookId)
+  const recallNoteId = useAppStore(state => state.recallNoteId)
   const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
   const [unconfirmedBrowserRegionIds, setUnconfirmedBrowserRegionIds] = useState<ReadonlySet<string>>(() => new Set())
   const onBrowserControlConfirmation = useCallback((regionId: string, unconfirmed: boolean) => {
@@ -137,6 +139,7 @@ function DesktopApp() {
     window.addEventListener('resize', resized)
     return () => window.removeEventListener('resize', resized)
   }, [])
+  const recallVisible = mainSurface === 'recall' && !settingsRoute
   const surveyVisible = mainSurface === 'survey' && !settingsRoute
   const focusVisible = mainSurface === 'agents' && !settingsRoute
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
@@ -145,7 +148,7 @@ function DesktopApp() {
     Object.values(tab.regions).flatMap(surface => isSessionSurface(surface) ? [surface.sessionId] : [])))], [tabs])
   // The spatial directory reads execution identity, never status/output clocks.
   const surveySessions = useAppStore(useShallow(state => {
-    if ((!surveyVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) || surveySessionIds.length === 0) return []
+    if ((!surveyVisible && !recallVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) || surveySessionIds.length === 0) return []
     const byId = sessionPresentationById(state.sessions)
     return surveySessionIds.flatMap(id => {
       const session = byId.get(id)
@@ -156,7 +159,7 @@ function DesktopApp() {
   const surveyTopics = scratchTopicsForWorkspace(surveyTopicSnapshots, topicsWorkspace)
   const retainedSurveyCatalog = useRef<AgentMuxSpaceCatalog | null>(null)
   const spatialDirectory = useMemo(() => {
-    if (!surveyVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) return { catalog: retainedSurveyCatalog.current, issue: null }
+    if (!surveyVisible && !recallVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) return { catalog: retainedSurveyCatalog.current, issue: null }
     try {
       const catalog = spatialCatalog(useAppStore.getState(), surveyTopics ?? [])
       retainedSurveyCatalog.current = catalog
@@ -165,7 +168,7 @@ function DesktopApp() {
       // Directory validation is a presentation failure, never a reason to stop a healthy Session.
       return { catalog: retainedSurveyCatalog.current, issue: `The work surface directory could not be confirmed: ${error instanceof Error ? error.message : String(error)}` }
     }
-  }, [surveyVisible, focusVisible, moteFloating.open, moteFloating.preview, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
+  }, [surveyVisible, recallVisible, focusVisible, moteFloating.open, moteFloating.preview, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
   const surveyCatalog = spatialDirectory.catalog
   const selectMoteReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState(), current = readPmoTeamsTopicFloatingState(), tab = state.tabs[reference.tabId]
@@ -248,20 +251,44 @@ function DesktopApp() {
     if (!surveySelection || !surveyCatalog) return null
     const projection = resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
       surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference)
-    const active = surveySelection.active
-    const surface = active ? tabs[active.tabId]?.regions[active.regionId] : undefined
-    if (!projection || !surveyNotebookId || !surveyNoteId || !active || surface?.kind !== 'file') return projection
-    const references = projection.selection.filter(reference => reference.tabId === active.tabId && reference.regionId === active.regionId)
-    const reference = references.find(value => surveyOccurrence.current && sameWorkbenchProjectionSelection(value, surveyOccurrence.current))
-      // The original File owner may change a legacy path-based Tab ID. The same immutable Region
-      // in this exact display/Group remains the original occurrence; never choose another Group.
-      ?? references.find(value => surveyOccurrence.current && value.regionId === surveyOccurrence.current.regionId &&
-        value.displayWorkspaceId === surveyOccurrence.current.displayWorkspaceId && value.groupId === surveyOccurrence.current.groupId)
-      ?? (references.length === 1 ? references[0] : undefined)
-    return reference ? { ...projection, entity: { kind: 'region' as const, regionId: reference.regionId }, selection: [reference] } : projection
-  }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference, surveyNotebookId, surveyNoteId])
+    return projection
+  }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference])
   const surveyCurrentSelection = useMemo(() => surveySelection ? surveyResolvedZoneSelection(surveySelection, surveyProjection, surveyOccurrence.current) : null,
     [surveySelection, surveyProjection])
+  const recallOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
+  const selectRecallReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
+    const state = useAppStore.getState()
+    if (!state.recallZoneSelection || JSON.stringify(state.recallZoneSelection) !== JSON.stringify(recallSelection)) return
+    const currentTopics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    const currentCatalog = spatialCatalog(state, currentTopics)
+    const tab = state.tabs[reference.tabId]
+    const scope = resolveWorkbenchZone(state.recallZoneSelection.zoneId, currentCatalog, state.layouts, state.tabs, 'recall-workbench', [], () => {})
+    const layout = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
+    if (!tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
+      !currentCatalog.tabs.some(member => member.tabId === tab.id && member.zoneId === state.recallZoneSelection!.zoneId)) return
+    const surface = tab.regions[reference.regionId]
+    if (surface && isSessionSurface(surface)) state.focusExecutionSession(surface.sessionId, reference, { navigate: false })
+    recallOccurrence.current = reference
+    state.setRecallZoneSelection(surveySelectReference(state.recallZoneSelection, reference))
+  }, [recallSelection])
+  const recallProjection = useMemo(() => {
+    if (!recallSelection || !surveyCatalog) return null
+    const projection = resolveWorkbenchZone(recallSelection.zoneId, surveyCatalog, layouts, tabs, 'recall-workbench',
+      recallSelection.active ? [...recallSelection.selection, recallSelection.active] : recallSelection.selection, selectRecallReference)
+    const active = recallSelection.active
+    const surface = active ? tabs[active.tabId]?.regions[active.regionId] : undefined
+    if (!projection || !recallNotebookId || !recallNoteId || !active || surface?.kind !== 'file') return projection
+    const references = projection.selection.filter(reference => reference.tabId === active.tabId && reference.regionId === active.regionId)
+    const reference = references.find(value => recallOccurrence.current && sameWorkbenchProjectionSelection(value, recallOccurrence.current))
+      // The original File owner may change a legacy path-based Tab ID. The same immutable Region
+      // in this exact display/Group remains the original occurrence; never choose another Group.
+      ?? references.find(value => recallOccurrence.current && value.regionId === recallOccurrence.current.regionId &&
+        value.displayWorkspaceId === recallOccurrence.current.displayWorkspaceId && value.groupId === recallOccurrence.current.groupId)
+      ?? (references.length === 1 ? references[0] : undefined)
+    return reference ? { ...projection, entity: { kind: 'region' as const, regionId: reference.regionId }, selection: [reference] } : projection
+  }, [recallSelection, surveyCatalog, layouts, tabs, selectRecallReference, recallNotebookId, recallNoteId])
+  const recallCurrentSelection = useMemo(() => recallSelection ? surveyResolvedZoneSelection(recallSelection, recallProjection, recallOccurrence.current) : null,
+    [recallSelection, recallProjection])
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const currentOrdinaryLayout = activeWorkspaceId ? layouts[activeWorkspaceId] : undefined
   const retainedOrdinaryLayout = useRef<{ workspaceId: string; layout: NonNullable<typeof currentOrdinaryLayout> } | null>(null)
@@ -293,6 +320,17 @@ function DesktopApp() {
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) })
       }
     }
+    if (recallVisible && recallProjection) {
+      const projection = recallProjection
+      const projected = projectWorkbenchProjection(layouts[projection.displayWorkspaceId], tabs, projection)
+      for (const reference of projected.selection) {
+        if (projected.unsupportedTabIds.has(reference.tabId)) continue
+        append(reference.tabId, { hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
+          active: true && (recallCurrentSelection?.active?.tabId !== reference.tabId ||
+            sameWorkbenchProjectionSelection(recallCurrentSelection.active, reference)), visible: true, surface: 'recall', controlsOpen: false,
+          projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectRecallReference({ ...reference, regionId }) })
+      }
+    }
     if (mainSurface === 'agents' && focusProjection && focusTab) {
       const reference = focusProjection.selection[0]!
       append(focusTab.id, {
@@ -304,7 +342,9 @@ function DesktopApp() {
     }
     return targets
   }, [moteViewTargets, surveyVisible, surveyProjection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
-    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets])
+    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
+  const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
+  useEffect(() => { if (mainSurface === 'recall') setRecallVisited(true) }, [mainSurface])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
   useEffect(() => {
     if (mainSurface === 'survey') setSurveyVisited(true)
@@ -312,7 +352,7 @@ function DesktopApp() {
   const compactSidebars = windowWidth <= 760 && mainSurface === 'workbench' && Boolean(config?.workspaces.some(item => item.id === activeWorkspaceId))
   const windowSidebars = useWindowSidebarLayout(compactSidebars)
   const { projectRailOpen, toolsOpen } = windowSidebars
-  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'
+  const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall'
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
@@ -383,7 +423,7 @@ function DesktopApp() {
   const renderedToolDockWidth = Math.min(toolDockMaximumWidth, getRenderedToolDockWidth(toolDockWidth, projectRailOpen))
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
-  const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || (mainSurface === 'workbench' && Boolean(workspace))
+  const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
   const workbenchVisible = mainSurface === 'workbench' && !settingsRoute
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
@@ -532,6 +572,7 @@ function DesktopApp() {
               ) : null}
               {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
+              {recallVisited || mainSurface === 'recall' ? <GlobalRecallSurface onSelectReference={selectRecallReference} visible={recallVisible} catalog={surveyCatalog} projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusView !== 'closed' && Boolean(workbenchSpaceSelection || focusView === 'unconfirmed')} onCloseWorkspace={() => setFocusView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {config && mountedWorkspaces.length > 0 ? (

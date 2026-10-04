@@ -148,6 +148,8 @@ import {
 } from '../../shared/scratch-topics'
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
+import { reconcileNotesStorageResources, reconcileNotesLauncherDrafts, reobserveNotesStorageResources } from './lib/notes-storage-reconciliation'
+import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 import { api } from './lib/api'
 import { sessionLaunchFailure } from '../../shared/session-launch-result'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
@@ -620,9 +622,16 @@ type AppState = {
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
   notebookRecoveries: NotebookRecovery[]
-  surveyNotebookId: string | null
-  surveyNoteId: string | null
-  setSurveyNotebook(notebookId: string | null, noteId?: string | null): void
+  recallNotebookId: string | null
+  recallNoteId: string | null
+  recallZoneSelection: SurveyZoneSelection | null
+  setRecallZoneSelection(selection: SurveyZoneSelection | null): void
+  recallSidebarCollapsed: boolean
+  recallSidebarWidth: number
+  setRecallSidebarCollapsed(collapsed: boolean): void
+  setRecallSidebarWidth(width: number): void
+  setRecallNotebook(notebookId: string | null, noteId?: string | null): void
+  refreshNotesStorage(): Promise<void>
   surveyZoneSelection: SurveyZoneSelection | null
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyCollectedZones: Record<string, true>
@@ -2367,6 +2376,12 @@ type PersistedAppState = {
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
   notebookRecoveries?: NotebookRecovery[]
+  recallNotebookId?: string | null
+  recallNoteId?: string | null
+  recallZoneSelection?: PersistedSurveyZoneSelection | null
+  recallSidebarCollapsed?: boolean
+  recallSidebarWidth?: number
+  /** Previous persisted notebook context is transferred once into Recall. */
   surveyNotebookId?: string | null
   surveyNoteId?: string | null
   surveyZoneSelection?: PersistedSurveyZoneSelection | null
@@ -2405,8 +2420,11 @@ export type RestoredUiState = Pick<
   | 'activeWorkspaceId'
   | 'mainSurface'
   | 'notebookRecoveries'
-  | 'surveyNotebookId'
-  | 'surveyNoteId'
+  | 'recallNotebookId'
+  | 'recallNoteId'
+  | 'recallZoneSelection'
+  | 'recallSidebarCollapsed'
+  | 'recallSidebarWidth'
   | 'surveyZoneSelection'
   | 'surveyCollectedZones'
   | 'surveyExplorationNames'
@@ -2493,8 +2511,13 @@ export function restorePersistedUiState(
     | 'activeWorkspaceId'
     | 'mainSurface'
     | 'notebookRecoveries'
+    | 'recallNotebookId'
+    | 'recallNoteId'
     | 'surveyNotebookId'
     | 'surveyNoteId'
+    | 'recallZoneSelection'
+    | 'recallSidebarCollapsed'
+    | 'recallSidebarWidth'
     | 'surveyZoneSelection'
     | 'surveyCollectedZones'
     | 'surveyExplorationNames'
@@ -2525,11 +2548,14 @@ export function restorePersistedUiState(
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
-    mainSurface: restoredMainSurface(persisted.mainSurface),
+    mainSurface: persisted.mainSurface === 'survey' && persisted.surveyNotebookId ? 'recall' : restoredMainSurface(persisted.mainSurface),
     notebookRecoveries: restoreNotebookRecoveries(persisted.notebookRecoveries),
-    surveyNotebookId: typeof persisted.surveyNotebookId === 'string' ? persisted.surveyNotebookId : null,
-    surveyNoteId: typeof persisted.surveyNoteId === 'string' ? persisted.surveyNoteId : null,
-    surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
+    recallNotebookId: typeof (persisted.recallNotebookId ?? persisted.surveyNotebookId) === 'string' ? (persisted.recallNotebookId ?? persisted.surveyNotebookId)! : null,
+    recallNoteId: typeof (persisted.recallNoteId ?? persisted.surveyNoteId) === 'string' ? (persisted.recallNoteId ?? persisted.surveyNoteId)! : null,
+    recallZoneSelection: restoredSurveyZoneSelection(persisted.recallZoneSelection ?? (persisted.surveyNotebookId ? persisted.surveyZoneSelection : null)),
+    recallSidebarCollapsed: restoredBoolean(persisted.recallSidebarCollapsed, false),
+    recallSidebarWidth: clampSurveySidebarWidth(persisted.recallSidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
+    surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyNotebookId ? null : persisted.surveyZoneSelection),
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
     noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
@@ -2594,7 +2620,8 @@ function selectPersistedInputs(state: AppState) {
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
     notebookRecoveries: state.notebookRecoveries,
-    surveyNotebookId: state.surveyNotebookId, surveyNoteId: state.surveyNoteId,
+    recallNotebookId: state.recallNotebookId, recallNoteId: state.recallNoteId,
+    recallZoneSelection: state.recallZoneSelection, recallSidebarCollapsed: state.recallSidebarCollapsed, recallSidebarWidth: state.recallSidebarWidth,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
     surveyExplorationNames: state.surveyExplorationNames,
@@ -2641,7 +2668,8 @@ function partializeAppState(state: AppState): PersistedAppState {
   const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
   const projection: PersistedAppState = {
     ...presentation,
-    surveyNotebookId: presentation.surveyNotebookId, surveyNoteId: presentation.surveyNoteId,
+    recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
+    recallZoneSelection: persistedSurveyZoneSelection(presentation.recallZoneSelection),
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
     documents: Object.fromEntries(Object.entries(documents).filter(([key]) => dirtyDocuments[key])),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
@@ -2961,11 +2989,12 @@ let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 /** The existing Space and Survey selection facts captured by file display intents. */
-function surveyPresentationAfterClose(state: Pick<AppState, 'tabs' | 'surveyZoneSelection' | 'surveyNotebookId' | 'surveyNoteId'>, tabs: AppState['tabs']) {
-  const active = state.surveyZoneSelection?.active
-  const closedPage = state.surveyNotebookId && state.surveyNoteId && active && state.tabs[active.tabId]?.regions[active.regionId]?.kind === 'file' && !tabs[active.tabId]?.regions[active.regionId]
-  return { surveyNoteId: closedPage ? null : state.surveyNoteId,
-    surveyZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
+function surveyPresentationAfterClose(state: Pick<AppState, 'tabs' | 'surveyZoneSelection' | 'recallZoneSelection' | 'recallNotebookId' | 'recallNoteId'>, tabs: AppState['tabs']) {
+  const active = state.recallZoneSelection?.active
+  const closedPage = state.recallNotebookId && state.recallNoteId && active && state.tabs[active.tabId]?.regions[active.regionId]?.kind === 'file' && !tabs[active.tabId]?.regions[active.regionId]
+  return { recallNoteId: closedPage ? null : state.recallNoteId,
+    recallZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.recallZoneSelection),
+    surveyZoneSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
 }
 
 export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise<NoteCreationReceipt> {
@@ -2978,9 +3007,27 @@ export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise
   } catch (error) { return { ...receipt, notebookIssue: 'Note saved. Notebook registration is unconfirmed; recover this same note. ' + presentError(error) } }
 }
 
+/** Consume the storage owner's exact resource receipt; never rename Tab/Region entities. */
+export async function applyNotesStorageSnapshot(snapshot: NotesStorageSnapshot): Promise<void> {
+  const before = useAppStore.getState()
+  const next = reconcileNotesStorageResources(before, snapshot.resourceChanges, snapshot.directoryChanges)
+  reconcileNotesLauncherDrafts(snapshot.resourceChanges, snapshot.directory)
+  if (next !== before) {
+    for (const change of snapshot.resourceChanges) {
+      const fromKey = documentKey(change.from.workspaceId, change.from.path)
+      const toKey = documentKey(change.to.workspaceId, change.to.path)
+      if (fromKey !== toKey || change.from.workspacePath !== change.to.workspacePath) { advanceDocumentLifetime(fromKey); if (toKey !== fromKey) advanceDocumentLifetime(toKey) }
+    }
+    useAppStore.setState(next)
+    try { await reobserveNotesStorageResources(next, snapshot.resourceChanges, useAppStore.getState) }
+    catch (error) { useAppStore.getState().reportError(new Error('The original Note moved and your draft is kept. File observation is unconfirmed; reopen this same Note to reconnect it. ' + presentError(error))) }
+  }
+}
+
 export function fileNavigationSelection(state: AppState): string {
   // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
-  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyNotebookId, state.surveyNoteId, state.surveyZoneSelection, state.workbenchSpaceSelection])
+  if (state.mainSurface === 'recall') return JSON.stringify([state.mainSurface, state.recallNotebookId, state.recallNoteId, state.recallZoneSelection])
+  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection, state.workbenchSpaceSelection])
   const reference = mainRegionReference(state.workbenchSpaceSelection)
   if (reference) return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection,
     state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.surveyZoneSelection])
@@ -3186,8 +3233,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   nameAcknowledgementRevision: 0,
   mainSurface: 'workbench',
   notebookRecoveries: [],
-  surveyNotebookId: null, surveyNoteId: null,
-  setSurveyNotebook(notebookId, noteId = null) { set({ surveyNotebookId: notebookId, surveyNoteId: noteId }) },
+  recallNotebookId: null, recallNoteId: null,
+  recallZoneSelection: null,
+  setRecallZoneSelection(recallZoneSelection) { set({ recallZoneSelection }) },
+  recallSidebarCollapsed: false, recallSidebarWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH,
+  setRecallSidebarCollapsed(recallSidebarCollapsed) { set({ recallSidebarCollapsed }) },
+  setRecallSidebarWidth(width) { set({ recallSidebarWidth: clampSurveySidebarWidth(width) }); void saveWorkbenchSelection(false) },
+  setRecallNotebook(notebookId, noteId = null) { set({ recallNotebookId: notebookId, recallNoteId: noteId }) },
+  async refreshNotesStorage() { await applyNotesStorageSnapshot(await api.notesStorage.inspect()) },
   surveyZoneSelection: null,
   surveyCollectedZones: {},
   surveyExplorationNames: {},
@@ -3326,6 +3379,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
+    let pendingNotesStorage: NotesStorageSnapshot | null = null
+    const disposeNotesStorage = api.notesStorage.onChange(snapshot => {
+      if (booting) pendingNotesStorage = snapshot
+      else void applyNotesStorageSnapshot(snapshot).catch(error => get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))))
+    })
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
         enqueueSessionMembershipEvent(pendingSessionEvents, event)
@@ -3363,6 +3421,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeControl()
       disposeSpatialLinkIssues()
       disposeFileInvalidations()
+      disposeNotesStorage()
       void stopWarmTerminal(get().warmTerminal).then((sessionId) => {
         if (!sessionId) return
         set((state) => ({
@@ -3681,6 +3740,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
+      try { await applyNotesStorageSnapshot(pendingNotesStorage ?? await api.notesStorage.inspect()) }
+      catch (error) { get().reportError(new Error('Notes directory view could not reconnect. Your original workface and drafts are kept; refresh the Notes directory in Settings. ' + presentError(error))) }
       // Publication releases the boot buffer before optional spatial/browser work awaits.
       // Latest replacement facts survive a noisy neighbor; truncated timelines use Core.
       booting = false
@@ -4707,9 +4768,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : controlFailure('CONTROL_FAILED', 'Region cannot be promoted to a new Tab.')
       }
       set((current) => ({
-        ...(current.mainSurface === 'survey' ? {} : { retainedSpatialFocus: null,
+        ...(current.mainSurface === 'survey' || current.mainSurface === 'recall' ? {} : { retainedSpatialFocus: null,
           activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
         surveyZoneSelection: surveySelectionAfterPromote(current.surveyZoneSelection, region, result.target),
+        recallZoneSelection: surveySelectionAfterPromote(current.recallZoneSelection, region, result.target),
         tabs: result.tabs,
         layouts: result.layouts
       }))
@@ -5534,9 +5596,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // these values, since the Region was right-clicked in the visible workbench, but setting them makes
     // "show the new Tab" true regardless of how the action was reached — e.g. a future command palette.)
     set((state) => ({
-      ...(state.mainSurface === 'survey' ? {} : { retainedSpatialFocus: null,
+      ...(state.mainSurface === 'survey' || state.mainSurface === 'recall' ? {} : { retainedSpatialFocus: null,
         activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
       surveyZoneSelection: surveySelectionAfterPromote(state.surveyZoneSelection, { workspaceId, tabId, regionId }, result.target),
+      recallZoneSelection: surveySelectionAfterPromote(state.recallZoneSelection, { workspaceId, tabId, regionId }, result.target),
       tabs: result.tabs,
       layouts: result.layouts
     }))
@@ -5758,7 +5821,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setMainSurface(mainSurface) {
     const state = get()
-    const choice = state.workbenchSpaceSelection ?? (mainSurface !== 'survey' && state.activeWorkspaceId
+    const choice = state.workbenchSpaceSelection ?? (mainSurface !== 'survey' && mainSurface !== 'recall' && state.activeWorkspaceId
       ? workbenchObjectLayout(state, state.activeWorkspaceId).choice : null)
     const surface = choice?.tabId && choice.regionId ? state.tabs[choice.tabId]?.regions[choice.regionId] : undefined
     const confirmed = choice && projectWorkbenchSpaceSelection(state.layouts[choice.workspaceId], state.tabs, workbenchSelectionCatalog(state), choice).confirmed
@@ -7232,8 +7295,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const originalResource = captured.config?.workspaces.find(item => item.id === workspaceId)
     if (!originalResource) throw new Error('The Note resource Workspace is unavailable.')
-    const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'survey-workbench' && captured.mainSurface === 'survey' && captured.surveyNotebookId
-      ? captured.surveyNotebookId : DEFAULT_NOTEBOOK_ID }
+    const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'recall-workbench' && captured.mainSurface === 'recall' && captured.recallNotebookId
+      ? captured.recallNotebookId : DEFAULT_NOTEBOOK_ID }
     const noteId = retrying ? previous.noteId : crypto.randomUUID(), blockId = retrying ? previous.blockIds[0]! : crypto.randomUUID(), draft = retrying ? previous.draft : initialContent ?? ''
     let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
       ...(launcher ? { launcher } : {}),
@@ -7247,7 +7310,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let topics: ScratchTopicSnapshot[] = []
     try { if (captured.config?.workspaces.some(item => item.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) } catch { /* The original birth context remains authoritative; missing discovery cannot choose another directory. */ }
     try {
-      if (captured.mainSurface === 'survey' && !projection) throw new Error('The Note Survey presentation is unconfirmed. Its draft and original target are retained.')
+      if ((captured.mainSurface === 'survey' || captured.mainSurface === 'recall') && !projection) throw new Error('The Note Survey presentation is unconfirmed. Its draft and original target are retained.')
       if (projection && (!receipt.presentation || !projection.selection.some(reference => sameWorkbenchProjectionSelection(reference, receipt.presentation!.reference)) ||
         !projection.catalog.locations.some(location => workbenchProjectionMatches(projection, location) && location.displayWorkspaceId === projection.displayWorkspaceId && location.groupId === groupId && location.tabId === launcher?.tabId && location.regionId === launcher.regionId))) throw new Error('The exact Note presentation reference is unconfirmed. Its original draft is retained.')
       receipt = { ...receipt, target: noteCreationTarget(captured, topics, { workspaceId, groupId, ...(projection ? { displayWorkspaceId: projection.displayWorkspaceId } : {}), ...(launcher ? { launcher } : {}) }) }
@@ -7385,6 +7448,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { ...renamed,
         surveyZoneSelection: state.surveyZoneSelection ? { ...state.surveyZoneSelection,
           selection: state.surveyZoneSelection.selection.map(remap), active: state.surveyZoneSelection.active ? remap(state.surveyZoneSelection.active) : null } : null,
+        recallZoneSelection: state.recallZoneSelection ? { ...state.recallZoneSelection,
+          selection: state.recallZoneSelection.selection.map(remap), active: state.recallZoneSelection.active ? remap(state.recallZoneSelection.active) : null } : null,
         // Same reason as `createPath`: the Topics panel and the Board read this counter and nothing
         // else. Moving a Topic's `topic.md` out breaks the Topic's identity, and only the file tree
         // would notice. Folded into the projection's own `set` so it is one render, not two.
@@ -9439,7 +9504,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       state.nameAuthorityRevision = current.nameAuthorityRevision
     }
     return { ...state, agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
-      agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
+      agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
 }))

@@ -1,4 +1,5 @@
 import { isFolderWorkspace, isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
+import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
 import { directoryIdentity } from '../../../shared/space-addresses'
 
 export type WorkspaceProject = {
@@ -30,6 +31,7 @@ function basename(path: string): string {
 export function projectWorkspaces(workspaces: readonly WorkspaceRecord[]): WorkspaceProject[] {
   const projects = new Map<string, WorkspaceProject>()
   for (const workspace of workspaces) {
+    if (workspace.id === NOTES_WORKSPACE_ID) continue
     const id = workspaceProjectId(workspace)
     const existing = projects.get(id)
     if (existing) {
@@ -60,7 +62,7 @@ export function projectRailNavigation(workspaces: readonly WorkspaceRecord[]): {
   return {
     scratch: workspaces.find((workspace) => isScratchWorkspaceId(workspace.id)) ?? null,
     projects: projectWorkspaces(
-      workspaces.filter((workspace) => !isScratchWorkspaceId(workspace.id))
+      workspaces.filter((workspace) => !isScratchWorkspaceId(workspace.id) && workspace.id !== NOTES_WORKSPACE_ID)
     )
   }
 }
