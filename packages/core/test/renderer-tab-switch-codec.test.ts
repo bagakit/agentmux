@@ -17,8 +17,8 @@ const decoders = [
   { name: 'public metrics observation', parse(performance: unknown) {
     return parseMetricsObservation({ schema: 'agentmux.metrics.v1', observedAt: 2,
       scope: { kind: 'unix-host', hostId: 'local', hostname: 'fixture-host', mainPid: 1 }, window,
-      units: { cpu: 'percent', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
-      process: pending, app: pending, runtime: pending, main: pending,
+      units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
+      diagnostics: pending, process: pending, app: pending, runtime: pending, main: pending,
       renderer: { state: 'available', observedAt: 2, lastSuccessAt: 2, reason: null,
         data: { window, counts, performance } } }).renderer.data!.performance
   } }

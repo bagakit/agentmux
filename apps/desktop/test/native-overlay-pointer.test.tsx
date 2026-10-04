@@ -9,6 +9,7 @@ import { observeNativeOverlayRegions } from '../src/renderer/src/lib/native-over
 
 const signals = vi.hoisted(() => ({ pointer: undefined as undefined | ((input: NativeBrowserInput) => void) }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { ui: {
+  nativeBrowserVisibility: () => new Promise(() => {}), onNativeBrowserVisibility: () => () => {},
   publishNativeOverlays: async () => ({ projected: 0, capturedPixels: 0 }),
   getZoomFactor: () => 1, onNativeOverlayWarning: () => () => {},
   onNativeBrowserInput(listener: (input: NativeBrowserInput) => void) { signals.pointer = listener; return () => { signals.pointer = undefined } }

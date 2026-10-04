@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
+import { createRendererPerformance } from '../../../src/renderer/src/lib/renderer-performance'
 import type { MetricsObservation } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../src/shared/toolkit'
 import { runKey } from '../../../src/renderer/src/components/performance/PerformanceOverview'
@@ -11,7 +12,7 @@ const runs = Array.from({ length: 8 }, (_, i) => ({ runId: `preparation-run-${i 
   rootRssKib: i === 7 ? null : 28672, descendantsRssKib: i === 7 ? null : [1331200, 495616, 393216, 303104, 192512, 122880, 61440][i], descendantProcessCount: i === 7 ? null : 2 }))
 const observation: MetricsObservation = {
   schema: 'agentmux.metrics.v1', observedAt: at, scope: { kind: 'unix-host', hostId: 'local', hostname: 'local-mac', mainPid: 1234 },
-  window: { windowId: 1, webContentsId: 1, generation: 1 }, units: { cpu: 'percent', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
+  window: { windowId: 1, webContentsId: 1, generation: 1 }, units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
   app: available({ processCount: 7, cpuPercent: 18.4, rssKib: 655360, unavailable: null, groups: [
     { role: 'main', processCount: 1, cpuPercent: 3.1, rssKib: 131072 }, { role: 'renderer', processCount: 2, cpuPercent: 12.8, rssKib: 327680 },
     { role: 'gpu', processCount: 1, cpuPercent: 2.5, rssKib: 131072 }, { role: 'utility', processCount: 3, cpuPercent: 0, rssKib: 65536 }
@@ -19,8 +20,9 @@ const observation: MetricsObservation = {
   runtime: available([{ hostId: 'local', resources: { observedAt: at - 60000, runCount: 11, runningRuns: 7, terminatedRuns: 4, terminatedUnattachedRuns: 2, attachments: 8, retainedOutputBytes: 3145728 },
     unavailable: null, process: { cpuPercent: null, rssKib: null, unavailable: 'Runtime does not publish its process identity.' },
     runtimeStorage: { path: _hygiene_fixturePath("Users/fixture/workspaces/editor/.runtime/history"), bytes: 1572864000 }, runtimeStorageUnavailable: null, runtimeStorageObservedAt: at - 60000 }], at - 60000),
+  diagnostics: { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null },
   main: available({ sessionAttachmentOwners: 3, sessionAttachmentLeases: 4, fileWatchers: 5, browserViews: 2, releasedBrowserViews: 1 }),
-  renderer: available({ window: { windowId: 1, webContentsId: 1, generation: 1 }, counts: { monacoEditors: 3, monacoModels: 5, documents: 4, runtimeSubscriptions: 2, terminalViews: 3, terminalAddons: 6, terminalListeners: 9 } })
+  renderer: available({ window: { windowId: 1, webContentsId: 1, generation: 1 }, counts: { monacoEditors: 3, monacoModels: 5, documents: 4, runtimeSubscriptions: 2, terminalViews: 3, terminalAddons: 6, terminalListeners: 9 }, performance: createRendererPerformance(() => 0, () => at).snapshot() })
 }
 export const performanceSnapshot: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
   startedAt: at - 47000, manual: false, consumerCount: 1, sequence: 1,

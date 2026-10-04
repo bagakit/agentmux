@@ -1679,3 +1679,27 @@ describe('BrowserViewManager healthy page during failed candidate cleanup', () =
     manager.close(current.id)
   })
 })
+
+it('native chrome demand follows successful physical Browser owner bounds and releases without a second registry', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  const changes = vi.fn(); manager.onNativeVisibilityChange = changes
+  expect(manager.nativeBrowserVisibility()).toEqual({ revision: 0, bounds: [] })
+  await manager.create('chrome-demand-page', 'https://example.org')
+  expect(manager.nativeBrowserVisibility().bounds).toEqual([])
+  const bounds = { x: 10, y: 20, width: 120, height: 80 }
+  manager.setBounds('chrome-demand-page', bounds)
+  expect(changes.mock.calls.at(-1)?.[0]).toEqual({ revision: 1, bounds: [bounds] })
+  const detached = manager.nativeBrowserVisibility(); detached.bounds[0]!.x = 999
+  expect(manager.nativeBrowserVisibility().bounds).toEqual([bounds])
+  manager.setBounds('chrome-demand-page', { ...bounds })
+  expect(changes).toHaveBeenCalledTimes(1)
+  manager.setBounds('chrome-demand-page', { ...bounds, y: 30 })
+  expect(changes.mock.calls.at(-1)?.[0]).toEqual({ revision: 2, bounds: [{ ...bounds, y: 30 }] })
+  manager.setBounds('chrome-demand-page', null)
+  expect(changes.mock.calls.at(-1)?.[0]).toEqual({ revision: 3, bounds: [] })
+  manager.setBounds('chrome-demand-page', bounds)
+  manager.release('chrome-demand-page')
+  expect(changes.mock.calls.at(-1)?.[0].bounds).toEqual([])
+  expect(manager.nativeBrowserVisibility().bounds).toEqual([])
+  manager.dispose()
+})

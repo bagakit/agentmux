@@ -7,6 +7,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
 }))
 import {
   collectTerminalColdParkCandidates,
+  terminalParkingSessionFacts,
   useTerminalColdParking
 } from '../src/renderer/src/lib/terminal-cold-parking-coordinator.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -66,7 +67,7 @@ describe('window terminal parking coordinator', () => {
     const candidates = collectTerminalColdParkCandidates({
       tabs,
       layouts: { 'workspace-1': layout },
-      sessions: [session('first'), session('second')],
+      sessions: [session('first'), session('second')].map(terminalParkingSessionFacts),
       activeWorkspaceId: 'workspace-1',
       workbenchVisible: true
     })
@@ -84,7 +85,7 @@ describe('window terminal parking coordinator', () => {
     const candidates = collectTerminalColdParkCandidates({
       tabs: { [launching.id]: launching, [exited.id]: exited },
       layouts: { 'workspace-1': layout },
-      sessions: [session('launching'), session('exited', 'exited')],
+      sessions: [session('launching'), session('exited', 'exited')].map(terminalParkingSessionFacts),
       activeWorkspaceId: 'other-workspace',
       workbenchVisible: true
     })
@@ -125,7 +126,7 @@ describe('window terminal parking coordinator', () => {
     const candidates = collectTerminalColdParkCandidates({
       tabs: { [tab.id]: tab },
       layouts: { 'workspace-1': layout },
-      sessions: [recovering],
+      sessions: [recovering].map(terminalParkingSessionFacts),
       activeWorkspaceId: 'other-workspace',
       workbenchVisible: true
     })
@@ -140,7 +141,7 @@ describe('window terminal parking coordinator', () => {
     const candidates = collectTerminalColdParkCandidates({
       tabs: { [tab.id]: tab },
       layouts: { 'workspace-1': layout },
-      sessions: [session('remote-project')],
+      sessions: [session('remote-project')].map(terminalParkingSessionFacts),
       activeWorkspaceId: 'another-workspace',
       workbenchVisible: true
     })
@@ -174,7 +175,7 @@ describe('window terminal parking coordinator', () => {
     const candidates = collectTerminalColdParkCandidates({
       tabs: { [first.id]: first, [second.id]: second },
       layouts: { [workspaceId]: activeTopicLayout },
-      sessions: [session('topic-a'), session('topic-b')],
+      sessions: [session('topic-a'), session('topic-b')].map(terminalParkingSessionFacts),
       activeWorkspaceId: workspaceId,
       workbenchVisible: true
     })

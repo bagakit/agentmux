@@ -21,7 +21,7 @@ const baseline = useAppStore.getState()
 const require = createRequire(import.meta.url)
 const cssSources = [
   ...['tokens', 'chrome'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css')),
-  ...['conversation-avatar', 'conversation-input-details'].map(name => require.resolve('@agentmux/client-ui/styles/' + name + '.css')),
+  ...['conversation-avatar', 'conversation-input-details'].map(name => resolve(import.meta.dirname, '../../../packages/client-ui/src/styles/' + name + '.css')),
   ...['mote-workface', 'space-object-appearance'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css'))
 ]
 beforeEach(() => {

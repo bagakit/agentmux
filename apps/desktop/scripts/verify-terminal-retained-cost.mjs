@@ -47,8 +47,8 @@ const variants = slice === 'derivation' ? [
   ['composer-workspace-invalidation-withdrawn', replace('components/AgentSessionComposer.tsx',
     '[config, topics, session?.kind, session?.hostId, session?.workspacePath]', '[]')],
   ['composer-prompt-caller-withdrawn', replace('components/AgentSessionComposer.tsx',
-    "useObservedAppStore('composer', visible, firstPromptSelector)",
-    "useObservedAppStore('composer', visible, state => createFirstPromptSelector(sessionId)(state))")]
+    "useObservedAppStore('composer', visible, consumerScope, firstPromptSelector)",
+    "useObservedAppStore('composer', visible, consumerScope, state => createFirstPromptSelector(sessionId)(state))")]
 ] : [
   ['hidden-reading-guard-withdrawn', replace('components/StableWorkbenchView.tsx', 'if (!previous.visible) return null', '')],
   ['outgoing-reading-guard-reversed', replace('components/StableWorkbenchView.tsx', 'if (!previous.visible) return null', 'if (!this.props.visible) return null')],

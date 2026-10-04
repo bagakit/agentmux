@@ -76,7 +76,7 @@ it('distinguishes selector checks and changed selections from committed renders 
   const initial = useAppStore.getState(), host = document.createElement('div'), root = createRoot(host)
   let renders = 0
   function Probe({ visible }: { visible: boolean }) {
-    const error = useObservedAppStore('composer', visible, state => state.error)
+    const error = useObservedAppStore('composer', visible, { sessionIds: ['own'], navigation: false }, state => state.error)
     useObservedConsumerCommit('composer', visible)
     renders++
     return <output>{error}</output>
@@ -87,7 +87,7 @@ it('distinguishes selector checks and changed selections from committed renders 
     const before = rendererPerformance.snapshot(), rendered = renders
     await act(async () => useAppStore.setState({ agentNames: { unrelated: 'name' } }))
     const unchanged = rendererPerformance.snapshot()
-    expect(unchanged.consumers.composer.hidden.checks).toBeGreaterThan(before.consumers.composer.hidden.checks)
+    expect(unchanged.consumers.composer.hidden.checks).toBe(before.consumers.composer.hidden.checks)
     expect(unchanged.consumers.composer.hidden.changes).toBe(before.consumers.composer.hidden.changes)
     expect(unchanged.consumers.composer.hidden.commits).toBe(before.consumers.composer.hidden.commits)
     expect(renders).toBe(rendered)

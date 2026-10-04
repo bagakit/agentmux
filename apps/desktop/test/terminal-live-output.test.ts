@@ -121,7 +121,12 @@ describe('live 输出积压的上界', () => {
     queue.forEach(item => pending.admit(item))
     const taken = pending.take(700)
     expect(taken.batch[0]).toEqual(queue[0])
-    expect([...taken.batch, ...pending]).toEqual(queue)
+    const all = [...taken.batch, ...pending] as TerminalLiveOutputChunk[]
+    expect(Buffer.concat(all.map(item => item.dataBytes))).toEqual(Buffer.concat(queue.map(item => item.dataBytes)))
+    expect(all[0]!.startByte).toBe(queue[0]!.startByte)
+    expect(all.at(-1)!.endByte).toBe(queue.at(-1)!.endByte)
+    for (let i = 1; i < all.length; i++) expect(all[i]!.startByte).toBe(all[i - 1]!.endByte)
+    expect(totalBytes(taken.batch)).toBe(700)
   })
 })
 

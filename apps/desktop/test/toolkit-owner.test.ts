@@ -10,10 +10,10 @@ import { resolve } from 'node:path'
 export function observation(time = 1000): MetricsObservation {
   const pending = { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null } as const
   return { schema: 'agentmux.metrics.v1', observedAt: time, scope: { kind: 'unix-host', hostId: 'local', hostname: 'private-fixture', mainPid: process.pid }, window: null,
-    units: { cpu: 'percent', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
+    units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
     process: { state: 'available', data: [{ hostId: 'local', runId: 'nonempty-run', rootPid: process.pid, processCount: 1, cpuPercent: 2, rssKib: 64,
       rootRssKib: 64, descendantsRssKib: 0, descendantProcessCount: 0 }], observedAt: time, lastSuccessAt: time, reason: null },
-    app: pending, runtime: pending, main: pending, renderer: pending }
+    app: pending, runtime: pending, main: pending, diagnostics: pending, renderer: pending }
 }
 const request = (operation: 'toolkit.get'|'toolkit.run'|'toolkit.stop') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'owning', operation, toolId: 'performance' as const })
 async function fixture(delayed = false) {

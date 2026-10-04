@@ -24,8 +24,8 @@ export function deepMetricsSnapshot(): ToolkitMetricsSnapshot {
       visible: true, revealed: true, liveReady: true, acceptsInput: true, readOnly: false, replaying: false } }]
   const observation: MetricsObservation = { schema: 'agentmux.metrics.v1', observedAt: 1000,
     scope: { kind: 'unix-host', hostId: 'local', hostname: 'test-host', mainPid: 1 }, window: { ...window },
-    units: { cpu: 'percent', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
-    process: pending, app: pending, runtime: pending, main: pending,
+    units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
+    diagnostics: pending, process: pending, app: pending, runtime: pending, main: pending,
     renderer: { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null, data: { window,
       counts: { monacoEditors: 0, monacoModels: 0, documents: 0, runtimeSubscriptions: 1, terminalViews: 1, terminalAddons: 1, terminalListeners: 1 }, performance } } }
   return { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'execution',
