@@ -16,6 +16,15 @@
 .branches-header--tools { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-3); gap: var(--sp-2); }
 .source-control-count { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .source-control-actions { display: flex; align-items: center; gap: 1px; }
+.branches-panel--branches .branch-search { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 0 var(--sp-3) var(--sp-2); }
+.branch-search__field { flex: 1; min-width: 0; height: 26px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-1); }
+.branch-search__field:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.branch-search__field > svg { flex: 0 0 12px; }
+.branch-search__field input { flex: 1; min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-meta); }
+.branch-search__field input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.branch-search__field button { flex: 0 0 18px; width: 18px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.branch-search__field button:hover { color: var(--text); background: var(--surface-3); }
+.branch-search select { flex: 0 0 90px; min-width: 0; height: 26px; padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: inherit; font-size: var(--fs-micro); }
 .branches-header button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .branches-header button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 /* 真实分支与 remote/PR 操作仍需要一行上下文；不重复项目路径或导航标题。 */
