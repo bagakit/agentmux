@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal } from '@agentmux/core'
@@ -25,8 +26,8 @@ export function MobileGoalLinks({ client, goal, updated }: {
     } finally { inFlight.current = false; setPending(false) }
   }
   return <details><summary>关联项目或会话</summary>
-    <form onSubmit={event => { event.preventDefault(); void link('session') }}><label>准确 Session ID<input aria-label="关联 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} required /></label><button disabled={pending}>关联会话</button></form>
-    <form onSubmit={event => { event.preventDefault(); void link('project') }}><label>准确 Project ID<input aria-label="关联 Project ID" value={projectId} onChange={event => setProjectId(event.target.value)} required /></label><button disabled={pending}>关联项目</button></form>
+    <form onSubmit={event => { event.preventDefault(); void link('session') }}><label>准确 Session ID<TextInput aria-label="关联 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} required /></label><button disabled={pending}>关联会话</button></form>
+    <form onSubmit={event => { event.preventDefault(); void link('project') }}><label>准确 Project ID<TextInput aria-label="关联 Project ID" value={projectId} onChange={event => setProjectId(event.target.value)} required /></label><button disabled={pending}>关联项目</button></form>
     {messages.map((text, index) => <p key={index} role="status">{text}</p>)}
   </details>
 }

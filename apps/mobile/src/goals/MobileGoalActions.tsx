@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult } from '@agentmux/core'
@@ -52,11 +53,11 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   }
   return <details onToggle={event => expand(event.currentTarget.open)}><summary>分配、执行与删除</summary>
     {discoveryIssue && <p role="status">{discoveryIssue}</p>}
-    <label>执行者<input aria-label="分配 Executor ID" list={`goal-executors-${goal.id}`} value={executorId} onChange={event => setExecutorId(event.target.value)} placeholder="准确 Executor ID，清空表示未分配" /></label>
+    <label>执行者<TextInput aria-label="分配 Executor ID" list={`goal-executors-${goal.id}`} value={executorId} onChange={event => setExecutorId(event.target.value)} placeholder="准确 Executor ID，清空表示未分配" /></label>
     <datalist id={`goal-executors-${goal.id}`}>{executors.map(executor => <option key={executor.executorId} value={executor.executorId}>{executor.label} · {executor.providerId} · {executor.availability}</option>)}</datalist>
     <button onClick={() => refresh(value => value + 1)}>刷新执行者目录</button>
     <button disabled={pending} onClick={() => { void execute('assign') }}>保存执行者分配</button>
-    <label>执行或交接的会话<input aria-label="执行 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} placeholder="可选准确 Session ID" /></label>
+    <label>执行或交接的会话<TextInput aria-label="执行 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} placeholder="可选准确 Session ID" /></label>
     <p>填写会话时明确指向它；不填写时，开始执行沿目标的原分配处理，可能复用关联会话或启动新 Agent。交接只更新原执行者与会话关系。</p>
     <button disabled={pending} onClick={() => { void execute('start') }}>开始执行此目标</button>
     <button disabled={pending} onClick={() => { void execute('handoff') }}>保存交接关系</button>
