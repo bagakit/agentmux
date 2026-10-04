@@ -3,8 +3,8 @@ import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { NativeJsonlHistoryReader, readNativeHistoryBytes, type NativeHistoryReadBudget } from '../dist/native-jsonl-history-reader.js'
-import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../dist/session-history.js'
+import { NativeJsonlHistoryReader, readNativeHistoryBytes, type NativeHistoryReadBudget } from '../src/native-jsonl-history-reader.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
 import type { AgentProviderSessionHistoryContext } from '../src/types.js'
 
 const roots: string[] = []
@@ -176,16 +176,18 @@ it.each(['replace', 'truncate', 'boundary-rewrite', 'source'] as const)('rejects
   await expect(open(next)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
 })
 
-it('bounds skipped/scanned input, rejects directories, and obeys cancellation before IO', async () => {
+it('keeps large strings out of materialization, rejects directories, and obeys cancellation before IO', async () => {
   const large = await fixture(JSON.stringify({ body: 'x'.repeat(4 * 1024 * 1024) }) + '\n')
-  await expect((await open(large.context)).readPrevious()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
+  const entry = await (await open(large.context)).readPrevious()
+  expect(typeof entry?.value.body).toBe('string')
+  expect(Buffer.byteLength(JSON.stringify(entry?.value))).toBeLessThan(1024)
   const { context } = await fixture(lines('one'))
   await expect(open({ ...context, transcriptPath: context.workspacePath })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_INVALID_TRANSCRIPT' })
   const controller = new AbortController(); controller.abort(new Error('cancelled'))
   await expect(open({ ...context, signal: controller.signal })).rejects.toThrow('cancelled')
 })
 
-it('enforces shared page budget across two JSONL readers on independent files', async () => {
+it('counts related scan bytes across two JSONL readers without a cumulative IO quota', async () => {
   const payload1 = 'A'.repeat(2_500_000)
   const payload2 = 'B'.repeat(2_500_000)
   const f1 = await fixture(JSON.stringify({ id: 'f1-one', data: payload1 }) + '\n')
@@ -199,11 +201,11 @@ it('enforces shared page budget across two JSONL readers on independent files', 
   expect(rec1?.value.id).toBe('f1-one')
   const bytesAfter1 = budget.bytesRead
   expect(bytesAfter1).toBeGreaterThan(2_500_000)
-  expect(bytesAfter1).toBeLessThanOrEqual(SESSION_HISTORY_MAX_PAGE_BYTES)
+  expect(bytesAfter1).toBeGreaterThan(SESSION_HISTORY_MAX_PAGE_BYTES)
 
-  await expect(reader2.readPrevious()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
+  expect((await reader2.readPrevious())?.value.id).toBe('f2-one')
   expect(budget.bytesRead).toBeGreaterThan(bytesAfter1)
-  expect(budget.bytesRead).toBeLessThanOrEqual(SESSION_HISTORY_MAX_PAGE_BYTES)
+  expect(budget.bytesRead).toBeGreaterThan(SESSION_HISTORY_MAX_PAGE_BYTES)
 
   const smallBudget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
   const s1 = await fixture(lines('s1-alpha', 's1-beta'))
@@ -219,7 +221,7 @@ it('enforces shared page budget across two JSONL readers on independent files', 
   expect(smallBudget.bytesRead).toBeLessThan(SESSION_HISTORY_MAX_PAGE_BYTES)
 })
 
-it('enforces shared page budget across auxiliary JSON reading and JSONL reader', async () => {
+it('keeps auxiliary allocation bounded while allowing the related JSONL record scan', async () => {
   const metaRoot = await mkdtemp(join(tmpdir(), 'agentmux-native-meta-'))
   roots.push(metaRoot)
   const metaPath = join(metaRoot, 'summary.json')
@@ -247,7 +249,8 @@ it('enforces shared page budget across auxiliary JSON reading and JSONL reader',
   }
 
   const jsonlReader = await openWithBudget(fTranscript.context, budget)
-  await expect(jsonlReader.readPrevious()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
+  expect((await jsonlReader.readPrevious())?.value.id).toBe('t-one')
+  expect(budget.bytesRead).toBeGreaterThan(SESSION_HISTORY_MAX_PAGE_BYTES)
 
   const posBudget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
   const posMetaPath = join(metaRoot, 'small-summary.json')
@@ -275,7 +278,7 @@ it('enforces shared page budget across auxiliary JSON reading and JSONL reader',
   expect(posBudget.bytesRead).toBeLessThan(SESSION_HISTORY_MAX_PAGE_BYTES)
 })
 
-it('synchronously reserves length before first await so parallel in-flight requests share budget', async () => {
+it('counts parallel in-flight reads and refuses an oversized single allocation before IO', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-native-parallel-'))
   roots.push(root)
   const filePath = join(root, 'data.bin')
@@ -292,12 +295,13 @@ it('synchronously reserves length before first await so parallel in-flight reque
 
     const req2 = readNativeHistoryBytes(file, 0, 3_000_000, signal, budget)
 
-    await expect(req2).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
+    expect((await req2).length).toBe(3_000_000)
+    await expect(readNativeHistoryBytes(file, 0, SESSION_HISTORY_MAX_PAGE_BYTES + 1, signal, budget)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
 
     const res1 = await req1
     expect(res1.length).toBe(3_000_000)
     expect(res1[0]).toBe(0x42)
-    expect(budget.bytesRead).toBe(3_000_000)
+    expect(budget.bytesRead).toBe(6_000_000)
   } finally {
     await file.close()
   }
@@ -335,18 +339,18 @@ it('emits non-empty nextCursor when remaining budget is sufficient and verifies 
   expect(await olderReader.nextCursor()).toBeNull()
 })
 
-it('rejects nextCursor and emits no unverified cursor when remaining budget is insufficient', async () => {
-  const { context } = await fixture(lines('one', 'two'))
+it('rejects nextCursor after an actual source boundary rewrite', async () => {
+  const { context, path } = await fixture(lines('one', 'two'))
   const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
   const reader = await openWithBudget(context, budget)
 
   const item = await reader.readPrevious()
   expect(item?.value).toEqual({ id: 'two', text: 'exact 中 two' })
 
-  budget.bytesRead = SESSION_HISTORY_MAX_PAGE_BYTES - 10
+  await writeFile(path, lines('NEW', 'two'))
 
   await expect(reader.nextCursor('must-not-be-issued')).rejects.toMatchObject({
-    code: 'AGENT_SESSION_HISTORY_TOO_LARGE'
+    code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
   })
 })
 
@@ -406,7 +410,7 @@ it('rejects before allocation and IO when signal was aborted during pending fsta
   }
 })
 
-it('wraps physical FileHandle.read across aux JSON and dual JSONL readers, verifying call counts, exact bytes, fingerprints, and shared limit', async () => {
+it('wraps physical FileHandle.read across aux JSON and dual JSONL readers, verifying call counts, exact bytes, fingerprints, and allocation limit', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-native-wrapped-'))
   roots.push(root)
 
@@ -501,11 +505,11 @@ it('wraps physical FileHandle.read across aux JSON and dual JSONL readers, verif
     expect(sharedBudget.bytesRead).toBe(totalRequested)
     expect(totalRequested).toBeLessThan(SESSION_HISTORY_MAX_PAGE_BYTES)
 
-    // Step 5: Enforce shared upper bound - request that exceeds budget rejects before any physical FileHandle.read
+    // Step 5: Oversized single allocations still reject before any physical FileHandle.read
     const callCountBeforeLimit = physicalReads.length
     const probeFile = await openFile(metaPath, constants.O_RDONLY)
     try {
-      const overLength = SESSION_HISTORY_MAX_PAGE_BYTES - sharedBudget.bytesRead + 1
+      const overLength = SESSION_HISTORY_MAX_PAGE_BYTES + 1
       await expect(readNativeHistoryBytes(probeFile, 0, overLength, signal, sharedBudget)).rejects.toMatchObject({
         code: 'AGENT_SESSION_HISTORY_TOO_LARGE'
       })

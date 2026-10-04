@@ -94,9 +94,10 @@ it('refuses a different main native Session or a missing exact locator', async (
   await expect(missing.client.sessionHistoryPage('private-agent')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE' })
 })
 
-it('counts skipped sidechain bytes against the page budget and cancels on disposal', async () => {
+it('scans skipped sidechain records without an IO quota and still cancels on disposal', async () => {
   const large = await fixture(jsonl(Array.from({ length: 70 }, (_, index) => record(`side-${index}`, 'assistant', 'x'.repeat(64 * 1024), { isSidechain: true }))))
-  await expect(large.client.sessionHistoryPage('private-agent')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
+  const page = await large.client.sessionHistoryPage('private-agent')
+  expect(page.items).toEqual([]); expect(page.nextCursor).toBeNull()
   const after = await large.bytes()
   expect(after.native.length).toBeGreaterThan(SESSION_HISTORY_MAX_PAGE_BYTES)
   expect(after.native.equals(large.before.native)).toBe(true)
