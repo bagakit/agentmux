@@ -9,6 +9,7 @@ export type SurfaceNavigationPlugin =
   | {
       id: 'survey' | 'space' | 'focus' | 'goals'
       kind: 'surface'
+      navigationContext: 'work' | 'survey'
       label: string
       ariaLabel: string
       title: string
@@ -44,6 +45,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
   {
     id: 'space',
     kind: 'surface',
+    navigationContext: 'work',
     label: 'Space',
     ariaLabel: 'Space: show terminal and file workbench',
     title: 'Space — show terminal and file workbench',
@@ -54,6 +56,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
   {
     id: 'focus',
     kind: 'surface',
+    navigationContext: 'work',
     label: 'Focus',
     ariaLabel: 'Focus: show execution contexts',
     title: 'Focus — show execution contexts',
@@ -64,6 +67,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
   {
     id: 'goals',
     kind: 'surface',
+    navigationContext: 'work',
     label: 'Goals',
     ariaLabel: 'Goals: show goals and progress',
     title: 'Goals — show goals and progress',
@@ -74,6 +78,7 @@ export const SURFACE_NAVIGATION_PLUGINS: readonly SurfaceNavigationPlugin[] = [
   {
     id: 'survey',
     kind: 'surface',
+    navigationContext: 'survey',
     label: 'Survey',
     ariaLabel: 'Survey: browse and manage pages',
     title: 'Survey — browse and manage pages',

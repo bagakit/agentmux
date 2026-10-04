@@ -107,6 +107,9 @@
 .window-overlay-host__entry[data-overlay-layer="dialog"], [data-overlay-layer="dialog"] { z-index: var(--layer-dialog); }
 .surface-navigation { height: 22px; display: flex; align-items: center; gap: var(--sp-2); overflow: visible; -webkit-app-region: no-drag; }
 .surface-navigation__surfaces { height: 22px; display: flex; align-items: center; gap: 2px; }
+.surface-navigation__group-label { padding-right: 4px; color: var(--text-3); font-size: var(--fs-micro); line-height: 1; user-select: none; }
+.surface-navigation__utilities { height: 22px; display: flex; align-items: center; gap: var(--sp-2); }
+.surface-navigation__utilities::before { content: ''; width: 1px; height: 12px; flex: none; margin-right: 2px; background: var(--line); }
 .surface-navigation__slot { width: 26px; height: 22px; position: relative; display: inline-flex; flex: 0 0 26px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; color: var(--text-3); background: transparent; font: inherit; cursor: pointer; overflow: visible; transition: color .12s ease, background .12s ease, box-shadow .12s ease; }
 .surface-navigation__slot--launcher:hover { color: var(--text-2); background: var(--surface-2); }
 .surface-navigation__slot--launcher:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 70%, transparent); outline-offset: -2px; }
@@ -147,6 +150,7 @@
   .window-status-bar { gap: var(--sp-2); }
   .window-status-bar .agent-input-stack { min-width: 0; background: transparent; }
   .surface-navigation { gap: var(--sp-1); }
+  .surface-navigation__utilities { gap: var(--sp-1); }
 }
 @media (max-width: 560px) {
   .window-status-bar { padding: 0 var(--sp-2); gap: var(--sp-1); }
