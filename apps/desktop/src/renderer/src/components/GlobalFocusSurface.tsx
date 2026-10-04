@@ -31,9 +31,10 @@ import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
 
-export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, visible: hostVisible = true }: {
+export function GlobalFocusSurface({ presentation, currentReference = null, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, visible: hostVisible = true }: {
   visible?: boolean
   presentation?: ExecutionFocusPresentation
+  currentReference?: import('../lib/workbench-projection').WorkbenchProjectionSelection | null | undefined
   regionOnly?: boolean | undefined
   onToggleRegion?: (() => void) | undefined
   directoryIssue?: string | null
@@ -55,6 +56,9 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const tabs = useAppStore((state) => state.tabs)
   const layouts = useAppStore(state => state.layouts)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
+  const currentSurface = currentReference && tabs[currentReference.tabId]?.regions[currentReference.regionId]
+  const currentContext = currentSurface && (currentSurface.kind === 'agent' || currentSurface.kind === 'terminal')
+    ? executionRows.find(context => context.id === currentSurface.sessionId) ?? null : null
   const projection = presentation?.projection ?? null
   const selectedTab = projection?.selection.length === 1 ? tabs[projection.selection[0]!.tabId] ?? null : null
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
@@ -297,7 +301,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
           : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} />
+    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} />
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}
