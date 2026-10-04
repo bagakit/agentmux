@@ -790,11 +790,32 @@ export type AgentSessionHistoryDescriptor = {
   history?: AgentSessionHistoryMetadata
 }
 
+/** Structured native asynchronous questions; absence of an answer is not pending authority. */
+export type AgentSessionHistoryQuestion = {
+  /** Provider-owned opaque identity; clients must never construct or parse it. */
+  id: string
+  prompt: string
+  options: Array<{ id: string; label: string }>
+  acceptsText: boolean
+}
+
+export type AgentSessionHistoryQuestionRequest = {
+  delivery: 'async'
+  questions: AgentSessionHistoryQuestion[]
+}
+
+/** A native user record's exact reply reference; its original contentParts remain untouched. */
+export type AgentSessionHistoryQuestionAnswer = { questionId: string; answer: string }
+
 export type AgentSessionHistoryItem = {
   id: string
   turnId?: string
   kind: 'user-message' | 'assistant-message' | 'activity'
   messagePhase?: AgentSessionHistoryMessagePhase
+  questionRequest?: AgentSessionHistoryQuestionRequest
+  questionAnswers?: AgentSessionHistoryQuestionAnswer[]
+  /** A local native question parsing failure; original speech and adjacent history stay readable. */
+  questionDiagnostic?: { code: string; message: string }
   /** Original contentParts remain complete and copyable alongside this optional summary. */
   collaboration?: AgentSessionHistoryCollaboration
   title?: string
@@ -859,6 +880,16 @@ export type AgentProviderSessionHistoryContext = {
   signal: AbortSignal
 }
 
+export type AgentSessionQuestionReplyReceipt = {
+  agentSessionId: string
+  source: AgentSessionHistorySource
+  recordId: string
+  questionIds: string[]
+  operationId: string
+  /** Normal input delivery completed; only an observed native user record proves an answer. */
+  outcome: 'submitted'
+}
+
 export type AgentProviderSessionHistoryPage = Omit<AgentSessionHistoryPage, 'agentSessionId'>
 
 /** A relevant native source changed; this is not a user message or an accepted input receipt. */
@@ -882,6 +913,10 @@ export type AgentProviderSessionHistoryObservationContext = Omit<AgentProviderSe
 
 /** Authenticated operation origin supplied by the Host, independent of message authorship. */
 export type AgentOperationDevice = { hostId: string; deviceId: string; name: string }
+
+/** Supplied by the actual input owner; a native user role does not establish this fact. */
+export const AGENT_MESSAGE_CHANNELS = ['terminal', 'message-tool', 'cli', 'api', 'agent-message', 'reaction', 'question-reply'] as const
+export type AgentMessageChannel = (typeof AGENT_MESSAGE_CHANNELS)[number]
 
 export type AgentSessionUserMessageSource =
   | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
@@ -1545,6 +1580,7 @@ export type AgentTimelineItem = {
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
   sourceDevice?: AgentOperationDevice
+  sourceChannel?: AgentMessageChannel
   content?: string
   toolName?: string
   toolInput?: string

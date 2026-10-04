@@ -13,8 +13,9 @@ export type RulerRecord = {
   target: { kind: 'native'; source: string; recordId: string } | { kind: 'observed'; index: number }
   record: AgentSessionHistoryItem | Exclude<ConversationAxisItem, RulerRecord>
 }
-export type RulerWindow = '15m' | '1h' | '24h' | 'all'
-export const RULER_WINDOWS = { '15m': 15 * 60_000, '1h': 60 * 60_000, '24h': 24 * 60 * 60_000, all: Infinity }
+export const RULER_WINDOWS = { '6h': 6 * 3_600_000, '12h': 12 * 3_600_000, '24h': 24 * 3_600_000,
+  '3d': 3 * 86_400_000, '7d': 7 * 86_400_000, all: Infinity }
+export type RulerWindow = keyof typeof RULER_WINDOWS
 
 /** References only. The committed reading surfaces keep their own source order and bodies. */
 export function conversationRulerRecords(sessionId: string | undefined, page: AgentSessionHistoryPage | null | undefined,
@@ -28,29 +29,33 @@ export function conversationRulerRecords(sessionId: string | undefined, page: Ag
     seen.add(record.id)
     const source = JSON.stringify([native.source.providerId, native.source.nativeSessionId])
     const user = users.get(record.id)
-    records.push({ id: JSON.stringify(['native', source, record.id]), kind: 'ruler-record', record,
+    records.push({ id: JSON.stringify(['native', sessionId, source, record.id]), kind: 'ruler-record', record,
       ...(record.startedAt === undefined ? {} : { recordedAt: record.startedAt }),
       speaker: user ? speakerOfUserMessage(user) : record.kind === 'assistant-message' ? { role: 'agent', id: sessionId! } : null,
       target: { kind: 'native', source, recordId: record.id } })
   }
   observed.forEach((record, index) => {
     const at = 'createdAt' in record ? record.createdAt : record.recordedAt
-    records.push({ id: JSON.stringify(['observed', record.id]), kind: 'ruler-record', record,
+    records.push({ id: JSON.stringify(['observed', sessionId, record.id]), kind: 'ruler-record', record,
       ...(at === undefined ? {} : { recordedAt: at }), speaker: speakerOf(record), target: { kind: 'observed', index } })
   })
   return records
 }
 
-export function conversationRulerWindow(records: readonly RulerRecord[], window: RulerWindow) {
+export function conversationRulerWindow(records: readonly RulerRecord[], window: RulerWindow, visible?: ReadonlySet<string>) {
   const known = records.filter(r => r.recordedAt !== undefined && Number.isFinite(r.recordedAt))
   const untimed = records.filter(r => r.recordedAt === undefined || !Number.isFinite(r.recordedAt))
   const latest = known.reduce((last, r) => Math.max(last, r.recordedAt!), -Infinity)
+  const firstVisible = known.reduce((first, record) => visible?.has(record.id) ? Math.min(first, record.recordedAt!) : first, Infinity)
+  const end = Number.isFinite(firstVisible) ? Math.min(latest, firstVisible + RULER_WINDOWS[window]) : latest
   // All-unknown records remain navigable in source order, without a fabricated time domain.
-  const items = known.length === 0 ? [...records] : known.filter(r => r.recordedAt! >= latest - RULER_WINDOWS[window])
+  const items = known.length === 0 ? [...records] : known.filter(r => r.recordedAt! >= end - RULER_WINDOWS[window] && r.recordedAt! <= end)
     .sort((a, b) => a.recordedAt! - b.recordedAt!)
   const scale = createRulerScale(items.map(r => r.recordedAt), 1)
+  const recentStart = latest - 3_600_000
   return { items, untimed: known.length ? untimed : [], scale,
-    recentFraction: scale.axis === 'temporal' ? Math.max(0, Math.min(1, (latest - RULER_WINDOWS['1h'] - scale.origin) / scale.span)) : 0 }
+    recentFraction: scale.axis === 'temporal' ? (recentStart - scale.origin) / scale.span
+      : known.length === 0 ? null : items[0]!.recordedAt! < recentStart ? Infinity : 0 }
 }
 
 /** At most 48 displayed bins; count is recorded density, never execution time. */
