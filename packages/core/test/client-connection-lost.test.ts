@@ -106,7 +106,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
     // 界的具体化：把重连改成无限重试（删 give-up / 抬 ceiling 到 Infinity），connect 会被调用远超上限、
     // 永不发 unrecoverable，本测试 waitFor 超时红。open() 每次尝试恰好调一次 kernel.connect。
     expect(connect).toHaveBeenCalledTimes(RECONNECT_MAX_ATTEMPTS)
-    expect(events.filter((event) => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(0)
+    expect(events.filter((event) => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)).toHaveLength(0)
   })
 
   it('on reconnect, republishes each live run state from the daemon and then emits connection-state:restored', async () => {
@@ -135,7 +135,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
 
     state.handleConnectionLost(state.connectionEpoch)
     await vi.waitFor(() => {
-      expect(events.some((event) => event.type === 'connection-state' && event.state === 'restored')).toBe(true)
+      expect(events.some((event) => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)).toBe(true)
     })
 
     // 重连成功后，daemon 的 list() 权威真相被重新发成 process-state——把渲染端的 disconnected 洗回真相。
@@ -148,7 +148,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
     }
     expect(list).toHaveBeenCalled()
     // restored 必须在 republish 之后发（补发真相先于宣布恢复）。
-    const restoredIndex = events.findIndex((event) => event.type === 'connection-state' && event.state === 'restored')
+    const restoredIndex = events.findIndex((event) => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)
     const processIndex = events.findIndex((event) => event.type === 'process-state')
     expect(processIndex).toBeGreaterThanOrEqual(0)
     expect(processIndex).toBeLessThan(restoredIndex)
@@ -181,7 +181,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     await vi.waitFor(() => {
       // 每一轮的终局是 restored 或 unrecoverable 二者之一；等到本轮出现新的终局事件为止。
       expect(events.slice(before).some((event) =>
-        event.type === 'connection-state' && (event.state === 'restored' || event.state === 'retrying')
+        event.type === 'connection-state' && (event.state === 'restored' && !event.diagnostic || event.state === 'retrying')
       )).toBe(true)
     })
   }
@@ -193,7 +193,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
 
     for (let round = 0; round < RECONNECT_FLAP_BUDGET; round += 1) await flapOnce(events, state)
     // 预算内的每一轮都必须真的走完「lost → 重连 → restored」，用户看到的是自愈而不是终局。
-    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored'))
+    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored' && !e.diagnostic))
       .toHaveLength(RECONNECT_FLAP_BUDGET)
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'retrying')).toHaveLength(0)
 
@@ -201,7 +201,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     // restored、unrecoverable 永不出现，本断言红——这就是「无穷抖动 → 红」的具体化。
     await flapOnce(events, state)
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'retrying')).toHaveLength(1)
-    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored'))
+    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored' && !e.diagnostic))
       .toHaveLength(RECONNECT_FLAP_BUDGET)
   })
 
@@ -236,7 +236,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     await flapOnce(events, state)
     // 清账后重新起算，所以这一次仍然重连、自愈。若清账那句被删（或判据写成拿 restored 清），
     // 这台机器会在第 4 次正常抖动时被判死，本断言红。
-    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored')).toHaveLength(1)
+    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored' && !e.diagnostic)).toHaveLength(1)
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'retrying')).toHaveLength(0)
     // 清零后本次记 1，不是 BUDGET+1。
     expect(state.reconnectFlaps).toBe(1)
@@ -670,7 +670,7 @@ describe('low-frequency recovery preserves original capability', () => {
       expect(connect).toHaveBeenCalledTimes(1)
       release(); await manual
       expect(h.events.at(-1)).toMatchObject({ state: 'restored' })
-      expect(h.events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(1)
+      expect(h.events.filter(event => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)).toHaveLength(1)
       await vi.advanceTimersByTimeAsync(90_000)
       expect(connect).toHaveBeenCalledTimes(1)
     } finally { h.client.disconnect(); vi.useRealTimers() }
@@ -690,7 +690,7 @@ describe('low-frequency recovery preserves original capability', () => {
       expect(republish).toHaveBeenCalledTimes(1)
       expect(firstDone).toBe(false); expect(secondDone).toBe(false)
       release(); await Promise.all([first, second])
-      expect(h.events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(1)
+      expect(h.events.filter(event => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)).toHaveLength(1)
     } finally { release?.(); h.client.disconnect(); vi.useRealTimers() }
   })
 
@@ -782,7 +782,7 @@ describe('connection observation failures preserve healthy capabilities', () => 
     } finally { client.disconnect(); vi.useRealTimers() }
   })
 
-  it('does not let an old same-epoch recovery completion cancel or restore a newer in-flight recovery', async () => {
+  it('does not let an old recovery completion cancel or restore a newer in-flight recovery', async () => {
     vi.useFakeTimers()
     const client = isolatedClient(), state = internals(client)
     const kernel = fakeKernel(); state.kernel = kernel
@@ -799,10 +799,12 @@ describe('connection observation failures preserve healthy capabilities', () => 
       await vi.advanceTimersByTimeAsync(30_000)
       expect(republish).toHaveBeenCalledTimes(2)
       expect(kernel.isConnected()).toBe(true)
+      const transportRestorations = events.filter(event => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic).length
+      expect(transportRestorations).toBe(0)
       releases[0]!(); await vi.advanceTimersByTimeAsync(0)
-      expect(events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(0)
+      expect(events.filter(event => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)).toHaveLength(transportRestorations)
       releases[1]!(); await vi.advanceTimersByTimeAsync(0)
-      expect(events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(1)
+      expect(events.filter(event => event.type === 'connection-state' && event.state === 'restored' && !event.diagnostic)).toHaveLength(transportRestorations + 1)
       await vi.advanceTimersByTimeAsync(60_000)
       expect(kernel.connect).toHaveBeenCalledTimes(2)
     } finally { client.disconnect(); for (const release of releases) release(); vi.useRealTimers() }
