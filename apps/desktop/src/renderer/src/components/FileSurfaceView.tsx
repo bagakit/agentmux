@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo } from 'react'
 import { Eye, Save } from 'lucide-react'
 import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
 import { workspaceFileFormat } from '../../../shared/workspace-file-format'
@@ -8,31 +8,14 @@ import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
-import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { FilePreviewPane, ImageContent } from './FilePreviewPane'
+import { FilePreviewPane } from './FilePreviewPane'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
-import { WorkspaceImage } from './WorkspaceImage'
+import { SourceFilePreview } from './file-preview/SourceFilePreview'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
 const EditorPane = lazy(async () => ({ default: (await import('./EditorPane')).EditorPane }))
 const NoteFileSurfaceView = lazy(async () => ({ default: (await import('./NoteFileSurfaceView')).NoteFileSurfaceView }))
-const FileDataPreview = lazy(async () => ({ default: (await import('./FileDataPreview')).FileDataPreview }))
-const HtmlFilePreview = lazy(async () => ({ default: (await import('./HtmlFilePreview')).HtmlFilePreview }))
-
-function SourceImage({ content, name, visible }: { content: string; name: string; visible: boolean }) {
-  const [loaded, setLoaded] = useState<{ content: string; url: string } | null>(null)
-  useEffect(() => {
-    setLoaded(null)
-    if (!visible) return
-    const value = URL.createObjectURL(new Blob([content], { type: 'image/svg+xml' }))
-    setLoaded({ content, url: value })
-    return () => URL.revokeObjectURL(value)
-  }, [content, visible])
-  const url = visible && loaded?.content === content ? loaded.url : null
-  return url ? <ImageContent key={url} src={url} name={name} /> : null
-}
-
 /** One File identity with format-specific presentation, never a second editable document. */
 export function FileSurfaceView({ tabId, surface, released = false, visible = true }: {
   tabId: string; surface: FileWorkbenchSurface; released?: boolean; visible?: boolean
@@ -55,7 +38,6 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const svg = format.sourcePreview === 'svg'
   const html = format.browserPreview
   const note = format.sourcePreview === 'note'
-  const dataKind = format.sourcePreview === 'json' || format.sourcePreview === 'csv' || format.sourcePreview === 'tsv' ? format.sourcePreview : null
   const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
   const setRegionMode = useAppStore(state => state.setEditorRegionMode)
   const previewing = regionMode === 'preview'
@@ -113,19 +95,13 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     ? <div className="file-preview-state" role="status"><strong>Source exceeds the preview budget</strong><span>Preview is limited to 16 MB of UTF-8 content. The full source and its unsaved draft remain editable.</span></div>
     : note
     ? <NoteFileSurfaceView tabId={tabId} surface={surface} />
-    : svg
-    ? <SourceImage key={key} content={doc.content} name={surface.path} visible={visible} />
-    : dataKind
-    ? <FileDataPreview key={key} content={doc.content} kind={dataKind} comments={format.extension === 'jsonc'} />
-    : html
-    ? <HtmlFilePreview key={key} workspaceId={surface.workspaceId} path={surface.path} content={doc.content} />
-    : <AgentMarkdown documentMode outline className="file-markdown-preview" content={doc.content} workspaceRoot={workspaceRoot} sourcePath={surface.path}
-      renderWorkspaceImage={(path, alt, linked) => <WorkspaceImage key={`${surface.workspaceId}:${path}`} workspaceId={surface.workspaceId} path={path} alt={alt} linked={Boolean(linked)} openFile={() => openReference(path)} />}
-      openWorkspaceFile={openReference}
+    : format.sourcePreview
+    ? <SourceFilePreview key={key} kind={format.sourcePreview} content={doc.content} path={surface.path}
+      workspaceId={surface.workspaceId} workspaceRoot={workspaceRoot} visible={visible} openReference={openReference}
       openHttpLink={(url) => {
         if (!reference) { reportError(new Error('The original File display position is unconfirmed. Its content is retained.')); return }
         void useAppStore.getState().openHttpLink({ workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId, regionId: surface.regionId }, url, 'tab').catch(reportError)
-      }} /> : null
+      }} /> : null : null
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
       {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}

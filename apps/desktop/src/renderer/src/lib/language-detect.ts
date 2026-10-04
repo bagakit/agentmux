@@ -1,3 +1,4 @@
+import { workspaceFileFormat } from '../../../shared/workspace-file-format'
 import { workspaceFileExtension } from '../../../shared/workspace-file-preview'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
@@ -103,5 +104,5 @@ export function detectLanguage(filePath: string): string {
   const parts = filePath.split(/[\\/]/)
   const filename = parts.at(-1)!
   if (FILENAME_TO_LANGUAGE[filename]) return FILENAME_TO_LANGUAGE[filename]
-  return EXT_TO_LANGUAGE[`.${workspaceFileExtension(filename)}`] ?? 'plaintext'
+  return workspaceFileFormat(filePath).language ?? EXT_TO_LANGUAGE[`.${workspaceFileExtension(filename)}`] ?? 'plaintext'
 }
