@@ -51,7 +51,7 @@ function Reading({ visible = true, opened = false }: { visible?: boolean; opened
   conversationReading={{ reference: control, identity: control.run.runId, enabled: visible, opened }} />
 }
 function compose(visible = true, opened = false) { return <><Reading visible={visible} opened={opened} /><Witness /></> }
-async function flush() { for (let i = 0; i < 5; i++) await act(async () => { await Promise.allSettled([...promises]); await new Promise(resolve => setTimeout(resolve, 10)) }) }
+async function flush() { for (let i = 0; i < 8; i++) await act(async () => { await Promise.allSettled([...promises]); await new Promise(resolve => setTimeout(resolve, 10)) }) }
 async function render(node: ReactNode) { await act(async () => root.render(node)); await flush() }
 async function click(label: string) {
  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label)
@@ -134,7 +134,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   await click('Show latest messages')
   expect(ids().at(-1)).toBe('record-360'); expect(container.textContent).toContain('Input 360')
   expect(container.querySelector('[data-conversation-current-entry]')).toBeNull(); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
-  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(requests).toHaveLength(reads)
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(requests).toHaveLength(reads + 3)
  })
  it('notices changed current facts under the same raw identity without inventing a new-message count', async () => {
   await render(compose()); await click('Earlier'); const before = ids()
@@ -147,15 +147,15 @@ describe('One Activity reading surface over public original-sequence windows', (
   await click('Show latest messages'); expect(container.textContent).toContain('Updated native reply 359')
  })
  it('keeps a protected historical selection on Latest and cancels a superseded pending older page after selection is cleared', async () => {
-  await render(compose()); for (let n = 0; n < 4; n++) await click('Earlier')
+  await render(compose()); await click('Earlier')
   const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!, label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
   const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
   const before = ids(); await click('Show latest messages')
   expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(container.querySelector('[data-conversation-current-entry]')!.textContent).toContain('current window is kept to preserve selected content')
+  expect(container.querySelector('[data-conversation-current-entry]')!.textContent).toContain('records and cursor are kept')
   window.getSelection()!.removeAllRanges()
   // A fresh long transcript permits one more genuinely pending original earlier read.
-  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await writeFile(transcript, Array.from({ length: 1800 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
   await click('Show latest messages'); await click('Earlier')
   const page = recent!.nativeHistoryPage!
@@ -167,9 +167,9 @@ describe('One Activity reading surface over public original-sequence windows', (
   await act(async () => earlier.click())
   expect(container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!.disabled).toBe(false)
   const count = requests.length; await click('Show latest messages'); const current = ids()
-  expect(current.at(-1)).toBe('record-719')
+  expect(current.at(-1)).toBe('record-1799')
   await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30, cursor: page.nextCursor! }))); await flush()
-  expect(ids()).toEqual(current); expect(requests).toHaveLength(count); expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
+  expect(ids()).toEqual(current); expect(requests).toHaveLength(count + 3); expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
  })
  it('does not label a foreign or missing current source as an update and disables the historical Latest action while hidden', async () => {
   const current = await client.sessionHistoryPage(sid)
@@ -186,6 +186,137 @@ describe('One Activity reading surface over public original-sequence windows', (
   const latest = container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!
   expect(latest.disabled).toBe(true); await act(async () => latest.click()); await flush()
   expect(ids()).toEqual(before); expect(requests).toHaveLength(count)
+ })
+
+ it('seeds normal unopened Activity with300 raw and keeps shared streaming and distinct same-body appended records live', async () => {
+  await render(compose())
+  expect(ids()).toEqual(Array.from({ length: 300 }, (_, n) => `record-${String(60 + n).padStart(3, '0')}`))
+  expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
+  const localReads = requests.filter(request => request.limit === 100).length
+  const original = Array.from({ length: 360 }, (_, n) => n === 353 ? { ...record(n), message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Trace 353' }, { type: 'text', text: 'Reply 353 streamed' }] } } : record(n))
+  const appended = [360, 361].map(n => ({ ...record(n), type: 'user', message: { role: 'user', content: 'Same actual body, two native UUIDs' } }))
+  await writeFile(transcript, [...original, ...appended].map(row => JSON.stringify(row)).join('\n') + '\n')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  expect(body.isConnected).toBe(true); expect(body.textContent).toContain('Reply 353 streamed')
+  expect(ids().slice(-2)).toEqual(['record-360', 'record-361'])
+  expect([...container.querySelectorAll('.conversation-native-thread .log-turn__body')].filter(node => node.textContent === 'Same actual body, two native UUIDs')).toHaveLength(2)
+  expect(requests.filter(request => request.limit === 100)).toHaveLength(localReads)
+  expect(container.querySelector('.activity-feed__newer-edge')).toBeNull()
+ })
+ it('slides beyond1200 then replays adjacent visited pages toward its fixed head without null replay, and Current refreshes after a live gap', async () => {
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose())
+  expect(ids()).toHaveLength(300)
+  await appendFile(transcript, JSON.stringify(record(2400)) + '\n')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  expect(ids().at(-1)).toBe('record-2400')
+  const originalHead = ids().slice(-101), shared = recent!.nativeHistoryPage
+  expect(originalHead[0]).toBe('record-2300')
+  for (let n = 0; n < 5; n++) await click('Earlier')
+  expect(ids().length).toBeLessThanOrEqual(1200); expect(ids()).not.toContain('record-2300')
+  expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  expect(container.querySelector('.activity-feed__newer-edge')?.textContent).toContain('向下滚动继续读取')
+  expect(recent!.nativeHistoryPage).toBe(shared)
+  const nullReads = requests.filter(request => request.limit === 100 && !request.cursor).length
+  await appendFile(transcript, Array.from({ length: 130 }, (_, n) => JSON.stringify(record(2401 + n))).join('\n') + '\n')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  for (let n = 0; n < 3; n++) await click('Newer')
+  expect(ids().slice(-101)).toEqual(originalHead); expect(ids()).toContain('record-2400')
+  expect(requests.filter(request => request.limit === 100 && !request.cursor)).toHaveLength(nullReads)
+  expect(container.querySelector('.activity-feed__newer-edge')?.textContent).toContain('Show latest messages')
+  await click('Show latest messages'); expect(ids()).toHaveLength(300); expect(ids().at(-1)).toBe('record-2530')
+  if (process.env.AGENTMUX_SLIDING_SCENE_PAGES) await writeFile(process.env.AGENTMUX_SLIDING_SCENE_PAGES, JSON.stringify({ provenance: 'Controlled native Claude JSONL -> real public Core/FileStore; original API request and response in order, no user App/vendor writer', receipts: await Promise.all(promises.map(async (response, index) => ({ request: requests[index], response: await response }))) }, null, 2) + '\n')
+ })
+
+ it('bounds a continuously updated current head, suppresses automatic reseed retries after a protected rejection, and preserves the real Range', async () => {
+  await render(compose())
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-065"] .log-turn__body')!
+  const range = document.createRange(); range.selectNodeContents(body.querySelector('p')!); window.getSelection()!.addRange(range)
+  const publish = async (first: number) => {
+   await appendFile(transcript, Array.from({ length: 30 }, (_, n) => JSON.stringify(record(first + n))).join('\n') + '\n')
+   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  }
+  for (let n = 0; n < 7; n++) await publish(360 + n * 30)
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(container.textContent).toContain('records and cursor are kept')
+  const attempted = requests.filter(request => request.limit === 100).length
+  await publish(570); await publish(600)
+  expect(requests.filter(request => request.limit === 100)).toHaveLength(attempted)
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply 65')
+  window.getSelection()!.removeAllRanges(); await click('Show latest messages')
+  expect(ids()).toHaveLength(300); expect(ids().at(-1)).toBe('record-629')
+  for (let n = 0; n < 7; n++) await publish(630 + n * 30)
+  expect(ids().length).toBeLessThanOrEqual(500); expect(ids().at(-1)).toBe('record-839')
+  await click('Earlier'); expect(ids()[0]).toBe('record-240'); expect(ids().at(-1)).toBe('record-839')
+  expect(container.textContent).not.toContain('byte budget')
+ })
+ it('keeps the displayed current window when an automatic larger seed finishes hidden, and leaves an explicit visible retry', async () => {
+  await render(compose())
+  const publish = async (first: number) => {
+   await appendFile(transcript, Array.from({ length: 30 }, (_, n) => JSON.stringify(record(first + n))).join('\n') + '\n')
+   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  }
+  for (let n = 0; n < 6; n++) await publish(360 + n * 30)
+  const before = ids(), original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
+  let release!: (page: AgentSessionHistoryPage) => void, waiting = true
+  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
+   if (waiting && options?.limit === 100) { waiting = false; requests.push(options); return new Promise(resolve => { release = resolve }) }
+   return original(reference, options)
+  })
+  await publish(540); expect(release).toBeTypeOf('function')
+  await render(compose(false)); await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100 }))); await flush()
+  expect(ids()).toEqual(before); expect(container.textContent).toContain('paused while hidden')
+  const reads = requests.filter(request => request.limit === 100).length
+  await render(compose()); await flush(); expect(ids()).toEqual(before)
+  expect(requests.filter(request => request.limit === 100)).toHaveLength(reads)
+  await click('Current'); expect(ids().at(-1)).toBe('record-569'); expect(ids()).toHaveLength(300)
+ })
+ it('protects an expanded real body and Range before newer navigation trims the old side, then retries the same adjacent input', async () => {
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose()); for (let n = 0; n < 4; n++) await click('Earlier')
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!, body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-921"] .log-turn__body')!
+  const row = body.closest<HTMLElement>('[data-native-record-id]')!, trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
+  trace.open = true; const range = document.createRange(); range.selectNodeContents(body.querySelector('p')!); window.getSelection()!.addRange(range)
+  viewport.getBoundingClientRect = () => rect(0, 200); row.getBoundingClientRect = () => rect(10)
+  const before = ids(), start = requests.length; await click('Newer')
+  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true); expect(trace.open).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  const input = requests[start]!.cursor; expect(input).toBeTruthy()
+  window.getSelection()!.removeAllRanges(); row.getBoundingClientRect = () => rect(-200)
+  const retained = viewport.querySelector<HTMLElement>('[data-native-record-id="record-1601"]')!; retained.getBoundingClientRect = () => rect(10)
+  const retry = requests.length; await click('Newer')
+  expect(requests[retry]!.cursor).toBe(input); expect(ids()[0]).toBe('record-1200'); expect(ids().at(-1)).toBe('record-2299'); expect(retained.isConnected).toBe(true)
+ })
+ it('prefetches only on a real directional edge entry and keeps ruler and editable keys from reading pages', async () => {
+  await render(compose()); const viewport = container.querySelector<HTMLElement>('.activity-feed')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!
+  const before = requests.length
+  await act(async () => slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })))
+  const input = document.createElement('input'); viewport.append(input)
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })))
+  expect(requests).toHaveLength(before)
+  await act(async () => viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true, cancelable: true }))); await flush()
+  expect(ids()).toHaveLength(360); expect(requests).toHaveLength(before + 1)
+  const ended = requests.length; await wheel(); await wheel(100)
+  expect(requests).toHaveLength(ended)
+ })
+ it('consumes one large wheel intent without letting later anchor or layout scrolls issue another batch', async () => {
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose())
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 200 })
+  Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 10000 })
+  const before = requests.length
+  await wheel(-200000, 0)
+  expect(requests).toHaveLength(before + 3); expect(ids()[0]).toBe('record-1800')
+  // Geometry/anchor restoration after that input cannot borrow its old direction.
+  await act(async () => { viewport.scrollTop = 4000; viewport.dispatchEvent(new Event('scroll')) }); await flush()
+  await act(async () => { viewport.scrollTop = 0; viewport.dispatchEvent(new Event('scroll')) }); await flush()
+  expect(requests).toHaveLength(before + 3); expect(ids()[0]).toBe('record-1800')
+  // A genuinely new wheel can leave and re-enter the edge for the next batch.
+  await wheel(-100, 5000); expect(requests).toHaveLength(before + 3)
+  // A single large input crosses into the prefetch edge without a second event.
+  await wheel(-200000, 5000)
+  expect(requests).toHaveLength(before + 6); expect(ids()[0]).toBe('record-1500')
  })
  it('places an inline history boundary at the actual wider displayed context without remounting its expanded process or nonempty Range', async () => {
   const current = await client.sessionHistoryPage(sid, { limit: 30 })
@@ -218,23 +349,19 @@ describe('One Activity reading surface over public original-sequence windows', (
    expect(conversationReadingAnchor(viewport)).toEqual({ kind: 'record', id: 'record-250', offset: 10 })
   }
   expect(thread.querySelector('[role="separator"]')).toBeNull()
-  await click('Earlier'); expect(ids()[0]).toBe('record-240'); preserved()
-  expect(thread.querySelector('[role="separator"]')).toBeNull() // The actual displayed origin has not been reached.
-  await click('Earlier'); expect(ids()[0]).toBe('record-150'); preserved()
+  await click('Earlier'); expect(ids()[0]).toBe('record-000'); preserved()
   const divider = thread.querySelector<HTMLElement>('.activity-feed__history-divider')!
   expect(divider).not.toBeNull(); expect(divider.parentElement).toBe(thread)
   expect(divider.previousElementSibling).not.toBeNull()
-  expect(JSON.parse((divider.previousElementSibling as HTMLElement).dataset.nativeRecordIds!)).toEqual(Array.from({ length: 10 }, (_, n) => `record-${150 + n}`))
-  expect(divider.nextElementSibling).toBe(parent)
-  const previous = await client.sessionHistoryPage(sid, { limit: 1, cursor: olderContext.nextCursor! })
-  expect(previous.items[0]!.id).toBe('record-159')
+  expect(JSON.parse((divider.previousElementSibling as HTMLElement).dataset.nativeRecordIds!).at(-1)).toBe('record-059')
+  expect(divider.nextElementSibling).not.toBeNull()
+  const previous = await client.sessionHistoryPage(sid, { limit: 1, cursor: (await client.sessionHistoryPage(sid, { limit: 100, cursor: olderContext.nextCursor! })).nextCursor! })
+  expect(previous.items[0]!.id).toBe('record-059')
   expect(divider.textContent).toBe(`以上是历史消息（${new Date(previous.items[0]!.startedAt!).toLocaleString()}）`)
-  await click('Earlier'); expect(ids()[0]).toBe('record-060'); preserved()
-  expect(thread.querySelector('.activity-feed__history-divider')).toBe(divider); expect(divider.nextElementSibling).toBe(parent)
   await click('Current'); preserved(); expect(thread.querySelector('[role="separator"]')).toBeNull()
  })
- it('marks only a confirmed old-only loaded tail after the current cut is evicted, and does not invent a cut on an initial read', async () => {
-  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+ it('keeps an old-only window honest without a trailing divider after the current cut is evicted, and does not invent a cut on an initial read', async () => {
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   const current = await client.sessionHistoryPage(sid, { limit: 30 })
   await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
@@ -243,12 +370,11 @@ describe('One Activity reading surface over public original-sequence windows', (
   let divider = container.querySelector<HTMLElement>('.activity-feed__history-divider')!
   expect(divider.nextElementSibling).not.toBeNull()
   for (let n = 0; n < 4; n++) await click('Earlier')
-  expect(ids()).toHaveLength(400); expect(ids()).not.toContain('record-690')
-  divider = container.querySelector<HTMLElement>('.activity-feed__history-divider')!
-  expect(divider.parentElement?.className).toBe('conversation-native-thread'); expect(divider.nextElementSibling).toBeNull()
-  expect(ids().at(-1)).toBe('record-639')
-  expect(divider.textContent).toBe(`以上是历史消息（${new Date(record(639).timestamp).toLocaleString()}）`)
-  await click('Current'); expect(ids().at(-1)).toBe('record-719'); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  expect(ids()).toHaveLength(1100); expect(ids()).not.toContain('record-2100')
+  expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  expect(container.querySelector('[data-conversation-current-entry]')?.textContent).toContain('向下滚动继续读取')
+  expect(ids().at(-1)).toBe('record-1699')
+  await click('Current'); expect(ids().at(-1)).toBe('record-2399'); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
   await act(async () => root.unmount()); root = createClientUiRoot(container)
   await render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
    conversationReading={{ reference: control, identity: 'retired-without-current-context', enabled: true, opened: true }} />)
@@ -260,28 +386,24 @@ describe('One Activity reading surface over public original-sequence windows', (
   const current = ids(), visited = new Set(current)
   expect(current.at(-1)).toBe('record-359'); const before = requests.length
   await wheel()
-  expect(requests.length).toBeGreaterThan(before); expect(ids()[0]).toBe('record-240')
+  expect(requests.length).toBeGreaterThan(before); expect(ids()[0]).toBe('record-000')
   ids().forEach(id => visited.add(id))
-  for (let page = 0; page < 3; page++) {
-   await wheel(); const actual = ids()
-   const start = Math.max(0, 150 - page * 90)
-   expect(actual).toEqual(Array.from({ length: 360 - start }, (_, n) => `record-${String(n + start).padStart(3, '0')}`))
-   expect(new Set(actual).size).toBe(actual.length); actual.forEach(id => visited.add(id))
-  }
+  expect(new Set(ids()).size).toBe(360)
   expect(visited.size).toBe(360)
   const ended = requests.length; await wheel(); await wheel()
-  expect(requests).toHaveLength(ended); expect(requests.every(read => read.limit === 30)).toBe(true)
+  expect(requests).toHaveLength(ended); expect(requests.every(read => read.limit === 30 || read.limit === 100)).toBe(true)
   expect(useAppStore.getState().sessions[0]!.control).toEqual(control)
   expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('ORIGINAL UNSENT DRAFT')
  })
  it('does not read on downward or non-top wheel, hidden surfaces, or a second wheel during the same pending page', async () => {
+  await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await render(compose()); const before = requests.length
-  await wheel(100); await wheel(-100, 81)
+  await wheel(100); await wheel(-100, 501)
   expect(requests).toHaveLength(before)
   await render(compose(false)); await wheel()
   expect(requests).toHaveLength(before); await render(compose())
   let release!: (page: AgentSessionHistoryPage) => void
-  const page = recent!.nativeHistoryPage!, pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
+  const page = await promises[requests.findLastIndex(request => request.limit === 100)]!, pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
   vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; viewport.scrollTop = 0
   await act(async () => {
@@ -289,8 +411,8 @@ describe('One Activity reading surface over public original-sequence windows', (
    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
   })
   expect(requests).toHaveLength(before + 1); expect(requests.at(-1)!.cursor).toBe(page.nextCursor)
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30, cursor: page.nextCursor! }))); await flush()
-  expect(ids()).toHaveLength(120); expect(requests).toHaveLength(before + 3)
+  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
+  expect(ids()).toHaveLength(600); expect(requests).toHaveLength(before + 3)
  })
  it('preserves the current original body, expanded trace, Range and visible anchor through the first wheel prepend', async () => {
   await render(compose())
@@ -301,18 +423,18 @@ describe('One Activity reading surface over public original-sequence windows', (
   trace.open = true; const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Reply 353')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
   await wheel()
-  expect(ids()).toHaveLength(120); expect(body.isConnected).toBe(true); expect(trace.open).toBe(true)
+  expect(ids()).toHaveLength(360); expect(body.isConnected).toBe(true); expect(trace.open).toBe(true)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Reply')
   expect(conversationReadingAnchor(viewport)).toEqual({ kind: 'record', id: 'record-353', offset: 10 })
   expect(viewport.scrollTop).toBe(0)
  })
  it('retains the current records and opaque cursor after a first-wheel read failure, then explicitly retries that original page', async () => {
-  await render(compose()); const before = ids(), page = recent!.nativeHistoryPage!, count = requests.length
+  await render(compose()); const before = ids(), page = await promises[requests.findLastIndex(request => request.limit === 100)]!, count = requests.length
   vi.mocked(api.sessions.historyPage).mockImplementationOnce(async (_reference, options) => { requests.push(options ?? {}); throw new Error('Private read unavailable') })
   await wheel()
   expect(ids()).toEqual(before); expect(requests.at(-1)!.cursor).toBe(page.nextCursor)
   expect(container.textContent).toContain('Private read unavailable'); await flush(); expect(requests).toHaveLength(count + 1)
-  await click('Retry'); expect(ids()).toHaveLength(120)
+  await click('Retry'); expect(ids()).toHaveLength(360)
   expect(requests[count + 1]!.cursor).toBe(page.nextCursor)
  })
  it('uses the same wheel navigation with actual public indexed stdio history and its opaque cursor', async () => {
@@ -334,32 +456,22 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const ended = requests.length; await wheel(); expect(ids()).toHaveLength(120); expect(requests).toHaveLength(ended)
   const count = requests.length; await wheel(); expect(requests).toHaveLength(count)
   const actual = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(request => request.method === 'thread/items/list')
-  expect(actual.map(request => request.params)).toEqual([undefined, '90', '60', '30'].map(cursor => ({ threadId: native, sortDirection: 'desc', limit: 30, ...(cursor ? { cursor } : {}) })))
+  expect(actual.map(request => request.params)).toEqual([{ threadId: native, sortDirection: 'desc', limit: 30 }, { threadId: native, sortDirection: 'desc', limit: 100 }, { threadId: native, sortDirection: 'desc', limit: 100, cursor: '20' }])
  })
  it('continues beyond 290 records and a 201-process burst without losing raw pages or moving shared recent facts', async () => {
   await render(compose())
   const currentIds = recent!.nativeHistoryPage!.items.map(item => item.id)
   expect(currentIds.length).toBeGreaterThan(0); expect(currentIds.at(-1)).toBe('record-359')
   await click('Earlier')
-  expect(ids()).toHaveLength(120)
-  expect(ids()).toEqual(Array.from({ length: 120 }, (_, n) => `record-${String(n + 240).padStart(3, '0')}`))
-  const visited = new Set(ids())
-  for (let page = 0; page < 3; page++) {
-   await click('Earlier')
-   const actual = ids(); expect(actual.length).toBeLessThanOrEqual(400)
-   const start = Math.max(0, 150 - page * 90)
-   expect(actual[0]).toBe(`record-${String(start).padStart(3, '0')}`)
-   expect(actual).toEqual(Array.from({ length: 360 - start }, (_, n) => `record-${String(n + start).padStart(3, '0')}`))
-   actual.forEach(id => visited.add(id))
-   expect(recent!.nativeHistoryPage!.items.map(item => item.id)).toEqual(currentIds)
-  }
-  expect(visited.size).toBe(360)
+  expect(ids()).toEqual(Array.from({ length: 360 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
+  expect(new Set(ids()).size).toBe(360)
+  expect(recent!.nativeHistoryPage!.items.map(item => item.id)).toEqual(currentIds)
   expect(container.querySelectorAll('.activity-feed')).toHaveLength(1)
   expect(container.querySelector('.activity-feed__history-divider')?.textContent).toContain('以上是历史消息')
-  expect(requests.every(options => options.limit === 30)).toBe(true)
+  expect(requests.filter(options => options.limit === 100)).toHaveLength(4)
  })
  it('allows explicit deep-window Current navigation without a Range, while original records retain their source identity', async () => {
-  await render(compose()); await click('Earlier'); await click('Earlier'); await click('Earlier'); await click('Earlier')
+  await render(compose()); await click('Earlier')
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
   viewport.getBoundingClientRect = () => rect(0, 200)
   const group = viewport.querySelector<HTMLElement>('[data-native-record-ids]')!
@@ -370,7 +482,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
  })
  it('keeps same-source recent native input out of a historical raw window, while captured input and Current remain reachable', async () => {
-  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: { id: 'accepted-independent-input', agentSessionId: sid,
    kind: 'user_message', source: 'user', sourceChannel: 'message-tool', title: 'Accepted input', status: 'complete', content: 'Independent Message Tool input', createdAt: 1, updatedAt: 1 } })
   const timeline = await client.sessionTimeline(sid)
@@ -379,15 +491,15 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
     userMessageRead={{ loading: facts.loading, error: facts.error, hasMore: facts.hasMore, windowIncomplete: facts.windowIncomplete, onRetry: facts.refresh, onReadEarlier() {} }}
     conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} /> }
   await render(<Reader />)
-  expect(container.textContent).toContain('Input 712'); for (let batch = 0; batch < 5; batch++) await click('Earlier')
-  expect(ids()).not.toContain('record-712'); expect(container.textContent).not.toContain('Input 712')
+  expect(container.textContent).toContain('Input 2392'); for (let batch = 0; batch < 5; batch++) await click('Earlier')
+  expect(ids()).not.toContain('record-2392'); expect(container.textContent).not.toContain('Input 2392')
   expect(container.textContent).toContain('Independent Message Tool input')
-  expect(recent!.messages.find(message => message.rawId === 'record-712')?.content).toContain('Input 712')
-  await click('Current'); expect(container.textContent).toContain('Input 712'); expect(container.textContent).toContain('Independent Message Tool input')
+  expect(recent!.messages.find(message => message.rawId === 'record-2392')?.content).toContain('Input 2392')
+  await click('Current'); expect(container.textContent).toContain('Input 2392'); expect(container.textContent).toContain('Independent Message Tool input')
  })
  it('keeps the displayed original page and its actual cursor when legal public pages exceed the local reading memory budget together', async () => {
-  await writeFile(transcript, Array.from({ length: 90 }, (_, n) => JSON.stringify({ ...record(n), type: 'assistant',
-   message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Original process '.repeat(4400) }] } })).join('\n') + '\n')
+  await writeFile(transcript, Array.from({ length: 300 }, (_, n) => JSON.stringify({ ...record(n), type: 'assistant',
+   message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Original process '.repeat(2000) }] } })).join('\n') + '\n')
   const current = await client.sessionHistoryPage(sid, { limit: 30 })
   expect(current.items).toHaveLength(30); expect(current.nextCursor).not.toBeNull()
   await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
@@ -397,8 +509,8 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   await click('Earlier')
   expect(ids()).toEqual(before); expect(head.isConnected).toBe(true)
   expect(container.querySelector('.activity-feed__read-notice')?.textContent).toContain('byte budget')
-  expect(requests).toHaveLength(2); expect(requests[0]!.cursor).toBe(current.nextCursor)
-  expect(requests.every(read => read.limit === 30)).toBe(true)
+  expect(requests).toHaveLength(4); expect(requests[0]!.cursor).toBeUndefined(); expect(requests[2]!.cursor).toBeUndefined()
+  expect(requests.every(read => read.limit === 100)).toBe(true)
  })
  it('keeps every original adjacent raw record when a real shared observation projection has clipped older process facts', async () => {
   await render(compose())
@@ -417,7 +529,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(rawIds).toEqual(Array.from({ length: rawIds.length }, (_, n) => rawIds[0]! + n))
   await click('Earlier')
   const actual = ids(), ordinals = actual.map(id => Number(id.slice('record-'.length)))
-  expect(actual.length).toBeLessThanOrEqual(400)
+  expect(actual.length).toBeLessThanOrEqual(1200)
   if (process.env.AGENTMUX_UNIFIED_GAP_OBSERVATIONS) await writeFile(process.env.AGENTMUX_UNIFIED_GAP_OBSERVATIONS, JSON.stringify({ windowIncomplete: recent!.windowIncomplete, recentIds: recent!.nativeHistoryPage!.items.map(item => item.id), currentIds: current, resultingIds: actual, ordinals, gaps: ordinals.flatMap((n, index) => index && n !== ordinals[index - 1]! + 1 ? [{ before: ordinals[index - 1], after: n }] : []), requests, controls: controls.map(spy => spy.mock.calls.length) }, null, 2))
   expect(ordinals).toEqual(Array.from({ length: ordinals.length }, (_, n) => ordinals[0]! + n))
   expect(ordinals[0]).toBeLessThan(rawIds[0]!)
@@ -425,7 +537,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(recent!.nativeHistoryPage).toStrictEqual(original)
   await click('Current'); expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
  })
- it('enters an original earlier window from an unselected context-only anchor, while selected context and real raw anchors keep their protection', async () => {
+ it('retains actual continuous local context across shared sparse clipping without evicting selected body', async () => {
   await render(compose())
   for (let batch = 0; batch < 6; batch++) {
    const n = 360 + batch * 30
@@ -446,12 +558,10 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const text = [...old.querySelectorAll('p')].find(p => p.textContent === 'Reply 353')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
   const before = ids(), count = requests.length; await click('Earlier')
-  expect(ids()).toEqual(before); expect(old.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
+  expect(ids()).toHaveLength(540); expect(old.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
   expect(recent!.nativeHistoryPage).toBe(original)
-  window.getSelection()!.removeAllRanges(); await click('Earlier')
-  expect(ids()).toEqual(Array.from({ length: 180 }, (_, n) => `record-${360 + n}`))
-  expect(requests[count]!.cursor).toBe(original.nextCursor); expect(requests[count + 3]!.cursor).toBe(original.nextCursor)
-  expect(requests.slice(count)).toHaveLength(6)
+  expect(ids()).toEqual(Array.from({ length: 540 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
+  expect(requests.slice(count)).toHaveLength(1)
   expect(recent!.nativeHistoryPage).toBe(original); expect(recent!.nativeContextItems.some(item => item.id === 'record-353')).toBe(true)
  })
  it('preserves observed native input when no page exists or the actual public page has a different source', async () => {
@@ -478,17 +588,17 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, before = ids()
   const first = viewport.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
-  expect(before).toHaveLength(200); expect(before.includes('record-359')).toBe(true)
+  expect(before).toHaveLength(300); expect(before.includes('record-359')).toBe(true)
   viewport.getBoundingClientRect = () => rect(0, 200); first.getBoundingClientRect = () => rect(10)
   await click('Earlier')
-  expect(ids()).toHaveLength(290); expect(ids()[0]).toBe('record-070')
+  expect(ids()).toHaveLength(360); expect(ids()[0]).toBe('record-000')
   expect(first.isConnected).toBe(true)
-  expect(requests[0]!.cursor).toBe(current.nextCursor)
-  expect(requests).toHaveLength(3)
+  expect(requests[3]!.cursor).toBe((await promises[2]!).nextCursor)
+  expect(requests).toHaveLength(4)
 
  })
  it('keeps a real visible raw anchor when Earlier would remove it, then advances the same cursor after deliberate upward reading', async () => {
-  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   const current = await client.sessionHistoryPage(sid, { limit: 90 })
   await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
    userMessageRead={{ loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} }}
@@ -496,15 +606,15 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   for (let batch = 0; batch < 3; batch++) await click('Earlier')
   const acceptedCursor = (await promises.at(-1)!).nextCursor, rejectedStart = requests.length
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, original = ids()
-  const tail = viewport.querySelector<HTMLElement>('[data-native-record-id="record-713"]')!
+  const tail = viewport.querySelector<HTMLElement>('[data-native-record-id="record-2353"]')!
   viewport.getBoundingClientRect = () => rect(0, 200); tail.getBoundingClientRect = () => rect(10)
   await click('Earlier'); expect(ids()).toEqual(original); expect(tail.isConnected).toBe(true)
   expect(requests[rejectedStart]!.cursor).toBe(acceptedCursor)
-  const retained = viewport.querySelector<HTMLElement>('[data-native-record-id="record-369"]')!
+  const retained = viewport.querySelector<HTMLElement>('[data-native-record-id="record-1601"]')!
   tail.getBoundingClientRect = () => rect(-200); retained.getBoundingClientRect = () => rect(10)
   viewport.scrollTop = 10; await act(async () => viewport.dispatchEvent(new Event('scroll')))
   const retryStart = requests.length
-  await click('Earlier'); expect(ids()).toHaveLength(400); expect(ids()[0]).toBe('record-270')
+  await click('Earlier'); expect(ids()).toHaveLength(1100); expect(ids()[0]).toBe('record-900')
   expect(retained.isConnected).toBe(true); expect(requests[retryStart]!.cursor).toBe(acceptedCursor)
  })
  it('keeps selected Workflow step-count text and the actual cursor until selection clears, then reads genuinely earlier records', async () => {
@@ -515,15 +625,15 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
   const head = viewport.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
   const count = head.querySelector<HTMLElement>('.log-fold__steps')!
-  expect(count.textContent).toBe('34 步')
-  const range = document.createRange(); range.setStart(count.firstChild!, 0); range.setEnd(count.firstChild!, 2)
+  expect(count.textContent).toBe('4 步')
+  const range = document.createRange(); range.setStart(count.firstChild!, 0); range.setEnd(count.firstChild!, 1)
   window.getSelection()!.addRange(range); viewport.getBoundingClientRect = () => rect(0, 200); head.getBoundingClientRect = () => rect(10)
   const before = ids(); await click('Earlier')
   expect(ids()).toEqual(before); expect(head.isConnected).toBe(true); expect(range.startContainer.isConnected).toBe(true)
-  expect(window.getSelection()!.toString()).toBe('34')
+  expect(window.getSelection()!.toString()).toBe('4')
   window.getSelection()!.removeAllRanges(); await click('Earlier')
-  expect(ids()[0]).toBe('record-180'); expect(ids()).toHaveLength(180); expect(head.isConnected).toBe(true)
-  expect(requests).toHaveLength(6); expect(requests[0]!.cursor).toBe(current.nextCursor); expect(requests[3]!.cursor).toBe(current.nextCursor)
+  expect(ids()[0]).toBe('record-000'); expect(ids()).toHaveLength(360); expect(head.isConnected).toBe(true)
+  expect(requests).toHaveLength(5); expect(requests[3]!.cursor).toBe((await promises[2]!).nextCursor); expect(requests[4]!.cursor).toBe((await promises[2]!).nextCursor)
  })
  it('uses the public native source namespace, not a repeated raw ID, to protect a selected node through explicit source refresh', async () => {
   await render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
@@ -545,29 +655,29 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(container.querySelector('[data-native-source]')?.getAttribute('data-native-source')).toBe(JSON.stringify(['claude', nextNative]))
  })
  it('keeps selected overlap bodies and trace disclosures through prepend and observation append', async () => {
-  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await render(compose())
   await click('Earlier')
-  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-681"] .log-turn__body')!
-  expect(body.textContent).toContain('Reply 681')
-  const text = [...body.querySelectorAll('p')].find(p => p.textContent === 'Reply 681')!.firstChild!
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-2361"] .log-turn__body')!
+  expect(body.textContent).toContain('Reply 2361')
+  const text = [...body.querySelectorAll('p')].find(p => p.textContent === 'Reply 2361')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
   const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
-  expect(trace.textContent).toContain('Trace 681')
+  expect(trace.textContent).toContain('Trace 2361')
   await click('Earlier')
   expect(body.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
   expect(body.querySelector('[data-trace-kind="reasoning"]')).toBe(trace); expect(trace.open).toBe(true)
   await click('Earlier'); await click('Earlier')
   const rejectedStart = requests.length; await click('Earlier')
-  // This read would discard selected record681 in the newest page; cursor remains at the accepted window.
+  // This read would discard selected record2361 in the newest page; cursor remains at the accepted window.
   const lastCursor = requests[rejectedStart]?.cursor
   expect(container.textContent).toContain('records and cursor are kept')
   expect(body.isConnected).toBe(true)
-  await appendFile(transcript, JSON.stringify(record(720)) + '\n')
+  await appendFile(transcript, JSON.stringify(record(2400)) + '\n')
   await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid }))
   await flush()
-  expect(ids()).toContain('record-681'); expect(window.getSelection()!.toString()).toBe('Reply')
+  expect(ids()).toContain('record-2361'); expect(window.getSelection()!.toString()).toBe('Reply')
   window.getSelection()!.removeAllRanges(); const retryStart = requests.length; await click('Earlier')
   expect(requests[retryStart]?.cursor).toBe(lastCursor)
  })
@@ -588,7 +698,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(recent!.messages.length).toBeGreaterThan(0)
   expect(originalRead).toBeDefined()
  })
- it('keeps a legitimate290-raw recent page plus3 public30-raw pages with the original body and Range', async () => {
+ it('keeps a legitimate290-raw recent page through initial300 and original older100-page reading with the original body and Range', async () => {
   await writeFile(transcript, Array.from({ length: 380 }, (_, n) => JSON.stringify(n >= 90 && n < 290
    ? { ...record(n), type: 'user', message: { role: 'user', content: `Original maximum input ${n}` } }
    : { ...record(n), type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: `Original maximum process ${n}` }] } })).join('\n') + '\n')
@@ -609,10 +719,10 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect([...container.querySelectorAll('button')].filter(button => ['Earlier', 'Read earlier records'].includes(button.textContent?.trim() ?? ''))).toHaveLength(1)
   await click('Earlier')
   expect(ids()).toEqual(Array.from({ length: 380 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
-  expect(requests).toHaveLength(3); expect(requests.every(read => read.limit === 30)).toBe(true)
-  expect(requests[0]!.cursor).toBe(current.nextCursor)
+  expect(requests).toHaveLength(4); expect(requests.every(read => read.limit === 100)).toBe(true)
+  expect(requests[0]!.cursor).toBeUndefined()
   expect(requests[1]!.cursor).toBe((await promises[0]!).nextCursor)
-  expect(requests[2]!.cursor).toBe((await promises[1]!).nextCursor)
+  expect(requests[2]!.cursor).toBe((await promises[1]!).nextCursor); expect(requests[3]!.cursor).toBe((await promises[2]!).nextCursor)
   if (process.env.AGENTMUX_EARLIER_SCENE_PAGE) await writeFile(process.env.AGENTMUX_EARLIER_SCENE_PAGE, JSON.stringify({ provenance: 'Controlled native Claude syntax -> real FileStore/public Core SDK pages; no vendor writer or installed user session', current, earlierPages: await Promise.all(promises), requests }, null, 2) + '\n')
   expect(body.isConnected).toBe(true); expect(row.querySelector('.log-turn__body')).toBe(body)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Original maximum input 289')
@@ -620,7 +730,8 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(container.querySelector('.conversation-ruler__unread-edge')).toBeNull()
  })
  it('shows actual sticky batch loading without a second demand, keeps the old cursor on page2 failure and explicitly retries', async () => {
-  await render(compose()); const before = ids(), oldBody = container.querySelector('[data-native-record-id="record-353"] .log-turn__body')!, page = recent!.nativeHistoryPage!, start = requests.length
+  await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose()); const before = ids(), oldBody = container.querySelector('[data-native-record-id="record-1193"] .log-turn__body')!, page = await promises[requests.findLastIndex(request => request.limit === 100)]!, start = requests.length
   const earlier = container.querySelector<HTMLButtonElement>('.conversation-ruler__earlier')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!
   expect(container.querySelector('.conversation-ruler__unread-edge')).not.toBeNull()
   const reads = requests.length
@@ -638,15 +749,15 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(earlier.disabled).toBe(true); expect(slider.getAttribute('aria-disabled')).toBeNull(); expect(oldBody.isConnected).toBe(true)
   await act(async () => { earlier.click(); container.querySelector('.activity-feed')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })) })
   expect(requests).toHaveLength(start + 1)
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30, cursor: page.nextCursor! }))); await flush()
+  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
   expect(ids()).toEqual(before); expect(requests).toHaveLength(start + 2); expect(oldBody.isConnected).toBe(true)
   expect(container.querySelector('.activity-ruler__count[data-loading]')).toBeNull(); expect(container.textContent).toContain('Original second page unavailable')
   const retryStart = requests.length; await click('Retry')
-  expect(requests[retryStart]!.cursor).toBe(page.nextCursor); expect(requests).toHaveLength(retryStart + 3); expect(ids()).toHaveLength(120)
+  expect(requests[retryStart]!.cursor).toBe(page.nextCursor); expect(requests).toHaveLength(retryStart + 3); expect(ids()).toHaveLength(600)
  })
  it('keeps unknown and reversed native times honest while the unread edge and overview never issue reads', async () => {
-  await writeFile(transcript, Array.from({ length: 90 }, (_, n) => {
-   const original = { ...record(n), type: 'user', timestamp: new Date(_hygiene_fixtureTime(-37225600000) + (90 - n) * 1000).toISOString(), message: { role: 'user', content: `Original reverse record ${n}` } }
+  await writeFile(transcript, Array.from({ length: 390 }, (_, n) => {
+   const original = { ...record(n), type: 'user', timestamp: new Date(_hygiene_fixtureTime(-37225600000) + (390 - n) * 1000).toISOString(), message: { role: 'user', content: `Original reverse record ${n}` } }
    if (n % 3 === 0) Reflect.deleteProperty(original, 'timestamp')
    return JSON.stringify(original)
   }).join('\n') + '\n')
@@ -663,7 +774,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const slider = container.querySelector<HTMLElement>('[role="slider"]')!
   await act(async () => { slider.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20 })); slider.focus(); slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })); slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })) })
   expect(ids()).toEqual(before); expect(requests).toHaveLength(reads)
-  expect(container.textContent).toContain('Original reverse record 60'); expect(container.textContent).toContain('Original reverse record 89')
+  expect(container.textContent).toContain('Original reverse record 300'); expect(container.textContent).toContain('Original reverse record 389')
   expect(container.querySelectorAll('[role="slider"]')).toHaveLength(1)
  })
  it('keeps a no-record first read visible with the public SVG and no invented zero-count slider', async () => {
@@ -675,9 +786,9 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(container.querySelector('[role="slider"]')).toBeNull()
   const status = container.querySelector('.activity-feed__reading-status')!
   expect(status.textContent).toContain('Reading records'); expect(status.querySelector('svg.wf-streaming-glyph')).not.toBeNull()
-  expect(requests).toEqual([{ limit: 30 }])
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30 }))); await flush()
-  expect(ids()).toHaveLength(90); expect(requests).toHaveLength(3)
+  expect(requests).toEqual([{ limit: 100 }])
+  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100 }))); await flush()
+  expect(ids()).toHaveLength(300); expect(requests).toHaveLength(3)
   expect(container.querySelector('[role="slider"]')).not.toBeNull(); expect(container.querySelector('.activity-feed__reading-status')).toBeNull()
  })
  it('protects a connected Range crossing a middle-page record with neither endpoint inside it', async () => {
@@ -699,7 +810,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(protectsConversationWindow(viewport, recent!.nativeHistoryPage!, false)).toBe(true)
  })
  it('keeps a selected folded Process title before explicit Current would evict the group', async () => {
-  await render(compose()); await click('Earlier'); await click('Earlier'); await click('Earlier'); await click('Earlier')
+  await render(compose()); await click('Earlier')
   const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!
   const label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
   expect(label.textContent).toBe('执行过程')
@@ -709,7 +820,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   window.getSelection()!.removeAllRanges(); await click('Current'); expect(ids().at(-1)).toBe('record-359')
  })
  it('restores a retained folded group using its observation identity when prepend changes its raw-member list', async () => {
-  await render(compose()); await click('Earlier'); await click('Earlier'); await click('Earlier')
+  await render(compose()); await click('Earlier')
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, group = viewport.querySelector<HTMLElement>('[data-native-record-ids]')!
   viewport.getBoundingClientRect = () => rect(100, 200)
   const head = group.querySelector<HTMLElement>('.wf-head')!; head.getBoundingClientRect = () => rect(110)
@@ -751,7 +862,7 @@ describe('Real caller ownership and healthy retained identities', () => {
   expect(terminal.getAttribute('data-terminal-visible')).toBe('true'); expect(container.querySelector('.activity-feed')).toBeNull()
   await click('Header history')
   const feed = container.querySelector<HTMLElement>('.activity-feed')!
-  expect(feed).not.toBeNull(); expect(ids()).toHaveLength(90)
+  expect(feed).not.toBeNull(); expect(ids()).toHaveLength(300)
   expect(feed.closest('.agent-body')?.getAttribute('data-observation-surface')).toBe('workflow')
   expect(terminal.isConnected).toBe(true); expect(terminal.getAttribute('data-terminal-visible')).toBe('false')
   const bodyControl = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] button')!
@@ -802,6 +913,7 @@ describe('Real caller ownership and healthy retained identities', () => {
   expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('ORIGINAL UNSENT DRAFT')
  })
  it('passes a live hidden gate through the primary cached ReactElement and rejects its late original page', async () => {
+  await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await seed(); await render(pane()); await click('Earlier')
   const feed = container.querySelector('.activity-feed')!, before = ids()
   let release!: (page: AgentSessionHistoryPage) => void
@@ -813,6 +925,7 @@ describe('Real caller ownership and healthy retained identities', () => {
   const count = requests.length; await act(async () => earlier.click()); await flush(); expect(requests).toHaveLength(count)
  })
  it('passes visible eligibility through the secondary cached ReactElement without redirecting its local earlier window', async () => {
+  await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await seed(); const page = await client.sessionHistoryPage(sid)
   const stage = (visible: boolean) => <SessionActivityPresentation target={{ hostId: 'private-stage', active: true, visible,
     reference: { displayWorkspaceId: 'ws', groupId: 'group', tabId: 'tab', regionId: 'region' } }} regionId="region" sourceKey="original-source"
@@ -822,7 +935,7 @@ describe('Real caller ownership and healthy retained identities', () => {
     userMessageRead: { loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} } }}
    eligible readOnly={false} resourceOrigin={{ workspaceId: 'ws', tabId: 'tab', regionId: 'region' }}
    renderFrame={content => content} selectRegion={() => {}} />
-  await render(stage(true)); await click('Earlier'); expect(ids()).toHaveLength(120)
+  await render(stage(true)); await click('Earlier'); expect(ids()).toHaveLength(600)
   let release!: (page: AgentSessionHistoryPage) => void
   vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
@@ -840,7 +953,7 @@ describe('Real caller ownership and healthy retained identities', () => {
   const recover = vi.spyOn(useAppStore.getState(), 'recoverSession')
   await render(pane())
   const feed = container.querySelector<HTMLElement>('.activity-feed')!
-  expect(feed).not.toBeNull(); expect(ids()).toHaveLength(90); expect(container.textContent).toContain('Input 352')
+  expect(feed).not.toBeNull(); expect(ids()).toHaveLength(300); expect(container.textContent).toContain('Input 352')
   expect(feed.closest('.agent-body')?.getAttribute('data-observation-surface')).toBe('workflow')
   expect(feed.closest('[hidden]')).toBeNull(); expect(feed.closest('[inert]')).toBeNull()
   expect(container.querySelector('.activity-feed__reading')).not.toBeNull()
@@ -852,9 +965,9 @@ describe('Real caller ownership and healthy retained identities', () => {
    title: 'Original accepted input', status: 'complete', content: 'Captured Message Tool original', createdAt: 1, updatedAt: 1 } })
   await seed(); await retired(); useAppStore.setState({ sessions: [] })
   await render(pane()); await flush()
-  expect(container.querySelectorAll('.activity-feed')).toHaveLength(1); expect(ids()).toHaveLength(90)
+  expect(container.querySelectorAll('.activity-feed')).toHaveLength(1); expect(ids()).toHaveLength(300)
   expect(container.textContent).toContain('Captured Message Tool original'); expect(container.textContent).toContain('Input 352')
-  expect(requests.every(request => request.limit === 30)).toBe(true)
+  expect(requests.every(request => request.limit === 30 || request.limit === 100)).toBe(true)
   expect((await store.load()).length).toBe(0); expect((await store.loadRetiredAgentSessions()).length).toBe(1)
  })
  it('does not read for unrelated Store updates while an actual old window remains readable', async () => {

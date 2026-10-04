@@ -205,9 +205,9 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
 /** One typed read boundary for recent facts and each presentation's original-sequence window. */
 export async function readSessionConversationPage(
   reference: SessionHistoryReference,
-  options: { cursor?: string; source?: AgentSessionHistorySource } = {}
+  options: { cursor?: string; source?: AgentSessionHistorySource; limit?: number } = {}
 ): Promise<AgentSessionHistoryPage> {
-  const page = await api.sessions.historyPage(reference, { limit: 30, ...(options.cursor ? { cursor: options.cursor } : {}) })
+  const page = await api.sessions.historyPage(reference, { limit: options.limit ?? 30, ...(options.cursor ? { cursor: options.cursor } : {}) })
   if (page.agentSessionId !== reference.agentSessionId) throw new Error('Native page belongs to another Session.')
   if (options.source && !sameSource(options.source, page.source)) {
     throw changedSourceError('Native source changed. The current window is kept; refresh its source.')
