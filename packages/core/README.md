@@ -225,7 +225,7 @@ await client.dispose()
 `notebooks.json`，默认位于 `AGENTMUX_STATE_DIRECTORY` 所指的原状态目录。
 `@agentmux/core/notebook-catalog` 导出 `NotebookState`、`NotebookWrite`、`NotebookChange`
 和严格读取类型。正文由原资源 Host/Workspace 的文件能力持有，目录保存准确引用、
-页面层级、网页来源和真实变化轨迹。[Notebook 行为合同](../../docs/design/behavior/spaces-and-layout.md#notebook页面与持久目录)
+页面层级、网页来源和真实变化轨迹。[Notebook 行为合同](../../docs/design/behavior/knowledge-workflows.md#recallnotebook-与块知识)
 定义归属和关闭语义；这里列出实际公开调用方式。
 
 ```sh

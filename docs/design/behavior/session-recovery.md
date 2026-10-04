@@ -209,7 +209,7 @@
 
 - **屏幕语义证据不得按会话全史从零重建作为热路径**。每次提交或 readiness 观察若都从 byte 0 全量重放进临时 headless 终端，延迟随历史线性增长，并放大 gap 截断概率。活跃 Session 的屏幕证据应增量维护，或从最近完整 TUI 帧/检查点起点观察；失效（resize、重连、gap）时重建。字节史与 replay/checkpoint 权威仍在 ctxmux——Core 不另存第二份 Run 字节。Desktop cold-park 的重建成本与同一条有界证据合同对齐，见 [`agentmux-surface-density.md`](../agentmux-surface-density.md)。
 - **当前终端尺寸只认 ctxmux 的 owner-confirmed 事实。** `RunSpec.size` 是启动时请求的尺寸，此后不变，不能当作现在几列几行。Run 投影与虚拟屏幕使用 `RunInfo.current_size`；它为 `null` 时是明确的 unknown，不得回退成 spec.size。成功 resize 后的 `RunEvent::Resized` 让长连接屏幕证据失效并按新尺寸重建。Viewport 可以向 PTY 提交测得的网格，但只能把 receipt 里的 applied size 记成已经生效的尺寸。`current_size` 不能单独重建历史 TUI；跨尺寸历史仍按 gap/resync 处理。
-- 这条与[《寻址与复制》](spaces-and-layout.md#寻址与复制)里"失败结果要自带下一步命令"同源：失败不是终点，是一个要说清楚"现在怎么办"的时刻。
+- 这条与[《寻址与复制》](public-control.md#对象地址分享与方向)里"失败结果要自带下一步命令"同源：失败不是终点，是一个要说清楚"现在怎么办"的时刻。
 
 ### 完成与 error 判定可信度
 
@@ -384,7 +384,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - 远端管理的对象是 AgentMux Runtime，而不是把 Desktop 直接变成 ctxmux 的远程控制器。ctxmux 继续只负责 PTY、进程、Run、ordered bytes、Replay、Gap、Attachment 和权威运行时事实；AgentMux 负责 Agent 语义与 Session 恢复，Desktop 不在两层之间再保留一份实现。
 - 本地服务、SSH 与宿主提供的 HTTP 连接共用唯一类型化 JSON-RPC Runtime 服务与 Hosted SDK。传输只改变连接方式，不另建 Session、权限、历史、Attachment 或事件恢复实现；Headless 与带宿主能力的服务均组合同一个 Core 语义 owner。宿主私网、设备及 Desktop 转发能力仍由各自 owner 注入。
 - Runtime SDK 的调用方须经过当前传输认可的用户／设备授权；Agent 的 managed capability 只授权其既有受限业务操作，不能借 Runtime SDK 获得完整服务权限。订阅与 Attachment lease 同时绑定已授权 principal、准确 Runtime 及独立 consumer，释放一个 reader 不撤销其他 reader。
-- 本地受管 Agent 可查询指定远端 Host 的[执行器事实](settings-and-observation.md#设置页的信息架构)，选择该 Host 已有配置，沿[新建 Agent 的独立执行工作区](spaces-and-layout.md#agent-自助创建与空间操作)引用已登记的远端资源，在其准确 Host/目录创建全新会话并交付首任务，展示于本地准确的 Tab/Region 或指定分屏。创建不 fork/resume 来源原生会话，不自动复制父历史；来源作者核验沿[A2A 首句合同](agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。恢复读取原创建确认的执行资源与独立展示绑定，不能按当前展示 Zone、后来选中的 Workspace 或同名目录改写原 Host/cwd；清单、选择与最终真实进程须属于同一目标 Host，布局保存或命令存在不能代签实际启动与输出。
+- 本地受管 Agent 可查询指定远端 Host 的[执行器事实](settings-and-observation.md#设置页的信息架构)，选择该 Host 已有配置，沿[新建 Agent 的独立执行工作区](public-control.md#agent-自助创建与空间操作)引用已登记的远端资源，在其准确 Host/目录创建全新会话并交付首任务，展示于本地准确的 Tab/Region 或指定分屏。创建不 fork/resume 来源原生会话，不自动复制父历史；来源作者核验沿[A2A 首句合同](agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。恢复读取原创建确认的执行资源与独立展示绑定，不能按当前展示 Zone、后来选中的 Workspace 或同名目录改写原 Host/cwd；清单、选择与最终真实进程须属于同一目标 Host，布局保存或命令存在不能代签实际启动与输出。
 - 跨 Host 创建保留同一 operation、目标 Session、创建结果与初始投递回执。明确未启动、启动结果未知、已创建但回执不明与首句未确认分别表达；响应丢失后沿原目标 owner 核对原 operation，不换身份重复创建或重放输入。目标确已创建而投影、握手或首句确认失败时保留健康执行和原工作面，说明失败步骤及恢复动作；本地启动与人工 GUI 启动仍沿同一 Core 生命周期。
 - 建连与读者开流可取消；已由业务 owner 承接的写入必须保留原操作和对账入口，不能用外层通信超时宣告写入没有发生。大快照在同一服务内有界分段，初始切面与随后有序事件之间有明确 ready barrier，保持原 bytes、Gap、resize 与 checkpoint，不按 RPC 单帧预算截断历史。
 - ctxmux 的持久化语义必须如实表达：客户端断开和 daemon 重启可以保留历史 Run、Replay 与恢复线索；宿主机重启后的原生 PTY/进程连续性不是 ctxmux 的保证。宿主重启后由 AgentMux 使用 durable Provider handle 语义恢复同一 Session、创建新的 Run 时，界面应显示“同一 Session 的新 Run”，不能声称原 PTY 仍在继续运行。
@@ -433,3 +433,18 @@ Take over 是用户明确选择一位新 Agent，先理解原会话留下的工�
 - 状态与原动作先于长内容，窄／短 Region 首屏仍可找到原动作；正文与诊断可在各自有界区域阅读。Connecting 保留目标 Executor、完整可选择初始 Prompt、复制完整原文及其真实成功／失败反馈，不以缩短文案删掉启动意图。没有动作结果时不铺空反馈位。
 - 原 resume recap 的真实性、来源、精确 visible Host／Session 有界读取与恢复独立性只沿[《Terminal resume 画面中的 recap》](terminal-reading.md#terminal-resume-画面中的-recap)，不因重新排版改变读取资格、启动模型请求、扫描无关 Session 或增加自动 retry。内容不足与读取未知如实表达，不编造摘要或恢复进度。
 - 本次呈现不改变生命周期、冷启动按需恢复、原动作资格或失败处理 owner。健康输出、原 xterm／网格／输入／历史／草稿及 durable Tab／Group／Region／焦点／分割布局保留；不能用新的自动恢复、Runtime 请求或重建 Session 填补视觉空白。共享加载表面的其他消费者保留原标题、调用方内容、真实 failed 状态与原动作，不借视觉去重改变它们的行为。
+
+
+## 工作面持久恢复与启动边界
+
+- **应用重启必须先恢复持久化的 Tab Group/Region 拓扑，再恢复其中的 Session 投影**。Tab、分组、Region、焦点和 split ratio 是用户工作面的 durable 索引，不能因为 Runtime 首次快照暂时为空、恢复探测超时或恢复流程报错而被写回空布局；健康 Agent 的流程故障只留下可见服务窗告示并保留原 Region。只有 Core 明确报告 Session 已退休，才能移除该 Region。
+
+- **正常退出、重装与重新打开必须继续读取原工作面的实际持久化归属**。既有工作面的存储记录或物理目录未确认时，不能把新建的空数据库称为原工作面已经恢复；路径配置、内存里的工作面与跨进程可读的持久记录分别核实，保存或恢复缺口持续说明且不拿走健康 Run 的能力。原始备份与真实拓扑的有限恢复保留草稿、身份和未知输入，不自动补发；从旧备份取不到的较新编辑明确未知，找回工作面不能代签原存储缺失的根因已经修复。
+
+- **重开应用不能仅凭旧“未认领”标记停止原本健康的 Terminal**。持久化的未展示／归属待查记录不是新的用户停止意图；启动时已观察到的 Run 保持可查、可接回，已退出和状态未知分别如实说明，不把它们统统隐藏，也不凭标记新建工作视图。当前用户明确取消本次刚创建对象时，清理只针对本次已经确认的精确 Run；旧标记不能替代这个归属与意图。
+
+- **恢复不能把旧进程的生命周期租约当成仍在运行**。启动新进程时必须回收 owner PID 已退出、租约已过期或属于本次重启的未完成 lifecycle reservation；只有能证明旧 owner 仍活着的租约才报告“运行在其他进程”。判断不清时保留 Session/Region，并明确提示正在等待归属核验，不得静默丢失或伪造新 Session。
+
+- **退役 Run 记满了，不能把整次启动判死。** 用户原话：「刚才打包以后启动就失败了」。新进程回收未完成的停止租约时，必须把这次停止落进账本：该 Session 记成用户退役，它的 Run 进入有上限的退役 Run 环。环满时丢掉最旧的 Run，并同时丢掉只指向这些 Run 的退役 Session——这是容量到顶，不是账本损坏。刚刚停下的这条 Session 的退役记录必须留下。不得因为挤掉了旧记录就让停止落账失败、整窗退出。同一身份仍在当前 Session 里，才是真冲突，继续拒绝。
+
+- **界面就绪握手只证明新页面已挂上。** 用户原话：重启电脑后还是报 `Updated interface did not become ready`。打包启动要等渲染进程回报就绪，这个回报只表示页面已加载且 IPC 可用。恢复 Session、重绘终端这些启动工作在握手之后继续。不得把「全部恢复跑完」当作启动放行条件；恢复慢或超时走服务窗，不整窗退出。

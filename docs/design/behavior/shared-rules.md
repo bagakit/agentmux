@@ -50,9 +50,9 @@
   其他产品事实，也不能为同一事实创建第二套状态。
 
 > 当前确认的导航、Tab、分屏和会话栏需求见
-> [顶部与项目栏](spaces-and-layout.md#顶部与项目栏)；`agentmux-project-rail-navigation.md`（本机过程资料：`docs/plans/agentmux-project-rail-navigation.md`）。
+> [顶部与项目栏](../presentation/spaces-and-layout.md#顶部与项目栏)；`agentmux-project-rail-navigation.md`（本机过程资料：`docs/plans/agentmux-project-rail-navigation.md`）。
 > Scratch 的 Topic 与 Wiki 合同见
-> [Scratch 的交互与组织](spaces-and-layout.md#scratch-的交互与组织)；`agentmux-wiki-first-scratch.md`（本机过程资料：`docs/plans/agentmux-wiki-first-scratch.md`）。
+> [Scratch 的交互与组织](spaces-and-layout.md#topic-的打开与默认终端)；`agentmux-wiki-first-scratch.md`（本机过程资料：`docs/plans/agentmux-wiki-first-scratch.md`）。
 
 ## 设计哲学
 
