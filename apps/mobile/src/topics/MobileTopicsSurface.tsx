@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
 import { MobileTopicKnowledge, type TopicsRpc } from './MobileTopicKnowledge'
@@ -68,7 +69,7 @@ export function MobileTopicsSurface({ rpc, onOpenTopic, renderWorkface, openSour
     {deepLinkIssue && <p className="mobile-topics-issue" role="status">{deepLinkIssue}<button onClick={() => setDeepLinkRetry(value => value + 1)}>重试原 Topic</button></p>}
     <div className="mobile-topics-tabs" role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => setMode('topics')}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => setMode('knowledge')}>知识</button></div>
     <div hidden={inTopic || mode !== 'topics'}>
-      <label className="mobile-topics-search"><input aria-label="查找 Topic 或分类" value={query} placeholder={category ? '查找此分类的 Topic' : '查找分类'} onChange={event => setQuery(event.target.value)} /></label>
+      <label className="mobile-topics-search"><TextInput aria-label="查找 Topic 或分类" value={query} placeholder={category ? '查找此分类的 Topic' : '查找分类'} onChange={event => setQuery(event.target.value)} /></label>
       <ul className="mobile-topics-list">{!category ? categories.filter(value => value.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map(value => <li key={value.categoryId}>
         <button onClick={() => { setCategory(value); setTopics([]); setQuery('') }}><strong>{value.title}</strong>{value.readError && <small>{value.readError}</small>}</button></li>)
         : topics.filter(value => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map(value => <li key={value.topicId}>
