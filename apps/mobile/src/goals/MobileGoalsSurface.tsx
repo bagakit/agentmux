@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult, AgentMuxRpcParams } from '@agentmux/core'
 import { AGENTMUX_DEMAND_PRIORITIES, AGENTMUX_DEMAND_STATUSES } from '@agentmux/core/control'
@@ -117,7 +118,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession }: 
         if (present()) { selectedRef.current = goal.id; setSelected(goal.id) }
       }} />
     <div hidden={selected !== null || !!discussionTab}>
-      <div className="mobile-goals-filters"><input aria-label="搜索目标" placeholder="搜索目标或项目" value={query} onChange={event => setQuery(event.target.value)} />
+      <div className="mobile-goals-filters"><TextInput aria-label="搜索目标" placeholder="搜索目标或项目" value={query} onChange={event => setQuery(event.target.value)} />
         <select aria-label="筛选工作状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></div>
       <details><summary>按 Goal ID 打开</summary><form onSubmit={event => {
         event.preventDefault()
@@ -128,7 +129,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession }: 
           if (result.goal) { choose(result.goal); setLookupIssue('') }
           else setLookupIssue('未找到这个准确 Goal ID；原列表与输入保留。')
         }).catch(error => { if (sequence === lookupRead.current && epoch === (factEpoch.current.goals[goalId] ?? 0)) setLookupIssue(`读取目标失败：${message(error)}。原列表与输入保留，可重试。`) })
-      }}><label>Goal ID<input aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <p role="status">{lookupIssue}</p>}</details>
+      }}><label>Goal ID<TextInput aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <p role="status">{lookupIssue}</p>}</details>
       {goals === null ? <p>目标列表尚未确认。</p> : <>
         <ul className="mobile-goals-list">{(visibleGoals ?? []).map(goal => <li key={goal.id}>
           <button onClick={() => choose(goal)}><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {statuses[goal.status]}</span><small>{goal.description}</small></button>
@@ -184,8 +185,8 @@ function GoalDetail({ goal, visible, decisions, client, updated, refresh, childr
     <h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '目标原意尚未整理。'}</p>
     <button onClick={() => edit(!editing)}>编辑目标正文</button>
     {editing && <form onSubmit={event => { event.preventDefault(); const patch = { ...(title !== baseline.current.title ? { title } : {}), ...(description !== baseline.current.description ? { description } : {}) }; if (Object.keys(patch).length) void save(patch) }}>
-      <label>标题<input value={title} onChange={event => setTitle(event.target.value)} /></label>
-      <label>目标原意<textarea value={description} onChange={event => setDescription(event.target.value)} /></label>
+      <label>标题<TextInput value={title} onChange={event => setTitle(event.target.value)} /></label>
+      <label>目标原意<ComposerTextarea value={description} onValueChange={setDescription} /></label>
       <button disabled={saving}>保存正文</button>
     </form>}
     {Object.entries(saveMessages).map(([field, text]) => <p key={field} role="status">{field}：{text}</p>)}
