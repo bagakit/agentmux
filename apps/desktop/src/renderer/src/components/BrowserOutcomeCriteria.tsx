@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useId, useState, type MouseEvent } from 'react'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from '../../../shared/browser-outcome-criteria'
 
@@ -39,8 +40,8 @@ export function BrowserOutcomeCriteria({ evaluation, busy = false, historical = 
   }
   return <details className="browser-task-asset browser-outcome-criteria">
     <summary>{historical ? 'Recorded check' : 'Completion condition'}{evaluation ? ` · ${labels[evaluation.status]}` : ''}</summary>
-    <label className="browser-task-asset__field">Field key<input value={key} maxLength={128} onChange={event => setKey(event.target.value)} /></label>
-    <label className="browser-task-asset__field">CSS selector<input value={selector} maxLength={512} onChange={event => setSelector(event.target.value)} /></label>
+    <label className="browser-task-asset__field">Field key<TextInput value={key} maxLength={128} onChange={event => setKey(event.target.value)} /></label>
+    <label className="browser-task-asset__field">CSS selector<TextInput value={selector} maxLength={512} onChange={event => setSelector(event.target.value)} /></label>
     <fieldset className="browser-outcome-criteria__types">
       <legend>Value type</legend>
       <div>{(['string', 'number', 'boolean'] as const).map(value => <label key={value}>
@@ -48,7 +49,7 @@ export function BrowserOutcomeCriteria({ evaluation, busy = false, historical = 
         {{ string: 'Text', number: 'Number', boolean: 'Checked' }[value]}
       </label>)}</div>
     </fieldset>
-    <label className="browser-task-asset__field">Equals<input value={expected} maxLength={16384} onChange={event => setExpected(event.target.value)} /></label>
+    <label className="browser-task-asset__field">Equals<TextInput value={expected} maxLength={16384} onChange={event => setExpected(event.target.value)} /></label>
     <div className="browser-task-asset__run-actions"><button className="browser-rsi-button browser-rsi-button--primary browser-rsi-replay__run" disabled={busy || pending} onClick={event => { void run(event) }}>
       {pending || busy ? 'Checking…' : 'Check current field'}
     </button></div>
