@@ -70,7 +70,6 @@ import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from '.
 const MAX_MESSAGE_BYTES = AGENTMUX_CONTROL_MAX_MESSAGE_BYTES
 const MAX_ID_BYTES = 512
 const MAX_TAB_REGIONS = 64
-const MAX_EXECUTORS = 128
 
 function object(value: unknown, message: string, code: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(message, code)
@@ -819,7 +818,7 @@ function parseTab(value: unknown) {
 }
 
 function parseExecutors(value: unknown): AgentMuxControlExecutor[] {
-  if (!Array.isArray(value) || value.length > MAX_EXECUTORS) throw new AgentMuxError('Control Executors are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(value)) throw new AgentMuxError('Control Executors are invalid.', 'CONTROL_PROTOCOL_ERROR')
   const result = value.map((item) => {
     const source = object(item, 'Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')
     if (typeof source.label !== 'string' || !source.label.trim() || !isAgentMuxExecutorAvailability(source.availability)) throw new AgentMuxError('Control Executor is invalid.', 'CONTROL_PROTOCOL_ERROR')

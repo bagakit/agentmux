@@ -11,8 +11,6 @@ import type {
 } from './executor-contract.js'
 
 const SCHEMA = 'agentmux.host-executors.v1'
-const MAX_BYTES = 1024 * 1024
-const MAX_EXECUTORS = 256
 type Configurations = Record<string, AgentExecutorConfig>
 type Probe = Pick<AgentMuxHostExecutorDescriptor, 'availability' | 'executable' | 'cause'>
 
@@ -108,18 +106,16 @@ export class AgentMuxHostExecutorOwner {
     let contents: string
     try {
       const metadata = await stat(this.options.path)
-      if (!metadata.isFile() || metadata.size > MAX_BYTES) throw new Error('Executor configuration file is invalid or exceeds its size limit.')
+      if (!metadata.isFile()) throw new Error('Executor configuration file is not a regular file.')
       contents = await readFile(this.options.path, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
       throw new AgentMuxError('The original Host Executor configuration could not be read. Its file and existing Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
     }
     try {
-      if (Buffer.byteLength(contents) > MAX_BYTES) throw new Error('Executor configuration file exceeds its size limit.')
       const state = record(JSON.parse(contents), ['schema', 'runtimeId', 'executors'])
       if (state.schema !== SCHEMA || state.runtimeId !== this.options.runtimeId) throw new Error('Executor configuration belongs to another semantic Host.')
       const values = record(state.executors)
-      if (Object.keys(values).length > MAX_EXECUTORS) throw new Error('Too many Executor configurations.')
       return Object.fromEntries(Object.entries(values).map(([id, value]) => [text(id, 'Executor ID', 512), parseConfig(value)]))
     } catch {
       throw new AgentMuxError('The original Host Executor configuration is invalid or belongs to another semantic Host. Restore the original file; existing Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
@@ -182,13 +178,9 @@ export class AgentMuxHostExecutorOwner {
         expectedRevision === undefined && Object.hasOwn(current, executorId) && currentRevision !== revision(config)) {
         throw new AgentMuxError('Executor configuration changed. Read its current revision before replacing it.', 'EXECUTOR_CONFIGURATION_CONFLICT')
       }
-      if (!Object.hasOwn(current, executorId) && Object.keys(current).length >= MAX_EXECUTORS) {
-        throw new AgentMuxError('The target Host Executor registry is full.', 'EXECUTOR_CONFIGURATION_LIMIT')
-      }
       if (!Object.hasOwn(current, executorId) || currentRevision !== revision(config)) {
         const executors = { ...current, [executorId]: config }
         const contents = JSON.stringify({ schema: SCHEMA, runtimeId: this.options.runtimeId, executors }) + '\n'
-        if (Buffer.byteLength(contents) > MAX_BYTES) throw new AgentMuxError('Executor configuration exceeds its size limit.', 'EXECUTOR_CONFIGURATION_LIMIT')
         await mkdir(dirname(this.options.path), { recursive: true, mode: 0o700 })
         await durableWriteFile(this.options.path, contents)
       }

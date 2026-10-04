@@ -650,8 +650,10 @@ export class RuntimeController {
       let connected = false
       try {
         if (options?.observation) this.assertObservationHostConnection(hostId, host)
-        await host.client.connect()
-        connected = true
+        if (host.config.kind !== 'local') {
+          await host.client.connect()
+          connected = true
+        }
         if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its Provider catalog.', 'EXECUTOR_HOST_CHANGED')
         const entries = host.client.providers.catalog()
         this.observationWarnings.delete(JSON.stringify([hostId, step]))
@@ -687,7 +689,7 @@ export class RuntimeController {
   async discoverExecutors(hostId: string): Promise<import('../shared/contracts.js').HostExecutorInventory> {
     const host = this.hosts.get(hostId)
     if (!host) throw new AgentMuxError('The exact execution Host is not configured.', 'UNKNOWN_HOST')
-    await host.client.connect()
+    if (host.config.kind !== 'local') await host.client.connect()
     const inventory = await host.client.listHostExecutors({ refresh: true })
     if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its Executor inventory. Refresh this Host.', 'EXECUTOR_HOST_CHANGED')
     return { routeHostId: hostId, ...inventory }
@@ -696,7 +698,7 @@ export class RuntimeController {
   async configureExecutor(hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput): Promise<import('../shared/contracts.js').HostExecutorConfiguration> {
     const host = this.hosts.get(hostId)
     if (!host) throw new AgentMuxError('The exact execution Host is not configured.', 'UNKNOWN_HOST')
-    await host.client.connect()
+    if (host.config.kind !== 'local') await host.client.connect()
     if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed before saving its Executor. Inspect this Host before another explicit save.', 'EXECUTOR_HOST_CHANGED')
     return { routeHostId: hostId, ...await host.client.configureHostExecutor(input) }
   }
@@ -724,7 +726,7 @@ export class RuntimeController {
     }
     try {
       const current = assertOwner()
-      await current.client.connect()
+      if (current.config.kind !== 'local') await current.client.connect()
       assertOwner()
       const result = await current.client.probeExecutorAvailability(input.providerId, input.command)
       executable = result.executable
