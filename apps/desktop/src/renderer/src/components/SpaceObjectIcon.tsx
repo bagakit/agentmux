@@ -24,7 +24,12 @@ function retainMoteAvatarRead(workspaceId: string, topicId: string, fileName: st
   const existing = activeMoteAvatarReads.get(key)
   const entry = existing ?? { consumers: 0, reported: false,
     promise: api.scratch.readMoteAvatar(workspaceId, topicId, { kind: 'image', fileName }, objectKey) }
-  if (!existing) activeMoteAvatarReads.set(key, entry)
+  if (!existing) {
+    activeMoteAvatarReads.set(key, entry)
+    // A settled failure is not reusable image content. Keep existing readers'
+    // issue while letting an explicit re-save or newly opened preview read again.
+    void entry.promise.catch(() => { if (activeMoteAvatarReads.get(key) === entry) activeMoteAvatarReads.delete(key) })
+  }
   entry.consumers++
   return { entry, release() {
     entry.consumers--
