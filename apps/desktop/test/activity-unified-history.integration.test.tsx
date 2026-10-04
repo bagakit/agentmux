@@ -164,7 +164,7 @@ describe('One Activity reading surface over public original-sequence windows', (
    requests.push(options ?? {}); return new Promise(resolve => { release = resolve })
   })
   const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
-  await act(async () => earlier.click())
+  await act(async () => { earlier.focus(); earlier.click() })
   expect(container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!.disabled).toBe(false)
   const count = requests.length; await click('Show latest messages'); const current = ids()
   expect(current.at(-1)).toBe('record-1799')
@@ -682,13 +682,17 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(requests[retryStart]?.cursor).toBe(lastCursor)
  })
  it('does not start a hidden read or commit a hidden late page, while another visible recent consumer remains usable', async () => {
+  await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await render(compose()); await click('Earlier')
   const before = ids(), originalRead = api.sessions.historyPage
   let release!: (page: AgentSessionHistoryPage) => void
   const pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => pending)
+  const pendingStart = requests.length
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
   await act(async () => button.click())
+  expect(requests).toHaveLength(pendingStart + 1)
+  expect(container.querySelector('.activity-feed__reading-status')).not.toBeNull()
   await render(compose(false))
   const actual = await client.sessionHistoryPage(sid, requests.at(-1))
   await act(async () => release(actual)); await flush()
@@ -715,7 +719,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const body = row.querySelector<HTMLElement>('.log-turn__body')!, paragraph = body.querySelector('p')!
   viewport.getBoundingClientRect = () => rect(0, 200); row.getBoundingClientRect = () => rect(10)
   const range = document.createRange(); range.selectNodeContents(paragraph); window.getSelection()!.addRange(range)
-  expect(container.querySelectorAll('.conversation-ruler__earlier[data-available]')).toHaveLength(1)
+  expect(container.querySelector('.activity-feed__reading button')?.textContent?.trim()).toBe('Earlier')
   expect([...container.querySelectorAll('button')].filter(button => ['Earlier', 'Read earlier records'].includes(button.textContent?.trim() ?? ''))).toHaveLength(1)
   await click('Earlier')
   expect(ids()).toEqual(Array.from({ length: 380 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
@@ -729,10 +733,10 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(conversationReadingAnchor(viewport)).toEqual({ kind: 'record', id: 'record-289', offset: 10 })
   expect(container.querySelector('.conversation-ruler__unread-edge')).toBeNull()
  })
- it('shows actual sticky batch loading without a second demand, keeps the old cursor on page2 failure and explicitly retries', async () => {
+ it('shows actual inline batch loading without a second demand, keeps the old cursor on page2 failure and explicitly retries', async () => {
   await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await render(compose()); const before = ids(), oldBody = container.querySelector('[data-native-record-id="record-1193"] .log-turn__body')!, page = await promises[requests.findLastIndex(request => request.limit === 100)]!, start = requests.length
-  const earlier = container.querySelector<HTMLButtonElement>('.conversation-ruler__earlier')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!
+  const earlier = container.querySelector<HTMLButtonElement>('.activity-feed__reading button')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!
   expect(container.querySelector('.conversation-ruler__unread-edge')).not.toBeNull()
   const reads = requests.length
   await act(async () => { earlier.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true })); slider.focus(); slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
@@ -741,12 +745,19 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
   vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
    .mockImplementationOnce(async (_reference, options) => { requests.push(options ?? {}); throw new Error('Original second page unavailable') })
-  await act(async () => earlier.click())
+  await act(async () => { earlier.focus(); earlier.click() })
   expect(container.querySelector('.activity-ruler__readout')).toBeNull()
-  const status = container.querySelector<HTMLElement>('.activity-ruler__count[data-loading]')!
+  const status = container.querySelector<HTMLElement>('.activity-feed__reading-status')!
   expect(status).not.toBeNull(); expect(status.textContent).toContain('Reading'); expect(status.getAttribute('role')).toBe('status'); expect(status.getAttribute('aria-live')).toBe('polite')
   expect(status.querySelector('svg.wf-streaming-glyph')).not.toBeNull(); expect(container.querySelector('.activity-feed')?.hasAttribute('aria-busy')).toBe(false)
-  expect(earlier.disabled).toBe(true); expect(slider.getAttribute('aria-disabled')).toBeNull(); expect(oldBody.isConnected).toBe(true)
+  const ruler = container.querySelector('.activity-ruler')!, entry = status.closest('.activity-feed__reading')!, thread = container.querySelector('.conversation-native-thread')!
+  expect(ruler.compareDocumentPosition(entry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(entry.compareDocumentPosition(thread) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(container.querySelector('.activity-ruler__count')!.textContent).toBe(`${ids().length} records`)
+  expect(container.querySelector('.activity-ruler__count [role="status"], .activity-ruler__count svg')).toBeNull()
+  expect(container.querySelector('.conversation-ruler__earlier')).toBeNull()
+
+  expect(earlier.isConnected).toBe(false); expect(slider.getAttribute('aria-disabled')).toBeNull(); expect(oldBody.isConnected).toBe(true)
   await act(async () => { earlier.click(); container.querySelector('.activity-feed')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })) })
   expect(requests).toHaveLength(start + 1)
   await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
@@ -766,7 +777,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const before = ids(), reads = requests.length, edge = container.querySelector('.conversation-ruler__unread-edge')!
   expect(edge).not.toBeNull(); expect(edge.getAttribute('style')).toBeNull(); expect(edge.getAttribute('aria-hidden')).toBe('true')
-  expect(container.querySelector('.conversation-ruler__earlier')?.getAttribute('title')).toContain('no time width')
+  expect(container.querySelector('.conversation-ruler__unread-edge')?.getAttribute('style')).toBeNull()
   const overview = container.querySelector<HTMLButtonElement>('button[aria-label^="History window:"]')!
   expect(overview).not.toBeNull(); await act(async () => overview.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })))
   const all = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent === 'All loaded records')
@@ -776,6 +787,15 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(ids()).toEqual(before); expect(requests).toHaveLength(reads)
   expect(container.textContent).toContain('Original reverse record 300'); expect(container.textContent).toContain('Original reverse record 389')
   expect(container.querySelectorAll('[role="slider"]')).toHaveLength(1)
+ })
+ it('leaves no empty history toolbar when the actual current source is exhausted and has no reading actions', async () => {
+  await writeFile(transcript, [record(352), record(353)].map(row => JSON.stringify(row)).join('\n') + '\n')
+  await render(compose())
+  expect(ids()).toEqual(['record-352', 'record-353'])
+  expect(container.querySelector('.activity-feed__reading')).toBeNull()
+  expect(container.querySelector('.activity-feed__reading-status')).toBeNull()
+  expect(container.querySelector('.activity-ruler__count')!.textContent).toBe('2 records')
+  expect(requests).toHaveLength(2) // Shared recent + one original page, no synthetic UI demand.
  })
  it('keeps a no-record first read visible with the public SVG and no invented zero-count slider', async () => {
   let release!: (page: AgentSessionHistoryPage) => void
@@ -919,10 +939,10 @@ describe('Real caller ownership and healthy retained identities', () => {
   let release!: (page: AgentSessionHistoryPage) => void
   vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
   const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!
-  await act(async () => earlier.click()); await render(pane(false))
+  await act(async () => { earlier.focus(); earlier.click() }); await render(pane(false))
   await act(async () => release(await client.sessionHistoryPage(sid)))
   await flush(); expect(container.querySelector('.activity-feed')).toBe(feed); expect(ids()).toEqual(before)
-  const count = requests.length; await act(async () => earlier.click()); await flush(); expect(requests).toHaveLength(count)
+  const count = requests.length; await act(async () => { earlier.focus(); earlier.click() }); await flush(); expect(requests).toHaveLength(count)
  })
  it('passes visible eligibility through the secondary cached ReactElement without redirecting its local earlier window', async () => {
   await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
