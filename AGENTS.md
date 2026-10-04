@@ -4,7 +4,7 @@
 
 ## 目标与优先级
 
-1. **通用本地 Agent 核心包优先。** `packages/core` 可独立发布、无 UI 依赖、与宿主框架无关。它以类型安全的公共 API 统一 Agent CLI 的发现、配置、Session、输入输出、状态、权限与语义恢复；新增 Agent 原则上只增加 Provider，不迫使 client 改写交互。
+1. **通用本地 Agent 核心包优先。** `packages/core` 可独立发布、无 UI 依赖、与宿主框架无关。它以类型安全的公共 API 统一 Agent CLI 的发现、配置、Session、输入输出、状态、权限与语义恢复；新增 Agent 原则上只增加 Provider，不迫使 client 改写交互。持久 Session 与原身份可恢复是核心正确性底线，行为合同归[Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)，不能用能启动新进程或当前画面正常代签。
 2. **编辑器是第一方 client 和参考实现。** Desktop 用真实编辑、终端、工作区、worktree 与多 Agent 流程验证 Core，保持 Agent-first、terminal-first，并达到成熟产品的交互与视觉质量。全部 Agent 生命周期经过 Core 公共 API。
 
 ## 分层与身份
@@ -32,6 +32,7 @@ Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另
 
 ### 工作面恢复与终端阅读
 
+- 持久 Session 与恢复失效按重大故障处理。修复、更新与资源治理优先保全原身份和可恢复数据，执行与验收沿[Session 恢复](docs/design/behavior/session-recovery.md)，不能以另起空状态、删除原 Session 或绕过真实恢复证明完成。
 - 重启、重装或 Runtime 暂不可用后，先恢复 durable 的 Tab、Tab Group、Region、焦点与分割布局。健康 Run 自动接回；已结束或丢失 Run 的恢复时机遵循 [交互 SSOT《冷启动按需恢复》](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位)，通过 Core 执行，不要求冷启动批量恢复所有 CLI。
 - 空快照、握手超时、探测失败或未释放的 lifecycle lease 都不是删除投影的理由。只有 Core 明确确认 Session 终局事实才允许移除；观测 unknown / unavailable 不冒充终局。失败保留原工作面和服务窗，不伪装成新 Session。
 - 活跃终端连续向上阅读与性能是 P0。结果、成本与观测条件唯一见 [交互 SSOT《Terminal 连续向上阅读历史》](docs/design/behavior/terminal-reading.md#terminal-连续向上阅读历史) 和密度 SSOT 对应章节。另一页可读、局部测试通过或安装成功都不能代替真实活跃会话的连续阅读。
