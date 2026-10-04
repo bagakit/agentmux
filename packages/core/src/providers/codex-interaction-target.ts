@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { nativeProcessBirth, nativeProcessFiles, openNativeProcessImage } from '../agent-native-process.js'
+import { nativeProcessBirth, nativeProcessFiles } from '../agent-native-process.js'
 import type { AgentProvider, AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import type { AgentMuxInteractionRequest, AgentTerminalScreenSnapshot } from '../types.js'
 
@@ -118,7 +118,7 @@ export function createCodexInteractionResponsePreparation(
     const transcriptPath = handle.transcriptPath
     const rootPid = context.processId, rootBirth = await nativeProcessBirth(rootPid, context.signal)
     const handleIdentity = JSON.stringify(context.nativeHandle ?? null)
-    let writer: { pid: number; birth: string; image: string } | undefined
+    let writer: { pid: number; birth: string; descriptors: string[] } | undefined
     const readCurrentTarget = async (current: AgentProviderPromptExecutionContext): Promise<NativeTarget | null> => {
       const signal = current.signal ?? context.signal
       signal.throwIfAborted()
@@ -131,14 +131,11 @@ export function createCodexInteractionResponsePreparation(
         (entry.access === 'w' || entry.access === 'u'))
       const owners = [...new Set(files.map(entry => entry.processId))]
       if (owners.length !== 1) return null
-      const pid = owners[0]!, birth = await nativeProcessBirth(pid, signal), image = await openNativeProcessImage(pid, signal)
-      try {
-        const candidate = { pid, birth, image: image.identity }
-        if (writer && (writer.pid !== pid || writer.birth !== birth || writer.image !== image.identity)) return null
-        await image.assertCurrent(signal)
-        if (await nativeProcessBirth(pid, signal) !== birth) return null
-        writer ??= candidate
-      } finally { await image.file.close() }
+      const pid = owners[0]!, birth = await nativeProcessBirth(pid, signal)
+      const descriptors = files.map(entry => entry.descriptor)
+      if (writer && (writer.pid !== pid || writer.birth !== birth || !descriptors.some(descriptor => writer!.descriptors.includes(descriptor)))) return null
+      if (await nativeProcessBirth(pid, signal) !== birth || await nativeProcessBirth(rootPid, signal) !== rootBirth) return null
+      writer ??= { pid, birth, descriptors }
       return target
     }
     let sourceId: string | undefined
