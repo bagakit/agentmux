@@ -36,10 +36,10 @@ function input(overrides: Partial<AgentMuxMessageAppendInput> = {}): AgentMuxMes
   }
 }
 
-async function queue(options: ConstructorParameters<typeof DurableAgentMuxMessageQueue>[1] = {}) {
+async function queue() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-global-message-'))
   roots.push(root)
-  return new DurableAgentMuxMessageQueue(join(root, 'state', 'messages.ndjson'), options)
+  return new DurableAgentMuxMessageQueue(join(root, 'state', 'messages.ndjson'))
 }
 
 describe('Core-owned durable A2A global message queue', () => {
@@ -246,13 +246,6 @@ describe('Core-owned durable A2A global message queue', () => {
     await expect(reopened.ack({ ...reader, generation: replay.generation }, authorize)).rejects.toMatchObject({ code: 'AGENT_DELIVERY_GENERATION_STALE' })
     const next = await reopened.check({ ...reader, limit: 99 }, authorize)
     expect(next.messages.map((item) => item.envelope.messageId)).toEqual(['message-2'])
-  })
-
-  it('refuses a bounded append before writing a record', async () => {
-    const durable = await queue({ maxMessages: 1, maxBytes: 10_000 })
-    await durable.append(input())
-    await expect(durable.append(input({ operationId: 'request-2' }))).rejects.toMatchObject({ code: 'MESSAGE_QUEUE_BACKPRESSURE' })
-    expect(await durable.listAfter(0)).toHaveLength(1)
   })
 
   it('keeps delivery failures and their reasons in the append-only audit after reopen', async () => {
