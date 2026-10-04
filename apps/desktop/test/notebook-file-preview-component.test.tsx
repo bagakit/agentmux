@@ -63,6 +63,12 @@ describe('Notebook current-buffer reader', () => {
     expect(container.textContent).toContain('Use Source')
     expect(workers[0]?.requests[0]).toMatchObject({ type: 'open', content: expect.stringContaining('<b>x</b>') })
   })
+  it('rejects dense unclosed opening markers before sanitization', async () => {
+    await render(<NotebookFilePreview content={source([codeCell('malformed output', [{ output_type: 'display_data', data: { 'text/html': '<a'.repeat(32768) } }])])} />)
+    expect(container.querySelector('iframe')).toBeNull()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('static preview budget')
+    expect(workers[0]?.requests[0]).toMatchObject({ type: 'open', content: expect.stringContaining('<a<a<a') })
+  })
   it('releases static output frames outside the viewport and recreates only current output on reentry', async () => {
     const node = (text: string) => <NotebookFilePreview content={source([codeCell('output', [{ output_type: 'display_data', data: { 'text/html': `<b>${text}</b>` } }])])} />
     await render(node('original draft'))
