@@ -81,3 +81,6 @@ export type { PortableCoreArtifact } from './portable-core-artifact.js'
 
 export { SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 export type { AgentSessionHistoryResourceParams, AgentSessionHistoryResourceResult } from './session-history-resource.js'
+
+export * from './delivery-attempt.js'
+export * from './delivery-attempt-store.js'

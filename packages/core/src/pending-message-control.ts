@@ -1,3 +1,4 @@
+import { validateDeliveryLogId } from './delivery-attempt.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 
@@ -13,6 +14,7 @@ export type AgentMuxPendingMessage = {
   delivery: 'not-submitted' | 'unconfirmed' | 'confirmed'
   errorCode: string | null
   error: string | null
+  logId?: string
   /** The original intent is retained, but is not eligible for active queue delivery. */
   archived: boolean
 }
@@ -37,7 +39,7 @@ export function isPendingMessageOperation(value: unknown): value is PendingMessa
 
 /** Validate the business result before a transport carries it to any client. */
 export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
-  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'archived'])
+  const source = rpcRecord(value, ['pendingId', 'text', 'runId', 'enqueuedAt', 'status', 'phase', 'editable', 'delivery', 'errorCode', 'error', 'logId', 'archived'])
   const identifier = (input: unknown): input is string => typeof input === 'string' && Boolean(input.trim()) && !/[\0\r\n]/u.test(input)
   if (!identifier(source.pendingId) || typeof source.text !== 'string' || source.text.includes('\0') ||
       source.runId !== null && !identifier(source.runId) ||
@@ -50,5 +52,6 @@ export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
       source.editable && (source.archived || source.phase !== null || source.delivery !== 'not-submitted')) {
     throw new AgentMuxError('Pending message facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
+  if (source.logId !== undefined) validateDeliveryLogId(source.logId)
   return source as AgentMuxPendingMessage
 }

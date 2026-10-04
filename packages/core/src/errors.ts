@@ -9,7 +9,8 @@ export class AgentMuxError extends Error {
     message: string,
     readonly code: string,
     readonly detail?: string,
-    readonly controlFailure?: AgentMuxControlFailure
+    readonly controlFailure?: AgentMuxControlFailure,
+    readonly logId?: string
   ) {
     super(message)
     this.name = 'AgentMuxError'

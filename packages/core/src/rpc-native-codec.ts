@@ -1,3 +1,4 @@
+import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
 import { isDeepStrictEqual } from 'node:util'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
@@ -134,6 +135,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {
+      case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
+      case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>
       case 'agent.context': {
         const expected = parseAgentContextParams(input)
         record(p, ['hostId', 'sourceHostId', 'agentSessionId', 'descriptor', 'session', 'status', 'runtimeDiagnostics', 'captured', 'native', 'unavailable', 'nextCursor'])

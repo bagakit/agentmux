@@ -1,3 +1,5 @@
+import { DeliveryAttemptStore } from './delivery-attempt-store.js'
+import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup } from './delivery-attempt.js'
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { inspectNotebook } from './notebook-catalog.js'
@@ -47,7 +49,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
-  'runtimeDiagnostics' | 'runtimeIdentity' | 'observeRunStorage'> & {
+  'readDeliveryAttempt' | 'runtimeDiagnostics' | 'runtimeIdentity' | 'observeRunStorage'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
@@ -55,6 +57,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   notebookStore?: AgentMuxNotebookStore
   topics?: AgentMuxRpcTopicsOwner
   files?: AgentMuxRpcFilesOwner
@@ -106,6 +109,7 @@ const NATIVE_FIELDS = {
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'sourceChannel'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
+  'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
@@ -302,6 +306,10 @@ export class AgentMuxRpcService {
       return { session: method === 'agent.reopen'
         ? await client.reopenAgent(input as unknown as Parameters<AgentMuxClient['reopenAgent']>[0])
         : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
+    }
+    if (method === 'message.delivery.report' && (context.caller !== undefined || !context.principal ||
+      !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) {
+      throw new AgentMuxError('A client diagnostic report needs its transport-authenticated user or device.', 'CONTROL_PERMISSION_DENIED')
     }
     if (method === 'message.pending.edit' || method === 'message.pending.send' ||
         method === 'message.pending.archive' || method === 'message.pending.restore' || method === 'agent.question.reply') {
@@ -570,6 +578,44 @@ export class AgentMuxRpcService {
         if (!owner) throw new AgentMuxError('The selected Host is unavailable for storage observation.', 'CONTROL_UNAVAILABLE')
         const observation = await owner.client.observeRunStorage({ runId })
         result = { ...observation, runtime: { ...observation.runtime, hostId } }; break
+      }
+      case 'message.delivery.inspect': {
+        const logId = validateDeliveryLogId(p.logId)
+        const hostId = p.hostId === undefined ? undefined : rpcString(p.hostId, 'Original diagnostic Host')
+        const observations: DeliveryAttemptLookup[] = []
+        const journal = this.ports.deliveryAttempts
+        if (caller && hostId !== undefined && hostId !== caller.hostId) throw new AgentMuxError(
+          'The authenticated Agent belongs to a different diagnostic Host.', 'CONTROL_PERMISSION_DENIED')
+        if (journal && (caller === undefined || caller.hostId === journal.hostId) &&
+            (hostId === undefined || hostId === journal.hostId)) observations.push(await journal.store.read(logId))
+        let scopes: AgentMuxRpcCoreClient[] = []
+        try { scopes = (await this.clients()).filter(entry => (hostId === undefined || entry.hostId === hostId) &&
+          (caller === undefined || entry.client === caller.client)) }
+        catch (error) { observations.push({ logId, availability: 'unavailable', record: null, persistence: null,
+          issue: `Core diagnostic owners are unavailable: ${error instanceof Error ? error.message : String(error)}` }) }
+        for (const scope of scopes) {
+          try { observations.push(await scope.client.readDeliveryAttempt(logId)) }
+          catch (error) { observations.push({ logId, availability: 'unavailable', record: null, persistence: null,
+            issue: `Original Host ${scope.hostId}: ${error instanceof Error ? error.message : String(error)}` }) }
+        }
+        const found = observations.filter(value => value.availability === 'found')
+        if (found.length > 1 && found.some(value => JSON.stringify(value.record) !== JSON.stringify(found[0]!.record))) {
+          throw new AgentMuxError('This diagnostic ID has more than one original record owner.', 'DELIVERY_LOG_CONFLICT')
+        }
+        result = found[0] ?? observations.find(value => value.availability === 'unavailable') ??
+          (observations.length ? { logId, availability: 'not-found', record: null, persistence: null, issue: null }
+            : { logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic Host is unavailable.' })
+        break
+      }
+      case 'message.delivery.report': {
+        const hostId = rpcString(p.hostId, 'Original diagnostic Host'), journal = this.ports.deliveryAttempts
+        if (!journal || journal.hostId !== hostId) throw new AgentMuxError('The selected diagnostic Host is unavailable. Retain the original local report.', 'DELIVERY_LOG_UNAVAILABLE')
+        const record = parseDeliveryAttempt(p.record)
+        if (record.source !== 'client' || record.observation !== undefined || record.reporter !== undefined) {
+          throw new AgentMuxError('Client reports cannot author Core Input or authenticated identity.', 'CONTROL_PERMISSION_DENIED')
+        }
+        result = await journal.store.record({ ...record, reporter: { ...context.principal!, routeHostId: journal.hostId, receivedAt: Date.now() } })
+        break
       }
       case 'system.doctor': {
         const client = caller?.client ?? (await this.clients())[0]?.client
