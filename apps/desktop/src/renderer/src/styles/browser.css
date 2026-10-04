@@ -213,5 +213,4 @@
 
 .browser-presentation-notice { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding-inline: var(--sp-2); flex: none; }
 .browser-presentation-notice > .service-disclosure { flex: 1; padding-inline: 0; }
-.browser-presentation-notice > .small-button { flex: none; min-height: 26px; padding: 0 var(--sp-2); border: 0; background: transparent; box-shadow: none; font-weight: 400; }
-.browser-presentation-notice > .small-button:hover { background: var(--surface-2); }
+.browser-presentation-notice > .small-button { flex: none; min-height: 26px; margin-block: var(--sp-1); padding: 0 var(--sp-3); white-space: nowrap; }

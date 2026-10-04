@@ -55,7 +55,8 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
     const content = surface.querySelector<HTMLElement>('.agent-body, .browser-body, .terminal-view__xterm, .pane-body')
     const composer = surface.querySelector<HTMLElement>('.agent-input-stack')
     const terminal = surface.querySelector<HTMLElement>('.terminal-view__xterm')
-    let top = Math.max(bounds.top + 32, content?.getBoundingClientRect().top ?? bounds.top + 32)
+    let top = Math.max(bounds.top + 32, content?.getBoundingClientRect().top ?? bounds.top + 32,
+      button.getBoundingClientRect().bottom + 8)
     let bottom = Math.min(bounds.top + bounds.height * 0.6, composer?.getBoundingClientRect().top ?? bounds.bottom,
       (terminal?.getBoundingClientRect().bottom ?? bounds.bottom) - 32)
     // Prefer the reading area above the input. When it cannot hold even a

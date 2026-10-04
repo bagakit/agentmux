@@ -99,7 +99,7 @@ export function useBrowserPresentationCapture(browserId: string) {
         acquired?.getTracks().forEach(track => track.stop())
         if (current === generation.current) {
           captureFailed.current = true
-          setNotice(`Live page preview is unconfirmed. The original page is kept. ${error instanceof Error ? error.message : String(error)}`)
+          setNotice(`Live page preview is unconfirmed. ${error instanceof Error ? error.message : String(error)}`)
           setCapturePhase('failed')
         }
         if (capture) await api.browser.ackPresentationCapture(capture.captureId, { outcome: 'failed', message: error instanceof Error ? error.message : String(error) }).catch(() => {})
