@@ -82,11 +82,11 @@ describe('Provider exact native typed input target', () => {
     expect(await prepared!.verifyCurrentTarget({ ...f.context, nativeSourceId: prepared!.target.nativeSourceId })).toBe(false)
   })
 
-  it.each(['ordinary-composer', 'wrong-command', 'cursor-outside', 'incomplete'] as const)('does not authorize a %s frame', async kind => {
+  it.each(['ordinary-composer', 'wrong-command', 'inactive-menu', 'incomplete'] as const)('does not authorize a %s frame', async kind => {
     const f = await fixture(), screen = pane()
     if (kind === 'ordinary-composer') screen.lines[1]!.text = '› Ask a question'
     if (kind === 'wrong-command') screen.lines[5]!.text = '$ printf another'
-    if (kind === 'cursor-outside') screen.cursor.row = 0
+    if (kind === 'inactive-menu') screen.lines[7]!.text = '  1. Yes, proceed (y)'
     if (kind === 'incomplete') screen.lines.pop()
     expect(inspectCodexInteractionTarget(screen, f.request)).toBe(false)
   })

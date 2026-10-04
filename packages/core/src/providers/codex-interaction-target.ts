@@ -84,17 +84,26 @@ export function inspectCodexInteractionTarget(screen: AgentTerminalScreenSnapsho
   if (!cmd || screen.lines.length !== screen.rows) return false
   const rows = screen.lines.map(line => line.text.trimEnd())
   const footer = rows.findIndex(row => row.trim() === 'Press enter to confirm or esc to cancel')
-  if (footer < 0 || screen.cursor.row < footer || screen.cursor.row > footer + 1 ||
+  if (footer < 0 || rows.filter(row => row.trim() === 'Press enter to confirm or esc to cancel').length !== 1 ||
       rows.slice(footer + 1).some(row => row.trim())) return false
-  let start = -1
-  for (let index = 0; index < footer; index++) if (rows[index]!.trim() === 'Would you like to run the following command?') start = index
-  if (start < 0) return false
+  const headers = rows.slice(0, footer).flatMap((row, index) => row.trim() === 'Would you like to run the following command?' ? [index] : [])
+  if (headers.length !== 1) return false
+  const start = headers[0]!
+  if (screen.lines.slice(start, footer + 1).some(line => line.wrapped)) return false
   const pane = rows.slice(start + 1, footer)
-  const allow = pane.findIndex(row => /^[› ]*1\. Yes, proceed \(y\)$/u.test(row))
-  const reject = pane.findIndex(row => /^[› ]*[23]\. No, and tell Codex what to do differently \(esc\)$/u.test(row))
-  if (allow < 0 || reject <= allow) return false
-  // Only the exact visible command preceding these options can authorize this invocation.
-  return pane.slice(0, allow).some(row => row.trim() === `$ ${cmd}`)
+  const allow = pane.findIndex(row => /^(?:› | *)1\. Yes, proceed \(y\)$/u.test(row))
+  if (allow < 0) return false
+  const options = pane.slice(allow).filter(row => row.trim())
+  const labels = options.map(row => row.replace(/^› /u, '').trim())
+  if (labels.length !== 2 && labels.length !== 3 || labels[0] !== '1. Yes, proceed (y)' ||
+      labels.at(-1) !== `${labels.length}. No, and tell Codex what to do differently (esc)` ||
+      labels.length === 3 && !/^2\. Yes, and don't ask again(?: for commands that start with `.+`)? \(p\)$/u.test(labels[1]!)) return false
+  // The native menu selection identifies the logical input target. The physical
+  // VT cursor can remain on preceding output while this complete menu is active.
+  if (options.filter(row => row.startsWith('› ')).length !== 1 ||
+      pane.slice(0, allow).some(row => row.trimStart().startsWith('›'))) return false
+  const commands = pane.slice(0, allow).filter(row => row.trimStart().startsWith('$ '))
+  return commands.length === 1 && commands[0]!.trim() === `$ ${cmd}`
 }
 
 export function createCodexInteractionResponsePreparation(
