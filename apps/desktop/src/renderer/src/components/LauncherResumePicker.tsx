@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -183,7 +184,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             </button>
           </div>
           <label className="launcher-resume__search"><Search size={14} aria-hidden="true" />
-            <input ref={searchRef} aria-label="Search saved Sessions" role="combobox" aria-expanded="true"
+            <TextInput ref={searchRef} aria-label="Search saved Sessions" role="combobox" aria-expanded="true"
               aria-controls={listId} aria-activedescendant={selectedSessionId ? `${listId}-${selectedSessionId}` : undefined}
               placeholder="Search Agent, ID, project or known recap…" value={query} onChange={event => { setQuery(event.target.value); setSelectedId(null); setFeedback(null) }}
               onKeyDown={event => {
