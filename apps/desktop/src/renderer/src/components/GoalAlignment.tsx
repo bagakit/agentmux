@@ -10,6 +10,7 @@ import { goalResultExplanation } from '../lib/goal-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import dialogueArtworkUrl from '../../../../resources/artwork/demand-dialogue.png'
 
 type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
@@ -50,7 +51,10 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
   }
   const checks = new Map(grounding?.checks.map(check => [check.criterionId, check]) ?? [])
   const resultExplanation = goalResultExplanation(demand)
-  const goalRequest = <div className="goals-request-action"><button type="button" className={`goals-button${!failure && (!alignment || confirmIssue) ? ' goals-button--primary' : ''}`} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : alignment ? 'Discuss changes' : 'Clarify goal'}<ArrowUpRight size={13} /></button><span className="goals-caption">Sends a goal request to the agent.</span></div>
+  const goalRequest = <div className="goals-request-action">
+    <img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} />
+    <div className="goals-request-action__content"><button type="button" className={`goals-button${!failure && (!alignment || confirmIssue) ? ' goals-button--primary' : ''}`} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : alignment ? 'Discuss changes' : 'Clarify goal'}<ArrowUpRight size={13} /></button><span className="goals-caption">Sends a goal request to the agent.</span></div>
+  </div>
   const resultRequest = alignment?.confirmedAt ? <button type="button" className="goals-button" data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : grounding ? 'Ask agent to check again' : 'Ask agent to check work'}<ArrowUpRight size={13} /></button> : null
   return <>
     {alignment ? <section className="goals-alignment" aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>

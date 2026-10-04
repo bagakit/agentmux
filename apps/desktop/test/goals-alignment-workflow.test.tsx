@@ -99,6 +99,14 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
 
   it('shows the original intent and one clarification block without empty proposal or result sections', async () => {
     await save(); await mount()
+    const artwork = container.querySelector<HTMLImageElement>('.goals-request-action img')!
+    expect(artwork?.src).toContain('demand-dialogue.png')
+    expect(artwork.alt).toBe(''); expect(artwork.getAttribute('aria-hidden')).toBe('true')
+    expect(artwork.closest('button')).toBeNull()
+    await act(async () => artwork.dispatchEvent(new Event('error')))
+    expect(artwork.hidden).toBe(true)
+    expect(button('Clarify goal').disabled).toBe(false)
+    expect(api.demands.confirmAlignment).not.toHaveBeenCalled()
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
     expect(container.querySelectorAll('.goals-clarification')).toHaveLength(1)
     expect(container.querySelector('.goals-alignment')).toBeNull(); expect(container.querySelector('.goals-grounding')).toBeNull()
