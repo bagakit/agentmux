@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { chooseField } from './helpers/selection-field'
 import { act, Profiler } from 'react'
 import type { Root } from 'react-dom/client'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
@@ -61,10 +62,11 @@ describe('original Mote Current work and expanded Goal consumer cost', () => {
     await update(defaultAgent.id, { updatedAt: 10 })
     expect(renders).toBe(0); expect(context).not.toHaveBeenCalled()
     await update(defaultAgent.id, { label: 'Original member renamed' })
+    await chooseField(container.querySelector<HTMLElement>('[aria-label="Goal continuation Agent"]')!, defaultAgent.id)
     expect(container.querySelector('[aria-label="Goal continuation Agent"]')!.textContent).toContain('Original member renamed')
     expect(renders).toBeGreaterThan(0); expect(context).not.toHaveBeenCalled()
     await update(defaultAgent.id, { control: { ...defaultAgent.control, agentSessionId: 'wrong-original-agent' } })
-    expect(container.querySelector('[aria-label="Goal continuation Agent"]')!.textContent).not.toContain('Original member renamed')
+    expect(container.querySelector('[aria-label="Goal continuation Agent"]')!.textContent).toContain('not in current options')
     await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== neighborAgent.id) })))
     expect(container.textContent).toContain('1 linked discussion not loaded. Original references retained.')
     expect(container.querySelector('[data-mote-goal="original-goal"]')).not.toBeNull()

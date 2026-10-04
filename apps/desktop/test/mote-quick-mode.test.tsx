@@ -1,3 +1,4 @@
+import { chooseField } from './helpers/selection-field'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { saveMoteQuickDefaults } from '../src/renderer/src/lib/mote-quick-mode'
 // @vitest-environment happy-dom
@@ -135,9 +136,9 @@ describe('quick-mode original consumer counterexamples', () => {
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
     await app.mount()
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
-    const agent = document.querySelector<HTMLSelectElement>('select[aria-label="Default Agent"]')!, selected = document.querySelector<HTMLSelectElement>('select[aria-label="Default conversation"]')!
-    expect(agent.value).toBe('fixture'); expect(JSON.parse(selected.value)).toEqual(conversation)
-    expect(read).toHaveBeenCalled()
+    const agent = document.querySelector<HTMLButtonElement>('[aria-label="Default Agent"]')!, selected = document.querySelector<HTMLButtonElement>('[aria-label="Default conversation"]')!
+    expect(agent.dataset.value).toBe('fixture'); expect(JSON.parse(selected.dataset.value!)).toEqual(conversation)
+    await chooseField(agent, 'fixture'); expect(read).toHaveBeenCalled()
     await moteClick(document.querySelector<HTMLElement>('[aria-label="Close quick mode"]')!)
     expect(write).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
   })
