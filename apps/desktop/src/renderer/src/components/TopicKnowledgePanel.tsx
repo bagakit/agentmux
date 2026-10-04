@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeDocument, TopicKnowledgeItem } from '@agentmux/core/control'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -80,7 +81,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
       {topic ? <button type="button" className="icon-button" aria-label="New knowledge" onClick={() => setEdit({ topicId: topic.id })}><Plus size={14} /></button> : null}</header>
     <form className="topic-knowledge-search" role="search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setAttempt(value => value + 1) }}>
       <Search size={14} aria-hidden="true" />
-      <input ref={searchInput} type="text" aria-label={topic ? 'Search this Topic' : 'Search all Topics'} value={query} placeholder="Search knowledge and files…" onChange={event => { setQuery(event.target.value); if (!event.target.value) clearSearch() }} onKeyDown={event => { if (event.key === 'Escape' && query && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); clearSearch() } }} />
+      <TextInput ref={searchInput} type="text" aria-label={topic ? 'Search this Topic' : 'Search all Topics'} value={query} placeholder="Search knowledge and files…" onChange={event => { setQuery(event.target.value); if (!event.target.value) clearSearch() }} onKeyDown={event => { if (event.key === 'Escape' && query && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); clearSearch() } }} />
       {query ? <button type="button" className="icon-button" aria-label="Clear search" title="Clear search" onClick={clearSearch}><X size={12} /></button> : null}
       <button type="submit" className="icon-button topic-knowledge-search__submit" aria-label="Search" title="Search · Enter"><CornerDownLeft size={14} /></button>
     </form>
