@@ -319,6 +319,8 @@ Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project
 
 ## Hook 配置隔离与非 AgentMux 会话
 
+Hook 观察区分解析、排队、owner 执行、持久完成与回执读取。入内存待绑定只表示 memory acceptance，成功完成回执才代表 owner 完成；sender 的协议期限须包含排队与执行。未执行的排队请求过期后不得稍后落地；同 receipt 的在途重试合并、识别内容冲突，并在 sender 观察窗口内保留去重事实。owner 提交未知仍是未知，用原 receipt 和原生事实核对，不重放 Agent 输入。背压、超时或单条内容越界不得关闭原 Session／Run／终端；对应 binding 沿既有 SDK／Hosted runtime events 服务窗说明受理阶段、未知事实与恢复动作，不承诺跨任意 Core 重启的 exactly-once。
+
 原生恢复身份与会话记录必须属于当前 Agent Session。下属 Agent 的普通工具、权限与生命周期事件及其记录位置不能覆盖主 Agent 的原生会话句柄，也不能把主身份与下属记录路径拼成一个貌似有效的句柄。Provider 已声明的下属事件继续提供状态、活动和在途事实；记录归属不清时如实保留未知，不阻断主 Agent 的工作。合法主会话事件仍可建立或更新主会话句柄，不靠目录扫描、标题或最近文件猜测身份。
 
 Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／Provider 关联和已持久原生身份；这些已知事实只来自 Core，事件正文不能自称可信身份。恢复后仍沿同一事实识别主会话，不能靠上一次内存中的归属替代持久身份，也不能因生成恢复命令就改变关联。Provider 解释原生 Session 的明确父系与主／子事实；主身份未知或父系事实不足时，保留原始 trace 和未知，不能将同目录、Message 的引用父级或界面选择猜成主 Session。
