@@ -149,6 +149,8 @@ import type {
   AgentSessionHistoryMetadata,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
+  AgentSessionHistoryQuestionAnswer,
+  AgentSessionHistorySource,
   AgentSessionHistoryDescriptor,
   AgentSessionHistoryObservation,
   AgentSessionHistoryObservationOptions,
@@ -289,6 +291,19 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
   agentMuxNote?: string
   prompt: string
+}
+
+/** Explicit manual answer to an exact Provider-owned asynchronous question record. */
+export type AgentMuxSessionQuestionReplyInput = Omit<AgentMuxAgentPromptInput,
+  'prompt' | 'agentMuxNote' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
+  source: AgentSessionHistorySource
+  turnId: string
+  recordId: string
+  answers: AgentSessionHistoryQuestionAnswer[]
+  /** Configured native invocation, just as for the existing public history reader. */
+  commandOverride?: string
+  args?: readonly string[]
+  env?: Readonly<Record<string, string | undefined>>
 }
 
 export type AgentMuxAgentMessageInput = {

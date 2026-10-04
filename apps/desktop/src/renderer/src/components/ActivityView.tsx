@@ -1,6 +1,8 @@
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
-import { ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
+import { ArrowDown, ArrowLeft, ChevronRight, ChevronUp, FileText, Info, Pencil, Search } from 'lucide-react'
+import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -35,13 +37,15 @@ import { conversationRulerRecords, conversationRulerWindow, type RulerRecord, ty
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { ConversationView, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
+import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
+import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'
 
 /**
@@ -79,12 +83,14 @@ type RawEntry =
   | { type: 'user-message'; message: AgentSessionUserMessage; time?: number }
 
 function buildActivityEntries(
-  items: AgentTimelineItem[],
+  sourceItems: AgentTimelineItem[],
   userMessages?: readonly AgentSessionUserMessage[]
 ): {
   unifiedItems: ConversationAxisItem[]
   segments: Segment[]
 } {
+  // Host diagnostics remain queryable in the original timeline, outside conversation content.
+  const items = sourceItems.filter(item => !(item.kind === 'system_message' && item.source === 'agentmux' && item.id.startsWith('device-operation:')))
   const segments: Segment[] = []
   let run: AgentTimelineItem[] = []
   const flush = (): void => {
@@ -334,30 +340,35 @@ type UserMessageReadState = {
   onReadEarlier: (trigger: HTMLButtonElement) => void
 }
 
-function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefined }) {
-  if (!read || (!read.loading && !read.error && !read.observationError && !read.windowFrozen && !read.windowIncomplete && !read.hasMore)) return null
+function UserMessageReadNotice({ read, showEarlier = true }: { read: UserMessageReadState | undefined; showEarlier?: boolean }) {
+  if (!read || (!read.error && !read.observationError && !read.windowFrozen && !read.windowIncomplete && !(showEarlier && read.hasMore))) return null
   return (
     <div className="activity-feed__read-notice" role="status">
       <span>
-        {read.loading ? <><LoaderCircle size={12} className="spin" /> Reading native inputs…</> : read.error
+        {read.error
           ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
           : read.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.'
           : read.observationError ? `Automatic native updates are unavailable: ${read.observationError.message}. The current reading window is kept; Refresh retries the source.`
-          : read.windowIncomplete ? 'This window keeps recent conversation and process records. History reads the original sequence.'
-          : 'Earlier conversation records are available in History.'}
+          : read.windowIncomplete ? 'This window keeps recent conversation and process records. Read earlier to browse the original sequence.'
+          : 'Earlier conversation records are available.'}
       </span>
       {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
       {!read.error && (read.windowFrozen || read.observationError) ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>{read.windowFrozen ? 'Read latest records' : 'Refresh'}</button> : null}
-      {read.hasMore || read.windowIncomplete ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
+      {showEarlier && (read.hasMore || read.windowIncomplete) ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
     </div>
   )
 }
 
 export function ActivityView({
   sessionId,
-  items,
+  executionHostId,
+  items: observedItems,
   userMessages,
-  nativeHistoryPage,
+  nativeHistoryPage: recentNativePage,
+  nativeContextItems,
+  conversationReading,
+  readingNotice,
+  readingAction,
   userMessageRead,
   revealRequest,
   capability,
@@ -371,12 +382,19 @@ export function ActivityView({
   onContinue,
   onSelectAnnotation,
   describeSpeaker,
-  moteConversation = false
+  moteConversation = false,
+  onReplyQuestion,
+  renderMessageActions
 }: {
   sessionId: string
+  executionHostId?: string
   items: AgentTimelineItem[]
   userMessages?: readonly AgentSessionUserMessage[]
   nativeHistoryPage?: AgentSessionHistoryPage | null
+  nativeContextItems?: AgentSessionHistoryPage['items']
+  conversationReading?: ConversationReading
+  readingNotice?: ReactNode
+  readingAction?: ReactNode
   userMessageRead?: UserMessageReadState
   revealRequest?: ConversationRevealRequest | null
   capability: 'unavailable' | 'complete-events' | 'streaming'
@@ -401,18 +419,104 @@ export function ActivityView({
    */
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
+  renderMessageActions?: (source: ConversationReplySource) => ReactNode
+  onReplyQuestion?: ConversationQuestionReply
 }) {
+  const logRef = useRef<HTMLDivElement>(null)
+  const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
+  const anchorRef = useRef<ReturnType<typeof conversationReadingAnchor>>(null)
+  const followRef = useRef(initFollowState())
+  const [showJump, setShowJump] = useState(false)
+  const returnRef = useRef<HTMLButtonElement>(null)
+  const edgeRef = useRef({ earlier: false, newer: false, programmaticTop: null as number | null })
+  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal) => {
+    const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
+    if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal)) return false
+    anchorRef.current = keepAnchor && feedEl ? conversationReadingAnchor(feedEl) : null
+    if (intent === 'current') {
+      followRef.current = { ...followRef.current, following: true }
+      edgeRef.current.earlier = false; edgeRef.current.newer = false
+    }
+    return true
+  }, nativeContextItems)
+  const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const interactive = event.target instanceof Element && event.target.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="button"], [role="textbox"], [role="combobox"], [role="menu"]')
+    if (!event.defaultPrevented && !interactive) {
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) requestReadingEdge(-1, event.currentTarget)
+      if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) requestReadingEdge(1, event.currentTarget)
+    }
+    if (event.key === 'Escape' && !event.defaultPrevented && conversationReading?.opened && conversationReading.onClose) {
+      event.stopPropagation(); conversationReading.onClose()
+    }
+  }
+  useEffect(() => {
+    edgeRef.current = { earlier: false, newer: false, programmaticTop: null }
+  }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
+  const nativeHistoryPage = readingWindow.page
+  const historyBoundary = readingWindow.historyBoundary
+  const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
+  const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
+  const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
+  const items = readingWindow.captured ?? observedItems
+  useLayoutEffect(() => {
+    if (conversationReading?.enabled && feedEl && anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
+    else if (conversationReading?.enabled && feedEl && followRef.current.following) feedEl.scrollTop = feedEl.scrollHeight
+    if (feedEl) edgeRef.current.programmaticTop = feedEl.scrollTop
+  }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
+  useLayoutEffect(() => {
+    if (!conversationReading?.enabled || !(readingWindow.historical || showJump) || !feedEl) return
+    const content = feedEl.querySelector('.conversation-native-thread')
+    if (!content) return
+    const observer = new ResizeObserver(() => {
+      if (anchorRef.current) { restoreConversationAnchor(feedEl, anchorRef.current); edgeRef.current.programmaticTop = feedEl.scrollTop }
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [feedEl, conversationReading?.enabled, readingWindow.historical, showJump])
+  useEffect(() => {
+    if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
+    returnRef.current?.focus({ preventScroll: true })
+  }, [conversationReading?.opened, conversationReading?.identity])
   const { unifiedItems, segments } = useMemo(() => {
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
     const nativeIds = new Set(page?.items.filter((item) => item.kind === 'user-message').map((item) => item.id))
-    // Only move an input into the source thread when that exact record is present there.
-    // A missing page prop cannot erase already observed native input facts.
-    const observedMessages = userMessages?.filter((message) => message.source.kind !== 'native' || !page ||
-      message.source.providerId !== page.source.providerId || message.source.nativeSessionId !== page.source.nativeSessionId ||
-      !nativeIds.has(message.rawId))
+    // A historical native window contains only its own source records. Recent facts stay
+    // in the shared current window; a missing/different source never erases observed input.
+    const observedMessages = userMessages?.filter((message) => {
+      if (message.source.kind !== 'native' || !page) return true
+      const sameSource = message.source.providerId === page.source.providerId && message.source.nativeSessionId === page.source.nativeSessionId
+      if (conversationReading?.nativeSourceFacts && !sameSource) return false
+      return !sameSource || !readingWindow.historical && !nativeIds.has(message.rawId)
+    })
     return buildActivityEntries(items, observedMessages)
-  }, [items, userMessages, nativeHistoryPage, sessionId])
+  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, conversationReading?.nativeSourceFacts])
   const placed = useMemo(() => placeSegments(segments), [segments])
+  const nativeSupplement = (entry: Segment): boolean => entry.kind === 'user-message' && entry.message.source.kind === 'native'
+  const observations = placed.reduce((summary, { entry }) => {
+    if (nativeSupplement(entry)) return summary
+    if (entry.kind === 'user-message') {
+      summary.count++
+      if (entry.message.deliveryStatus === 'failed') summary.failed++
+      if (entry.message.deliveryStatus === 'unverified') summary.unconfirmed++
+    } else for (const item of entry.kind === 'run' ? entry.items : [entry.item]) {
+      summary.count++
+      if (item.status === 'failed') summary.failed++
+      if (item.kind === 'user_message' && item.status === 'streaming') summary.unconfirmed++
+    }
+    return summary
+  }, { count: 0, failed: 0, unconfirmed: 0 })
+  const observationRef = useRef<HTMLDetailsElement>(null)
+  const [observationDisclosure, setObservationDisclosure] = useState({ sessionId, open: false })
+  const observationOpen = observationDisclosure.sessionId === sessionId && observationDisclosure.open
+  const observationVisible = observationOpen && conversationReading?.enabled !== false
+  const readObservationImage = useCallback<ReadPastedImage>(path => observationVisible && readPastedImage
+    ? readPastedImage(path) : Promise.resolve(null), [observationVisible, readPastedImage])
+  const expandObservationFor = (target: Element): void => {
+    const disclosure = observationRef.current
+    if (!disclosure?.contains(target)) return
+    disclosure.open = true
+    setObservationDisclosure({ sessionId, open: true })
+  }
   const origin = useMemo(() => {
     for (const it of unifiedItems) {
       const t = 'createdAt' in it ? it.createdAt : it.recordedAt
@@ -422,22 +526,20 @@ export function ActivityView({
   }, [unifiedItems])
   const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems),
     [sessionId, nativeHistoryPage, unifiedItems])
-  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('1h')
-  const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow), [rulerRecords, rulerWindow])
+  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
+  const [visible, setVisible] = useState<Set<string>>(new Set())
+  const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
   const activity = useMemo(() => projectAgentActivityHistory(items), [items])
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
   const selectedRecord = rulerRecords.find(record => record.id === selectedRecordId)
   const selectedIndex = selectedRecord?.target.kind === 'observed' ? selectedRecord.target.index : null
   const rulerSelectedIndex = ruler.items.findIndex(record => record.id === selectedRecordId)
-  const [visible, setVisible] = useState<Set<string>>(new Set())
   const scale = ruler.scale
   const band = useMemo(() => {
     const indices = ruler.items.flatMap((record, index) => visible.has(record.id) ? [index] : [])
     return rulerBand(scale, indices.length ? { from: Math.min(...indices), to: Math.max(...indices) } : null)
   }, [ruler.items, scale, visible])
 
-  const logRef = useRef<HTMLDivElement>(null)
-  const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
   const [locatedMessageKey, setLocatedMessageKey] = useState<string | null>(null)
   useEffect(() => {
     if (!locatedMessageKey) return
@@ -447,8 +549,6 @@ export function ActivityView({
   useEffect(() => { setLocatedMessageKey(null) }, [sessionId])
   // 跟随状态是一个**值**，判定全在 lib 里；组件只负责把几何量喂进去、把决定执行掉。
   // 这样"什么时候该贴底"能被断言，而不是埋在一个 effect 里——本仓库测试不跑 effect。
-  const followRef = useRef(initFollowState())
-  const [showJump, setShowJump] = useState(false)
   const lastSessionIdRef = useRef<string | null>(null)
   const currentSessionId = sessionId
 
@@ -469,7 +569,7 @@ export function ActivityView({
 
   const pinToBottom = (): void => {
     const el = feedEl ?? logRef.current?.closest('.activity-feed')
-    if (el instanceof HTMLElement) el.scrollTop = el.scrollHeight
+    if (el instanceof HTMLElement) { el.scrollTop = el.scrollHeight; edgeRef.current.programmaticTop = el.scrollTop }
   }
 
   const jumpToLatest = (): void => {
@@ -480,6 +580,29 @@ export function ActivityView({
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }
 
+  const handleReadingWheel = (event: WheelEvent<HTMLDivElement>): void => {
+    const el = event.currentTarget
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1)
+    requestReadingEdge(Math.sign(delta), el, delta)
+  }
+  const requestReadingEdge = (direction: number, el: HTMLElement, delta = 0): void => {
+    // Only this wheel/key input can request a page. Passive scroll, layout and
+    // anchor restoration update reading position without producing more reads.
+    const edges = edgeRef.current
+    const distance = Math.max(80, el.clientHeight * 2)
+    const nextTop = Math.max(0, el.scrollTop + delta)
+    const earlier = nextTop <= distance
+    const newer = el.scrollHeight - el.clientHeight - nextTop <= distance
+    if (!earlier) edges.earlier = false
+    if (!newer) edges.newer = false
+    if (!conversationReading?.enabled || readingWindow.loading) return
+    if (direction < 0 && earlier && !edges.earlier && readingWindow.hasMore) {
+      edges.earlier = true; readingWindow.readEarlier()
+    } else if (direction > 0 && newer && !edges.newer && readingWindow.hasNewer) {
+      edges.newer = true; readingWindow.readNewer()
+    }
+  }
+
   // 用户主动往上滚才脱离；内容变长不算——两者都会让"离底部的距离"变大，能区分它们的证据是
   // scrollTop 本身有没有减少。判定在 lib 里，这里只把事件折进去。
   useEffect(() => {
@@ -488,31 +611,44 @@ export function ActivityView({
     const handle = (): void => {
       const geometry = feedGeometry()
       if (!geometry) return
-      followRef.current = onScroll(followRef.current, geometry)
+      const programmatic = edgeRef.current.programmaticTop === geometry.scrollTop
+      edgeRef.current.programmaticTop = null
+      if (!programmatic && geometry.scrollTop !== followRef.current.lastScrollTop) anchorRef.current = conversationReadingAnchor(el)
+      followRef.current = programmatic
+        ? { ...followRef.current, lastScrollTop: geometry.scrollTop }
+        : onScroll(followRef.current, geometry)
       setShowJump(shouldShowJumpToLatest(followRef.current))
     }
     el.addEventListener('scroll', handle, { passive: true })
     return () => el.removeEventListener('scroll', handle)
-  }, [feedEl])
+  }, [feedEl, readingWindow.historical, readingWindow.loading, readingWindow.hasMore, readingWindow.hasNewer, conversationReading?.enabled])
 
   // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
   // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
   useEffect(() => {
     const geometry = feedGeometry()
-    if (!geometry) return
-    const last = unifiedItems.at(-1)
+    if (!geometry || readingWindow.historical) return
+    const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
+    const nativeTail = page?.items.at(-1)
+    const observedTail = unifiedItems.at(-1)
+    // The native source owns the reading tail. Inspect only its final record, never the whole page.
+    const nativeLength = nativeTail?.contentParts.reduce((length, part) => length +
+      Object.values(part).reduce<number>((size, value) => size + (typeof value === 'string' ? value.length : 0), 0), 0)
     const decision = onContentChange(followRef.current, {
-      itemCount: unifiedItems.length,
-      lastItemId: last?.id ?? null,
-      lastItemLength: last?.content?.length ?? 0
+      itemCount: unifiedItems.length + (page?.items.length ?? 0),
+      lastItemId: nativeTail ? JSON.stringify([page!.source.providerId, page!.source.nativeSessionId, nativeTail.id]) : observedTail?.id ?? null,
+      lastItemLength: nativeLength ?? observedTail?.content?.length ?? 0
     }, geometry)
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
-  }, [unifiedItems, feedEl])
+  }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical])
 
   useEffect(() => {
     if (!revealRequest || !feedEl) return
+    const target = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
+      .find(node => node.dataset.messageSourceKey === revealRequest.sourceKey)
+    if (target && revealRequest.isCurrent()) expandObservationFor(target)
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
       const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
@@ -546,9 +682,12 @@ export function ActivityView({
     const el = host ? segmentEls.current.get(host.key) : undefined
     // Reuse the same scroll primitive the rest of the app uses to bring a row into view; there is no
     // second scroll controller for the Activity log.
+    if (el) expandObservationFor(el)
     el?.scrollIntoView({ block: 'nearest' })
   }
 
+  // Retain confirmed DOM visibility through observation handoff, never message bodies.
+  const visibleShells = useRef<{ feed: HTMLDivElement; sessionId: string; shells: Set<Element> } | null>(null)
   // Register committed shells once. Disclosure registers only added descendants, never a scroll-frame scan.
   useEffect(() => {
     if (!feedEl) return
@@ -561,38 +700,76 @@ export function ActivityView({
       if (key) { const ids = expected.get(key) ?? []; ids.push(record.id); expected.set(key, ids) }
     }
     const mapping = new Map<Element, readonly string[]>()
-    const onscreen = new Set<Element>()
-    const recompute = (): void => setVisible(new Set([...onscreen].flatMap(el => mapping.get(el) ?? [])))
-    const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
-      recompute()
-    }, { root: feedEl, rootMargin: '-64px 0px 0px 0px', threshold: 0 })
+    const previous = visibleShells.current
+    const onscreen = previous?.feed === feedEl && previous.sessionId === sessionId ? previous.shells : new Set<Element>()
+    visibleShells.current = { feed: feedEl, sessionId, shells: onscreen }
+    let active = true
+    const recompute = (): void => {
+      if (!active) return
+      const next = new Set([...onscreen].flatMap(el => mapping.get(el) ?? []))
+      setVisible(current => current.size === next.size && [...current].every(id => next.has(id)) ? current : next)
+    }
+    const ruler = feedEl.querySelector<HTMLElement>('.activity-ruler')
+    let headerHeight = -1
+    let observer: IntersectionObserver
+    function observeViewport(): void {
+      if (!active) return
+      const height = Math.ceil(ruler?.getBoundingClientRect().height ?? 0)
+      if (height === headerHeight) return
+      headerHeight = height
+      ruler?.closest<HTMLElement>('.activity-feed-frame')?.style.setProperty('--activity-reading-top', `${height + 8}px`)
+      observer?.disconnect()
+      const current = new IntersectionObserver(entries => {
+        if (!active || observer !== current) return
+        for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
+        recompute()
+      }, { root: feedEl, rootMargin: `-${height}px 0px 0px 0px`, threshold: 0 })
+      observer = current
+      for (const node of mapping.keys()) observer.observe(node)
+    }
+    observeViewport()
+    const resize = new ResizeObserver(observeViewport)
+    if (ruler) resize.observe(ruler)
+    function unregister(node: Element): void {
+      observer.unobserve(node)
+      mapping.delete(node)
+      onscreen.delete(node)
+    }
     function register(node: HTMLElement): void {
       const id = node.dataset.nativeRecordId ?? node.dataset.nativeStepId
       const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource
       const key = id && source ? JSON.stringify([source, id]) : node.dataset.segmentKey
-      const records = key ? expected.get(key) : undefined
-      if (records && !mapping.has(node)) { mapping.set(node, records); observer.observe(node) }
+      // Only a folded header represents the group's records. Expanded steps keep their own visibility.
+      const group = node.matches('.wf-head[aria-expanded="false"]') ? node.closest<HTMLElement>('[data-native-record-ids]') : null
+      const records = group && source
+        ? (JSON.parse(group.dataset.nativeRecordIds ?? '[]') as string[]).flatMap(recordId => expected.get(JSON.stringify([source, recordId])) ?? [])
+        : key ? expected.get(key) : undefined
+      if (!records?.length) { unregister(node); return }
+      mapping.set(node, records)
+      observer.observe(node)
     }
-    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key]'
+    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key], [data-native-record-ids] .wf-head'
     feedEl.querySelectorAll<HTMLElement>(selector).forEach(register)
+    for (const node of onscreen) if (!mapping.has(node) || !node.isConnected) onscreen.delete(node)
+    recompute()
     const mutations = new MutationObserver(entries => {
+      if (!active) return
       for (const entry of entries) {
+        if (entry.type === 'attributes' && entry.target instanceof HTMLElement && entry.target.matches('[data-native-record-ids] .wf-head')) register(entry.target)
         for (const added of entry.addedNodes) if (added instanceof HTMLElement) {
           if (added.matches(selector)) register(added)
           added.querySelectorAll<HTMLElement>(selector).forEach(register)
         }
         for (const removed of entry.removedNodes) if (removed instanceof HTMLElement) {
-          const unregister = (node: Element): void => { observer.unobserve(node); mapping.delete(node); onscreen.delete(node) }
           if (removed.matches(selector)) unregister(removed)
           removed.querySelectorAll(selector).forEach(unregister)
         }
       }
       recompute()
     })
-    mutations.observe(feedEl, { childList: true, subtree: true })
-    return () => { mutations.disconnect(); observer.disconnect() }
-  }, [rulerRecords, placed, feedEl])
+    mutations.observe(feedEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] })
+    return () => { active = false; mutations.disconnect(); resize.disconnect(); observer.disconnect() }
+  }, [rulerRecords, placed, feedEl, sessionId])
 
   const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
   locateRef.current.source = nativeHistoryPage
@@ -621,13 +798,60 @@ export function ActivityView({
 
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
-  const hasItems = items.length > 0
-  const readNotice = <UserMessageReadNotice read={userMessageRead} />
+  const hasItems = unifiedItems.length > 0
+  // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
+  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.hasEarlierNavigation || readingWindow.historical ||
+    conversationReading.opened || readingWindow.newerOutside || readingWindow.error || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
+    <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
+      <div className="activity-feed__reading-entry">
+        {readingWindow.hasMore ? (
+          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading || !conversationReading.enabled}
+            onClick={readingWindow.readEarlier}><ChevronUp size={12} aria-hidden="true" />Earlier</button>
+        ) : null}
+        {readingWindow.hasEarlierNavigation || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? (
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            aria-label="Current" title="Return to latest messages" onClick={readingWindow.showCurrent}>
+            <ArrowDown size={12} aria-hidden="true" />Current</button>
+        ) : null}
+        {conversationReading.nativeSourceFacts?.nativeConfirmation ? <>
+          <span className="activity-feed__reading-status">{readingWindow.previousSource ? 'Previous native source' : 'Current native source'}</span>
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            onClick={readingWindow.showCurrentSource}>Current source</button>
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            onClick={readingWindow.showPreviousSource}>Previous source</button>
+        </> : null}
+        {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
+          className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
+          onClick={conversationReading.onClose}><ArrowLeft size={12} aria-hidden="true" />Return</button> : null}
+        {readingAction}
+      </div>
+    </div>
+  ) : null
+  const readNotice = <>
+    {readingNotice}
+    {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Submitted-message read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
+    {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
+      <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
+    {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
+      onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
+  </>
+
+  // Loading is a sibling overlay: neither scroll height nor card geometry depends on pending work.
+  const renderSurface = (content: JSX.Element): JSX.Element => <div className="activity-feed-frame">
+    {content}
+    {conversationReading?.enabled !== false && (readingWindow.loading || userMessageRead?.loading) ? <div className="activity-feed__loading-layer">
+      <span role="status" aria-live="polite" className="activity-feed__reading-status">
+        <WorkflowStatusGlyph status="running" />Reading records…
+      </span>
+    </div> : null}
+  </div>
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
-    return (
-      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+    return renderSurface(
+      <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={handleReadingWheel}>
         {readNotice}
+        {readingEntry}
         {fileReferenceNotice}
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
@@ -635,10 +859,12 @@ export function ActivityView({
       </div>
     )
   }
-  if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, items)) {
-    return (
-      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+  if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, hasItems ? items : [])) {
+    return renderSurface(
+      <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={handleReadingWheel}>
         {readNotice}
+        {readingEntry}
         {fileReferenceNotice}
         {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
@@ -649,9 +875,11 @@ export function ActivityView({
   // 正在想、但首行还没落地：显示"在进行"而不是空状态。一个正在工作的东西显示成空，
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
   if (!hasUserMessages && !hasItems && !hasNativeRecords) {
-    return (
-      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+    return renderSurface(
+      <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={handleReadingWheel}>
         {readNotice}
+        {readingEntry}
         {fileReferenceNotice}
         <WorkingIndicator />
       </div>
@@ -667,10 +895,85 @@ export function ActivityView({
     }
   }
 
+  const renderPlaced = ({ entry, key }: PlacedSegment): JSX.Element => {
+  const readEntryImage = readPastedImage && (nativeSupplement(entry) ? readPastedImage : readObservationImage)
+  // Identity is resolved once here; the shared message only renders that verdict.
+  const speaker = entry.kind === 'run'
+    ? null
+    : entry.kind === 'user-message'
+      ? speakerOfUserMessage(entry.message)
+      : speakerOf(entry.item)
+  const described = speaker ? describeSpeaker?.(speaker) : undefined
   return (
-    <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+    // One wrapper per segment carries the scroll target, the observer key, and the selection
+    // marker, so the three log registers below stay unaware of the ruler wiring.
+    <div
+      key={key}
+      className="activity-log__segment"
+      ref={registerSegment(key)}
+    >
+      {entry.kind === 'run' ? (
+        <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
+      ) : entry.kind === 'user-message' ? (
+        <ConversationMessage
+          compact={!nativeSupplement(entry)}
+          messageId={entry.message.id}
+          conversationSessionId={sessionId}
+          {...(executionHostId ? { executionHostId } : {})}
+          inputSource={entry.message.source}
+          located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
+          {...(describeSpeaker ? { describeSpeaker } : {})}
+          content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
+          {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
+          {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
+          origin={origin}
+          speaker={speaker!}
+          name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
+          workspaceRoot={workspaceRoot}
+          homeDir={homeDir}
+          {...(described?.providerId ? { providerId: described.providerId } : {})}
+          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+          {...(readEntryImage ? { readPastedImage: readEntryImage } : {})}
+          {...(openHttpLink ? { openHttpLink } : {})}
+          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
+          {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+        />
+      ) : speaker ? (
+        <CapturedConversationMessage
+          compact
+          item={entry.item}
+          {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
+            !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
+            ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
+          conversationSessionId={sessionId}
+          {...(executionHostId ? { executionHostId } : {})}
+          {...(entry.item.kind === 'user_message' || speaker.role === 'system' || entry.item.sourceDevice || entry.item.sourceChannel ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceChannel ? { channel: entry.item.sourceChannel } : {}), ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
+          located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
+          {...(describeSpeaker ? { describeSpeaker } : {})}
+          {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
+          origin={origin}
+          speaker={speaker}
+          workspaceRoot={workspaceRoot}
+          homeDir={homeDir}
+          {...(described ?? {})}
+          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+          {...(readEntryImage ? { readPastedImage: readEntryImage } : {})}
+          {...(openHttpLink ? { openHttpLink } : {})}
+          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
+          {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+        />
+      ) : (
+        <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot} />
+      )}
+    </div>
+  )
+  }
+
+  return renderSurface(
+    <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={handleReadingWheel}>
       {readNotice}
-        {fileReferenceNotice}
+      {fileReferenceNotice}
       {capability === 'unavailable' ? (
         <div className="activity-feed__empty" role="status">
           This executor does not provide structured activity. Terminal remains available.
@@ -681,6 +984,7 @@ export function ActivityView({
         scale={scale}
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
         band={band}
+        {...(conversationReading ? { reading: { loading: readingWindow.loading, hasMore: readingWindow.hasMore } } : {})}
         recentFraction={ruler.recentFraction}
         activity={activity.segments}
         controls={close => <ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
@@ -697,10 +1001,35 @@ export function ActivityView({
           ) : null
         }
       /> : null}
+      {observations.count > 0 ? <details key={sessionId} ref={observationRef} className="activity-feed__observations"
+        open={observationOpen} onToggle={event => {
+          if (event.currentTarget === observationRef.current) setObservationDisclosure({ sessionId, open: event.currentTarget.open })
+        }}>
+        <summary className="activity-feed__observation-source">
+          <ChevronRight size={12} aria-hidden="true" />
+          <span>投递与运行详情</span>
+          <span className="activity-feed__observation-count">· {observations.count} 项</span>
+          {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}
+          {observations.unconfirmed > 0 ? <span className="activity-feed__observation-issue">{observations.unconfirmed} submissions unconfirmed</span> : null}
+        </summary>
+        <div className="activity-feed__observation-scope">包含发送回执和运行观察，不代表 Agent 已接纳的对话消息</div>
+        <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
+      </details> : null}
+      <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
+      {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
-        renderProcess={(props) => <NativeProcessObservation {...props} />}
+        {...(historyBoundary && boundaryIndex > 0 ? {
+          recordBoundary: { ...historyBoundary, content: <div className="activity-feed__history-divider" role="separator">
+            以上是历史消息（{boundaryTime === undefined ? '时间未记录' : new Date(boundaryTime).toLocaleString()}）
+          </div> }
+        } : {})}
+        renderQuestionNotice={renderConversationQuestionNotice}
+        {...(onReplyQuestion ? { onReplyQuestion } : {})}
+        {...(renderMessageActions ? { renderMessageActions } : {})}
+        renderProcess={(props) => <NativeProcessObservation {...props} compact={true} />}
         sessionId={sessionId}
+        {...(executionHostId ? { executionHostId } : {})}
         locatedMessageKey={locatedMessageKey}
         {...(onContinue ? { onContinue } : {})}
         workspaceRoot={workspaceRoot}
@@ -711,76 +1040,13 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
-      {placed.length > 0 ? <div className="activity-feed__observation-source">Submitted messages &amp; Hook observations · Separate recorded source</div> : null}
-
-      <div className="activity-log" ref={logRef}>
-        {placed.map(({ entry, key, from }) => {
-          // Identity is resolved once here; the shared message only renders that verdict.
-          const speaker = entry.kind === 'run'
-            ? null
-            : entry.kind === 'user-message'
-              ? speakerOfUserMessage(entry.message)
-              : speakerOf(entry.item)
-          const described = speaker ? describeSpeaker?.(speaker) : undefined
-          return (
-            // One wrapper per segment carries the scroll target, the observer key, and the selection
-            // marker, so the three log registers below stay unaware of the ruler wiring.
-            <div
-              key={key}
-              className="activity-log__segment"
-              ref={registerSegment(key)}
-            >
-              {entry.kind === 'run' ? (
-                <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
-              ) : entry.kind === 'user-message' ? (
-                <ConversationMessage
-                  messageId={entry.message.id}
-                  conversationSessionId={sessionId}
-                  inputSource={entry.message.source}
-                  located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
-                  {...(describeSpeaker ? { describeSpeaker } : {})}
-                  content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
-                  {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
-                  {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
-                  origin={origin}
-                  speaker={speaker!}
-                  name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
-                  workspaceRoot={workspaceRoot}
-                  homeDir={homeDir}
-                  {...(described?.providerId ? { providerId: described.providerId } : {})}
-                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-                  {...(readPastedImage ? { readPastedImage } : {})}
-                  {...(openHttpLink ? { openHttpLink } : {})}
-                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
-                  {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-                />
-              ) : speaker ? (
-                <CapturedConversationMessage
-                  item={entry.item}
-                  conversationSessionId={sessionId}
-                  {...(entry.item.kind === 'user_message' || entry.item.sourceDevice ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
-                  located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
-                  {...(describeSpeaker ? { describeSpeaker } : {})}
-                  origin={origin}
-                  speaker={speaker}
-                  workspaceRoot={workspaceRoot}
-                  homeDir={homeDir}
-                  {...(described ?? {})}
-                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-                  {...(readPastedImage ? { readPastedImage } : {})}
-                  {...(openHttpLink ? { openHttpLink } : {})}
-                  {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.item)) } : {})}
-                  {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-                />
-              ) : (
-                <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot} />
-              )}
-            </div>
-          )
-        })}
-      </div>
-      {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
-      {showJump ? (
+      {readingWindow.historical || readingWindow.newerOutside ? <div className="activity-feed__read-notice activity-feed__newer-edge" data-conversation-current-entry>
+        <span role="status" aria-live="polite">{readingWindow.error ?? (readingWindow.newerOutside ? 'Current records updated or outside this window.' : 'Viewing earlier records.')} {readingWindow.hasNewer ? '较新记录可向下滚动继续读取' : ''}</span>
+        {readingWindow.hasNewer ? <button type="button" className="small-button" disabled={readingWindow.loading || !conversationReading?.enabled} onClick={readingWindow.readNewer}>Newer</button> : null}
+        <button type="button" className="small-button" disabled={!conversationReading?.enabled} onClick={readingWindow.showCurrent}>Show latest messages</button>
+      </div> : null}
+      {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
+      {showJump && !readingWindow.historical ? (
         <button
           type="button"
           className="activity-feed__jump"

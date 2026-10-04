@@ -5,13 +5,13 @@ import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
-import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer } from './ConversationRecordSequence.js'
+import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
+  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
 export type ConversationQuestionReply = (input: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'answers' | 'operationId'>) => Promise<AgentSessionQuestionReplyReceipt>
 
@@ -23,6 +23,7 @@ type Props = ReadingProps & {
   describeSpeaker?: DescribeSpeaker
   onContinue?: (prompt: string) => void
   locatedMessageKey?: string | null
+  recordBoundary?: ConversationRecordBoundary
   renderProcess?: ConversationProcessRenderer
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   /** Hosts may retain an existing annotation/disclosure identity without replacing presentation. */
@@ -32,7 +33,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
@@ -88,7 +89,7 @@ export const ConversationView = memo(function ConversationView({
     </div> : null}
     <ConversationRecordSequence items={records}
       sourceKey={JSON.stringify([sessionId, page.source.providerId, page.source.nativeSessionId])}
-      renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} />
+      renderRecord={renderRecord} {...(recordBoundary ? { recordBoundary } : {})} {...(renderProcess ? { renderProcess } : {})} />
   </section>
 })
 

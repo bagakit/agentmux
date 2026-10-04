@@ -130,6 +130,10 @@
       "types": "./dist/runtime-client.d.ts",
       "import": "./dist/runtime-client.js"
     },
+    "./prompt-reaction": {
+      "types": "./dist/prompt-reaction.d.ts",
+      "import": "./dist/prompt-reaction.js"
+    },
     "./public-rpc-relay": {
       "types": "./dist/public-rpc-relay.d.ts",
       "import": "./dist/public-rpc-relay.js"

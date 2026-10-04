@@ -22,7 +22,6 @@
   padding:var(--sp-3) 18px;
   background: var(--surface-0);
   box-shadow: inset 0 -1px var(--line-soft), 0 8px 28px color-mix(in oklab, var(--bg) 24%, transparent);
-  backdrop-filter: blur(14px);
 }
 .activity-ruler__summary { grid-row:1; min-width:0; display:flex; align-items:baseline; flex-wrap:wrap; gap:var(--sp-2) var(--sp-4); }
 .activity-ruler__stack { grid-row:2; grid-column:1 / -1; min-width:0; }
@@ -64,7 +63,6 @@
 .activity-ruler__span-arrow { margin:0 var(--sp-1); opacity: .55; }
 /* 耗时是这一行里唯一"被算出来"的数，给它一档更亮的字色，让扫视先落在它上面。 */
 .activity-ruler__span-elapsed { color: var(--text-2); }
-.activity-ruler__note { grid-row:1; display: inline-flex; color: var(--text-3); cursor: help; }
 /* The whole track is one focusable slider (click + keyboard both resolve to an event). Its focus ring
    must be visible like every other interactive control in the surface. */
 .activity-ruler__track { outline: none; cursor: pointer; }
@@ -72,24 +70,13 @@
 /* The selected tick — where a click or keyboard landed — stands off the rail so the jump target reads
    at a glance without disturbing the honest tick positions around it. */
 .activity-ruler__tick[data-selected] { width: 3px; height: 18px; transform: translate(-1.5px, -50%); box-shadow: 0 0 0 2px var(--surface-0); }
-/* The visible-range band frames which stretch of the trace the log is currently showing. It is only
-   ever rendered when the range is a real subset (see rulerBand), so it never spans the full width and
-   claims "everything is on screen". A dashed variant keeps it honest on the ordinal axis. */
+/* Position only; conversation-ruler.css owns the range material and motion. */
 .activity-ruler__band {
   position: absolute;
   top: 50%;
-  height: 16px;
   /* 与 tick 同一条居中规则。band 没有水平偏移——它的 left/width 就是它要框的那段范围本身。 */
   transform: translateY(-50%);
-  min-width: 2px;
-  border-radius: 2px;
-  background: color-mix(in oklab, var(--green) 16%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--green) 42%, transparent);
   pointer-events: none;
-}
-.activity-ruler__band[data-axis='ordinal'] {
-  background: color-mix(in oklab, var(--text-3) 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-3) 40%, transparent);
 }
 /* The hover/focus readout reuses the terminal link preview's anchoring rule so it never covers the
    segment it describes; it flips above/below via data-placement exactly as that preview does. */
@@ -107,8 +94,9 @@
     var(--overlay-surface);
   box-shadow: var(--elev-2), var(--hl-strong), 0 0 0 1px var(--scrim-2);
   pointer-events: none;
-  animation: menu-in var(--dur-enter) ease;
+  animation: activity-ruler-readout-enter var(--dur-enter) var(--ease-enter);
 }
+@keyframes activity-ruler-readout-enter { from { opacity: 0; } to { opacity: 1; } }
 .activity-ruler__readout[data-placement='above'] { transform: translateY(-100%); }
 /* 引文那一路比时刻宽：时刻是两行短数字，原话是一段可读的话。宽度上限按可读行长取（一行 45-75
    个字符是长期成立的可读区间），而不是按面板好看取——读不完的引文等于没给。面板本身
@@ -335,3 +323,23 @@
 }
 
 .log-row__time[tabindex]:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+/* One natural-flow entry with the messages; never a second toolbar or viewport. */
+.activity-feed__reading { display: flex; justify-content: center; align-items: center; min-height: 40px; padding: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.activity-feed__reading-entry { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--sp-1); max-width: 100%; padding: var(--sp-1); border-radius: 999px; background: color-mix(in oklab, var(--text) 3%, transparent); }
+.activity-feed__reading-action, .activity-feed__reading-status { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 24px; padding: var(--sp-1) var(--sp-2); white-space: nowrap; line-height: 16px; }
+.activity-feed__reading-action { border: 0; border-radius: 999px; background: transparent; color: var(--text-3); font: inherit; cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast); }
+.activity-feed__reading-action:hover:not(:disabled) { color: var(--text); background: color-mix(in oklab, var(--text) 5%, transparent); }
+.activity-feed__reading-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.activity-feed__reading-action:disabled { cursor: default; opacity: .5; }
+.activity-feed__reading-status { color: var(--text-2); animation: activity-reading-arrive var(--dur-fast) var(--ease-enter) both; }
+.activity-feed__reading-status > svg { flex: none; color: var(--blue); }
+@keyframes activity-reading-arrive { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .activity-feed__reading-status { animation: none; } .activity-feed__reading-action { transition: none; } }
+.activity-feed__history-divider { display: flex; align-items: center; gap: 12px; padding: 18px 0 10px; color: var(--text-3); font-size: 10px; }
+.activity-feed__history-divider::before, .activity-feed__history-divider::after { content: ''; height: 1px; flex: 1; background: var(--line-soft); }
+
+/* Pending work floats above this local viewport; it never inserts a row into the message flow. */
+.activity-feed-frame { position: relative; height: 100%; min-height: 0; }
+.activity-feed__loading-layer { position: absolute; z-index: 3; top: var(--activity-reading-top, 8px); inset-inline: 12px; display: flex; justify-content: center; pointer-events: none; }
+.activity-feed__loading-layer > .activity-feed__reading-status { min-height: 28px; padding: 5px 12px; border-radius: 999px; color: var(--text-2); background: color-mix(in oklab, var(--surface-1) 88%, transparent); box-shadow: var(--elev-1), inset 0 0 0 1px var(--line-soft); backdrop-filter: blur(12px); }

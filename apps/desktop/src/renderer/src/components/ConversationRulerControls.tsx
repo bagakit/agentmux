@@ -3,7 +3,7 @@ import { type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import * as Menu from './HoverDropdownMenu'
 import { ClusterEntries } from './ConversationAxis'
 import type { RulerRecord, RulerWindow } from '../lib/conversation-ruler'
-const labels: Record<RulerWindow, string> = { '15m': '15m', '1h': '1h', '24h': '24h', all: 'All loaded' }
+const labels: Record<RulerWindow, string> = { '6h': '6h', '12h': '12h', '24h': '24h', '3d': '3d', '7d': '7d', all: 'All loaded' }
 export function ConversationRulerControls({ window, onWindow, untimed, onSelect, describe, onOpen }: {
   window: RulerWindow; onWindow: (value: RulerWindow) => void; untimed: readonly RulerRecord[]
   onSelect: (record: RulerRecord) => void; describe: DescribeSpeaker; onOpen: () => void
