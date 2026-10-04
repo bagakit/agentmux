@@ -1,6 +1,6 @@
 import { hostedCarrierPerformance } from './performance-diagnostics.js'
 import { AgentMuxError } from './errors.js'
-import { Buffer } from 'node:buffer'
+import { base64 } from '@scure/base'
 
 type TransferBudget = { minimumBytes: number }
 function reserveTransferBytes(budget: TransferBudget | undefined, bytes: number): void {
@@ -81,18 +81,26 @@ import type { AgentMuxHostedTransferChunk } from './hosted-client-contract.js'
 export const AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES = 48 * 1024
 export const AGENTMUX_HOSTED_TRANSFER_MAX_BYTES = 32 * 1024 * 1024
 export function encodeBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
+  return typeof globalThis.Buffer === 'function'
+    ? globalThis.Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')
+    : base64.encode(bytes)
 }
 function isBase64(data: string): boolean {
   const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
   // A flat scan keeps budget-sized images from exhausting the RegExp call stack.
-  return data.length % 4 === 0 && !/[^A-Za-z0-9+/]/u.test(data.slice(0, data.length - padding))
+  if (data.length % 4 !== 0 || /[^A-Za-z0-9+/]/u.test(data.slice(0, data.length - padding))) return false
+  // Buffer accepts nonzero padding bits; require the same canonical bytes in both platforms.
+  const tail = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.indexOf(data[data.length - padding - 1] ?? '')
+  return padding === 0 || (tail & (padding === 2 ? 15 : 3)) === 0
 }
 export function decodeBase64(data: string): Uint8Array {
-  if (!isBase64(data)) {
-    throw new AgentMuxError('RPC bytes are not valid base64.', 'CONTROL_PROTOCOL_ERROR')
+  try {
+    if (isBase64(data)) return typeof globalThis.Buffer === 'function'
+      ? new Uint8Array(globalThis.Buffer.from(data, 'base64'))
+      : base64.decode(data)
   }
-  return new Uint8Array(Buffer.from(data, 'base64'))
+  catch { /* Noncanonical padding is also malformed protocol data. */ }
+  throw new AgentMuxError('RPC bytes are not valid base64.', 'CONTROL_PROTOCOL_ERROR')
 }
 /** An observation carrier, never a replay ledger or a byte authority. */
 export function hostedTransfer(value: unknown, transferId: string): AgentMuxHostedTransferChunk[] {
