@@ -170,16 +170,16 @@ export class AgentPromptSubmissionCoordinator {
   /** Called outside the input lane. A claimed/unknown original operation is never prepared anew. */
   async qualifyInputTransport(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string,
     prompt: string, signal: AbortSignal, onPreparationStarted?: () => void,
-    protocolInput?: AgentPromptProtocolInputBoundary): Promise<AgentPromptTransportQualification | undefined> {
+    protocolInput?: AgentPromptProtocolInputBoundary, deadline = Date.now() + 40_000): Promise<AgentPromptTransportQualification | undefined> {
     const provider = this.deps.providers.get(session.providerId)
-    if (!provider.preparePromptExecutionTransport) return undefined
+    const direct = provider.catalog.capabilities.promptExecution?.immediate === 'native-steer'
+    if (!direct && !provider.preparePromptExecutionTransport) return undefined
     const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
     const previous = current.promptCompletionAdmission
     const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
       !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
     if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId || unfinished) return undefined
     onPreparationStarted?.()
-    const deadline = Date.now() + 40_000
     try {
       this.deps.assertAgentRun(current, run)
       if (run.state.type !== 'running' || run.acceptedInputBytes === null) {
@@ -192,8 +192,14 @@ export class AgentPromptSubmissionCoordinator {
           current.retiredRuns.at(-1)?.runId === current.nativePromptPredecessor.previousRun.runId
           ? { nativePromptPredecessor: current.nativePromptPredecessor } : {}) }
       const evidence = await provider.readPromptExecutionEvidence?.(context)
-      const transport = await provider.preparePromptExecutionTransport({ ...context, signal,
-        ...(evidence ? { nativeSourceId: evidence.sourceId } : {}) })
+      // Direct steering already requires read + verify. Freeze that source without
+      // imposing the interrupt strategy's optional preparation factory.
+      const nativeSourceId = evidence?.sourceId
+      const transport = direct && nativeSourceId ? { nativeSourceId,
+        verifyCurrentTransport: async (fresh: AgentProviderPromptExecutionContext) =>
+          await provider.verifyPromptExecutionTransport!({ ...fresh, nativeSourceId }) }
+        : !direct ? await provider.preparePromptExecutionTransport!({ ...context, signal,
+          ...(evidence ? { nativeSourceId: evidence.sourceId } : {}) }) : undefined
       if (!evidence || !transport || transport.nativeSourceId !== evidence.sourceId) {
         throw new AgentMuxError('The original native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
       }
@@ -578,26 +584,6 @@ export class AgentPromptSubmissionCoordinator {
       session.retiredRuns.at(-1)?.runId === session.nativePromptPredecessor.previousRun.runId) {
       Object.assign(nativeContext, { nativePromptPredecessor: session.nativePromptPredecessor })
     }
-    if (nativeSteer && !rejoiningFrozenPlan) {
-      // Native steering needs the current target and writable source, not a new
-      // redraw, an interrupt receipt or a completed-turn epoch. Read the already
-      // authoritative complete pane while preserving the original input fence.
-      const preparationSignal = AbortSignal.any([AbortSignal.timeout(8_000), ...(signal ? [signal] : []), ...(renderSignal ? [renderSignal] : [])])
-      const context = { ...nativeContext, signal: preparationSignal }
-      try {
-        const evidence = await provider.readPromptExecutionEvidence?.(context)
-        if (!evidence) throw new AgentMuxError('The current native input source is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
-        await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false,
-          screen => Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(screen.snapshot(), 'native-steer') !== 'unavailable',
-          { timeoutMs: 8_000, requireCompleteFrame: true, signal: preparationSignal,
-            timeoutMessage: 'The current native composer is unconfirmed; ordinary terminal input remains available.',
-            terminalMessage: 'The original Agent Run ended before native steering.' })
-        if (!await provider.verifyPromptExecutionTransport?.({ ...context, nativeSourceId: evidence.sourceId })) {
-          throw new AgentMuxError('The current native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
-        }
-        preparationSignal.throwIfAborted()
-      } catch (error) { throw promptPreparationFailure(error) }
-    }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
     let preparationGeneration: number | undefined
     const verifyTransport = async (nativeSourceId: string | undefined, firstInputFence: boolean): Promise<void> => {
@@ -624,6 +610,29 @@ export class AgentPromptSubmissionCoordinator {
           throw new AgentMuxError('Input or process identity changed during preparation.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
         }
         run = fresh
+      }
+    }
+    if (nativeSteer && !rejoiningFrozenPlan) {
+      // Observe the current pane, preserving one original preparation deadline and
+      // the frozen source across acknowledged protocol replies before first claim.
+      const remaining = transportQualification ? transportQualification.deadline - Date.now() : 8_000
+      const preparationSignal = AbortSignal.any([AbortSignal.timeout(Math.max(1, remaining)), ...(signal ? [signal] : []), ...(renderSignal ? [renderSignal] : [])])
+      const context = { ...nativeContext, signal: preparationSignal }
+      try {
+        const nativeSourceId = transportQualification?.transport.nativeSourceId ??
+          (await observePromptTransport(preparationSignal, async () => await provider.readPromptExecutionEvidence?.(context)))?.sourceId
+        if (!nativeSourceId) throw new AgentMuxError('The current native input source is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        await observePromptTransport(preparationSignal, () => this.deps.screenEvidence.wait(session, run.latestOutputBytes, false,
+          screen => Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(screen.snapshot(), 'native-steer') !== 'unavailable',
+          { timeoutMs: Math.max(1, remaining), requireCompleteFrame: true, signal: preparationSignal,
+            timeoutMessage: 'The current native composer is unconfirmed; ordinary terminal input remains available.',
+            terminalMessage: 'The original Agent Run ended before native steering.' }))
+        await verifyTransport(nativeSourceId, true)
+        preparationSignal.throwIfAborted()
+      } catch (error) {
+        const preclaim = transportQualification?.protocolInput?.preclaim
+        if (preclaim && !preclaim.claimStarted && error === preclaim.interruption) throw error
+        throw promptPreparationFailure(error)
       }
     }
     if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {
