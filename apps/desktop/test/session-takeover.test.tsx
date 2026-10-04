@@ -214,7 +214,7 @@ it('names an unobserved remote successor through the original Desktop Host while
     const names=vi.mocked(api.spatial.renameLabel),persist=names.getMockImplementation()!
     names.mockRejectedValue(new Error('First name ACK unavailable'))
     const launch=launchBoundary(),report=await takeOverSession(source,'fixture',()=>true),id=report.agent!.agentSessionId
-    expect(report.outcome).toBe('opened');expect(report.agent!.hostId).toBe('local')
+    expect(report.outcome).toBe('opened');expect(report.agent!.hostId).toBe('remote')
     useAppStore.setState({sessions:useAppStore.getState().sessions.filter(s=>s.id!==id)})
     names.mockImplementation(persist);const creation=vi.mocked(api.sessions.creation).mockClear()
     const inspected=await inspectTakeover(source)
@@ -229,13 +229,37 @@ it('names an unobserved remote successor through the original Desktop Host while
 
 it('a failed creation keeps its correlation and visible feedback; Check again never resends', async () => {
   const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Original Host temporarily unavailable'))
+  const creation = vi.mocked(api.sessions.creation).mockRejectedValue(new Error('The original creation has no confirmed Session or prepared start.'))
   await mountPicker()
   await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick')!.click())
   await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover__issue')).not.toBeNull() })
   expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Original Host temporarily unavailable')
   expect(useAppStore.getState().layouts.repo!.groups[0]!.activeTabId).toBe('source-tab')
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLButtonElement>('.session-takeover__issue button')!.disabled).toBe(false) })
   await act(async () => document.querySelector<HTMLButtonElement>('.session-takeover__issue button')!.click())
-  await inspectTakeover(source)
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Original operation failure: Original Host temporarily unavailable') })
+  expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Current creation check: The original creation has no confirmed Session or prepared start.')
+  const inspected = await inspectTakeover(source)
+  expect(inspected!.issues.map(issue => issue.step)).toEqual(['original-owner', 'creation-read'])
+  const binding = useAppStore.getState().spatialRequests[inspected!.requestId]!
+  expect(binding.originalFailure?.message).toBe('Original Host temporarily unavailable')
+  expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.spatialRequests[binding.requestId].originalFailure).toEqual(binding.originalFailure)
+  const observed = launched(binding.agentSessionId, binding.requestId).created
+  creation.mockResolvedValue({ ...observed, creation: { ...observed.creation!, createOperationId: 'another-operation' } })
+  expect(await inspectTakeover(source)).toMatchObject({ outcome: 'unknown', issues: [
+    { step: 'original-owner', message: 'Original operation failure: Original Host temporarily unavailable' },
+    { step: 'creation-read', message: expect.stringContaining('original creation operation identity') }
+  ] })
+  creation.mockResolvedValue({ ...observed, creation: { ...observed.creation!, persistence: 'unconfirmed' } })
+  expect(await inspectTakeover(source)).toMatchObject({ outcome: 'unknown', issues: [
+    { step: 'original-owner', message: 'Original operation failure: Original Host temporarily unavailable' },
+    { code: 'AGENT_CREATION_UNCONFIRMED' }
+  ] })
+  creation.mockResolvedValue(observed)
+  const confirmed = await inspectTakeover(source)
+  expect(confirmed!.outcome).toBe('opened')
+  expect(confirmed!.issues).toEqual([])
+  expect(useAppStore.getState().spatialRequests[binding.requestId]!.originalFailure).toEqual(binding.originalFailure)
   expect(launch).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
 })

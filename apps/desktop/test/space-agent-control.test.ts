@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt, type AgentMuxSpaceControlRequest } from '@agentmux/core'
+import { rpcControlResult, parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { directoryIdentity, spatialSources, workspaceZoneId } from '../src/shared/space-addresses'
@@ -288,13 +289,17 @@ describe('public Desktop spatial Control owner', () => {
 
   it('same request and inspection read original Core owner without respawn/resend, even after a later cross-host display move', async () => {
     const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
-    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("other"))), creation: { createOperationId: 'correlation', initialPrompt: 'confirmed' } }))
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'once' }, destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') }, focus: false })
+    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("other"))), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' } }))
     const opened = await useAppStore.getState().executeControl(input)
     if (opened.operation !== 'agent.open') throw new Error('Wrong operation')
     const replay = await useAppStore.getState().executeControl(input)
     expect(replay).toMatchObject({ outcome: 'opened', to: opened.to })
     expect(created).toHaveBeenCalledTimes(1)
+    const conflict = await useAppStore.getState().executeControl({ ...input,
+      content: { kind: 'new-agent', executorId: 'fixture', prompt: 'A different task on the existing ID' } } as AgentMuxSpaceControlRequest)
+    expect(conflict).toMatchObject({ issues: [{ code: 'SPACE_REQUEST_CONFLICT' }] })
+    expect(useAppStore.getState().spatialRequests[input.requestId]!.originalFailure).toBeUndefined()
     useAppStore.setState(state => ({ config: { ...state.config!, hosts: [...state.config!.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'private.invalid', user: 'fixture', port: 22 }],
       workspaces: [...state.config!.workspaces, { id: 'remote-dir', hostId: 'remote', name: 'Remote', path: _hygiene_fixturePath("remote"), kind: 'folder' }] } }))
     await control({ operation: 'space.mv', fromRegionId: opened.to!.regionId, expectedAgentSessionId: opened.agent!.agentSessionId,
@@ -303,6 +308,63 @@ describe('public Desktop spatial Control owner', () => {
     expect(inspected).toMatchObject({ request: { known: true, report: { outcome: 'unknown', agent: { hostId: 'local', cwd: _hygiene_fixturePath("other") } } } })
     expect(creation.mock.calls.map(call => call[0])).toEqual(['local', 'local'])
     expect(created).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains the first launch error across persistence reload and public readback without replaying', async () => {
+    const original = Object.assign(new Error('Runtime durable database is full'), { code: 'CTXMUX_DURABILITY_FAILED' })
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(original)
+    const stop = vi.spyOn(api.sessions, 'stop')
+    vi.spyOn(api.sessions, 'creation').mockRejectedValue(new Error('No confirmed Session or prepared start'))
+    const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'Do not replay this task' },
+      destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') }, focus: false })
+    const failed = await useAppStore.getState().executeControl(input)
+    if (failed.operation !== 'agent.open') throw new Error('Wrong operation')
+    expect(failed.issues[0]).toMatchObject({ step: 'owner', code: original.code, message: original.message })
+    const persisted = localStorage.getItem('agentmux-workbench-v1')!
+    const binding = JSON.parse(persisted).state.spatialRequests[input.requestId]
+    expect(binding.originalFailure).toEqual(failed.issues[0])
+    expect(persisted).not.toContain('Do not replay this task')
+    const before = { tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts }
+    useAppStore.setState({ spatialRequests: {} })
+    await useAppStore.getState().retryWorkbenchSave()
+    localStorage.setItem('agentmux-workbench-v1', persisted)
+    await useAppStore.persist.rehydrate()
+    expect(useAppStore.getState().spatialRequests[input.requestId]!.originalFailure).toEqual(failed.issues[0])
+    const query = request({ operation: 'space.inspect', target: { requestId: input.requestId } })
+    const inspected = await useAppStore.getState().executeControl(query)
+    if (inspected.operation !== 'space.inspect') throw new Error('Wrong operation')
+    const receipt = parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: query.requestId, ok: true, operation: inspected.operation,
+      result: Object.fromEntries(Object.entries(inspected).filter(([key]) => key !== 'operation')) }, query)
+    expect(receipt).toMatchObject({ result: { request: { report: { outcome: 'unknown', issues: [
+      { step: 'original-owner', code: original.code, message: 'Original operation failure: Runtime durable database is full' },
+      { step: 'creation-read', message: 'Current creation check: No confirmed Session or prepared start' }
+    ] } } } })
+    const wire = rpcControlResult('space.inspect', inspected)
+    const publicResult = parseRpcControlResult('space.inspect', wire, { target: { operationId: input.requestId } })
+    expect(publicResult).toMatchObject({ request: { operationId: input.requestId, report: {
+      operationId: input.requestId, issues: inspected.request!.report!.issues
+    } } })
+    const repeated = await useAppStore.getState().executeControl(input)
+    expect(repeated).toMatchObject({ issues: inspected.request!.report!.issues })
+    expect(useAppStore.getState().tabs).toEqual(before.tabs)
+    expect(useAppStore.getState().layouts).toEqual(before.layouts)
+    expect(created).toHaveBeenCalledTimes(1)
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('keeps the original failure visible when saving the failure receipt is unavailable', async () => {
+    vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async () => {
+      vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('Failure receipt flush unavailable'))
+      throw new Error('Original launch response unavailable')
+    })
+    const failed = await control({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' },
+      destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') }, focus: false })
+    expect(failed).toMatchObject({ outcome: 'partial', save: { diskDurability: 'unconfirmed', storageFlushRequested: false }, issues: [
+      { step: 'owner', message: 'Original launch response unavailable' },
+      { step: 'failure-save', code: 'SPACE_FAILURE_SAVE_UNCONFIRMED', message: 'Failure receipt flush unavailable' }
+    ] })
+    expect(useAppStore.getState().spatialRequests[failed.requestId]!.originalFailure?.message).toBe('Original launch response unavailable')
+    expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
   })
 
   it('launches a selected remote Workspace below a local Region and retains its resource through display moves and operation readback', async () => {
@@ -316,7 +378,7 @@ describe('public Desktop spatial Control owner', () => {
       return launch(session, input.createOperationId!)
     })
     const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (hostId, id) => ({
-      ...agentCreationFixture({ ...agent(id, _hygiene_fixturePath("remote/repo")), hostId }), creation: { createOperationId: 'remote-op', initialPrompt: 'confirmed' }
+      ...agentCreationFixture({ ...agent(id, _hygiene_fixturePath("remote/repo")), hostId }), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' }
     }))
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'remote-only', executionWorkspaceId: 'remote-workspace', prompt: 'once' },
       destination: { regionId: 'local-region', split: 'down' }, focus: false })
@@ -408,9 +470,9 @@ describe('public Desktop spatial Control owner', () => {
         resource: { projectId: input.resource.projectId, sourceWorkspaceId: 'repo', hostId: 'local', path: workspace.path, workspaceId: workspace.id, kind: 'directory', branch: null } }
     })
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
-    vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("new-dir"))), creation: { createOperationId: 'op', initialPrompt: 'confirmed' } }))
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' },
       destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), newZone: { kind: 'directory', projectId: directoryIdentity('local', _hygiene_fixturePath("repo")), path: _hygiene_fixturePath("new-dir") } }, focus: false })
+    vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("new-dir"))), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' } }))
     const opened = await useAppStore.getState().executeControl(input)
     expect(opened).toMatchObject({ outcome: 'opened', resource: { workspaceId: 'new-resource' } })
     const queried = request({ operation: 'space.inspect', target: { requestId: input.requestId } })
