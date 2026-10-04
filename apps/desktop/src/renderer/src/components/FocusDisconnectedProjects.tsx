@@ -17,6 +17,7 @@ export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selecte
 }) {
   const surface = useRef<HTMLElement>(null), header = useRef<HTMLButtonElement>(null)
   const pendingReturn = useRef<{ target: HTMLElement | null; from: Element | null } | null>(null)
+  const order = new Map([...contexts.keys()].map((id, index) => [id, index]))
   const ids = new Set(lanes.flatMap(lane => lane.contextIds.filter(id => contexts.has(id))))
   const visibleLanes = lanes.filter(lane => lane.contextIds.some(id => contexts.has(id) && visibleIds.has(id)))
   const matchingCount = [...ids].filter(id => visibleIds.has(id)).length
@@ -65,7 +66,7 @@ export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selecte
       {heading}<div className="focus-disconnected-projects__cards">{groupFocusContexts(lane.contextIds.flatMap(id => {
         const context = visibleIds.has(id) ? contexts.get(id) : null
         return context ? [context] : []
-      })).disconnected.map(context => <FocusContextRow key={context.id} context={context} variant="directory" selected={context.id === selectedId} onSelect={onSelect} />)}</div>
+      })).disconnected.sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(context => <FocusContextRow key={context.id} context={context} variant="directory" selected={context.id === selectedId} onSelect={onSelect} />)}</div>
     </>} /> : expanded ? <div className="focus-disconnected-projects__empty" role="status">
       <strong>No matching disconnected contexts</strong><span>Try another search or clear the filters.</span>
       <button type="button" onClick={onClearFilters}>Clear filters</button>

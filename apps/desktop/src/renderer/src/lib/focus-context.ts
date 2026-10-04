@@ -42,7 +42,6 @@ export function focusColumnFor(context: FocusContext): FocusColumn {
 export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusColumn, FocusContext[]> {
   const groups: Record<FocusColumn, FocusContext[]> = { attention: [], working: [], results: [], idle: [], disconnected: [] }
   for (const row of rows) groups[focusColumnFor(row)].push(row)
-  for (const group of Object.values(groups)) group.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
   return groups
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
@@ -159,7 +158,8 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
 }
 /** One existing per-surface cache owns execution rows and the separate PMO attention projection. */
 function createFocusProjectionCache() {
-  const cache = new Map<string, { session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
+  let groupSequence = 0
+  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
   const select = (input: Inputs): FocusProjection => {
@@ -183,6 +183,7 @@ function createFocusProjectionCache() {
       const sameOwner = old && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
       const workspace = sameOwner ? old.workspace : workspaceForSession(input.config, session, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots))
       const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots)) : null
+      let group: { key: string; enteredAt: number | null; sequence: number } | null = null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
       const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))
@@ -195,14 +196,26 @@ function createFocusProjectionCache() {
           next.detailIsRecap = false
           next.detailKind = 'service'
         }
+        const groupKey = JSON.stringify([next.runId, next.hostId, next.workspaceId, next.workspacePath, next.topicId, focusColumnFor(next)])
+        // State entry is an honest initial seed only when it explains this displayed group.
+        // A pending request can enter Attention while the semantic state is still Working.
+        const initialEntry = !session.pendingInteraction && next.state === session.status.state ? next.stateEnteredAt ?? null : null
+        group = old?.group?.key === groupKey ? old.group : {
+          key: groupKey, enteredAt: old ? now : initialEntry, sequence: groupSequence++
+        }
         model = old?.model && Object.keys(next).every(key => next[key as keyof FocusContext] === old.model![key as keyof FocusContext]) ? old.model : next
         rows.push(model)
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
       }
-      cache.set(session.id, { session, activitySemantic, timeline, name, config: input.config, workspace, topicId, lane, model, laneModel })
+      cache.set(session.id, { group, session, activitySemantic, timeline, name, config: input.config, workspace, topicId, lane, model, laneModel })
     }
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
+    // Only Focus card order changes. Lane facts keep their original input order and priorities.
+    rows.sort((a, b) => {
+      const first = cache.get(a.id)!.group!, second = cache.get(b.id)!.group!
+      return (second.enteredAt ?? -Infinity) - (first.enteredAt ?? -Infinity) || first.sequence - second.sequence
+    })
     result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention}
     previous = {sessions: input.sessions, timelines: input.timelines, agentNames: input.agentNames, config: input.config, scratchTopicSnapshots: input.scratchTopicSnapshots}
     return result

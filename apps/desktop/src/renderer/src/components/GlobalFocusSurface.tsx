@@ -159,7 +159,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const selected = executionRows.find(row => row.id === shownSessionId)
   const filteredIds = new Set(filtered.map(row => row.id))
   const focusProjectLanes = allLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
-  const rowsById = new Map(filtered.map(row => [row.id, row]))
+  const rowsByLane = new Map<string, typeof filtered>()
+  for (const row of filtered) {
+    const lane = laneByContext.get(row.id)
+    if (!lane) continue
+    const rows = rowsByLane.get(lane.id) ?? []
+    rows.push(row)
+    rowsByLane.set(lane.id, rows)
+  }
   const disconnectedContexts = new Map(executionRows.filter(row => columnFor(row) === 'disconnected').map(row => [row.id, row]))
   const disconnectedLanes = allLanes.filter(lane => lane.contextIds.some(id => disconnectedContexts.has(id)))
   const boardLanes = focusProjectLanes
@@ -214,7 +221,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const filterSummary = `${projectOptions.find(option => option.id === project)?.name ?? 'All projects'} · ${bucketFilter === 'all' ? 'All states' : bucketMeta[bucketFilter].label}`
   const filterCount = Number(project !== 'all') + Number(bucketFilter !== 'all')
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
-    const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
+    const rows = rowsByLane.get(lane.id) ?? []
     const groups = groupFocusContexts(rows)
     const counts: FocusLaneCounts = [groups.attention.length, groups.working.length, groups.results.length, groups.idle.length]
     const sparse = counts.reduce((total, count) => total + count, 0) === 1
