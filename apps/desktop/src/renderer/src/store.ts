@@ -69,7 +69,7 @@ import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/f
 import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from './lib/focus-timeline-name-width'
 import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRulerPreferences } from './lib/focus-timeline-ruler'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
-import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
+import type { GitDiffDescriptor, GitCommitSnapshot } from '../../shared/git-contracts'
 import { confirmedSteerDelivery, reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
@@ -932,7 +932,9 @@ type AppState = {
   openFileDiff(path: string, workspaceId?: string): Promise<void>
   /** Explicit file navigation from an external control, through the original document owner. */
   openFileAndReveal(path: string, tabGroupId?: string, location?: { line: number; column?: number }, workspaceId?: string, navigationSignal?: AbortSignal): Promise<boolean>
-  openBranchDiff(workspaceId: string, comparison: GitBranchDiffDescriptor): void
+  openBranchDiff(workspaceId: string, comparison: GitDiffDescriptor): void
+  openGitWorkbench(workspaceId: string, snapshot: GitCommitSnapshot): { tabId: string; regionId: string }
+  selectGitCommit(regionId: string, snapshot: GitCommitSnapshot): void
   loadBranchDiff(regionId: string): Promise<void>
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
@@ -4420,6 +4422,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 url: surface.url, title: surface.title, profileId: surface.profileId, navigationId: surface.navigationId,
                 error: surface.error, loading: surface.loading }
               case 'file': return { ...base, kind: surface.kind, path: surface.path }
+              case 'git': return { ...base, kind: surface.kind, scope: surface.scope, selection: surface.selection }
               case 'git-diff': return { ...base, kind: surface.kind, comparison: surface.comparison }
               case 'launcher': return { ...base, kind: surface.kind }
               default: return assertUnreachableSurface(surface)
@@ -5870,6 +5873,40 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
   },
+  openGitWorkbench(workspaceId, snapshot) {
+    const state = get()
+    const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
+    if (!workspace || workspace.hostId !== snapshot.hostId) throw new Error('The original Git workspace is unavailable.')
+    const existing = Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface =>
+      surface.kind === 'git' && surface.workspaceId === workspaceId &&
+      surface.scope.hostId === snapshot.hostId && surface.scope.repoPath === snapshot.repoPath &&
+      surface.scope.workspacePath === workspace.path
+        ? [{ tab, surface }] : []))[0]
+    const tabId = existing?.tab.id ?? 'view:' + crypto.randomUUID()
+    const regionId = existing?.surface.regionId ?? newRegionId()
+    const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
+    const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
+    const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
+    if (!nextLayout) throw new Error('The original Git Tab Group is unavailable.')
+    const selection = { commitOid: snapshot.commitOid, parentOid: snapshot.parentOid }
+    const tab = existing
+      ? focusWorkbenchTabRegion({ ...existing.tab, regions: { ...existing.tab.regions,
+          [regionId]: { ...existing.surface, selection } } }, regionId)
+      : createWorkbenchTab(tabId, { kind: 'git', regionId, workspaceId,
+          scope: { hostId: snapshot.hostId, repoPath: snapshot.repoPath, workspacePath: workspace.path }, selection })
+    set(current => ({ activeWorkspaceId: workspaceId, mainSurface: 'workbench',
+      tabs: { ...current.tabs, [tabId]: tab }, layouts: { ...current.layouts, [workspaceId]: nextLayout } }))
+    get().focusRegion(workspaceId, tabId, regionId, 'navigation', groupId)
+    return { tabId, regionId }
+  },
+  selectGitCommit(regionId, snapshot) {
+    const found = findWorkbenchRegion(get().tabs, regionId)
+    if (found?.surface.kind !== 'git' || found.surface.scope.hostId !== snapshot.hostId ||
+        found.surface.scope.repoPath !== snapshot.repoPath) return
+    const { tab, surface } = found
+    set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
+      [regionId]: { ...surface, selection: { commitOid: snapshot.commitOid, parentOid: snapshot.parentOid } } } } } }))
+  },
   openBranchDiff(workspaceId, comparison) {
     const state = get()
     if (!state.config?.workspaces.some((workspace) => workspace.id === workspaceId)) return
@@ -5890,12 +5927,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       activeWorkspaceId: workspaceId, mainSurface: 'workbench',
       tabs: { ...current.tabs, [tabId]: tab }, layouts: { ...current.layouts, [workspaceId]: nextLayout }
     }))
+    get().focusRegion(workspaceId, tabId, tab.layout.activeRegionId, 'navigation', groupId)
   },
   async loadBranchDiff(regionId) {
     const surface = findWorkbenchRegion(get().tabs, regionId)?.surface
     if (surface?.kind !== 'git-diff') return
     await loadRegionDiff(
-      regionId, (bridge) => bridge.branchDiff(surface.workspaceId, surface.comparison)
+      regionId, (bridge) => 'kind' in surface.comparison
+        ? bridge.commitDiff(surface.workspaceId, surface.comparison)
+        : bridge.branchDiff(surface.workspaceId, surface.comparison)
     )
   },
   async renameAgent(sessionId, name, expectedNameRevision) {

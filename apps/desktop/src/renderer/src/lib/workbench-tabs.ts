@@ -1,4 +1,4 @@
-import type { GitBranchDiffDescriptor } from '../../../shared/git-contracts'
+import type { GitDiffDescriptor } from '../../../shared/git-contracts'
 import type {
   AppConfig,
   BrowserSnapshot,
@@ -55,11 +55,19 @@ export type FileWorkbenchSurface = {
   path: string
 }
 
+export type GitWorkbenchSurface = {
+  regionId: string
+  kind: 'git'
+  workspaceId: string
+  scope: { hostId: string; repoPath: string; workspacePath: string }
+  selection: { commitOid: string; parentOid: string | null } | null
+}
+
 export type GitDiffWorkbenchSurface = {
   regionId: string
   kind: 'git-diff'
   workspaceId: string
-  comparison: GitBranchDiffDescriptor
+  comparison: GitDiffDescriptor
 }
 
 export type LauncherWorkbenchSurface = {
@@ -93,6 +101,7 @@ export type WorkbenchSurface =
   | TerminalWorkbenchSurface
   | FileWorkbenchSurface
   | GitDiffWorkbenchSurface
+  | GitWorkbenchSurface
   | LauncherWorkbenchSurface
   | BrowserWorkbenchSurface
 
@@ -361,11 +370,17 @@ export function fileTabId(workspaceId: string, path: string): string {
 }
 
 /** Fixed Git object coordinates form the identity, independently of the current disk document. */
-export function gitDiffIdentity(workspaceId: string, comparison: GitBranchDiffDescriptor): string {
+export function gitDiffIdentity(workspaceId: string, comparison: GitDiffDescriptor): string {
   const { snapshot, file } = comparison
+  if ('kind' in comparison && comparison.kind === 'commit') {
+    const fixed = comparison.snapshot
+    return 'git-diff:' + JSON.stringify([workspaceId, fixed.hostId, fixed.repoPath,
+      'commit', fixed.parentOid, fixed.commitOid, file.path, file.origPath])
+  }
+  const branch = comparison as import('../../../shared/git-contracts').GitBranchDiffDescriptor
   return `git-diff:${JSON.stringify([
-    workspaceId, snapshot.hostId, snapshot.repoPath, snapshot.mode,
-    snapshot.baseOid, snapshot.targetOid, snapshot.comparisonBaseOid, file.path, file.origPath
+    workspaceId, branch.snapshot.hostId, branch.snapshot.repoPath, branch.snapshot.mode,
+    branch.snapshot.baseOid, branch.snapshot.targetOid, branch.snapshot.comparisonBaseOid, file.path, file.origPath
   ])}`
 }
 

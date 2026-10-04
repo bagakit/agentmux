@@ -19,6 +19,7 @@ import {
   type BrowserWorkbenchSurface,
   type FileWorkbenchSurface,
   type GitDiffWorkbenchSurface,
+  type GitWorkbenchSurface,
   type LauncherWorkbenchSurface,
   type TerminalWorkbenchSurface,
   type WorkbenchSurface,
@@ -55,6 +56,7 @@ export type PersistedWorkbenchSurface =
   | TerminalWorkbenchSurface
   | FileWorkbenchSurface
   | GitDiffWorkbenchSurface
+  | GitWorkbenchSurface
   | LauncherWorkbenchSurface
   | PersistedBrowserSurface
 
@@ -468,6 +470,7 @@ function persistedSurfaceSurvives(
       return true
     case 'file':
       return ctx.fileSurvives(surface)
+    case 'git':
     case 'git-diff':
       return true
     case 'browser':

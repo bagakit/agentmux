@@ -58,7 +58,7 @@ export type AgentMuxSpaceTabFact = {
 export type AgentMuxSpaceRegionFact = {
   regionId: string
   tabId: string
-  kind: 'agent' | 'terminal' | 'browser' | 'file' | 'git-diff' | 'launcher'
+  kind: 'agent' | 'terminal' | 'browser' | 'file' | 'git' | 'git-diff' | 'launcher'
   browserId?: string
   file?: { workspaceId: string; path: string; zoneRelativePath?: string; issue?: string }
   agentSessionId: string | null

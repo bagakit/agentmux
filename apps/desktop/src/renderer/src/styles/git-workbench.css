@@ -1,0 +1,43 @@
+.git-workbench { height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; color: var(--text-2); background: var(--surface-0); container: git-workbench / inline-size; }
+.git-workbench__header { flex: none; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); font-size: var(--fs-meta); }
+.git-workbench__header strong { color: var(--text); font-weight: 500; }
+.git-workbench__header > span:not(.git-workbench__readonly) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.git-workbench__readonly { color: var(--text-3); font-size: var(--fs-micro); }
+.git-workbench__body { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(240px, 38%) minmax(0, 1fr); }
+.git-workbench__history { min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.git-workbench__details { min-width: 0; min-height: 0; overflow: auto; padding: var(--sp-3) var(--sp-4); font-size: var(--fs-meta); line-height: 1.5; overscroll-behavior: contain; }
+.git-workbench__target { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); color: var(--text-3); }
+.git-workbench__target code { font-family: var(--font-mono); font-size: var(--fs-meta); }
+.git-workbench__message { margin: var(--sp-3) 0; color: var(--text); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.git-workbench__message::first-line { font-weight: 600; }
+.git-workbench__metadata { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-1) var(--sp-3); margin: var(--sp-3) 0; }
+.git-workbench__metadata dt { color: var(--text-3); }
+.git-workbench__metadata dd { min-width: 0; margin: 0; overflow-wrap: anywhere; user-select: text; }
+.git-workbench__metadata code { display: block; font: var(--fs-micro) var(--font-mono); }
+.git-workbench__comparison { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: var(--sp-4) 0 var(--sp-3); }
+.git-workbench__comparison label { color: var(--text-3); }
+.git-workbench__comparison select { min-width: 0; max-width: 100%; height: 24px; border: 0; border-radius: var(--radius-sm); padding: 0 var(--sp-2); color: var(--text-2); background: var(--surface-1); font: inherit; }
+.git-workbench__files-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin: var(--sp-3) 0 var(--sp-1); }
+.git-workbench__files-title strong { font-weight: 500; }
+.git-workbench__files-title > span, .git-workbench__empty { color: var(--text-3); }
+.git-workbench__files { margin: 0; padding: 0; list-style: none; }
+.git-workbench__files button { width: 100%; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.git-workbench__files button:hover { background: var(--surface-1); color: var(--text); }
+.git-workbench__files button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.git-workbench__files button > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.git-workbench__files small { font: inherit; color: var(--text-3); }
+.git-workbench__change { flex: 0 0 12px; font: var(--fs-micro) var(--font-mono); line-height: 20px; color: var(--text-3); }
+.git-workbench__change--added { color: var(--green-text); }
+.git-workbench__change--deleted { color: var(--red-text); }
+.git-workbench__warning { color: var(--text-3); overflow-wrap: anywhere; }
+.git-history-commit { cursor: pointer; }
+.git-history-commit[aria-current="true"] { background: var(--surface-2); }
+.git-branch-diff.editor-pane { display: flex; flex-direction: column; }
+.git-branch-diff > .editor-header { flex: none; height: 30px; }
+.git-branch-diff > .git-branch-diff__commits, .git-branch-diff > .branches-inline-error { flex: none; }
+.git-branch-diff__canvas { flex: 1; min-width: 0; min-height: 0; }
+@container git-workbench (max-width: 620px) {
+  .git-workbench__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(110px, 32%) minmax(0, 1fr); }
+  .git-workbench__history { border-right: 0; border-bottom: 1px solid var(--line); }
+  .git-workbench__details { padding: var(--sp-2) var(--sp-3); }
+}

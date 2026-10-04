@@ -45,6 +45,7 @@ export const TopicRowPresence = memo(function TopicRowPresence({ workspace, topi
           case 'terminal': executorLabel = 'Terminal'; break
           case 'browser': executorLabel = 'Browser'; break
           case 'file': executorLabel = 'File'; break
+          case 'git': executorLabel = 'Git history'; break
           case 'git-diff': executorLabel = 'Git diff'; break
           case 'launcher': executorLabel = 'Launcher'; break
           case undefined: executorLabel = 'Launcher'; break

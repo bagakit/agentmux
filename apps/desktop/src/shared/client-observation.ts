@@ -22,16 +22,24 @@ const regionTree = layoutTree('regionId') as z.ZodType<WorkbenchViewLayout['root
 const groupTree = layoutTree('groupId') as z.ZodType<WorkspaceLayout['root']>
 const regionBase = { regionId: id, workspaceId: id }
 const sessionRegion = { ...regionBase, sessionId: id, phase: z.enum(['launching', 'attached']), control: control.nullable(), processState: z.enum(['running', 'exited', 'interrupted']).nullable() }
-const comparison = z.object({
+const branchComparison = z.object({
   snapshot: z.object({ hostId: id, repoPath: id, mode: z.enum(['two-point', 'merge-base']), baseBranch: id,
     targetBranch: id, baseOid: id, targetOid: id, comparisonBaseOid: id }).strict(),
   file: z.object({ path: id, origPath: nullableId }).strict()
 }).strict()
+const commitComparison = z.object({
+  kind: z.literal('commit'),
+  snapshot: z.object({ hostId: id, repoPath: id, commitOid: id, parentOid: nullableId }).strict(),
+  file: z.object({ path: id, origPath: nullableId }).strict()
+}).strict()
+const comparison = z.union([branchComparison, commitComparison])
 const region = z.discriminatedUnion('kind', [
   z.object({ ...sessionRegion, kind: z.literal('agent') }).strict(),
   z.object({ ...sessionRegion, kind: z.literal('terminal') }).strict(),
   z.object({ ...regionBase, kind: z.literal('launcher') }).strict(),
   z.object({ ...regionBase, kind: z.literal('file'), path: id }).strict(),
+  z.object({ ...regionBase, kind: z.literal('git'), scope: z.object({ hostId: id, repoPath: id, workspacePath: id }).strict(),
+    selection: z.object({ commitOid: id, parentOid: nullableId }).strict().nullable() }).strict(),
   z.object({ ...regionBase, kind: z.literal('git-diff'), comparison }).strict(),
   z.object({ ...regionBase, kind: z.literal('browser'), browserId: id, url: z.string(), title: z.string(),
     profileId: z.string(), navigationId: z.string(), error: z.string().nullable(), loading: z.boolean() }).strict()

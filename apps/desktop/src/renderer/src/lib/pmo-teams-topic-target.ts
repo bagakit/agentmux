@@ -19,6 +19,7 @@ function nonAgentStatus(region: WorkbenchSurface | undefined): string {
     case 'launcher': return 'No Agent yet'
     case 'terminal': return 'Terminal region'
     case 'file': return 'File region'
+    case 'git': return 'Git region'
     case 'git-diff': return 'Diff region'
     case 'browser': return 'Browser region'
     default: return assertUnreachableSurface(region)

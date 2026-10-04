@@ -41,6 +41,8 @@ function candidateForSurface(
       // Terminal has its own replay/attachment contract (see surface-memory-budget.ts); agent/launcher
       // carry no releasable native owner in this budget. All three are intentionally not candidates.
       return null
+    case 'git':
+      return null
     case 'git-diff':
       return {
         id: surface.regionId, kind: 'monaco', visible,

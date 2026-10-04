@@ -108,6 +108,7 @@ function TopicRegionMark({ region }: { region: TopicRegionDetail }) {
     case 'terminal': return <SquareTerminal size={14} aria-hidden="true" />
     case 'browser': return <Globe2 size={14} aria-hidden="true" />
     case 'file': return <FileCode2 size={14} aria-hidden="true" />
+    case 'git':
     case 'git-diff': return <GitCompareArrows size={14} aria-hidden="true" />
     case 'launcher': return <PanelsTopLeft size={14} aria-hidden="true" />
     case 'agent': return <Bot size={14} aria-hidden="true" />

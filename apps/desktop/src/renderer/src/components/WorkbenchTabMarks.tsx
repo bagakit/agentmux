@@ -47,6 +47,7 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
       return <SquareTerminal size={12} />
     case 'file':
       return <FileCode2 size={12} />
+    case 'git':
     case 'git-diff':
       return <GitCompareArrows size={12} />
     case 'browser':

@@ -85,7 +85,7 @@ export function MobileSurveyCatalog({ client = null, visible = true, catalog, op
             const region = catalog?.regions.find(value => value.tabId === tab.tabId && value.regionId === regionId)
             const row = catalog?.agentPresentation?.find(value => value.agentSessionId === region?.agentSessionId)
             const addresses = catalog?.locations.filter(value => value.tabId === tab.tabId && value.regionId === regionId) ?? []
-            return <li key={regionId}><strong>{region ? ({ agent: 'Agent', terminal: 'Terminal', browser: '网页', file: '文件与笔记', 'git-diff': '变更', launcher: '启动入口' }[region.kind]) : 'Region 未确认'}</strong><details><summary>原位置</summary><code>{regionId}</code>
+            return <li key={regionId}><strong>{region ? ({ agent: 'Agent', terminal: 'Terminal', browser: '网页', file: '文件与笔记', git: 'Git 历史', 'git-diff': '变更', launcher: '启动入口' }[region.kind]) : 'Region 未确认'}</strong><details><summary>原位置</summary><code>{regionId}</code>
               {addresses.map(address => <small key={JSON.stringify(address)}>位置：{address.displayWorkspaceId} / {address.groupId}{address.spaceId ? ` / ${address.spaceId}` : ''}</small>)}</details>
               {region?.kind === 'agent' && region.agentSessionId && <button type="button" onClick={() => openSession(region.agentSessionId!, { name: row?.name ?? '名称未确认', project: row?.project ?? '项目未确认' })}>继续对话 · {row?.name ?? region.agentSessionId}</button>}
               {region?.kind === 'browser' && <MobileRegionContent key={regionId} client={client} visible={visible} tabId={tab.tabId} zoneId={tab.zoneId} regionId={regionId} browserId={region.browserId} kind="browser" />}
