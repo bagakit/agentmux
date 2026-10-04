@@ -41,9 +41,10 @@ function historyGraph(commits: GitHistoryCommit[], refs: GitHistoryRef[]) {
     commit.parents.forEach((parent, index) => {
       if (!after.includes(parent)) after.splice(Math.min(lane + index, after.length), 0, parent)
     })
-    width = Math.max(width, before.length, after.length)
+    const rowLanes = Math.max(before.length, after.length)
+    width = Math.max(width, rowLanes)
     lanes = after
-    return { commit, lane, before, after, continued }
+    return { commit, lane, before, after, continued, width: x(rowLanes - 1) + 10 }
   })
   return { rows, width: x(width - 1) + 10, pending: lanes, guides }
 }
@@ -92,8 +93,8 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
       if (readingDown && scrollHeight - clientHeight - scrollTop <= ROW_HEIGHT * 3 &&
         history.enabled && document.visibilityState !== 'hidden' && !history.loading && !history.error && ready.nextCursor) void history.loadMore()
     }}>
-      <div className="git-history-window">
-        <div className="git-history-graph" aria-label="Commit relationships" tabIndex={0}>
+      <div className="git-history-window" style={{ paddingBottom: graph.pending.length ? 12 : 0 }}>
+        <div className="git-history-graph" aria-label="Commit relationships">
           <svg width={graph.width} height={graph.rows.length * ROW_HEIGHT + (graph.pending.length ? 12 : 0)} role="img" aria-label="Loaded commit graph">
             {graph.rows.map(({ commit, lane, before, after, continued }, row) => {
               const top = row * ROW_HEIGHT, middle = top + ROW_HEIGHT / 2, bottom = top + ROW_HEIGHT
@@ -119,7 +120,8 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
           </svg>
         </div>
         <ol className="git-history-commits">
-          {ready.commits.map(commit => <li className="git-history-commit" key={commit.oid} data-history-oid={commit.oid} style={{ height: ROW_HEIGHT }}
+          {graph.rows.map(({ commit, width }) => <li className="git-history-commit" key={commit.oid} data-history-oid={commit.oid}
+            style={{ height: ROW_HEIGHT, '--history-graph-width': `${width}px` } as CSSProperties}
             {...details.triggerEvents(commit)}>
             <strong>{commit.subject || '(No commit message)'}</strong>
               {commit.refs.length > 0 && <div className="git-history-refs">

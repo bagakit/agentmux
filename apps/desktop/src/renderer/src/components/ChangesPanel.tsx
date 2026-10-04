@@ -387,7 +387,7 @@ export function ChangesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   return (
     <section className="branches-panel changes-panel">
       <header className="branches-header branches-header--tools" aria-label="Change actions">
-        <span className="source-control-count" aria-label="Changed file count">{repo ? repo.changes.length : 0}</span>
+        <span className="source-control-count" aria-label="Changed file count">{repo ? repo.changes.length : 0} files</span>
         <button type="button" title="Refresh changes" onClick={() => void refresh()} disabled={loading}>
           {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
