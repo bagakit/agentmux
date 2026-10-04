@@ -64,7 +64,12 @@
 
 ## Git 源码控制与 PR
 
-History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/conversation-input.md#explorer-提交历史的密度分支颜色与连线)。收敛提交行只改变呈现，真实 Git 分支身份、固定分页、全部 parent 与未读边界仍沿本节；不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
+History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 提交历史的密度、分支颜色与连线》](../presentation/conversation-input.md#explorer-提交历史的密度分支颜色与连线)，每行图宽与标签适配见[《Git History 行内图宽与标签》](../presentation/files-and-git.md#git-history-行内图宽与标签)。收敛提交行只改变呈现，真实 Git 分支身份、固定分页、全部 parent 与未读边界仍沿本节；不能改变选中引用、已读历史、原 Workspace/Tab/Region、草稿或健康 Run。
+
+- Branches 以真实 worktree 绑定区分 Worktrees 与未绑定 worktree 的 Branches；当前分支仍归其真实分组，Pin 只改变组内顺序。两组及各自数量须容易发现，大量 worktree 不能把纯分支组的存在藏到长表末尾。折叠只改变阅读投影，打开、创建／移除 worktree、选择与右键动作仍指向原分支和准确资源。
+- Branches 的数字须能辨明对象与单位：本地分支总数、组内条目数、Agent 在场数量与上游 ahead／behind 提交数分别表达。同步计数只描述当前 HEAD 与其真实有效上游；Agent 在场仍按原 worktree 和 executor 身份计数，不能因 Provider 图标相同合并不同 executor。表示优化不触发 Git 写入、fetch 或 Agent 生命周期动作。
+- Changes 的改动数量须能读出文件单位，主文件名在窄栏仍可辨；目录摘要可以让位，完整仓库相对路径经原 tooltip 可读。阅读调整保持原 Staged／Changes 分组、精确路径坐标、stage／unstage／discard／diff／commit 动作和保护边界，不为显示读取文件内容。
+- 项目内 worktree 的行内路径摘要使用相对于该项目仓库根的准确路径，根本身可用 `.` 表示；上下文须使基准可辨，项目外或归属未确认的路径不伪装成项目内路径。完整目标的 tooltip、复制偏好、Host 与原始操作路径继续沿[《寻址与复制》](spaces-and-layout.md#寻址与复制)，相对摘要不成为执行 cwd 或新的资源身份。长分支、提交标题与引用即使行内省略，也须经原有 hover／键盘入口完整可读，不能以截断冒称数据缺失或另增读取事实。
 
 - 用户要求 Git 增加「所有历史分支」选项：History 默认看已存在本地分支、本地已知 remote-tracking 引用与当前 HEAD 所可达的提交和真实分叉／合并关系，可明确选择一个引用读取其历史，再回到全部范围；它与 Branches 的工作线管理、Changes 的未提交改动各有清楚职责。远程引用只是本地已知事实，已读提交上的 tag 可作真实装饰，不为 tag 另扩根集合；查看不自动 fetch、checkout、创建 worktree、修改索引或触发 Agent。已删除引用／reflog 的范围尚未确认，不冒称包含。
 - History 每次读取固定准确仓库／Host、范围与 tip commit，提交身份和全部真实 parent 关系来自 Desktop Main 的 Git 事实。长历史有界、按需继续，范围、已加载边界与未读 parent 可辨；不能把一页当全历史、把缺对象或读取失败画成根节点／空仓库，不能让后来移动的引用混入同一分页快照。切 Workspace／引用或 History 不可见后停止无效读取，迟到结果不抢回旧选择，不把错误伪装成零提交。同 Workspace 内切 Branches／Changes／History、临时被设置覆盖或窗口隐藏时，仍存在的历史阅读面保留同一范围已读页；离开整个工具面或换 Workspace 后重新进入可重新读取，不把旧范围内容带入新范围。文件树收起但 History 仍可见时保持读取。单个历史读取失败仍保原工作面与健康 Run。视觉唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。
