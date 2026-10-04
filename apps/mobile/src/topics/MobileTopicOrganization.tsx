@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import type { TopicsRpc } from './MobileTopicKnowledge'
 
@@ -63,7 +64,7 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
     <h2>{{ 'category-create': '新建分类', 'topic-create': '新建 Topic', 'category-rename': '重命名分类', 'topic-move': '移动 Topic' }[original.kind]}</h2>
     {original.kind === 'topic-move' ? <><p>{original.topic.title} · 原 Topic 整体移动，内容与执行身份保留。</p><label>目标分类<select aria-label="目标分类" value={destination} disabled={busy} onChange={event => setDestination(event.target.value)}>
       <option value="">选择分类</option>{categories.map(value => <option key={value.categoryId} value={value.categoryId}>{value.title}</option>)}</select></label></>
-      : <label>名称<input aria-label="分类或 Topic 名称" maxLength={120} value={title} readOnly={busy} onChange={event => setTitle(event.target.value)} /></label>}
+      : <label>名称<TextInput aria-label="分类或 Topic 名称" maxLength={120} value={title} readOnly={busy} onChange={event => setTitle(event.target.value)} /></label>}
     {issue && <p className="mobile-topics-issue" role="status">{issue}</p>}
     {unknown && <button type="button" onClick={() => { void inspect() }}>检查原操作结果</button>}
     {unknown && checked && <button type="button" onClick={() => { setUnknown(false); setChecked(false); setIssue('已采用检查结果；继续操作须明确确认保存。') }}>以检查结果为基准继续</button>}
