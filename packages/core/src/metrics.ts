@@ -64,17 +64,24 @@ const literal = (expected: unknown): Parser => v => { if (v !== expected) invali
 const record = (fields: Record<string, Parser>): Parser => v => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) invalid()
   const source = v as Record<string, unknown>
-  if (Object.keys(source).length !== Object.keys(fields).length) invalid()
+  if ((Object.getPrototypeOf(source) !== Object.prototype && Object.getPrototypeOf(source) !== null) ||
+    Reflect.ownKeys(source).length !== Object.keys(fields).length) invalid()
   for (const [key, parse] of Object.entries(fields)) {
     const descriptor = Object.getOwnPropertyDescriptor(source, key)
-    if (!descriptor || !('value' in descriptor)) invalid()
+    if (!descriptor?.enumerable || !('value' in descriptor)) invalid()
     parse(descriptor.value)
   }
 }
-const array = (parse: Parser): Parser => v => {
-  if (!Array.isArray(v) || v.length > 4096) invalid()
-  for (const item of v) parse(item)
+const boundedArray = (max: number, parse: Parser): Parser => v => {
+  if (!Array.isArray(v) || Object.getPrototypeOf(v) !== Array.prototype || v.length > max ||
+    Reflect.ownKeys(v).length !== v.length + 1) invalid()
+  for (let index = 0; index < v.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(v, String(index))
+    if (!descriptor?.enumerable || !('value' in descriptor)) invalid()
+    parse(descriptor.value)
+  }
 }
+const array = (parse: Parser): Parser => boundedArray(4096, parse)
 const windowParser = record({ windowId: count, webContentsId: count, generation: count })
 const countsParser = record({ monacoEditors: nullable(count), monacoModels: nullable(count), documents: count,
   runtimeSubscriptions: count, terminalViews: count, terminalAddons: count, terminalListeners: count })
@@ -90,10 +97,6 @@ const terminalInteractionParser = record({ observedSinceAt: number,
     buffer: v => { if (!['normal', 'alternate'].includes(v as string)) invalid() }, mouseTrackingMode: identity })) })
 const consumerParser = record({ checks: count, changes: count, commits: count })
 const visibilityParser = record({ visible: consumerParser, hidden: consumerParser })
-const boundedArray = (max: number, parse: Parser): Parser => v => {
-  if (!Array.isArray(v) || v.length > max) invalid()
-  for (const item of v) parse(item)
-}
 const tabSwitchParser = record({ id: count,
   target: record({ displayWorkspaceId: identity, groupId: identity, tabId: identity, regionId: identity, presentationId: identity }),
   handlerAt: number, inputDelayMs: nullable(number), selectedMs: nullable(number), placedMs: nullable(number),
