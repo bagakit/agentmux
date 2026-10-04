@@ -22,6 +22,8 @@
 - [Demand 管理闭环](#demand-管理闭环)
 - [Demand 的专属 PMO Tab](#demand-的专属-pmo-tab)
 
+Goal 可以记录准确原内容资源的来源关联 `contentRefs`（Host、资源 Workspace、原 Zone 的完整身份），与执行 `sessionIds`、Project 及每次展示位置分别成立。已确认的来源不是唯一显示归属：Goal 仍可因明确关联的执行 Session 出现在包含该 Session 的工作面；这种发现不向其显示 Space 追加内容来源。来源由原 Goal owner 原子追加，关闭讨论 Tab、开始新讨论或改变显示绑定不删除已确认关联；Mote 沿其原内容 home Zone 找回同一 Goal 和结果，不从当前显示的外来 Zone、名称或执行 cwd 猜来源。已有记录只可用当前准确原资源与 Session 成员事实追加，证据缺失或多个可能来源时保原数据并说明未知。追加使用原 Goal update 的记录版本检查，冲突后先读取同一 Goal；不复制 Goal、结果或生命周期。
+
 ## Goals 的 Grill 与 Grounding
 
 用户指出：「需求讨论的关键还是 grill 对齐目标，和 grounding 对齐结果，但是现在感觉看不出来，容易堆垃圾」，并认为「需求详情面板则更像是一个老旧的系统，非常糟糕，一点都不现代化，没必要的东西也都让用户自己填」。用户要求主要参考本地 Multica，做出更好的设计并彻底优化。Goals 必须让人首先看懂要达到什么、还有什么关键取舍、接下来该对齐目标还是核验结果；持续 Goal 与执行 Session/Run 的身份保持分离。
@@ -226,3 +228,11 @@ Demand 卡只展示足以扫描和路由的摘要：稳定 ID、标题、状态�
 - Demand 详情必须提供明确的“打开 PMO”动作。点击后打开 PMO Teams 浮窗并聚焦该 Demand 的专属 Tab；如果原 Tab 已被关闭或不可恢复，动作先为该 Demand 建立新的专属 PMO Tab，再打开它，不能悄悄切到另一个 Demand 的上下文。
 - New Demand 的初始提示词必须带上稳定 Demand ID、标题、描述和当前路由事实，并明确 PMO 只负责澄清、分配和跟进，不直接冒充执行 Agent。PMO 对话创建 Demand 的路径仍由 PMO 自己决定是否写入，不因为专属 Tab 规则自动新建空 Demand。
 - New Demand 打开的浮窗如果带有明确目标 Tab，浮窗只能等待并展示这张 Tab 的 Agent；目标 Agent 尚未挂上时不能先展示旧 PMO Session，也不能在目标标记清除后回退到其他 Demand 的 PMO。
+
+### Goal 与原持续推进的连接
+
+确认的 Goal 可以由明确关联的准确执行 Session 持续推进。原 `goal.start` 通过可选 continuation 授权绑定已确认 alignment revision 与同一业务 operationId；未提供 continuation 仍是原有限开始。原 `goal.inspect` 按该 Goal 投影原续跑 Manager 的准确目标、状态与原操作回执，读不创建调度或复制 Goal 账本。原 `goal.continuation-action` 以准确 Goal/loop、预期 revision 与业务 operationId 沿同一 Manager 执行暂停、恢复、停止或检查；普通日历 `schedule.*` 不承载 interval 续跑。RPC/CLI/GUI 与连接设备对同一操作、版本和结果使用一致语义。
+
+有限 Goal 开始把已确认的任务正常提交给明确的执行 Session；Provider 具备立即打断能力不等于这次目标开始获得抢占授权。提交方式与同一业务操作在首次入队时保存，重试沿原方式和原回执；已经选择立即打断或方式尚未确认的旧操作，不能被新的有限开始静默改成普通提交。忙碌、待权限、错误 Run 和投递未知仍由原 Core 判定并保留原任务、草稿与健康工作面，不在失败后换方式或换身份重发。用户的显式立即发送与原持续推进保留各自原合同。
+
+Goal 完成/取消仅停止相应 loop；blocked、待决定、确认失效或读取未知暂停自动动作并保留健康 Agent。loop 与 Goal grounding 的人类接受各自成立，自动推进不替用户确认目标、接受成果或宣告成功。交互与 Mote 入口唯一见[《目标、持续推进与成果回报》](motes-and-coordination.md#目标持续推进与成果回报)。
