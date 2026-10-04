@@ -14,12 +14,13 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { resolveOverlayContainer, WindowOverlayPortal } from './WindowOverlayHost'
 
 /** Familiar icon operations retain a visible tooltip and full accessible name. */
-export function MoteBehaviorAction({ label, children, onClick, expanded }: {
-  label: string; children: ReactNode; onClick(): void; expanded?: boolean
+export function MoteBehaviorAction({ label, children, onClick, expanded, disabled, busy }: {
+  label: string; children: ReactNode; onClick(): void; expanded?: boolean; disabled?: boolean; busy?: boolean
 }) {
   const id = useId(), [anchor, setAnchor] = useState<DOMRect | null>(null)
   return <>
     <button type="button" className="icon-button mote-behavior-action" aria-label={label} aria-expanded={expanded}
+      disabled={disabled} aria-busy={busy || undefined}
       aria-describedby={anchor ? id : undefined} onClick={() => { setAnchor(null); onClick() }}
       onPointerEnter={event => setAnchor(event.currentTarget.getBoundingClientRect())} onPointerLeave={() => setAnchor(null)}
       onFocus={event => setAnchor(event.currentTarget.getBoundingClientRect())} onBlur={() => setAnchor(null)}>{children}</button>
