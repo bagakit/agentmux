@@ -56,8 +56,8 @@ Tab 级投影只保当前展示位置的一行身份／操作带，不再套上�
 
 - 窗口只保留一组主导航，位置与分组见[《左下角导航与右下角工具组》](#左下角导航与右下角工具组)；顶行不重复主导航。
 - Agents 收件箱按注意力排序，Needs you 使用现有琥珀语义，working 使用现有绿色/蓝色语义，结果审查入口使用低对比度次级动作；不为同一状态增加第二枚常驻徽章。
-- Board 卡片先读 Task 身份，再读 Project 和状态；Session 名称、Provider 与执行状态进入次级元信息，不抢 Task 标题层级。
-- 没有选中 Task 时主区占满可用宽度；不画空右栏、不画占位边框、不使用“从右到左”的方向性动画。只有多个 Region 真实存在时才显示 arrangement 控件。
+- Goals 的目标卡片、详情与执行关联只见[Goals 呈现 owner](goals-and-demand.md#goals-的清单看板与详情)，不在空间页另立 Board／Demand 卡片合同。
+- 没有选中 Goal 时不画空详情栏或占位边框，布局沿[Goals owner](goals-and-demand.md#goals-的清单看板与详情)，不使用“从右到左”的方向性动画。只有多个 Region 真实存在时才显示 arrangement 控件。
 
 共同控件层级、类名、工具栏布局和选中语言统一见[《控件语言》](shared-rules.md#控件语言)；这里保留 Space 与 Project Rail 的对象约束。
 
@@ -97,7 +97,7 @@ Branch／Worktree 与 Topic 沿同一控件语言选择原工作面；资源身�
 
 - Mote 未指定手动身份时使用自己的类型图标与名称；手动身份规则引用交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)，共用 Space 行的密度、选择、焦点与状态语言；正常大小写为 `Mote`，不采用全大写缩写。Topics、Mote 和 Folder/Project 共用顶部控制行的密度与通用 `+` 菜单，各自分区有就地 `+`，保留总览的独立密度。产品身份与创建/人格行为只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。PMO 默认角色与 Provider/Executor 身份各有含义，不能让预制头像冒充底层执行者或运行状态；具体 PMO 入口与浮窗密度继续复用对应章节。
 - Project Rail 的所有真实树层级采用同一个 `--rail-depth` 公式；group header、project row、pinned child 不再各自补缩进。Pinned child 的标题比普通项目小一档，hover 只使用下划线，不使用项目行的 Surface 填充；它和所属 Project 之间仅由一层缩进和 pin 标记表达关系，不再画连接线。
-- 用户原话：「左侧项目菜单的缩进有点多, 图标有点大, 每个项的高度有点高了, 可以更加紧凑些, 或者在顶层的 projects 上的加号旁边增加一个组件, 调整紧凑程度」。 的「缩进有点看不出来」收紧了这一约束：密度可同时收紧行高与图标，但分类归属与真实 Folder/Branch pin 层级差仍遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent，不能压成与字间距等同。整栏变紧来自删掉重复留白、空槽和标题，不牺牲层级辨认。
+- 用户原话：「左侧项目菜单的缩进有点多, 图标有点大, 每个项的高度有点高了, 可以更加紧凑些, 或者在顶层的 projects 上的加号旁边增加一个组件, 调整紧凑程度」。「缩进有点看不出来」收紧了这一约束：密度可同时收紧行高与图标，但分类归属与真实 Folder/Branch pin 层级差仍遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent，不能压成与字间距等同。整栏变紧来自删掉重复留白、空槽和标题，不牺牲层级辨认。
 - 密度档由用户拥有，控件落在紧凑查找行尾；它是**可见的常驻控件**，不是隐藏偏好，也不进设置页——用户要在看着树的同时调。档位数保持极少（默认、紧凑、更紧凑三档），不做无级滑块：滑块要求用户自己找一个好值，而这件事只有几个稳定好值。各档行高与图标联动，真实缩进始终遵守本节最小可辨预算。
 - 密度档是 durable 的：重启后仍是用户选的那一档。缺席即默认档，不回写。
 - 通知胶囊默认保持 icon+count 的窄态，hover/focus 才过渡到 icon+count+label；状态颜色只作辅助，图形和数字始终存在。
@@ -137,12 +137,12 @@ Chat 使用原 Tab，既有 Group 沿原工作面分组；Thread 使用原 Agent
 
 ### Projects 层级与活动语言
 
-- 左侧菜单降低字重与重复装饰，状态栏内使用低对比语义图标和短标签承载 Agent 状态；数量作为辅助信息，不再由单点加数字承担全部语义。
+- 左侧菜单降低字重与重复装饰；全窗 Agent 状态由[Focus 唯一入口](focus-context.md#离线目录与导航)承载，数量只是辅助，不由单点加数字承担全部语义。状态栏资源与系统通知仍沿各自 owner，不重复 Agent 汇总。
 - Branch 与 Topic 的 recap 使用同一紧凑摘要表面，放在工作线行的次级信息层，不抢主标题。
-- Projects 栏与主工作区之间保留一条可拖拽的窄分隔带；悬停和拖拽时提高边界对比度并显示 resize cursor，静止时保持低干扰。宽度变化即时反映在项目名称、层级缩进与状态槽的可用空间中，结束拖拽后只持久化一个最终宽度，不增加第二份布局状态。行为约束见 [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)「顶部与项目栏」。
+- Projects 栏与主工作区之间保留一条可拖拽的窄分隔带；悬停和拖拽时提高边界对比度并显示 resize cursor，静止时保持低干扰。宽度变化即时反映在项目名称、层级缩进与状态槽的可用空间中，结束拖拽后只持久化一个最终宽度，不增加第二份布局状态。行为约束见[《Folder 与项目树》](../behavior/spaces-and-layout.md#folder-与项目树)。
 - 分组使用轻量目录集合图标和分类标签；项目使用自身图标或仓库图标，普通目录用文件夹。真实父子通过标题左缘差和分组权重表达层级，不画连接线，避免只靠文字亮度猜层级；具体层级差唯一见[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent，表现约束见[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)。
 - running/error 汇总使用紧凑图标微标与短数字；hover activity 面板以小尺寸 Provider 图标、单行最近活动与停止时长构成，避免大块数字方框和空白。
-- 运行状态采用细小节奏条和简短文案，尊重减少动画偏好；待处理采用有语义图标与原因短语，移除“点＋数字方框”和“数字＋叹号方框”。详情在悬停面板中显示 Agent 名称与状态，点击定位。行为见 [Desktop interaction](../agentmux-desktop-interaction.md)“Projects 结构与状态可读性”。
+- 运行状态采用细小节奏条和简短文案，尊重减少动画偏好；待处理采用有语义图标与原因短语，移除“点＋数字方框”和“数字＋叹号方框”。详情在悬停面板中显示 Agent 名称与状态，点击定位。行为见[《Projects 状态与 Activity 菜单》](../behavior/settings-and-observation.md#projects-状态与-activity-菜单)。
 
 ### 跨设备关联项目组
 
@@ -375,13 +375,13 @@ Topic rail 以紧凑的 Tab 图标簇表达打开面，不再用宽大的 chip �
 
 字母牌不要求把现有身份槽整体放大；字号沿原 `--fs-micro`，低于10px的原具名例外保持冻结的7px且实际绘字，不将字母混入豁免。叠压时右缘被邻座覆盖，注意力、归并计数、自定义徽标与字母不得抢同一可见角或把字母登记在实际被遮住的角；角位及换载体裁决沿[共享密度合同](shared-rules.md)，不新增第五角标。每枚hover/focus可完整阅读，用户自定义徽标继续保留。
 
-Provider官方品牌色保留，不使用正片叠底或给品牌染色；原色相仅作辅助分组并让开语义状态色，不另建调色板。Region嵌入的Agent头像不再另列重复身份；真实working/running的描边与其他状态的灰度沿原状态事实，静态身份不冒充运行，hover名称、状态与准确定位保持。
+Provider 官方品牌色与自动说话人色的分工唯一见[《对话身份色与语义色》](agent-capabilities-and-messaging.md#对话身份色与语义色)，不使用正片叠底、品牌重染或另一调色板。Topic topology 的 Region 地图将 Agent 头像嵌入准确格子，不另列重复身份；该地图的 working/running 状态描边与其他状态的中性层级沿原事实，不能推广成所有身份头像的 running 角标。普通导航身份的标记范围只见[身份呈现 owner](agent-capabilities-and-messaging.md#状态标记与-executor-叠加密度)，hover 名称、真实状态与准确定位保持。
 
 ## 顶部与项目栏
 
-- 左侧状态汇总的 running/error 数量采用紧凑语义图标与短数字；hover activity 面板展示 Provider 图标、最近活动摘要与停止时长，信息密度优先，不重复完整会话正文。
+- 全窗 running／error 汇总唯一见[Focus 入口](focus-context.md#离线目录与导航)；局部 Activity 面板仍展示 Provider 图标、最近活动摘要与停止时长，信息密度优先，不重复完整会话正文。
 
-- 左侧项目菜单使用较轻字重与明确的层级、状态和图标语义，降低装饰性重复信息；Status Bar 内的 Agent 状态采用低调的语义图标与短标签，不再使用“点+数量”作为唯一表达。
+- 左侧项目菜单使用较轻字重与明确的层级、状态和图标语义，降低装饰性重复信息。全窗 Agent 汇总沿[Focus 入口](focus-context.md#离线目录与导航)，Status Bar 不另放同义摘要；原非 Agent 控件保持。
 
 - **最左侧 Projects 栏支持拖拽调宽**。用户可从项目栏与主工作区的边界拖拽改变宽度，拖拽过程中项目内容即时适配，松开后保留最终宽度；边界提供可发现的 resize affordance、键盘焦点与可访问名称。调宽只影响 Projects 栏，不改变 Workspace Tools 或主工作区布局；收起和恢复沿用同一份宽度状态。
 
@@ -389,9 +389,9 @@ Provider官方品牌色保留，不使用正片叠底或给品牌染色；原色
 
 - Session 的顶层 Tab 组始终直接占据窗口最上方的 Tabbar。单 Pane 时它与窗口顶行合并；分屏时也不再额外预留一条空的全局 chrome 行，由左上方的首个 Pane 承载一次必要的窗口 chrome，其余 Pane 只保留自己的紧凑 Tabbar。
 
-- Project Rail 底部并排放 Settings 与键盘帮助，展开和收起时均可直接访问。
+- Settings 与键盘帮助的位置唯一见[《左下角导航与右下角工具组》](#左下角导航与右下角工具组)，展开与收起 Project Rail 时仍可直接访问。
 
-- **项目行回答三件事：哪个 Project、在跑几个 Agent、要不要你**。尾部的数字是**当前在跑的 Agent 数**，不是这个项目有几个 worktree——用户扫这一栏是在找"哪儿还有活在动"，仓库有几个 worktree 属于结构事实，答的不是同一个问题，进 tooltip。零不显示数字，只有真在跑才占位。Host 同理：本机是绝大多数情况，每行都写一遍 `This Mac` 不携带信息，只有远程 Host 才值得占一个位置。
+- 项目行以名称为主要扫描信息，尾部状态与准确 Session 计数唯一遵守[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)：两类需处理同时可见，安静时保最相关状态，其余按需读全；不把 worktree 结构数量混入 Agent 状态数。结构与 Host 资料按需读取，远程 Host 保必要区分，本机不逐行重复 `This Mac`。
 
 
 ## 控件用途说明
@@ -408,7 +408,7 @@ Provider官方品牌色保留，不使用正片叠底或给品牌染色；原色
 - 右侧运行/错误通知默认只显示语义 icon 和数量；hover、focus 或明确交互时再展开文案，展开不能遮挡项目名或改变列表跳动。
 - Pinned item 必须是可点击的导航入口；Topic 的 pin 标记贴近标题并保持在标题行的视觉轨道内，不漂浮到整行中央。
 - Topic按原Tab顺序呈现Region内的Agent身份与状态，后台健康Agent继续可见可达；详细在场条件只见[行为合同](../behavior/spaces-and-layout.md#topic-工作面拓扑与在场状态)。
-- Project Rail 的密度由用户在 Projects 标题行就地切换（加号旁），不进设置页；提供默认、紧凑、更紧凑三档，按同一个入口循环。切换只改变行高、行图标尺寸与每层缩进，**不改变树结构、归属、选中项或滚动位置**——密度是看法，不是数据。默认档的树缩进也要保持克制，避免切换后仍把项目标题推得太远；该选择重启后仍然有效（视觉档位见 DEN「Project Rail 与 Topic 行密度」）。
+- 树密度入口、三档几何和固定层级差唯一见[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)。密度不改变树结构、归属、选中或滚动位置；不另保留 Projects 标题加号旁入口或随档改变层级缩进的旧要求。
 - running 与 working 必须**同时**在字形与动势上可分：`running`（进程活着、未在产出）保持静态 glyph，`working`（正在产出）带节奏动势。只换提示文字、只换颜色、或两者都静态都不满足这条；reduced-motion 下动势退化为静态但**字形差异必须保留**（约束原文见 DEN「Agents、队列与语义 token 密度」，此处只补「哪一个是哪一个」）。
 
 
@@ -425,7 +425,7 @@ Focus 不留独立标题行，其必要过滤控件直接避开 macOS 原生窗�
 
 - **Project tree 的行尾状态统一为小图标 + 数字。** idle、running/working 与 error 都占同一枚紧凑状态槽，数字表示该 Project 的对应 Session 数量；图标形状和语义色区分状态，不能让某一类变成一段长文案或另一种尺寸的徽章。没有数量时不占位，tooltip/读屏补充完整状态名称。
 
-- **每个 Project 行行首显示这个项目自己的图标**。前提变了才改的：这条原先写的是"普通 Project 行不显示每行都相同的文件夹图标，行首留白"——那句在**每一行都是同一枚文件夹**时是对的（一列全同的图标不是信息，见密度合同[《控件语言》](shared-rules.md#控件语言)「一列全同的图标」）。一旦主进程能从项目仓库里探到各自真实的图标文件（favicon、app icon 等），这一列就有了区分度：`agentmux` 与 `avatars` 各顶自己的标识，用户一眼认出哪行是哪个。此时**文件夹/仓库 glyph 退化成"未知"态**——只在探不到图标时兜底，而不再是唯一态。兜底必须是**统一的文件夹/仓库 glyph**，不用 name-derived 色点、不留空：实测用户 10 个项目只有 4 个有图标，混排留空会让左缘参差。图标只表达身份，不模拟运行状态（运行仍走独立尾部状态槽）。Scratch 仍用它自己的品牌图标。
+- **Project 行首使用原身份槽。** 真实自动项目图像、确认无图的自动字母牌与手动图形优先级唯一见[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)及[《Folder 自动图像的近期活跃色调》](#folder-自动图像的近期活跃色调)。不再以统一 Folder／repo glyph 覆盖已有字素或手动选择，也不创建随机图像；原图和字母牌共用紧凑槽位，名称与左缘保持稳定，运行状态仍由独立尾部状态槽表达。
 
 - 有分组头时，分组成员整体比未分组项目多一层轻微缩进；成员之间的真实嵌套在此基础上继续增加缩进。分组头仍是标签而不是项目行，不能与成员落在同一条左缘，也不能因此新增持久化层级。
 
