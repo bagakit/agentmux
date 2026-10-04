@@ -250,7 +250,7 @@ describe('AgentHookServer', () => {
     expect(receipts).toEqual(['before-0', 'before-1', 'live'])
   })
 
-  it('keeps the same token retryable after an abort-aware delivery timeout', async () => {
+  it('retains unknown timed-out receipts while keeping the same token usable for new observations', async () => {
     let attempts = 0
     const server = new AgentHookServer(async (_event, signal) => {
       attempts += 1
@@ -263,17 +263,19 @@ describe('AgentHookServer', () => {
     await server.start()
     const binding = server.createBinding('semantic-retry', 'codex')
     await binding.bindRun('run-retry')
-    const request = async () => await fetch(binding.endpoint.url, {
+    const request = async (receiptId = 'retry-receipt') => await fetch(binding.endpoint.url, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${binding.endpoint.token}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ receiptId: 'retry-receipt', eventName: 'Stop' })
+      body: JSON.stringify({ receiptId, eventName: 'Stop' })
     })
 
     expect((await request()).status).toBe(503)
-    expect((await request()).status).toBe(204)
+    expect((await request()).status).toBe(503)
+    expect(attempts).toBe(1)
+    expect((await request('new-receipt')).status).toBe(204)
     expect(attempts).toBe(2)
   })
 
@@ -287,16 +289,18 @@ describe('AgentHookServer', () => {
     await server.start()
     const binding = server.createBinding('semantic-1', 'codex')
     await binding.bindRun('daemon-1')
-    const request = () => fetch(binding.endpoint.url, {
+    const request = (receiptId = 'stable-stop-receipt') => fetch(binding.endpoint.url, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${binding.endpoint.token}`,
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ receiptId: 'stable-stop-receipt', eventName: 'Stop' })
+      body: JSON.stringify({ receiptId, eventName: 'Stop' })
     })
     expect((await request()).status).toBe(503)
-    expect((await request()).status).toBe(204)
+    expect((await request()).status).toBe(503)
+    expect(attempts).toBe(1)
+    expect((await request('new-stop-receipt')).status).toBe(204)
     expect(attempts).toBe(2)
   })
 

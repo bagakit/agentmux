@@ -102,6 +102,59 @@ describe('Hook admission, receipt and observation recovery', () => {
     expect(receipts).toEqual(['pending'])
   })
 
+  it('retains original receipt uncertainty and conflicts while a timed-out owner drains', async () => {
+    const receipts: string[] = [], failures: HookDeliveryFailure[] = []
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const server = new AgentHookServer(async event => {
+      receipts.push(event.receiptId)
+      if (event.receiptId === 'unknown-draining') await gate
+    }, 0, failure => { failures.push(failure) })
+    servers.push(server); await server.start()
+    const binding = server.createBinding('draining-session', 'codex'); await binding.bindRun('draining-run')
+    try {
+      const first = await post(binding, 'unknown-draining', { original: true })
+      expect(first.status).toBe(503)
+      const unknown = { error: 'HOOK_DELIVERY_TIMEOUT', receiptId: 'unknown-draining', stage: 'owner', accepted: 'unknown' }
+      expect(await first.json()).toMatchObject(unknown)
+      const repeated = await post(binding, 'unknown-draining', { original: true })
+      expect(repeated.status).toBe(503)
+      expect(await repeated.json()).toMatchObject(unknown)
+      expect((await post(binding, 'unknown-draining', { conflicting: true })).status).toBe(409)
+      const fresh = await post(binding, 'not-admitted')
+      expect(await fresh.json()).toMatchObject({ error: 'HOOK_BINDING_RECOVERING', stage: 'admission', accepted: false })
+      expect(receipts).toEqual(['unknown-draining'])
+      expect(failures.filter(failure => failure.receiptId === 'unknown-draining')).toEqual([
+        expect.objectContaining({ stage: 'owner', accepted: 'unknown' }),
+        expect.objectContaining({ stage: 'owner', accepted: 'unknown' })
+      ])
+      release(); await wait(10)
+      expect((await post(binding, 'unknown-draining', { original: true })).status).toBe(503)
+      expect((await post(binding, 'new-after-drain')).status).toBe(204)
+      expect(receipts).toEqual(['unknown-draining', 'new-after-drain'])
+    } finally { release() }
+  }, 4_000)
+
+  it('does not execute an unknown receipt twice after owner mutation then rejection', async () => {
+    const mutations: string[] = []
+    const server = new AgentHookServer(event => {
+      mutations.push(event.receiptId)
+      if (event.receiptId === 'unknown-commit') throw new Error('commit acknowledgement unavailable after mutation')
+    }, 0)
+    servers.push(server); await server.start()
+    const binding = server.createBinding('unknown-session', 'pi'); await binding.bindRun('unknown-run')
+    const first = await post(binding, 'unknown-commit', { original: true })
+    expect(await first.json()).toMatchObject({ receiptId: 'unknown-commit', stage: 'owner', accepted: 'unknown' })
+    await wait(10) // The rejected owner has drained; unknown is still not proof of no commit.
+    const repeated = await post(binding, 'unknown-commit', { original: true })
+    expect(repeated.status).toBe(503)
+    expect(await repeated.json()).toMatchObject({ receiptId: 'unknown-commit', stage: 'owner', accepted: 'unknown' })
+    expect(mutations).toEqual(['unknown-commit'])
+    expect((await post(binding, 'unknown-commit', { conflicting: true })).status).toBe(409)
+    expect((await post(binding, 'fresh-receipt')).status).toBe(204)
+    expect(mutations).toEqual(['unknown-commit', 'fresh-receipt'])
+  })
+
   it('expires queued work before execution, keeps other bindings usable and reopens after aborted work drains', async () => {
     const failures: HookDeliveryFailure[] = []
     const receipts: string[] = []
