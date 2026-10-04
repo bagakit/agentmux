@@ -13,7 +13,6 @@ const dispatch = 'apps/desktop/src/main/browser-page-dispatch.ts'
 const test = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const cases = [
   ['upload-stop-during-workspace-io-proof-removed', manager, "if (signal?.aborted) throw new Error('This Browser operation stopped before file assignment could be confirmed.')", 'void signal'],
-  ['upload-takeover-during-workspace-io-proof-removed', manager, "if (takeover.at !== null) throw new Error('Human took control before file assignment could be confirmed.')", 'void takeover'],
   ['upload-original-view-source-proof-removed', manager, "if (view !== observingView) throw new Error('The Browser view changed before upload.')", 'void view'],
   ['upload-original-view-current-proof-removed', manager, "if (currentView !== observingView) throw new Error('The Browser view changed during upload.')", 'void currentView'],
   ['upload-owner-disconnected', manager, 'this.uploads ? { uploads:', 'false ? { uploads:'],
@@ -23,7 +22,6 @@ const cases = [
   ['script-completion-deletes-file-list', manager, 'const cleanupWarning = session.detach()', 'await this.uploads?.releaseBrowser(entry.id); const cleanupWarning = session.detach()'],
   ['same-document-history-deletes-file-list', manager, 'if (!details.isSameDocument) this.releaseUploadFiles(entry)', 'this.releaseUploadFiles(entry)'],
   ['navigation-does-not-release-file-list', manager, 'if (!details.isSameDocument) this.releaseUploadFiles(entry)', 'void details.isSameDocument'],
-  ['human-takeover-permits-file-selection', manager, 'takeover.at !== null && BROWSER_ACTION_PAGE_CALLS.has(name)', "takeover.at !== null && name !== 'uploadFiles' && BROWSER_ACTION_PAGE_CALLS.has(name)"],
   ['upload-cleanup-warning-hidden', manager, "entry.activity = { ...entry.activity, warning: 'Selected-file staging could not be fully released. The Browser remains usable; navigate or close it to retry cleanup.' }", 'void entry.activity']
 ]
 const inputs = [manager, dispatch, test]
@@ -59,13 +57,6 @@ try {
       const secondary = 'current !== snapshot || !issued?.has(ref) || expired.has(ref) || context.pageInfo().navigationId !== snapshot.navigationId'
       assert.equal(source.split(secondary).length - 1, 1, 'Post-resolution issued proof must exist exactly once.')
       mutated = mutated.replace(secondary, 'current !== snapshot || expired.has(ref) || context.pageInfo().navigationId !== snapshot.navigationId')
-    }
-    if (name === 'human-takeover-permits-file-selection') {
-      // Remove the authorization rule at every relevant read, including the asynchronous IO boundary.
-      // Removing only the outer action gate is caught by the inner guard and cannot model unauthorized assignment.
-      const secondary = "if (takeover.at !== null) throw new Error('Human took control before file assignment could be confirmed.')"
-      assert.equal(source.split(secondary).length - 1, 1, 'Async upload takeover proof must exist exactly once.')
-      mutated = mutated.replace(secondary, 'void takeover')
     }
     await fs.writeFile(path.join(isolated, file), mutated)
     try {

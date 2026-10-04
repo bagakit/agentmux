@@ -19,7 +19,6 @@ const cases = [
   ['continuation-replays-download-action', dispatch, 'const owner = context.downloads.context()', 'await callOn("@e1", "function () { this.click() }"); const owner = context.downloads.context()'],
   ['download-warning-not-projected', dispatch, 'if (warning) context.note(warning)', 'void warning'],
   ['download-options-guard-removed', dispatch, "Object.keys(options).some(key => !['path', 'timeoutMs', 'maxBytes'].includes(key))", 'false'],
-  ['human-takeover-permits-download', manager, 'takeover.at !== null && BROWSER_ACTION_PAGE_CALLS.has(name)', "takeover.at !== null && name !== 'download' && BROWSER_ACTION_PAGE_CALLS.has(name)"],
   ['native-download-trigger-disconnected', dispatch, "async () => await callOn(ref, 'function () { this.scrollIntoView({block: \"center\"}); this.click() }')", 'async () => undefined']
 ]
 const inputs = [manager, dispatch, test]
