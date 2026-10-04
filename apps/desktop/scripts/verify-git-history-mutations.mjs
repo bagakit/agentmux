@@ -1,6 +1,6 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 
-const main = 'apps/desktop/src/main/git-service.ts'
+const main = 'packages/git/src/git-repository.ts'
 const preload = 'apps/desktop/src/preload/index.ts'
 const hook = 'apps/desktop/src/renderer/src/hooks/useGitHistory.ts'
 const panel = 'apps/desktop/src/renderer/src/components/GitHistoryPanel.tsx'

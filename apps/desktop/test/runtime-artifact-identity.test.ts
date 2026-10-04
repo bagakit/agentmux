@@ -26,10 +26,10 @@ async function fixture() {
   const source = join(root, 'source'), home = join(root, 'home')
   const current = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
   for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/preload', 'apps/desktop/src/shared',
-    'apps/desktop/scripts', 'packages/core/src', 'packages/core/scripts', 'packages/core/bin'])
+    'apps/desktop/scripts', 'packages/core/src', 'packages/core/scripts', 'packages/core/bin', 'packages/git/src'])
     await mkdir(join(source, directory), { recursive: true })
   for (const name of ['apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
-    'packages/core/package.json', 'pnpm-lock.yaml']) await file(join(source, name), 'unchanged shell')
+    'packages/core/package.json', 'packages/git/package.json', 'packages/git/tsconfig.build.json', 'pnpm-lock.yaml']) await file(join(source, name), 'unchanged shell')
   for (const directory of [join(source, 'packages/core/vendor/ctxmux'), join(current, runtimeRelative), join(candidate, runtimeRelative)]) {
     await file(join(directory, selected, 'manifest.json'), 'current host manifest')
     await file(join(directory, selected, 'bin/ctxmuxd'), 'current host daemon')
@@ -53,6 +53,14 @@ it('source release Native identity ignores foreign artifacts while retaining act
   await file(join(f.source, 'packages/core/src/runtime-client.ts'), 'actual Core change')
   const after = await sourceUpdateIdentity(f.source)
   expect(after.ctxmux).toBe(before.ctxmux); expect(after.shell).not.toBe(before.shell)
+})
+
+it('neutral Git source changes alter the shell identity without changing the native runtime', async () => {
+  const f = await fixture(), before = await sourceUpdateIdentity(f.source)
+  await file(join(f.source, 'packages/git/src/git-repository.ts'), 'actual Git capability change')
+  const after = await sourceUpdateIdentity(f.source)
+  expect(after.shell).not.toBe(before.shell)
+  expect(after.ctxmux).toBe(before.ctxmux)
 })
 
 it('source release Native identity changes for each current host artifact and rejects missing host facts', async () => {

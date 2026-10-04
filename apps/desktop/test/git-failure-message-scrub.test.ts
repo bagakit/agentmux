@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { afterAll, describe, expect, it } from 'vitest'
-import { gitFailureError, gitFailureMessage } from '../src/main/git-service.js'
+import { gitFailureError, gitFailureMessage } from '@agentmux/git'
 
 /**
  * 守的缺陷（#481 / #484）：两个 service 各写了一份 `assertGit`，字节级相同，**只差一个 scrub**。
@@ -59,7 +59,7 @@ import { gitFailureError, gitFailureMessage } from '../src/main/git-service.js'
 const MAIN = fileURLToPath(new URL('../src/main', import.meta.url))
 
 /** 取值口自己的家。只有这个文件可以拼那条 fallback 链。 */
-const SSOT = 'git-service.ts'
+const SSOT = 'git-repository.ts'
 
 /** 允许自己构造 git 失败消息的文件。SSOT 一个，别无。 */
 const MESSAGE_BUILDERS = new Set([SSOT])
@@ -114,7 +114,7 @@ function namesImportedFromGitService(source: ts.SourceFile): Set<string> {
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement)) continue
     if (!ts.isStringLiteral(statement.moduleSpecifier)) continue
-    if (!statement.moduleSpecifier.text.endsWith('git-service.js')) continue
+    if (statement.moduleSpecifier.text !== '@agentmux/git') continue
     const bindings = statement.importClause?.namedBindings
     if (bindings === undefined || !ts.isNamedImports(bindings)) continue
     // element.name 是本地名——调用点写的就是它（`import { x as y }` 时调用点是 `y`）。
@@ -178,7 +178,7 @@ function importsMessageAccessor(source: ts.SourceFile): boolean {
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement)) continue
     if (!ts.isStringLiteral(statement.moduleSpecifier)) continue
-    if (!statement.moduleSpecifier.text.endsWith('git-service.js')) continue
+    if (statement.moduleSpecifier.text !== '@agentmux/git') continue
     const bindings = statement.importClause?.namedBindings
     if (bindings === undefined || !ts.isNamedImports(bindings)) continue
     for (const element of bindings.elements) {
@@ -238,7 +238,7 @@ function readTsFilesRecursively(root: string): SourceText[] {
 }
 
 function mainProcessFiles(): SourceText[] {
-  return readTsFilesRecursively(MAIN)
+  return [...readTsFilesRecursively(MAIN), ...readTsFilesRecursively(fileURLToPath(new URL('../../../packages/git/src', import.meta.url)))]
 }
 
 /** 自证用的临时扫描根，跑完清掉。 */
@@ -277,7 +277,7 @@ describe('git 失败消息只有一个构造口', () => {
     // 这段代码里**没有** scrub 这个词——按名字查的守卫看不见它，这正是判据要落在取值面的理由。
     // 顶上那行 import 是刻意留的：光有 import 不代表这处读取合法，读取点本身要过允许清单。
     const copy = `
-      import { gitFailureError } from './git-service.js'
+      import { gitFailureError } from '@agentmux/git'
       async function run(host: Host) {
         const result = await host.run('git', ['status'], {})
         if (result.exitCode !== 0) {
@@ -335,7 +335,7 @@ describe('git 失败消息只有一个构造口', () => {
     // 合法形状 1：`.stderr` 作为「从 git-service 导入的函数」的实参——分类谓词只吐布尔，值进了 SSOT。
     // 这正是 worktree-service 真实的两处读取的形状，也是主断言里被判 permitted 的那些。
     const legitimate = `
-      import { isNotAGitRepositoryStderr } from './git-service.js'
+      import { isNotAGitRepositoryStderr } from '@agentmux/git'
       async function a(host: Host) {
         const result = await host.run('git', ['status'], {})
         if (result.exitCode !== 0 && isNotAGitRepositoryStderr(result.stderr)) return null
@@ -352,7 +352,7 @@ describe('git 失败消息只有一个构造口', () => {
   it('反向自证 2：控制流里判空 stderr（比较）不报红', () => {
     // 合法形状 2：`result.stderr !== ''` 是比较，产出布尔，是控制流不是拼消息。
     const guardOnly = `
-      import { gitFailureError } from './git-service.js'
+      import { gitFailureError } from '@agentmux/git'
       async function a(host: Host) {
         const result = await host.run('git', ['status'], {})
         if (result.stderr !== '') return null

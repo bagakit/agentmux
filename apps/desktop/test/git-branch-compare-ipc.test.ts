@@ -1,4 +1,3 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,13 +10,14 @@ import type { ScratchTopics } from '../src/main/scratch-topics.js'
 import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 const fixture = vi.hoisted(() => ({
+  path: '',
   api: undefined as unknown as AgentMuxPreloadApi,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
-  sender: { id: 1, isDestroyed: () => false, send: vi.fn(), session: { flushStorageData: vi.fn() } }
+  sender: { id: 1, isDestroyed: () => false, send: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } }
 }))
 vi.mock('electron', () => ({
-  app: { getPath: () => _hygiene_fixturePath("isolated-branch-ipc") },
+  app: { getPath: () => fixture.path, getAppPath: () => fixture.path },
   contextBridge: { exposeInMainWorld: (_key: string, value: AgentMuxPreloadApi) => { fixture.api = value } },
   webFrame: { getZoomFactor: () => 1 },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => fixture.handlers.set(channel, handler), removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -41,7 +41,7 @@ import '../src/preload/index.js'
 import { LocalExecutionHost } from '@agentmux/core'
 import { registerIpc } from '../src/main/ipc.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
-import { GIT_NONINTERACTIVE_ENV } from '../src/main/git-service.js'
+import { GIT_NONINTERACTIVE_ENV } from '@agentmux/git'
 
 let root: string
 let dispose: (() => Promise<void>) | undefined
@@ -50,6 +50,7 @@ let host: LocalExecutionHost
 beforeEach(async () => {
   fixture.handlers.clear(); fixture.invokes.length = 0
   root = await mkdtemp(join(tmpdir(), 'agentmux-branch-ipc-'))
+  fixture.path = root
   host = new LocalExecutionHost()
   const git = async (...args: string[]) => {
     const result = await host.run('git', ['-C', root, ...args], { env: GIT_NONINTERACTIVE_ENV, timeoutMs: 20_000, maxOutputBytes: 2 * 1024 * 1024 })
@@ -60,10 +61,10 @@ beforeEach(async () => {
   await writeFile(join(root, 'one.txt'), 'base\n'); await git('add', '--all'); await git('commit', '-m', 'Base')
   await git('switch', '-c', 'target'); await writeFile(join(root, 'one.txt'), 'target\n'); await git('add', '--all'); await git('commit', '-m', 'Target'); targetOid = await git('rev-parse', 'HEAD')
   await git('switch', 'base'); await writeFile(join(root, 'one.txt'), 'dirty decoy\n')
-  const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {}, executionHost: () => host } as unknown as RuntimeController
-  dispose = await registerIpc({ window: { webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {}, executionHost: () => host } as unknown as RuntimeController
+  dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'local', path: root, name: 'Private', kind: 'folder' }] }) } as unknown as ConfigStore,
-    scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles, progressLoops: { subscribe: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'] })
   expect(fixture.handlers.has('git:compareBranches')).toBe(true); expect(fixture.handlers.has('git:branchDiff')).toBe(true)
 })
 afterEach(async () => {

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { LocalExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
 import type { GitHistoryResult } from '../src/shared/git-contracts.js'
-import { GitService, GIT_NONINTERACTIVE_ENV } from '../src/main/git-service.js'
+import { GitService } from '../src/main/git-service.js'
+import { GIT_NONINTERACTIVE_ENV } from '@agentmux/git'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })

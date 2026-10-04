@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
-import { GitService, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '../src/main/git-service.js'
+import { GitService } from '../src/main/git-service.js'
+import { isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '@agentmux/git'
 
 const config: AppConfig = {
   version: 9,

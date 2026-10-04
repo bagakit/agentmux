@@ -6,15 +6,16 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '../../..')
-const helper = 'apps/desktop/src/shared/git-project-identity.ts'
-const owner = 'apps/desktop/src/main/git-service.ts'
+const helper = 'packages/git/src/project-identity.ts'
+const owner = 'packages/git/src/git-repository.ts'
+const adapter = 'apps/desktop/src/main/git-service.ts'
 const ipc = 'apps/desktop/src/main/ipc.ts', preload = 'apps/desktop/src/preload/index.ts'
 const sidebar = 'apps/desktop/src/renderer/src/components/WorkspaceSidebar.tsx'
 const associations = 'apps/desktop/src/renderer/src/hooks/useGitProjectAssociations.ts'
-const sources = [helper, owner, ipc, preload, 'apps/desktop/src/shared/git-contracts.ts',
+const sources = [helper, owner, adapter, ipc, preload, 'apps/desktop/src/shared/git-contracts.ts',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts']
 const tests = ['apps/desktop/test/git-project-identity.test.ts', 'apps/desktop/test/git-project-identity-ipc.test.ts']
-const captured = [helper, owner, ipc, preload, ...tests]
+const captured = [helper, owner, adapter, ipc, preload, ...tests]
 const inputs = [...sources, ...tests, sidebar, associations, 'apps/desktop/scripts/verify-git-project-identity.mjs',
   'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts', 'tsconfig.base.json', 'apps/desktop/tsconfig.json', 'pnpm-lock.yaml']
 const dependencyInputs = ['packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/src/execution-host.ts',
@@ -44,7 +45,8 @@ async function consumers() {
   const ts = createRequire(import.meta.url)('typescript')
   const required = [
     { definition: helper, file: owner, expression: 'normalizeGitProjectRemote' },
-    { definition: owner, file: ipc, expression: 'git.projectIdentity' },
+    { definition: owner, file: adapter, expression: 'this.repository(workspaceId, config).projectIdentity' },
+    { definition: adapter, file: ipc, expression: 'git.projectIdentity' },
     { definition: ipc, file: preload, expression: 'ipcRenderer.invoke', channel: 'git:projectIdentity' },
     { definition: preload, file: associations, expression: 'api.git.projectIdentity' },
     { definition: associations, file: sidebar, expression: 'useGitProjectAssociations' }
@@ -77,7 +79,7 @@ try {
   receipt.owningTypecheck = { command: [process.execPath, ...typeArgs], exitCode: typeExit, log: typeLog, logSHA256: sha(await read(typeLog)) }
   assert.equal(typeExit, 0, 'The actual owning source/test contracts must typecheck')
   const canonical = 'return `${url.hostname.toLowerCase()}${port}/${path}`'
-  const host = 'const host = this.hostFor(workspace.hostId)\n      const repoPath = await this.resolveRepoPath(host, workspace.path)'
+  const host = 'const host = this.hostFor(workspace.hostId)'
   const source = "const source = names.includes('origin') ? 'origin' : names.length === 1 ? names[0]! : null"
   const port = "const port = url.port && url.port !== defaults[url.protocol] ? `:${url.port}` : ''"
   const failure = "return unavailable(scrubGitCredentials(error instanceof Error ? error.message : 'Repository source observation failed.'))"
@@ -85,8 +87,8 @@ try {
     { id: 'retain-userinfo', target: helper, before: canonical,
       after: 'return `${url.username ? `${url.username}:${url.password}@` : ""}${url.hostname.toLowerCase()}${port}/${path}`',
       assertion: 'Repository source normalization must exclude credentials and preserve equivalent addresses' },
-    { id: 'borrow-local-host', target: owner, before: host,
-      after: "const host = this.hostFor('local')\n      const repoPath = await this.resolveRepoPath(host, workspace.path)",
+    { id: 'borrow-local-host', target: adapter, before: host,
+      after: "const host = this.hostFor('local')",
       assertion: 'The exact Workspace Host must own the real-Git source read' },
     { id: 'borrow-upstream-source', target: owner, before: source,
       after: "const source = names.includes('upstream') ? 'upstream' : names.includes('origin') ? 'origin' : names.length === 1 ? names[0]! : null",
@@ -109,7 +111,7 @@ try {
     const own = path.join(run, phase.id); await fs.mkdir(own, { mode: 0o700 })
     const config = path.join(own, 'readonly.config.mts'), report = path.join(own, 'vitest.json'), capture = path.join(own, 'consumed-source.json')
     const expected = Object.fromEntries(captured.map(file => [path.join(root, file), receipt.inputsBefore[file]]))
-    const configSource = `import base from ${JSON.stringify(path.join(root, 'vitest.config.ts'))};
+    const configSource = `import base from ${JSON.stringify(path.join(root, 'apps/desktop/test/git-workbench.config.mts'))};
 import {defineConfig} from 'vitest/config';import {createHash} from 'node:crypto';import {readFileSync,writeFileSync} from 'node:fs';
 const expected=${JSON.stringify(expected)},target=${JSON.stringify(path.join(root, phase.target))},before=${JSON.stringify(phase.before)},after=${JSON.stringify(phase.after)},loaded:Record<string,unknown>={};
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
