@@ -8,6 +8,15 @@ export type RendererTerminalCost = {
   revealed: boolean; liveReady: boolean; acceptsInput: boolean; replaying: boolean
   inFlightWrites: number; queuedItems: number; queuedBytes: number; pendingItems: number; pendingBytes: number
   cols: number; rows: number; normalLines: number; alternateLines: number
+  interaction: {
+    observedSinceAt: number
+    keydown: { count: number; unknownDelayCount: number; delay: RendererWorkTiming }
+    wheel: { count: number; unknownDelayCount: number; delay: RendererWorkTiming }
+    /** User onData/onBinary sessions.write Promise completion; excludes protocol replies and paste. Never PTY ACK, processing or echo. */
+    writeRequests: { started: number; completed: number; failed: number; pending: number; wall: RendererWorkTiming; lastStartedAt: number | null; lastSettledAt: number | null }
+    lastEvent: { kind: 'keydown' | 'wheel'; observedAt: number; delayMs: number | null; visible: boolean;
+      liveReady: boolean; acceptsInput: boolean; readOnly: boolean; buffer: 'normal' | 'alternate'; mouseTrackingMode: string } | null
+  }
 }
 export type RendererTabSwitchTarget = {
   displayWorkspaceId: string; groupId: string; tabId: string; regionId: string; presentationId: string
@@ -43,6 +52,6 @@ export type RendererPerformanceSnapshot = {
   /** At most 16 recent exact-occurrence observations. Missing stages stay null. */
   tabSwitches: RendererTabSwitchCost[]
   tabSwitchesOmitted: number
-  slowEvents: { kind: 'session-event' | 'terminal-write' | 'long-task' | 'input-delay'; detail: string; observedAt: number; durationMs: number }[]
+  slowEvents: { kind: 'session-event' | 'terminal-write' | 'long-task' | 'input-delay' | 'terminal-interaction'; detail: string; observedAt: number; durationMs: number }[]
   observerCost: { snapshots: RendererWorkTiming; performanceCallbacks: RendererWorkTiming }
 }

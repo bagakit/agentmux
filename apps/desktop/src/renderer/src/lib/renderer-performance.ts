@@ -31,6 +31,9 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     },
     commit(kind: keyof typeof consumers, visible: boolean) { consumers[kind][visible ? 'visible' : 'hidden'].commits++ },
     start: now,
+    terminalInteraction(detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number) {
+      slow('terminal-interaction', detail, duration)
+    },
     sessionEvent(kind: string, start: number) {
       const elapsed = Math.max(0, now() - start)
       add(sessionEvents, elapsed); slow('session-event', kind, elapsed)
