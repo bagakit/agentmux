@@ -116,6 +116,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     const terminalContainer = agentSurface?.querySelector<HTMLElement>('.terminal-view__xterm')
     const interactionBody = agentSurface?.querySelector<HTMLElement>('.agent-body')
     let disposed = false, revision = 0
+    let observedSourceHost: HTMLElement | null = null
     let observedInteraction: HTMLElement | null = null
     let observedHelper: HTMLElement | null = null
     let observedTerminal: HTMLElement | null = null, observedRegionId: string | undefined
@@ -127,12 +128,13 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     const cursorObserver = new MutationObserver(scheduleUpdate)
     const terminalObserver = new MutationObserver(scheduleUpdate)
     if (terminalContainer) terminalObserver.observe(terminalContainer, { childList: true })
-    // Observe only this Region's request host and its current request shell.
+    // Observe only this Region's body, current source host and request shell.
     // Reading history or an unrelated Region must not schedule this placement.
     const interactionObserver = new MutationObserver(scheduleUpdate)
     const observeInteraction = () => {
       interactionObserver.disconnect()
       if (interactionBody) interactionObserver.observe(interactionBody, { childList: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] })
+      if (observedSourceHost) interactionObserver.observe(observedSourceHost, { childList: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] })
       if (observedInteraction) interactionObserver.observe(observedInteraction, { attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class', 'data-request-id'] })
     }
     observeInteraction()
@@ -140,12 +142,17 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     const update = async () => {
       const request = ++revision
       if (!composer.isConnected || composer.closest('[hidden], [inert]')) return
-      const interaction = Array.from(interactionBody?.children ?? []).find(node =>
-        node instanceof HTMLElement && node.matches('.agent-interaction[data-request-id]') &&
+      const sourceHost = Array.from(interactionBody?.children ?? []).find(node =>
+        node instanceof HTMLElement && node.matches('.agent-interaction-source') &&
         (node.closest('[data-workbench-region-id]') ?? node.closest('.agent-surface')) === region) as HTMLElement | undefined
-      if ((interaction ?? null) !== observedInteraction) {
+      const interaction = Array.from(sourceHost?.children ?? []).find(node =>
+        node instanceof HTMLElement && node.matches('.agent-interaction[data-request-id]')) as HTMLElement | undefined
+      if ((sourceHost ?? null) !== observedSourceHost || (interaction ?? null) !== observedInteraction) {
+        if (observedSourceHost) resize.unobserve(observedSourceHost)
         if (observedInteraction) resize.unobserve(observedInteraction)
+        observedSourceHost = sourceHost ?? null
         observedInteraction = interaction ?? null
+        if (observedSourceHost) resize.observe(observedSourceHost)
         if (observedInteraction) resize.observe(observedInteraction)
         observeInteraction()
       }
@@ -198,10 +205,13 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
             position.y < cursor.bottom && position.y + height > cursor.top) {
           overlapTop = overlapTop === undefined ? cursor.top : Math.min(overlapTop, cursor.top)
         }
-        if (interaction?.isConnected && !interaction.closest('[hidden], [inert]')) {
-          const style = getComputedStyle(interaction)
-          const rect = interaction.getBoundingClientRect()
+        if (interaction?.isConnected && sourceHost?.isConnected && !interaction.closest('[hidden], [inert]')) {
+          const style = getComputedStyle(interaction), hostStyle = getComputedStyle(sourceHost)
+          // The source notice belongs to the current request too; moving above
+          // only its inner card could cover that visible declaration instead.
+          const rect = sourceHost.getBoundingClientRect()
           if (style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+              hostStyle.display !== 'none' && hostStyle.visibility !== 'hidden' && hostStyle.visibility !== 'collapse' &&
               rect.width > 0 && rect.height > 0 && left < rect.right && left + width > rect.left &&
               position.y < rect.bottom && position.y + height > rect.top) {
             overlapTop = overlapTop === undefined ? rect.top : Math.min(overlapTop, rect.top)
