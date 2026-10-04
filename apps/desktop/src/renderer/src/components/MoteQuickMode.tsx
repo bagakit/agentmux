@@ -1,9 +1,11 @@
 import { sessionPresentationById } from '../lib/session-presentation'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Bot, FileText, MessageCircle, Pencil, Pin, X, Zap } from 'lucide-react'
+import { Bot, Clock3, FileText, MessageCircle, Pencil, Pin, X, Zap } from 'lucide-react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
+import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
+import { moteRecoveryTiming } from '../lib/mote-session-recovery'
 import { MOTE_QUICK_MODE_PATH, type MoteQuickDefaults } from '../../../shared/mote-quick-mode'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -34,6 +36,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
     <div className="mote-details__section-actions"><span><Zap size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><Pencil size={14} /></MoteBehaviorAction></div>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><Bot size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><MessageCircle size={14} /><span>Default conversation</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved conversation' : 'Choose conversation')}</strong>{defaults.conversation ? <Pin size={12} aria-label="Kept open" /> : null}</button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><Clock3 size={14} /><span>Reconnect</span><strong>{moteRecoveryTiming(scope.topic) === 'startup' ? 'At app startup' : 'When opened'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
       onClose={() => setEditing(false)} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
@@ -105,6 +108,11 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
           options={[{ value: '', label: 'No fixed conversation' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
             ...choices.map(choice => ({ value: JSON.stringify(choice), label: `${conversationLabels[choice.sessionId]} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
+        <label htmlFor={id + '-recovery'}><Clock3 size={16} /><span>Reconnect<small>Continues the original conversation. Sends no message.</small></span></label>
+        {scope.topic.id === PMO_TEAMS_TOPIC_ID ? <div id={id + '-recovery'} className="mote-details__hint">At app startup · Main Mote</div> :
+          <SelectionField id={id + '-recovery'} label="Reconnect conversation" value={draft.recovery ?? 'on-open'}
+            onValueChange={value => { if (value === 'startup' || value === 'on-open') update({ ...form.current, recovery: value }) }}
+            options={[{ value: 'on-open', label: 'When this Mote is opened' }, { value: 'startup', label: 'At app startup' }]} />}
         {!choices.length ? <p className="mote-details__hint">Start an original conversation in this Mote, then choose it here.</p> : null}
         {loading ? <p role="status" className="mote-details__hint">Reading MOTE.md…</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread</button></div> : null}

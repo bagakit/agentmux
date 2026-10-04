@@ -1,3 +1,4 @@
+import { useMoteConversationRecovery } from '../lib/mote-session-recovery'
 import { useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { useMemo, type ReactNode } from 'react'
 import { useAppStore } from '../store'
@@ -5,11 +6,12 @@ import { MoteWorkfaceContext, useMoteWorkfaceScope } from '../lib/mote-workface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 /** Mote supplies object context; the shared Space owns files and persona tools. */
-export function MoteWorkface({ workspaceId, topicId, floating = false, visible = true, onTabSelect, children }: {
-  workspaceId: string; topicId?: string | undefined; floating?: boolean; visible?: boolean
+export function MoteWorkface({ workspaceId, topicId, floating = false, visible = true, recoverOnOpen = visible, onTabSelect, children }: {
+  workspaceId: string; topicId?: string | undefined; floating?: boolean; visible?: boolean; recoverOnOpen?: boolean
   onTabSelect?: ((tabId: string, groupId?: string) => void) | undefined; children: ReactNode
 }) {
   const scope = useMoteWorkfaceScope(workspaceId, topicId, visible)
+  useMoteConversationRecovery(scope?.topic, scope?.workspace.id ?? workspaceId, recoverOnOpen)
   const defaults = useMoteDefaultConversation(scope?.topic, scope?.workspace.id ?? workspaceId, visible)
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
