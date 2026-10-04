@@ -1,6 +1,7 @@
+import { ComposerTextarea, InputGroup } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { Check, FileText, MessageCircle, Plus, X } from 'lucide-react'
+import { ArrowRight, Check, FileText, MessageCircle, Plus, X } from 'lucide-react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
@@ -124,14 +125,17 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
               <MoteBehaviorAction label="Try a cooperation question" expanded={extra === 'trial'} onClick={() => setExtra(value => value === 'trial' ? null : 'trial')}><MessageCircle size={16} /></MoteBehaviorAction>
               <MoteBehaviorAction label="Open original behavior file" onClick={() => void inspect()}><FileText size={16} /></MoteBehaviorAction>
             </div>
-            {extra === 'custom' ? <label className="mote-behavior-extra">Extra preferences<textarea aria-label="Custom cooperation preferences" rows={3}
-              value={draft.custom} onChange={event => update({ ...form.current, custom: event.target.value })} placeholder="What helps us work together?" /></label> : null}
-            {extra === 'trial' ? <div className="mote-behavior-extra"><label>Try your own question<textarea aria-label="Cooperation trial question" rows={3} value={question}
-              onChange={event => { trialInput.current = {}; setQuestion(event.target.value) }} placeholder="Bring a real question to a new discussion" /></label>
-              <button type="button" className="small-button" onClick={() => {
+            {extra === 'custom' ? <label className="mote-behavior-extra">Extra preferences<ComposerTextarea aria-label="Custom cooperation preferences" rows={3}
+              value={draft.custom} onValueChange={value => update({ ...form.current, custom: value })} placeholder="What helps us work together?" /></label> : null}
+            {extra === 'trial' ? <div className="mote-behavior-extra"><label htmlFor={id + '-trial'}>Try your own question</label>
+              <InputGroup variant="prompt">
+                <ComposerTextarea id={id + '-trial'} aria-label="Cooperation trial question" rows={1} value={question}
+                  onValueChange={value => { trialInput.current = {}; setQuestion(value) }} placeholder="Bring a real question to a new discussion" />
+                <MoteBehaviorAction label="Prepare new discussion" onClick={() => {
                 if (openMoteDiscussionDraft(scope, question, { reference })) onClose()
                 else setIssue('The new Launcher is unconfirmed. Your question is kept; inspect the original Group and retry.')
-              }}>Prepare new discussion</button>
+                }}><ArrowRight size={16} /></MoteBehaviorAction>
+              </InputGroup>
               <p className="mote-details__hint">Uses saved settings. Edit the question in the new Launcher, then Start.</p>
             </div> : null}
             {saved?.legacySoul && !issue ? <p className="mote-details__hint">Your original preferences are kept. Save to move them into BEHAVIOR.md.</p> : null}
