@@ -1254,7 +1254,7 @@ export class RuntimeController {
 
   async toolkitRunPort(): Promise<ToolkitRunPort> {
     const hostId = 'local'
-    const client = await this.connectedClient(hostId)
+    const client = await this.connectedClient(hostId, 'runtime')
     return {
       create: async (input, onEvent) => await this.trackHostLifecycleOperation(hostId, async () => {
         const run = await client.createTerminal(input)
@@ -1277,7 +1277,7 @@ export class RuntimeController {
 
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
-      const client = await this.connectedClient(request.hostId)
+      const client = await this.connectedClient(request.hostId, 'runtime')
       const run = await client.createTerminal({
         createOperationId: request.createOperationId ?? randomUUID(),
         workspacePath: request.workspacePath,
@@ -1316,7 +1316,7 @@ export class RuntimeController {
     const key = sessionAttachmentKey(control)
     const rendererGeneration = this.rendererGenerations.get(webContentsId) ?? 0
     return await this.serializeSessionAttachment(key, async () => {
-      const client = await this.connectedClient(control.hostId)
+      const client = await this.connectedClient(control.hostId, 'runtime')
       const existing = this.sessionAttachmentOwners.get(key)
       const identity = sessionControlIdentity(control)
       if (existing && existing.controlIdentity !== identity) {
@@ -1426,7 +1426,7 @@ export class RuntimeController {
       throw new Error('A retained history read for this Run is still pending. Live input remains available.')
     }
     const read = (async (): Promise<SessionReplayResult> => {
-      const client = await this.connectedClient(owner.control.hostId)
+      const client = await this.connectedClient(owner.control.hostId, 'runtime')
       const result = await client.readRunReplay(owner.control.run, afterByte)
       if (result.run.runId !== owner.control.run.runId) {
         throw new Error('Retained history returned a different Run.')
@@ -1462,7 +1462,7 @@ export class RuntimeController {
         this.sessionAttachmentLeases.delete(attachmentId)
         return
       }
-      await (await this.connectedClient(owner.control.hostId)).releaseRunAttachment(owner.control.run)
+      await (await this.connectedClient(owner.control.hostId, 'runtime')).releaseRunAttachment(owner.control.run)
       owner.attachmentIds.delete(attachmentId)
       this.sessionAttachmentLeases.delete(attachmentId)
       this.sessionAttachmentOwners.delete(currentLease.key)
@@ -1488,7 +1488,7 @@ export class RuntimeController {
       }
       const owner = this.sessionAttachmentOwners.get(lease.key)
       if (!owner?.attachmentIds.has(attachmentId)) return null
-      const client = await this.connectedClient(owner.control.hostId)
+      const client = await this.connectedClient(owner.control.hostId, 'runtime')
       const applied = owner.control.kind === 'agent'
         ? await client.resizeAgent(
           owner.control.agentSessionId,
@@ -1502,7 +1502,7 @@ export class RuntimeController {
   }
 
   async write(control: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<void> {
-    const client = await this.connectedClient(control.hostId)
+    const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'agent') await client.writeAgent({
       agentSessionId: control.agentSessionId, expectedRun: control.run, data, source
     })
@@ -1510,7 +1510,7 @@ export class RuntimeController {
   }
 
   async paste(control: SessionControl, text: string, terminalData: string): Promise<void> {
-    const client = await this.connectedClient(control.hostId)
+    const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'agent') {
       await client.pasteAgent({ agentSessionId: control.agentSessionId,
         expectedRun: control.run, text, terminalData })
@@ -1788,7 +1788,7 @@ export class RuntimeController {
   }
 
   async interrupt(control: SessionControl): Promise<void> {
-    const client = await this.connectedClient(control.hostId)
+    const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'agent') await client.signalAgent(control.agentSessionId, 'SIGINT')
     else await client.signalTerminal(control.run, 'SIGINT')
   }
@@ -1797,7 +1797,7 @@ export class RuntimeController {
     if (control.kind === 'terminal' && control.runId !== control.run.runId) {
       throw Object.assign(new Error('Terminal storage target has conflicting Run identities.'), { code: 'INVALID_CONTROL_REQUEST' })
     }
-    const client = await this.connectedClient(control.hostId)
+    const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'agent') {
       // Confirm original Session/Run binding without changing lifecycle or opening an attachment.
       const original = client.agentSession(control.agentSessionId)
@@ -2034,13 +2034,16 @@ export class RuntimeController {
     const connection = (async () => {
       try {
         await client.connect()
-        if (this.hosts.get(hostId)?.client !== client || runtimeOwner(client)?.availability !== 'connected') return
-        this.publish(hostId, { type: 'connection-state', state: 'restored',
-          evidence: { source: 'run-process', observedAt: Date.now() } })
+        // The Hosted SDK confirms its consumer lease, not completion of Core recovery observation.
+        // Only the original Core's current observation event can clear the service window.
+        if (this.hosts.get(hostId)?.client !== client) return
       } catch (error) {
         if (this.hosts.get(hostId)?.client !== client) return
-        this.publish(hostId, { type: 'connection-state', state: 'unrecoverable',
-          evidence: { source: 'run-process', observedAt: Date.now() } }, endpointWarning(hostId, 'Connecting to Runtime', error))
+        const available = runtimeOwner(client)?.availability === 'connected'
+        this.publish(hostId, { type: 'connection-state', state: available ? 'restored' : 'unrecoverable',
+          ...(available ? { diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
+            message: `${error instanceof Error ? error.message : String(error)}. Original Runtime remains available; retry Session observation.` } } : {}),
+          evidence: { source: 'run-process', observedAt: Date.now() } }, endpointWarning(hostId, available ? 'Observing Runtime' : 'Connecting to Runtime', error))
       }
     })()
     this.endpointConnections.set(client, connection)
@@ -2059,15 +2062,17 @@ export class RuntimeController {
     }
   }
 
-  private async connectedClient(hostId: string): Promise<AgentMuxClient> {
+  private async connectedClient(hostId: string, scope: 'runtime' | 'session' = 'session'): Promise<AgentMuxClient> {
     if (this.hostReconfigurationReservations.has(hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${hostId}`)
     }
     const host = this.hosts.get(hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${hostId}`)
     try {
-      await host.client.connect()
-      if (this.endpointWarnings.get(hostId)?.step !== 'Saving Runtime binding') this.endpointWarnings.delete(hostId)
+      if (scope === 'runtime') await host.client.connectRuntime()
+      else {
+        await host.client.connect()
+      }
     } catch (error) {
       this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Connecting to Runtime', error))
       throw error
@@ -2309,7 +2314,9 @@ export class RuntimeController {
     if (toolkit) { toolkit(event); return }
     let warningChange: RuntimeEndpointWarning | null | undefined
     if (event.type === 'connection-state') {
-      if (event.state === 'restored') {
+      const recoveryWarningKey = JSON.stringify([hostId, 'Observing Runtime'])
+      if (event.state === 'restored' && !event.diagnostic) {
+        this.observationWarnings.delete(recoveryWarningKey)
         if (this.endpointWarnings.get(hostId)?.step !== 'Saving Runtime binding') {
           this.endpointWarnings.delete(hostId)
           warningChange = null
@@ -2319,7 +2326,11 @@ export class RuntimeController {
           event.diagnostic ? new AgentMuxError(event.diagnostic.message, event.diagnostic.code) :
           new AgentMuxError(event.state === 'lost' ? 'Runtime connection was lost.' :
             'Automatic reconnect did not verify the Runtime. Its existing Sessions remain unverified; reconnect this endpoint.', 'RUNTIME_UNAVAILABLE'))
-        this.endpointWarnings.set(hostId, warningChange)
+        if (event.state === 'restored') warningChange = { ...warningChange, availability: 'connected' }
+        if (event.state === 'restored' && this.endpointWarnings.get(hostId)?.step === 'Saving Runtime binding') {
+          warningChange = { ...warningChange, scope: 'observation' }
+          this.observationWarnings.set(recoveryWarningKey, warningChange)
+        } else this.endpointWarnings.set(hostId, warningChange)
       }
     }
     const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId } } : event
@@ -2342,7 +2353,7 @@ export class RuntimeController {
     data: string
   ): Promise<void> {
     try {
-      await (await this.connectedClient(hostId)).writeAgent({
+      await (await this.connectedClient(hostId, 'runtime')).writeAgent({
         agentSessionId, expectedRun: { runId }, data, source: 'terminal-protocol'
       })
     } catch (error) {
