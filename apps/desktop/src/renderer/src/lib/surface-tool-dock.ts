@@ -150,8 +150,8 @@ export function topicsWithAgents(
 ): TopicWithAgents[] {
   const liveByTopic = new Map<string, Map<string, AgentSessionSnapshot>>()
   for (const session of sessions) {
-    if (session.kind !== 'agent' || !workspaceOwnsSessionPath(workspace, session)) continue
-    const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
+    if (session.kind !== 'agent' || !workspaceOwnsSessionPath(workspace, session, topics)) continue
+    const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
     if (!topicId) continue
     const bucket = liveByTopic.get(topicId) ?? new Map<string, AgentSessionSnapshot>()
     bucket.set(session.id, session)
