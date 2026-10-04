@@ -4,6 +4,8 @@
 
 产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)：Space/Zone/Tab/Region 的稳定身份、关系与持久布局归 Core，Project/Workspace 是资源来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run；公开 Control 表达空间目标和回执，client 持有可见表面与焦点。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[空间 CLI 使用合同](../../docs/guides/agentmux-cli-object-control.md)。Desktop Client 组合自己的配置与 Git owner，并消费 Core 的持久空间和公开 Agent API。
 
+常用入口：[Terminal 调用](#terminal-调用) · [Agent 调用与输入](#agent-调用与输入) · [原生对话读取](#原生对话读取) · [Runtime 边界](#runtime-边界)。
+
 当前 Local Run 只由随包 [Darwin manifest](vendor/ctxmux/darwin-arm64/manifest.json) 与 [Linux manifest](vendor/ctxmux/linux-x64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、同一 SDK tarball 和 darwin-arm64 / linux-x64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
 Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；随包原生 Runtime 支持 macOS arm64 与 Linux x64。`ctxmux` / `ctxmuxd` 的 npm bin 按宿主选择固定原生产物；正常 npm 安装的 `postinstall` 先校验 manifest、字节数与 SHA-256，再恢复原生文件的执行位。`--ignore-scripts` 会跳过这个必要安装步骤，Runtime 无法执行；请启用 lifecycle scripts 重新安装。安装脚本只处理包内固定产物，不访问网络、宿主配置或已有 Run。
@@ -55,6 +57,8 @@ Provider-native Resume 由 Core 从自己的 Session/provenance 物化新的通�
 请求 ctxmux 创建并记录相应 lineage。调用方请求 Level B 而 provenance 不足时必须失败；
 Core 和 ctxmux 都不能把它暗中降为 Level A restart。
 
+## Terminal 调用
+
 ```ts
 import { connectLocalAgentMuxRuntime } from '@agentmux/core'
 
@@ -80,6 +84,8 @@ Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTermin
 Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `agent output` 与 `agent output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的「ordered bytes 的公开传输边界」。
 
 Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live 和 complete stubborn-tree Stop。源码与历史通过记录不代签当前候选；oracle 和证据范围见[测试策略](../../docs/testing/strategy.md)。
+
+## Agent 调用与输入
 
 Codex 代表纵切现在也走同一个 Adapter。`AgentProvider` 仍在 Core 生成 Launch/Resume Plan、归一化 Hook/Permission，并在 daemon-issued RunId 返回后把每次 Hook binding 锁定到 exact Run。Core File Store/Resolver 独占 `agentSessionId`、当前 RunId、Provider native session id/ACP handle 与完整退役 Run／Session 身份事实；旧 Run、未知 native id 和冲突绑定失败关闭。Desktop 与 CLI 共用该 Store，不再维护第二份身份文件。
 
