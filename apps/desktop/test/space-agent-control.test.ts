@@ -69,7 +69,7 @@ describe('public Desktop spatial Control owner', () => {
     if (receipt.operation !== 'agent.open') throw new Error('Wrong operation')
     expect(created).toHaveBeenCalledTimes(1)
     const agentSessionId = created.mock.calls[0]![0].agentSessionId!
-    expect(agentSessionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{17}$/u)
+    expect(agentSessionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
     expect(useAppStore.getState().spatialRequests[receipt.requestId]!.agentSessionId).toBe(agentSessionId)
     expect(created.mock.calls[0]![0]).toMatchObject({ workspacePath: _hygiene_fixturePath("other"), createOperationId: receipt.requestId })
     expect(receipt.issues).toContainEqual(expect.objectContaining({ message: 'Creation receipt unavailable' }))
