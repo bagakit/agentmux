@@ -169,6 +169,20 @@ export type AgentMuxDisplayNameReport = {
 }
 export type AgentMuxAgentViewMode = 'terminal' | 'activity'
 export type AgentMuxFileViewMode = 'source' | 'diff' | 'preview'
+export type AgentMuxFileFormatReport = {
+  regionId: string
+  status: 'formatted' | 'unchanged' | 'unsupported' | 'unavailable' | 'stale' | 'cancelled' | 'failed'
+  message: string | null
+}
+/** Ephemeral compilation of an original File draft; artifact bytes stay with the client. */
+export type AgentMuxFileBuildReport = {
+  regionId: string
+  buildId: string
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unavailable' | 'unknown' | 'stale' | 'missing' | 'unsupported'
+  message: string | null
+  log: string
+  artifact: { kind: 'pdf'; byteLength: number } | null
+}
 /** Applied state and save acknowledgement are separate from content availability. */
 export type AgentMuxWorkfaceReport = {
   changed: boolean
@@ -222,6 +236,10 @@ type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
   | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
+  | { operation: 'file.format'; regionId: string }
+  | { operation: 'file.build'; regionId: string }
+  | { operation: 'file.build.inspect'; regionId: string; buildId: string }
+  | { operation: 'file.build.cancel'; regionId: string; buildId: string }
   | { operation: 'space.swap'; regionId: string; withRegionId: string }
   | { operation: 'open.file'; path: string; zoneId: string; spaceId?: string; displayWorkspaceId?: string; groupId?: string;
       /** Exact existing Tab and anchor Region; all three fields require the exact display occurrence. */
@@ -246,6 +264,10 @@ export type AgentMuxSpaceControlRequest = Base & (
 export type AgentMuxSpaceControlResult =
   | ({ operation: 'agent.view' } & AgentMuxAgentViewReport)
   | ({ operation: 'space.view' } & AgentMuxFileViewReport)
+  | ({ operation: 'file.format' } & AgentMuxFileFormatReport)
+  | ({ operation: 'file.build' } & AgentMuxFileBuildReport)
+  | ({ operation: 'file.build.inspect' } & AgentMuxFileBuildReport)
+  | ({ operation: 'file.build.cancel' } & AgentMuxFileBuildReport)
   | ({ operation: 'space.swap' } & AgentMuxRegionSwapReport)
   | ({ operation: 'open.file' } & AgentMuxFileOpenReport)
   | ({ operation: 'agent.rename'; agentSessionId: string } & AgentMuxDisplayNameReport)

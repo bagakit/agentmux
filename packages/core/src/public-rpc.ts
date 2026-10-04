@@ -28,7 +28,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'space.ls': 'space.ls', 'space.inspect': 'space.inspect', 'space.rename': 'space.rename',
   'space.mv': 'space.mv', 'space.swap': 'space.swap', 'space.bind': 'space.bind',
   'space.unbind': 'space.unbind', 'space.focus': 'focus', 'space.promote': 'promote.region',
-  'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view',
+  'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view', 'file.format': 'file.format', 'file.build': 'file.build', 'file.build.inspect': 'file.build.inspect', 'file.build.cancel': 'file.build.cancel',
   'terminal.open': 'open.terminal', 'browser.open': 'open.browser',
   'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
   'browser.inspect': 'browser.operation',
