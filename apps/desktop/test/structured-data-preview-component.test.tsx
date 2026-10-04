@@ -3,14 +3,25 @@ import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StructuredDataPreview } from '../src/renderer/src/components/file-preview/StructuredDataPreview'
-import * as parsers from '../src/renderer/src/lib/file-formats/data-parse'
+import * as parsers from '../src/renderer/src/lib/file-formats/data-structured-request'
+import { readStructuredPreview } from '../src/renderer/src/lib/file-formats/data-parse'
 import { readJsonLines } from '../src/renderer/src/lib/file-formats/data-jsonl'
 import type { StructuredPreview } from '../src/renderer/src/lib/file-formats/data-model'
 
 let root: Root, container: HTMLDivElement
 async function render(node: ReactNode) { await act(async () => root.render(node)); await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); await vi.dynamicImportSettled() }) }
 async function click(label: string) { const button = [...container.querySelectorAll('button')].find(item => item.textContent === label || item.getAttribute('aria-label') === label)!; expect(button).toBeDefined(); await act(async () => button.click()) }
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container) })
+const workers: any[] = []
+beforeEach(() => {
+  workers.length = 0
+  vi.stubGlobal('Worker', class {
+    onmessage: any; onerror: any; onmessageerror: any
+    terminate = vi.fn()
+    postMessage = vi.fn(({ id, kind, content }) => { void readStructuredPreview(kind, content).then(parsed => this.onmessage?.({ data: { id, parsed } })) })
+    constructor() { workers.push(this) }
+  })
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+})
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('structured current-buffer reader', () => {
@@ -29,7 +40,7 @@ describe('structured current-buffer reader', () => {
   })
   it('starts no hidden work, rejects late A→B→A results and clears the old reader before the next owner', async () => {
     const pending: Array<(parsed: StructuredPreview) => void> = []
-    const parser = vi.spyOn(parsers, 'readStructuredPreview').mockImplementation(() => new Promise(resolve => pending.push(resolve)))
+    const parser = vi.spyOn(parsers, 'requestStructuredPreview').mockImplementation(() => new Promise(resolve => pending.push(resolve)))
     const node = (content: string, visible = true, ownerKey = 'file') => <StructuredDataPreview kind="jsonl" content={content} visible={visible} ownerKey={ownerKey} />
     await render(node('1', false)); expect(parser).not.toHaveBeenCalled()
     await render(node('1')); await render(node('2')); await render(node('1'))
@@ -49,5 +60,24 @@ describe('structured current-buffer reader', () => {
     expect(container.textContent).toContain('second'); expect(container.textContent).not.toContain('first')
     await render(<StructuredDataPreview kind="toml" content={'key = ['} />); expect(container.textContent).toContain('column')
     await render(<StructuredDataPreview kind="yaml" content={'a'.repeat(1024 * 1024 + 1)} />); expect(container.textContent).toContain('Structured preview limit')
+  })
+  it('terminates the pending parser Worker on hide/change and retains source on startup failure', async () => {
+    vi.stubGlobal('Worker', class {
+      onmessage: any; onerror: any; onmessageerror: any
+      terminate = vi.fn(); postMessage = vi.fn()
+      constructor() { workers.push(this) }
+    })
+    await render(<StructuredDataPreview kind="yaml" content="a: 1" />)
+    const first = workers[0], deliver = first.onmessage, id = first.postMessage.mock.calls[0][0].id
+    await render(<StructuredDataPreview kind="yaml" content="a: 2" />)
+    expect(first.terminate).toHaveBeenCalledOnce()
+    await act(async () => deliver({ data: { id, parsed: readJsonLines('999') } }))
+    expect(container.textContent).not.toContain('999')
+    await render(<StructuredDataPreview kind="yaml" content="a: 2" visible={false} />)
+    expect(workers[1].terminate).toHaveBeenCalledOnce()
+    expect(container.textContent).toBe('')
+    vi.stubGlobal('Worker', class { constructor() { throw Error('Denied') } })
+    await render(<StructuredDataPreview kind="yaml" content="a: 3" />)
+    expect(container.textContent).toContain('complete source remains editable')
   })
 })

@@ -1,5 +1,7 @@
 import { fixtureClock as _hygiene_fixtureClock } from "../scripts/lib/fixture-values.mjs"
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as config from '../src/renderer/src/lib/file-formats/data-config'
+import { readStructuredPreview } from '../src/renderer/src/lib/file-formats/data-parse'
 import { readJsonLines } from '../src/renderer/src/lib/file-formats/data-jsonl'
 import { readYamlPreview, readTomlPreview } from '../src/renderer/src/lib/file-formats/data-config'
 import { DATA_PREVIEW_MAX_BYTES } from '../src/renderer/src/lib/file-data-preview'
@@ -37,6 +39,13 @@ describe('JSON Lines independent records', () => {
 })
 
 describe('configuration structured readers', () => {
+  it('does not start a parser after a pending import was cancelled', async () => {
+    const parse = vi.spyOn(config, 'readYamlPreview'), lifetime = new AbortController()
+    const pending = readStructuredPreview('yaml', 'a: 1', lifetime.signal)
+    lifetime.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(parse).not.toHaveBeenCalled(); parse.mockRestore()
+  })
   it('keeps independent YAML documents and errors, source scalar text and aliases without expanding them', () => {
     const result = readYamlPreview('value: 9223372036854775807\nanchor: &self [*self]\n---\nbad: [\n---\ngood: |\n  readable\n')
     expect(result.status).toBe('ready')
