@@ -1,6 +1,6 @@
 # 空间状态与导航机制
 
-本文说明当前源码中空间事实的 owner、持久化、Desktop 投影及准确导航的公共接缝。产品分组与身份含义只见[空间行为合同](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)；源码存在不代表所有设计消费面、实际安装或 Native surface 已通过验收。
+本文说明当前源码中空间事实的 owner、持久化、Desktop 投影及准确导航的公共接缝。整体体系与实体／入口的含义只见[空间模型](../design/behavior/spaces-and-layout.md#空间模型)及[概念词典](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)；源码存在不代表所有设计消费面、实际安装或 Native surface 已通过验收。
 
 ## 唯一事实 owner
 

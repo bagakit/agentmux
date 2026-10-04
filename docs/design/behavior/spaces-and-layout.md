@@ -14,7 +14,7 @@
 
 **阅读顺序**
 
-- [空间模型与实体绑定](#空间模型与实体绑定)：对象是什么、如何绑定、谁持有身份和资源。
+- [空间模型与实体绑定](#空间模型与实体绑定)：整体空间模型、具体实体、绑定及身份与资源归属。
 - [导航上下文与入口](#导航上下文与入口)：哪些入口共享选择，哪些独立恢复。
 - [Space 对象与知识组织](#space-对象与知识组织)：Folder、Mote、Category、Topic 及项目组的区别。
 - [Tab Group 与分屏布局](#tab-group-与分屏布局)：完整工作面、展示分组、分屏叶位置和关闭。
@@ -22,6 +22,30 @@
 - [导航操作与可读性](#导航操作与可读性)：打开、创建、寻址、名称、拓扑、浮层和启动面。
 
 ## 空间模型与实体绑定
+
+### 空间模型
+
+**空间模型（Spatial Model）** 是 AgentMux 用于组织、寻址、组合和复用工作面的持久实体与关系模型。其核心实体为 **Space、Zone、Tab、Region**；模型同时描述实体组成、空间绑定、展示位置及持久布局，具体实体身份与操作边界由下文[概念词典](#统一概念与空间寻址)和[实体与展示绑定](#zonetabsregions-的实体与展示绑定)定义。
+
+对外寻址按 Space／Zone／Tab／Region 表达；这些层级之间的绑定和组成关系按原合同成立，不能把全部关系简化为单父目录树。Tab Group 负责组织 Tabs 的展示及其分割树，属于模型的展示组织关系，不改变四级公开对象层级；准确展示位置仍保留 display Workspace／Group 引用，见[Tab Group 与 Region](#tabtab-group-与-region)。
+
+这套模型由 Core 持有稳定身份、拓扑、布局与全部绑定，独立于图形客户端。Work、Survey、Recall 与 Mote 面板复用同一模型；各自导航选择的共享或隔离沿[导航上下文](#worksurveyrecall-与-mote-的导航上下文)，不因共用模型而合并当前选择。AgentSession／Run、资源 Host／Workspace 与执行 cwd 仍沿原 owner，空间展示不改变执行身份或目录。
+
+整体体系称**空间模型**；**Space** 是其中的具体实体；**Space 入口**是 Work 下查看和操作这些对象的主视图，其完整定义见[Space 入口与实体的关系](#space-入口与实体的关系)。**空间图**是模型中实体、关系和布局的持久数据表示，当前实现与来源见[空间状态与导航机制](../../architecture/spatial-state.md)；增加整体定义不创建新的实体、注册表或存储 owner。
+
+```mermaid
+flowchart LR
+  S["Space 实体<br/>Folder · Mote · Category"] -->|"空间绑定，可多处"| Z["Zone 实体<br/>目录工作区 · Topic · Home"]
+  Z -->|"组成"| T["Tab：完整工作面"]
+  T -->|"布局叶位置"| R["Region：Agent · Terminal · 文件 · Browser · Launcher"]
+  G["Tab Group<br/>展示分组与分割树"] -->|"Tab 展示绑定"| T
+  N["导航上下文<br/>Work · Survey · Recall · Mote 面板"] -.->|"选择准确对象与位置"| S
+  N -.->|"加载 Zone／Tab／Region"| R
+  R -.->|"可选 Session 引用，多位置展示"| A["AgentSession：语义执行身份"]
+  A -->|"当前 Run 绑定"| U["Run：进程 · PTY · 字节"]
+```
+
+图中的关系须沿[实体与展示绑定](#zonetabsregions-的实体与展示绑定)和[Tab Group 布局](#tabtab-group-与-region)解释；它不是严格单父目录树。Project／Workspace 提供原 Host 的资源来源，见[Project 与 Workspace](#project-与-workspace)，不替代 Space 身份或按展示位置改写 cwd。
 
 ### 统一概念与空间寻址
 
@@ -63,19 +87,6 @@ The stable spatial graph is part of amux and is maintained by Core even on a rem
 
 因此，组织工作面的 Space 和实体 Space 使用同一身份，是模型约束，不是名称碰巧相同；Space 视图本身则是入口。树中的父子关系帮助查找，实体的全部合法绑定和多个展示位置仍可查询。一个 Session 可以在多个 Region 展示；它的 cwd、Host、Provider／Executor、Run 和协调角色继续由原 owner 持有。Mote 是可作为 Space 的持久产品对象，左下 Mote 面板是该对象的快捷呈现；两个入口不产生两个 Mote，也不合并面板与 Work 的选择。
 
-```mermaid
-flowchart LR
-  S["Space 实体<br/>Folder · Mote · Category"] -->|"空间绑定，可多处"| Z["Zone 实体<br/>目录工作区 · Topic · Home"]
-  Z -->|"组成"| T["Tab：完整工作面"]
-  T -->|"布局叶位置"| R["Region：Agent · Terminal · 文件 · Browser · Launcher"]
-  G["Tab Group<br/>展示分组与分割树"] -->|"Tab 展示绑定"| T
-  N["导航上下文<br/>Work · Survey · Recall · Mote 面板"] -.->|"选择准确对象与位置"| S
-  N -.->|"加载 Zone／Tab／Region"| R
-  R -.->|"可选 Session 引用，多位置展示"| A["AgentSession：语义执行身份"]
-  A -->|"当前 Run 绑定"| U["Run：进程 · PTY · 字节"]
-```
-
-图中的关系须沿[实体与展示绑定](#zonetabsregions-的实体与展示绑定)和[Tab Group 布局](#tabtab-group-与-region)解释；它不是严格单父目录树。Project／Workspace 提供原 Host 的资源来源，见[Project 与 Workspace](#project-与-workspace)，不替代 Space 身份或按展示位置改写 cwd。
 
 ### Zone→Tabs→Regions 的实体与展示绑定
 
