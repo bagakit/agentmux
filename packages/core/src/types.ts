@@ -829,12 +829,7 @@ export type AgentSessionHistoryQuestionRequest = {
 }
 
 /** A native user record's exact reply reference; its original contentParts remain untouched. */
-export type AgentSessionHistoryQuestionAnswer = {
-  questionId: string
-  answer: string
-  /** Question text carried by this native reply, not current pending or authenticated question authority. */
-  prompt?: string
-}
+export type AgentSessionHistoryQuestionAnswer = { questionId: string; answer: string }
 
 export type AgentSessionHistoryItem = {
   id: string
@@ -1005,8 +1000,6 @@ export type AgentSessionUserMessage = {
   author: AgentSessionUserMessageAuthor
   content: string
   contentParts: AgentSessionHistoryContentPart[]
-  /** Existing Provider reply facts; the original contentParts remain complete for Copy. */
-  questionAnswers?: AgentSessionHistoryQuestionAnswer[]
   recordedAt?: number
   deliveryStatus?: 'complete' | 'unverified' | 'failed'
 }

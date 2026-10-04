@@ -2,7 +2,6 @@ import type {
   AgentProviderId,
   AgentSessionHistoryContentPart,
   AgentSessionHistoryPage,
-  AgentSessionHistoryQuestionAnswer,
   AgentSessionUserMessage,
   AgentSessionUserMessageAuthor,
   AgentSessionUserMessageSource,
@@ -26,20 +25,10 @@ export function sessionHistoryTextForReading(part: Extract<AgentSessionHistoryCo
   return part.readingRange === undefined ? part.text : part.text.slice(part.readingRange.start, part.readingRange.end)
 }
 
-function extractUserMessageText(contentParts: readonly AgentSessionHistoryContentPart[], questionAnswers?: readonly AgentSessionHistoryQuestionAnswer[]): string {
-  const texts: string[] = []
-  const answerText = questionAnswers?.length ? questionAnswers.map(answer => answer.answer).join('\n\n') : undefined
-  let answersPlaced = false
-  for (const part of contentParts) {
-    if (part.kind !== 'text') continue
-    if (answerText !== undefined && !answersPlaced) {
-      texts.push(answerText)
-      answersPlaced = true
-    } else {
-      texts.push(sessionHistoryTextForReading(part))
-    }
-  }
-  if (answerText !== undefined && !answersPlaced) texts.unshift(answerText)
+function extractUserMessageText(contentParts: readonly AgentSessionHistoryContentPart[]): string {
+  const texts = contentParts
+    .filter((part): part is Extract<AgentSessionHistoryContentPart, { kind: 'text' }> => part.kind === 'text')
+    .map(sessionHistoryTextForReading)
   return texts.join('\n')
 }
 
@@ -65,7 +54,7 @@ export function projectSessionUserMessages(params: {
       if (seenNativeIds.has(stableId)) continue
       seenNativeIds.add(stableId)
 
-      const content = extractUserMessageText(item.contentParts, item.questionAnswers) || item.title || ''
+      const content = extractUserMessageText(item.contentParts) || item.title || ''
       const author: AgentSessionUserMessageAuthor = { kind: 'unknown' }
       const source: AgentSessionUserMessageSource = {
         kind: 'native',
@@ -83,7 +72,6 @@ export function projectSessionUserMessages(params: {
         author,
         content,
         contentParts: [...item.contentParts],
-        ...(item.questionAnswers === undefined ? {} : { questionAnswers: item.questionAnswers }),
         ...(item.startedAt !== undefined ? { recordedAt: item.startedAt } : {})
       })
     }

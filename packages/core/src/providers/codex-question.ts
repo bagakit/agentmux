@@ -48,7 +48,7 @@ export function codexQuestionAnswers(content: unknown): AgentSessionHistoryQuest
   const replies = Array.isArray(parsed) ? parsed : [parsed]
   if (!replies.length || replies.some(reply => !reply || typeof reply !== 'object' || Array.isArray(reply) ||
     typeof reply.questionItemId !== 'string' || !reply.questionItemId || typeof reply.question !== 'string' || typeof reply.answer !== 'string')) return undefined
-  return replies.map(reply => ({ questionId: reply.questionItemId, answer: reply.answer, prompt: reply.question }))
+  return replies.map(reply => ({ questionId: reply.questionItemId, answer: reply.answer }))
 }
 
 function nativeTitle(prompt: string): string {
