@@ -11,6 +11,7 @@ import { parseFileListParams, parseFileListResult, parseFileReadParams, parseFil
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { WorkspaceFiles } from '../src/main/workspace-files'
+import { parseMoteQuickMode, serializeMoteQuickMode } from '../src/shared/mote-quick-mode'
 import { DEFAULT_MOTE_BEHAVIOR, parseMoteBehaviorDocument, serializeMoteBehaviorDocument } from '../src/shared/mote-behavior'
 import { FileReadOwner } from '../src/main/file-read-owner'
 
@@ -254,4 +255,24 @@ it('actual public Files and compiled CLI read and save original behavior YAML an
   expect(await readFile(join(f.root, 'mote', path), 'utf8')).toBe(changed)
   f.observe.mockResolvedValue(null)
   expect(await f.client.call('file.read', { ...f.params, path })).toMatchObject({ resource: null, result: { status: 'unknown' } })
+})
+
+
+it('public Files and compiled CLI round-trip original Mote quick defaults with revision conflict', async () => {
+  const f = await fixture(), path = 'MOTE.md'
+  const original = serializeMoteQuickMode('', { executorId: 'original-agent' }) + '# User additions\nKeep these exact notes.\n'
+  await writeFile(join(f.root, 'mote', path), original)
+  const args = ['--endpoint', 'unix:' + f.server.path, 'file', 'read', '--zone', 'original-zone', '--space', 'mote-space', '--path', path, '--host', 'local', '--workspace', f.workspace.id, '--workspace-path', f.root]
+  const readOutput = await cli(f.root, args); expect(readOutput.code, readOutput.stderr).toBe(0)
+  const read = JSON.parse(readOutput.stdout).result
+  expect(parseMoteQuickMode(read.result.document.content)).toEqual({ status: 'valid', defaults: { executorId: 'original-agent' } })
+  const defaults = { executorId: 'chosen-agent', conversation: { hostId: 'execution-host', sessionId: 'core-original-session', displayWorkspaceId: 'display-workspace', groupId: 'group', tabId: 'tab', regionId: 'region' } }
+  const changed = serializeMoteQuickMode(original, defaults)
+  const writeArgs = ['--endpoint', 'unix:' + f.server.path, 'file', 'write', '--zone', 'original-zone', '--space', 'mote-space', '--path', path, '--resource', JSON.stringify(read.resource), '--expected-revision', read.result.document.revision]
+  const saved = await cli(f.root, writeArgs, changed); expect(saved.code, saved.stderr).toBe(0)
+  expect(JSON.parse(saved.stdout)).toMatchObject({ result: { result: { status: 'written' } } })
+  expect(parseMoteQuickMode(await readFile(join(f.root, 'mote', path), 'utf8'))).toEqual({ status: 'valid', defaults })
+  expect(changed).toContain('# User additions\nKeep these exact notes.\n')
+  const conflict = await cli(f.root, writeArgs, original)
+  expect(JSON.parse(conflict.stdout)).toMatchObject({ result: { result: { status: 'conflict' } } }); expect(await readFile(join(f.root, 'mote', path), 'utf8')).toBe(changed)
 })

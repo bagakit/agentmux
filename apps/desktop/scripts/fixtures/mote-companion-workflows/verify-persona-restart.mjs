@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { readFile, readdir, mkdir, writeFile, rm } from 'node:fs/promises'
+import { readFile, readdir, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { join, resolve, relative, dirname } from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 
@@ -10,14 +10,15 @@ const { build } = createRequire(require.resolve('vite'))('esbuild')
 const capturePath = resolve(root, process.argv[2] ?? ''), capture = JSON.parse(await readFile(capturePath, 'utf8'))
 assert.equal(capture.passed, true, 'A failed Renderer candidate cannot supply qualified input')
 const renderer = JSON.parse(await readFile(join(dirname(capturePath), 'renderer-result.json'), 'utf8'))
+const quickMode = capture.captureSubset === 'quick-mode'
 const behaviorOnly = capture.captureSubset === 'behavior-only'
-const required = behaviorOnly ? ['behavior-saved-reopened', 'cooperation-new-launcher-no-executor', 'cooperation-later-input-kept'] : ['cooperation-new-launcher-no-executor', 'cooperation-later-input-kept', 'ideas-context-unknown', 'ideas-mote-aba-input-kept']
+const required = quickMode ? ['quick-default-retained'] : behaviorOnly ? ['behavior-saved-reopened', 'cooperation-new-launcher-no-executor', 'cooperation-later-input-kept'] : ['cooperation-new-launcher-no-executor', 'cooperation-later-input-kept', 'ideas-context-unknown', 'ideas-mote-aba-input-kept']
 const cases = renderer.restartInputs.map(item => ({ ...item, captureFile: capturePath }))
 const captureOwners = new Map([[capturePath, capture]])
 let reusedCooperationSource = {}
 // A wording-only Ideas recapture can reuse unchanged cooperation observations, with an explicit
 // per-case Source receipt rather than claiming those older frames came from this new process.
-if (!behaviorOnly && !required.every(name => cases.some(item => item.name === name))) {
+if (!quickMode && !behaviorOnly && !required.every(name => cases.some(item => item.name === name))) {
   const cooperationOwners = [
     'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts',
     'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/store.ts',
@@ -56,8 +57,12 @@ try {
       alias['@agentmux/' + name + (key === '.' ? '' : key.slice(1))] = join(folder, target.import.replace('./dist/', name === 'core' ? './src/' : './').replace(/\.js$/, '.ts'))
     }
   }
+  const clientUiRoot = join(root, 'packages/client-ui'), clientUiManifest = JSON.parse(await readFile(join(clientUiRoot, 'package.json'), 'utf8'))
   const lazyBrowserInputs = {}
-  const worker = join(compiled, 'worker.mjs')
+  const worker = join(compiled, 'src/main/worker.mjs'); await mkdir(dirname(worker), { recursive: true })
+  const helper = resolve(dirname(worker), '../../resources/bin/agentmux-workspace-move')
+  await mkdir(dirname(helper), { recursive: true }); await symlink(join(root, 'apps/desktop/resources/bin/agentmux-workspace-move'), helper)
+  receipt.nativeFileHelperSha = sha(await readFile(helper))
   const built = await build({ absWorkingDir: root, entryPoints: [join(import.meta.dirname, 'persona-restart-entry.ts')], outfile: worker, bundle: true, platform: 'node', format: 'esm', alias, metafile: true,
     plugins: [{ name: 'original-lazy-browser-source', setup(plugin) {
       plugin.onResolve({ filter: /components\/(?:FileSurfaceView|FileSourceEditor)$/ }, async args => {
@@ -66,7 +71,7 @@ try {
         return { path: original, external: true }
       })
     } }, { name: 'current-client-ui-source', setup(plugin) {
-      plugin.onResolve({ filter: /^@agentmux\/client-ui\// }, args => ({ path: join(root, 'packages/client-ui/src/lib', args.path.slice('@agentmux/client-ui/'.length) + '.ts') }))
+      plugin.onResolve({ filter: /^@agentmux\/client-ui\// }, args => { const key = '.' + args.path.slice('@agentmux/client-ui'.length); for (const [sub, target] of Object.entries(clientUiManifest.exports).sort(([a],[b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length-a.length)) { const [before,after] = sub.split('*'); if (sub !== key && (!sub.includes('*') || !key.startsWith(before) || !key.endsWith(after))) continue; const source = typeof target === 'string' ? target : target.browser; if (!source) throw Error('Missing original Source export'); return { path: join(clientUiRoot, source.replace('*', sub.includes('*') ? key.slice(before.length,key.length-after.length) : '')) } } throw Error('Unknown original UI export '+key) })
     } }, { name: 'installed-dependencies', setup(plugin) {
       plugin.onResolve({ filter: /^[^./]/ }, args => {
         if (Object.hasOwn(alias, args.path)) return { path: alias[args.path] }
@@ -96,6 +101,7 @@ try {
       const output = JSON.parse(await readFile(join(stateDirectory, mode + '-output.json'), 'utf8'))
       outputs.push(output)
       assert.equal(output.fileWrites, captured.state.behavior && mode === 'write' ? 1 : 0);
+      if (captured.state.quickMode) { assert.equal(output.quickMode.document.content, captured.state.quickMode.content); assert.equal(output.quickMode.parsed.status, 'valid'); assert.deepEqual(output.quickMode.preferred.conversation, captured.state.quickMode.conversation) }
       if (captured.state.behavior) {
         assert.equal(output.behavior.document.path, captured.state.behavior.path); assert.equal(output.behavior.document.content, captured.state.behavior.content)
         assert.equal(output.behavior.document.revision, 'sha256:' + sha(Buffer.from(captured.state.behavior.content)))
@@ -111,6 +117,7 @@ try {
       if (Object.keys(captured.state.launcherState.drafts).length) assert.deepEqual(output.savedLauncher.state, captured.state.launcherState)
     }
     assert.equal(new Set(outputs.map(output => output.pid)).size, 3, 'Readback must run in fresh processes')
+    assert.deepEqual(outputs[1].quickMode, outputs[0].quickMode); assert.deepEqual(outputs[2].quickMode, outputs[0].quickMode);
     assert.deepEqual(outputs[1].behavior, outputs[0].behavior); assert.deepEqual(outputs[2].behavior, outputs[0].behavior)
     assert.deepEqual(outputs[1].spatial.graph, outputs[0].spatial.graph); assert.deepEqual(outputs[2].spatial.graph, outputs[0].spatial.graph)
     await writeFile(join(stateDirectory, 'process-results.json'), JSON.stringify(outputs, null, 2))
