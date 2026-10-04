@@ -10,6 +10,7 @@ const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const directory = path.join(root, (".tmp/mote-companion/persona-renderer-" + (globalThis.crypto.randomUUID()) + "")), compiled = path.join(directory, 'compiled')
 const selectFields = process.argv.includes('--select-fields')
+const recoveryPolicy = process.argv.includes('--recovery-policy')
 const executorPicker = process.argv.includes('--executor-picker')
 const quickMode = process.argv.includes('--quick-mode'), sourceFixture = quickMode ? path.join(fixture, '../mote-quick-mode') : fixture
 const entry = quickMode ? 'quick-entry' : 'persona-entry', main = quickMode ? 'quick-main.cjs' : 'persona-main.cjs'
@@ -17,7 +18,7 @@ const behaviorOnly = process.argv.includes('--behavior-only')
 const ideasOnly = process.argv.includes('--ideas-only')
 const feedbackOnly = process.argv.includes('--feedback-only')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
-const receipt = { passed: false, captureOnly: true, captureSubset: executorPicker ? 'executor-picker' : selectFields ? 'select-fields' : quickMode ? 'quick-mode' : behaviorOnly ? 'behavior-only' : feedbackOnly ? 'feedback-only' : ideasOnly ? 'ideas-only' : 'full', aestheticReview: 'not-performed', source: {}, images: {},
+const receipt = { passed: false, captureOnly: true, captureSubset: recoveryPolicy ? 'recovery-policy' : executorPicker ? 'executor-picker' : selectFields ? 'select-fields' : quickMode ? 'quick-mode' : behaviorOnly ? 'behavior-only' : feedbackOnly ? 'feedback-only' : ideasOnly ? 'ideas-only' : 'full', aestheticReview: 'not-performed', source: {}, images: {},
   boundary: quickMode ? 'Original Profile, WorkspaceWorkbench, SessionPane, Composer and Editor in an isolated Electron Renderer. Controlled original Files/Session replies and actual configured identities; trusted mouse/keyboard through original menu selection. No live App/Run, native lifecycle, model, package or install claim.' : 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled filesystem/history/Goal API replies, synthetic exact Session reference and no configured Executor; no live user App/Run, Core native lifecycle, model, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
@@ -65,7 +66,7 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="' + entry + '.css"></head><body><div id="root"></div><script type="module" src="' + entry + '.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(sourceFixture, main), path.join(compiled, 'index.html'), directory, directory, ...(executorPicker ? ['--executor-picker'] : selectFields ? ['--select-fields'] : behaviorOnly ? ['--behavior-only'] : feedbackOnly ? ['--feedback-only'] : ideasOnly ? ['--ideas-only'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(sourceFixture, main), path.join(compiled, 'index.html'), directory, directory, ...(recoveryPolicy ? ['--recovery-policy'] : executorPicker ? ['--executor-picker'] : selectFields ? ['--select-fields'] : behaviorOnly ? ['--behavior-only'] : feedbackOnly ? ['--feedback-only'] : ideasOnly ? ['--ideas-only'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
