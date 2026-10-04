@@ -124,6 +124,7 @@
 - Branch 行与 Topic 行都展示对应工作线的 recap，沿用同一份 Board 行摘要来源，不复制状态管线。
 
 - Agent Session 是 Core 持有的 Provider 语义身份；Run 是 ctxmux 进程身份；Tab/Region 是 Core 持有的持久空间身份，View 是 Client 的呈现实例。
+- 新自动生成的 Agent Session ID 统一为固定17位 Base58，使用不含 `0/O/I/l` 的字母数字表，完整保留12字节96bit身份空间；随机生成与按创建操作确定性派生共用浏览器／Core 可消费的原生成 owner。既有 ID、已有链接与显式提供的合法原 ID 保持，不按新格式重写或收紧；Provider 原生 ID、Run 及空间身份各保原 owner。已持久化的创建／准备操作及已入队首句的收件身份重试时先沿原操作事实取回原 Session ID，不能因生成算法更新重复创建、改绑或重投首句；未知沿同一操作核对，不猜未创建。不新增分享别名、旧算法 fallback 或另一份身份注册表，ID 不构成权限凭证。
 - 一个 Session 可以没有 View，也可以投影到多个 View。关闭 Tab 内的 Region 只改变该 View 的内容布局；关闭承载某个 Session 最后一个 Region 的完整 View 时，Terminal 直接停止 Run，Agent 默认停止并二次确认，同时明确提供保留 Session 的选项。
 - 关闭共享或尚未附着的语义 Session 展示面，没有停止 Run 的义务；同一 Session 合法更换 Run 不得阻断这次局部关闭，另一个健康 View 与当前 Session 保留。最后一个已退出展示面及实际 Run 资源收尾仍不能借迟到结果删除后来替换的 Run/Region。
 - 用户反馈「已报错停止的 Session Tab/Region 点关闭关不掉」「tab进入无法处理撞墙状态，撞墙必须避免」。当前同 Session 的 typed 进程事实已经 exited 时，用户关闭精确展示面不应再依赖停止该 Run；收起投影保留原语义 Session、历史、草稿和未知输入，不冒称退休或取消。关闭收尾未能在有界时间内确认时，保原 View 并说明结果未知，释放本次 UI 租约，让原保留 Session 的局部关闭选项与重试真正可达；迟到结果不能删除后来替换的 Run/Region，也不假称原 Stop 已取消。展示保存未确认不得堵死这个局部出口，仍持续说明本次布局耐久未知；running/unknown 的明确停止确认、文件未保存确认、Browser 资源义务及 App 退出/更新保存约束保持，不从错误文案或缺快照猜 exited。
