@@ -1,24 +1,30 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { AgentMuxError } from './errors.js'
 import type { AgentProviderId, NativeHookEnvelope } from './types.js'
 import { defaultAgentMuxHookPort } from './runtime-paths.js'
+import { HOOK_OWNER_TIMEOUT_MS, HOOK_REQUEST_TIMEOUT_MS, HOOK_RETRY_DELAY_MS } from './agent-hook-delivery.js'
 
 const MAX_BODY_BYTES = 128 * 1024
 const MAX_BINDINGS = 256
 const MAX_PENDING_EVENTS = 8
 const MAX_PENDING_DELIVERIES = 8
-const HOOK_DELIVERY_TIMEOUT_MS = 2_000
+// Keep completed receipts for the sender's entire two-observation retry window.
+const RECEIPT_RETRY_WINDOW_MS = 2 * (HOOK_REQUEST_TIMEOUT_MS + HOOK_RETRY_DELAY_MS) + HOOK_RETRY_DELAY_MS
+const MAX_RECEIPT_BYTES = MAX_PENDING_DELIVERIES * MAX_BODY_BYTES
 
 function withHookDeliveryDeadline(
   delivery: Promise<void>,
-  controller: AbortController
+  controller: AbortController,
+  timeoutMs: number,
+  onTimeout: () => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      onTimeout()
       controller.abort()
       reject(new AgentMuxError('Hook owner delivery timed out.', 'HOOK_DELIVERY_TIMEOUT'))
-    }, HOOK_DELIVERY_TIMEOUT_MS)
+    }, timeoutMs)
     delivery.then(
       () => {
         clearTimeout(timer)
@@ -38,14 +44,17 @@ async function readBody(request: IncomingMessage): Promise<string> {
   for await (const value of request) {
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
     size += chunk.byteLength
-    if (size > MAX_BODY_BYTES) throw new Error('Hook body too large')
+    if (size > MAX_BODY_BYTES) throw new AgentMuxError('Hook body exceeds the ingress parsing budget.', 'HOOK_BODY_TOO_LARGE')
     chunks.push(chunk)
   }
   return Buffer.concat(chunks).toString('utf8')
 }
 
 function respond(response: ServerResponse, statusCode: number, body = ''): void {
-  response.writeHead(statusCode, body ? { 'content-type': 'application/json' } : undefined)
+  response.writeHead(statusCode, {
+    ...(body ? { 'content-type': 'application/json' } : {}),
+    ...(statusCode === 429 || statusCode === 503 ? { 'retry-after': String(HOOK_RETRY_DELAY_MS / 1_000) } : {})
+  })
   response.end(body)
 }
 
@@ -92,6 +101,16 @@ type PendingBinding = {
   pendingDeliveries: number
   accepting: boolean
   closed: boolean
+  receipts: Map<string, { fingerprint: string; bytes: number; expiresAt: number; response?: Promise<void> }>
+}
+
+export type HookDeliveryFailure = {
+  agentSessionId: string
+  runId: string | null
+  receiptId: string
+  code: string
+  stage: 'admission' | 'owner'
+  accepted: false | 'unknown'
 }
 
 export class AgentHookServer {
@@ -112,7 +131,8 @@ export class AgentHookServer {
       event: NativeHookEnvelope,
       signal: AbortSignal
     ) => void | Promise<void>,
-    private readonly port = defaultAgentMuxHookPort()
+    private readonly port = defaultAgentMuxHookPort(),
+    private readonly onFailure?: (failure: HookDeliveryFailure) => void
   ) {}
 
   async start(): Promise<HookServerEndpoint> {
@@ -204,7 +224,8 @@ export class AgentHookServer {
       tail: Promise.resolve(),
       pendingDeliveries: 0,
       accepting: true,
-      closed: false
+      closed: false,
+      receipts: new Map()
     }
     this.bindings.set(token, binding)
     let closed = false
@@ -256,8 +277,13 @@ export class AgentHookServer {
     try {
       parsed = JSON.parse(await readBody(request))
       request.setTimeout(0)
-    } catch {
-      respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
+    } catch (error) {
+      const oversized = error instanceof AgentMuxError && error.code === 'HOOK_BODY_TOO_LARGE'
+      const code = oversized ? 'HOOK_BODY_TOO_LARGE' : 'INVALID_HOOK_ENVELOPE'
+      respond(response, oversized ? 413 : 400, JSON.stringify({ error: code, stage: 'admission', accepted: false,
+        retryable: false, recovery: 'Refresh the native Session observation; the Agent and terminal remain available.' }))
+      try { this.onFailure?.({ agentSessionId: binding.agentSessionId, runId: binding.runId,
+        receiptId: 'unparsed-envelope', code, stage: 'admission', accepted: false }) } catch { /* Diagnostic isolation. */ }
       return
     }
     if (!isIngressEvent(parsed)) {
@@ -265,50 +291,113 @@ export class AgentHookServer {
       return
     }
     if (!binding.accepting) {
-      respond(response, 503, JSON.stringify({ error: 'hook_binding_closed' }))
+      this.fail(response, binding, parsed.receiptId, 'HOOK_BINDING_RECOVERING', 'admission', false)
+      return
+    }
+    const fingerprint = createHash('sha256').update(JSON.stringify({ eventName: parsed.eventName, payload: parsed.payload },
+      (_key, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)).digest('hex')
+    for (const [id, receipt] of binding.receipts) {
+      if (receipt.expiresAt < Date.now()) binding.receipts.delete(id)
+    }
+    const existing = binding.receipts.get(parsed.receiptId)
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        respond(response, 409, JSON.stringify({ error: 'hook_receipt_conflict', receiptId: parsed.receiptId }))
+        return
+      }
+      if (!existing.response) {
+        respond(response, 202, JSON.stringify({ stage: 'pending_run', accepted: 'memory', receiptId: parsed.receiptId }))
+        return
+      }
+      try { await existing.response; respond(response, 204) }
+      catch (error) { this.deliveryFailed(response, binding, parsed.receiptId, error) }
+      return
+    }
+    // Receipt metadata consumes a bounded part of the existing in-flight byte budget.
+    // Do not evict an acknowledged receipt while its original sender can still retry.
+    const receiptBytes = Buffer.byteLength(parsed.receiptId) + 256
+    const cachedBytes = [...binding.receipts.values()].reduce((size, receipt) => size + receipt.bytes, 0)
+    if (cachedBytes + receiptBytes > MAX_RECEIPT_BYTES) {
+      this.fail(response, binding, parsed.receiptId, 'HOOK_RECEIPT_BACKPRESSURE', 'admission', false)
       return
     }
     if (binding.runId === null) {
       if (binding.events.length >= MAX_PENDING_EVENTS) {
-        respond(response, 429, JSON.stringify({ error: 'hook_binding_pending_limit' }))
+        this.fail(response, binding, parsed.receiptId, 'HOOK_PENDING_BACKPRESSURE', 'admission', false)
         return
       }
+      binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity })
       binding.events.push(parsed)
-      respond(response, 204)
+      respond(response, 202, JSON.stringify({ stage: 'pending_run', accepted: 'memory', receiptId: parsed.receiptId }))
       return
     }
     if (binding.pendingDeliveries >= MAX_PENDING_DELIVERIES) {
-      respond(response, 429, JSON.stringify({ error: 'hook_binding_delivery_limit' }))
+      this.fail(response, binding, parsed.receiptId, 'HOOK_DELIVERY_BACKPRESSURE', 'admission', false)
       return
     }
+    binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity })
     try {
       await this.enqueue(binding, parsed)
       respond(response, 204)
-    } catch {
-      respond(response, 503, JSON.stringify({ error: 'hook_delivery_failed' }))
+    } catch (error) {
+      this.deliveryFailed(response, binding, parsed.receiptId, error)
     }
+  }
+
+  private deliveryFailed(response: ServerResponse, binding: PendingBinding, receiptId: string, error: unknown): void {
+    const queued = error instanceof AgentMuxError && error.code === 'HOOK_QUEUE_TIMEOUT'
+    const code = error instanceof AgentMuxError ? error.code : 'HOOK_DELIVERY_FAILED'
+    this.fail(response, binding, receiptId, code, queued ? 'admission' : 'owner', queued ? false : 'unknown')
+  }
+
+  private fail(response: ServerResponse, binding: PendingBinding, receiptId: string, code: string,
+    stage: 'admission' | 'owner', accepted: false | 'unknown'): void {
+    const failure = { agentSessionId: binding.agentSessionId, runId: binding.runId, receiptId, code, stage, accepted }
+    respond(response, stage === 'admission' && binding.accepting ? 429 : 503,
+      JSON.stringify({ error: code, receiptId, stage, accepted, retryable: !binding.closed,
+        recovery: 'Retry the original receipt after backoff; the Agent and terminal remain available.' }))
+    try { this.onFailure?.(failure) } catch { /* Diagnostic consumers cannot break ingress. */ }
   }
 
   private enqueue(binding: PendingBinding, event: HookIngressEvent): Promise<void> {
     binding.pendingDeliveries += 1
-    const started = binding.tail.catch(() => {}).then(() => this.publish(binding, event))
-    const response = started.then(async (delivery) => await delivery.response).catch((error) => {
-      if (error instanceof AgentMuxError && error.code === 'HOOK_DELIVERY_TIMEOUT') {
-        binding.accepting = false
-      }
-      throw error
+    const deadline = Date.now() + HOOK_REQUEST_TIMEOUT_MS
+    let expired = false
+    let queueTimer: ReturnType<typeof setTimeout>
+    const queueTimeout = new Promise<never>((_resolve, reject) => {
+      queueTimer = setTimeout(() => {
+        expired = true
+        reject(new AgentMuxError('Hook observation expired before owner execution; no work was started.', 'HOOK_QUEUE_TIMEOUT'))
+      }, HOOK_REQUEST_TIMEOUT_MS)
     })
+    const started = binding.tail.catch(() => {}).then(() => {
+      clearTimeout(queueTimer)
+      if (expired || Date.now() >= deadline) throw new AgentMuxError('Hook observation expired before owner execution; no work was started.', 'HOOK_QUEUE_TIMEOUT')
+      return this.publish(binding, event, Math.min(HOOK_OWNER_TIMEOUT_MS, deadline - Date.now()))
+    })
+    const response = Promise.race([queueTimeout, started.then(async (delivery) => await delivery.response)])
     const drain = started.then(async (delivery) => await delivery.drain).finally(() => {
       binding.pendingDeliveries -= 1
       if (!binding.closed && this.bindings.get(binding.token) === binding) binding.accepting = true
     })
     binding.tail = drain.then(() => {}, () => {})
+    const receipt = binding.receipts.get(event.receiptId)
+    if (receipt) {
+      receipt.response = response
+      void response.then(() => { receipt.expiresAt = Date.now() + RECEIPT_RETRY_WINDOW_MS }, () => {
+        // Failed work may still be draining. Retrying before that exits must join
+        // the old response, never race a second owner mutation.
+        void binding.tail.then(() => { if (binding.receipts.get(event.receiptId) === receipt) binding.receipts.delete(event.receiptId) })
+      })
+    }
     return response
   }
 
   private publish(
     binding: PendingBinding,
-    event: HookIngressEvent
+    event: HookIngressEvent,
+    timeoutMs: number
   ): { response: Promise<void>; drain: Promise<void> } {
     if (binding.runId === null) {
       return { response: Promise.resolve(), drain: Promise.resolve() }
@@ -331,7 +420,7 @@ export class AgentHookServer {
     }
     const drain = Promise.resolve(delivery)
     return {
-      response: withHookDeliveryDeadline(drain, controller),
+      response: withHookDeliveryDeadline(drain, controller, timeoutMs, () => { binding.accepting = false }),
       drain
     }
   }

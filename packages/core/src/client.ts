@@ -927,7 +927,16 @@ export class AgentMuxClient {
     })
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
-      async (event, signal) => await this.acceptHookEvent(event, signal)
+      async (event, signal) => await this.acceptHookEvent(event, signal),
+      undefined,
+      failure => {
+        const session = this.registry.findByRun(runRef(failure.runId ?? ''))
+        if (!session || session.agentSessionId !== failure.agentSessionId) return
+        this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+          code: failure.code,
+          message: `Native Hook ${failure.receiptId} failed during ${failure.stage}; ${failure.accepted === false ? 'owner work did not start' : 'durable delivery is unconfirmed'}. The original Session, Run and terminal capability are kept. ${failure.code === 'HOOK_BODY_TOO_LARGE' || failure.code === 'INVALID_HOOK_ENVELOPE' ? 'Refresh native Session observation to read its original source.' : 'Retry the same observation receipt after backoff; refresh native Session observation if its sender has exited.'}`,
+          evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      }
     )
     this.hookInstaller = options.hookInstaller
       ?? new AgentManagedHookInstaller(join(defaultCtxmuxStateDirectory(), 'hooks'))
