@@ -110,8 +110,8 @@ it('neighboring inputs and replies use the actual ruler width, keep original ord
   expect(group).toBeDefined(); expect(group.dataset.recordKind).toBe('mixed')
   expect(JSON.parse(group.dataset.messageRawIds!)).toEqual(['near-reply', 'near-input'])
   expect(Number(group.dataset.messageAt)).toBe(NOW - 20_000); expect(Number(group.dataset.messageThrough)).toBe(NOW - 10_000)
-  expect(group.title).toContain('from'); expect(group.title).toContain('through')
-  expect(group.title).toContain(':40'); expect(group.title).toContain(':50')
+  expect(group.getAttribute('aria-label')).toContain('from'); expect(group.getAttribute('aria-label')).toContain('through')
+  expect(group.getAttribute('aria-label')).toContain(':40'); expect(group.getAttribute('aria-label')).toContain(':50')
   await act(async () => group.click())
   const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
   expect(list.map(node => node.dataset.recordRawId)).toEqual(['near-reply', 'near-input'])
@@ -120,12 +120,12 @@ it('neighboring inputs and replies use the actual ruler width, keep original ord
   const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!, text = body.querySelector('p')!.firstChild!, range = document.createRange()
   range.setStart(text, 0); range.setEnd(text, 8); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 7
   const before = reads.mock.calls.length
-  await resize(30_000); expect(markers()).toHaveLength(3)
+  await resize(36_000); expect(markers()).toHaveLength(3)
   await resize(120); expect(markers()).toHaveLength(2)
   const zoom = host.querySelector<HTMLSelectElement>('[aria-label="Focus window size"]')!
   await act(async () => { zoom.value = '0.5'; zoom.dispatchEvent(new Event('change', { bubbles: true })) })
   expect(recordCount()).toBe(2); expect(markers()).toHaveLength(1)
-  await resize(3000); expect(markers()).toHaveLength(2)
+  await resize(5000); expect(markers()).toHaveLength(2)
   await resize(0); expect(markers()).toHaveLength(2)
   await click('[aria-label="Previous focus window"]'); expect(markers()).toHaveLength(0)
   expect(overlay().querySelector('.recent-focus__message-body')).toBe(body); expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(7)
@@ -218,6 +218,7 @@ it('an already-read source without a current Context admits its new input using 
 })
 
 it('input and reply shapes stay distinct while a same-time mixed group is neutral and reads every original record', async () => {
+  measuredTimeline(864)
   await writeFile(fixture.path, '')
   await seedCaptured([
     captured('input-alone', 'user_message', { createdAt: NOW - 2 * HOUR, authorAgentSessionId: 'other-agent' }),
@@ -238,12 +239,14 @@ it('input and reply shapes stay distinct while a same-time mixed group is neutra
   style.textContent = await readFile(resolve(import.meta.dirname, '../src/renderer/src/styles/focus.css'), 'utf8')
   document.head.append(style)
   try {
-    expect(getComputedStyle(input).borderRadius).toBe('2px')
-    expect(getComputedStyle(reply).borderRadius).toBe('50%')
+    expect(getComputedStyle(input).borderRadius).toBe('6px')
+    expect(getComputedStyle(reply).borderRadius).toBe('6px')
+    expect(input.querySelector('.lucide-arrow-down-left')).not.toBeNull()
+    expect(reply.querySelector('.lucide-arrow-up-right')).not.toBeNull()
   } finally { style.remove() }
   const group = markers().find(node => node.dataset.recordCount === '4')!
   expect(group.dataset.recordKind).toBe('mixed'); expect(group.dataset.messageAuthor).toBeUndefined()
-  expect(group.textContent).toBe('4'); expect(group.title).toContain('3 inputs · 1 replies')
+  expect(group.querySelector('.recent-focus__message-count')!.textContent).toBe('4'); expect(group.querySelector('.recent-focus__message-direction')!.textContent).toBe('↕')
   expect(group.getAttribute('aria-label')).toContain('3 inputs and 1 replies')
   await act(async () => group.click())
   const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
@@ -271,6 +274,7 @@ it('unrelated output does not reproject records or read history and the slow UI 
 })
 
 it('the actual current Global page and shared ConversationView both retain user and assistant speech with original parts while keeping reasoning activity distinct', async () => {
+  measuredTimeline(864)
   await render(); await wait(() => expect(pages.length).toBeGreaterThan(0))
   expect(pages[0]!.items.map(item => [item.id, item.kind])).toEqual([['u', 'user-message'], ['a', 'assistant-message'], ['thinking', 'activity']])
   expect(rawIds()).toEqual(['u', 'a'])

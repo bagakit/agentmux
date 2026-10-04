@@ -1,3 +1,4 @@
+import { layoutTimelineMarkers } from './timeline-marker-layout'
 /**
  * 「这条轴上有哪些说话人的标记，各自落在时间轴的哪个位置」——两条轴（说话人轴、自我 Agent 轴）
  * 唯一的定位与筛选出处。
@@ -86,17 +87,6 @@ export type ConversationAxisCluster = { fraction: number; members: readonly Conv
 
 /** Width affects density, never timestamps or original record identity. */
 export function clusterConversationAxis(marks: readonly ConversationAxisMark[], width: number): ConversationAxisCluster[] {
-  if (!Number.isFinite(width) || width <= 0) return marks.map(mark => ({ fraction: mark.fraction, members: [mark] }))
-  const sorted = [...marks].sort((a, b) => a.fraction - b.fraction || a.index - b.index)
-  const groups: ConversationAxisMark[][] = []
-  for (const mark of sorted) {
-    const group = groups[groups.length - 1]
-    // Include the count and full pointer target, rather than only the 16px avatar.
-    if (group && (mark.fraction - group[group.length - 1]!.fraction) * width < 64) group.push(mark)
-    else groups.push([mark])
-  }
-  return groups.map(members => ({
-    fraction: (members[0]!.fraction + members[members.length - 1]!.fraction) / 2,
-    members: [...members].sort((a, b) => a.index - b.index)
-  }))
+  return layoutTimelineMarkers(marks.map(mark => ({ fraction: mark.fraction, member: mark })), width)
+    .map(group => ({ ...group, members: [...group.members].sort((a, b) => a.index - b.index) }))
 }

@@ -1,7 +1,8 @@
+import { TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, History, LocateFixed, MessageSquare, Minus, Plus, SquareTerminal, X } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, History, LocateFixed, MessageSquare, Minus, Plus, SquareTerminal, X } from 'lucide-react'
 import { projectConversationRecords, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { EMPTY_FOCUS_WORK_ITEMS, MAX_FOCUS_WORK_RECORDS, clipFocusWorkInterval, createFocusWorkSelector, mergeFocusWorkItems, projectFocusWorkHistory, type FocusWorkFacts, type FocusWorkInterval } from '../lib/focus-work-history'
 import { useShallow } from 'zustand/react/shallow'
@@ -407,7 +408,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
           if (anchor) onInspect(segments[0]!, anchor)
         } : undefined} />
       <span>{name}{observedName ? <small>Observed as {observedName}</small> : path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}{selected ? <span className="recent-focus__current" aria-label="Current Context"><LocateFixed size={10} aria-hidden="true" /></span> : null}</span>
-    <div className="recent-focus__lane">
+    <div className="recent-focus__lane" style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px` } as React.CSSProperties}>
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
       {work && context ? <button type="button" className="recent-focus__working" data-working-entered-at={work.enteredAt} data-working-through={Math.min(now, window.end)} data-run-id={context.runId}
         style={{ left: `${work.left}%`, width: `${work.width}%` }}
@@ -432,20 +433,19 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${context ? name : item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
         {...hoverEvent(`focus:${track.key}:${item.focusedAt}`, () => focusVisitFacts(item, time))}
         onClick={event => context ? onSelect(sessionId) : onInspect(item, event.currentTarget)}><span>{clock(item.focusedAt)}</span></button>)}
-      {messageGroups.map(({ records, startAt, endAt }) => {
+      {messageGroups.map(({ records, startAt, endAt, fraction }) => {
         const message = records[0]!, multiple = records.length > 1
         const inputs = records.filter(record => record.kind === 'user-message').length, replies = records.filter(record => record.kind === 'assistant-message').length
         const recordKind = inputs && replies ? 'mixed' : message.kind
         const recordedRange = startAt === endAt ? `at ${time.detailed(startAt)}` : `from ${time.detailed(startAt)} through ${time.detailed(endAt)}`
         const speaker = message.speaker!
         const described = describeMessageSpeaker(speaker)
-        const authorLabel = speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} · Sender ${speaker.id}` : speaker.role === 'human' ? 'Human message · You' : 'Prompt · Sender not recorded'
         return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={startAt} data-message-through={endAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
-          style={{ left: `${focusTimePosition(startAt, window)}%` }} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${inputs} inputs and ${replies} replies. Open recorded messages.` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
-          title={multiple ? `${records.length} records · ${inputs} inputs · ${replies} replies · ${name} · Record times ${recordedRange} · Click to read each original record` : `${name} · Record time ${dateClock(message.recordedAt!)} · ${authorLabel}\n${message.content.slice(0, 160)}`}
+          style={{ left: `${fraction * 100}%` }} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${inputs} inputs and ${replies} replies. Open recorded messages.` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
+
           onMouseEnter={event => { if (!multiple) onPreview(message, event.currentTarget, false) }} onMouseLeave={() => onDismiss(message.id)}
           onFocus={event => { if (!multiple && !(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false, true) }} onBlur={() => onDismiss(message.id)}
-          onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{multiple ? records.length > 99 ? '99+' : records.length : <ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={10} />}</button>
+          onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{multiple ? <><span className="recent-focus__message-count">{records.length > 99 ? '99+' : records.length}</span><span className="recent-focus__message-direction" aria-hidden="true">{recordKind === 'mixed' ? '↕' : replies ? <ArrowUpRight size={7} /> : <ArrowDownLeft size={7} />}</span></> : <><span className="recent-focus__message-avatar"><ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={16} /></span><span className="recent-focus__message-direction" aria-hidden="true">{replies ? <ArrowUpRight size={7} /> : <ArrowDownLeft size={7} />}</span></>}</button>
       })}
     </div>
   </div>
