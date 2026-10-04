@@ -114,6 +114,79 @@ afterEach(async () => {
 })
 
 describe('One Activity reading surface over public original-sequence windows', () => {
+ it('makes updated original current records reachable from the historical window edge without replacing its selected body', async () => {
+  await render(compose()); await click('Earlier')
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
+  const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Reply 353')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
+  const before = ids(), count = requests.length
+  expect(container.querySelector('[data-conversation-current-entry]')).not.toBeNull()
+  expect(container.querySelector('[data-conversation-current-entry]')!.textContent).not.toContain('Current records updated')
+  await appendFile(transcript, JSON.stringify(record(360)) + '\n')
+  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)) }); await flush()
+  expect(recent!.nativeHistoryPage!.items.at(-1)!.id).toBe('record-360')
+  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  const entry = container.querySelector<HTMLElement>('[data-conversation-current-entry]')!
+  expect(entry).not.toBeNull(); expect(entry.textContent).toContain('Current records updated')
+  expect(entry.previousElementSibling?.className).toBe('conversation-native-thread')
+  const reads = requests.length; expect(reads).toBeGreaterThan(count)
+  await click('Show latest messages')
+  expect(ids().at(-1)).toBe('record-360'); expect(container.textContent).toContain('Input 360')
+  expect(container.querySelector('[data-conversation-current-entry]')).toBeNull(); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(requests).toHaveLength(reads)
+ })
+ it('notices changed current facts under the same raw identity without inventing a new-message count', async () => {
+  await render(compose()); await click('Earlier'); const before = ids()
+  await writeFile(transcript, Array.from({ length: 360 }, (_, n) => JSON.stringify(n === 359
+   ? { ...record(n), message: { role: 'assistant', content: [{ type: 'text', text: 'Updated native reply 359' }] } } : record(n))).join('\n') + '\n')
+  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid }))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)) }); await flush()
+  expect(ids()).toEqual(before); expect(container.textContent).not.toContain('Updated native reply 359')
+  expect(container.querySelector('[data-conversation-current-entry]')!.textContent).toContain('Current records updated')
+  await click('Show latest messages'); expect(container.textContent).toContain('Updated native reply 359')
+ })
+ it('keeps a protected historical selection on Latest and cancels a superseded pending older page after selection is cleared', async () => {
+  await render(compose()); for (let n = 0; n < 4; n++) await click('Earlier')
+  const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!, label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
+  const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
+  const before = ids(); await click('Show latest messages')
+  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(container.querySelector('[data-conversation-current-entry]')!.textContent).toContain('current window is kept to preserve selected content')
+  window.getSelection()!.removeAllRanges()
+  // A fresh long transcript permits one more genuinely pending original earlier read.
+  await writeFile(transcript, Array.from({ length: 720 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
+  await click('Show latest messages'); await click('Earlier')
+  const page = recent!.nativeHistoryPage!
+  let release!: (page: AgentSessionHistoryPage) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => {
+   requests.push(options ?? {}); return new Promise(resolve => { release = resolve })
+  })
+  const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
+  await act(async () => earlier.click())
+  expect(container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!.disabled).toBe(false)
+  const count = requests.length; await click('Show latest messages'); const current = ids()
+  expect(current.at(-1)).toBe('record-719')
+  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30, cursor: page.nextCursor! }))); await flush()
+  expect(ids()).toEqual(current); expect(requests).toHaveLength(count); expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
+ })
+ it('does not label a foreign or missing current source as an update and disables the historical Latest action while hidden', async () => {
+  const current = await client.sessionHistoryPage(sid)
+  const surface = (page: AgentSessionHistoryPage | null, enabled = true) => <ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={page}
+   conversationReading={{ reference: control, identity: control.run.runId, enabled }} />
+  await render(surface(current)); await click('Earlier'); const before = ids(), count = requests.length
+  for (const page of [null, { ...current, items: [] }, { ...current, agentSessionId: 'foreign-agent' },
+   { ...current, source: { ...current.source, providerId: 'foreign-provider' } }, { ...current, source: { ...current.source, nativeSessionId: 'foreign-native' } }]) {
+   await render(surface(page)); expect(ids()).toEqual(before)
+   expect(container.querySelector('[data-conversation-current-entry]')).not.toBeNull()
+   expect(container.querySelector('[data-conversation-current-entry]')!.textContent).not.toContain('Current records updated')
+  }
+  await render(surface(current, false))
+  const latest = container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!
+  expect(latest.disabled).toBe(true); await act(async () => latest.click()); await flush()
+  expect(ids()).toEqual(before); expect(requests).toHaveLength(count)
+ })
  it('places an inline history boundary at the actual wider displayed context without remounting its expanded process or nonempty Range', async () => {
   const current = await client.sessionHistoryPage(sid, { limit: 30 })
   const context = await client.sessionHistoryPage(sid, { limit: 100 })
