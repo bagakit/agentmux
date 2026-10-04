@@ -22,6 +22,7 @@ export type FocusColumn = typeof FOCUS_COLUMNS[number]
 export type FocusContext = {
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
   processState: SessionSnapshot['processState']
+  runUnobserved?: boolean
   bucket: FocusBucket; kind: SessionSnapshot['kind']; providerId: string | null
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
@@ -36,7 +37,7 @@ export type FocusContext = {
 }
 /** Observation loss cannot retire a running Run. All Focus grouping uses this rule. */
 export function focusColumnFor(context: FocusContext): FocusColumn {
-  return context.bucket !== 'attention' && context.state === 'disconnected' && context.processState !== 'running'
+  return context.bucket !== 'attention' && context.state === 'disconnected' && context.processState !== 'running' && !context.runUnobserved
     ? 'disconnected' : context.bucket
 }
 export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusColumn, FocusContext[]> {
@@ -97,7 +98,8 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   const now = Date.now()
   const bucket = focusBucketForSession(session, Boolean(result), now)
   const activitySemantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
-  const stateLabel = session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unknown'
+  const stateLabel = session.runUnobserved && bucket === 'idle' ? 'Run not observed'
+    : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unknown'
     ? 'Activity unknown' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
       ? 'Activity not reported' : sessionStatusLabel(session)
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
@@ -133,7 +135,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   // the helper's chosen kind and it is nonempty. A newer prompt is a different fact.
   const detailIsRecap = Boolean(detailIsMessage && recap && latest?.content?.trim()
     && latest.kind === (recap.source === 'Last assistant message' ? 'assistant_message' : 'user_message'))
-  return { id: session.id, name, detail, state: state === 'working' && activitySemantic !== 'active' ? 'running' : state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
+  return { id: session.id, name, detail, state: state === 'working' && activitySemantic !== 'active' ? 'running' : state, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
     runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'unknown' || activitySemantic === 'unsupported' ? null : workingEntryTime(session), recap, detailIsRecap, detailKind,
@@ -142,7 +144,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: number): boolean {
   return a.kind === b.kind && a.label === b.label && a.providerId === b.providerId && a.hostId === b.hostId
     && a.workspacePath === b.workspacePath && a.processState === b.processState && a.status.state === b.status.state
-    && a.status.detail === b.status.detail
+    && a.status.detail === b.status.detail && a.runUnobserved === b.runUnobserved
     && a.status.source === b.status.source
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)

@@ -946,6 +946,8 @@ type SessionSnapshotBase = {
   createdAt: number
   updatedAt: number
   processState: AgentMuxRunState
+  /** A retained recovery projection has no observed Run; its placeholder state is not a process fact. */
+  runUnobserved?: true
   interruptionReason?: string
   status: SessionStatus
   latestOutputBytes: number
