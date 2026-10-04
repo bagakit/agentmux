@@ -30,7 +30,7 @@
 .goals-entry__actions > button { display: flex; width: 100%; min-width: 0; min-height: 62px; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: var(--fs-prose)/1.5 var(--font-sans); text-align: left; cursor: pointer; transition: background-color var(--dur-fast), color var(--dur-fast); }
 .goals-entry__actions > button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .goals-entry__actions > button:active:not(:disabled) { color: var(--text); background: var(--surface-3); }
-.goals-surface .goals-common :is(button,textarea):focus { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.goals-surface .goals-common button:focus { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .goals-entry__actions > button:disabled { color: var(--text-2); opacity: 1; cursor: default; }
 .goals-common__art { flex: none; width: 48px; height: 48px; object-fit: contain; pointer-events: none; }
 .goals-common__copy { display: flex; flex: 1; flex-direction: column; gap: var(--sp-2); min-width: 0; }
@@ -90,7 +90,7 @@
 .goals-surface--detail-open .goals-toolbar { flex-wrap: wrap; }
 .goals-surface--detail-open .goals-search { flex-basis: 100%; }
 .goals-search { display: flex; align-items: center; flex: 1; min-width: 64px; gap: var(--sp-3); height: 28px; color: var(--text-3); }
-.goals-search input { min-width: 0; width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
+.goals-search input { min-width: 0; width: 100%; border: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
 .goals-search button { padding: var(--sp-2); display: flex; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .goals-button, .goals-view-toggle button, .goals-filter-chips button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 28px; flex-shrink: 0; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; white-space: nowrap; }
 .goals-button:hover, .goals-view-toggle button:hover { color: var(--text); background: var(--surface-2); }
@@ -100,7 +100,7 @@
 .goals-view-toggle { display: flex; align-items: center; padding: var(--sp-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
 .goals-view-toggle button { min-height: 24px; padding: 0 var(--sp-3); }
 .goals-view-toggle button[aria-pressed='true'] { background: var(--surface-3); color: var(--text); }
-.goals-surface :is(button,input,textarea,select,[role='button'],summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.goals-surface :is(button,select,[role='button'],summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .goals-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); padding: var(--sp-5); border-bottom: 1px solid var(--line-soft); background: var(--surface-1); }
 .goals-filters label, .goals-properties__fields label { display: flex; align-items: center; gap: var(--sp-4); justify-content: space-between; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
 .goals-surface select, .goals-properties input { max-width: 65%; min-width: 0; height: 28px; padding: 0 var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: inherit; font-size: var(--fs-body); }
