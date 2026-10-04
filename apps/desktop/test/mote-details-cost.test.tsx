@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { chooseField } from './helpers/selection-field'
 import { act, Profiler, StrictMode } from 'react'
 import { createRoot as createDomRoot, type Root } from 'react-dom/client'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
@@ -144,11 +145,11 @@ it('hidden Profile retains original chooser, question, expanded Goal and minutes
   const goal: DemandRecord = { id: 'same-goal', title: 'Same original Goal', description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null, sessionIds: [defaultAgent.id, neighborAgent.id], createdAt: 1, updatedAt: 2, source: 'session' }
   useAppStore.setState({ demands: { [goal.id]: goal } })
   await mount(); await click('Choose or create a goal'); await click('Same original Goal')
-  const chooser = container.querySelector<HTMLSelectElement>('[aria-label="Goal to associate with this Mote"]')!
+  const chooser = container.querySelector<HTMLElement>('[aria-label="Goal to associate with this Mote"]')!
   const minutes = container.querySelector<HTMLInputElement>('[aria-label="Goal continuation minutes"]')!
   const question = container.querySelector<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')!
   expect(chooser).toBeTruthy(); expect(minutes).toBeTruthy(); expect(question).toBeTruthy()
-  await input(chooser, goal.id); await input(minutes, '47'); await input(question, 'Keep my current question')
+  await chooseField(chooser, goal.id); await input(minutes, '47'); await input(question, 'Keep my current question')
   const reads = vi.mocked(api.demands.list).mock.calls.length, inspections = vi.mocked(api.continuousProgress.goals).mock.calls.length
   await renderDetails(false); renders = 0
   const parse = vi.spyOn(behavior, 'parseMoteBehaviorDocument'), files = vi.mocked(api.files.readPublic), before = files.mock.calls.length
@@ -159,8 +160,9 @@ it('hidden Profile retains original chooser, question, expanded Goal and minutes
   expect(renders).toBe(0); expect(parse).not.toHaveBeenCalled(); expect(files.mock.calls.length).toBe(before)
   await renderDetails()
   expect(container.querySelector('[aria-label="Goal continuation minutes"]')).toBe(minutes); expect(minutes.value).toBe('47')
-  expect(container.querySelector('[aria-label="Goal to associate with this Mote"]')).toBe(chooser); expect(chooser.value).toBe(goal.id)
+  expect(container.querySelector('[aria-label="Goal to associate with this Mote"]')).toBe(chooser); expect(chooser.dataset.value).toBe(goal.id)
   expect(question.value).toBe('Keep my current question')
+  await chooseField(container.querySelector<HTMLElement>('[aria-label="Mote discussion for the goal"]')!, defaultAgent.id)
   expect(container.querySelector('[aria-label="Mote discussion for the goal"]')?.textContent).toContain('Hidden current name 5')
   expect(vi.mocked(api.demands.list).mock.calls.length).toBe(reads); expect(vi.mocked(api.continuousProgress.goals).mock.calls.length).toBe(inspections)
   expect(files.mock.calls.length).toBe(before + 1)

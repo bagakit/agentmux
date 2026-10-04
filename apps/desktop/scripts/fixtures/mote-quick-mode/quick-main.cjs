@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const [html, privateRoot, evidence] = process.argv.slice(2)
+const selectFields = process.argv.includes('--select-fields')
 app.setPath('userData', path.join(privateRoot, 'userData'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const result = { passed: false, pid: process.pid, images: [], operations: [], errors: [], restartInputs: [] }
@@ -15,8 +16,8 @@ app.whenReady().then(async () => {
     for (let i=0;i<150 && !(await read('!!window.moteQuick'));i++) await pause(30)
     assert.equal(await read('!!window.moteQuick'), true)
     const click = async selector => {
-      const r = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw Error('missing original control');n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-      for (const type of ['mouseDown','mouseUp']) win.webContents.sendInputEvent({ type, x: Math.round(r.x * win.webContents.getZoomFactor()), y: Math.round(r.y * win.webContents.getZoomFactor()), button: 'left', clickCount: 1 }); await pause(140)
+      const r = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw Error('missing original control');n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hitTag:document.elementFromPoint(x,y)?.tagName,hitControl:document.elementFromPoint(x,y)?.closest("button,[role=menuitemradio]")?.getAttribute("aria-label")}})()`)
+      result.clicks ??= []; result.clicks.push({selector,...r}); for (const type of ['mouseDown','mouseUp']) win.webContents.sendInputEvent({ type, x: Math.round(r.x * win.webContents.getZoomFactor()), y: Math.round(r.y * win.webContents.getZoomFactor()), button: 'left', clickCount: 1 }); await pause(140)
     }
     const key = async keyCode => { for (const type of ['keyDown','keyUp']) win.webContents.sendInputEvent({ type, keyCode }); await pause(100) }
     const capture = async name => {
@@ -25,10 +26,42 @@ app.whenReady().then(async () => {
       assert.equal(facts.overflow, false); assert.equal(facts.drafts['original-display-session'], 'An original unsent question stays here.'); assert.equal(facts.drafts['analyst-region'], 'Analyst draft.')
       await fs.writeFile(path.join(evidence,name+'.png'),(await win.webContents.capturePage()).toPNG()); result.images.push(name+'.png'); result.operations.push({ name, ...facts })
     }
-    const edit = async () => { await click('[aria-label="Edit quick mode"]'); for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog[aria-busy=true]") || document.body.textContent.includes("Reading MOTE.md")');i++) await pause(30); assert.equal(await read(`document.querySelector('select[aria-label="Default Agent"]').value`), 'fixture') }
+    const edit = async (expected = 'fixture') => { await click('[aria-label="Edit quick mode"]'); for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog[aria-busy=true]") || document.body.textContent.includes("Reading MOTE.md")');i++) await pause(30); assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`), expected) }
     await read('moteQuick.enter()'); await pause(180)
     assert.equal(await read('moteQuick.facts().selection.tabId'), 'original-discussion')
     assert.equal(await read('document.querySelector(".pane-tabbar .workbench-tab")?.dataset.workbenchTabId'), 'original-discussion')
+    if (selectFields) {
+      for (const light of [false, true]) {
+        await read(`moteQuick.theme(${light})`)
+        const mode = light ? 'light' : 'dark'
+        win.setContentSize(light ? 320 : 1080, light ? 820 : 850)
+        await edit(); await read(`document.addEventListener('pointerdown',e=>window.menuPointer=e.target.outerHTML,{once:true})`); await click('[aria-label="Default Agent"]'); result.menuDebug = await read(`({target:window.menuPointer,open:document.querySelector('[aria-label="Default Agent"]')?.dataset.state,menus:[...document.querySelectorAll('[role="menu"]')].map(n=>({label:n.getAttribute('aria-label'),count:n.querySelectorAll('[role="menuitemradio"]').length})),focused:document.activeElement.getAttribute('role')})`); assert.equal(result.menuDebug.menus.length, 1, JSON.stringify(result.menuDebug)); await capture('agent-menu-' + mode)
+        assert.equal(await read(`document.querySelector('[role="menu"]')?.closest('[data-overlay-host]') !== null`), true)
+        await key('Escape'); assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Default Agent')
+        assert.equal(await read(`!!document.querySelector('.mote-quick-mode-dialog')`), true)
+        await click('.mote-quick-mode-dialog [aria-label="Default conversation"]'); result.conversationMenuDebug = await read(`({open:document.querySelector('.mote-quick-mode-dialog [aria-label="Default conversation"]')?.dataset.state,menus:[...document.querySelectorAll('[role="menu"]')].map(n=>({label:n.getAttribute('aria-label'),count:n.querySelectorAll('[role="menuitemradio"]').length})),focused:document.activeElement.getAttribute('role')})`); assert.equal(result.conversationMenuDebug.menus.length,1,JSON.stringify(result.conversationMenuDebug)); await capture('conversation-menu-' + mode); await key('Escape'); await key('Escape')
+        assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
+        await click('[aria-label="Choose or create a goal"]'); await click('[aria-label="Goal to associate with this Mote"]')
+        await capture('goal-menu-' + mode); await click('[role="menuitemradio"][data-value="choice-experiment"]')
+        await click('[aria-label="Mote discussion for the goal"]'); await capture('discussion-menu-' + mode)
+        await key('Escape'); await click('[aria-label="Choose or create a goal"]')
+        await click('[data-mote-goal="choice-experiment"] .mote-current-work__copy')
+        await click('[aria-label="Goal continuation Agent"]'); await read(`(()=>{const a=document.querySelector('[aria-label="Goal continuation Agent"]').getBoundingClientRect(),b=document.querySelector('.goals-continuation input[type=number]').getBoundingClientRect();if(a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom)throw Error('Executing Agent overlaps interval input')})()`); await capture('execution-agent-menu-' + mode); await key('Escape')
+        await click('[data-mote-goal="choice-experiment"] .mote-current-work__copy')
+      }
+      await edit(); await click('[aria-label="Default Agent"]'); await key('R')
+      assert.equal(await read(`document.activeElement?.textContent`), 'Research partner')
+      await key('Return'); assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`), 'analyst')
+      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
+      await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
+      await click('[data-capture-save]'); await pause(150)
+      assert.equal(await read('moteQuick.facts().defaults.defaults.executorId'), 'analyst')
+      await edit('analyst'); await capture('shared-selection-saved-reopened'); await key('Escape')
+      await read('moteQuick.unknown()'); await edit('analyst'); await capture('shared-selection-unknown-kept')
+      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 1)
+      result.passed = true
+      return
+    }
     for (const light of [false,true]) {
       await read(`moteQuick.theme(${light})`)
       win.setContentSize(1080,850); await capture('profile-wide-'+(light?'light':'dark'))
@@ -38,9 +71,9 @@ app.whenReady().then(async () => {
       await key('Escape')
       assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'),0)
     }
-    await edit(); await read(`(()=>{const n=document.querySelector('select[aria-label="Default Agent"]');n.value='analyst';n.dispatchEvent(new Event('change',{bubbles:true}))})()`); await pause(100)
+    await edit(); await click('[aria-label="Default Agent"]'); await click('[role="menuitemradio"][data-value="analyst"]'); await pause(100)
     // The first focused selector is the original configured Agent choice.
-    assert.equal(await read(`document.querySelector('select[aria-label="Default Agent"]').value`), 'analyst')
+    assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`), 'analyst')
     await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
     await read(`document.addEventListener('pointerdown',event=>window.quickClickTarget=event.target.outerHTML,{once:true})`); await click('[data-capture-save]'); result.saveClick={zoom:win.webContents.getZoomFactor(),target:await read('window.quickClickTarget')} 
     for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog")');i++) await pause(30)
@@ -49,7 +82,7 @@ app.whenReady().then(async () => {
     assert.equal(await read('Object.values(moteQuick.facts().disk).some(v=>v.includes("# User notes\\nKeep this paragraph."))'),true)
     await capture('saved-profile-original-editor')
     await click('[aria-label="Edit quick mode"]'); await pause(180)
-    assert.equal(await read(`document.querySelector('select[aria-label="Default Agent"]').value`),'analyst'); await capture('saved-settings-reopened'); await key('Escape')
+    assert.equal(await read(`document.querySelector('[aria-label="Default Agent"]').dataset.value`),'analyst'); await capture('saved-settings-reopened'); await key('Escape')
     await read('moteQuick.enter()'); await pause(140)
     assert.equal(await read('moteQuick.facts().selection.tabId'),'original-discussion')
     result.restartInputs.push({ name: 'quick-default-retained', state: await read('moteQuick.restartInput()') })

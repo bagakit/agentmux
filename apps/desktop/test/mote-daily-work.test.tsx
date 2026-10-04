@@ -1,5 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { chooseField } from './helpers/selection-field'
 import { act, createElement } from 'react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -92,7 +93,7 @@ describe('original Mote Goal composition and current-work caller', () => {
     expect([...panel.querySelectorAll('[data-mote-goal]')].map(item => item.getAttribute('data-mote-goal')).sort()).toEqual(['neighbor', 'ours'])
     await moteClick(panel.querySelector('[data-mote-goal="ours"] .mote-current-work__copy')!)
     expect(panel.querySelector('[aria-label="Goal continuous progress"]')).not.toBeNull()
-    expect((panel.querySelector('[aria-label="Goal continuation Agent"]') as HTMLSelectElement).value).toBe(defaultAgent.id)
+    expect((panel.querySelector('[aria-label="Goal continuation Agent"]') as HTMLElement).dataset.value).toBe(defaultAgent.id)
     expect(useAppStore.getState().agentComposerDrafts).toBe(before); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
   })
   it('opens original Goal/results navigation without selecting a foreign Topic or starting an Agent', async () => {
@@ -128,8 +129,8 @@ describe('original Mote Goal composition and current-work caller', () => {
       vi.spyOn(api.demands, 'update').mockImplementationOnce(async (id, patch) => { await pending; return owner.update(id, patch) })
       const panel = await profile()
       const select = async (label: string, value: string) => {
-        const input = panel.querySelector<HTMLSelectElement>('[aria-label="' + label + '"]')!
-        expect(input).not.toBeNull(); await act(async () => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) })
+        const input = panel.querySelector<HTMLElement>('[aria-label="' + label + '"]')!
+        expect(input).not.toBeNull(); await chooseField(input, value)
       }
       await moteClick(panel.querySelector('[aria-label="Choose or create a goal"]')!)
       await select('Goal to associate with this Mote', 'first-real'); await select('Mote discussion for the goal', neighborAgent.id)
@@ -138,8 +139,8 @@ describe('original Mote Goal composition and current-work caller', () => {
       await moteClick(panel.querySelector('[data-mote-goal="later-real"] .mote-current-work__copy')!)
       await act(async () => finish()); await settleMoteApp()
       await expect.poll(async () => (await owner.list()).find(goal => goal.id === 'first-real')!.sessionIds, { timeout: 3000 }).toContain(neighborAgent.id)
-      expect(panel.querySelector<HTMLSelectElement>('[aria-label="Goal to associate with this Mote"]')?.value).toBe('later-real')
-      expect(panel.querySelector<HTMLSelectElement>('[aria-label="Mote discussion for the goal"]')?.value).toBe(defaultAgent.id)
+      expect(panel.querySelector<HTMLElement>('[aria-label="Goal to associate with this Mote"]')?.dataset.value).toBe('later-real')
+      expect(panel.querySelector<HTMLElement>('[aria-label="Mote discussion for the goal"]')?.dataset.value).toBe(defaultAgent.id)
       expect((await owner.list()).find(goal => goal.id === 'first-real')!.sessionIds).toContain(neighborAgent.id)
       expect((await owner.list()).find(goal => goal.id === 'first-real')!.contentRefs).toEqual([moteGoalContext(useAppStore.getState(), scope()).contentRef])
       expect((await owner.list()).find(goal => goal.id === 'later-real')!.sessionIds).toEqual([defaultAgent.id])

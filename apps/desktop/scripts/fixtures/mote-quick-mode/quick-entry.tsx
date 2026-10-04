@@ -18,6 +18,7 @@ import { MOTE_BEHAVIOR_LINK, DEFAULT_MOTE_BEHAVIOR } from '../../../src/shared/m
 import { parseMoteQuickMode, serializeMoteQuickMode } from '../../../src/shared/mote-quick-mode'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import type { ScratchTopicSnapshot, SessionSnapshot } from '../../../src/shared/contracts'
+import type { Demand } from '@agentmux/demand'
 import type { FileReadParams, FileReadResult } from '@agentmux/core'
 import '../../../src/renderer/src/styles/index.css'
 import '../mote-companion-workflows/persona-scene.css'
@@ -56,7 +57,12 @@ api.files.readPublic = async (params: FileReadParams): Promise<FileReadResult> =
 api.files.write = async (_workspace, input) => { calls.push({ operation: 'write', path: input.path }); if (await revision(disk[input.path] ?? '') !== input.expectedRevision) return { status: 'conflict', observedRevision: await revision(disk[input.path] ?? '') }; disk[input.path] = input.content; return { status: 'written', revision: await revision(input.content) } }
 api.files.observe = async () => {}; api.files.unobserve = async () => {}; api.files.onInvalidated = () => () => {}
 api.scratch.listTopics = async () => [quickTopic(), secondTopic]; api.scratch.readTopic = async (_workspace, id) => id === topic.id ? quickTopic() : secondTopic; api.scratch.ensureMote = async () => quickTopic()
-api.demands.list = async () => []
+const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
+  title: index ? 'Compare the evidence before choosing our next experiment' : 'Explore a small useful experiment',
+  description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
+  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: 1, updatedAt: 2, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [] }))
+api.demands.list = async () => goals
+api.continuousProgress.goals = async () => []
 api.sessions.historyPage = async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'fixture', nativeSessionId: 'original-controlled-native' }, nextCursor: null,
   items: [{ id: 'original-message', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Let’s compare a small experiment before expanding the project.' }] }] })
 function reset() {
