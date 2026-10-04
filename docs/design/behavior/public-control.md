@@ -29,7 +29,7 @@
 
 用户希望「Agent CLI 能操作 AgentMux 桌面应用本身」，Agent 和用户交流时能切换界面；理想情况下，Mote 在浮窗里交流的同时，可以改变主画面当前聚焦的 Space 或某个 Goal，也方便 Agent 自行迭代、调试和观察。该能力沿同一公共业务服务的 `app focus`／`app inspect`、`space focus` 与 `goal focus` 接入，具体呈现与输入仍由原 Client owner 执行；不把系统桌面 Computer Use、Browser 操作或 Agent／Run 生命周期并成另一条 Runtime。
 
-Work、Survey 与左下 Mote 面板的导航范围，以及明确跨上下文动作的一次带入语义，只见[Work、Survey 与 Mote 的导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)。本节公共动作继续分别报告选择、呈现和输入，不因入口或共享实体合并各上下文的目标。
+Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上下文动作的一次带入语义，只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。本节公共动作继续分别报告选择、呈现和输入，不因入口或共享实体合并各上下文的目标。
 
 - **主画面与对话输入分别成立。** 选中主画面目标不等于真实 caret 已转移。默认导航保留仍在交流的 Mote 浮窗、同一对象／Tab／Region、原 View、真实 caret、草稿与组字，不关闭、重新创建、重选或自动发送其内容。只有调用者明确要求把输入交给精确目标时才尝试输入焦点转移；不能为证明主面导航成功先 blur 浮窗再恢复或挑一个编辑框。
   用户继续点击或输入浮窗，选择该原 Tab 内的精确 Region、原输入与逻辑 lane；浮窗自己的活动 Region、焦点标记与观察须跟随这次局部选择，主面保留的源焦点即使来自同一 Tab 也不能覆盖浮窗的局部选择。固定浮窗仍保留原有的输入与人工操作能力。不能因此清掉主面精确 Space／Zone 地址、改变无关 Workspace／Group 或保留的源焦点，或重新授权另一处 launcher 自动激活。人工在主面明确导航或新建 Tab 仍按原交互执行。

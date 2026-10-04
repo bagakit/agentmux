@@ -40,7 +40,7 @@ Space 的同一 Mote 名册支持协作者视图与常规列表，显示选择�
 
 用户继续要求把窗口内的 Mote 对象放到左侧，避免与 Tab 叠在一起；可以在宽卡片与仅头像两态切换，「类似 Discord」；窗口边缘更明显，与背后工作面区分。对象导航与事情导航分层，仍是原来的同一个可操作快捷面。
 
-左下 Mote 面板与 Work 中 Mote 实体的导航边界只见[Work、Survey 与 Mote 的导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)，本节继续定义原协调对象与快捷面的行为。Mote 与 Topic 的文件树使用同一公共能力；Mote 文件区固定浏览该 Mote 的原真实根，不提供展开整个共享目录的“Show all files”或面向普通知识 Topic 的收集入口，普通文件及知识能力从各自原场景可达，不借 Mote 顶部改变范围或把引用收集叫文件保存。二级内容按对象表达：知识库 Category 展开具体 Topic，Topic 显示自身讨论、知识与资料，Mote 呈现同一持久对象的自我设定、名片与点子，让用户理解这位搭档和怎样继续合作。知识层级只见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)。自我设定与名片沿原名称、头像、SOUL 等事实，点子沿已有持久笔记与资料能力，不另造人格、Memory 引擎、记忆存储或强制资料分类。菜单文案与具体分组数量不由本条规定；框架与共同工作面只见[《Space 的统一工作面框架》](spaces-and-layout.md#space-的统一工作面框架)。Mote 主选择器只列 Mote，跨对象浏览仍由 Space 中分开的 Motes 与 Topics 分区承担。同一 Mote 可以有多个自己的 Tab/Group，这些事情标签不表示多个 Topic；Mote 与 Zone 不合并身份，也不改变既有实体多处展示绑定。共用文件树不改变原文件资源归属，导航分类与物理存储仍是不同事实；目录分离与已授权迁移统一遵守[《Topic 与 Mote 的物理目录》](#topic-与-mote-的物理目录)。
+左下 Mote 面板与 Work 中 Mote 实体的导航边界只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)，本节继续定义原协调对象与快捷面的行为。Mote 与 Topic 的文件树使用同一公共能力；Mote 文件区固定浏览该 Mote 的原真实根，不提供展开整个共享目录的“Show all files”或面向普通知识 Topic 的收集入口，普通文件及知识能力从各自原场景可达，不借 Mote 顶部改变范围或把引用收集叫文件保存。二级内容按对象表达：知识库 Category 展开具体 Topic，Topic 显示自身讨论、知识与资料，Mote 呈现同一持久对象的自我设定、名片与点子，让用户理解这位搭档和怎样继续合作。知识层级只见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)。自我设定与名片沿原名称、头像、SOUL 等事实，点子沿已有持久笔记与资料能力，不另造人格、Memory 引擎、记忆存储或强制资料分类。菜单文案与具体分组数量不由本条规定；框架与共同工作面只见[《Space 的统一工作面框架》](spaces-and-layout.md#space-的统一工作面框架)。Mote 主选择器只列 Mote，跨对象浏览仍由 Space 中分开的 Motes 与 Topics 分区承担。同一 Mote 可以有多个自己的 Tab/Group，这些事情标签不表示多个 Topic；Mote 与 Zone 不合并身份，也不改变既有实体多处展示绑定。共用文件树不改变原文件资源归属，导航分类与物理存储仍是不同事实；目录分离与已授权迁移统一遵守[《Topic 与 Mote 的物理目录》](#topic-与-mote-的物理目录)。
 
 Mote 在 Space 中的二级对象内容以 Profile 为首屏，Ideas 承载原笔记与点子；原 SOUL／自我设定直接呈现在 Profile，沿明确文件编辑动作进入右侧原 Editor，不另设 Persona 切换。对象内容仍在共同框架内，保同一原 Zone 工作面与公共文件能力，不另造 Zone 导航、文件树、Editor 或 Tab/Region 管理；切换与原工作面的保护统一遵守前述 Space 框架，普通 Topic 保持自己的内容。 名片首屏以准确身份、已保存的合作方式和当前事项为主；`topic.md` 的原摘要收在注明文件来源的按需展开处，与原 `SOUL.md` 分开辨认，并可沿原 Editor 编辑。展示调整不按文案猜测哪些内容是默认模板，也不删除已保存摘要；没有事项或点子时保原创建／查看动作，读取尚未确认或失败时仍保可读说明与原恢复动作。
 
@@ -199,7 +199,7 @@ Task 写入策略必须是用户可配置的开关，默认值为“按风险确
 
 ## 默认 Session 的浮动工作面
 
-默认 Session 和全部 Mote 的快捷打开形态统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)：保留背后原工作面，不用跳转 Scratch 主路由冒充快捷面。内容是已选 Mote 的原 Tab、Region、Agent 身份、输出和 composer，只是附着投影，不创建第二个 Session、PTY 或聊天产品；Board、Focus 等入口明确打开准确目标时复用这一个快捷面，不另维护一份 Mote；一次跨上下文带入与后续独立选择只见[导航上下文合同](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)。
+默认 Session 和全部 Mote 的快捷打开形态统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)：保留背后原工作面，不用跳转 Scratch 主路由冒充快捷面。内容是已选 Mote 的原 Tab、Region、Agent 身份、输出和 composer，只是附着投影，不创建第二个 Session、PTY 或聊天产品；Board、Focus 等入口明确打开准确目标时复用这一个快捷面，不另维护一份 Mote；一次跨上下文带入与后续独立选择只见[导航上下文合同](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。
 
 固定开合与目标属于持久 UI 状态。重启先恢复原面与 Tab/Region，再尝试 reattach/resume；恢复握手、探测或渲染失败时保留入口和持久工作面，在服务窗说明失败步骤，不清空布局。
 
