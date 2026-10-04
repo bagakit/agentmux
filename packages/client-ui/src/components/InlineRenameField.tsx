@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef } from 'react'
+import { TextInput } from '../input/index.js'
 import { LoaderCircle } from 'lucide-react'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 
@@ -43,7 +44,7 @@ export function InlineRenameField({
   }
 
   return <span className="inline-rename-field" data-pending={pending || undefined}>
-    <input ref={input} className={`inline-rename-field__input ${inputClassName ?? ''}`}
+    <TextInput ref={input} className={`inline-rename-field__input ${inputClassName ?? ''}`}
       aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
       aria-busy={pending} value={value} readOnly={pending} placeholder={placeholder}
       spellCheck={false} autoComplete="off" autoCapitalize="off"

@@ -87,7 +87,7 @@
 .agent-interaction--async button[aria-pressed='true'] .agent-question__choice-mark { color: var(--bg); background: var(--green); box-shadow: none; }
 .agent-question__custom { display: grid; gap: 4px; margin-top: 8px; color: var(--text-3); font-size: var(--fs-micro); }
 .agent-question__custom textarea { display: block; width: 100%; min-height: 45px; resize: vertical; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); background: var(--surface-0); font: var(--fs-meta)/1.45 var(--font-ui); }
-.agent-question__custom textarea:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.agent-question__custom textarea:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .agent-question__answer { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-question__answer > svg { flex: 0 0 auto; margin-top: 2px; color: var(--green); }
 .agent-question__footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }

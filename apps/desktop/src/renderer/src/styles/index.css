@@ -6,6 +6,7 @@
  */
 @import './tokens.css';
 @import './base.css';
+@import '@agentmux/client-ui/input/styles.css';
 @import './chrome.css';
 @import './space-tree.css';
 @import './project-groups.css';

@@ -52,9 +52,7 @@
 .mote-details__source { overflow-wrap: anywhere; }
 .mote-cooperation-entry { margin: 12px 0 4px; }
 .mote-cooperation-entry__question { display: flex; align-items: flex-end; gap: 6px; padding: 5px 6px 5px 0; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); }
-.mote-cooperation-entry__question:focus-within { border-color: var(--green); outline: 2px solid var(--green); outline-offset: 2px; }
 .mote-cooperation-entry textarea { flex: 1; min-width: 0; width: 100%; resize: vertical; box-sizing: border-box; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); padding: 7px 10px; min-height: 34px; max-height: 160px; font: inherit; line-height: 1.5; }
-.mote-cooperation-entry textarea:focus-visible { outline: 0; }
 .mote-cooperation-entry .mote-details__hint { margin: 6px 0; font-size: var(--fs-meta); }
 .mote-cooperation-entry__sources { margin-top: 8px; color: var(--text-3); font-size: var(--fs-meta); }
 .mote-cooperation-entry__sources summary { cursor: pointer; }

@@ -1,3 +1,5 @@
+import { TextInput } from '@agentmux/client-ui/input'
+import { ComposerTextarea } from '../ComposerTextarea'
 import { Camera, UserRound, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '../../../../shared/user-profile'
@@ -62,7 +64,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
       <div className="settings-profile__identity-text">
         <span className="settings-profile__eyebrow">Your place in AgentMux</span>
         <label htmlFor="profile-display-name">What should we call you?</label>
-        <input id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
+        <TextInput id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
           placeholder="Your name" autoComplete="nickname" onChange={event => draft.setField('displayName', event.currentTarget.value)} />
         <div className="settings-profile__image-actions">
           <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><Camera size={13} aria-hidden="true" /> Change photo</button>
@@ -81,9 +83,9 @@ export function ProfileSettingsPane({ profile, onSave }: {
     <section className="settings-profile__context">
       <header><h3>Working with you</h3><p>A little context makes a better collaborator.</p></header>
       <label htmlFor="profile-about">About you &amp; how you work</label>
-      <textarea id="profile-about" aria-label="About you and how you work" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
+      <ComposerTextarea id="profile-about" aria-label="About you and how you work" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
         rows={6} placeholder="Your work, experience, and how you prefer agents to communicate."
-        onChange={event => draft.setField('about', event.currentTarget.value)} />
+        onValueChange={value => draft.setField('about', value)} />
       <div className="settings-profile__context-footer"><span>This is your context. Each Mote keeps its own role and instructions.</span><small>{value.about.length} / {USER_PROFILE_ABOUT_LIMIT}</small></div>
       <label className="settings-profile__sharing">
         <input type="checkbox" checked={value.shareWithAgents} onChange={event => draft.setField('shareWithAgents', event.currentTarget.checked)} />

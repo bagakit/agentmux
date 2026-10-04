@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { memo, useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Pencil, SquareTerminal } from 'lucide-react'
 import { AgentAvatar } from './AgentAvatar'
@@ -38,7 +39,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
   const className = `focus-context${compact ? ' focus-context--compact' : ''}${directory ? ' focus-context--directory' : ''}${selected ? ' is-selected' : ''}${menuOpen ? ' is-menu-open' : ''}`
   if (draft !== null) return <div className={`${className} focus-context--renaming`} data-session-id={context.id}>
     <Pencil size={16} className="focus-context__rename-mark" aria-hidden="true" />
-    <input ref={input} className="focus-context__rename" aria-label={`Rename Agent ${context.name}`} value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={commitRename}
+    <TextInput ref={input} className="focus-context__rename" aria-label={`Rename Agent ${context.name}`} value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={commitRename}
       onKeyDown={event => {
         event.stopPropagation()
         if (event.nativeEvent.isComposing || event.keyCode === 229) return
