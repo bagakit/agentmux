@@ -1,3 +1,4 @@
+import { RetainedDocumentDraftNotice } from './RetainedDocumentDraftNotice'
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react'
 import { AlertTriangle, Check, Code, Eye, FolderOpen, GitCompare, Map, MoreHorizontal, RefreshCw, Save, WrapText } from 'lucide-react'
 import { api } from '../lib/api'
@@ -176,6 +177,7 @@ export function EditorPane({
           </DropdownMenu.Root>
         </div>
       </header>
+      <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
       {issue ? (
         <div className={`editor-file-notice editor-file-notice--${issue.kind}`} role="alert">
           <AlertTriangle size={13} />

@@ -15,13 +15,22 @@ export function reconcileNotesStorageResources<T extends FileWorkbenchState>(sta
     if (!affected.length && !Object.hasOwn(next.documents, fromKey)) continue
     const patch: Record<string, unknown> = { tabs: { ...next.tabs } }
     for (const tab of affected) (patch.tabs as typeof next.tabs)[tab.id] = { ...tab, regions: Object.fromEntries(Object.entries(tab.regions).map(([id, surface]) => [id, surface.kind === 'file' && surface.workspaceId === change.from.workspaceId && surface.path === change.from.path ? { ...surface, workspaceId: change.to.workspaceId, path: change.to.path } : surface])) }
-    for (const field of ['documents', 'dirtyDocuments', 'documentGenerations', 'documentObservationGenerations', 'documentIssues', 'savingDocuments'] as const) {
+    for (const field of ['documents', 'dirtyDocuments', 'documentGenerations', 'documentObservationGenerations', 'documentIssues', 'savingDocuments', 'retainedDocumentDrafts'] as const) {
       const collection = { ...next[field] } as Record<string, unknown>
       if (!conflict && fromKey !== toKey && Object.hasOwn(collection, fromKey)) { collection[toKey] = collection[fromKey]; delete collection[fromKey] }
       if (field === 'documents' && collection[toKey]) collection[toKey] = { ...(collection[toKey] as object), workspaceId: change.to.workspaceId, path: change.to.path }
       patch[field] = collection
     }
-    if (conflict) (patch.documentIssues as typeof next.documentIssues)[toKey] = { kind: 'changed', observed: { ...next.documents[fromKey]!, path: change.to.path } }
+    if (conflict) {
+      const retained = patch.retainedDocumentDrafts as Record<string, typeof next.documents[string][]>
+      const alternatives = [...(retained[toKey] ?? []), ...(retained[fromKey] ?? [])]
+      const source = { ...next.documents[fromKey]!, path: change.to.path }
+      if (!alternatives.some(draft => draft.content === source.content)) alternatives.push(source)
+      retained[toKey] = alternatives
+      for (const field of ['documents', 'dirtyDocuments', 'documentGenerations', 'documentObservationGenerations', 'documentIssues', 'savingDocuments', 'retainedDocumentDrafts'] as const) delete (patch[field] as Record<string, unknown>)[fromKey]
+      ;(patch.dirtyDocuments as typeof next.dirtyDocuments)[toKey] = true
+      // A retained buffer is not a disk observation. Normal read/write conflict facts stay intact.
+    }
     next = { ...next, ...patch }
   }
   const bindings = (next as T & { spaceZoneBindings?: SpaceZoneBindings }).spaceZoneBindings
