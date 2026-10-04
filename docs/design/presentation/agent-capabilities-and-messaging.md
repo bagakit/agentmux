@@ -15,8 +15,10 @@
 - [原生会话变化的就地提示](#原生会话变化的就地提示)
 - [Claude Prompt 的提交反馈](#claude-prompt-的提交反馈)
 - [Hook 隔离提示的密度](#hook-隔离提示的密度)
+- [AgentMux 注入上下文的阅读](#agentmux-注入上下文的阅读)
 - [A2A 消息队列与身份信息密度](#a2a-消息队列与身份信息密度)
 - [A2A 的可读消息与地址](#a2a-的可读消息与地址)
+- [Message Tool 的等待与失败说明](#message-tool-的等待与失败说明)
 
 ## 注意力与审查密度
 
@@ -24,7 +26,7 @@
 - 全局 Needs you 入口和 Session 内交互卡使用同一套状态颜色、图标和文案；列表行优先显示 Agent/Session 身份、请求类型和摘要，数量放在聚合入口。
 - 选中的请求复用现有交互卡和动作语言；提交中、失败、请求已过期与列表已空均有独立可读状态，不能只靠颜色表达。键盘焦点在下一项或入口按钮上可见。 入口收起后的焦点归还与较晚操作优先级遵循上述交互合同，不新增可见控件。
 - Diff、Browser preview 和继续对话使用结果附近的一组紧凑动作；展开内容才占用详情或 Region，静息时不制造空右栏。
-- Context、Usage、Needs you 和 Error 保持不同语义表达；既有未知值保持中性 unavailable/unknown，不能用绿色或 0% 代替未知。本 Feature 不新增 Usage 数据源或仪表盘。
+- Context、Usage、Needs you 和 Error 保持不同语义表达；既有未知值保持中性 unavailable/unknown，不能用绿色或 0% 代替未知。本节不新增 Usage 数据源或仪表盘。
 - 预览和审查入口沿用当前 Surface、Region 和服务窗语言；窄屏时可以收进动作菜单，但不能依赖 hover 才能使用。
 
 ## Agents、队列与语义 token 密度
@@ -39,9 +41,17 @@
 
 具体 Agent 的图标在各处保留同一 Executor 颜色／角标与默认底图，密度变化只调整尺寸，不丢身份定制。标识编辑控件嵌入该 Executor 配置，不归全局外观；行为归属见交互 SSOT 同名条目。
 
+### 对话身份色与语义色
+
+对话与参与者轨复用[共同消息头像](conversation-input.md#用户消息气泡的内文密度)：已核 Agent 使用真实项目图与 Agent 角标，Mote 使用原对象头像，人类与系统沿原作者呈现。身份解析、显示名与 Provider 资料各沿原事实 owner，不从事件 kind、消息声明或颜色认证作者；机器事件 glyph 仍可表达事件类型。
+
+派生说话人色只提供辅助分组，不能独自区分身份或表达执行状态。同 Provider 的不同 Agent 可能共享品牌图形，也可能色相相近；接线方须提供可分辨的真实名字，名字、hover／focus 与可访问名称才是稳定判别入口。手选图形、Provider 品牌与 Mote 所选图片保原色，不把派生色重涂其图案。
+
+自动派生的 Agent 说话人色相让开现有语义色：amber 的待处理、red 的错误、green 的成功，以及人类说话人的 blue。以各语义色相为中心保留半宽 **22°** 的弧，先按色相环合并跨 0° 与相交禁区，再从补集均匀取值；不能先散列再把命中禁区的值推到边缘，否则会人为聚簇。色相使用整数度，禁止为了增加可用色域任意缩小避让弧。可用区间随实际语义 token 推导，不把某次 palette 测得的区间数量或角度总量写成另一份固定色表。名字与非颜色状态信号始终保留，身份色不冒充运行、等待、成功或错误。
+
 ## 状态标记与 Executor 叠加密度
 
-工作中的 Agent 使用小型活动字形，避免用一个小绿点承担“正在产出”的含义；idle／普通 running 保持无标记的身份图。等待、阻塞、断联和错误只在确有提醒价值时显示右上角标记。Executor 角标缩小到 Provider 图标内部的叠加层，保留一圈很窄的底色隔离，不向外扩张，不和 Provider 身份图分开排布。活动详情菜单使用有限宽度、可换行和最大高度滚动，原因文本与时间、Project 元数据仍能同时读到。
+Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值显示角标：工作中的 Agent 使用小型活动字形，避免用一个小绿点承担“正在产出”的含义；idle／普通 running 不添加常驻标记。Message Tools 接收者头像同时承担状态与关联动作入口，其 running／working 呈现只见[《Message Tools 右侧操作整体》](conversation-input.md#message-tools-右侧操作整体)。等待、阻塞、断联和错误只在确有提醒价值时显示右上角标记。Executor 角标缩小到 Provider 图标内部的叠加层，保留一圈很窄的底色隔离，不向外扩张，不和 Provider 身份图分开排布。活动详情菜单使用有限宽度、可换行和最大高度滚动，原因文本与时间、Project 元数据仍能同时读到。
 ## 状态、Browser 与 Scratch / Topic 密度
 
 - Project 树的 idle、running/working、error 统一为同一宽度的“小图标 + 数字”状态槽；只换 glyph 和语义色，不换控件结构。完整状态名称进入 tooltip/无障碍名称，避免长文案破坏树的列对齐。停止/退出态使用中性颜色，error 只使用于明确故障事实。
@@ -51,7 +61,7 @@
 
 ## Executor identity 的统一密度
 
-- Executor identity 组件在 Tab、树、Session、Board 和 Browser rail 中共享同一图标盒、状态点尺寸、珐琅外轮廓和 hover/focus 信息面板；调用方只提供尺寸上下文，不重写内部间距。
+- Executor identity 组件在 Tab、树、Session、Board 和 Browser rail 中共享同一图标盒、状态点尺寸、珐琅外轮廓和 hover/focus 信息面板；调用方只提供尺寸上下文，不重写内部间距。此处适用普通导航／观察身份，Message Tools 的状态入口按上节引用呈现。
 - 自定义 Executor 图标是 Provider 图标内部的小型叠加，不能向外扩成第二圈。状态点只在 working、needs-user、blocked、disconnected 或明确 error 时显示，idle/正常停止不添加常驻装饰。
 - 信息面板使用现有 tooltip 的 micro/compact 字号和边距，内容分成身份、状态和一个小型设置动作；设置动作进入 Executor 模板设置，不把 Appearance 的控件复制进面板。
 - 既有头像的保留和 Reset 语义归交互合同「旧配置的 Executor 身份不能丢」；所有尺寸下的设置预览与实际身份图保持一致。
@@ -84,7 +94,7 @@
 
 - 非历史 CLI 当前回执与无关原生读取依赖边界归交互合同[《持久消息的显式消费与派发等待》](../behavior/agent-capabilities-and-messaging.md#持久消息的显式消费与派发等待)，不另造提示或输出协议。
 - 显式消费沿现有 CLI 结构化回执与可读信封表达批次、Run、消息身份和真实投递状态，不增加常驻界面入口或第二种已读徽章；通信语义唯一来源见交互合同[《持久消息的显式消费与派发等待》](../behavior/agent-capabilities-and-messaging.md#持久消息的显式消费与派发等待)。
-- 本次跨 Session 消息来源优化沿既有一行来源与正文呈现，不新增视觉层或认证徽章；统一来源头、首条及 `whoami`／启动／技能的使用要求只引用交互合同[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。
+- 跨 Session 消息来源沿既有一行来源与正文呈现，不新增视觉层或认证徽章；统一来源头、首条及 `whoami`／启动／技能的使用要求只引用交互合同[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。
 
 - 发送回执与收件侧信封必须能对应同一条消息：首层明确显示已入队、已投递或失败，详情能核对稳定 `messageId` 和 Core 核验的双方 Session/Run；重试不得像一条新消息，队列暂不可写时不得出现虚假的“已送达”。交互行为以[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)为准。
 - 收件来源显示 Core 已解析的参与者身份；Region、Tab 和其他视觉位置不能冒充发送者或接收者。实际可读来源与机器消息字段的归属只见上述 A2A 交互合同，不沿用旧 XML 属性表达。

@@ -112,6 +112,12 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 - Editor 中已支持渲染的文件，包括 HTML，应在原 FileRegion 就地切换源码与预览；原 File、Workspace / Host、Tab / Region、草稿与源码选择 / 阅读位置保持，不以另开 Browser 工作面代替就地预览。模式沿同一 FileRegion 的公共 `file.view` 能力消费，格式与内容是否实际可呈现仍须准确表达；具体格式边界沿下文，不因“可渲染”承诺任意新格式。
 - 具体编辑能力与格式边界先参考成熟产品，再形成对应 Feature 的评审任务；`local-file-preview-editors` 保留历史需求与验收记录，后续格式预览维护沿本节的同一 File / Browser 所有者闭合，不混入既有版本安装验收。
 
+### Terminal 系统文件出口
+
+- **Terminal 中的系统文件路径必须保持系统文件语义。** 终端输出的工作区内 `.app`、`.dmg`、`.pkg`、`.exe`、`.msi`、`.deb`、`.rpm`、`.AppImage` 与常见压缩包等可由系统处理的文件，点击后交给当前操作系统打开，不得误送进编辑器或 Browser Tab。路径仍必须先经过既有 Workspace 根约束；远端 Workspace 没有本机系统打开出口，因此只提供可用的文件管理器揭示能力，不能画一个点击后必然失败的假按钮。
+- **终端路径的右键菜单要回答“去哪里找它”。** 指针停在已识别的文件路径上时，右键菜单提供平台对应的 `Reveal in Finder`、`Reveal in File Explorer` 或 `Reveal in File Manager`；系统可处理的文件额外提供打开动作。右键普通输出、拖选文本或无法归一化的路径不显示这些动作。揭示和打开都复用 Main 的 Workspace 文件安全边界，不能把绝对路径直接从 Renderer 交给系统。
+- **文件路径和 HTTP 链接是两条不同的出口。** HTTP(S) 仍进入 Browser 的目的地选择；只有归一化成功的本地 Workspace 文件路径才进入系统文件动作。系统动作失败必须以可读错误浮现，不能静默退回编辑器 Tab。
+
 ### Terminal 本机临时产物预览
 
 用户反馈系统临时目录下的 html 链接 hover 无浮窗，点击无反应。本 Pane 展示的 Session 的资源 Host 确认是本机时，系统真实临时目录中的文件产物应有可辨链接和被动目标读出，点击后可在现有隔离 Browser 中真实预览 HTML 及其相对资源；Browser 已有可呈现格式沿原能力和诚实失败使用，不制造假 Workspace、第二 FileSurface 或另一套 Browser。该能力只补本机临时产物，普通源码、书签、正文 `file:` URI 与远端路径仍遵守各自原入口。
