@@ -14,3 +14,17 @@
 .pdf-content__password { display:flex; flex-direction:column; align-items:center; gap:var(--sp-4); max-width:36ch; }
 .pdf-content__password label { width:100%; display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-2); font-size:var(--fs-meta); }
 .pdf-content__password input { width:100%; padding:var(--sp-3); border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--text); }
+.pdf-content__search { display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); padding:var(--sp-2) var(--sp-4); background:var(--surface-1); border-bottom:1px solid var(--line-soft); font-size:var(--fs-meta); color:var(--text-3); }
+.pdf-content__search input { flex:1; min-width:80px; max-width:320px; background:var(--surface-0); border:1px solid var(--line-soft); border-radius:var(--radius-sm); color:var(--text); padding:var(--sp-2) var(--sp-3); font:inherit; }
+.pdf-content__search input:focus-visible { outline:1px solid var(--focus-line); }
+.pdf-content__search .small-button { min-height:24px; padding:0 var(--sp-2); font-size:var(--fs-meta); }
+.pdf-content__search [aria-pressed='true'] { color:var(--text); background:var(--surface-3); }
+.pdf-content__search output { font-variant-numeric:tabular-nums; }
+.pdf-content__outline { position:absolute; inset:0 auto 0 0; z-index:3; width:min(260px, 85%); overflow:auto; background:var(--surface-0); color:var(--text); border-right:1px solid var(--line); box-shadow:4px 0 12px var(--wash-1); padding:var(--sp-3) var(--sp-4); font-size:var(--fs-meta); }
+.pdf-content__outline-heading { display:flex; justify-content:space-between; align-items:center; gap:var(--sp-3); padding-bottom:var(--sp-3); }
+.pdf-content__outline ol { list-style:none; padding:0; margin:0; }
+.pdf-content__outline li { margin:0 0 var(--sp-2); }
+.pdf-content__outline li button { display:block; width:100%; text-align:left; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text); font:inherit; padding:var(--sp-2); cursor:pointer; overflow-wrap:anywhere; }
+.pdf-content__outline li button:hover { background:var(--wash-1); }
+.pdf-content__outline li button:focus-visible { outline:1px solid var(--focus-line); }
+.pdf-content__outline p, .pdf-content__outline li span { color:var(--text-3); line-height:1.65; overflow-wrap:anywhere; }
