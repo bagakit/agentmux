@@ -55,8 +55,9 @@ describe('Notes storage original production consumers', () => {
     const tab = createWorkbenchTab('retained-file', { regionId: 'file', kind: 'file', workspaceId: '__scratch__', path: 'one.note.json' })
     const state = { tabs: { [tab.id]: tab }, documents: { [oldKey]: { content: 'OLD UNSAVED' }, [newKey]: { content: 'NEW UNSAVED' } }, dirtyDocuments: { [oldKey]: true, [newKey]: true }, documentGenerations: {}, documentObservationGenerations: {}, documentIssues: {}, savingDocuments: {} } as any
     const mapped = reconcileNotesStorageResources(state, [change])
-    expect(mapped.tabs[tab.id].regions.file.workspaceId).toBe('__notes__'); expect(mapped.documents[oldKey].content).toBe('OLD UNSAVED'); expect(mapped.documents[newKey].content).toBe('NEW UNSAVED')
-    expect(mapped.documentIssues[newKey]).toMatchObject({ kind: 'changed', observed: { content: 'OLD UNSAVED' } })
+    expect(mapped.tabs[tab.id].regions.file.workspaceId).toBe('__notes__'); expect(mapped.documents[oldKey]).toBeUndefined(); expect(mapped.documents[newKey].content).toBe('NEW UNSAVED')
+    expect(mapped.documentIssues[newKey]).toBeUndefined()
+    expect(mapped.retainedDocumentDrafts[newKey]).toMatchObject([{ content: 'OLD UNSAVED' }])
   })
   it('does not reacquire a Note file watcher after its original consumer closes during reobservation', async () => {
     const tab = createWorkbenchTab('closing-file', { regionId: 'file', kind: 'file', workspaceId: '__notes__', path: 'one.note.json' })
