@@ -18,12 +18,15 @@ app.whenReady().then(async () => {
     }
     const click = async selector => {
       await until(`document.querySelector(${JSON.stringify(selector)})?.checkVisibility()`)
+      await read(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:"nearest"})`)
       const rect = await read(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
       win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, x: Math.round(rect.x), y: Math.round(rect.y) })
       win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: Math.round(rect.x), y: Math.round(rect.y) })
     }
     const capture = async name => {
+      await read('Promise.all([...document.querySelectorAll("[data-host-upgrade] button")].flatMap(button=>button.getAnimations()).filter(animation=>animation.effect.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))')
       await read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+      await new Promise(done => setTimeout(done, 100))
       const file = name + '.png'; fs.writeFileSync(path.join(evidence, file), (await win.capturePage()).toPNG())
       result.images.push({ path: file, width: await read('innerWidth'), height: await read('innerHeight') })
     }
@@ -31,32 +34,56 @@ app.whenReady().then(async () => {
     for (const width of [1440, 640]) {
       win.setContentSize(width, 950); win.showInactive(); win.webContents.focus()
       await until(`innerWidth === ${width}`)
-      await until('document.querySelector(".remote-core-upgrade-notices .service-window")?.checkVisibility()')
-      assert.equal(await read('Boolean(document.querySelector(".global-system-notices__details")?.matches(":popover-open"))'), false)
-      await capture('proactive-notice-' + width)
-      const before = await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length')
-      await click('.remote-core-upgrade-notices button')
-      await until('document.querySelector("[data-resource-editor=build]")?.checkVisibility()')
-      await until(`window.remoteUpgradePreview.calls.filter(call=>call==="check").length === ${before + 1}`)
-      assert.equal(await read('document.querySelector("[data-resource-editor]").dataset.resourceEditor'), 'build')
-      assert.match(await read('document.querySelector("[data-host-upgrade]").innerText'), /Checking upgrade/)
-      await capture('automatic-checking-' + width)
-      await read('window.remoteUpgradePreview.releaseCheck()')
-      await until('document.querySelector("[data-host-upgrade]")?.innerText.includes("Runtime update required")')
-      await capture('automatic-refusal-' + width)
-      if (width === 640) {
-        await click('.settings-resource-back')
-        await until('document.querySelector("[data-resource-view]")?.dataset.resourceView === "library"')
-        assert.equal(await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length'), before + 1)
-        await capture('connection-library-' + width)
-        await click('[data-resource-row="build"]')
-        await until(`window.remoteUpgradePreview.calls.filter(call=>call==="check").length === ${before + 2}`)
+      for (const mode of ['refusal', 'ready', 'unknown']) {
+        await read(`window.remoteUpgradePreview.setMode(${JSON.stringify(mode)})`)
+        const before = await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length')
+        await click('.remote-core-upgrade-notices button')
+        await until('document.querySelector("[data-resource-editor=build]")?.checkVisibility()')
+        await until(`window.remoteUpgradePreview.calls.filter(call=>call==="check").length === ${before + 1}`)
+        if (mode === 'refusal') await capture('checking-' + width)
         await read('window.remoteUpgradePreview.releaseCheck()')
-        await until('document.querySelector("[data-host-upgrade]")?.innerText.includes("Runtime update required")')
-        await capture('reentered-refusal-' + width)
+        const status = mode === 'refusal' ? 'Automatic upgrade unavailable' : mode === 'ready' ? 'Ready to upgrade' : 'Upgrade result unconfirmed'
+        await until(`document.querySelector("[data-host-upgrade]")?.innerText.includes(${JSON.stringify(status)})`)
+        assert.equal(await read('document.querySelector(".host-upgrade__details").open'), false)
+        assert.equal(await read('document.querySelector("[data-host-upgrade]").scrollWidth <= document.querySelector("[data-host-upgrade]").clientWidth + 1'), true)
+        const buttonBefore = mode === 'ready' ? await read('(()=>{const button=document.querySelector("[data-upgrade-action]");const style=getComputedStyle(button);return {disabled:button.disabled,color:style.color,background:style.backgroundImage,opacity:style.opacity}})()') : undefined
+        await capture(mode + '-collapsed-' + width)
+        if (mode === 'ready') {
+          const buttonAfter = await read('(()=>{const button=document.querySelector("[data-upgrade-action]");const style=getComputedStyle(button);return {disabled:button.disabled,color:style.color,background:style.backgroundImage,opacity:style.opacity,target:getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()}})()')
+          assert.equal(buttonAfter.disabled, false)
+          assert.equal(buttonAfter.opacity, '1')
+          assert.equal(buttonAfter.color, 'rgb(12, 14, 18)')
+          result.readyButtons ??= []; result.readyButtons.push({width,before:buttonBefore,settled:buttonAfter})
+        }
+        if (mode !== 'ready') {
+          await click('.host-upgrade__details > summary')
+          await until('document.querySelector(".host-upgrade__details").open')
+          await read('document.querySelector(".host-upgrade__details").scrollIntoView({block:"end"})')
+          const typography = await read(`(()=>{
+            const message=document.querySelector('.host-upgrade__diagnostic-message'), title=document.querySelector('.host-upgrade__title > strong');
+            return {messageFont:parseFloat(getComputedStyle(message).fontSize),titleFont:parseFloat(getComputedStyle(title).fontSize),
+              fullSource:document.querySelector('.host-upgrade__facts code').textContent.length,
+              pageOverflow:document.documentElement.scrollWidth>innerWidth,
+              facts:[...document.querySelectorAll('.host-upgrade__facts dd')].map(el=>({width:el.clientWidth,scroll:el.scrollWidth}))}
+          })()`)
+          assert.equal(typography.fullSource, 40)
+          assert(typography.messageFont <= typography.titleFont, 'Technical diagnosis regressed to oversized body typography')
+          assert.equal(typography.pageOverflow, false)
+          assert(typography.facts.every(item=>item.scroll<=item.width+1), 'Full technical identity overflowed its field')
+          result.typography ??= []; result.typography.push({width,mode,...typography})
+          await capture(mode + '-expanded-' + width)
+          if (mode === 'refusal') {
+            await click('[data-copy-upgrade-diagnostics]')
+            await until('document.querySelector(".host-upgrade__copy-feedback")?.innerText.includes("Diagnostics copied")')
+            assert.match(await read('window.remoteUpgradePreview.copied.at(-1)'), /Required Runtime protocol: 22/)
+            assert.equal(await read('window.remoteUpgradePreview.calls.filter(call=>call==="check").length'), before + 1)
+            await read('document.querySelector(".host-upgrade__details > summary").click()')
+            await capture('diagnostics-copied-' + width)
+          }
+        }
+        await click('[aria-label="Close settings"]')
+        await until('!document.querySelector(".settings-page")')
       }
-      await click('[aria-label="Close settings"]')
-      await until('!document.querySelector(".settings-page")')
     }
     result.calls = await read('window.remoteUpgradePreview.calls'); result.passed = true
   } catch (error) {

@@ -24,14 +24,26 @@ useAppStore.setState({ config, loading: false, sessions: [], sessionSnapshots: {
     code: 'REMOTE_CORE_UPGRADE_REQUIRED', message: 'The remote Core uses an older endpoint interface without a confirmed connection receipt.',
     recovery: 'Update this exact service while retaining its original Runtime and Sessions.' }] })
 const calls: string[] = []
+const copied: string[] = []
+let mode: 'refusal' | 'ready' | 'unknown' = 'refusal'
+const candidate = { digest: 'a'.repeat(64), sourceCommit: 'b'.repeat(40), protocolVersion: 22 }
+const expected = { targetDigest: 'c'.repeat(64), runtimeId: 'original-runtime', ownerInstanceId: 'original-owner',
+  processId: 100, startTicks: '123', candidateDigest: candidate.digest, nativeInstanceId: 'native-owner', nativeProcessId: 101, nativeStartTicks: '456' }
 let releaseCheck: (() => void) | undefined
 Object.assign(api.hosts, {
-  upgradeCheck: async (input: unknown) => { calls.push('check'); await new Promise<void>(done => { releaseCheck = done }); return { input, eligible: false, reason: 'runtime-update-required',
-    candidate: { digest: 'controlled-candidate', sourceCommit: 'controlled-source', protocolVersion: 22 },
-    detail: 'This service uses Runtime protocol 21. The update needs protocol 22. A safe Runtime upgrade is not available for this deployment; existing Agents were kept.' } },
+  upgradeCheck: async (input: unknown) => {
+    calls.push('check'); await new Promise<void>(done => { releaseCheck = done })
+    return mode === 'ready' ? { input, eligible: true, reason: 'ready', candidate, expected, detail: 'The original owner is qualified for a Core deployment.' } : mode === 'unknown' ?
+      { input, eligible: false, reason: 'unverified', candidate, detail: 'The original operation needs reconciliation.', latestOperation: { input, expected,
+        operationId: '6f801593-fbda-44a7-9130-43723b979b73', status: 'unknown', stage: 'verifying', updatedAt: 1,
+        detail: 'The staged Core was observed, but reconnection to the exact original owner could not be confirmed. No replacement update was started.' } } :
+      { input, eligible: false, reason: 'runtime-update-required', candidate,
+        detail: '远端 Runtime 为协议 21，本机候选为协议 22。当前没有经验证的无损 Runtime 升级入口，暂不能执行此升级；原 Agent 和运行进程已保留。' }
+  },
   upgrade: async () => { throw new Error('The controlled preview never upgrades a service') },
   upgradeInspect: async () => { throw new Error('No real maintenance operation exists in this preview') }
 })
+Object.assign(api.ui, { writeClipboardText: async (text: string) => { calls.push('copy'); copied.push(text) } })
 function Fixture() {
   const [request, setRequest] = useState<SettingsNavigationRequest | null>(null)
   const navigation = { open: (section: SettingsNavigationRequest['section']) => setRequest({ section }),
@@ -46,6 +58,6 @@ function Fixture() {
     <footer className="window-status-bar"><GlobalSystemNotices /></footer>
   </div></SettingsNavigation.Provider></DesktopClientUiProvider>
 }
-Object.assign(window, { remoteUpgradePreview: { ready: true, calls, releaseCheck: () => { const release = releaseCheck; releaseCheck = undefined; release?.() },
+Object.assign(window, { remoteUpgradePreview: { ready: true, calls, copied, setMode: (value: typeof mode) => { mode = value }, releaseCheck: () => { const release = releaseCheck; releaseCheck = undefined; release?.() },
   boundary: 'Actual production notification, SettingsPanel and Host editor/CSS. Controlled endpoint and maintenance DTOs; no real SSH, Main, installation or Run qualification.' } })
 createRoot(document.getElementById('root')!).render(<Fixture />)
