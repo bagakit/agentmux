@@ -7,6 +7,8 @@
 | 要了解什么 | 入口 |
 | --- | --- |
 | 产品定位、安装与 Core 使用概览 | [项目 README](../README.md) |
+| Mote／Work／Know 产品分组、Space 入口与实体、Agent 空间地址 | [空间概念与关系](design/behavior/spaces-and-layout.md#统一概念与空间寻址) |
+| 空间持久化、准确位置与跨视图导航怎样实现 | [空间状态与导航机制](architecture/spatial-state.md) |
 | 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
 | 公开 API / CLI 的实际合同与接线来源 | [公共能力源码入口](specs/public-capabilities.md) |
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |

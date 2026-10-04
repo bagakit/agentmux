@@ -11,7 +11,7 @@
 | 读者问题 | 唯一正文 |
 | --- | --- |
 | 全局原则、保护边界及文档归属 | [共同原则、设计事实与 Owner](behavior/shared-rules.md) |
-| Work／Survey／Recall／Mote 导航上下文、Space／Zone／Tab／Region 与布局身份 | [空间、导航与工作面](behavior/spaces-and-layout.md) |
+| Mote／Work／Know 产品分组、Space 实体与 Agent 寻址、各导航上下文及布局身份 | [空间、导航与工作面](behavior/spaces-and-layout.md) |
 | Recall 的 Notebook、页面、块知识与可设置笔记目录 | [Recall 与笔记目录](behavior/spaces-and-layout.md#recallnotebook-与块知识) |
 | Survey 的浏览探索与向 Recall／Topic 输送成果 | [Survey 工作流](behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口) |
 | Topics 的分类、主题、讨论、知识沉淀与本地承接 | [Topics 知识库的层级与沉淀](behavior/spaces-and-layout.md#topics-知识库的层级与沉淀) |
