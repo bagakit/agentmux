@@ -30,15 +30,34 @@ export type AgentMuxSshRuntimeClientOptions = {
   }
 }
 
-export async function connectLocalAgentMux(
+/** Connect physical Run capabilities without awaiting Session/catalog observation.
+ * Call client.connect() explicitly to load semantics; failures remain diagnostic
+ * and can be retried on this same Client without replacing healthy Runs.
+ */
+export async function connectLocalAgentMuxRuntime(
   options: AgentMuxLocalRuntimeClientOptions = {}
 ): Promise<AgentMuxClient> {
   const client = new AgentMuxClient({
     ...(options.providers === undefined ? {} : { providers: options.providers }),
     ...(options.store === undefined ? {} : { store: options.store })
   })
-  await client.connect()
+  await client.connectRuntime()
   return client
+}
+
+/** Return only after the complete Session/catalog observation has succeeded. */
+export async function connectLocalAgentMux(
+  options: AgentMuxLocalRuntimeClientOptions = {}
+): Promise<AgentMuxClient> {
+  const client = await connectLocalAgentMuxRuntime(options)
+  try { await client.connect(); return client }
+  catch (error) {
+    // A rejected factory cannot hand its observation resources to a caller.
+    // Disposing this Client releases those resources without stopping its Runs.
+    try { await client.dispose() }
+    catch (cleanup) { throw new AggregateError([error, cleanup], 'Session observation failed and Client cleanup was incomplete.') }
+    throw error
+  }
 }
 
 export async function connectSshAgentMux(
