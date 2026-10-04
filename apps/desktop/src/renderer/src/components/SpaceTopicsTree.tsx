@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
-import { MOTE_DIRECTORY_VIEW_DEFAULT, type SessionSnapshot, type ScratchTopicSnapshot, type WorkspaceRecord } from '../../../shared/contracts'
+import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type SessionSnapshot, type ScratchTopicSnapshot, type WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -42,6 +42,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   const tabs = useAppStore((state) => state.tabs)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const directoryView = useAppStore(state => state.config?.moteDirectoryView ?? MOTE_DIRECTORY_VIEW_DEFAULT)
+  const avatarSize = useAppStore(state => state.config?.moteDirectoryAvatarSize ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT)
   const order = useAppStore((state) => state.scratchTopicOrder)
   const pinned = useAppStore((state) => state.pinnedItems[SCRATCH_WORKSPACE_ID])
   const collapsedGroups = useAppStore((state) => state.collapsedProjectGroups)
@@ -148,7 +149,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
           onClick={() => setShowArchived(value => !value)}><Archive size={13} /><span>{archivedMotes.length}</span></button>}
         activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sectionSessions} contexts={contexts} /> : undefined} /></div>
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}
-      <div className="mote-directory" data-mote-directory-view={directoryView}>
+      <div className="mote-directory" data-mote-directory-view={directoryView} style={{ '--mote-directory-avatar-size': `${avatarSize}px` } as CSSProperties}>
       {expanded ? ids.map((id) => {
         const topic = byId.get(id)!
         const isMote = true

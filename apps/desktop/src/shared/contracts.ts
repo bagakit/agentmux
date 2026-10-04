@@ -406,6 +406,9 @@ export const PROJECT_RAIL_DENSITY_DEFAULT: ProjectRailDensity = 'default'
 export const MOTE_DIRECTORY_VIEW_IDS = ['collaborators', 'list'] as const
 export type MoteDirectoryView = (typeof MOTE_DIRECTORY_VIEW_IDS)[number]
 export const MOTE_DIRECTORY_VIEW_DEFAULT: MoteDirectoryView = 'collaborators'
+export const MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT = 36
+export const MOTE_DIRECTORY_AVATAR_SIZE_MIN = 24
+export const MOTE_DIRECTORY_AVATAR_SIZE_MAX = 48
 
 /** Fixed Executor identity marks; arbitrary text does not belong in the avatar surface. */
 export const AGENT_AVATAR_BADGE_IDS = ['spark', 'bolt', 'shield', 'flame'] as const
@@ -559,6 +562,7 @@ export type AppConfig = {
    */
   projectRailDensity?: ProjectRailDensity
   moteDirectoryView?: MoteDirectoryView
+  moteDirectoryAvatarSize?: number
   /**
    * 复制路径时是否给绝对地址。默认（缺席 / `false`）把当前用户家目录缩写成 `~`；`true` 是用户主动
    * 选择的「我要绝对路径」这一档。用户原话：「默认是波浪线，但也可以支持用户配置这种绝对地址」，
