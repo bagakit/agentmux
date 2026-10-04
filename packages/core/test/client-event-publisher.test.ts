@@ -9,72 +9,77 @@ const event: AgentMuxClientEvent = {
   evidence: { source: 'user', observedAt: 1 }
 }
 
-describe('AgentMux Client event publisher bounds', () => {
-  it('caps distinct listeners and releases capacity when a listener unsubscribes', () => {
+describe('AgentMux Client event publisher Consumer isolation', () => {
+  it('supports more than 64 actual Consumers and releases only the selected subscription', () => {
     const publisher = new AgentMuxClientEventPublisher()
-    const listeners = Array.from({ length: 64 }, () => vi.fn())
-    const releases = listeners.map((listener) => publisher.onEvent(listener))
-
-    expect(() => publisher.onEvent(listeners[0]!)).not.toThrow()
-    expect(() => publisher.onEvent(vi.fn())).toThrowError(
-      expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_LIMIT' })
-    )
-
+    const listeners = Array.from({ length: 128 }, () => vi.fn())
+    const releases = listeners.map(listener => publisher.onEvent(listener))
+    publisher.publish(event)
+    expect(listeners.every(listener => listener.mock.calls.length === 1)).toBe(true)
     releases[0]!()
-    expect(() => publisher.onEvent(vi.fn())).not.toThrow()
+    publisher.publish(event)
+    expect(listeners[0]).toHaveBeenCalledOnce()
+    expect(listeners.slice(1).every(listener => listener.mock.calls.length === 2)).toBe(true)
     publisher.dispose()
+    publisher.publish(event)
+    expect(listeners[1]).toHaveBeenCalledTimes(2)
   })
 
-  it('does not let throwing, rejecting, or unresolved consumers block lifecycle publication', async () => {
-    const publisher = new AgentMuxClientEventPublisher()
-    const delivered = vi.fn()
-    publisher.onEvent(() => { throw new Error('consumer failed') })
-    publisher.onEvent(async () => await Promise.reject(new Error('async consumer failed')))
-    publisher.onEvent(async () => await new Promise<void>(() => {}))
+  it('reports rejecting and unresolved JS Consumers without blocking healthy Consumers or a transient synchronous failure', async () => {
+    const publisher = new AgentMuxClientEventPublisher(), failures = vi.fn(), delivered = vi.fn()
+    let throws = true
+    const recovering = vi.fn(() => { if (throws) throw new Error('transient failure') })
+    publisher.onEvent(recovering)
+    publisher.onEvent((async () => { throw new Error('async failure') }) as unknown as (event: AgentMuxClientEvent) => void, { onError: failures })
+    publisher.onEvent((() => new Promise<void>(() => {})) as unknown as (event: AgentMuxClientEvent) => void, { onError: failures })
     publisher.onEvent(delivered)
-
     expect(() => publisher.publish(event)).not.toThrow()
-    expect(delivered).toHaveBeenCalledOnce()
-    expect(delivered).toHaveBeenCalledWith(event)
-    await Promise.resolve()
-    publisher.dispose()
-  })
-
-  it('detaches a Promise-returning consumer instead of queueing behind it', async () => {
-    const publisher = new AgentMuxClientEventPublisher()
-    let release!: () => void
-    const blocked = new Promise<void>((resolve) => { release = resolve })
-    const slow = vi.fn(async () => await blocked)
-    const fast = vi.fn()
-    publisher.onEvent(slow)
-    publisher.onEvent(fast)
-
-    for (let index = 0; index < 1_000; index += 1) publisher.publish(event)
-
-    expect(slow).toHaveBeenCalledOnce()
-    expect(fast).toHaveBeenCalledTimes(1_000)
-    release()
-    await blocked
-    await Promise.resolve()
-
+    expect(failures).toHaveBeenCalledTimes(2)
+    expect(failures.mock.calls.every(([error]) => error.code === 'CLIENT_EVENT_LISTENER_ASYNC')).toBe(true)
+    expect(delivered.mock.calls.filter(([value]) => value === event)).toHaveLength(1)
+    throws = false
     publisher.publish(event)
-    expect(slow).toHaveBeenCalledOnce()
-    expect(fast).toHaveBeenCalledTimes(1_001)
+    expect(recovering.mock.calls.filter(([value]) => value === event)).toHaveLength(2)
+    expect(delivered.mock.calls.filter(([value]) => value === event)).toHaveLength(2)
+    await Promise.resolve()
     publisher.dispose()
   })
 
-  it('allows explicit re-registration after a Promise-returning consumer is detached', () => {
-    const publisher = new AgentMuxClientEventPublisher()
+  it('detaches Promise-returning Consumers with a diagnostic and allows explicit corrected registration', () => {
+    const publisher = new AgentMuxClientEventPublisher(), diagnostics = vi.fn(), healthy = vi.fn()
     const pending = new Promise<void>(() => {})
-    const listener = vi.fn(async () => await pending)
-    publisher.onEvent(listener)
-
+    const listener = vi.fn(() => pending) as unknown as (event: AgentMuxClientEvent) => void
+    publisher.onEvent(listener, { onError: diagnostics })
+    publisher.onEvent(healthy)
+    for (let index = 0; index < 1000; index += 1) publisher.publish(event)
+    expect(listener).toHaveBeenCalledOnce()
+    expect(diagnostics).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_ASYNC', message: expect.stringContaining('subscribe again') }))
+    expect(healthy.mock.calls.filter(([value]) => value === event)).toHaveLength(1000)
+    expect(healthy.mock.calls.filter(([value]) => value.code === 'CLIENT_EVENT_LISTENER_ASYNC')).toHaveLength(1)
+    const corrected = vi.fn()
+    publisher.onEvent(corrected)
     publisher.publish(event)
-    publisher.onEvent(listener)
-    publisher.publish(event)
-
-    expect(listener).toHaveBeenCalledTimes(2)
+    expect(corrected).toHaveBeenCalledOnce()
     publisher.dispose()
+  })
+
+  it('reports a sole invalid JS Consumer directly and contains a Promise diagnostic Consumer without recursion', () => {
+    const publisher = new AgentMuxClientEventPublisher(), consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      publisher.onEvent((() => Promise.resolve()) as unknown as (event: AgentMuxClientEvent) => void)
+      publisher.publish(event)
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_ASYNC' }))
+      const invalidDiagnostic = vi.fn((value: AgentMuxClientEvent) => value.type === 'agent-error' && value.code === 'CLIENT_EVENT_LISTENER_ASYNC' ? Promise.resolve() : undefined)
+      publisher.onEvent(invalidDiagnostic as unknown as (event: AgentMuxClientEvent) => void)
+      publisher.onEvent((() => Promise.resolve()) as unknown as (event: AgentMuxClientEvent) => void)
+      const healthy = vi.fn(); publisher.onEvent(healthy)
+      publisher.publish(event)
+      expect(invalidDiagnostic).toHaveBeenCalledTimes(2)
+      expect(healthy).toHaveBeenCalledTimes(2)
+      publisher.publish(event)
+      expect(healthy).toHaveBeenCalledTimes(3)
+      expect(consoleError).toHaveBeenCalledTimes(3)
+    } finally { consoleError.mockRestore(); publisher.dispose() }
   })
 
   it('publishes the Store-assigned Timeline revision and canonical mutation', () => {
