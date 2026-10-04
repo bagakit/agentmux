@@ -3,7 +3,8 @@ import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { isNeedsYouState } from './attention-vocabulary'
 import { focusLaneForSession } from './agent-focus'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { topicIdForSession, workspaceForSession } from './workbench-tabs'
+import { firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
+import type { AgentTimelineSnapshot } from '../../../shared/contracts'
 import type { SessionViewMode } from './session-state'
 
 let indexedSessions: readonly SessionSnapshot[] | undefined
@@ -52,6 +53,38 @@ export function effectiveSessionViewMode(state: {
   return session && focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
     scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))) === 'pmo'
     ? 'activity' : 'terminal'
+}
+
+/** A retained consumer checks cheap facts first, before walking directory observations. */
+export function createSessionViewModeSelector(sessionId: string) {
+  let previous: readonly unknown[] | undefined
+  let mode: SessionViewMode = 'terminal'
+  return (state: Parameters<typeof effectiveSessionViewMode>[0]): SessionViewMode => {
+    const explicit = storedSessionViewMode(state.viewModes, sessionId)
+    if (explicit !== null) return explicit
+    const session = sessionPresentationById(state.sessions).get(sessionId)
+    const facts = [state.config, state.scratchTopicSnapshots, session?.kind, session?.hostId, session?.workspacePath]
+    if (!previous || facts.some((fact, i) => fact !== previous![i])) {
+      mode = effectiveSessionViewMode(state, sessionId)
+      previous = facts
+    }
+    return mode
+  }
+}
+
+/** Revision also covers preview appends that mutate the same timeline object. */
+export function createFirstPromptSelector(sessionId: string) {
+  let previous: readonly unknown[] | undefined
+  let prompt: string | null = null
+  return (state: { timelines: Readonly<Record<string, AgentTimelineSnapshot>> }): string | null => {
+    const timeline = state.timelines[sessionId]
+    const facts = [timeline, timeline?.revision, timeline?.items, timeline?.items.length]
+    if (!previous || facts.some((fact, i) => fact !== previous![i])) {
+      prompt = firstPromptFromTimeline(timeline)
+      previous = facts
+    }
+    return prompt
+  }
 }
 
 /** Human-readable status uses the same facts in Focus and a projected coordination context. */

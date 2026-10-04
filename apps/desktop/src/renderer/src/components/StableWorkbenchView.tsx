@@ -67,7 +67,10 @@ function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeE
 // late: Chromium has already collapsed the live Range when that slot detaches.
 class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }> {
   private pending = new Set<ReadingSnapshot>()
-  getSnapshotBeforeUpdate(): ReadingSnapshot {
+  getSnapshotBeforeUpdate(previous: Readonly<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }>): ReadingSnapshot | null {
+    // Snapshot the outgoing presentation, before React moves or hides it.
+    // A previously hidden host has no live reading to capture on this commit.
+    if (!previous.visible) return null
     const ranges = captureReadingRanges(this.props.host), activeElement = document.activeElement
     const snapshot: ReadingSnapshot = { ranges, scrolls: captureReadingScrolls(this.props.host, ranges, activeElement), activeElement,
       parent: this.props.host.parentElement, interrupted: false, dispose() {} }
@@ -80,8 +83,8 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
     }
     return snapshot
   }
-  componentDidUpdate(_previous: Readonly<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }>, _state: unknown, snapshot: ReadingSnapshot): void {
-    if (snapshot.ranges.length === 0 && snapshot.scrolls.length === 0) return
+  componentDidUpdate(_previous: Readonly<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }>, _state: unknown, snapshot: ReadingSnapshot | null): void {
+    if (!snapshot || snapshot.ranges.length === 0 && snapshot.scrolls.length === 0) return
     const host = this.props.host
     // The parent layout effect reattaches this same host during this commit.
     queueMicrotask(() => {

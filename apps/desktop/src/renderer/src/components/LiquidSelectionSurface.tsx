@@ -24,17 +24,18 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
     let observing = false
     let pointing = false
     let observedTarget: HTMLElement | null = null
+    let alive = true
 
     const bounds = (node: Element): Bounds => {
       const rect = node.getBoundingClientRect()
       const container = host.getBoundingClientRect()
       return { x: rect.left - container.left + host.scrollLeft - host.clientLeft, y: rect.top - container.top + host.scrollTop - host.clientTop, width: rect.width, height: rect.height }
     }
-    const remember = () => {
+    const remember = (capture = true) => {
       // Only a live animation can differ from our stored geometry. After an
       // effect cleanup, cancellation exposes the old inline destination; do
       // not overwrite the intermediate rectangle that cleanup just captured.
-      if (animation && !lens.hidden && lens.getClientRects().length) {
+      if (capture && active && !document.hidden && animation && !lens.hidden && lens.getClientRects().length) {
         const current = bounds(lens)
         if (current.width > 0 && current.height > 0) painted.current = current
       }
@@ -46,6 +47,15 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
       lens.style.removeProperty('--liquid-pointer-y')
     }
     const update = (flow = false) => {
+      if (!alive) return
+      if (!active || document.hidden) {
+        remember(false)
+        lens.dataset.liquidPaused = 'true'
+        lens.hidden = true
+        painted.current = destination = null
+        clearGlint()
+        return
+      }
       const paused = !active || document.hidden || reduced.matches
       lens.dataset.liquidPaused = String(paused)
       const target = selected === null ? null : host.querySelector<HTMLElement>(`[${targetAttribute}="${CSS.escape(selected)}"]`)
@@ -88,7 +98,7 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
       if (paused) clearGlint()
     }
     const onPointer = (event: PointerEvent) => {
-      if (lens.hidden) return
+      if (!alive || !active || document.hidden || lens.hidden) return
       const rect = lens.getBoundingClientRect()
       const clamp = (n: number) => Math.max(0, Math.min(100, n))
       lens.style.setProperty('--liquid-pointer-x', `${clamp((event.clientX - rect.left) / rect.width * 100)}%`)
@@ -101,14 +111,15 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
     })
     const onScroll = () => update()
     const sync = () => {
+      if (!alive) return
       const watch = active && !document.hidden
       if (watch && !watching) resize.observe(host)
       else if (!watch && watching) resize.unobserve(host)
       watching = watch
       // Keep only the host resize sentinel while a media query hides this
       // region. It detects its return without keeping local consumers alive.
-      const rect = host.getBoundingClientRect()
-      const visible = watch && rect.width > 0 && rect.height > 0
+      const rect = watch ? host.getBoundingClientRect() : null
+      const visible = rect !== null && rect.width > 0 && rect.height > 0
       if (visible && !observing) {
         mutation.observe(host, { childList: true, subtree: true, characterData: true })
         host.addEventListener('scroll', onScroll, { passive: true })
@@ -137,6 +148,7 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
     document.addEventListener('visibilitychange', sync)
     return () => {
       remember()
+      alive = false
       resize.disconnect()
       mutation.disconnect()
       host.removeEventListener('scroll', onScroll)
