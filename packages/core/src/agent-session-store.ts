@@ -631,7 +631,7 @@ function semanticStatus(value: unknown): AgentStatus {
   if (!['working', 'waiting', 'blocked', 'done', 'error', 'running'].includes(String(source.state))) {
     throw new AgentMuxError('semanticStatus.state is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
-  if (source.source !== 'native-hook' && source.source !== 'acp') {
+  if (source.source !== 'native-hook' && source.source !== 'native-transcript' && source.source !== 'acp') {
     throw new AgentMuxError('semanticStatus.source is invalid.', 'INVALID_AGENT_SESSION_STORE')
   }
   const detail = source.detail === undefined
@@ -646,6 +646,19 @@ function semanticStatus(value: unknown): AgentStatus {
       stateEnteredAt: timestamp(source.stateEnteredAt, 'semanticStatus.stateEnteredAt')
     }),
     ...(detail ? { detail } : {}),
+    ...(source.nativeTurnId === undefined ? {} : { nativeTurnId: text(source.nativeTurnId, 'semanticStatus.nativeTurnId') }),
+    ...(source.failure === undefined ? {} : { failure: (() => {
+      const failure = record(source.failure, 'semanticStatus.failure')
+      if (source.state !== 'error') throw new AgentMuxError('Failure requires an error status.', 'INVALID_AGENT_SESSION_STORE')
+      const http = failure.httpStatusCode
+      if (http !== undefined && (!Number.isInteger(http) || Number(http) < 100 || Number(http) > 599)) {
+        throw new AgentMuxError('Failure HTTP status is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return { code: text(failure.code, 'failure.code'), message: text(failure.message, 'failure.message'),
+        recovery: text(failure.recovery, 'failure.recovery'), nativeTurnId: text(failure.nativeTurnId, 'failure.nativeTurnId'),
+        ...(failure.nativeCode === undefined ? {} : { nativeCode: text(failure.nativeCode, 'failure.nativeCode') }),
+        ...(http === undefined ? {} : { httpStatusCode: Number(http) }) }
+    })() }),
     ...(source.idleEvidenceConsumed === undefined ? {} : { idleEvidenceConsumed: (() => {
       if (source.idleEvidenceConsumed !== true || source.state !== 'done') throw new AgentMuxError('Invalid consumed completion.', 'INVALID_AGENT_SESSION_STORE')
       return true as const

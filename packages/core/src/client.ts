@@ -749,6 +749,11 @@ export class AgentMuxClient {
   // user-prompt-submit 重新打开，删掉等于把「已收尾」忘掉，迟到的工具事件又能把它点亮。
   private readonly hookNativeWitnesses = new Map<string, { candidate: string; handle?: AgentNativeSessionHandle; childSessionIds?: readonly string[]; reason?: string }>()
   private readonly hookTurnPhases = new Map<string, HookTurnPhase>()
+  private readonly nativeStatusSettlements = new Set<Promise<void>>()
+  private readonly nativeStatusWatches = new Map<string, {
+    key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
+    recordId?: string; sequence?: number
+  }>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
 
@@ -956,6 +961,10 @@ export class AgentMuxClient {
       await this.recoverPendingInteractionResponses(runs)
       this.assertConnectionEpoch(epoch)
       this.connected = true
+      // Native status is semantic evidence, independent of terminal Attachment/PTY traffic.
+      // Each contribution owns one exact retained source and reads only its changed bytes.
+      await Promise.all(this.registry.list().filter(session => runs.some(run =>
+        run.runId === session.run.runId && run.state.type === 'running')).map(session => this.ensureNativeStatusObservation(session)))
       // 缓刑期的起点。写在这里而不是只写在 `restored` 那侧，是因为首次 connect 也是「连接变健康」——
       // 少了这一句，`connectionHealthySince` 会停在 0，于是第一次掉线时 `now - 0` 必然超过缓刑期、
       // 账被无条件清零，跨成功的界永远攒不起来（即：这道界会变成死代码）。
@@ -1407,6 +1416,9 @@ export class AgentMuxClient {
     this.stopRequestedRuns.clear()
     this.endedRuns.clear()
     this.hookTurnPhases.clear()
+    const nativeStatusWatches = [...this.nativeStatusWatches.values()]
+    for (const watch of nativeStatusWatches) { watch.controller.abort(); watch.observer?.dispose() }
+    this.nativeStatusWatches.clear()
     this.agentInputCursors.clear()
     for (const lane of this.agentInputTails.values()) {
       for (const observation of lane.renderObservations) {
@@ -1433,6 +1445,7 @@ export class AgentMuxClient {
     await Promise.allSettled([...this.reopenSettlements.values()])
     await this.hookServer.stop()
     this.disconnect()
+    await Promise.all(this.nativeStatusSettlements)
     await this.registry.releaseReopenOwner()
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
     this.hookBindings.clear()
@@ -1739,6 +1752,7 @@ export class AgentMuxClient {
       this.hookTurnPhases.delete(current.run.runId)
       releaseSubagentRoster(current.run.runId)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      await this.ensureNativeStatusObservation(next)
       return { session: cloneSession(next), confirmation: structuredClone(next.nativeConfirmation!), persisted: true, current: true }
     })
   }
@@ -1971,6 +1985,7 @@ export class AgentMuxClient {
             if (protectsDifferentTarget(next)) throw new AgentMuxError(
               'The confirmed current source differs from the explicit semantic resume target. The target and retained records were kept; this refresh did not change the conversation.',
               'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
+            await this.ensureNativeStatusObservation(next)
           } catch (error) {
             const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
             // A durable commit can report an error after writing; confirm it without reintroducing Runtime.
@@ -2510,9 +2525,13 @@ export class AgentMuxClient {
   async statusAgent(agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus> {
     this.requireConnected()
     const sessions = (await this.readAgentSessions()).filter(candidate => candidate.hostId === 'local')
-    const session = sessions.find(candidate => candidate.agentSessionId === agentSessionId)
+    let session = sessions.find(candidate => candidate.agentSessionId === agentSessionId)
     if (!session) throw new AgentMuxError('Agent Session is unknown.', 'UNKNOWN_AGENT_SESSION')
     const run = await this.requireCurrentAgentRun(session, sessions)
+    if (run.state.type === 'running') {
+      await this.ensureNativeStatusObservation(session)
+      session = cloneSession(this.requireAgentSession(agentSessionId))
+    }
     const projectedRun = this.projectRun(run, session)
     const capabilities = { ...this.providers.get(session.providerId).catalog.capabilities }
     // 三条轴的观察合同：语义活性优先取 Session 自己声明的 semanticStatus（它带 native-hook/acp 来源，
@@ -5818,6 +5837,108 @@ export class AgentMuxClient {
     }
   }
 
+  private async ensureNativeStatusObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<void> {
+    const provider = this.providers.get(session.providerId)
+    if (!provider.observeSessionStatus || !session.nativeHandle) return
+    const key = JSON.stringify([session.run.runId, session.nativeHandle])
+    const existing = this.nativeStatusWatches.get(session.agentSessionId)
+    if (existing?.key === key) { await existing.pending; return }
+    existing?.controller.abort(); existing?.observer?.dispose()
+    const watch: {
+      key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
+      recordId?: string; sequence?: number
+    } = {
+      key, controller: new AbortController(), pending: Promise.resolve()
+    }
+    this.nativeStatusWatches.set(session.agentSessionId, watch)
+    const unavailable = (code: string, message: string): void => {
+      if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code,
+        message: `${message} The retained Session, Run and input remain available. Inspect the Session to retry observation.`,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      if (code !== 'AGENT_NATIVE_STATUS_GAP') {
+        this.nativeStatusWatches.delete(session.agentSessionId)
+        watch.controller.abort(); watch.observer?.dispose()
+      }
+    }
+    try {
+      watch.observer = await provider.observeSessionStatus({ args: [], workspacePath: session.workspacePath,
+        nativeHandle: structuredClone(session.nativeHandle),
+        ...(session.nativePromptPredecessor ? { nativePromptPredecessor: structuredClone(session.nativePromptPredecessor) } : {}),
+        signal: watch.controller.signal, onUnavailable: unavailable,
+        onStatus: observation => {
+          watch.pending = watch.pending.then(async () => {
+            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch ||
+              observation.recordId === watch.recordId || (watch.sequence !== undefined && observation.sequence !== undefined && observation.sequence <= watch.sequence)) return
+            const current = this.requireAgentSession(session.agentSessionId)
+            if (!sameRun(current.run, session.run) || !sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)) return
+            // A fresh input Hook can precede its native record. Never replay a prior turn's end over it.
+            const hook = current.hookReceipt
+            if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && hook?.nativeTurnId && hook.nativeTurnId !== observation.nativeTurnId &&
+              (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= hook.observedAt)) return
+            const next = await this.updateExactAgentSession(current.agentSessionId, current.run, saved => {
+              if (watch.controller.signal.aborted || !sameNativeHandle(saved.nativeHandle, session.nativeHandle)) return saved
+              const savedHook = saved.hookReceipt
+              if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && savedHook?.nativeTurnId && savedHook.nativeTurnId !== observation.nativeTurnId &&
+                (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= savedHook.observedAt)) return saved
+              if (saved.semanticStatus?.nativeTurnId === observation.nativeTurnId &&
+                saved.semanticStatus.state === observation.state &&
+                JSON.stringify(saved.semanticStatus.failure) === JSON.stringify(observation.failure)) return saved
+              // Reading an old working record never renews the native activity clock.
+              if (observation.initialSnapshot && observation.state === 'working' && (observation.nativeObservedAt === undefined ||
+                observation.nativeObservedAt <= (saved.semanticStatus?.observedAt ?? 0))) return saved
+              const status = transitionAgentSemanticStatus(saved.semanticStatus, {
+                state: observation.state === 'unknown' ? 'running' : observation.state,
+                source: 'native-transcript', observedAt: observation.initialSnapshot && observation.state === 'working' ? observation.nativeObservedAt! :
+                  Math.max(Date.now(), (saved.semanticStatus?.observedAt ?? 0) + 1),
+                nativeTurnId: observation.nativeTurnId,
+                ...(observation.failure ? { failure: structuredClone(observation.failure),
+                  detail: `[${observation.failure.code}] ${observation.failure.message}` } : {})
+              })
+              return { ...saved, semanticStatus: status, updatedAt: Math.max(saved.updatedAt, status.observedAt),
+                ...(acceptsAgentActivityState(saved.activityCommit, saved.run, status) ? {
+                  activityCommit: advanceAgentActivityCommit(saved.activityCommit, {
+                    id: JSON.stringify(['activity-state', 'native-transcript', saved.run.runId, observation.recordId]),
+                    source: 'native-transcript', createdAt: status.observedAt,
+                    activityState: { run: { ...saved.run }, state: status.state,
+                      ...(status.stateEnteredAt === undefined ? {} : { stateEnteredAt: status.stateEnteredAt }) }
+                  })
+                } : {}) }
+            })
+            if (watch.controller.signal.aborted || next.semanticStatus?.nativeTurnId !== observation.nativeTurnId) return
+            if (next.activityCommit && !next.activityCommit.latestCommitted) await this.flushAgentActivity(next)
+            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
+            watch.recordId = observation.recordId
+            if (observation.sequence !== undefined) watch.sequence = observation.sequence
+            this.hookTurnPhases.set(session.run.runId, observation.state === 'working' ? 'in-turn' : 'turn-ended')
+            const status = next.semanticStatus!
+            if (status.failure) {
+              await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: next.agentSessionId, item: {
+                id: JSON.stringify(['native-failure', next.run.runId, observation.recordId]),
+                agentSessionId: next.agentSessionId, kind: 'lifecycle', status: 'failed', source: 'native-transcript',
+                createdAt: status.observedAt, updatedAt: status.observedAt, title: `[${status.failure.code}] ${status.failure.message}`,
+                content: JSON.stringify(status.failure)
+              } }, { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt })
+            }
+            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
+            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            this.publisher.publish({ type: 'agent-status', agentSessionId: next.agentSessionId,
+              state: observation.state, ...(status.detail ? { detail: status.detail } : {}),
+              ...(status.failure ? { failure: structuredClone(status.failure) } : {}),
+              evidence: { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt } })
+          }).catch(error => unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_PERSIST_FAILED',
+            error instanceof Error ? error.message : 'The native status could not be saved.'))
+          const pending = watch.pending
+          this.nativeStatusSettlements.add(pending)
+          void pending.then(() => this.nativeStatusSettlements.delete(pending))
+        }
+      })
+      await watch.pending
+    } catch (error) {
+      unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_UNAVAILABLE', error instanceof Error ? error.message : 'Native status observation is unavailable.')
+    }
+  }
+
   private async persistSemanticStatus(
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
@@ -6580,9 +6701,10 @@ export class AgentMuxClient {
     const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
     // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。
-    // Unknown outcome ends a known main turn; an ordinary unknown observation stays neutral.
-    // Use this same decision for the durable status and published semantic status below.
-    const updatesSemanticStatus = hookEventUpdatesSemanticStatus(
+    // A Provider contributing native turn outcomes owns completion, including after tool Hooks.
+    // An ordinary Stop proves a yield; it cannot prove success or overwrite that outcome.
+    const nativeEnd = provider.observeSessionStatus !== undefined
+    const updatesSemanticStatus = !(nativeEnd && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
       turnPhase,
       normalized.lifecycleEvent,
       provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent))
@@ -6874,6 +6996,7 @@ export class AgentMuxClient {
     }
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
 
+    await this.ensureNativeStatusObservation(next)
     if (nextTurnPhase === 'in-turn' && session.terminalPromptReadiness?.source === 'native-stop') {
       this.promptSubmission.cancelReadiness(session.agentSessionId)
     }
@@ -6899,6 +7022,7 @@ export class AgentMuxClient {
     )
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
 
+    await this.ensureNativeStatusObservation(next)
   }
 
   private publishActivityFailure(session: AgentMuxStoredAgentSession, error: unknown, observedAt: number): void {
@@ -7047,6 +7171,11 @@ export class AgentMuxClient {
     // 意图已经在上一行被读走并删掉，事后再没有第二次机会算出这个答案。
     this.endedRuns.set(event.runId, exitReason)
     if (agentSession) {
+      const watch = this.nativeStatusWatches.get(agentSession.agentSessionId)
+      if (watch && JSON.parse(watch.key)[0] === event.runId) {
+        this.nativeStatusWatches.delete(agentSession.agentSessionId)
+        watch.controller.abort(); watch.observer?.dispose()
+      }
       this.invalidateEndedRunReadiness(agentSession, runRef(event.runId))
       if (event.state.type !== 'running') void this.persistActivityBoundary(agentSession, event.state.type, event.observedAt)
     }

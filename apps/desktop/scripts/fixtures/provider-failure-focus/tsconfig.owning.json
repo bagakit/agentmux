@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+  "include": [
+    "../../../src/shared/contracts.ts",
+    "../../../src/renderer/src/lib/session-state.ts",
+    "../../../src/renderer/src/lib/session-service-notices.ts",
+    "../../../src/renderer/src/**/*.d.ts",
+    "../../../test/provider-failure-focus.test.tsx"
+  ]
+}

@@ -68,6 +68,7 @@ const SOURCE_MEMBERS: Record<AgentMuxEvidenceSource, true> = {
   'terminal-output': true,
   'run-process': true,
   'native-hook': true,
+  'native-transcript': true,
   acp: true,
   user: true,
   agentmux: true

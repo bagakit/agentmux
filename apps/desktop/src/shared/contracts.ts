@@ -896,6 +896,8 @@ export type SessionStatus = {
   source: AgentMuxEvidenceSource
   observedAt: number
   detail?: string
+  /** Core-owned request failure; it does not imply that the Run exited or input is unavailable. */
+  failure?: NonNullable<AgentStatus['failure']>
   exitCode?: number
   /**
    * WHY an `exited` Run ended, carried verbatim from Core — synthesized there from the stop intent we

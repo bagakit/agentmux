@@ -33,6 +33,7 @@ import type {
   AgentPromptExecution,
   AgentPromptExecutionContext,
   AgentPromptExecutionEvidence,
+  AgentProviderSessionStatus,
   AgentNativePromptPredecessor,
   AgentHookReceipt,
   AgentTerminalScreenSnapshot,
@@ -137,6 +138,11 @@ export type AgentProviderPreparedInteractionResponse = Readonly<{
   /** Re-read the same native invocation/source immediately before a new input claim. */
   verifyCurrentTarget(context: AgentProviderPromptExecutionContext): Promise<boolean>
 }>
+export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
+export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
+  onStatus(status: AgentProviderSessionStatus): void
+  onUnavailable(code: string, message: string): void
+}
 
 export type AgentProvider = {
   readonly id: AgentProviderId
@@ -177,6 +183,7 @@ export type AgentProvider = {
     request: Readonly<AgentMuxInteractionRequest>,
     response: Readonly<AgentMuxInteractionResponse>
   ): Promise<AgentProviderPreparedInteractionResponse | null>
+  observeSessionStatus?(context: AgentProviderSessionStatusObservationContext): Promise<{ dispose(): void }>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
     response: AgentMuxInteractionResponse
@@ -222,6 +229,7 @@ export type AgentProviderDefinition = {
   preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
   prepareInteractionResponse?: AgentProvider['prepareInteractionResponse']
+  observeSessionStatus?: (context: AgentProviderSessionStatusObservationContext) => Promise<{ dispose(): void }>
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
 }
@@ -375,6 +383,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
     ...(definition.prepareInteractionResponse ? { prepareInteractionResponse: definition.prepareInteractionResponse } : {}),
+    ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),

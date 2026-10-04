@@ -18,6 +18,23 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     } }
   })
   const identity = [session.hostId, session.id, session.control.run.runId]
+  // A connection gap can replace the display status, but cannot settle a retained native failure.
+  // A subsequent current work/completion observation clears the notice with its absent failure.
+  const failureStatus = session.status.failure ? session.status
+    : session.status.state === 'disconnected' ? session.semanticStatus : undefined
+  const failure = failureStatus?.failure
+  if (failure) notices.push({ id: 'provider-request', occurrence: JSON.stringify([...identity, failure.nativeTurnId]),
+    cause: JSON.stringify([failure.code, failure.message, failure.nativeCode, failure.httpStatusCode, failure.recovery]),
+    observedAt: failureStatus!.observedAt,
+    notice: { kind: session.processState === 'interrupted' ? 'indeterminate' : 'process-degraded', notice: {
+      step: `Agent request failed · ${failure.code}`,
+      mode: `${failure.message} ${session.processState === 'running'
+        ? 'The Run is still alive; its original Session and input controls are kept.'
+        : session.processState === 'exited' ? 'The Run exited; the original Session and output are kept.'
+          : 'The Run is interrupted and its availability is unknown; the original Session and output are kept.'}`,
+      restore: failure.recovery
+    } }
+  })
   if (lifecycleError?.message && lifecycleError.failure && lifecycleFailureBelongsTo(lifecycleError.failure, { subject: session.control })) {
     notices.push({ id: 'recovery', occurrence: JSON.stringify(identity),
       cause: JSON.stringify([lifecycleError.failure.step, errorIdentity(lifecycleError.message)]),

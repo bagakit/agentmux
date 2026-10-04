@@ -5,11 +5,32 @@ import { isAbsolute } from 'node:path'
 import { nativeProcessFiles, nativeProcessBirth } from '../agent-native-process.js'
 import type { AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence } from '../types.js'
+import { codexFailure } from './codex-errors.js'
 
 const TAIL_BYTES = 512 * 1024
 const HEADER_BYTES = 512 * 1024
-const sourceIdentity = (sessionId: string, source: { dev: bigint; ino: bigint }): string =>
+export const codexNativeSourceId = (sessionId: string, source: { dev: bigint; ino: bigint }): string =>
   createHash('sha256').update(`[${JSON.stringify(sessionId)},${source.dev},${source.ino}]`).digest('base64url')
+
+export function codexTurnRecordEvidence(value: unknown, sourceId: string, nativeSessionId: string): AgentPromptExecutionEvidence | null {
+  const item = value as { timestamp?: unknown; type?: unknown; ordinal?: unknown; payload?: {
+    type?: unknown; turn_id?: unknown; thread_id?: unknown; reason?: unknown; error?: unknown
+  } }
+  const event = item?.payload
+  const boundary = item?.type === 'event_msg' && ['task_started', 'task_complete', 'turn_aborted'].includes(String(event?.type))
+  const turnRecord = item?.type === 'turn_context' || (item?.type === 'event_msg' &&
+    event?.type === 'item_completed' && event.thread_id === nativeSessionId)
+  if ((!boundary && !turnRecord) || !event || (event.thread_id !== undefined && event.thread_id !== nativeSessionId)) return null
+  if (typeof event.turn_id !== 'string' || !event.turn_id || !Number.isSafeInteger(item.ordinal)) return null
+  const state = !boundary || event.type === 'task_started' ? 'working' : 'ended'
+  const failure = state === 'ended' && event.error != null ? codexFailure(event.error, event.turn_id) : undefined
+  const observedAt = typeof item.timestamp === 'string' ? Date.parse(item.timestamp) : NaN
+  return { sourceId, id: createHash('sha256').update(JSON.stringify([sourceId, item.ordinal, item.type, event.type, event.turn_id])).digest('base64url'),
+    nativeTurnId: event.turn_id, nativeOrdinal: Number(item.ordinal), state,
+    ...(Number.isSafeInteger(observedAt) && observedAt >= 0 ? { observedAt } : {}),
+    ...(failure ? { endReason: 'failed', failure } : event.type === 'task_complete' ? { endReason: 'completed' } :
+      event.type === 'turn_aborted' && event.reason === 'interrupted' ? { endReason: 'interrupted' } : {}) }
+}
 
 /** Current local transport is proven by the exact native source's unique writer
  * in this Run's process group. Executable path/version observations are separate:
@@ -29,7 +50,7 @@ export function createCodexPromptExecutionTransportVerifier(): (context: AgentPr
     try {
       source = await file.stat({ bigint: true })
       if (!source.isFile()) return false
-      if (!context.nativeSourceId || sourceIdentity(handle.sessionId, source) !== context.nativeSourceId) return false
+      if (!context.nativeSourceId || codexNativeSourceId(handle.sessionId, source) !== context.nativeSourceId) return false
       const header = Buffer.alloc(Number(source.size < BigInt(HEADER_BYTES) ? source.size : BigInt(HEADER_BYTES)))
       await file.read(header, 0, header.length, 0)
       const end = header.indexOf(10)
@@ -74,7 +95,7 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
     if (headerEnd < 0) return null
     const meta = JSON.parse(header.subarray(0, headerEnd).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown } }
     if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null
-    const sourceId = sourceIdentity(handle.sessionId, stat)
+    const sourceId = codexNativeSourceId(handle.sessionId, stat)
     const predecessor = context.nativePromptPredecessor
     // The retained source must be exactly the one Core observed before this Run
     // started. A replacement cannot inherit an initial-idle authorization.
@@ -93,23 +114,24 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
     const first = start ? tail.indexOf(10) + 1 : 0
     if (first <= 0 && start) return null
     const lines = tail.subarray(first, completeEnd).toString('utf8').split('\n')
-    for (let index = lines.length - 1; index >= 0; index--) {
-      const item = JSON.parse(lines[index]!) as { type?: unknown; ordinal?: unknown; payload?: { type?: unknown; turn_id?: unknown; thread_id?: unknown; reason?: unknown } }
-      const event = item.payload
-      const boundary = item.type === 'event_msg' && ['task_started', 'task_complete', 'turn_aborted'].includes(String(event?.type))
-      // A long turn may have evicted task_started from this bounded suffix. These
-      // ordered native records still identify that turn; a later end wins because
-      // this traversal is newest first. Child-thread events cannot bind this Run.
-      const turnRecord = item.type === 'turn_context' || (item.type === 'event_msg' &&
-        event?.type === 'item_completed' && event.thread_id === handle.sessionId)
-      if ((!boundary && !turnRecord) || !event) continue
-      if (typeof event.turn_id !== 'string' || !event.turn_id || !Number.isSafeInteger(item.ordinal)) return null
-      const state = !boundary || event.type === 'task_started' ? 'working' : 'ended'
-      return currentEvidence({ sourceId, id: createHash('sha256').update(JSON.stringify([sourceId, item.ordinal, item.type, event.type, event.turn_id])).digest('base64url'),
-        nativeTurnId: event.turn_id, state,
-        ...(event.type === 'task_complete' ? { endReason: 'completed' as const } :
-          event.type === 'turn_aborted' && event.reason === 'interrupted' ? { endReason: 'interrupted' as const } : {}) })
+    let latest: AgentPromptExecutionEvidence | null = null
+    for (const line of lines) {
+      const record = JSON.parse(line) as { type?: string; payload?: { type?: string; thread_id?: string } }
+      const payload = record.payload
+      const relevant = (record.type === 'turn_context' || (record.type === 'event_msg' &&
+        ['task_started', 'task_complete', 'turn_aborted', 'item_completed'].includes(payload?.type ?? ''))) &&
+        (payload?.thread_id === undefined || payload.thread_id === handle.sessionId) &&
+        (payload?.type !== 'item_completed' || payload.thread_id === handle.sessionId)
+      if (!relevant) continue
+      const evidence = codexTurnRecordEvidence(record, sourceId, handle.sessionId)
+      // A malformed current boundary cannot resurrect a prior success.
+      if (!evidence) return null
+      if (latest && evidence.nativeOrdinal! <= latest.nativeOrdinal!) continue
+      if (latest && evidence.state === 'ended' && evidence.nativeTurnId !== latest.nativeTurnId) continue
+      if (latest?.state === 'ended' && payload?.type === 'item_completed') continue
+      latest = evidence
     }
+    if (latest) return currentEvidence(latest)
     // A complete, small new transcript with no turn can prove initial idle. A
     // retained suffix cannot make the same assertion.
     return start === 0 ? currentEvidence({ sourceId, id: sourceId, state: 'idle' }) : null

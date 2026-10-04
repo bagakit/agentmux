@@ -45,6 +45,8 @@ Provider、AgentSession、provider-native identity、Launch/Resume Plan、Hook�
 Prompt readiness、Agent status 和 Evidence 解释。新增 Provider 不得要求 ctxmux 增加
 Agent-specific Run 类型或解析 Provider 输出。
 
+Codex 的官方错误资料、原生暴露边界与适配核对见[Codex Provider 错误说明](../../docs/guides/codex-provider-errors.md)。模型请求失败的通用行为由[交互合同](../../docs/design/behavior/agent-capabilities-and-messaging.md#模型请求失败与工作结果)持有；说明中的覆盖范围不代称当前候选已经实现或安装。
+
 Provider-native Resume 由 Core 从自己的 Session/provenance 物化新的通用 `RunSpec`，再
 请求 ctxmux 创建并记录相应 lineage。调用方请求 Level B 而 provenance 不足时必须失败；
 Core 和 ctxmux 都不能把它暗中降为 Level A restart。
