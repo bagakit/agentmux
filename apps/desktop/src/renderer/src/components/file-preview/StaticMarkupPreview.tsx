@@ -18,7 +18,9 @@ function PreparedMarkup({ content, title }: { content: string; title: string }) 
   const [prepared, setPrepared] = useState<{ content: string; html?: string; error?: string } | null>(null)
   useEffect(() => {
     let current = true
-    if (content.length > STATIC_MARKUP_MAX_BYTES || new TextEncoder().encode(content).byteLength > STATIC_MARKUP_MAX_BYTES || (content.match(/<[a-zA-Z][^>]*>/g)?.length ?? 0) > STATIC_MARKUP_MAX_ELEMENTS) {
+    // Count opening markers in linear time, including malformed unclosed tags.
+    // Looking ahead for a closing '>' can backtrack quadratically before sanitization.
+    if (content.length > STATIC_MARKUP_MAX_BYTES || new TextEncoder().encode(content).byteLength > STATIC_MARKUP_MAX_BYTES || (content.match(/<[a-zA-Z]/g)?.length ?? 0) > STATIC_MARKUP_MAX_ELEMENTS) {
       setPrepared({ content, error: 'This output exceeds the static preview budget. Use Source to read the complete output.' })
       return
     }

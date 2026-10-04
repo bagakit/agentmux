@@ -14,6 +14,7 @@ export const sources = [
   'packages/client-ui/src/lib/use-visible-work.ts'
 ]
 export const mutations = [
+  { label: 'notebook-markup-budget-backtracks', file: 'apps/desktop/src/renderer/src/components/file-preview/StaticMarkupPreview.tsx', before: 'content.match(/<[a-zA-Z]/g)', after: 'content.match(/<[a-zA-Z][^>]*>/g)' },
   { label: 'notebook-static-output-offscreen-not-released', file: 'apps/desktop/src/renderer/src/components/file-preview/StaticMarkupPreview.tsx', before: '{inView && <PreparedMarkup', after: '{true && <PreparedMarkup' },
   { label: 'notebook-static-dom-budget-removed', file: 'apps/desktop/src/renderer/src/components/file-preview/StaticMarkupPreview.tsx', before: 'const STATIC_MARKUP_MAX_ELEMENTS = 3000', after: 'const STATIC_MARKUP_MAX_ELEMENTS = 3000000' },
   { label: 'notebook-source-newlines-injected', file: 'apps/desktop/src/renderer/src/lib/file-formats/data-notebook.ts', before: "value.join('')", after: "value.join('\\n')" },
