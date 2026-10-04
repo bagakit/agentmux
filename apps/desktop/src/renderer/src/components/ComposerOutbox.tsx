@@ -1,3 +1,5 @@
+import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
+import { messageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { MailboxLocationContext } from './MailboxLocationContext'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
@@ -21,6 +23,7 @@ export type ComposerQueuedMessage = {
   unconfirmed?: boolean
   errorCode?: string
   error?: string
+  logId?: string
   awaitingExplicitSend?: true
   archived?: true
   confirmed?: boolean
@@ -70,6 +73,15 @@ function CopyQueuedMessage({ entry, onCopy }: { entry: ComposerQueuedMessage; on
     }}>{accepted ? <Check size={14} /> : accepted === false ? <TriangleAlert size={14} /> : <Copy size={14} />}</button>
 }
 
+function QueuedDeliveryLog({ logId, copy }: { logId: string; copy?: ((text: string) => Promise<boolean>) | undefined }) {
+  const [log, setLog] = useState(() => messageDeliveryDiagnostics.get(logId))
+  useEffect(() => {
+    setLog(messageDeliveryDiagnostics.get(logId))
+    return messageDeliveryDiagnostics.subscribe(() => setLog(messageDeliveryDiagnostics.get(logId)))
+  }, [logId])
+  return <DeliveryLogDetails logId={logId} log={log} copyText={copy ?? (async () => false)} />
+}
+
 export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onHistory, onMove, onSend, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false }: {
   pendingInteraction?: boolean
   reading?: ConversationReadingProps | undefined
@@ -88,13 +100,12 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
   const [editingId, setEditingId] = useState<string | null>(null)
   const [failure, setFailure] = useState<{id:string;text:string;message:string} | null>(null)
   if (!queued.length) return null
-  const sending = queued.some(entry => entry.sending || entry.preparing)
   return <section className="composer-outbox" aria-label={queued[0]?.archived ? 'Archived messages' : 'Queued messages'}>
     <h3>{queued[0]?.archived ? 'Archived' : 'Pending'} ({queued.length})</h3>
     <ol className="composer-mailbox__messages">
       {queued.map((entry,index) => {
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
-        const canSend = !entry.archived && entry.deliverable && !sending && !pendingInteraction && editingId !== entry.id
+        const canSend = !entry.archived && !state.busy && editingId !== entry.id
         const ownFailure = failure?.id === entry.id && failure.text === entry.text ? failure.message : null
         return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}>
           <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
@@ -124,6 +135,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}
             {state.busy || entry.error || entry.unconfirmed || !entry.deliverable || entry.archived ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed && !entry.error) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
+            {entry.logId ? <QueuedDeliveryLog logId={entry.logId} copy={onCopy} /> : null}
             <ConversationMessage {...reading} compact recordedIdentity messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
               {...(entry.enqueuedAt === undefined ? {} : {createdAt:entry.enqueuedAt})} {...(onCopy ? {onCopy} : {})}
               messageDetails={<><dl className="composer-mailbox__record-facts"><dt>Record</dt><dd>{entry.archived ? 'Archived original message' : 'Pending original message'}</dd><dt>Enqueued</dt><dd><MailboxTime value={entry.enqueuedAt} complete /></dd><dt>Delivery</dt><dd>{state.detail}</dd>{entry.errorCode ? <><dt>Code</dt><dd>{entry.errorCode}</dd></> : null}</dl>{executionDetails}</>} />

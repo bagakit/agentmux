@@ -287,7 +287,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
           {queued.map((entry, index) => {
             const state = queuedMessageState(entry, pendingInteraction)
             const immediate = entry.immediateSend ?? sendImmediately
-            const canSend = entry.id !== editingId && !active && !pendingInteraction && entry.deliverable && Boolean(onSend)
+            const canSend = entry.id !== editingId && !state.busy && Boolean(onSend)
             const Icon = state.busy ? LoaderCircle : entry.unconfirmed ? CircleHelp : !entry.deliverable || entry.error || entry.status === 'failed' ? TriangleAlert : Clock3
             const editing = entry.id === editingId && Boolean(onEdit)
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
@@ -296,7 +296,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
               tabIndex={0} aria-label={'待发 ' + (index + 1) + ': ' + entry.text}
               onPointerMove={event => { if (!editingId && event.pointerType !== 'touch' && entry.id !== hoveredId) setHoveredId(entry.id) }}
               onPointerLeave={() => setHoveredId(current => current === entry.id ? null : current)} onFocus={() => select(entry.id)}>
-              <span className="composer-pending__state" aria-label={state.label} title={state.label}><Icon size={12} aria-hidden="true" /><span className="composer-pending__sr-only">{state.label}</span></span>
+              <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} aria-hidden="true" /><span className="composer-pending__sr-only">{state.label}</span></span>
               {editing && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => {
                 setEditingId(null)
                 if (surfaceRef.current?.contains(document.activeElement)) listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus()

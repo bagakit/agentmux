@@ -52,6 +52,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'deviceManagement:ls': 'device administration',
   'deviceManagement:link': 'device administration',
   'deviceManagement:revoke': 'device administration',
+  'sessions:recordDeliveryFailure': 'delivery diagnostic report',
   'sessions:observeHistory': 'history observation',
   'sessions:releaseHistoryObservation': 'history observation',
   'continuousProgress:list': 'continuous progress',

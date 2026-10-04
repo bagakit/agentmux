@@ -1,3 +1,4 @@
+import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core'
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
@@ -1031,7 +1032,7 @@ export type RuntimeEndpointWarning = {
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
 export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
-  code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure
+  code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
 } }
 
 export type RuntimeSnapshot = {
@@ -1649,6 +1650,7 @@ export type AgentMuxDesktopApi = {
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
+    recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
     submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }): Promise<void>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
