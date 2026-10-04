@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { openNotebookPage } from '../src/renderer/src/lib/recall-notebooks'
 import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook-catalog'
 import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 // @vitest-environment happy-dom
@@ -125,7 +126,7 @@ beforeEach(() => {
   useAppStore.setState({ loading: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench',
     surveySidebarWidth: 220, surveySidebarCollapsed: false,
     recallZoneSelection: null, recallSidebarWidth: 220, recallSidebarCollapsed: false, notebookRecoveries: [], recallNotebookId: null, recallNoteId: null, surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratchWorkspace, {...workspace,id:SCRATCH_WORKSPACE_ID,path:_hygiene_fixturePath("scratch"),name:'Topics'}] }, activeWorkspaceId: workspace.id,
-    sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]), [NOTES_WORKSPACE_ID]: createWorkspaceLayout('notes-group'), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
+    sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
     agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
     projectRailOpen: true, toolsOpen: true, workspaceTool: 'agents', demands: {}, browserAnnotationsByBrowserId: {},
     documents: { [key]: { path: file.path, content: 'Unsaved file', revision: 'disk' } }, dirtyDocuments: { [key]: true },
@@ -403,12 +404,14 @@ it('creates a Notebook first and adds its Note page in the original Zone without
   await renderApp(); await enterSurvey()
   expect(dom.container.querySelector('.survey-start-heading h1')!.textContent).toBe('Recall')
   const before = useAppStore.getState()
+  expect(before.layouts[NOTES_WORKSPACE_ID]).toBeUndefined()
   await startNotebookWithPage()
-  await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active).not.toBeNull())
+  await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active).toEqual(expect.objectContaining({ tabId: expect.any(String), regionId: expect.any(String) })))
   const current = useAppStore.getState(), selected = current.recallZoneSelection!, ref = selected.active!
   expect(selected.zoneId).not.toBe(originalZoneId())
   expect(current.tabs[ref.tabId]!.space?.zoneId).toBe(selected.zoneId)
-  expect(current.tabs[ref.tabId]!.regions[ref.regionId]).toMatchObject({ kind: 'file' })
+  expect(current.tabs[ref.tabId]!.regions[ref.regionId]).toMatchObject({ kind: 'file', workspaceId: NOTES_WORKSPACE_ID })
+  expect(current.layouts[NOTES_WORKSPACE_ID]?.groups.some(group => group.tabOrder.includes(ref.tabId))).toBe(true)
   expect(Object.values(current.tabs).filter(tab => tab.space?.zoneId === selected.zoneId)).toHaveLength(1)
   expect(api.browser.create).not.toHaveBeenCalled(); expect(api.files.write).toHaveBeenCalledTimes(1)
   expect(current.tabs[mixed.id]).toBe(before.tabs[mixed.id]); expect(current.layouts[workspace.id]!.activeGroupId).toBe(before.layouts[workspace.id]!.activeGroupId); healthy()
@@ -781,4 +784,27 @@ it('adds a new managed Note to an old Notebook without changing its original mix
   expect(useAppStore.getState().tabs[mixed.id]).toBe(before.tabs[mixed.id])
   expect(useAppStore.getState().layouts[workspace.id]).toBe(before.layouts[workspace.id])
   expect(api.browser.create).not.toHaveBeenCalled(); healthy()
+})
+
+it('reopens the original foreign-displayed Note when its hidden resource has no display layout', async () => {
+  noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  const before = useAppStore.getState(), reference = before.recallZoneSelection!.active!, originalTab = before.tabs[reference.tabId]!
+  const groupId = before.layouts[workspace.id]!.activeGroupId, notesGroup = before.layouts[NOTES_WORKSPACE_ID]!.activeGroupId
+  await act(async () => {
+    await useAppStore.getState().setTabDisplayPlacement(reference.tabId, workspace.id, groupId, true)
+    await useAppStore.getState().setTabDisplayPlacement(reference.tabId, NOTES_WORKSPACE_ID, notesGroup, false)
+    // This is the restored graph with the original foreign occurrence, without an empty
+    // display container for a hidden file resource. No resource or entity is invented.
+    const layouts = { ...useAppStore.getState().layouts }; delete layouts[NOTES_WORKSPACE_ID]
+    useAppStore.setState({ layouts })
+  })
+  const page = (await api.notebooks.read()).pages[before.recallNoteId!]!
+  let opened = false
+  await act(async () => { opened = await openNotebookPage(page) })
+  expect(opened).toBe(true)
+  expect(useAppStore.getState().layouts[NOTES_WORKSPACE_ID]).toBeUndefined()
+  expect(useAppStore.getState().tabs[reference.tabId]?.regions[reference.regionId]).toBe(originalTab.regions[reference.regionId])
+  expect(useAppStore.getState().layouts[workspace.id]?.groups.find(group => group.id === groupId)?.tabOrder).toContain(reference.tabId)
+  expect(useAppStore.getState().recallZoneSelection?.active).toEqual(reference)
+  expect(api.files.write).toHaveBeenCalledTimes(1); healthy()
 })
