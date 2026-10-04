@@ -79,10 +79,13 @@ export function terminalAcceptsInput(input: {
  */
 export function terminalInputSender(input: {
   accepts: () => boolean
+  /** Historical parser queries describe a past screen, not the current process. */
+  replaying?: () => boolean
   write: (data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => void
 }): (data: AgentMuxRunInputData, source?: AgentMuxAgentWriteInput['source']) => void {
   return (data, source = 'user') => {
     if (!input.accepts()) return
+    if (source === 'terminal-protocol' && input.replaying?.()) return
     // 空载荷不上线。xterm 有两处会送出「按了键但没有字节要发」：IME 组字途中的 `onData('')`，
     // 以及旧式鼠标上报被禁用/坐标越界时 `onBinary('')`（经 encodeTerminalBinaryInput 变成零长
     // Uint8Array）。ctxmux daemon 的 RecoverableInput 校验会拒绝空载荷，抛

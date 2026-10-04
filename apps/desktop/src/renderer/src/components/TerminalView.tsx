@@ -761,6 +761,7 @@ export function TerminalView({
     let readyForLiveOutput = false
     let readySinceAt: number | null = null
     let replayingContinuation = true
+    let historicalOutputDepth = 0
     let observationPending = false
     let continuationKnown = false
     const acceptsCurrentInput = (): boolean =>
@@ -952,6 +953,14 @@ export function TerminalView({
       kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, kittyOutputDecoder.decode(data, { stream: true }))
       if (!disposed) setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
     }
+    const writeHistoricalOutput = async (data: Uint8Array): Promise<void> => {
+      historicalOutputDepth++
+      try {
+        await writeOutput(data)
+      } finally {
+        historicalOutputDepth--
+      }
+    }
     const backfillRetainedOutput = async (throughByte: number): Promise<void> => {
       if (attachmentId === null || disposed) return
       try {
@@ -959,7 +968,7 @@ export function TerminalView({
           cursor,
           throughByte,
           read: (afterByte) => boundedTerminalHistoryRead(api.sessions.replay(attachmentId!, afterByte)),
-          write: writeOutput
+          write: writeHistoricalOutput
         })
         if (disposed) return
         cursor = recovered.cursor
@@ -1245,6 +1254,7 @@ export function TerminalView({
      */
     const sendInput = terminalInputSender({
       accepts: acceptsCurrentInput,
+      replaying: () => replayingContinuation || historicalOutputDepth > 0,
       write: (data, source) => {
         if (!readOnlyRef.current) {
           const startedAt = rendererPerformance.start()
@@ -1274,7 +1284,7 @@ export function TerminalView({
     })
     const linkPreviewScroll = terminal.onScroll(clearLinkPreview)
     const oscHandlers = installTerminalOscHandlers(terminal, {
-      isReplaying: () => replayingContinuation,
+      isReplaying: () => replayingContinuation || historicalOutputDepth > 0,
       respondFromRenderer: session.kind === 'terminal',
       sendInput: (data) => sendInput(data, 'terminal-protocol'),
       // PTY 里的 TUI（nvim / fzf / lazygit）用 OSC 52 往剪贴板写。走的是和 Cmd+C 同一个出口，
