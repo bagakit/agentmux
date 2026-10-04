@@ -1,4 +1,6 @@
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
+import { tabSwitchObservation } from '../lib/tab-switch-observation'
+import { workbenchProjectionTabReference } from '../lib/workbench-projection'
 import { projectedNameRevision } from '../lib/name-authority'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
@@ -224,6 +226,13 @@ function SortableWorkbenchTab({
     disabled: projection?.placementConfirmed === false,
     data: { kind: 'tab', tabId: tab.id, groupId: group.id } satisfies DragTabData
   })
+  const switchTarget = useMemo(() => ({ presentationId: projection?.presentationId ?? (mote?.floating ? 'mote' : 'space'),
+    ...(projection ? workbenchProjectionTabReference(projection, group.id, tab)
+      : { displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id, regionId: tab.layout.activeRegionId }) }),
+  [projection, Boolean(mote?.floating), workspaceId, group.id, tab.id, tab.layout.activeRegionId])
+  useLayoutEffect(() => {
+    if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget)
+  }, [visible, group.activeTabId, tab.id, switchTarget])
   const [pendingClose, setPendingClose] = useState<{
     tabIds: string[]
     dirtyCount: number
@@ -411,7 +420,16 @@ function SortableWorkbenchTab({
           style={{ transform: CSS.Translate.toString(transform), transition }}
           {...nameTooltip.props}
           aria-current={mote && group.activeTabId === tab.id ? 'page' : undefined}
-          onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : mote ? mote.selectTab(tab.id, group.id) : activateTab(workspaceId, group.id, tab.id, 'local')}
+          onClick={event => {
+            const selectedSurface = tab.regions[switchTarget.regionId]
+            const mode = selectedSurface?.kind === 'agent' ? effectiveSessionViewMode(useAppStore.getState(), selectedSurface.sessionId)
+              : selectedSurface?.kind === 'terminal' ? 'terminal' : selectedSurface ? 'other' : 'unknown'
+            tabSwitchObservation.begin(switchTarget, mode, event.nativeEvent.timeStamp)
+            if (projection) selectWorkbenchProjectionTab(projection, group.id, tab)
+            else if (mote) mote.selectTab(tab.id, group.id)
+            else activateTab(workspaceId, group.id, tab.id, 'local')
+            if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget)
+          }}
           {...attributes}
           {...listeners}
           aria-describedby={[attributes['aria-describedby'], nameTooltip.props['aria-describedby']].filter(Boolean).join(' ') || undefined}

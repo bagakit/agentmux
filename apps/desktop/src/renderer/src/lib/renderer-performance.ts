@@ -1,4 +1,5 @@
 import type { RendererConsumerCost, RendererPerformanceSnapshot, RendererTerminalCost, RendererWorkTiming } from '@agentmux/core/control'
+import { tabSwitchObservation } from './tab-switch-observation'
 
 const timing = (): RendererWorkTiming => ({ count: 0, totalMs: 0, maxMs: 0 })
 const consumer = (): RendererConsumerCost => ({ checks: 0, changes: 0, commits: 0 })
@@ -121,7 +122,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         sessionEvents: { ...sessionEvents }, terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
         inputDelay: { ...inputDelay, timing: { ...inputDelay.timing } },
         longTasks: { ...longTasks, timing: { ...longTasks.timing } }, terminals: current, omittedTerminals: terminals.size - attempted, unavailableTerminals,
-        slowEvents: slowEvents.map(event => ({ ...event })),
+        slowEvents: slowEvents.map(event => ({ ...event })), tabSwitches: tabSwitchObservation.snapshot(), tabSwitchesOmitted: tabSwitchObservation.omitted(),
         observerCost: { snapshots: { ...observerCost.snapshots }, performanceCallbacks: { ...observerCost.performanceCallbacks } }
       }
       add(observerCost.snapshots, now() - start)

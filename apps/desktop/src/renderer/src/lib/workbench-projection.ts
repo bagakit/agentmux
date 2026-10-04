@@ -47,10 +47,13 @@ export function workbenchProjectionZone(scope: WorkbenchProjection) {
   const zoneId = scope.catalog.tabs.find(tab => tab.tabId === tabId)?.zoneId
   return scope.catalog.zones.find(zone => zone.zoneId === zoneId)
 }
-export function selectWorkbenchProjectionTab(scope: WorkbenchProjection, groupId: string, tab: WorkbenchTab, regionId?: string): void {
+export function workbenchProjectionTabReference(scope: WorkbenchProjection, groupId: string, tab: WorkbenchTab, regionId?: string): WorkbenchProjectionSelection {
   const held = scope.selection.find(reference => reference.displayWorkspaceId === scope.displayWorkspaceId && reference.groupId === groupId && reference.tabId === tab.id)
-  const reference = { displayWorkspaceId: scope.displayWorkspaceId, groupId, tabId: tab.id,
+  return { displayWorkspaceId: scope.displayWorkspaceId, groupId, tabId: tab.id,
     regionId: regionId ?? held?.regionId ?? (scope.entity.kind === 'region' ? scope.entity.regionId : tab.layout.activeRegionId) }
+}
+export function selectWorkbenchProjectionTab(scope: WorkbenchProjection, groupId: string, tab: WorkbenchTab, regionId?: string): void {
+  const reference = workbenchProjectionTabReference(scope, groupId, tab, regionId)
   if (scope.entity.kind === 'zone' && scope.selectionMode !== 'occurrence' || scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference))) scope.onSelect(reference)
 }
 
