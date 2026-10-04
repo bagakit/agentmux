@@ -324,9 +324,17 @@
 
 .log-row__time[tabindex]:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
 
-/* One conversation host; navigation occupies a single quiet row, never another viewport. */
-.activity-feed__reading { display: flex; align-items: center; gap: 6px; min-height: 24px; flex-wrap: wrap; padding: 2px 18px 6px; color: var(--text-3); font-size: 11px; }
-.activity-feed__reading > span { flex: 1; }
-.activity-feed__reading .small-button { min-height: 22px; padding: 2px 6px; font-size: 11px; }
+/* One natural-flow entry with the messages; never a second toolbar or viewport. */
+.activity-feed__reading { display: flex; justify-content: center; align-items: center; min-height: 40px; padding: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.activity-feed__reading-entry { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--sp-1); max-width: 100%; padding: var(--sp-1); border-radius: 999px; background: color-mix(in oklab, var(--text) 3%, transparent); }
+.activity-feed__reading-action, .activity-feed__reading-status { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 24px; padding: var(--sp-1) var(--sp-2); white-space: nowrap; line-height: 16px; }
+.activity-feed__reading-action { border: 0; border-radius: 999px; background: transparent; color: var(--text-3); font: inherit; cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast); }
+.activity-feed__reading-action:hover:not(:disabled) { color: var(--text); background: color-mix(in oklab, var(--text) 5%, transparent); }
+.activity-feed__reading-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.activity-feed__reading-action:disabled { cursor: default; opacity: .5; }
+.activity-feed__reading-status { color: var(--text-2); animation: activity-reading-arrive var(--dur-fast) var(--ease-enter) both; }
+.activity-feed__reading-status > svg { flex: none; color: var(--blue); }
+@keyframes activity-reading-arrive { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .activity-feed__reading-status { animation: none; } .activity-feed__reading-action { transition: none; } }
 .activity-feed__history-divider { display: flex; align-items: center; gap: 12px; padding: 18px 0 10px; color: var(--text-3); font-size: 10px; }
 .activity-feed__history-divider::before, .activity-feed__history-divider::after { content: ''; height: 1px; flex: 1; background: var(--line-soft); }

@@ -1,5 +1,4 @@
 import { Info } from 'lucide-react'
-import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
 import { useAppStore } from '../store'
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
@@ -77,7 +76,7 @@ export function Ruler({
   controls?: (close: () => boolean) => ReactNode
   recentFraction?: number | null
   activity?: AgentActivityHistoryProjection['segments']
-  reading?: { loading: boolean; hasMore: boolean; enabled: boolean; onReadEarlier: () => void }
+  reading?: { loading: boolean; hasMore: boolean }
   axes?: (peek: {
     width: number
     onPeek: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
@@ -305,15 +304,11 @@ export function Ruler({
           <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true">→</span><span>{span.to}</span></span>
 
         </span> : <span className="activity-ruler__span">Record order</span>}
-        <span className="activity-ruler__count" data-loading={reading?.loading ? 'true' : undefined} role={reading ? 'status' : undefined} aria-live={reading ? 'polite' : undefined}>
-          {reading?.loading ? <><WorkflowStatusGlyph status="running" /> Reading…</> : `${scale.count} records`}
+        <span className="activity-ruler__count" data-loading={reading?.loading ? 'true' : undefined} >
+          {scale.count} records
         </span>
       </div>
       <div className="activity-ruler__actions">
-        {reading ? <button type="button" className="conversation-ruler__earlier" data-available={reading.hasMore ? 'true' : undefined}
-          aria-label="Read earlier native records" aria-hidden={!reading.hasMore} tabIndex={reading.hasMore ? 0 : -1}
-          title="Earlier original records have not been loaded. Read the next batch; this edge has no time width."
-          disabled={!reading.hasMore || reading.loading || !reading.enabled} onClick={() => { closeReadout(); reading.onReadEarlier() }}>Earlier</button> : null}
         {controls?.(closeReadout)}
         <button type="button" className="activity-ruler__guide-trigger" aria-label="Timeline guide"
           title="Explain this timeline" popoverTarget={legendId} popoverTargetAction="toggle"

@@ -76,11 +76,10 @@
 .activity-ruler__guide-states i[data-key='waiting'] { background:var(--amber); }
 .activity-ruler__guide-footnote { margin:9px 0 0; color:var(--text-3); font-size:var(--fs-micro); }
 
-/* Reading status and continuation live outside the unchanged loaded coordinate box. */
+/* Loaded count stays stable; waiting feedback belongs to the message flow. */
 .activity-ruler[data-reading-surface] .activity-ruler__count {
   display:inline-flex; align-items:center; gap:4px; width:78px; flex:none;
 }
-.activity-ruler__count[data-loading] { color:var(--text-2); }
 .activity-ruler__stack { position:relative; }
 .conversation-ruler__unread-edge {
   position:absolute; left:-14px; bottom:0; width:10px; height:14px; border-radius:2px;
@@ -88,13 +87,3 @@
   mask-image:linear-gradient(to bottom,transparent,black 35%,black 65%,transparent);
   pointer-events:none;
 }
-.conversation-ruler__earlier {
-  display:inline-flex; align-items:center; justify-content:center; height:24px; padding:3px 4px;
-  border:0; border-radius:4px; color:var(--text-3); background:transparent;
-  font:var(--fs-micro)/1.2 var(--font-sans); cursor:pointer;
-}
-.conversation-ruler__earlier:not([data-available]) { visibility:hidden; }
-.conversation-ruler__earlier:hover { color:var(--text-2); background:var(--surface-2); }
-.conversation-ruler__earlier:focus-visible { outline:none; box-shadow:var(--focus-ring); }
-.conversation-ruler__earlier:disabled { opacity:.55; cursor:default; }
-.activity-feed__reading-status { display:inline-flex; align-items:center; gap:5px; }

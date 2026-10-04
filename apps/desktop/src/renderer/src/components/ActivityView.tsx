@@ -1,6 +1,6 @@
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
-import { ArrowLeft, ChevronRight, FileText, Info, Pencil, Search } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ChevronRight, ChevronUp, FileText, Info, Pencil, Search } from 'lucide-react'
 import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
@@ -801,24 +801,34 @@ export function ActivityView({
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
+  // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
+  const readingEntry = conversationReading && (readingWindow.loading || readingWindow.hasMore || readingWindow.historical ||
+    conversationReading.opened || readingWindow.newerOutside || readingWindow.error || readingAction) ? (
+    <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
+      <div className="activity-feed__reading-entry">
+        {readingWindow.loading ? <span role="status" aria-live="polite" className="activity-feed__reading-status">
+          <WorkflowStatusGlyph status="running" /> Reading records…</span> : readingWindow.hasMore ? (
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            onClick={readingWindow.readEarlier}><ChevronUp size={12} aria-hidden="true" />Earlier</button>
+        ) : null}
+        {readingWindow.historical || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? (
+          <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
+            aria-label="Current" title="Return to latest messages" onClick={readingWindow.showCurrent}>
+            <ArrowDown size={12} aria-hidden="true" />Current</button>
+        ) : null}
+        {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
+          className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
+          onClick={conversationReading.onClose}><ArrowLeft size={12} aria-hidden="true" />Return</button> : null}
+        {readingAction}
+      </div>
+    </div>
+  ) : null
   const readNotice = <>
-    {conversationReading ? <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}
->
-      {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button" className="small-button"
-        aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`} onClick={conversationReading.onClose}>
-        <ArrowLeft size={12} /> Return</button> : null}
-      <span>{readingWindow.historical ? 'Earlier records' : 'Conversation'}</span>
-      {readingWindow.loading && !ruler.items.length ? <span role="status" aria-live="polite" className="activity-feed__reading-status"><WorkflowStatusGlyph status="running" /> Reading records…</span> : null}
-      {readingWindow.historical || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? <button type="button" className="small-button" disabled={!conversationReading.enabled} onClick={readingWindow.showCurrent}>Current</button> : null}
-      {!(nativeHistoryPage && ruler.items.length) && (readingWindow.historical ? readingWindow.hasMore : Boolean(userMessageRead?.hasMore || userMessageRead?.windowIncomplete || conversationReading.opened)) ?
-        <button type="button" className="small-button" disabled={readingWindow.loading || !conversationReading.enabled} onClick={readingWindow.readEarlier}>Earlier</button> : null}
-      {readingAction}
-    </div> : null}
     {readingNotice}
     {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Submitted-message read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
     {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
-    {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading || !nativeHistoryPage || !ruler.items.length} read={userMessageRead ? { ...userMessageRead,
+    {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
       onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
 
@@ -827,6 +837,7 @@ export function ActivityView({
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
         {readNotice}
+        {readingEntry}
         {fileReferenceNotice}
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
@@ -839,6 +850,7 @@ export function ActivityView({
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
         {readNotice}
+        {readingEntry}
         {fileReferenceNotice}
         {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
@@ -853,6 +865,7 @@ export function ActivityView({
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
         {readNotice}
+        {readingEntry}
         {fileReferenceNotice}
         <WorkingIndicator />
       </div>
@@ -946,7 +959,7 @@ export function ActivityView({
     <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
       {readNotice}
-        {fileReferenceNotice}
+      {fileReferenceNotice}
       {capability === 'unavailable' ? (
         <div className="activity-feed__empty" role="status">
           This executor does not provide structured activity. Terminal remains available.
@@ -957,7 +970,7 @@ export function ActivityView({
         scale={scale}
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
         band={band}
-        {...(conversationReading ? { reading: { loading: readingWindow.loading, hasMore: readingWindow.hasMore, enabled: conversationReading.enabled, onReadEarlier: readingWindow.readEarlier } } : {})}
+        {...(conversationReading ? { reading: { loading: readingWindow.loading, hasMore: readingWindow.hasMore } } : {})}
         recentFraction={ruler.recentFraction}
         activity={activity.segments}
         controls={close => <ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
@@ -989,6 +1002,7 @@ export function ActivityView({
         <div className="activity-log">{placed.filter(({ entry }) => !nativeSupplement(entry)).map(renderPlaced)}</div>
       </details> : null}
       <div className="activity-log" ref={logRef}>{placed.filter(({ entry }) => nativeSupplement(entry)).map(renderPlaced)}</div>
+      {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
         {...(historyBoundary && boundaryIndex > 0 ? {
