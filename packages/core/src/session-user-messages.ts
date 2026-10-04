@@ -20,10 +20,15 @@ function buildNativeMessageStableId(
   return `native:${providerId}:${encodeSegment(nativeSessionId)}:${encodeSegment(recordId)}`
 }
 
+/** Providers interpret native wrappers once; clients read the exact span and copy the original text. */
+export function sessionHistoryTextForReading(part: Extract<AgentSessionHistoryContentPart, { kind: 'text' }>): string {
+  return part.readingRange === undefined ? part.text : part.text.slice(part.readingRange.start, part.readingRange.end)
+}
+
 function extractUserMessageText(contentParts: readonly AgentSessionHistoryContentPart[]): string {
   const texts = contentParts
     .filter((part): part is Extract<AgentSessionHistoryContentPart, { kind: 'text' }> => part.kind === 'text')
-    .map((part) => part.text)
+    .map(sessionHistoryTextForReading)
   return texts.join('\n')
 }
 
@@ -90,6 +95,7 @@ export function projectSessionUserMessages(params: {
       const source: AgentSessionUserMessageSource = {
         kind: 'captured',
         submissionId: item.id,
+        ...(item.sourceChannel === undefined ? {} : { channel: item.sourceChannel }),
         ...(item.sourceDevice ? { device: { ...item.sourceDevice } } : {})
       }
 
