@@ -21,6 +21,8 @@
 .mote-chooser__actions { display: flex; flex: none; align-items: center; justify-content: center; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
 .mote-chooser__actions > button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .mote-chooser__actions > button:hover { background: var(--surface-3); color: var(--text); }
+.mote-chooser__actions > .mote-chooser__archive { width: auto; min-width: 30px; padding-inline: 3px; gap: 3px; }
+.mote-chooser__archive span { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser { flex-basis: 56px; padding: var(--sp-1); }
 .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__choice { align-items: center; justify-content: center; min-height: 44px; padding: var(--sp-1); }
 .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__name { justify-content: center; }

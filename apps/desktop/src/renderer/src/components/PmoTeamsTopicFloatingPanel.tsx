@@ -148,7 +148,7 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
       {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} onReferenceSelect={onReferenceSelect} />)}
     </div>
     <div className="mote-chooser__actions">
-      <button type="button" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><Archive size={13} /></button>
+      <button type="button" className="mote-chooser__archive" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><Archive size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
       <button type="button" aria-label="Show Mote avatars only" aria-pressed={railMode === 'avatars'} title={railMode === 'cards' ? 'Show avatars only' : 'Show Mote cards'} onClick={onToggleMode}>
         {railMode === 'cards' ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
       </button>

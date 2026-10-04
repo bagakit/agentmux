@@ -7,6 +7,7 @@ import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { scratchMoteTopics, scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { SpaceObjectContextMenu } from '../src/renderer/src/components/SpaceObjectContextMenu'
@@ -20,11 +21,14 @@ beforeEach(() => {
   catalog = moteTopics.map(topic => ({ ...topic, ...(topic.soul ? { moteArchive: { state: 'active' as const, version: topic.id === PMO_TEAMS_TOPIC_ID ? 'primary' : 'unwritten' } } : {}) }))
   useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 0, topics: catalog, reading: false, error: null } } })
   app.listTopics.mockImplementation(async () => structuredClone(catalog))
+  // A fresh original-object read must observe the same durable catalog as list.
+  // The App fixture's initial read otherwise replaces current archive facts.
+  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => structuredClone(catalog.find(topic => topic.id === id) ?? null))
   app.ensureMote.mockImplementation(async (_workspace, id) => structuredClone(catalog.find(topic => topic.id === id)!))
   vi.spyOn(api.scratch, 'setMoteArchived').mockImplementation(async (workspaceId, id, archived, key, expected) => {
     expect(workspaceId).toBe(SCRATCH_WORKSPACE_ID)
     const topic = catalog.find(item => item.id === id)!
-    expect(key).toBe(topicSpaceIconTarget(scratchWorkspace, topic).key)
+    expect(key).toBe(topicSpaceIconTarget(scratchWorkspace, topic)!.key)
     if (!topic?.moteArchive || topic.moteArchive.state === 'unknown' || topic.moteArchive.version !== expected || id === PMO_TEAMS_TOPIC_ID) throw new Error('Archive state changed')
     const moteArchive = { state: archived ? 'archived' as const : 'active' as const, version: 'confirmed-' + ++generation }
     catalog = catalog.map(item => item.id === id ? { ...item, moteArchive } : item)
@@ -63,7 +67,7 @@ function quiet(before: ReturnType<typeof useAppStore.getState>) {
 async function setArchive(archived: boolean) {
   const topic = useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics!.find(topic => topic.id === customMoteId)!
   expect(topic.moteArchive?.state).not.toBe('unknown')
-  await useAppStore.getState().setMoteArchived(SCRATCH_WORKSPACE_ID, customMoteId, archived, topicSpaceIconTarget(scratchWorkspace, topic).key,
+  await useAppStore.getState().setMoteArchived(SCRATCH_WORKSPACE_ID, customMoteId, archived, topicSpaceIconTarget(scratchWorkspace, topic)!.key,
     (topic.moteArchive as { version: string }).version)
 }
 // Keep the real Radix menu and row lifecycle; vary only when the confirmed IPC
@@ -233,7 +237,7 @@ it('Space keyboard Archive returns to the same visible Motes disclosure after it
   expect(document.activeElement).toBe(button('Show archived Motes in Space'))
 })
 it('Space Show archived finds the same hidden object and real Restore returns its original pin, icon and order without selecting or replacing work', async () => {
-  selected(true); useAppStore.setState({ projectRailOpen: true, spaceObjectIcons: { [topicSpaceIconTarget(scratchWorkspace, catalog[1]!).key]: 'book' },
+  selected(true); useAppStore.setState({ projectRailOpen: true, spaceObjectIcons: { [topicSpaceIconTarget(scratchWorkspace, catalog[1]!)!.key]: 'book' },
     pinnedItems: { [SCRATCH_WORKSPACE_ID]: [customMoteId] }, scratchTopicOrder: [quietMoteId, customMoteId] })
   await app.mount(); const before = useAppStore.getState()
   expect(document.querySelector(`[data-space-nav="topic:${customMoteId}"]`)).toBeNull()
@@ -288,10 +292,17 @@ it('primary menu explains final protection and plain Topics offer no archive act
   const primary = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Primary Mote cannot be archived')
   expect(primary).toBeDefined(); expect(primary!.getAttribute('aria-disabled')).toBe('true')
   await act(async () => content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
-  const plain = document.querySelector<HTMLElement>(`[data-space-nav="topic:${ordinaryTopicId}"]`)
-  expect(plain).not.toBeNull(); content = await menu(plain!)
-  expect(content.textContent).toContain('Change icon'); expect(content.textContent).not.toContain('Archive')
-  expect(plain!.closest('.space-mote-entry')).toBeNull(); expect(content.textContent).not.toContain('Pin Mote'); expect(content.textContent).not.toContain('Edit SOUL.md')
+  // Ordinary Topics now live under Category content, not as Mote roster rows.
+  expect(document.querySelector(`.space-motes-section [data-space-nav="topic:${ordinaryTopicId}"]`)).toBeNull()
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
+  try {
+    await act(async () => root.render(<SpaceObjectContextMenu target={topicSpaceIconTarget(scratchWorkspace, catalog.find(topic => topic.id === ordinaryTopicId)!)} onChangeIcon={() => {}}>
+      <button type="button" data-space-icon-target="original-plain-topic">Original ordinary Topic</button>
+    </SpaceObjectContextMenu>))
+    content = await menu(host.querySelector('button')!)
+    expect(content.textContent).toContain('Change avatar'); expect(content.textContent).not.toContain('Archive')
+    expect(content.textContent).not.toContain('Pin Mote'); expect(content.textContent).not.toContain('Edit persona')
+  } finally { await act(async () => root.unmount()); host.remove() }
   expect(api.scratch.setMoteArchived).not.toHaveBeenCalled()
 })
 it('unknown archive metadata remains a Mote with neutral discovery, retained exact target and a working retry notice', async () => {
@@ -301,7 +312,7 @@ it('unknown archive metadata remains a Mote with neutral discovery, retained exa
   expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.error).toContain('Archive state unconfirmed')
   useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 0, topics: catalog, reading: false, error: null } } })
   await app.mount(); expect(choice(customMoteId)).not.toBeNull()
-  expect(app.panel().textContent).toContain('Mote archive state is unconfirmed'); expect(app.panel().textContent).not.toContain('Topic directory is still being confirmed')
+  expect(app.panel().textContent).toContain(catalog[1]!.title + ' archive state is unconfirmed'); expect(app.panel().textContent).not.toContain('Topic directory is still being confirmed')
   expect(app.panel().dataset.moteTargetTab).toBe(customTab.id)
   const before = useAppStore.getState(); await moteClick(button('Retry directory', app.panel())); quiet(before)
 })
@@ -361,6 +372,8 @@ it('unconfirmed write receipt never publishes success or hides the original Mote
 })
 it('Launcher recommends active objects while its explicitly selected archived Mote and nonempty in-flight request retain the same original owner', async () => {
   selected(true)
+  useLauncherState.getState().selectMote(customMoteId)
+  useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID, 'agents', 'collapsed')
   useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', quietTab.id)
   await app.mount(); await moteClick(button('Close Mote', app.panel()))
   const launcher = document.querySelector<HTMLElement>(`.workbench-tab-slot[data-workbench-tab-id="${quietTab.id}"] .launch-surface`)

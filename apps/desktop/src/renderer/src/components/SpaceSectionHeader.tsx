@@ -15,10 +15,10 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
 
 /** Categories share controls; member indentation expresses category ownership, not a directory. */
 export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen,
-  createLabel, onCreate, createIcon, activity, selected = false, navigationId, parentNavigationId, collapsible = true, iconTargetKey }: {
+  createLabel, onCreate, createIcon, activity, actions, selected = false, navigationId, parentNavigationId, collapsible = true, iconTargetKey }: {
   label: string; count: number; icon: ReactNode; expanded: boolean; filtering: boolean;
   onToggle(): void; onOpen?: () => void; createLabel?: string; onCreate?: () => Promise<unknown>; createIcon?: ReactNode;
-  activity?: ReactNode; selected?: boolean; navigationId?: string; parentNavigationId?: string; collapsible?: boolean; iconTargetKey?: string
+  activity?: ReactNode; actions?: ReactNode; selected?: boolean; navigationId?: string; parentNavigationId?: string; collapsible?: boolean; iconTargetKey?: string
 }) {
   const [busy, setBusy] = useState(false)
   const reportError = useAppStore((state) => state.reportError)
@@ -38,6 +38,7 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
       <strong>{label}</strong><small>{count}</small>
     </button>
     {activity}
+    {actions}
     {onCreate ? <button type="button" className="icon-button space-section-add" aria-label={createLabel} title={createLabel}
       disabled={busy} onClick={() => void create()}>{createIcon ?? <Plus size={13} />}</button> : null}
   </div>

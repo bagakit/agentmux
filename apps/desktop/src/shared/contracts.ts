@@ -401,6 +401,11 @@ export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact', 'dense'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
 export const PROJECT_RAIL_DENSITY_DEFAULT: ProjectRailDensity = 'default'
 
+/** The original Mote roster has two presentations, independent of its identities. */
+export const MOTE_DIRECTORY_VIEW_IDS = ['collaborators', 'list'] as const
+export type MoteDirectoryView = (typeof MOTE_DIRECTORY_VIEW_IDS)[number]
+export const MOTE_DIRECTORY_VIEW_DEFAULT: MoteDirectoryView = 'collaborators'
+
 /** Fixed Executor identity marks; arbitrary text does not belong in the avatar surface. */
 export const AGENT_AVATAR_BADGE_IDS = ['spark', 'bolt', 'shield', 'flame'] as const
 export type AgentAvatarBadge = (typeof AGENT_AVATAR_BADGE_IDS)[number]
@@ -552,6 +557,7 @@ export type AppConfig = {
    * 真的切了档时发生。密度是看法不是数据，补一次盘只是白写。
    */
   projectRailDensity?: ProjectRailDensity
+  moteDirectoryView?: MoteDirectoryView
   /**
    * 复制路径时是否给绝对地址。默认（缺席 / `false`）把当前用户家目录缩写成 `~`；`true` 是用户主动
    * 选择的「我要绝对路径」这一档。用户原话：「默认是波浪线，但也可以支持用户配置这种绝对地址」，
