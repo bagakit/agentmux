@@ -1,3 +1,4 @@
+import { InputGroup } from '@agentmux/client-ui/input'
 import { ArrowRight } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -39,13 +40,13 @@ export function MoteFirstCooperation({ scope, reference }: {
     finally { if (lifetime.current === epoch) { flight.current = false; setPending(false) } }
   }
   return <section className="mote-cooperation-entry" aria-label="Start working together">
-    <div className="mote-cooperation-entry__question">
+    <InputGroup className="mote-cooperation-entry__question">
       <ComposerTextarea aria-label="A question for this Mote" rows={1} value={question}
         placeholder="What’s on your mind?"
         onValueChange={value => useLauncherState.getState().setDraft(key, 'prompt', value)} />
       {question.trim() ? <MoteBehaviorAction label={pending ? 'Reading original materials' : 'Prepare this question in a new discussion'}
         onClick={() => void prepare()}><ArrowRight size={16} /></MoteBehaviorAction> : null}
-    </div>
+    </InputGroup>
     {pending ? <p className="mote-details__hint" role="status">Reading the saved profile…</p> : null}
     {issue ? <p className="mote-details__issue" role="status">{issue}</p> : null}
     {persistenceIssue ? <p className="mote-details__issue" role="status">{persistenceIssue}</p> : null}

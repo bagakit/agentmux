@@ -10,7 +10,8 @@
 html, body, #root { width: 100%; height: 100%; margin:0; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+button:focus-visible,
+input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset']):focus-visible {
   outline: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
   outline-offset: 1px;
 }

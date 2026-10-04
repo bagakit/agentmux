@@ -1,3 +1,4 @@
+import { Textarea } from '@agentmux/client-ui/input'
 import { useState, type ComponentPropsWithRef } from 'react'
 import {
   composerCompositionHandlers,
@@ -44,7 +45,7 @@ export function ComposerTextarea({ value, onValueChange, ...rest }: ComposerText
   })
 
   return (
-    <textarea
+    <Textarea
       {...rest}
       value={composerRenderValue(value, composition)}
       onChange={(event) => ime.change(event.target.value)}

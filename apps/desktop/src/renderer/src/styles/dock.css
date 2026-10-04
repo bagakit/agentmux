@@ -128,7 +128,7 @@
 .workspace-topic-item.current:hover { background: var(--green-bg-hover); }
 .workspace-topic-rename-form { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4); }
 .workspace-topic-rename-form input { min-width: 0; height: 25px; padding:0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--bg); font: inherit; font-size: var(--fs-meta); outline: 0; }
-.workspace-topic-rename-form input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.workspace-topic-rename-form input:focus { border-color: var(--focus-line); }
 /* Topic 行的 identity 排版走共享的 .selector-row__identity；这里只留本面板的两点差异：
    摘要用 micro 字号，且标题与摘要之间留一格——此前这一格是那条已删的 `> span { gap }`
    顺带给的，与共享层写明的 `gap:0` 相矛盾，删掉它就得把这个意图明写出来。 */

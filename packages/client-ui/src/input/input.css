@@ -1,0 +1,30 @@
+/* Low-specificity defaults let each surface keep its existing geometry. */
+:where(.ui-input, .ui-input-group) {
+  box-sizing: border-box; min-width: 0; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text);
+}
+:where(.ui-input) { font: inherit; padding: 6px 8px; }
+:where(.ui-input-group) { display: flex; align-items: flex-end; gap: 6px; }
+:where(.ui-input)::placeholder { color: var(--text-3); }
+.ui-input:disabled { opacity: .55; cursor: not-allowed; }
+.ui-input:read-only { cursor: default; }
+
+/* The same text focus language also applies to native fields not yet using the primitives. */
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset'])):focus-visible,
+textarea:focus-visible, select:focus-visible {
+  outline: 1px solid var(--focus-line); outline-offset: -1px;
+}
+.ui-input:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.ui-input-group:focus-within { border-color: var(--focus-line); }
+input[aria-invalid='true']:focus-visible, textarea[aria-invalid='true']:focus-visible,
+select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
+.ui-input[aria-invalid='true'], .ui-input-group[aria-invalid='true'],
+.ui-input-group:has(> .ui-input[aria-invalid='true']) { border-color: var(--red-line); }
+.ui-input-group > .ui-input { border: 0; background: transparent; }
+.ui-input-group > .ui-input:focus-visible { outline: none; }
+
+@media (forced-colors: active) {
+  input:focus-visible, textarea:focus-visible, select:focus-visible { outline-color: Highlight; }
+  .ui-input:focus-visible, .ui-input-group:focus-within { border-color: Highlight; }
+  .ui-input-group > .ui-input:focus-visible { border: 0; outline: none; }
+}

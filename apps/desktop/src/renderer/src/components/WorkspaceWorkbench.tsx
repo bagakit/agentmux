@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { Pin } from 'lucide-react'
 import { motePinnedTab, moteTabOrder, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
@@ -442,7 +443,7 @@ function SortableWorkbenchTab({
         >
           <WorkbenchTabMarks marks={marks} />
           {rename ? (
-            <input
+            <TextInput
               ref={renameInput}
               className="workbench-tab__rename"
               aria-label={rename.label}
@@ -716,7 +717,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}
       homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
       <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={target ? visible : props.nativeSurfacesVisible}
-        headerPortalTargetId={target?.headerPortalTargetId ?? props.headerPortalTargetId} />
+        headerPortalTargetId={target?.surface === 'focus' ? null : target?.headerPortalTargetId ?? props.headerPortalTargetId} />
     </StableWorkbenchView>
 }
 
@@ -2039,9 +2040,7 @@ export function WorkspaceWorkbench({
               restore: 'Choose its original location in Space to restore placement-dependent actions.' } }} /> : null}
           <WorkbenchRegionTree
             tab={tab} groupId={confirmedDisplayGroup ?? homeReferences.get(tab.id)?.groupId} regionTarget={regionTarget}
-            headerPortalTargetId={projection?.surface === 'focus' && targetId && storedLayout && ownerByTab.has(tab.id) &&
-              tab.layout.root.type === 'leaf' && tab.regions[tab.layout.root.regionId]?.kind === 'agent'
-              ? projection?.headerPortalTargetId ?? `${targetId}-header` : null}
+            headerPortalTargetId={null}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}

@@ -1,5 +1,6 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_TOPIC_TITLE_MAX_LENGTH } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
@@ -14,6 +15,7 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
 }) {
   const [name, setName] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), content = useRef<HTMLDivElement>(null)
+  const errorId = useId()
   const current = useRef(target); current.current = target
   const epoch = useRef({})
   useLayoutEffect(() => { epoch.current = {}; setName(target?.topic.title ?? ''); setError(null); setBusy(false) }, [target?.topic.id, target?.workspace.id])
@@ -45,9 +47,9 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
         <Dialog.Title className="confirmation-dialog__title">Rename Mote</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Choose the name shown in Space and the Mote list. Its discussions and files stay together.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void save() }}>
-          <label className="mote-rename__field">Name<input ref={input} value={name} disabled={busy} autoComplete="off" maxLength={SCRATCH_TOPIC_TITLE_MAX_LENGTH}
+          <label className="mote-rename__field">Name<TextInput ref={input} value={name} disabled={busy} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} autoComplete="off" maxLength={SCRATCH_TOPIC_TITLE_MAX_LENGTH}
             onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault() }} /></label>
-          {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
+          {error ? <p id={errorId} role="alert" className="surface-inline-error">{error}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button>
             <button type="submit" className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save name'}</button></footer>
         </form>

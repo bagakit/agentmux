@@ -6,6 +6,12 @@
   "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
+    "./input": {
+      "types": "./src/input/index.ts",
+      "browser": "./src/input/index.ts",
+      "import": "./dist/input/index.js"
+    },
+    "./input/styles.css": "./src/input/input.css",
     ".": {
       "types": "./src/index.ts",
       "browser": "./src/index.ts",
