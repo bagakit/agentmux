@@ -8,12 +8,14 @@ const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../.
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const directory = path.join(root, (".tmp/mote-companion/persona-renderer-" + (globalThis.crypto.randomUUID()) + "")), compiled = path.join(directory, 'compiled')
+const quickMode = process.argv.includes('--quick-mode'), sourceFixture = quickMode ? path.join(fixture, '../mote-quick-mode') : fixture
+const entry = quickMode ? 'quick-entry' : 'persona-entry', main = quickMode ? 'quick-main.cjs' : 'persona-main.cjs'
 const behaviorOnly = process.argv.includes('--behavior-only')
 const ideasOnly = process.argv.includes('--ideas-only')
 const feedbackOnly = process.argv.includes('--feedback-only')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
-const receipt = { passed: false, captureOnly: true, captureSubset: behaviorOnly ? 'behavior-only' : feedbackOnly ? 'feedback-only' : ideasOnly ? 'ideas-only' : 'full', aestheticReview: 'not-performed', source: {}, images: {},
-  boundary: 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled filesystem/history/Goal API replies, synthetic exact Session reference and no configured Executor; no live user App/Run, Core native lifecycle, model, package or install claim.' }
+const receipt = { passed: false, captureOnly: true, captureSubset: quickMode ? 'quick-mode' : behaviorOnly ? 'behavior-only' : feedbackOnly ? 'feedback-only' : ideasOnly ? 'ideas-only' : 'full', aestheticReview: 'not-performed', source: {}, images: {},
+  boundary: quickMode ? 'Original Profile, WorkspaceWorkbench, SessionPane, Composer and Editor in an isolated Electron Renderer. Controlled original Files/Session replies and actual configured identities; trusted mouse/keyboard with original HTML-select change. No live App/Run, native lifecycle, model, package or install claim.' : 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled filesystem/history/Goal API replies, synthetic exact Session reference and no configured Executor; no live user App/Run, Core native lifecycle, model, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const alias = Object.fromEntries(['delivery-diagnostics','composer-file-reference','composer-semantic-reference','error-presentation'].map(name => ['@agentmux/client-ui/'+name,path.join(root,'packages/client-ui/src/lib/'+name+'.ts')]))
@@ -44,16 +46,16 @@ try {
   }
   const clientUiRoot = path.join(root, 'packages/client-ui'), clientUiManifest = JSON.parse(await fs.readFile(path.join(clientUiRoot, 'package.json'), 'utf8'))
   const clientUiSource = { name: 'original-client-ui-source', setup(plugin) { plugin.onResolve({ filter: /^@agentmux\/client-ui(?:\/.*)?$/ }, args => { const key = args.path === '@agentmux/client-ui' ? '.' : '.' + args.path.slice('@agentmux/client-ui'.length); const entries = Object.entries(clientUiManifest.exports).sort(([a],[b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length-a.length); for (const [sub, target] of entries) { const [before,after] = sub.split('*'); if (sub !== key && (!sub.includes('*') || !key.startsWith(before) || !key.endsWith(after))) continue; const source = typeof target === 'string' ? target : target.browser; if (!source) throw Error('Missing current Source export'); return { path: path.join(clientUiRoot, source.replace('*', sub.includes('*') ? key.slice(before.length, key.length-after.length) : '')) } } throw Error('Unknown original UI export '+key) }) } }
-  const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'persona-entry.tsx')], outdir: compiled, bundle: true,
+  const built = await build({ absWorkingDir: root, entryPoints: [path.join(sourceFixture, entry + '.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientUiSource, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
-  for (const name of ['capture-persona.mjs', 'persona-main.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  for (const file of [import.meta.filename, path.join(sourceFixture, main)]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
-  await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="persona-entry.css"></head><body><div id="root"></div><script type="module" src="persona-entry.js"></script></body></html>')
+  await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="' + entry + '.css"></head><body><div id="root"></div><script type="module" src="' + entry + '.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'persona-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(behaviorOnly ? ['--behavior-only'] : feedbackOnly ? ['--feedback-only'] : ideasOnly ? ['--ideas-only'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(sourceFixture, main), path.join(compiled, 'index.html'), directory, directory, ...(behaviorOnly ? ['--behavior-only'] : feedbackOnly ? ['--feedback-only'] : ideasOnly ? ['--ideas-only'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
