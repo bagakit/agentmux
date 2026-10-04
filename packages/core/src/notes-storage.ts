@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, open, readFile, realpath, lstat, unlink, readdir } from 'node:fs/promises'
+import { mkdir, open, readFile, realpath, lstat, unlink, readdir, link } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { durableWriteFile } from './durable-write.js'
@@ -41,7 +41,7 @@ export class AgentMuxNotesStorage {
   async hasLocation(): Promise<boolean> { try { await readFile(this.locatorPath); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error } }
   async catalogEstablished(): Promise<boolean> { const location = await this.location(); return !!location.catalogEstablished || Object.keys(location.operations).length > 0 }
   async confirmCatalog(): Promise<void> { const location = await this.location(); if (!location.catalogEstablished) await this.persist({ ...location, catalogEstablished: true }) }
-  async inspect(operationId?: string): Promise<NotesStorageSnapshot> { const location = await this.location(); return { directory: location.directory, catalogPath: location.pending ? location.operations[location.pending]!.sourceCatalog : join(location.directory, 'notebooks.json'), resourceChanges: Object.values(location.operations).filter(o => o.phase === 'committed').flatMap(o => o.resourceChanges), directoryChanges: Object.values(location.operations).filter(o => o.phase === 'committed' && o.expectedDirectory !== o.directory).map(o => ({ from: o.expectedDirectory, to: o.directory })), operation: operationId ? Object.hasOwn(location.operations, operationId) ? location.operations[operationId]! : null : location.pending ? location.operations[location.pending] ?? null : null } }
+  async inspect(operationId?: string): Promise<NotesStorageSnapshot> { const location = await this.location(); return { directory: location.directory, catalogPath: location.pending && location.operations[location.pending]!.phase === 'prepared' ? location.operations[location.pending]!.sourceCatalog : join(location.directory, 'notebooks.json'), resourceChanges: Object.values(location.operations).filter(o => o.phase === 'committed').flatMap(o => o.resourceChanges), directoryChanges: Object.values(location.operations).filter(o => o.phase === 'committed' && o.expectedDirectory !== o.directory).map(o => ({ from: o.expectedDirectory, to: o.directory })), operation: operationId ? Object.hasOwn(location.operations, operationId) ? location.operations[operationId]! : null : location.pending ? location.operations[location.pending] ?? null : null } }
   async withLock<T>(work: () => Promise<T>): Promise<T> {
     await mkdir(dirname(this.locatorPath), { recursive: true, mode: 0o700 }); const lock = await open(this.locatorPath + '.lock', 'a+', 0o600)
     try { const deadline = Date.now() + 5000; while (!native.tryLock(lock.fd)) { if (Date.now() > deadline) throw failure('Notes storage is completing its original change. Retry the same operation.', 'NOTEBOOK_BUSY'); await delay(10) }; return await work() } finally { await lock.close() }
@@ -53,7 +53,7 @@ export class AgentMuxNotesStorage {
     return this.withLock(async () => {
       if (!input.operationId?.trim() || !isAbsolute(input.directory) || !isAbsolute(input.expectedDirectory)) throw failure('Choose an absolute Notes directory and the original operation identity.', 'NOTES_STORAGE_INPUT_INVALID')
       let location = await this.location(); const existing = Object.hasOwn(location.operations, input.operationId) ? location.operations[input.operationId] : undefined
-      if (existing) { if (existing.directory !== resolve(input.directory) || existing.expectedDirectory !== resolve(input.expectedDirectory)) throw failure('This operation identity belongs to a different directory change.', 'NOTES_STORAGE_INPUT_INVALID'); if (existing.phase === 'prepared') await this.finish(location, existing); else await this.cleanup(existing); return this.inspect(input.operationId) }
+      if (existing) { if (existing.directory !== resolve(input.directory) || existing.expectedDirectory !== resolve(input.expectedDirectory)) throw failure('This operation identity belongs to a different directory change.', 'NOTES_STORAGE_INPUT_INVALID'); if (existing.phase === 'prepared') await this.finish(location, existing); else { await this.cleanup(existing); if (location.pending === existing.operationId) { location.pending = null; await this.persist(location) } }; return this.inspect(input.operationId) }
       if (location.pending) throw failure('Another Notes directory change needs recovery first.', 'NOTEBOOK_BUSY')
       if (location.directory !== resolve(input.expectedDirectory)) throw failure('The Notes directory changed after this setting was opened.', 'CONFIG_CONFLICT')
       const destination = resolve(input.directory), sourceRoot = location.directory
@@ -63,8 +63,9 @@ export class AgentMuxNotesStorage {
       await mkdir(destination, { recursive: true, mode: 0o700 })
       if ((await lstat(destination)).isSymbolicLink()) throw failure('Choose the actual Notes directory rather than a symbolic link.', 'NOTES_STORAGE_INPUT_INVALID')
       const sourceCatalog = adoption?.catalogPath ?? join(sourceRoot, 'notebooks.json')
-      let catalog = await this.readCatalog(sourceCatalog, !!location.catalogEstablished || Object.keys(location.operations).length > 0)
-      if (join(destination, 'notebooks.json') !== sourceCatalog) { try { const occupiedCatalog = parseNotebookState(JSON.parse(await readFile(join(destination, 'notebooks.json'), 'utf8'))); if (JSON.stringify(occupiedCatalog) !== JSON.stringify(catalog)) throw failure('The target already contains another Notebook directory.', 'NOTES_STORAGE_CONFLICT') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
+      const originalCatalogBytes = await readFile(sourceCatalog).catch(error => { if (error.code !== 'ENOENT') throw error; if (location.catalogEstablished || Object.keys(location.operations).length) throw failure('The original confirmed Notebook catalog is unavailable.', 'NOTEBOOK_READ_UNCONFIRMED'); return Buffer.alloc(0) })
+      let catalog = originalCatalogBytes.length ? parseNotebookState(JSON.parse(originalCatalogBytes.toString())) : emptyNotebookState()
+      if (join(destination, 'notebooks.json') !== sourceCatalog) { try { await lstat(join(destination, 'notebooks.json')); throw failure('The target already contains a Notebook directory.', 'NOTES_STORAGE_CONFLICT') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
       const resourceChanges: NotesResourceChange[] = [], files: NotesStorageOperation['files'] = []
       for (const page of Object.values(catalog.pages)) {
         const r = page.resource
@@ -97,34 +98,85 @@ export class AgentMuxNotesStorage {
         }
         await collect(sourceRoot)
       }
-      const operation: NotesStorageOperation = { ...input, directory: destination, expectedDirectory: sourceRoot, phase: 'prepared', resourceChanges, files, catalog, sourceCatalog, sourceCatalogHash: digest(await readFile(sourceCatalog).catch(error => { if (error.code !== 'ENOENT') throw error; return Buffer.alloc(0) })) }
+      const operation: NotesStorageOperation = { ...input, directory: destination, expectedDirectory: sourceRoot, phase: 'prepared', resourceChanges, files, catalog, sourceCatalog, sourceCatalogHash: digest(originalCatalogBytes) }
       location = { ...location, pending: input.operationId, operations: { ...location.operations, [input.operationId]: operation } }; await this.persist(location); await this.finish(location, operation); return this.inspect(input.operationId)
     })
   }
-  private async finish(location: Location, operation: NotesStorageOperation): Promise<void> {
-    for (const file of operation.files) {
-      const bytes = await readFile(file.source)
-      if (digest(bytes) !== file.hash) throw failure('A Note changed while its directory operation was prepared.', 'NOTES_STORAGE_CONFLICT')
-      await mkdir(dirname(file.destination), { recursive: true, mode: 0o700 })
-      const targetRoot = await realpath(operation.directory), parent = await realpath(dirname(file.destination)), parentRelative = relative(targetRoot, parent)
-      if (parentRelative.startsWith('..') || isAbsolute(parentRelative)) throw failure('The target file escaped its Notes directory.', 'NOTES_STORAGE_INPUT_INVALID')
-      if (file.destination === file.source) continue
-      try { if (!(await lstat(file.destination)).isFile()) throw failure('The destination is not an ordinary Note file.', 'NOTES_STORAGE_CONFLICT'); if (digest(await readFile(file.destination)) !== file.hash) throw failure('The target already contains a different Note file.', 'NOTES_STORAGE_CONFLICT') }
-      catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; await durableWriteFile(file.destination, bytes, { requireDirectorySync: true }) }
-      if (digest(await readFile(file.destination)) !== file.hash) throw failure('The copied Note bytes could not be confirmed.')
-    }
-    await durableWriteFile(join(operation.directory, 'notebooks.json'), JSON.stringify(operation.catalog) + '\n', { requireDirectorySync: true })
-    operation.phase = 'committed'; location.directory = operation.directory; location.pending = null; await this.persist(location)
-    await this.cleanup(operation)
+  /** Atomic create: an external file appearing at the destination is never replaced. */
+  private async createFile(path: string, bytes: Uint8Array): Promise<void> {
+    const temporary = path + '.' + randomUUID() + '.notes-transfer'
+    try {
+      const handle = await open(temporary, 'wx', 0o600)
+      try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+      try { await link(temporary, path) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; if (!(await lstat(path)).isFile() || digest(await readFile(path)) !== digest(bytes)) throw failure('The destination contains a different file.', 'NOTES_STORAGE_CONFLICT') }
+      const directory = await open(dirname(path), 'r'); try { await directory.sync() } finally { await directory.close() }
+    } finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error }) }
   }
-  private async cleanup(operation: NotesStorageOperation): Promise<void> {
-    await this.ports.beforeSourceCleanup?.(operation.resourceChanges)
-    // A retained source is recovery evidence, never a second writable owner. Delete only confirmed owned bytes.
-    for (const file of operation.files) if (file.source !== file.destination && digest(await readFile(file.source).catch(() => Buffer.alloc(0))) === file.hash) await unlink(file.source)
-    if (operation.sourceCatalog !== join(operation.directory, 'notebooks.json')) {
-      const original = await readFile(operation.sourceCatalog).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
-      if (original && digest(original) === operation.sourceCatalogHash) await unlink(operation.sourceCatalog)
+  private async finish(location: Location, operation: NotesStorageOperation): Promise<void> {
+    await mkdir(dirname(operation.sourceCatalog), { recursive: true, mode: 0o700 })
+    const catalogLock = await open(operation.sourceCatalog + '.lock', 'a+', 0o600)
+    try {
+      const deadline = Date.now() + 5000
+      while (!native.tryLock(catalogLock.fd)) { if (Date.now() > deadline) throw failure('The original Notebook writer is busy.', 'NOTEBOOK_BUSY'); await delay(10) }
+      const targetCatalog = join(operation.directory, 'notebooks.json'), preparedBytes = Buffer.from(JSON.stringify(operation.catalog) + '\n'), preparedHash = digest(preparedBytes)
+      const originalBytes = await readFile(operation.sourceCatalog).catch(error => { if (error.code !== 'ENOENT') throw error; return Buffer.alloc(0) })
+      if (digest(originalBytes) !== operation.sourceCatalogHash && !(targetCatalog === operation.sourceCatalog && digest(originalBytes) === preparedHash)) throw failure('The original Notebook catalog changed after this move was prepared.', 'NOTES_STORAGE_CONFLICT')
+      if (targetCatalog !== operation.sourceCatalog) {
+        const existing = await readFile(targetCatalog).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
+        if (existing && (!(await lstat(targetCatalog)).isFile() || digest(existing) !== preparedHash)) throw failure('The destination Notebook catalog changed after this move was prepared.', 'NOTES_STORAGE_CONFLICT')
+      }
+      for (const file of operation.files) {
+        const bytes = await readFile(file.source)
+        if (digest(bytes) !== file.hash) throw failure('A Note changed while its directory operation was prepared.', 'NOTES_STORAGE_CONFLICT')
+        await mkdir(dirname(file.destination), { recursive: true, mode: 0o700 })
+        const targetRoot = await realpath(operation.directory), parent = await realpath(dirname(file.destination)), parentRelative = relative(targetRoot, parent)
+        if (parentRelative.startsWith('..') || isAbsolute(parentRelative)) throw failure('The target file escaped its Notes directory.', 'NOTES_STORAGE_INPUT_INVALID')
+        if (file.destination === file.source) continue
+        await this.createFile(file.destination, bytes)
+        if (!(await lstat(file.destination)).isFile() || digest(await readFile(file.destination)) !== file.hash) throw failure('The target already contains a different Note file.', 'NOTES_STORAGE_CONFLICT')
+      }
+      if (targetCatalog === operation.sourceCatalog) await durableWriteFile(targetCatalog, preparedBytes, { requireDirectorySync: true })
+      else { await this.createFile(targetCatalog, preparedBytes); if (digest(await readFile(targetCatalog)) !== preparedHash) throw failure('The destination Notebook catalog was occupied before publication.', 'NOTES_STORAGE_CONFLICT') }
+      operation.phase = 'committed'; location.directory = operation.directory; location.pending = operation.operationId; await this.persist(location)
+      await this.cleanup(operation, true)
+      location.pending = null; await this.persist(location)
+    } finally { await catalogLock.close() }
+  }
+  private async cleanup(operation: NotesStorageOperation, locked = false): Promise<void> {
+    if (!locked) {
+      await mkdir(dirname(operation.sourceCatalog), { recursive: true, mode: 0o700 })
+      const lock = await open(operation.sourceCatalog + '.lock', 'a+', 0o600)
+      try { const deadline = Date.now() + 5000; while (!native.tryLock(lock.fd)) { if (Date.now() > deadline) throw failure('The original Notebook writer is busy.', 'NOTEBOOK_BUSY'); await delay(10) }; return await this.cleanup(operation, true) }
+      finally { await lock.close() }
     }
+    const pending = [] as NotesStorageOperation['files']
+    for (const file of operation.files) if (file.source !== file.destination) {
+      const original = await readFile(file.source).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
+      if (original && digest(original) !== file.hash) throw failure('An original Note changed before its copies were acknowledged.')
+      if (original) pending.push(file)
+    }
+    const originalCatalog = operation.sourceCatalog === join(operation.directory, 'notebooks.json') ? null : await readFile(operation.sourceCatalog).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
+    if (originalCatalog && digest(originalCatalog) !== operation.sourceCatalogHash) throw failure('The original Notebook catalog changed before its copies were acknowledged.')
+    const removeCatalog = !!originalCatalog
+    const confirmDestination = async () => {
+      if (!pending.length && !removeCatalog) return
+      const targetCatalog = join(operation.directory, 'notebooks.json')
+      if (!(await lstat(targetCatalog)).isFile()) throw failure('The destination Notebook catalog is not an ordinary file.')
+      const catalog = await this.readCatalog(targetCatalog, true)
+      for (const file of pending) if (!(await lstat(file.destination)).isFile() || digest(await readFile(file.destination)) !== file.hash) throw failure('A destination Note is unavailable or changed; the last original copy is retained.')
+      for (const change of operation.resourceChanges) if (operation.catalog.pages[change.noteId]) {
+        const current = catalog.pages[change.noteId]?.resource
+        if (!current || !(['hostId', 'workspaceId', 'workspacePath', 'path'] as const).every(key => current[key] === change.to[key])) throw failure('The destination Notebook no longer confirms this original Note resource.')
+      }
+    }
+    await confirmDestination()
+    await this.ports.beforeSourceCleanup?.(operation.resourceChanges)
+    await confirmDestination()
+    for (const file of pending) if (digest(await readFile(file.source)) !== file.hash) throw failure('An original Note changed during the host acknowledgement.')
+    if (removeCatalog && digest(await readFile(operation.sourceCatalog)) !== operation.sourceCatalogHash) throw failure('The original Notebook catalog changed during the host acknowledgement.')
+    // All destination bytes, catalog resources and host references are confirmed before deleting any source.
+    for (const file of pending) if (digest(await readFile(file.source)) === file.hash) await unlink(file.source)
+    if (removeCatalog && digest(await readFile(operation.sourceCatalog)) === operation.sourceCatalogHash) await unlink(operation.sourceCatalog)
   }
   async bootstrap(legacy: { catalogPath: string; workspace: { id: string; hostId: string; path: string }; destinationWorkspaceId: string }): Promise<NotesStorageSnapshot> {
     await this.withLock(async () => {
@@ -132,14 +184,14 @@ export class AgentMuxNotesStorage {
       try { await readFile(legacy.catalogPath) } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e }
       await this.persist({ schemaVersion: 1, directory: dirname(legacy.catalogPath), operations: {}, pending: null })
     })
-    const current = await this.inspect()
+    let current = await this.inspect()
     if (current.directory !== dirname(legacy.catalogPath)) {
-      await this.resume()
+      await this.resume(); current = await this.inspect()
       const catalog = await this.readCatalog(current.catalogPath, await this.catalogEstablished())
       if (!Object.values(catalog.pages).some(p => p.resource.hostId === legacy.workspace.hostId && p.resource.workspaceId === legacy.workspace.id && p.resource.workspacePath === legacy.workspace.path && !p.resource.path.includes('/'))) return this.inspect()
       return this.change({ operationId: 'adopt-original-note-resources', expectedDirectory: current.directory, directory: current.directory }, { ...legacy, catalogPath: current.catalogPath })
     }
     return this.change({ operationId: 'adopt-original-notes-directory', expectedDirectory: current.directory, directory: this.initialDirectory }, legacy)
   }
-  async resume(): Promise<void> { await this.withLock(async () => { const location = await this.location(); if (location.pending) await this.finish(location, location.operations[location.pending]! ) }) }
+  async resume(): Promise<void> { await this.withLock(async () => { const location = await this.location(); if (location.pending) { const operation = location.operations[location.pending]!; if (operation.phase === 'prepared') await this.finish(location, operation); else { await this.cleanup(operation); location.pending = null; await this.persist(location) } } }) }
 }
