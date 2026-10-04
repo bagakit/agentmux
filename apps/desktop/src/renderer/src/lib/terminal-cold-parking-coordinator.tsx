@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { shallow } from 'zustand/shallow'
-import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from './session-presentation'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
@@ -13,6 +12,7 @@ import {
 } from './terminal-cold-parking-policy'
 import type { WorkbenchTab } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
+import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 
 type Layouts = Readonly<Record<string, WorkspaceLayout>>
 type Tabs = Readonly<Record<string, WorkbenchTab>>
@@ -23,12 +23,47 @@ type Tabs = Readonly<Record<string, WorkbenchTab>>
 // deadline scheduler's dependencies).
 const EMPTY_TABS: Tabs = Object.freeze({})
 const EMPTY_LAYOUTS: Layouts = Object.freeze({})
-const EMPTY_SESSIONS: readonly SessionSnapshot[] = Object.freeze([])
+const EMPTY_SESSIONS: readonly TerminalParkingSessionFacts[] = Object.freeze([])
+
+type TerminalParkingSessionFacts = { id: string; kind: SessionSnapshot['kind']; hostId: string; runId: string; canRebuild: boolean; hasPendingInteraction: boolean }
+
+/** Only these facts grant parking; no output/status timestamp or whole Session identity does. */
+export function terminalParkingSessionFacts(session: Pick<SessionSnapshot, 'id' | 'kind' | 'control' | 'processState' | 'status'> & { pendingInteraction?: unknown }): TerminalParkingSessionFacts {
+  return { id: session.id, kind: session.kind, hostId: session.control.hostId, runId: session.control.run.runId, canRebuild: session.processState === 'running' &&
+    session.status.state !== 'error' && session.status.state !== 'exited' && session.status.state !== 'disconnected',
+    hasPendingInteraction: Boolean(session.kind === 'agent' && session.pendingInteraction) }
+}
+
+/** One coordinator-owned projection, bounded by its current topology, not Session lifetime. */
+export function createTerminalParkingSessionSelector(sessionIds: readonly string[]) {
+  let value: readonly TerminalParkingSessionFacts[] = EMPTY_SESSIONS
+  let previousSessions: readonly SessionSnapshot[] | undefined
+  const previous = new Map<string, TerminalParkingSessionFacts>()
+  return (state: { sessions: readonly SessionSnapshot[] }): readonly TerminalParkingSessionFacts[] => {
+    if (sessionIds.length === 0) return EMPTY_SESSIONS
+    if (state.sessions === previousSessions) return value
+    previousSessions = state.sessions
+    const byId = sessionPresentationById(state.sessions)
+    const next: TerminalParkingSessionFacts[] = []
+    for (const id of sessionIds) {
+      const session = byId.get(id)
+      if (!session) { previous.delete(id); continue }
+      const facts = terminalParkingSessionFacts(session)
+      const known = previous.get(id)
+      const item = known && known.kind === facts.kind && known.hostId === facts.hostId && known.runId === facts.runId && known.canRebuild === facts.canRebuild && known.hasPendingInteraction === facts.hasPendingInteraction ? known : facts
+      previous.set(id, item)
+      next.push(item)
+    }
+    if (shallow(value, next)) return value
+    value = next
+    return value
+  }
+}
 
 export type TerminalParkingCollectionInput = {
   tabs: Tabs
   layouts: Layouts
-  sessions: readonly SessionSnapshot[]
+  sessions: readonly TerminalParkingSessionFacts[]
   activeWorkspaceId: string | null
   workbenchVisible: boolean
   projectedVisibleTabIds?: ReadonlySet<string> | undefined
@@ -60,27 +95,9 @@ export function collectTerminalColdParkCandidates(
         hiddenSinceMs: null,
         lastActivatedSeq: 0,
         phase: surface.phase,
-        // Only a currently running Run has an attach/replay contract. Interrupted, exited, errored,
-        // or continuity-unavailable Sessions remain rendered so recovery stays visible.
-        //
-        // A continuity failure is covered by `state !== 'error'` and needs no clause of its own —
-        // a `status.continuity === undefined` clause here was measured to be dead code. Both writers
-        // of that field go through one producer (`continuityStatusFields` in store.ts, shared by the
-        // startup candidate projection and the user-pressed recovery path) which hardcodes
-        // `state: 'error'`; and every later status event replaces the whole `status` object
-        // (`session-state.ts`, agent-status and process-state), so the field cannot survive into a
-        // non-error state. Deleting such a clause reddened only a fixture hand-built to hold
-        // `state: 'running'` alongside it — a combination production never produces.
-        canRebuild: Boolean(
-          session &&
-          session.processState === 'running' &&
-          session.status.state !== 'error' &&
-          session.status.state !== 'exited' &&
-          session.status.state !== 'disconnected'
-        ),
-        hasPendingInteraction: Boolean(
-          session?.kind === 'agent' && session.pendingInteraction
-        )
+        // Unknown, ended or failed Runs stay rendered; related interaction remains available.
+        canRebuild: session?.canRebuild ?? false,
+        hasPendingInteraction: session?.hasPendingInteraction ?? false
       })
     }
   }
@@ -134,19 +151,13 @@ export function useTerminalColdParking({
   // These defaults are deliberately at the store-selector boundary. During hydration (and in
   // static/resource-probe renders) a partial store is a valid transient state; parking should
   // observe an empty workbench rather than make the entire App render fail closed.
-  const tabs = useAppStore((state) => state?.tabs) ?? EMPTY_TABS
+  const tabs = useAppStore((state) => workbenchNavigationTabs(state?.tabs ?? EMPTY_TABS)) ?? EMPTY_TABS
   const layouts = useAppStore((state) => state?.layouts) ?? EMPTY_LAYOUTS
   const sessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap((tab) => (
     Object.values(tab.regions).flatMap((surface) => isSessionSurface(surface) ? [surface.sessionId] : [])
   )))], [tabs])
-  const sessions = useAppStore(useShallow((state) => {
-    if (sessionIds.length === 0) return EMPTY_SESSIONS
-    const byId = sessionPresentationById(state.sessions)
-    return sessionIds.flatMap((id) => {
-      const session = byId.get(id)
-      return session ? [session] : []
-    })
-  })) ?? EMPTY_SESSIONS
+  const sessionSelector = useMemo(() => createTerminalParkingSessionSelector(sessionIds), [sessionIds])
+  const sessions = useAppStore(sessionSelector) ?? EMPTY_SESSIONS
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const candidates = useMemo(
     () => collectTerminalColdParkCandidates({
@@ -184,7 +195,7 @@ export function useTerminalColdParking({
     const nowMs = Date.now()
     const currentIds = new Set(candidates.map((candidate) => candidate.id))
     let changed = false
-    for (const id of hiddenSinceByRegionRef.current.keys()) {
+    for (const id of new Set([...hiddenSinceByRegionRef.current.keys(), ...activationOrderByRegionRef.current.keys(), ...navigationContextByRegionRef.current.keys()])) {
       if (!currentIds.has(id)) {
         hiddenSinceByRegionRef.current.delete(id)
         activationOrderByRegionRef.current.delete(id)

@@ -1,5 +1,8 @@
 import type { BrowserBounds } from './contracts'
 
+/** Main-owned physically visible Browser rectangles; revision orders initial/read-event races. */
+export interface NativeBrowserVisibility { revision: number; bounds: BrowserBounds[] }
+
 /** Chrome and contained stage geometry only; never page DOM, payload or executable content. */
 export interface NativeOverlayRegion {
   id: string

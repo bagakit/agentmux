@@ -53,6 +53,7 @@ export function Ruler({
   items,
   scale,
   selectedIndex,
+  visible = true,
   band,
   onSelect,
   axes,
@@ -64,6 +65,7 @@ export function Ruler({
   items: readonly RulerAxisItem[]
   scale: RulerScale
   selectedIndex: number | null
+  visible?: boolean
   band: ReturnType<typeof rulerBand>
   onSelect: (index: number) => void
   /**
@@ -89,13 +91,14 @@ export function Ruler({
   const [trackWidth, setTrackWidth] = useState(0)
   useLayoutEffect(() => {
     const track = trackRef.current
-    if (!track) return
-    const measure = (): void => setTrackWidth(track.getBoundingClientRect().width)
+    if (!visible || !track) return
+    let active = true
+    const measure = (): void => { if (active) setTrackWidth(track.getBoundingClientRect().width) }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(track)
-    return () => observer.disconnect()
-  }, [])
+    return () => { active = false; observer.disconnect() }
+  }, [visible])
   const density = useMemo(() => conversationRulerDensity(items, trackWidth), [items, trackWidth])
   const axisLabel = describeRulerAxis(scale)
   const span = describeSpan(scale)

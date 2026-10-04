@@ -93,3 +93,6 @@ export type { AgentSessionHistoryResourceParams, AgentSessionHistoryResourceResu
 export * from './public-rpc-files.js'
 export * from './delivery-attempt.js'
 export * from './delivery-attempt-store.js'
+
+export { createInputPerformanceRecorder, hostedCarrierPerformance } from './performance-diagnostics.js'
+export type { ClientPerformanceDiagnostics, InputPerformanceSnapshot, HostedCarrierCost } from './performance-diagnostics.js'

@@ -1,6 +1,6 @@
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
-import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
+import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
@@ -241,6 +241,12 @@ const api: AgentMuxPreloadApi = {
       const wrapped = (_event: Electron.IpcRendererEvent, input: import('../shared/native-overlay').NativeBrowserInput): void => listener(input)
       ipcRenderer.on(NATIVE_BROWSER_INPUT_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_BROWSER_INPUT_CHANNEL, wrapped)
+    },
+    nativeBrowserVisibility: () => ipcRenderer.invoke('ui:nativeBrowserVisibility'),
+    onNativeBrowserVisibility(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, visibility: import('../shared/native-overlay').NativeBrowserVisibility): void => listener(visibility)
+      ipcRenderer.on(NATIVE_BROWSER_VISIBILITY_CHANNEL, wrapped)
+      return () => ipcRenderer.off(NATIVE_BROWSER_VISIBILITY_CHANNEL, wrapped)
     },
     publishNativeOverlays: (regions) => ipcRenderer.invoke('ui:publishNativeOverlays', regions),
     onNativeOverlayWarning(listener) {

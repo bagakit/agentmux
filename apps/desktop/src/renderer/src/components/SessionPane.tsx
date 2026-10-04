@@ -115,6 +115,7 @@ export function SessionPane({
 }) {
   const observationVisible = visible || presentations.some(target => target.visible !== false)
   useObservedConsumerCommit('sessionPane', observationVisible)
+  const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly }), [sessionId, visible, readOnly])
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const [takeoverSelection, setTakeoverSelection] = useState<string | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
@@ -131,16 +132,16 @@ export function SessionPane({
         'pointer', mailboxOrigin.tabGroupId)
     }
   }
-  const session = useObservedAppStore('sessionPane', observationVisible, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const session = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
-  const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, (state) => state.pendingAgentLaunches[sessionId])
-  const recoveryCandidate = useObservedAppStore('sessionPane', observationVisible, (state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
-  const nameMetadata = useObservedAppStore('sessionPane', observationVisible, state => sessionNameMetadataFor(state.sessionNameMetadata, sessionId, [
+  const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
+  const recoveryCandidate = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
+  const nameMetadata = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => sessionNameMetadataFor(state.sessionNameMetadata, sessionId, [
     linkOrigin.tabId && linkOrigin.regionId ? agentRegionExecution({tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, agentSessionId: sessionId})?.hostId : undefined,
     session?.hostId, pendingLaunch?.request?.hostId, recoveryCandidate?.hostId
   ]))
   const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
-  const historyHostId = useObservedAppStore('sessionPane', observationVisible, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
+  const historyHostId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
   const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
   const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && surfaceKind === 'agent' && visible && !parked && linkOrigin.tabId && linkOrigin.regionId
     ? { agentSessionId: sessionId, tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
@@ -152,36 +153,46 @@ export function SessionPane({
     : unobservedReference ? unobservedReference.source?.hostId
       : pendingLaunch ? pendingLaunch.request?.hostId
       : retainedHistory?.state === 'retired' ? retainedHistory.hostId : recoveryCandidate?.hostId
-  const configuredExecutionHost = useObservedAppStore('sessionPane', observationVisible, state => state.config?.hosts.find(host => host.id === executionHostId))
-  const runtimeHostUnavailable = useObservedAppStore('sessionPane', observationVisible, state => (state.runtimeEndpointWarnings ?? []).some(
+  const configuredExecutionHost = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.hosts.find(host => host.id === executionHostId))
+  const runtimeHostUnavailable = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => (state.runtimeEndpointWarnings ?? []).some(
     warning => warning.hostId === executionHostId && warning.availability !== 'connected'))
   const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId ?? retainedHistory?.history?.executorId)
-  const connectingExecutor = useObservedAppStore('sessionPane', observationVisible, (state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
-  const connectingAppearance = useObservedAppStore('sessionPane', observationVisible, (state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
-  const tabName = useObservedAppStore('sessionPane', observationVisible, (state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
-  const sourceWorkspaceId = useObservedAppStore('sessionPane', observationVisible, state => linkOrigin.tabId ? state.tabs[linkOrigin.tabId]?.workspaceId : undefined)
+  const connectingExecutor = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
+  const connectingAppearance = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
+  const tabName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
+  const sourceWorkspaceId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => linkOrigin.tabId ? state.tabs[linkOrigin.tabId]?.workspaceId : undefined)
   const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId,
     visible || presentations.some(target => target.visible !== false))
-  const timeline = useObservedAppStore('sessionPane', observationVisible, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
-  const timelineSnapshot = useObservedAppStore('sessionPane', observationVisible, (state) => state.timelines[sessionId])
+  const timeline = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
+  const timelineSnapshot = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId])
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
-  const firstPrompt = useObservedAppStore('sessionPane', observationVisible, firstPromptSelector)
-  const userName = useObservedAppStore('sessionPane', observationVisible, (state) => state.agentNames?.[sessionId])
-  const appendAgentComposerDraft = useObservedAppStore('sessionPane', observationVisible, (state) => state.appendAgentComposerDraft)
-  const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, (state) => state.config?.appearance.terminalTheme)
-  const autoFocus = useObservedAppStore('sessionPane', observationVisible, state => {
+  const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, firstPromptSelector)
+  const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
+  const appendAgentComposerDraft = useAppStore.getState().appendAgentComposerDraft
+  const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.config?.appearance.terminalTheme)
+  const autoFocus = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
     if (!visible || readOnly || state.retainedSpatialFocus || state.workbenchNavigationInputPolicy || state.mainSurface !== 'workbench' ||
       state.activeWorkspaceId !== mailboxOrigin.workspaceId || !mailboxOrigin.tabId || !linkOrigin.regionId) return false
     const choice = state.workbenchSpaceSelection
     return choice?.workspaceId === mailboxOrigin.workspaceId && choice.groupId === mailboxOrigin.tabGroupId &&
       choice.tabId === mailboxOrigin.tabId && choice.regionId === linkOrigin.regionId
   })
-  const terminalFontSize = useObservedAppStore('sessionPane', observationVisible,
+  const terminalFontSize = useObservedAppStore('sessionPane', observationVisible, consumerScope,
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
-  const viewMode = useObservedAppStore('sessionPane', observationVisible, viewModeSelector)
+  const viewMode = useObservedAppStore('sessionPane', observationVisible, consumerScope, viewModeSelector)
   const activitySourceKey = session?.kind === 'agent' ? JSON.stringify([session.control.hostId, session.id, session.control.run.runId]) : sessionId
+  // Status/time updates do not change the original native reading source.
+  const nativeSourceFacts = useMemo(() => session?.kind === 'agent' ? {
+    ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}),
+    ...(session.observedNativeHandle ? { observedNativeHandle: session.observedNativeHandle } : {}),
+    ...(session.nativeSourceObservation ? { nativeSourceObservation: session.nativeSourceObservation } : {}),
+    ...(session.nativeConfirmation ? { nativeConfirmation: session.nativeConfirmation } : {})
+  } : {}, [session?.kind, session?.kind === 'agent' ? session.nativeHandle : undefined,
+    session?.kind === 'agent' ? session.observedNativeHandle : undefined,
+    session?.kind === 'agent' ? session.nativeSourceObservation : undefined,
+    session?.kind === 'agent' ? session.nativeConfirmation : undefined])
   const activityLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
   const activityContent = useRef<ReactElement<ComponentProps<typeof ActivityView>> | null>(null)
   const currentSourceKey = useRef(activitySourceKey)
@@ -387,8 +398,9 @@ export function SessionPane({
   // Observe only identity facts for the Agents actually represented in this reading surface.
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
   const speakerIds = useMemo(() => [...new Set([sessionId, ...agentSessionIdsOfUserMessages(userMessages)])], [sessionId, userMessages])
+  const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false }), [speakerIds])
   const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds, activityDemand), [speakerIds, activityDemand])
-  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, useShallow(speakerFactsSelector))
+  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, useShallow(speakerFactsSelector))
   const describeSpeaker = useMemo(() => {
     const original = createSpeakerResolver({
       lookupAgent: (id) => {
@@ -420,9 +432,9 @@ export function SessionPane({
     }
   }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
   )
-  const refreshSession = useObservedAppStore('sessionPane', observationVisible, (state) => state.refreshSession)
-  const recoverSession = useObservedAppStore('sessionPane', observationVisible, (state) => state.recoverSession)
-  const respondInteraction = useObservedAppStore('sessionPane', observationVisible, (state) => state.respondInteraction)
+  const refreshSession = useAppStore.getState().refreshSession
+  const recoverSession = useAppStore.getState().recoverSession
+  const respondInteraction = useAppStore.getState().respondInteraction
   const annotateMessage = (annotation: ConversationAnnotation): void => {
     // 「把一段引文送进当前草稿」这个决定归 store 的 `appendAgentComposerDraft` 所有——
     // 浏览器标注那条 dock 动作走的就是它。这里此前手写了一份读-改-写（`getState()` +
@@ -448,13 +460,13 @@ export function SessionPane({
   // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (fixtureRoot/repo/sub) is
   // owned by no workspace exactly, and answering '' there would make its absolute path links
   // unclickable. See the same note in TerminalView.
-  const reportError = useObservedAppStore('sessionPane', observationVisible, (state) => state.reportError)
-  const activeWorkspaceRoot = useObservedAppStore('sessionPane', observationVisible, (state) =>
+  const reportError = useAppStore.getState().reportError
+  const activeWorkspaceRoot = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
   const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, mailboxOrigin),
     [sessionId, mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, mailboxOrigin.sessionId])
-  const fileContext = useObservedAppStore('sessionPane', observationVisible, selectFileContext)
+  const fileContext = useObservedAppStore('sessionPane', observationVisible, consumerScope, selectFileContext)
   const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)
   useEffect(() => { setFileLinkIssue(null) }, [fileContext])
   const fileOrigin = useMemo(() => ({ ...mailboxOrigin, sessionId }), [mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, sessionId])
@@ -508,7 +520,7 @@ export function SessionPane({
     setObservationMounted(refresh !== null)
   }, [])
   const [recovering, setRecovering] = useState(false)
-  const reopenRetiredSession = useObservedAppStore('sessionPane', observationVisible, state => state.reopenRetiredSession)
+  const reopenRetiredSession = useAppStore.getState().reopenRetiredSession
   const retainedReopenRef = useRef<object | null>(null)
   const retainedUnconfirmedIntent = useRef<string | null>(null)
   const clearedRetainedIntent = useRef<string | null>(null)
@@ -860,7 +872,7 @@ export function SessionPane({
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
   const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
   const conversationReading = session.kind === 'agent' ? {
-    reference: session.control, identity: activitySourceKey, nativeSourceFacts: session, enabled: visible && !parked && activityShown,
+    reference: session.control, identity: activitySourceKey, nativeSourceFacts, enabled: visible && !parked && activityShown,
     opened: historyOpen || inlineHistory,
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined

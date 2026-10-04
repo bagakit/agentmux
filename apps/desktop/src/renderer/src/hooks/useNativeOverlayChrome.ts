@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { NativeOverlayRegion } from '../../../shared/native-overlay'
+import type { NativeBrowserVisibility, NativeOverlayRegion } from '../../../shared/native-overlay'
 import { api } from '../lib/api'
+import { rendererPerformance } from '../lib/renderer-performance'
 import { observeNativeOverlayRegions } from '../lib/native-overlay-regions'
 
 /** The only window consumer. Coalesce portal changes while a native frame is in flight. */
@@ -30,13 +31,23 @@ export function useNativeOverlayChrome(): string | undefined {
     const overlays = observeNativeOverlayRegions(document.body, api.ui.getZoomFactor, (regions, notice) => {
       pending = { regions, ...(notice ? { warning: notice } : {}) }
       void drain()
-    })
+    }, reading => rendererPerformance.observeOverlay(reading))
+    let demandRevision = -1
+    const onDemand = (visibility: NativeBrowserVisibility): void => {
+      if (disposed || visibility.revision <= demandRevision) return
+      demandRevision = visibility.revision
+      overlays.setNativeDemand(visibility)
+    }
+    const unsubscribeDemand = api.ui.onNativeBrowserVisibility(onDemand)
+    // Subscribe first. A delayed initial IPC result cannot replace a newer owner event.
+    void api.ui.nativeBrowserVisibility().then(onDemand).catch(() => {})
     const unsubscribeInput = api.ui.onNativeBrowserInput(overlays.handleNativeInput)
     return () => {
       disposed = true
       pending = undefined
       overlays.dispose()
       unsubscribeInput()
+      unsubscribeDemand()
       unsubscribe()
       void api.ui.publishNativeOverlays([]).catch(() => {})
     }

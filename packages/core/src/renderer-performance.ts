@@ -1,5 +1,17 @@
 /** Bounded renderer flight recorder. Durations are wall time, never CPU or input ACK. */
 export type RendererWorkTiming = { count: number; totalMs: number; maxMs: number }
+export type RendererOverlayObservation = {
+  reason: 'initial' | 'demand' | 'mutation' | 'resize' | 'scroll' | 'toggle' | 'font' | 'collect'
+  scheduled: boolean; coalesced: boolean; nativeDemandCount: number | null
+  candidateCount?: number; geometryReadCount?: number; collectMs?: number
+}
+export type RendererOverlayCost = {
+  triggers: Record<RendererOverlayObservation['reason'], number>
+  scheduled: number; coalesced: number; candidates: number; geometryReads: number
+  nativeDemandCount: number | null; latestCandidates: number | null; latestGeometryReads: number | null
+  collect: RendererWorkTiming
+}
+export type RendererInputRequestCost = { started: number; completed: number; failed: number; pending: number; wall: RendererWorkTiming }
 export type RendererConsumerCost = { checks: number; changes: number; commits: number }
 export type RendererVisibilityCost = { visible: RendererConsumerCost; hidden: RendererConsumerCost }
 export type RendererTerminalCost = {
@@ -44,6 +56,8 @@ export type RendererPerformanceSnapshot = {
   startedAt: number; observedAt: number
   recording: 'bounded-lifetime'; selectorTiming: 'counts-only'; writeTiming: 'parser-callback-wall'
   consumers: { composer: RendererVisibilityCost; sessionPane: RendererVisibilityCost }
+  inputRequests: Record<'user' | 'protocol' | 'paste', RendererInputRequestCost>
+  overlay: RendererOverlayCost
   sessionEvents: RendererWorkTiming
   terminalWrites: { visible: RendererWorkTiming; hidden: RendererWorkTiming; stringCodeUnits: number; bytes: number }
   inputDelay: { state: 'observing' | 'unsupported' | 'stopped' | 'unavailable'; reason: string | null; durationThresholdMs: 16; timing: RendererWorkTiming }

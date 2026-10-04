@@ -18,7 +18,7 @@ import {
   caretAtFirstLine,
   caretAtLastLine
 } from '../lib/composer-history'
-import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit } from '../lib/composer-resubmit-guard'
+import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
 import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -45,7 +45,7 @@ const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
 // The resubmit guard survives a Composer remount within the same application run.
 // Drafts remain owned by the store; transient operation feedback stays with the mounted Composer.
-const lastSubmitBySession = new Map<string, LastSubmit>()
+const lastSubmitBySession = new ComposerResubmitGuard()
 
 
 export function agentComposerAvailability(
@@ -79,61 +79,62 @@ export function AgentSessionComposer({
   visible?: boolean
 }) {
   useObservedConsumerCommit('composer', visible)
+  const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: false }), [sessionId])
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(sessionId)
-  const text = useObservedAppStore('composer', visible, (state) => state.agentComposerDrafts[sessionId] ?? '')
-  const setAgentComposerDraft = useObservedAppStore('composer', visible, (state) => state.setAgentComposerDraft)
-  const clearAgentComposerDraftIfUnchanged = useObservedAppStore('composer', visible, (state) => state.clearAgentComposerDraftIfUnchanged)
-  const enqueueAgentSteer = useObservedAppStore('composer', visible, (state) => state.enqueueAgentSteer)
-  const archiveAgentSteer = useObservedAppStore('composer', visible, (state) => state.archiveAgentSteer)
-  const moveAgentSteer = useObservedAppStore('composer', visible, (state) => state.moveAgentSteer)
-  const sendQueuedAgentSteer = useObservedAppStore('composer', visible, (state) => state.sendQueuedAgentSteer)
+  const text = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentComposerDrafts[sessionId] ?? '')
+  const setAgentComposerDraft = useAppStore.getState().setAgentComposerDraft
+  const clearAgentComposerDraftIfUnchanged = useAppStore.getState().clearAgentComposerDraftIfUnchanged
+  const enqueueAgentSteer = useAppStore.getState().enqueueAgentSteer
+  const archiveAgentSteer = useAppStore.getState().archiveAgentSteer
+  const moveAgentSteer = useAppStore.getState().moveAgentSteer
+  const sendQueuedAgentSteer = useAppStore.getState().sendQueuedAgentSteer
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
   // the two cannot drift. Each entry carries an operationId for retry correlation; only its text renders.
   // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the
   // selector on every store update (zustand compares by reference) — the `.map` to text happens once per
   // real render below, not inside the selector, so it does not defeat that reference check.
-  const sendingId = useObservedAppStore('composer', visible, (state) => state.agentSteerInFlight?.[sessionId])
-  const sendingPhase = useObservedAppStore('composer', visible, (state) => state.agentSteerInFlightPhase?.[sessionId])
-  const queuedEntries = useObservedAppStore('composer', visible, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
-  const executors = useObservedAppStore('composer', visible, (state) => state.config?.executors)
-  const session = useObservedAppStore('composer', visible, (state) => sessionPresentationById(state.sessions).get(sessionId))
-  const lifecycleFailure = useObservedAppStore('composer', visible, state => state.errorNoticeContext?.lifecycle)
-  const lifecycleMessage = useObservedAppStore('composer', visible, state => state.error ?? state.lastError)
+  const sendingId = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerInFlight?.[sessionId])
+  const sendingPhase = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerInFlightPhase?.[sessionId])
+  const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
+  const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
+  const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const lifecycleFailure = useObservedAppStore('composer', visible, consumerScope, state => state.errorNoticeContext?.lifecycle)
+  const lifecycleMessage = useObservedAppStore('composer', visible, consumerScope, state => state.error ?? state.lastError)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
-  const viewMode = useObservedAppStore('composer', visible, viewModeSelector)
-  const setViewMode = useObservedAppStore('composer', visible, (state) => state.setViewMode)
-  const userName = useObservedAppStore('composer', visible, (state) => state.agentNames?.[sessionId])
-  const timeline = useObservedAppStore('composer', visible, (state) => state.timelines?.[sessionId])
+  const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
+  const setViewMode = useAppStore.getState().setViewMode
+  const userName = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentNames?.[sessionId])
+  const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => state.timelines?.[sessionId])
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
-  const firstPrompt = useObservedAppStore('composer', visible, firstPromptSelector)
+  const firstPrompt = useObservedAppStore('composer', visible, consumerScope, firstPromptSelector)
   const displayName = session?.kind === 'agent' ? agentDisplayName({
     userName, firstPrompt, fallbackLabel: tabName || session.label, providerLabel: agentProviderLabel(session.providerId)
   }) : undefined
-  const config = useObservedAppStore('composer', visible, state => state.config)
-  const topicSnapshots = useObservedAppStore('composer', visible, state => state.scratchTopicSnapshots)
+  const config = useObservedAppStore('composer', visible, consumerScope, state => state.config)
+  const topicSnapshots = useObservedAppStore('composer', visible, consumerScope, state => state.scratchTopicSnapshots)
   const topics = useMemo(() => scratchTopicsForConfig(config, topicSnapshots), [config, topicSnapshots])
   const workspace = useMemo(() => config?.workspaces.find(item =>
     session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, topics)
   ), [config, topics, session?.kind, session?.hostId, session?.workspacePath])
-  const activeFile = useObservedAppStore('composer', visible, (state) =>
+  const activeFile = useObservedAppStore('composer', visible, consumerScope, (state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined
   )
   // The posture control is drawn purely from the Provider's catalog declaration, looked up by the
   // session's providerId. A Provider that declares none yields undefined, so the composer draws nothing.
-  const postureControl = useObservedAppStore('composer', visible, (state) =>
+  const postureControl = useObservedAppStore('composer', visible, consumerScope, (state) =>
     session?.kind === 'agent'
       ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.postureControl
       : undefined
   )
-  const composerOptions = useObservedAppStore('composer', visible, (state) => session?.kind === 'agent'
+  const composerOptions = useObservedAppStore('composer', visible, consumerScope, (state) => session?.kind === 'agent'
     ? state.providerCatalog.find((entry) => entry.id === session.providerId)?.composer : undefined)
   // 用户自己的 prompt，按这个 Session 的 Provider 过滤。读的是**实时配置**而不是构造时的快照：
   // 在设置页改完回到 Composer，候选必须已经是新的（本仓「替身写成常量会藏起被测性质」同一族）。
   // 走共用取值层而不是就地 `?? []`：缺席即空、缺 providerId 即通用这两个默认必须只有一处，且它
   // 缺席时返回共享冻结的同一个引用——zustand 按引用比较，就地新建 `[]` 会无限重渲染。
-  const myShortcuts = useObservedAppStore('composer', visible, (state) => resolveComposerShortcuts(state.config))
+  const myShortcuts = useObservedAppStore('composer', visible, consumerScope, (state) => resolveComposerShortcuts(state.config))
   const shortcutsHere = composerShortcutsForProvider(
     myShortcuts,
     session?.kind === 'agent' ? session.providerId : undefined
@@ -154,10 +155,10 @@ export function AgentSessionComposer({
   // 识别词：同一批 Shortcut 的**裸** keyword（无 `/`）。同一个 keyword 字段供两处识别（`/` 候选与裸词），
   // 不建第二份注册表——那两份必然漂移，一处认得的词另一处不认。
   const keywordCandidates = shortcutsHere.map((shortcut) => ({ text: shortcut.keyword, description: `${shortcut.label} · Shortcut` }))
-  const send = useObservedAppStore('composer', visible, (state) => state.send)
-  const interrupt = useObservedAppStore('composer', visible, (state) => state.interrupt)
-  const setPosture = useObservedAppStore('composer', visible, (state) => state.setPosture)
-  const reportError = useObservedAppStore('composer', visible, (state) => state.reportError)
+  const send = useAppStore.getState().send
+  const interrupt = useAppStore.getState().interrupt
+  const setPosture = useAppStore.getState().setPosture
+  const reportError = useAppStore.getState().reportError
   // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
@@ -179,18 +180,18 @@ export function AgentSessionComposer({
   function submit(): void {
     if (!submitMode.canSubmit || !text.trim()) return
     const value = expandSemanticReferences(text)
-    if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
+    if (lastSubmitBySession.isDuplicate(sessionId, value)) return
     if (!send(sessionId, value, feedback.report, 'manual')) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
-    lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
+    lastSubmitBySession.record(sessionId, value)
     useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
   function queue(): void {
     const value = expandSemanticReferences(text)
     if (!value.trim()) return
-    if (isDuplicateResubmit(lastSubmitBySession.get(sessionId) ?? null, value, Date.now(), RESUBMIT_WINDOW_MS)) return
+    if (lastSubmitBySession.isDuplicate(sessionId, value)) return
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
@@ -198,7 +199,7 @@ export function AgentSessionComposer({
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
-    lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
+    lastSubmitBySession.record(sessionId, value)
     useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 

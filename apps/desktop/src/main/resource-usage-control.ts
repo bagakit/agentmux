@@ -42,10 +42,11 @@ export function createResourceMetricsPort(args: {
         return {
           schema: 'agentmux.metrics.v1', observedAt: (args.now ?? Date.now)(),
           scope: { kind: 'unix-host', hostId: 'local', hostname: hostname(), mainPid: process.pid }, window,
-          units: { cpu: 'percent', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
+          units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
           process: source(sample.processObservedAt === null ? null : sample.runs, sample.processObservedAt, sample.unavailable),
           app: source(sample.appObservedAt === null ? null : sample.app, sample.appObservedAt, sample.app?.unavailable ?? null),
           runtime: source(sample.runtime, sample.runtimeObservedAt, sample.runtimeUnavailable),
+          diagnostics: source(sample.diagnostics.data, sample.diagnostics.observedAt, sample.diagnostics.unavailable),
           main: source(sample.mainOwners, sample.mainObservedAt,
             sample.mainUnavailable ?? (sample.mainOwners === null ? 'Main resource owners unavailable' : null)),
           renderer: sameWindow ? source(renderer.data, renderer.observedAt, renderer.unavailable)

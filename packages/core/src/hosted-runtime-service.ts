@@ -8,6 +8,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHoste
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
+  'clientPerformanceDiagnostics',
   'readDeliveryAttempt', 'resolveAgentCreationSessionId',
   'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
@@ -174,6 +175,7 @@ export class AgentMuxHostedRuntimeService {
     if (this.consumer(id) !== original) throw new AgentMuxError('Host consumer changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
+    if (context.signal && invocation.method === 'clientPerformanceDiagnostics') invocation.args[0] = { signal: context.signal }
     const source = context.sourceDevice
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)

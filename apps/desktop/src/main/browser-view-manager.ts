@@ -307,6 +307,8 @@ export function normalizeBrowserUrl(value: string): string {
 
 export class BrowserViewManager {
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
+  onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility) => void) | undefined
+  private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Facts from real embedded page owners; external tabs never enter this registry. */
   targets(): AgentMuxBrowserTarget[] {
@@ -779,6 +781,14 @@ export class BrowserViewManager {
       entry.visible && entry.bounds && !entry.view.webContents.isDestroyed() ? [{ ...entry.bounds }] : [])
   }
 
+  nativeBrowserVisibility(): import('../shared/native-overlay.js').NativeBrowserVisibility {
+    return { revision: this.nativeVisibilityRevision, bounds: this.visibleNativeBounds() }
+  }
+  private notifyNativeVisibility(): void {
+    this.nativeVisibilityRevision++
+    this.onNativeVisibilityChange?.(this.nativeBrowserVisibility())
+  }
+
   /** O(1) lookup of the current physically attached owner; no second native Browser registry. */
   nativeOwner(browserId: string): NativeBrowserOwner | undefined {
     const entry = this.entries.get(browserId)
@@ -846,6 +856,7 @@ export class BrowserViewManager {
       viewport: entry.viewport
     }
     this.entries.delete(id)
+    this.notifyNativeVisibility()
     this.releasedEntries.set(id, released)
     if (!this.window.isDestroyed()) {
       try { this.window.contentView.removeChildView(entry.view) } catch { /* already detached */ }
@@ -943,6 +954,7 @@ export class BrowserViewManager {
       return this.snapshot(entry)
     } catch (error) {
       this.entries.delete(id)
+      this.notifyNativeVisibility()
       const cleanupErrors: unknown[] = []
       if (childRegistrationAttempted && !this.window.isDestroyed()) {
         try {
@@ -2500,9 +2512,11 @@ export class BrowserViewManager {
     const entry = this.entries.get(id)
     if (!entry) return
     if (bounds === null) {
+      const wasVisible = entry.visible
       entry.visible = false
       void entry.feedback?.clear()
       entry.view.setVisible(false)
+      if (wasVisible) this.notifyNativeVisibility()
       return
     }
     // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
@@ -2512,12 +2526,15 @@ export class BrowserViewManager {
       throw new Error('Browser bounds must be finite with a positive size')
     }
     const becomingVisible = !entry.visible
+    const boundsChanged = !entry.bounds || entry.bounds.x !== normalized.x || entry.bounds.y !== normalized.y ||
+      entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
     entry.bounds = normalized
     entry.visible = true
     entry.view.setBounds(entry.bounds)
     if (becomingVisible) this.window.contentView.addChildView(entry.view, 1)
     entry.view.setVisible(true)
     if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
+    if (becomingVisible || boundsChanged) this.notifyNativeVisibility()
   }
 
   /**
@@ -2568,6 +2585,7 @@ export class BrowserViewManager {
       ).catch(() => {})
     }
     this.entries.delete(id)
+    this.notifyNativeVisibility()
     if (!this.window.isDestroyed()) {
       try { this.window.contentView.removeChildView(entry.view) } catch { /* already detached */ }
     }
@@ -2764,6 +2782,7 @@ export class BrowserViewManager {
       }
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
+      this.notifyNativeVisibility()
       if (!this.window.isDestroyed()) {
         try { this.window.contentView.removeChildView(view) } catch (error) {
           released.detachedView = view
