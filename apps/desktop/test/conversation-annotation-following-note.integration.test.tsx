@@ -139,8 +139,9 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(useAppStore.getState().agentComposerDrafts.a).toContain(`> ${quoted.replace(/\n/gu, '\n> ')}\n\n批注： Rendered range`)
   })
   it('mounts and closes the real floating branch without errors or late autofocus on position recovery', async () => {
-    // Controlled wide Pane geometry; the popover never reserves a text gutter.
+    // Controlled wide Pane geometry with a real empty side; no reserved gutter.
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.log-turn__text')) return new DOMRect(20, 0, 480, 600)
       if (this.matches('.log-turn__body')) return new DOMRect(0, 0, 800, 600)
       if (this.matches('.log-turn__annotation')) return new DOMRect(0, 0, 300, 160)
       return new DOMRect(0, 0, 800, 600)
@@ -150,7 +151,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     const errors = vi.spyOn(console, 'error')
     await render(pane()); const selected = await select(body()); await typeNote()
     const editor = document.querySelector<HTMLElement>('.log-turn__annotation')!
-    expect(editor.dataset.anchorState).toBe('range'); expect(editor.style.visibility).toBe('visible')
+    expect(editor.dataset.anchorState).toBe('range'); expect(editor.dataset.presentation).toBe('side')
     expect(editor.style.position).toBe('fixed')
     expect(editor.closest('.window-overlay-host')).not.toBeNull()
     expect(host.querySelector('.agent-surface')!.hasAttribute('data-conversation-note')).toBe(false)
@@ -167,8 +168,41 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(reopened.value).toBe('Keep this exact target'); expect(document.activeElement).toBe(reopened)
     expect(errors).toHaveBeenCalledTimes(0); other.remove()
   })
+  it('preserves the same editor, expanded quote and later focus across side and inline placement', async () => {
+    let wide = false
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.log-turn__text')) return new DOMRect(20, 0, wide ? 480 : 760, 600)
+      if (this.matches('.log-turn__annotation')) return new DOMRect(0, 0, 256, 160)
+      return new DOMRect(0, 0, 800, 600)
+    })
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.matches('.log-turn__annotation') ? 256 : 800 })
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.matches('.log-turn__annotation') ? 160 : 600 })
+    await render(pane()); const selected = await select(body()); await typeNote('保留这个编辑器')
+    const editor = document.querySelector<HTMLElement>('.log-turn__annotation')!
+    const input = editor.querySelector<HTMLTextAreaElement>('textarea')!
+    const passage = editor.querySelector<HTMLDetailsElement>('details')!
+    await act(async () => { passage.open = true; input.focus() })
+    wide = true
+    await act(async () => { for (const refresh of positioning.referenceUpdates) refresh() }); await flush()
+    expect(editor.dataset.presentation).toBe('side')
+    expect(document.querySelector('.log-turn__annotation')).toBe(editor)
+    expect(editor.querySelector('textarea')).toBe(input); expect(passage.open).toBe(true)
+    expect(input.value).toBe('保留这个编辑器')
+    // The helper substitutes insertBefore for happy-dom's missing moveBefore;
+    // Chromium qualification checks native focus/IME across the connected move.
+    const other = document.createElement('input'); document.body.append(other); other.focus()
+    wide = false
+    await act(async () => { for (const refresh of positioning.referenceUpdates) refresh() }); await flush()
+    expect(editor.dataset.presentation).toBe('inline')
+    expect(document.querySelector('.log-turn__annotation')).toBe(editor)
+    expect(editor.querySelector('textarea')).toBe(input); expect(passage.open).toBe(true)
+    expect(document.activeElement).toBe(other)
+    expect(body().querySelector('p')!.firstChild).toBe(selected.node); expect(selected.range.toString()).toBe('repeated phrase')
+    other.remove()
+  })
   it('does not steal another control focus when the first real position computation resolves late', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.matches('.log-turn__text')) return new DOMRect(20, 0, 480, 600)
       if (this.matches('.log-turn__body')) return new DOMRect(0, 0, 800, 600)
       if (this.matches('.log-turn__annotation')) return new DOMRect(0, 0, 300, 160)
       return new DOMRect(0, 0, 800, 600)
@@ -177,10 +211,10 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.matches('.log-turn__annotation') ? 160 : 600 })
     await render(pane()); positioning.held = true; await select(body())
     expect(positioning.release.length).toBeGreaterThan(0)
-    expect(document.querySelector<HTMLElement>('.log-turn__annotation')!.style.visibility).toBe('hidden')
+    expect(document.querySelector<HTMLElement>('.log-turn__annotation')!.dataset.presentation).toBe('inline')
     const other = document.createElement('input'); document.body.append(other); other.focus()
     positioning.held = false; await act(async () => { for (const release of positioning.release.splice(0)) release() }); await flush()
-    expect(document.querySelector<HTMLElement>('.log-turn__annotation')!.style.visibility).toBe('visible')
+    expect(document.querySelector<HTMLElement>('.log-turn__annotation')!.dataset.presentation).toBe('side')
     expect(document.activeElement).toBe(other); other.remove()
   })
   it('keeps ID, selected text, note and existing draft at the real consumer without sending', async () => {
@@ -188,11 +222,14 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n\n\nRegarding message "live-original-id":\n> repeated phrase\n\n批注： Keep this exact target')
     expect(useAppStore.getState().sessions.map(one => [one.id, one.control, one.processState])).toEqual([['a', agent('a').control, 'running']])
   })
-  it('reaches native text in the actual History through the same draft consumer', async () => {
-    await render(pane()); read.mockImplementation(async control => page(control.agentSessionId)); await click(button('History', host)); const history = host.querySelector('.session-history')!
-    expect(history.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(1)
-    await select(body(history)); await typeNote('Native passage'); await click(button('将批注加入回复草稿'))
-    expect(useAppStore.getState().agentComposerDrafts.a).toContain('Regarding message "native-text-original":\n> repeated phrase\n\n批注： Native passage')
+  it('reaches native text through the current Activity history reading and original draft consumer', async () => {
+    read.mockImplementation(async control => page(control.agentSessionId))
+    await render(pane()); await click(button('History', host))
+    const record = [...host.querySelectorAll<HTMLElement>('.log-turn')].find(node => node.dataset.messageId?.includes('native-text-original'))
+    expect(record).toBeDefined()
+    const id = record!.dataset.messageId!
+    await select(body(record!)); await typeNote('Native passage'); await click(button('将批注加入回复草稿'))
+    expect(useAppStore.getState().agentComposerDrafts.a).toContain(`Regarding message ${JSON.stringify(id)}:\n> repeated phrase\n\n批注： Native passage`)
   })
   it('reaches actual native user text parts in Activity without changing their source ID', async () => {
     read.mockImplementation(async control => page(control.agentSessionId))
@@ -221,8 +258,9 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     await render(pane()); const selected = await select(body()); await typeNote()
     const editor = document.querySelector<HTMLElement>('.log-turn__annotation')!
     expect(editor.dataset.anchorState).toBe('range')
-    expect(editor.style.position).toBe('fixed')
-    expect(editor.closest('.window-overlay-host')).not.toBeNull()
+    expect(editor.style.position).toBe('relative')
+    expect(editor.closest('.agent-surface')).not.toBeNull()
+    expect(editor.dataset.presentation).toBe('inline')
     expect(positioning.referenceUpdates.size).toBeGreaterThan(0)
     const other = document.createElement('input'); document.body.append(other); other.focus()
     // Controlled library notification for a moved reference. The accompanying
@@ -264,14 +302,13 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     const textarea = document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
     expect(textarea.value).toBe('Keep this exact target'); expect(document.activeElement).toBe(textarea)
   })
-  it('keeps the original note when the Pane hides or History covers its Range', async () => {
+  it('keeps the original note when the Pane hides or opens unified history reading', async () => {
     await render(pane()); const selected = await select(body()); await typeNote()
     await render(pane('a', false, false))
     expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(0)
     expect(document.querySelector('.log-turn__annotation')).toBeNull()
     await render(pane()); expect(document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!.value).toBe('Keep this exact target')
-    await click(button('History', host)); expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(0)
-    await click(button('Activity', host))
+    await click(button('History', host)); expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
     expect(body().querySelector('p')!.firstChild).toBe(selected.node)
     expect(document.querySelectorAll('.conversation-annotation-underline')).toHaveLength(2)
     expect(document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!.value).toBe('Keep this exact target')
@@ -283,7 +320,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     const selected = await select(body())
     expect(document.activeElement).toBe(text)
     expect(window.getSelection()!.toString()).toBe('repeated phrase')
-    expect(document.querySelector('.log-turn__annotation')!.closest('.window-overlay-host')).not.toBeNull()
+    expect(document.querySelector('.log-turn__annotation')!.closest('.agent-surface')).not.toBeNull()
     expect(body().querySelector('p')!.firstChild).toBe(selected.node)
     expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
     await act(async () => useAppStore.getState().setViewMode('a', 'terminal')); await flush()
@@ -360,13 +397,13 @@ describe('Actual conversation Range -> following note -> original reply draft', 
     expect(collector).toHaveBeenCalledTimes(0); expect(document.querySelector('.log-turn__annotation')).toBeNull()
     expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')
   })
-  it('keeps readonly History and a no-Composer Activity outside the selection collector', async () => {
+  it('keeps readonly unified history and a no-Composer Activity outside the selection collector', async () => {
     await render(pane('a', true)); read.mockImplementation(async control => page(control.agentSessionId)); await click(button('History', host))
     const collector = vi.spyOn(window, 'getSelection'); collector.mockClear()
-    await act(async () => body(host.querySelector('.session-history')!).dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
+    await act(async () => body().dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
     expect(collector).toHaveBeenCalledTimes(0); expect(document.querySelector('.log-turn__annotation')).toBeNull()
     await render(<SessionPane sessionId="a" surfaceKind="terminal" interactiveResize={false} visible linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} />)
-    await click(button('Activity', host)); collector.mockClear()
+    await act(async () => useAppStore.getState().setViewMode('a', 'activity')); await flush(); collector.mockClear()
     await act(async () => body().dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
     expect(collector).toHaveBeenCalledTimes(0); expect(document.querySelector('.log-turn__annotation')).toBeNull()
     expect(useAppStore.getState().agentComposerDrafts.a).toBe('Existing draft\n')

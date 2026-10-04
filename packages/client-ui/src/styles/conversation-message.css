@@ -109,6 +109,9 @@
 .log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
 .log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
 .log-turn__annotation { display: grid; gap: var(--sp-3); width: 256px; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-1), var(--hl); overflow: auto; pointer-events: auto; }
+.conversation-annotation-placement { display: contents; }
+.conversation-annotation-placement[data-presentation='inline'] > .window-overlay-host__entry { display: contents; }
+.log-turn__annotation[data-presentation='inline'] { flex: none; align-self: flex-end; width: min(256px, calc(100% - var(--sp-6))); max-height: min(240px, 45%); margin: var(--sp-3) var(--sp-4); box-shadow: var(--hl); }
 .conversation-annotation-note__passage { min-width: 0; }
 .conversation-annotation-note__passage > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--sp-3); list-style: none; cursor: pointer; color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-annotation-note__passage > summary::-webkit-details-marker { display: none; }
