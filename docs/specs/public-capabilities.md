@@ -43,6 +43,8 @@
 
 原 Zone 文件的已保存正文与原修订保存沿[文件类型与严格 codec](../../packages/core/src/public-rpc-files.ts)公开。`file read`／`file write` CLI → 公共服务 → Main 注入的 [FileReadOwner](../../apps/desktop/src/main/file-read-owner.ts) 解析准确 Zone／资源，再委托原 [WorkspaceFiles](../../apps/desktop/src/main/workspace-files.ts)；结果保留完整原 revision、Host／Workspace／Zone 与原读取状态；观察未知不冒文件不存在，也不另建 Memory 存储。`file.write` 只保存已有文本文件，要求完整原 revision；`written`／`conflict`／`error`／`unknown` 保真，未知先读同一文件核对，不自动再写。
 
+缺失目标的正文创建沿同一文件 owner 提供 `file.create`，CLI 为 `file create --input FILE|-`；先由 `file.read` 确认目标映射，提交完整原资源、Zone 相对路径、正文与明确的 `expectedRevision:null`。Main 确认映射后委托 `WorkspaceFiles.write` 的排他创建，不覆盖已存在文件；普通文本和 Note 使用同一通用能力，不新增正文 owner。结果沿原 `written`／`conflict`／`error`／`unknown` 与完整资源／revision 表达，未知先读同一准确目标对账，不自动换名或重发。既有 `file.write` 的完整 revision 要求保持。
+
 项目文件名发现沿同一 Files owner：`file ls` CLI → `file.list` → `WorkspaceFiles.listFiles`；结果只含名称、原资源与 complete／partial 原因，应用 Git 忽略规则且不递归目录链接，不读正文或改变焦点。名称相对请求的目录；使用 `file open --zone` 继续时，将原 `file ls --path` 的目录前缀与名称拼接为 Zone 相对路径（默认 `.` 可省略）。未知观察保留原精确打开能力。
 
 设备选择的图片与普通文件沿同一[公共文件类型与 codec](../../packages/core/src/public-rpc-files.ts)提供 `file.upload`／`file.upload.inspect`，CLI 为 `file upload [inspect] --input FILE|-`。公共服务先确认准确原 Host／Session／Run，再委托 Main 注入的 [FileUploadOwner](../../apps/desktop/src/main/file-upload-owner.ts)保存至 Host 指定私有位置并读回；原操作不可覆盖，未知核对不重传。手机 [MobileAttachments](../../apps/mobile/src/conversation/MobileAttachments.tsx) 消费同一回执，再借[共享文件引用插入](../../packages/client-ui/src/lib/composer-file-reference.ts)进入原 Composer；上传本身不发送消息，Core 输入与 Runtime 仍归原 owner。
