@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Link2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -54,7 +55,7 @@ export function ProjectGroupDialog({ projects, seed, editing, related, observati
           <Dialog.Close className="icon-button" disabled={busy} aria-label="Close project group editor"><X size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">Organize projects together. Files and sessions stay on their devices.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void submit() }}>
-          <label className="project-group-dialog__name">Group name<input autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} placeholder="Group name" /></label>
+          <label className="project-group-dialog__name">Group name<TextInput autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} placeholder="Group name" /></label>
           <div className="project-group-dialog__members" aria-label="Choose group members">
             {members.map(member => {
               const memberships = projectGroupsFor(groups, member.id).filter(group => group.groupId !== groupId)
