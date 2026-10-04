@@ -142,13 +142,12 @@
 .mote-current-work__copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
 .mote-current-work__detail { margin: 5px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mote-current-work__chooser { display: grid; gap: 7px; padding-block: 7px; }
-.mote-current-work__chooser select { width: 100%; min-width: 0; font-size: 11px; padding: 5px 7px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 5px; color: var(--text); }
 .mote-current-work__navigation { display: flex; align-items: center; justify-content: space-between; gap: 6px; border: 0; background: transparent; padding: 4px 0; color: var(--text-2); font-size: 11px; cursor: pointer; text-align: start; }
 .mote-current-work__navigation:disabled { opacity: .5; cursor: default; }
 .mote-current-work .goals-continuation { padding: 8px 0; margin: 6px 0 0; }
 .mote-current-work .goals-continuation form { display: flex; flex-wrap: wrap; gap: 8px; }
 .mote-current-work .goals-continuation label { min-width: 0; flex: 1 1 110px; }
-.mote-current-work .goals-continuation select { max-width: 100%; }
+.mote-current-work .goals-continuation .selection-field { width: 100%; }
 
 .mote-current-work__count { margin-inline-start: 6px; font-size: 10px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .mote-current-work__all { width: 100%; margin-block-start: 4px; }

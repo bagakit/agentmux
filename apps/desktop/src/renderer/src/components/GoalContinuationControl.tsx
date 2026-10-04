@@ -4,6 +4,7 @@ import type { ContinuousProgressLoop } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { SelectionField } from './SelectionField'
 import { useAppStore } from '../store'
 
 /** A thin original Goal caller, shared by Goal details and the Mote current-work surface. */
@@ -111,7 +112,7 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh, a
       <div className="goals-continuation__actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(action => action === 'stop' ? loop.status !== 'stopped' : action === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(action => <button type="button" className="goals-button" key={action} disabled={busy || Boolean(mutation.current) || !Number.isSafeInteger(loop.revision) || !loop.revision} onClick={() => mutate(loop, action)}>{action === 'check' ? 'Check now' : action.charAt(0).toUpperCase() + action.slice(1)}</button>)}</div>
     </div>)}
     {!currentLoops.some(loop => loop.status !== 'stopped') && observedGoal === demand.id ? <form onSubmit={event => { event.preventDefault(); start() }}>
-      <label>Executing Agent<select aria-label="Goal continuation Agent" value={selected} onChange={event => { setSelected(event.target.value); attempt.current = undefined }}><option value="">Choose an associated Agent…</option>{Object.entries(linked).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+      <label>Executing Agent<SelectionField label="Goal continuation Agent" value={selected} onValueChange={value => { setSelected(value); attempt.current = undefined }} options={[{ value: '', label: 'Choose an associated Agent…' }, ...Object.entries(linked).map(([id, label]) => ({ value: id, label }))]} /></label>
       <label>Check every<input aria-label="Goal continuation minutes" type="number" min="1" value={minutes} onChange={event => { setMinutes(event.target.value); attempt.current = undefined }} /> minutes</label>
       <button type="submit" className="goals-button" disabled={busy || Boolean(mutation.current) || demand.alignment?.confirmedAt == null || !Object.hasOwn(linked, selected) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
       {demand.alignment?.confirmedAt == null ? <p className="goals-service">Confirm this Goal’s scope before enabling automatic work.</p> : null}

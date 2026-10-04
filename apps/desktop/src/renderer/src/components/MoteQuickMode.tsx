@@ -13,6 +13,7 @@ import { spatialCatalog } from '../lib/space-agent-control'
 import { executorsForHost } from '../lib/executors'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
+import { SelectionField } from './SelectionField'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import '../styles/mote-quick-mode.css'
 
@@ -87,23 +88,22 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
     <Dialog.Overlay className="dialog-scrim mote-behavior-overlay" />
     <Dialog.Content ref={content} className="dialog-surface mote-quick-mode-dialog" aria-busy={busy}
-      onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLSelectElement>('select')?.focus() }}
+      onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLButtonElement>('.selection-field')?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = document.activeElement
         if (node?.isConnected && (active === document.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
       <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · ready to continue</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><X size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
         <label htmlFor={id + '-agent'}><Bot size={16} /><span>Default Agent<small>Preselected for new conversations.</small></span></label>
-        <select id={id + '-agent'} aria-label="Default Agent" value={draft.executorId ?? ''} onChange={event => { const { executorId: _, ...rest } = form.current; update(event.target.value ? { ...rest, executorId: event.target.value } : rest) }}>
-          <option value="">Use normal Launcher choice</option>
-          {draft.executorId && !executors.some(item => item.id === draft.executorId) ? <option value={draft.executorId}>{draft.executorId} · configuration unavailable</option> : null}
-          {executors.map(item => <option key={item.id} value={item.id}>{item.label}{item.detection?.state === 'missing' ? ' · not installed' : ''}</option>)}
-        </select>
+        <SelectionField id={id + '-agent'} label="Default Agent" value={draft.executorId ?? ''}
+          onValueChange={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }}
+          options={[{ value: '', label: 'Use normal Launcher choice' },
+            ...(draft.executorId && !executors.some(item => item.id === draft.executorId) ? [{ value: draft.executorId, label: draft.executorId + ' · configuration unavailable' }] : []),
+            ...executors.map(item => ({ value: item.id, label: item.label + (item.detection?.state === 'missing' ? ' · not installed' : '') }))]} />
         <label htmlFor={id + '-conversation'}><Pin size={16} /><span>Default conversation<small>Opens first and stays in this Mote’s tab row.</small></span></label>
-        <select id={id + '-conversation'} aria-label="Default conversation" value={selected} onChange={event => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === event.target.value); if (event.target.value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}>
-          <option value="">No fixed conversation</option>
-          {selected && !hasSelected ? <option value={selected}>Saved location · unconfirmed</option> : null}
-          {choices.map(choice => <option key={JSON.stringify(choice)} value={JSON.stringify(choice)}>{conversationLabels[choice.sessionId]} · {facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / {1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}</option>)}
-        </select>
+        <SelectionField id={id + '-conversation'} label="Default conversation" value={selected}
+          onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
+          options={[{ value: '', label: 'No fixed conversation' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
+            ...choices.map(choice => ({ value: JSON.stringify(choice), label: `${conversationLabels[choice.sessionId]} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
         {!choices.length ? <p className="mote-details__hint">Start an original conversation in this Mote, then choose it here.</p> : null}
         {loading ? <p role="status" className="mote-details__hint">Reading MOTE.md…</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button className="small-button" type="button" onClick={() => setAttempt(value => value + 1)}>Reread</button></div> : null}

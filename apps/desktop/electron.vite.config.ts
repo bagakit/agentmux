@@ -1,3 +1,4 @@
+import { radixOverlayAliases } from './scripts/radix-overlay-aliases'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
@@ -25,6 +26,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(import.meta.dirname, 'src/renderer'),
+    resolve: { alias: radixOverlayAliases },
     plugins: [react(), pdfjsViewerAssets()],
     define: { __AGENTMUX_WEB_PREVIEW__: 'false' }
   }
