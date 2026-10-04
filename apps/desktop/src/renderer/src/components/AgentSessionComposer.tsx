@@ -282,7 +282,8 @@ export function AgentSessionComposer({
           unconfirmed: entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
           ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
-            steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
+            steerQueueCanEverDrain(session.processState) && (steerEntryTargetsRun(entry, session.control.run.runId) ||
+              agentSteerCanEdit(entry, sendingId) && entry.goalContinuation === undefined)),
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
           ...(entry.logId ? { logId: entry.logId } : {}),
           ...(entry.error ? { error: entry.error } : {}),

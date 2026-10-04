@@ -8789,15 +8789,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived. Restore it before choosing Send.')
       if (get().agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original message already has an active send attempt. Its original input is kept.')
       if (session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
-      if (entry.runId !== undefined && !steerEntryTargetsRun(entry, session.control.run.runId)) {
-        throw controlFailure('STALE_AGENT_SESSION', `The message belongs to Run ${entry.runId}; the Session now points to Run ${session.control.run.runId}. The original message will not be sent to another Run.`)
+      const changedRun = entry.runId !== undefined && !steerEntryTargetsRun(entry, session.control.run.runId)
+      if (changedRun && (entry.promptCondition !== null || entry.goalContinuation !== undefined)) {
+        throw controlFailure('STALE_AGENT_SESSION', `The original delivery belongs to Run ${entry.runId}; the Session now points to Run ${session.control.run.runId}. Inspect the original delivery before sending it to another Run.`, {
+          detail: JSON.stringify({ queuedRunId: entry.runId, currentRunId: session.control.run.runId,
+            conditionState: entry.promptCondition === undefined ? 'unknown' : 'bound' })
+        })
       }
       manualSteerAttempts.set(attemptKey, attempt)
       set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
         [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
           if (item.operationId !== operationId) return item
           const { awaitingExplicitSend: _pause, preparationWait: _wait, preparationInputNotApplied: _safe, ...pending } = item
-          return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
+          // A new explicit selection binds a never-dispatched intent, just like admission.
+          // The ordered consumer still freezes fresh Core conditions before real input.
+          return { ...pending, ...(changedRun ? { runId: session.control.run.runId } : {}),
+            status: item.status === 'restoring' ? 'restoring' : 'queued' }
         }) } }))
       attempt.stage = 'ordered-queue'
       const pending = get().flushAgentSteerQueue(sessionId, operationId)
