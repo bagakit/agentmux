@@ -3,6 +3,12 @@ export function deliveryOutcome(error: unknown, operation: 'prompt' | 'interacti
   if (!error || typeof error !== 'object') return 'unknown'
   const { code, detail, controlFailure } = error as { code?: unknown; detail?: unknown; controlFailure?: { disposition?: unknown; confirmedInputBytes?: unknown } }
   if (detail === 'unknown') return 'unknown'
+  // defineAgentProvider rejects an unsupported immediate plan before any input.
+  // A transported unknown/partial-input fact takes precedence over that typed boundary.
+  if (operation === 'prompt' && code === 'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED') {
+    return controlFailure === undefined || (controlFailure?.disposition === 'not_applied'
+      && controlFailure.confirmedInputBytes === 0) ? 'rejected' : 'unknown'
+  }
   // This specific Core boundary is read-only preparation before any input in this call.
   // Mobile dispatches a fresh operation once; it never uses this fact to replay an older unknown operation.
   if (operation === 'prompt' && code === 'AGENT_PROMPT_PREPARATION_FAILED'

@@ -1,13 +1,13 @@
-.mobile-survey { padding: 12px; overflow: auto; min-height: 0; }
-.mobile-survey header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.mobile-survey h1 { font-size: 20px; }
-.mobile-survey h2 { font-size: 18px; }
-.mobile-survey h3 { font-size: 15px; }
+.mobile-survey { overflow: auto; min-height: 0; padding: 4px 12px 12px; }
+.mobile-survey header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mobile-survey h1 { font-size: 17px; margin-block: 6px; }
+.mobile-survey h2 { font-size: 15px; }
+.mobile-survey h3 { font-size: 13px; }
 .mobile-survey ul { list-style: none; padding: 0; }
 .mobile-survey li, .mobile-survey article { margin-block: 8px; }
-.mobile-survey button { min-height: 44px; padding: 8px 12px; color: inherit; border: 1px solid currentColor; border-radius: 10px; background: transparent; }
+.mobile-survey button { min-height: 44px; color: inherit; background: transparent; padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: 8px; }
 .mobile-survey button[aria-pressed='true'] { background: color-mix(in srgb, currentColor 12%, transparent); }
-.mobile-survey code, .mobile-survey small { display: block; overflow-wrap: anywhere; font-size: 12px; opacity: .75; }
+.mobile-survey code, .mobile-survey small { display: block; overflow-wrap: anywhere; opacity: .75; font-size: 11px; }
 .mobile-survey p { font-size: 13px; line-height: 1.5; }
 .mobile-note-body { line-height: 1.7; overflow-wrap: anywhere; }
 .mobile-note-body h1, .mobile-note-body h2, .mobile-note-body h3 { margin: 1em 0 .5em; }

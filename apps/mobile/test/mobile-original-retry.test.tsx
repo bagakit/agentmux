@@ -104,7 +104,7 @@ describe('explicit continuation of the retained original mobile request', () => 
     expect(editor(view.element).textContent).toBe('当前草稿')
   })
 
-  it.each(['AGENT_PROMPT_PREPARATION_FAILED', 'AGENT_PROMPT_OPERATION_CONFLICT', 'transport lost'])(
+  it.each(['AGENT_PROMPT_PREPARATION_FAILED', 'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED', 'AGENT_PROMPT_OPERATION_CONFLICT', 'transport lost'])(
     'keeps the earlier unknown after retry failure %s, including this-call not_applied/CF0', async code => {
       retainOriginal('新草稿不能替换原输入'); const f = fixture(); f.sessions.set('session-original', admitted())
       f.submit.mockRejectedValueOnce(Object.assign(new Error('original source/race must be checked by Core'), {
