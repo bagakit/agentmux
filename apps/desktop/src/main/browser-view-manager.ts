@@ -1582,6 +1582,20 @@ export class BrowserViewManager {
     if (plan.schema !== 'agentmux.browser-replay.v1' || !plan.operationId || !Array.isArray(plan.steps)) {
       throw new Error('Invalid Browser replay plan')
     }
+    if (this.operationJournal) {
+      // The caller may select a single step, but cannot hide missing original facts or an unknown outcome.
+      const original = await this.operationJournal.get(plan.operationId)
+      if (!original) throw new Error('The original Browser operation is unavailable. No replay was started; inspect its history before planning another action.')
+      const recordedPlan = await this.operationJournal.replayPlan(plan.operationId)
+      if (['preparing', 'running', 'waiting', 'human', 'indeterminate', 'stopped'].includes(original.phase)) {
+        throw new Error('The original Browser operation is stopped or its result is unconfirmed. No replay was started; inspect the original page before planning another action.')
+      }
+      // A selected or edited contribution cannot erase a barrier in its original operation.
+      const originalBlocked = recordedPlan?.steps.find(step => step.blockedReason)
+      if (originalBlocked?.blockedReason) {
+        throw new Error(`The original Browser operation requires review before any replay: ${originalBlocked.blockedReason}`)
+      }
+    }
     const blocked = plan.steps.find((step) => step.blockedReason)
     if (blocked?.blockedReason) {
       throw new Error(`Replay requires review before any action: ${blocked.blockedReason}`)

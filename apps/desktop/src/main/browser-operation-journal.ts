@@ -18,10 +18,9 @@ import type {
 export const BROWSER_OPERATION_JOURNAL_VERSION = 1 as const
 export const BROWSER_OPERATION_JOURNAL_FILE = 'browser-operation-journal.json'
 
-/** Keep the journal useful after a long-running Browser session without growing without bound. */
+/** Bound the history presentation and event backlog, never durable operation identity or steps. */
 export const MAX_BROWSER_OPERATIONS = 64
 export const MAX_BROWSER_OPERATION_EVENTS = 512
-export const MAX_BROWSER_OPERATION_STEPS = 128
 const MAX_FIELD_LENGTH = 240
 const MAX_REPLAY_ARGS = 12
 
@@ -162,7 +161,6 @@ type JournalOptions = {
   id?: () => string
   maxOperations?: number
   maxEvents?: number
-  maxSteps?: number
 }
 
 const ACTIVE_PHASES = new Set<BrowserOperationPhase>(['preparing', 'running', 'waiting', 'human'])
@@ -182,7 +180,6 @@ export class BrowserOperationJournal {
   private readonly makeId: () => string
   private readonly maxOperations: number
   private readonly maxEvents: number
-  private readonly maxSteps: number
   private warning: string | undefined
   /** 序号属于实际事件引用；裁剪可从中间移除事件，不能从数组下标反推。重启后重新发号。 */
   private sequenced = 0
@@ -199,7 +196,6 @@ export class BrowserOperationJournal {
     this.makeId = options.id ?? randomUUID
     this.maxOperations = Math.max(1, Math.floor(options.maxOperations ?? MAX_BROWSER_OPERATIONS))
     this.maxEvents = Math.max(1, Math.floor(options.maxEvents ?? MAX_BROWSER_OPERATION_EVENTS))
-    this.maxSteps = Math.max(1, Math.floor(options.maxSteps ?? MAX_BROWSER_OPERATION_STEPS))
   }
 
   /** Load once. Any unfinished operation is made explicitly indeterminate after a restart. */
@@ -273,7 +269,6 @@ export class BrowserOperationJournal {
       ...(input.replay ? { replay: input.replay } : {})
     })
     operation.steps.push(step)
-    trimSteps(operation, this.maxSteps)
     if (operation.phase === 'preparing' || operation.phase === 'waiting') operation.phase = 'running'
     this.publish({ type: 'step-started', operationId, at: startedAt, step })
     await this.persist()
@@ -362,7 +357,7 @@ export class BrowserOperationJournal {
 
   async list(): Promise<BrowserOperation[]> {
     await this.ready()
-    return this.document.operations.map(cloneOperation)
+    return historyWindow(this.document.operations, this.maxOperations).map(cloneOperation)
   }
 
   async events(operationId?: string): Promise<BrowserOperationEvent[]> {
@@ -376,9 +371,17 @@ export class BrowserOperationJournal {
   async replayPlan(operationId: string): Promise<BrowserReplayPlan | null> {
     const operation = await this.get(operationId)
     if (!operation) return null
-    const steps = operation.steps
-      .filter((step) => step.status === 'completed' && step.replay)
-      .map((step) => sanitizeReplay(step.replay as BrowserReplayStep))
+    const gap = replayGap(operation)
+    if (gap) throw new Error(`${gap} No full or single-step replay was started. Inspect the original operation and page; the Browser remains usable.`)
+    const unconfirmed = ACTIVE_PHASES.has(operation.phase) || operation.phase === 'indeterminate' || operation.phase === 'stopped'
+    const steps = operation.steps.map(step => {
+      const replay: BrowserReplayStep = step.replay ? sanitizeReplay(step.replay) : { method: step.method, url: operation.url, args: [] }
+      const blockedReason = replay.blockedReason ?? (unconfirmed
+        ? 'The original operation is stopped or its result is unconfirmed. Verify the original page before planning another action.'
+        : step.status !== 'completed' ? `Recorded step ${step.sequence} is ${step.status}; verify its original result before replay.`
+          : !step.replay ? `Recorded step ${step.sequence} has no safe replay contribution; inspect it before planning another action.` : undefined)
+      return { ...replay, ...(blockedReason ? { blockedReason } : {}) }
+    })
     return {
       schema: 'agentmux.browser-replay.v1',
       operationId: operation.id,
@@ -538,7 +541,6 @@ export class BrowserOperationJournal {
   }
 
   private trim(): void {
-    trimOperations(this.document, this.maxOperations)
     if (this.document.events.length > this.maxEvents) {
       this.document.events = this.document.events.slice(-this.maxEvents)
     }
@@ -631,7 +633,7 @@ function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
     },
     summary: clampProse(operation.summary),
     url: stripUrl(operation.url),
-    steps: operation.steps.slice(-MAX_BROWSER_OPERATION_STEPS).map(sanitizeStep),
+    steps: operation.steps.map(sanitizeStep),
     ...(rawOutcome !== undefined && !outcome ? { warning: clampProse(`${operation.warning ?? ''} Stored completion conditions are unreadable; verification is unavailable. Existing Browser work remains.`) }
       : operation.warning ? { warning: clampProse(operation.warning) } : {})
   }
@@ -689,27 +691,19 @@ function sanitizeScalar(value: unknown): unknown {
   return typeof value === 'undefined' ? null : `[${typeof value}]`
 }
 
-function trimSteps(operation: BrowserOperation, maxSteps: number): void {
-  if (operation.steps.length > maxSteps) operation.steps = operation.steps.slice(-maxSteps)
+function historyWindow(operations: BrowserOperation[], maxOperations: number): BrowserOperation[] {
+  const terminal = operations.filter(operation => !ACTIVE_PHASES.has(operation.phase) && operation.phase !== 'indeterminate')
+  const keepIds = new Set([
+    ...operations.filter(operation => ACTIVE_PHASES.has(operation.phase) || operation.phase === 'indeterminate').map(operation => operation.id),
+    ...terminal.slice(-maxOperations).map(operation => operation.id)
+  ])
+  return operations.filter(operation => keepIds.has(operation.id))
 }
 
-function trimOperations(document: BrowserOperationJournalDocument, maxOperations: number): void {
-  if (document.operations.length <= maxOperations) return
-  // Keep active operations even if they are old: dropping one would erase the fact that a restart
-  // interrupted it. If there are too many active runs, keep the newest entries consistently.
-  const active = document.operations.filter((operation) => ACTIVE_PHASES.has(operation.phase))
-  const inactive = document.operations.filter((operation) => !ACTIVE_PHASES.has(operation.phase))
-  const keepInactive = Math.max(0, maxOperations - Math.min(active.length, maxOperations))
-  const keepIds = new Set([
-    ...active.slice(-maxOperations).map((operation) => operation.id),
-    ...inactive.slice(inactive.length - keepInactive).map((operation) => operation.id)
-  ])
-  // Filter the original sequence so the resulting history remains chronological. Concatenating
-  // active and inactive partitions would make a still-running old operation appear after newer
-  // completed work, which makes a timeline jump backwards.
-  document.operations = document.operations.filter((operation) => keepIds.has(operation.id)).slice(-maxOperations)
-  const ids = new Set(document.operations.map((operation) => operation.id))
-  document.events = document.events.filter((event) => ids.has(event.operationId))
+/** Old retained tails have real missing facts. Never invent those steps or replay only the tail. */
+function replayGap(operation: BrowserOperation): string | null {
+  const missing = operation.steps.findIndex((step, index) => step.sequence !== index + 1)
+  return missing < 0 ? null : `Recorded Browser steps are incomplete before step ${operation.steps[missing]!.sequence}.`
 }
 
 function normalizeDocument(document: BrowserOperationJournalDocument): BrowserOperationJournalDocument {
@@ -718,7 +712,6 @@ function normalizeDocument(document: BrowserOperationJournalDocument): BrowserOp
     operations: document.operations.map(sanitizeOperation),
     events: document.events.map(sanitizeEvent)
   }
-  trimOperations(normalized, MAX_BROWSER_OPERATIONS)
   if (normalized.events.length > MAX_BROWSER_OPERATION_EVENTS) {
     normalized.events = normalized.events.slice(-MAX_BROWSER_OPERATION_EVENTS)
   }
