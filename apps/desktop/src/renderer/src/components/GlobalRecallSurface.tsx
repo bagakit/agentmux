@@ -89,8 +89,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
         const workspaceId = NOTES_WORKSPACE_ID
         const workspace = config?.workspaces.find(candidate => candidate.id === workspaceId)
         if (!workspace) throw new Error('The original Notes folder is unavailable. Its Notebook and existing pages are kept; reconnect it and retry.')
-        const groupId = before.layouts[workspace.id]?.activeGroupId
-        if (!groupId) throw new Error('The original Notes work surface is restoring. No replacement page was created; retry here.')
+        const groupId = before.prepareWorkbenchLayout(workspace.id).activeGroupId
         const context = { notebookId: notebook.notebookId, parentNoteId }
         const face = notebook.workface && notebook.workface.workspaceId !== workspace.id
           ? { zoneId: (await before.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })).zone.zoneId, workspaceId: workspace.id }
