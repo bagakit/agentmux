@@ -562,6 +562,8 @@ const mockApi: AgentMuxDesktopApi = {
       return { url: parseBookmarkUrl(kind, content), binary: isBinaryContent(content) }
     },
     readPreview: async () => ({ status: 'unavailable', code: 'WEB_PREVIEW_FILES_UNAVAILABLE', message: 'Workspace bytes preview is available in the desktop application.' }),
+    openHtmlPreview: async () => { throw new Error('HTML workspace preview is available in the desktop application.') },
+    releaseHtmlPreview: async () => {},
     write: async (workspaceId, input) => {
       const observedRevision = mockFileRevisions.get(input.path) ?? null
       if (observedRevision !== input.expectedRevision) {

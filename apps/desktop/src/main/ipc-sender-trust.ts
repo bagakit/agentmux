@@ -31,6 +31,8 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
 export const PRIVILEGED_SENDER_LABELS = {
   'files:createPublic': 'original file creation',
   'files:readPublic': 'original file read',
+  'files:openHtmlPreview': 'HTML file preview',
+  'files:releaseHtmlPreview': 'HTML file preview release',
   'schedule:list': 'Agent arrangement',
   'schedule:inspect': 'Agent arrangement',
   'schedule:create': 'Agent arrangement',

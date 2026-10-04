@@ -1554,6 +1554,9 @@ export type AgentMuxDesktopApi = {
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
     /** One complete, revision-verified bytes snapshot within the shared preview budget. */
     readPreview(workspaceId: string, path: string, options?: WorkspaceFilePreviewReadOptions): Promise<WorkspaceFilePreviewResult>
+    /** Read-only current HTML buffer and confined relative assets, isolated from the host renderer. */
+    openHtmlPreview(workspaceId: string, path: string, content: string): Promise<{ id: string; url: string }>
+    releaseHtmlPreview(id: string): Promise<void>
     /**
      * 读一份书签文件（`.webloc`/`.url`），一次拿齐 `openFile` 要的两件事：`url`（拿去导航，取不出＝
      * `null`，调用方退回把文件当文本打开）和 `binary`（这份文件本身是不是二进制）。书签读走这条而不是

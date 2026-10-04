@@ -3,10 +3,11 @@ import { workspaceFileExtension, workspaceFilePreviewFormat } from './workspace-
 
 const SOURCE_PREVIEWS = {
   md: 'markdown', markdown: 'markdown', mdown: 'markdown',
+  html: 'html', htm: 'html',
   svg: 'svg', json: 'json', jsonc: 'json', csv: 'csv', tsv: 'tsv'
 } as const
 
-export type WorkspaceSourcePreview = 'markdown' | 'svg' | 'note' | 'json' | 'csv' | 'tsv'
+export type WorkspaceSourcePreview = 'markdown' | 'html' | 'svg' | 'note' | 'json' | 'csv' | 'tsv'
 
 /** Presentation capability only. Bytes, revisions and codec verdicts remain with their owners. */
 export function workspaceFileFormat(path: string) {
