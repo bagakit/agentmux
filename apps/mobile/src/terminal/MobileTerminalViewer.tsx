@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { Copy, RefreshCw, SquareTerminal, Keyboard, Eye } from 'lucide-react'
 import { Terminal } from '@xterm/xterm'
@@ -136,7 +137,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     </div>}
     {sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
-    }}><label>列<input aria-label="PTY 列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<input aria-label="PTY 行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到原 Run</button><p>只按这次选择改变 Mac 的 PTY；手机旋转不会再改尺寸。</p></form>}
+    }}><label>列<TextInput aria-label="PTY 列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="PTY 行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到原 Run</button><p>只按这次选择改变 Mac 的 PTY；手机旋转不会再改尺寸。</p></form>}
     {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看原会话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
     <div className="mobile-terminal-canvas" ref={container} aria-label="原会话终端输出" />
     <aside className="mobile-terminal-notice" role="status"><p>{!client || !agentSessionId ? connection.message : reading.message}</p>
