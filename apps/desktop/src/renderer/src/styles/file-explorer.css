@@ -52,7 +52,7 @@
   background: var(--surface-0);
   transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
-.file-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text-2); background: transparent; font-size: var(--fs-micro); }
+.file-search input { width: 100%; min-width: 0; padding: 1px 2px; border: 0; outline: 0; color: var(--text-2); background: transparent; font-size: var(--fs-micro); }
 .file-search:focus-within { border-color: var(--focus-line); background: var(--bg); }
 @media (prefers-reduced-motion: reduce) { .file-search { transition: none; } }
 @media (forced-colors: active) { .file-search { border-color: ButtonText; } }
@@ -151,3 +151,6 @@
 .tree-row__link { flex-shrink: 0; color: var(--text-3); }
 
 .tree-row:has(.inline-rename-field__error), .tree-create-row:has(.inline-rename-field__error) { height:auto; min-height:24px; align-items:flex-start; padding-block:1px 4px; }
+
+.file-search input:focus-visible { outline: none; }
+@media (forced-colors: active) { .file-search:focus-within { border-color: Highlight; } }
