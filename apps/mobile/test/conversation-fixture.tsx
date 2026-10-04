@@ -2,6 +2,7 @@ import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { expect, vi } from 'vitest'
+import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 
@@ -32,6 +33,7 @@ export function fixture() {
     ? timeline : { agentSessionId: id, revision: 0, items: [] })
   // The fake is confined to tests; every product read/write goes through the public SDK method.
   const client = {
+    catalog: () => new AgentProviderRegistry().catalog(),
     agentSession: (id: string) => { const value = sessions.get(id); if (!value) throw new Error('unknown Session'); return value },
     agentSessions: () => [...sessions.values()],
     onEvent(listener: (event: AgentMuxClientEvent) => void) { listeners.add(listener); return () => { listeners.delete(listener); unsubscribe() } },

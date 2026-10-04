@@ -53,7 +53,7 @@ describe('mobile production workspace navigation', () => {
     expect(row.textContent).toContain('执行中')
     expect(row.textContent).toContain('codex')
     expect(row.textContent).not.toContain(fixturePath("workspace"))
-    await click(view.element.querySelector<HTMLButtonElement>('.mobile-navigation button:first-child')!)
+    await click(button(view.element.querySelector('.mobile-navigation') as HTMLElement, 'Mote'))
     await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-panel > .mobile-session-list button')!)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(view.element.querySelector('.mobile-mote-heading strong')).toBeNull()

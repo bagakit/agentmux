@@ -19,6 +19,16 @@ import { MobileMailbox } from './MobileMailbox'
 import './conversation.css'
 
 export type { MobileConnection } from './use-hosted-conversation'
+function promptExecutionFor(client: AgentMuxHostedClient, session: AgentMuxAgentSession) {
+  try {
+    const provider = client.catalog().find(entry => entry.id === session.providerId)
+    if (!provider) return { execution: 'default' as const, supported: undefined, issue: '公共能力目录未包含原 Session 的 Provider。' }
+    const supported = provider.capabilities.promptExecution?.immediate === 'interrupt-before-input'
+    return { execution: supported ? 'immediate' as const : 'default' as const, supported }
+  } catch (error) {
+    return { execution: 'default' as const, supported: undefined, issue: `公共能力目录读取失败：${errorMessage(error)}` }
+  }
+}
 function originalPromptRequest(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
   attempt: PromptAttempt | undefined) {
   const admission = session?.promptCompletionAdmission, intent = admission?.intent, message = intent?.message
@@ -71,6 +81,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const responses = useRef(local.responses)
   const [revision, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const [inputCapabilities, setInputCapabilities] = useState<Record<string, { sessionId: string; runId: string; execution: 'default' | 'immediate'; supported?: boolean | undefined; issue?: string | undefined }>>({})
+  const inputCapability = agentSessionId ? inputCapabilities[agentSessionId] : undefined
+  const setInputCapability = (value: NonNullable<typeof inputCapability>) =>
+    setInputCapabilities(current => ({ ...current, [value.sessionId]: value }))
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
@@ -79,10 +93,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const attempt = attempts.current.get(draftKey)
   const available = Boolean(client && agentSessionId && reading.session && connection.state === 'connected' && !reading.disconnected)
   const setDraft = (value: string, key = draftKey) => { drafts.current.set(key, value); local.save(); redraw(value => value + 1) }
-  const confirmPrompt = (key: string, original: PromptAttempt) => {
+  const confirmPrompt = (key: string, original: PromptAttempt, message = 'Core 已确认输入。') => {
     if (attempts.current.get(key) !== original) return
     original.phase = 'confirmed'
-    original.message = 'Core 已确认输入。'
+    original.message = message
     // A receipt belongs to its captured operation, including after navigating elsewhere.
     if (drafts.current.get(key) === original.draft) drafts.current.set(key, '')
     local.save()
@@ -111,13 +125,15 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       || existing?.phase === 'sending' || existing?.phase === 'unknown') return
     const originalClient = client, originalId = agentSessionId, originalKey = draftKey
     // No write has been dispatched if Core's authoritative condition cannot be obtained.
-    let condition: ReturnType<typeof agentPromptCondition>
-    try { condition = agentPromptCondition(originalClient.agentSession(originalId)) }
+    let condition: ReturnType<typeof agentPromptCondition>, originalSession: AgentMuxAgentSession
+    try { originalSession = originalClient.agentSession(originalId); condition = agentPromptCondition(originalSession) }
     catch (error) {
       attempts.current.set(originalKey, { operationId: '', runId: null, draft, phase: 'rejected', message: `尚未发送：${errorMessage(error)}` })
       local.save()
       redraw(value => value + 1); return
     }
+    const capability = explicit ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
+    setInputCapability({ sessionId: originalId, runId: condition.expectedRun.runId, ...capability })
     const original: PromptAttempt = { operationId: randomClientRequestId(), runId: condition.expectedRun.runId, draft, phase: 'sending', message: '正在发送输入…' }
     attempts.current.set(originalKey, original)
     local.save()
@@ -126,9 +142,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
         prompt: expandSemanticReferences(original.draft), authorHuman: true, ...condition,
         // Explicit Send/Cmd+Enter authorizes this input only; plain Enter keeps its original semantics.
-        ...(explicit ? { allowUncertainTurn: true, execution: 'immediate' as const } : {}) })
+        ...(explicit ? { allowUncertainTurn: true, ...(capability.execution === 'immediate' ? { execution: 'immediate' as const } : {}) } : {}) })
       if (!mounted.current) return
-      confirmPrompt(originalKey, original)
+      confirmPrompt(originalKey, original, capability.execution === 'immediate' ? 'Core 已确认立即执行输入。' : 'Core 已确认普通输入。')
       if (current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
     } catch (error) {
       if (!mounted.current) return
@@ -278,6 +294,24 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {responseAttempt ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
       <div className="mobile-conversation__composer">
+        {inputCapability?.sessionId === agentSessionId && inputCapability.runId === session?.run.runId ?
+          <aside className="mobile-conversation__notice" role="status">
+            {inputCapability.execution === 'immediate' ? '立即执行输入' : inputCapability.issue ? '普通输入 · 立即执行能力未确认' : inputCapability.supported === false ? '普通输入 · 不支持立即执行' : '普通输入'}
+            {attempt?.phase === 'confirmed' ? <span> · {attempt.message}</span> : null}
+            {inputCapability.issue ? <><p>{inputCapability.issue} 原会话与当前草稿保留；本次选择普通输入，未尝试立即执行。</p>
+              <button type="button" onClick={() => {
+                if (!client || !agentSessionId) return
+                try {
+                  const original = client.agentSession(agentSessionId)
+                  if (original.agentSessionId !== inputCapability.sessionId || original.run.runId !== inputCapability.runId) return
+                  const observed = promptExecutionFor(client, original)
+                  // Read-only recovery updates the service window, never the captured input mode.
+                  setInputCapability({ ...inputCapability, supported: observed.supported, issue: observed.issue })
+                } catch (error) {
+                  setInputCapability({ ...inputCapability, issue: `原 Session 能力读取失败：${errorMessage(error)}` })
+                }
+              }}>重新读取能力目录</button></> : null}
+          </aside> : null}
         <AgentComposer tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
           refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}

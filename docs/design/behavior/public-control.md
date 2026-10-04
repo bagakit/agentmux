@@ -221,7 +221,7 @@ CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace
 
 ## 手机版 Relay 连接
 
-手机连通后的一级导航为 Mote、Focus、Space。Mote 只列原协调对象；Space 沿原 Space→Zone→Tab→Region 绑定导航；Focus 按原 Core 执行状态与待处理交互组织，已有 Session 继续可达。目录不可读不按 cwd 或 Session ID 猜归属，原会话、草稿与阅读引用保留。默认主页由手机设置在三者中选择并保存在本设备，连通后直接进入该主页；连接管理收进菜单，未连通时才默认显示接入页。连接恢复不抢走用户后来选择的工作面。
+手机是适合移动使用的 AgentMux 第一方 client。连通后的一级导航从左到右为 Goals、Topics、Mote、Focus、Space，Mote 位于正中；原会话内也可切换主工作面。Survey、连接与设备设置及其他辅助能力收进菜单，不重复五个主入口。Mote 只列原协调对象；Space 沿原 Space→Zone→Tab→Region 绑定导航；Focus 按原 Core 执行状态与待处理交互组织，已有 Session 继续可达。目录不可读不按 cwd 或 Session ID 猜归属，原会话、草稿与阅读引用保留。默认主页可在五个主入口中选择并保存在本设备，原有三项设置原样保留，未知记录不覆盖；连通后直接进入该主页，未连通时才默认显示接入页。连接恢复不抢走用户后来选择的工作面。
 
 目录展示消费原 Focus 的名称、项目、状态与 recap，以及原 Mote 自定义头像。公共 carrier 保留这些 owner 的原展示值，不另加字段容量或再次截断摘要；类型、准确身份、权限和既有整条传输容量边界仍成立。正常中文与 emoji 展示数据不能使整份目录不可读。
 
@@ -254,4 +254,4 @@ Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定
 
 手机目录完整消费原呈现 owner 的名称、项目、详情和 recap，不另加任意字段长度限制或截断正常数据。传输容量沿既有公共消息预算，不用重复的更小字段预算阻断原可用目录。中文／emoji 不能导致整个 Focus、Mote 目录失效；验收包含原呈现生产者到实际公共 codec 的链路及原内容保真。
 
-Mobile 同时提供原 Topic、Survey 与 Goals 的可达入口，沿 main 的原功能与公共 owner 消费。Topic 保 Category、Topic、Chat 和知识来源身份；Survey 只显示原明确收集的研究 Zone、原名称和准确 Tab／Region，不能把全量空间当研究或复制内容。连接后的三个日常入口仍为 Mote、Focus、Space，Topic／Survey／Goals 在菜单中提供独立用途的入口；不重复日常导航。Goals 沿原公共目标 owner 保目标身份、状态、决策和操作回执，不维护手机独立目标系统。所选 File Region 以原目录元信息确定准确资源，通过既有 `file.read` 读取原内容与修订；列表不批量读取文件，不凭路径猜内容，不新增另一套文件读取接口。手机 Note 编辑和保存消费原共享 schema 与 revision-aware 文件写入 owner；冲突、未知写入和未保存草稿明确保全，未取得确认不冒保存成功。正文写入若缺公共入口，在同一交付中暴露原 owner 的最小 RPC／CLI 能力并验证实际手机消费，不停留只读占位。Browser 沿原 browserId 发现当前网页。原对话、Message Tools 与 Terminal 继续同源，自定义头像和动画保真，失败保原对象和草稿。
+Mobile 消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，入口位置沿本节一级导航。Topic 保 Category、Topic、Chat 和知识来源身份；Survey 只显示原明确收集的研究 Zone、原名称和准确 Tab／Region，不能把全量空间当研究或复制内容。Goals 沿原公共目标 owner 保目标身份、状态、决策和操作回执，不维护手机独立目标系统。所选 File Region 以原目录元信息确定准确资源，通过既有 `file.read` 读取原内容与修订；列表不批量读取文件，不凭路径猜内容，不新增另一套文件读取接口。手机 Note 编辑和保存消费原共享 schema 与 revision-aware 文件写入 owner；冲突、未知写入和未保存草稿明确保全，未取得确认不冒保存成功。正文写入若缺公共入口，在同一交付中暴露原 owner 的最小 RPC／CLI 能力并验证实际手机消费，不停留只读占位。Browser 沿原 browserId 发现当前网页。原对话、Message Tools 与 Terminal 继续同源，自定义头像和动画保真，失败保原对象和草稿。
