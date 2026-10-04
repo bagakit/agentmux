@@ -108,11 +108,11 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
   return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
     value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename' ||
     value === 'space.bind' || value === 'space.unbind' || value === 'open.file' ||
-    value === 'agent.view' || value === 'space.view' || value === 'space.swap'
+    value === 'agent.view' || value === 'space.view' || value === 'space.swap' || value === 'file.format' || value === 'file.build' || value === 'file.build.inspect' || value === 'file.build.cancel'
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -126,6 +126,12 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = operation === 'agent.view'
       ? { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), ...(mode === undefined ? {} : { mode: mode as 'terminal' | 'activity' }) }
       : { ...base, operation, regionId: spaceControlId(source.regionId, 'File Region', code, true), ...(mode === undefined ? {} : { mode: mode as 'source' | 'diff' | 'preview' }) }
+  } else if (operation === 'file.build.inspect' || operation === 'file.build.cancel') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'regionId', 'buildId'], code)
+    request = { ...base, operation, regionId: spaceControlId(source.regionId, 'File Region', code, true), buildId: spaceControlId(source.buildId, 'File build', code) }
+  } else if (operation === 'file.format' || operation === 'file.build') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'regionId'], code)
+    request = { ...base, operation, regionId: spaceControlId(source.regionId, 'File Region', code, true) }
   } else if (operation === 'space.swap') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'regionId', 'withRegionId'], code)
     request = { ...base, operation, regionId: spaceControlId(source.regionId, 'Region', code, true), withRegionId: spaceControlId(source.withRegionId, 'Other Region', code, true) }
@@ -447,6 +453,24 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   let result: AgentMuxSpaceControlResult
   if (operation === 'agent.view' || operation === 'space.view' || operation === 'space.swap' || operation === 'open.file') {
     result = workfaceReport(operation, source.result, code)
+  } else if (operation === 'file.format') {
+    const body = fields(source.result, ['regionId', 'status', 'message'], code)
+    result = { operation, regionId: spaceControlId(body.regionId, 'File Region', code, true),
+      status: member(body.status, ['formatted', 'unchanged', 'unsupported', 'unavailable', 'stale', 'cancelled', 'failed'] as const, 'Format status', code),
+      message: nullableString(body.message, 'Format message', code) }
+  } else if (operation === 'file.build' || operation === 'file.build.inspect' || operation === 'file.build.cancel') {
+    const body = fields(source.result, ['regionId', 'buildId', 'status', 'message', 'log', 'artifact'], code)
+    let artifact: { kind: 'pdf'; byteLength: number } | null = null
+    if (body.artifact !== null) {
+      const item = fields(body.artifact, ['kind', 'byteLength'], code)
+      if (item.kind !== 'pdf' || !Number.isSafeInteger(item.byteLength) || (item.byteLength as number) <= 0) fail('Build artifact is invalid.', code)
+      artifact = { kind: 'pdf', byteLength: item.byteLength as number }
+    }
+    const status = member(body.status, ['running', 'succeeded', 'failed', 'cancelled', 'unavailable', 'unknown', 'stale', 'missing', 'unsupported'] as const, 'Build status', code)
+    if ((status === 'succeeded') !== (artifact !== null)) fail('Build artifact disagrees with its completion status.', code)
+    const report = { regionId: spaceControlId(body.regionId, 'File Region', code, true), buildId: spaceControlId(body.buildId, 'File build', code),
+      status, message: nullableString(body.message, 'Build message', code), log: string(body.log, 'Build log', code), artifact }
+    result = operation === 'file.build' ? { operation, ...report } : operation === 'file.build.inspect' ? { operation, ...report } : { operation, ...report }
   } else if (operation === 'agent.inspect') {
     const body = fields(source.result, ['agentSessionId', 'override'], code)
     result = { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), override: nullableString(body.override, 'Display override', code) }

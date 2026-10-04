@@ -158,7 +158,13 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'interrupt': case 'resume': case 'stop':
       if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail()
       break
-    case 'space.view': if (actual.regionId !== request.regionId) fail(); break
+    case 'file.build':
+      if (actual.regionId !== request.regionId || actual.buildId !== request.requestId) fail()
+      break
+    case 'file.build.inspect': case 'file.build.cancel':
+      if (actual.regionId !== request.regionId || actual.buildId !== request.buildId) fail()
+      break
+    case 'space.view': case 'file.format': if (actual.regionId !== request.regionId) fail(); break
     case 'space.swap':
       if (actual.regionId !== request.regionId || actual.withRegionId !== request.withRegionId) fail()
       break
