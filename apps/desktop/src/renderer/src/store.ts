@@ -7357,7 +7357,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
+    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Agent display position is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
@@ -7571,7 +7571,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw new Error('Select a workspace first')
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
-    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Browser display position is unavailable')
+    if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Terminal display position is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
       : inheritedTopicIdForNewTab(workspace.id, layout, state.tabs, tabGroupId)
