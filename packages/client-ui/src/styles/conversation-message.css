@@ -83,6 +83,18 @@
 .log-turn__resource { display: grid; gap: var(--sp-2); margin: var(--sp-3) 0; font-size: var(--fs-meta); }
 .log-turn__resource code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__resource small { color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-files { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); white-space: normal; }
+.conversation-files__caption { color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-files__items { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: var(--sp-2); }
+.conversation-file { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: 40px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.conversation-file > svg { flex: none; color: var(--text-3); }
+.conversation-file:hover { color: var(--text); background: var(--surface-2); border-color: var(--line); }
+.conversation-file:focus-visible, .conversation-files__more > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.conversation-file__label { display: grid; gap: var(--sp-1); min-width: 0; }
+.conversation-file__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 560; }
+.conversation-file__path { overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.conversation-files__more > summary { width: fit-content; color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
+.conversation-files__more[open] > summary { margin-bottom: var(--sp-2); }
 .log-turn__trace { min-width: 0; margin: var(--sp-2) 0; font-size: var(--fs-meta); }
 .log-turn__trace > summary { cursor: pointer; color: var(--text-3); }
 .log-turn__trace[data-status='failed'] > summary { color: var(--red-text); }
@@ -97,6 +109,9 @@
 .log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
 .log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
 .log-turn__annotation { display: grid; gap: var(--sp-3); width: 256px; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-1), var(--hl); overflow: auto; pointer-events: auto; }
+.conversation-annotation-placement { display: contents; }
+.conversation-annotation-placement[data-presentation='inline'] > .window-overlay-host__entry { display: contents; }
+.log-turn__annotation[data-presentation='inline'] { flex: none; align-self: flex-end; width: min(256px, calc(100% - var(--sp-6))); max-height: min(240px, 45%); margin: var(--sp-3) var(--sp-4); box-shadow: var(--hl); }
 .conversation-annotation-note__passage { min-width: 0; }
 .conversation-annotation-note__passage > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--sp-3); list-style: none; cursor: pointer; color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-annotation-note__passage > summary::-webkit-details-marker { display: none; }
@@ -240,35 +255,50 @@
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }
 
-/* System context comes from a recorded producer fact, with its full text available on demand. */
+/* System records keep their original identity and raw body, with a single quiet reading line. */
 .log-turn[data-speaker-role='system'] {
-  margin-inline: var(--sp-5);
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
-  background: var(--surface-1);
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: var(--sp-2);
+  margin: var(--sp-1) var(--sp-3);
+  padding: var(--sp-1) var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
 }
-.log-turn[data-speaker-role='system'] .log-turn__node { background: var(--surface-1); }
+.log-turn[data-speaker-role='system'] .log-turn__node { background: transparent; opacity: .7; }
+.log-turn[data-speaker-role='system'] .log-turn__head { flex-wrap: nowrap; }
+.log-turn[data-speaker-role='system'] .log-turn__time { font-size: var(--fs-micro); }
+.log-turn[data-speaker-role='system'] .log-turn__actions { margin-left: 0; }
+.log-turn[data-speaker-role='system'] .log-turn__body { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .log-turn__system-toggle {
-  grid-column: 2;
-  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--text-3);
   font: inherit;
   font-size: var(--fs-meta);
+  text-align: left;
   cursor: pointer;
 }
+.log-turn__system-toggle > svg { flex: none; transition: transform var(--dur-fast) ease; }
+.log-turn__system-title { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.log-turn__system-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-turn__system-toggle[aria-expanded='true'] svg { transform: rotate(90deg); }
 .log-turn__system-toggle:hover { color: var(--text); }
-.log-turn__system-toggle:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; }
+.log-turn__system-toggle:disabled { cursor: default; }
+.log-turn__system-toggle:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
 @media (max-width: 620px) {
-  .log-turn[data-speaker-role='system'] { margin-inline: var(--sp-3); }
+  .log-turn[data-speaker-role='system'] { margin-inline: var(--sp-1); }
+  .log-turn[data-speaker-role='system'] .log-turn__head { gap: var(--sp-1); }
+  .log-turn__system-title { max-width: 55%; }
 }
+@media (prefers-reduced-motion: reduce) { .log-turn__system-toggle > svg { transition: none; } }
 
 /* Authored packet declarations stay quiet; quoted attribution retains its own reading edge. */
 .log-turn__packet-declaration { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }

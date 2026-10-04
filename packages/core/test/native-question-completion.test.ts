@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,7 +27,7 @@ const questionInput = { questions: [{ question: 'Synthetic choice?', options: [{
 
 function seed(providerId: string): AgentMuxStoredAgentSession {
   return { kind: 'agent', agentSessionId, providerId, executorId: providerId, hostId: 'local',
-    workspacePath: upstreamFixturePath("synthetic"), run: { runId }, retiredRuns: [],
+    workspacePath: fixturePath("synthetic"), run: { runId }, retiredRuns: [],
     hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43),  createdAt: 1, updatedAt: 1 }
 }
 
@@ -42,7 +42,7 @@ async function harness(providerId: string, provider?: AgentProvider) {
   owner.connected = true
   owner.kernel.isConnected = () => true
   let cursor = 0
-  const run = () => ({ nativeService: null, runId, lifecycleOperationId: null, program: 'synthetic', args: [], workspacePath: upstreamFixturePath("synthetic"),
+  const run = () => ({ nativeService: null, runId, lifecycleOperationId: null, program: 'synthetic', args: [], workspacePath: fixturePath("synthetic"),
     pid: 1, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor })
   owner.kernel.status = async () => run()
   owner.kernel.identity = () => ({ daemonInstanceId: 'synthetic-daemon', protocolVersion: 17, buildIdentity: 'synthetic' })
@@ -330,8 +330,9 @@ describe('native successful question completion owns only an exact unclaimed que
 
   it('a custom declarative Provider uses its own successful event and shared default child keys', async () => {
     const base = new AgentProviderRegistry().get('codex')
+    const { providerFork: _fork, ...capabilities } = base.catalog.capabilities
     const provider = defineAgentProvider({
-      catalog: { ...base.catalog, id: 'generic-question', executable: 'synthetic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+      catalog: { ...base.catalog, capabilities, id: 'generic-question', executable: 'synthetic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
       buildArgs: (_prompt, args) => [...args],
       hook: { rules: [{ events: ['before_question'], state: 'waiting', toolNames: ['ask_generic'] }, { events: ['after_question'], state: 'working' }],
         subagentTracking: { startEvents: ['child_start'], stopEvents: ['child_stop'], mainStopEvents: ['main_stop'] } },

@@ -1,51 +1,32 @@
 import { useEffect, useRef, useState } from 'react'
+import { RotateCcw } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { PastedImage } from '../lib/pasted-images.js'
 import { useClientUiPlatform } from '../platform.js'
 
-/**
- * Read a pasted image (`<home>/.agentmux/pasted/…`) back as an `<img>`-ready data URI, or null when it
- * is not a readable pasted image.
- *
- * Injected rather than imported: the real implementation is an IPC call, and importing it here would put
- * a main-process dependency inside a pure prose renderer. Absent by default — a caller (see AgentMarkdown)
- * that does not pass it gets today's behaviour, a pasted path rendered as its plain-text reference. This
- * only reads bytes; whether the token is even shaped like one of our pasted images is decided purely, by
- * `splitPastedImageReferences`, before this is ever called.
- */
+/** App-pasted references retain their confined byte reader; native references use Core's exact-record reader. */
 export type ReadPastedImage = (path: string) => Promise<PastedImage | null>
 
 type LoadedImage = { path: string; reader: ReadPastedImage; image: PastedImage }
 
-/**
- * A pasted image (`<home>/.agentmux/pasted/…`) shown as a clickable thumbnail that enlarges in a
- * lightbox — replacing the dead file-link button the user reported.
- *
- * Lives in its own file, not inside AgentMarkdown, because it answers a different question: AgentMarkdown
- * maps a node tree to elements, while this owns an overlay's whole lifecycle — a lazy byte load with three
- * end states and a Radix Dialog Portal. Keeping it here means a reader of the markdown renderer never has
- * to step over image-loading and focus-trap code to follow how prose becomes elements, and the Dialog
- * primitive is imported only where it is used.
- *
- * The `@path` token in the message text is NEVER rewritten (the Agent reads the image from it); this only
- * changes how the token is DISPLAYED. Bytes load lazily via the injected read seam. Three end states:
- *   - loading → the plain-text token (so it reads correctly until the image arrives, never a blank box)
- *   - failed  → fall back to the plain-text token, exactly what showed before this feature (a broken
- *               `<img>` is worse: the user cannot tell a bad image from a broken app)
- *   - loaded  → the thumbnail, click to enlarge
- */
+/** One thumbnail, decode guard and Radix lightbox for conversation images. The injected reader owns
+ * authorization; bytes, failures and open state stay bound to that exact reference and reader. */
 export function ConversationImage({
   text,
   path,
-  readPastedImage
+  label,
+  readImage
 }: {
   text: string
   path: string
-  readPastedImage: ReadPastedImage
+  label?: string
+  readImage: ReadPastedImage
 }) {
   const platform = useClientUiPlatform()
+  const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<LoadedImage | null>(null)
   const [failed, setFailed] = useState<LoadedImage | null>(null)
+  const [readFailure, setReadFailure] = useState<{ path: string; reader: ReadPastedImage; message: string } | null>(null)
   const [open, setOpen] = useState<LoadedImage | null>(null)
   const currentImage = useRef<LoadedImage | null>(null)
 
@@ -54,25 +35,29 @@ export function ConversationImage({
     setLoaded(null)
     setFailed(null)
     setOpen(null)
-    readPastedImage(path)
+    setReadFailure(null)
+    readImage(path)
       .then((result) => {
         if (!alive) return
-        if (result) setLoaded({ path, reader: readPastedImage, image: result })
+        if (result) setLoaded({ path, reader: readImage, image: result })
+        else setReadFailure({ path, reader: readImage, message: 'Image is not readable from this source.' })
       })
-      .catch(() => {
-        if (alive) setLoaded(null)
+      .catch((error: unknown) => {
+        if (alive) setReadFailure({ path, reader: readImage, message: error instanceof Error ? error.message : 'Image could not be read.' })
       })
     return () => {
       alive = false
     }
-  }, [path, readPastedImage])
+  }, [path, readImage, attempt])
 
   // Bind both the bytes and decode/open state to this exact read. A changed source cannot render
   // the previous image during the commit before effect cleanup, or inherit a late decode error.
-  const image = loaded?.path === path && loaded.reader === readPastedImage && failed !== loaded
+  const image = loaded?.path === path && loaded.reader === readImage && failed !== loaded
     ? loaded.image : null
   currentImage.current = image ? loaded : null
-  if (!image) return <>{text}</>
+  const failure = readFailure?.path === path && readFailure.reader === readImage ? readFailure.message
+    : failed?.path === path && failed.reader === readImage ? 'Recorded image could not be decoded.' : null
+  if (!image) return <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}<button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><RotateCcw size={12} aria-hidden="true" /></button></small> : null}</>
   const decodeFailed = () => { if (currentImage.current === loaded) setFailed(loaded) }
 
   return (
@@ -80,8 +65,8 @@ export function ConversationImage({
       if (currentImage.current === loaded) setOpen(next ? loaded : null)
     }}>
       <Dialog.Trigger asChild>
-        <button type="button" className="md-conversation-image" title={path}>
-          <img className="md-conversation-image__thumb" src={image.dataUrl} alt={path} onError={decodeFailed} />
+        <button type="button" className="md-conversation-image" title={label ?? path}>
+          <img className="md-conversation-image__thumb" src={image.dataUrl} alt={label ?? path} onError={decodeFailed} />
         </button>
       </Dialog.Trigger>
       <Dialog.Portal container={platform.overlayContainer() as HTMLElement}>
@@ -90,8 +75,8 @@ export function ConversationImage({
           {/* Radix requires a title for the dialog; it is visually hidden but read to assistive tech.
               There is no description — the enlarged image is the whole content — so describedby is
               explicitly cleared rather than left to warn about a missing Description. */}
-          <Dialog.Title className="md-conversation-image__a11y">{path}</Dialog.Title>
-          <img className="md-conversation-image__full" src={image.dataUrl} alt={path} onError={decodeFailed} />
+          <Dialog.Title className="md-conversation-image__a11y">{label ?? path}</Dialog.Title>
+          <img className="md-conversation-image__full" src={image.dataUrl} alt={label ?? path} onError={decodeFailed} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

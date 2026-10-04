@@ -1,16 +1,28 @@
-import { parseConnectionOffer } from '@agentmux/relay/offer'
-import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
+import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
+
+import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
+
 import { isDeepStrictEqual } from 'node:util'
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { parseAgentContextParams } from './agent-context.js'
+import { parseConnectionOffer } from '@agentmux/relay/offer'
+import { normalizeMessageChannel } from './message-origin.js'
+import { normalizeOperationDevice } from './operation-device.js'
+import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
+import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
+import { isFileMethod, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
+import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
+import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeAgentSession } from './agent-session-store.js'
+import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
@@ -32,6 +44,11 @@ function count(value: unknown, nullable = false): void { if (!(nullable && value
 function bool(value: unknown): void { if (typeof value !== 'boolean') fail() }
 function member(value: unknown, values: readonly unknown[]): void { if (!values.includes(value)) fail() }
 function array(value: unknown, consume: (item: unknown) => void): void { if (!Array.isArray(value)) return fail(); for (const item of value) consume(item) }
+function promptExecution(value: unknown): void {
+  if (value === undefined) return
+  const capability = record(value, ['immediate'])
+  member(capability.immediate, ['interrupt-before-input', 'native-steer'])
+}
 function runRef(value: unknown): Record<string, unknown> { const run = record(value, ['runId']); string(run.runId); return run }
 function issues(value: unknown, source = false): void {
   array(value, item => { const issue = record(item, source ? ['source', 'code', 'message', 'recovery'] : ['code', 'message', 'recovery'])
@@ -61,12 +78,14 @@ export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown>
   array(p.sessions, session => parseRpcAgentSession(session))
   array(p.catalog, item => { const entry = record(item)
     for (const key of ['id', 'label', 'executable', 'expectedProcess']) string(entry[key])
-    record(entry.capabilities); array(entry.launchOptions, option => record(option))
+    promptExecution(record(entry.capabilities).promptExecution); array(entry.launchOptions, option => record(option))
   })
   return p
 }
 function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSession>, routed = false): void {
-  const p = record(value, [...(routed ? ['routeHostId'] : []), 'session', 'run', 'capabilities', 'observation']), session = parseRpcAgentSession(p.session)
+  const p = record(value, [...(routed ? ['routeHostId'] : []), 'session', 'run', 'capabilities', 'observation', 'interactionResponseUnavailableReason']), session = parseRpcAgentSession(p.session)
+  const responseReason = session.pendingInteraction && agentInteractionResponseUnavailableReason(session.pendingInteraction)
+  if (p.interactionResponseUnavailableReason !== (responseReason || undefined)) fail()
   const run = record(p.run)
   if (run.runId !== session.run.runId || run.agentSessionId !== session.agentSessionId || run.kind !== 'agent' ||
     run.providerId !== session.providerId || run.executorId !== session.executorId || run.workspacePath !== session.workspacePath) fail()
@@ -76,6 +95,7 @@ function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSessi
   for (const key of ['observedAt', 'latestOutputBytes']) count(run[key])
   count(run.acceptedInputBytes, true)
   const capabilities = record(p.capabilities)
+  promptExecution(capabilities.promptExecution)
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
   member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)
@@ -122,13 +142,17 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
+    if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {
+      case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
+      case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>
       case 'agent.native.confirm': {
         record(p, ['session', 'confirmation', 'persisted', 'current'])
         const request = parseAgentNativeSessionConfirmation(input), session = parseRpcAgentSession(p.session)
@@ -221,6 +245,20 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break
+      case 'agent.question.reply': {
+        record(p, ['agentSessionId', 'source', 'recordId', 'questionIds', 'operationId', 'outcome'])
+        const source = record(p.source, ['providerId', 'nativeSessionId']), expected = record(input.source)
+        string(source.providerId); string(source.nativeSessionId)
+        if (!rpcSessionTargetMatches(input.agentSessionId, String(p.agentSessionId)) || p.recordId !== input.recordId ||
+          p.operationId !== input.operationId || p.outcome !== 'submitted' || source.providerId !== expected.providerId ||
+          source.nativeSessionId !== expected.nativeSessionId) fail()
+        array(p.questionIds, id => string(id))
+        const answers = input.answers as Array<{ questionId: string }>
+        if (!Array.isArray(answers) || JSON.stringify(p.questionIds) !== JSON.stringify(answers.map(answer => answer.questionId))) fail()
+        break
+      }
+      case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
+      case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])
         const session = parseRpcAgentSession(p.session), target = method === 'whoami' ? { kind: 'self' } : record(input.target)
@@ -259,7 +297,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
       case 'agent.send': {
-        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId'])
+        record(p, ['queueId', 'receiptId', 'messageId', 'sequence', 'envelope', 'delivery', 'promptCondition', 'agentSessionId', 'sourceChannel', 'sourceDevice'])
+        if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
+        if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
         for (const key of ['queueId', 'receiptId', 'messageId']) string(p[key])
         if (p.messageId !== envelope.messageId || input.messageId === undefined && envelope.operationId !== input.operationId || envelope.body !== input.text ||
@@ -302,6 +342,24 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           if (t.moteArchive !== undefined) { const a = record(t.moteArchive); member(a.state, ['active', 'archived', 'unknown']); if (a.state === 'unknown') text(a.issue); else string(a.version) } }
         array(p.topics, topic); array(p.motes, topic); break
       }
+      case 'notebook.ls': case 'notebook.apply': {
+        record(p, ['state'])
+        const state = parseNotebookState(p.state)
+        if (method === 'notebook.apply') {
+          string(input.operationId)
+          const operation = state.operations[input.operationId as string]
+          if (!operation || operation.fingerprint !== notebookFingerprint(input.change) ||
+            credentials && (operation.actor.kind !== 'agent' || operation.actor.id !== credentials.agentSessionId)) fail()
+        }
+        break
+      }
+      case 'notebook.inspect': {
+        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation'])
+        const state = parseNotebookState(p.state)
+        if (notebookFingerprint(p) !== notebookFingerprint(inspectNotebook(state, input))) fail()
+        break
+      }
+
       case 'space.state':
       case 'name.confirm':
       case 'space.commit': {
@@ -331,6 +389,30 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection']); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) } else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
       case 'system.subscription.cancel': record(p, ['disposed']); bool(p.disposed); break
+      case 'system.storage': {
+        const p = record(value, ['status', 'run', 'runtime', 'observedAt', 'storage', 'message'])
+        const request = rpcRecord(params), run = record(p.run, ['runId']), runtime = record(p.runtime)
+        if (run.runId !== request.runId || runtime.hostId !== request.hostId) fail()
+        string(run.runId); string(runtime.instanceId); string(runtime.buildIdentity); count(runtime.protocolVersion); count(p.observedAt)
+        member(p.status, ['observed', 'unsupported'])
+        if (p.status === 'unsupported') { text(p.message); if (p.storage !== undefined) fail(); break }
+        if (p.message !== undefined) fail()
+        const storage = record(p.storage, ['memory', 'persistence', 'policy'])
+        const memory = record(storage.memory, ['firstAvailableByte', 'latestOutputByte'])
+        count(memory.firstAvailableByte); count(memory.latestOutputByte)
+        if ((memory.firstAvailableByte as number) > (memory.latestOutputByte as number)) fail()
+        if (storage.persistence !== null) {
+          const owner = record(storage.persistence, ['firstFailure', 'actorStopped', 'queuedAppendCommands', 'offeredByte', 'confirmedByte'])
+          if (owner.firstFailure !== null) text(owner.firstFailure)
+          bool(owner.actorStopped)
+          for (const key of ['queuedAppendCommands', 'offeredByte', 'confirmedByte']) count(owner[key])
+        }
+        const policy = record(storage.policy, ['memoryPerRunBytes', 'memorySharedBytes', 'replayPerRunBytes', 'replaySharedBytes',
+          'databaseBytes', 'walCheckpointBytes', 'terminalHistoryRows', 'terminalCheckpointBytes'])
+        for (const key of ['memoryPerRunBytes', 'memorySharedBytes', 'replayPerRunBytes', 'replaySharedBytes',
+          'databaseBytes', 'walCheckpointBytes', 'terminalHistoryRows', 'terminalCheckpointBytes']) count(policy[key])
+        break
+      }
       case 'system.doctor': {
         record(p, ['ok', 'host', 'runtime', 'runtimeAction', 'runtimeStorage', 'runtimeStorageUnavailable', 'hosts', 'agents', 'integration']); bool(p.ok)
         const host = record(p.host); if (host.kind !== 'local') fail(); bool(host.reachable)

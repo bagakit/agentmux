@@ -1,172 +1,209 @@
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import type { Root, RootContent, PhrasingContent } from 'mdast'
+import type { Definition, FootnoteDefinition, Root, RootContent, PhrasingContent } from 'mdast'
 
-// Markdown for untrusted agent output.
-//
-// Agent answers are written in markdown, so a conversation that shows the source is a conversation you
-// have to decode. This turns that source into a bounded node tree the renderer maps to React elements.
-//
-// The parser is remark (`remark-parse` + `remark-gfm`) rather than something hand-rolled: the repo had no
-// markdown capability at all, and a hand-written subset was already failing on real agent output —
-// tables came out as a wall of pipes and dashes, nested lists collapsed flat, blockquotes and rules read
-// as literal text. remark is the maintained implementation of the same grammar, and GFM tables are the
-// construct agents reach for most.
-//
-// It is specifically remark and NOT marked/markdown-it because remark stops at an mdast SYNTAX TREE and
-// never emits HTML. That is the whole security position: untrusted text becomes React elements,
-// `dangerouslySetInnerHTML` never appears, and there is consequently nothing to sanitise. Adopting an
-// HTML-emitting library would import both its output and the permanent duty to neutralise that output
-// correctly — a duty we would eventually discharge wrongly.
-
+/** remark owns the grammar. This projection retains semantics as data, never executable HTML. */
 export type InlineNode =
   | { kind: 'text'; text: string }
   | { kind: 'code'; text: string }
+  | { kind: 'break' }
   | { kind: 'strong'; children: InlineNode[] }
   | { kind: 'emphasis'; children: InlineNode[] }
   | { kind: 'strike'; children: InlineNode[] }
-  // href is carried verbatim. Whether it may be opened is the renderer's call through the existing
-  // external-URL seam — a parser deciding that would be a second place where escape rules live.
   | { kind: 'link'; href: string; children: InlineNode[] }
   | { kind: 'image'; href: string; alt: string }
+  | { kind: 'footnote-reference'; identifier: string; number: number; occurrence: number }
 
 export type TableAlign = 'left' | 'center' | 'right' | null
+export type MarkdownFootnote = { identifier: string; number: number; references: number; children: BlockNode[] }
 
 export type BlockNode =
-  // `level` is semantics only (h1..h6). Every level renders at ONE font size: the surface contract puts a
-  // floor on type and forbids buying hierarchy with scale, so weight and spacing carry it instead.
-  | { kind: 'heading'; level: number; children: InlineNode[] }
+  | { kind: 'heading'; level: number; anchor: string; children: InlineNode[] }
   | { kind: 'paragraph'; children: InlineNode[] }
   | { kind: 'code'; language: string | null; text: string }
-  | { kind: 'list'; ordered: boolean; items: BlockNode[][] }
+  | { kind: 'list'; ordered: boolean; start?: number; checked?: (boolean | null)[]; items: BlockNode[][] }
   | { kind: 'quote'; children: BlockNode[] }
   | { kind: 'rule' }
   | { kind: 'table'; align: TableAlign[]; header: InlineNode[][]; rows: InlineNode[][][] }
+  | { kind: 'footnotes'; items: MarkdownFootnote[] }
+
+export type MarkdownHeading = Extract<BlockNode, { kind: 'heading' }>
+export type MarkdownDocument = { blocks: BlockNode[]; headings: MarkdownHeading[] }
 
 const processor = unified().use(remarkParse).use(remarkGfm)
+type ParseContext = {
+  source: string
+  definitions: Map<string, Definition>
+  footnotes: Map<string, FootnoteDefinition>
+  references: Map<string, { number: number; count: number }>
+  anchors: Set<string>
+  headings: MarkdownHeading[] | null
+}
 
-function inlineFrom(nodes: readonly PhrasingContent[]): InlineNode[] {
+/** Definitions can occur in a quote or list; CommonMark uses the first definition. */
+function collectDefinitions(node: Root | RootContent, context: ParseContext): void {
+  if (node.type === 'definition' && !context.definitions.has(node.identifier)) context.definitions.set(node.identifier, node)
+  if (node.type === 'footnoteDefinition' && !context.footnotes.has(node.identifier)) context.footnotes.set(node.identifier, node)
+  if ('children' in node) for (const child of node.children) collectDefinitions(child as RootContent, context)
+}
+
+function originalText(node: PhrasingContent, context: ParseContext): InlineNode {
+  const start = node.position?.start.offset, end = node.position?.end.offset
+  return { kind: 'text', text: start !== undefined && end !== undefined ? context.source.slice(start, end) : '' }
+}
+
+function inlineFrom(nodes: readonly PhrasingContent[], context: ParseContext): InlineNode[] {
   const out: InlineNode[] = []
   for (const node of nodes) {
     switch (node.type) {
       case 'text':
+      case 'html':
         out.push({ kind: 'text', text: node.value })
         break
       case 'inlineCode':
         out.push({ kind: 'code', text: node.value })
         break
       case 'strong':
-        out.push({ kind: 'strong', children: inlineFrom(node.children) })
+        out.push({ kind: 'strong', children: inlineFrom(node.children, context) })
         break
       case 'emphasis':
-        out.push({ kind: 'emphasis', children: inlineFrom(node.children) })
+        out.push({ kind: 'emphasis', children: inlineFrom(node.children, context) })
         break
       case 'delete':
-        out.push({ kind: 'strike', children: inlineFrom(node.children) })
+        out.push({ kind: 'strike', children: inlineFrom(node.children, context) })
         break
       case 'link':
-        out.push({ kind: 'link', href: node.url, children: inlineFrom(node.children) })
+        out.push({ kind: 'link', href: node.url, children: inlineFrom(node.children, context) })
         break
+      case 'linkReference': {
+        const definition = context.definitions.get(node.identifier)
+        out.push(definition ? { kind: 'link', href: definition.url, children: inlineFrom(node.children, context) } : originalText(node, context))
+        break
+      }
       case 'break':
-        out.push({ kind: 'text', text: '\n' })
-        break
-      // An mdast `html` node is a run of raw markup in the source. It becomes LITERAL TEXT: an agent
-      // quoting `<script>` from a file must see those characters, and nothing here may create an element.
-      case 'html':
-        out.push({ kind: 'text', text: node.value })
+        out.push({ kind: 'break' })
         break
       case 'image':
-        // Keep image attachments as data, never fetch them here. The renderer applies the workspace fence.
         out.push({ kind: 'image', href: node.url, alt: node.alt ?? '' })
         break
-      default:
-        // Anything else (footnote refs, custom nodes) degrades to its text content rather than
-        // disappearing. Silently eating part of an answer is worse than showing it plainly.
-        if ('children' in node && Array.isArray(node.children)) {
-          out.push(...inlineFrom(node.children as PhrasingContent[]))
-        } else if ('value' in node && typeof node.value === 'string') {
-          out.push({ kind: 'text', text: node.value })
-        }
+      case 'imageReference': {
+        const definition = context.definitions.get(node.identifier)
+        out.push(definition ? { kind: 'image', href: definition.url, alt: node.alt ?? '' } : originalText(node, context))
+        break
+      }
+      case 'footnoteReference': {
+        if (!context.footnotes.has(node.identifier)) { out.push(originalText(node, context)); break }
+        const reference = context.references.get(node.identifier) ?? { number: context.references.size + 1, count: 0 }
+        reference.count++
+        context.references.set(node.identifier, reference)
+        out.push({ kind: 'footnote-reference', identifier: node.identifier, number: reference.number, occurrence: reference.count })
+        break
+      }
     }
   }
   return out
 }
 
-function blocksFrom(nodes: readonly RootContent[]): BlockNode[] {
+function inlineText(nodes: readonly InlineNode[]): string {
+  return nodes.map(node => 'text' in node ? node.text : 'children' in node ? inlineText(node.children) : node.kind === 'image' ? node.alt : '').join('')
+}
+
+function headingAnchor(children: readonly InlineNode[], context: ParseContext): string {
+  const base = inlineText(children).toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s+/gu, '-') || 'section'
+  let anchor = base, suffix = 0
+  while (context.anchors.has(anchor)) anchor = `${base}-${++suffix}`
+  context.anchors.add(anchor)
+  return anchor
+}
+
+function blocksFrom(nodes: readonly RootContent[], context: ParseContext): BlockNode[] {
   const out: BlockNode[] = []
   for (const node of nodes) {
     switch (node.type) {
-      case 'heading':
-        out.push({ kind: 'heading', level: node.depth, children: inlineFrom(node.children) })
+      case 'heading': {
+        const children = inlineFrom(node.children, context)
+        const heading: MarkdownHeading = { kind: 'heading', level: node.depth, anchor: headingAnchor(children, context), children }
+        out.push(heading)
+        context.headings?.push(heading)
         break
+      }
       case 'paragraph':
-        out.push({ kind: 'paragraph', children: inlineFrom(node.children) })
+        out.push({ kind: 'paragraph', children: inlineFrom(node.children, context) })
         break
       case 'code':
         out.push({ kind: 'code', language: node.lang ?? null, text: node.value })
         break
-      case 'list':
-        out.push({
-          kind: 'list',
-          ordered: node.ordered === true,
-          // Items keep BLOCK children so a nested list stays nested. The previous hand-rolled parser
-          // flattened them, which lost the structure the author used to express grouping.
-          items: node.children.map((item) => blocksFrom(item.children))
-        })
+      case 'list': {
+        const checked = node.children.map(item => item.checked ?? null)
+        out.push({ kind: 'list', ordered: node.ordered === true,
+          ...(node.ordered && node.start !== null && node.start !== undefined ? { start: node.start } : {}),
+          ...(checked.some(value => value !== null) ? { checked } : {}),
+          items: node.children.map(item => blocksFrom(item.children, context)) })
         break
+      }
       case 'blockquote':
-        out.push({ kind: 'quote', children: blocksFrom(node.children) })
+        out.push({ kind: 'quote', children: blocksFrom(node.children, context) })
         break
       case 'thematicBreak':
         out.push({ kind: 'rule' })
         break
       case 'table': {
         const [header, ...rows] = node.children
-        out.push({
-          kind: 'table',
-          align: (node.align ?? []).map((value) => value ?? null),
-          header: (header?.children ?? []).map((cell) => inlineFrom(cell.children)),
-          rows: rows.map((row) => row.children.map((cell) => inlineFrom(cell.children)))
-        })
+        out.push({ kind: 'table', align: (node.align ?? []).map(value => value ?? null),
+          header: (header?.children ?? []).map(cell => inlineFrom(cell.children, context)),
+          rows: rows.map(row => row.children.map(cell => inlineFrom(cell.children, context))) })
         break
       }
-      // Raw markup at block level, same rule as inline: literal text, never an element.
       case 'html':
         out.push({ kind: 'paragraph', children: [{ kind: 'text', text: node.value }] })
         break
-      default:
-        if ('children' in node && Array.isArray(node.children)) {
-          out.push(...blocksFrom(node.children as RootContent[]))
-        }
+      case 'definition':
+      case 'footnoteDefinition':
+        break
     }
   }
   return out
 }
 
-/**
- * Parse agent output into blocks.
- *
- * Never throws: malformed markdown is a normal occurrence in generated text, and a parse failure must
- * degrade to showing the words rather than losing the answer.
- */
-export function parseAgentMarkdown(source: string): BlockNode[] {
+/** Malformed source stays readable; parsing never repairs content or creates HTML. */
+function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocument {
+  const headings: MarkdownHeading[] = []
   try {
-    return blocksFrom((processor.parse(source) as Root).children)
+    const tree = processor.parse(source) as Root
+    const context: ParseContext = { source, definitions: new Map(), footnotes: new Map(), references: new Map(), anchors: new Set(), headings: collectHeadings ? headings : null }
+    collectDefinitions(tree, context)
+    const blocks = blocksFrom(tree.children, context), notes: MarkdownFootnote[] = []
+    // Map iteration includes references introduced by a footnote; each definition is projected once.
+    for (const [identifier, reference] of context.references) {
+      notes.push({ identifier, number: reference.number, references: 0, children: blocksFrom(context.footnotes.get(identifier)!.children, context) })
+    }
+    for (const note of notes) note.references = context.references.get(note.identifier)!.count
+    if (notes.length) blocks.push({ kind: 'footnotes', items: notes })
+    return { blocks, headings }
   } catch {
-    return source.trim() === '' ? [] : [{ kind: 'paragraph', children: [{ kind: 'text', text: source }] }]
+    return { blocks: source.trim() === '' ? [] : [{ kind: 'paragraph', children: [{ kind: 'text', text: source }] }], headings: [] }
   }
 }
 
-/**
- * Whether output is worth parsing at all.
- *
- * A plain sentence should not be round-tripped through a parser that could reshape it — text that was
- * never markdown must reach the reader exactly as written.
- */
+export function parseAgentMarkdown(source: string): BlockNode[] {
+  return parseMarkdown(source, false).blocks
+}
+
+/** File outlines retain the original heading nodes during the same grammar projection. */
+export function parseAgentMarkdownDocument(source: string): MarkdownDocument {
+  return parseMarkdown(source, true)
+}
+
+/** Only an open outline needs a plain label; anchors remain owned by the original parse. */
+export function markdownHeadingText(heading: MarkdownHeading): string {
+  return inlineText(heading.children)
+}
+
+/** Conversation prose retains literal text unless it contains Markdown signals; files always parse. */
 export function looksLikeMarkdown(source: string): boolean {
   return (
-    /^(#{1,6}\s|\s*[-*+]\s|\s*\d+[.)]\s|```|~~~|>\s|\||---|\*\*\*)/mu.test(source) ||
-    /`|\*\*|__|~~|\[[^\]]*\]\(/u.test(source)
+    /^(#{1,6}\s|\s*[-*+]\s|\s*\d+[.)]\s|```|~~~|>\s|\||---|\*\*\*|\s*\[[^\]]+\]:)/mu.test(source) ||
+    /`|\*\*|__|~~|\[[^\]]*\]\(|\[[^\]]*\]\[[^\]]*\]|\[\^[^\]]+\]|(?:^|\s)[*_][^\s*_][^\n]*?[*_](?=\s|[.,!?;:]|$)|\n\s*=+\s*(?:\n|$)| {2,}\n/u.test(source)
   )
 }

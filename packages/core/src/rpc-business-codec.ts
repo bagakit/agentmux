@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
   type AgentMuxControlResult, type AgentMuxControlCaller } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
@@ -39,6 +40,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     throw new AgentMuxError('RPC business parameters cannot contain an internal Control envelope.', 'INVALID_CONTROL_REQUEST')
   }
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
+  if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect') && typeof source.operationId !== 'string') {
+    throw new AgentMuxError('Core maintenance requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
+  }
   if (method.startsWith('goal.')) {
     const oldKeys = (value: Record<string, unknown>): boolean =>
       Object.keys(value).some(key => ['demandId', 'parentDemandId', 'demand', 'demands'].includes(key)) ||
@@ -79,7 +83,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   }
   if (operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
-    'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'browser.run', 'browser.replay',
+    'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
     'browser.stop', 'agent.open'].includes(operation)
   const input = { ...body, schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation,
     ...(caller && usesCaller ? { caller } : {}) }
@@ -104,7 +108,7 @@ function goalKeys(value: Record<string, unknown>, inverse: boolean): Record<stri
 function operationKeys(value: Record<string, unknown>, inverse: boolean): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).map(([key, data]) => [
     key === (inverse ? 'operationId' : 'requestId') ? (inverse ? 'requestId' : 'operationId') : key,
-    (key === 'request' || key === 'report' || key === 'binding') && data && typeof data === 'object'
+    (key === 'request' || key === 'report' || key === 'binding' || key === 'receipt') && data && typeof data === 'object'
       ? operationKeys(data as Record<string, unknown>, inverse) : data
   ]))
 }
@@ -127,12 +131,22 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
   if (isBrowserTaskControlOperation(request.operation)) {
     assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, result))
   }
-  if (isToolkitRequest(request) && isToolkitRequest(result)) assertToolkitResultTarget(request, result)
   const actual = result as unknown as Record<string, unknown>
+  if (request.operation === 'demand.create' || request.operation === 'demand.update') {
+    const refs = request.operation === 'demand.create' ? request.contentRefs : request.patch.contentRefs
+    const demand = (result as Extract<AgentMuxControlResult, { operation: 'demand.create' | 'demand.update' }>).demand
+    if (refs?.some(ref => !demand.contentRefs?.some(saved => saved.hostId === ref.hostId && saved.workspaceId === ref.workspaceId && saved.zoneId === ref.zoneId))) fail()
+  }
   switch (request.operation) {
+    case 'demand.create':
+      if (actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== (actual.demand as Record<string, unknown>)?.id ||
+          request.demandId !== undefined && (actual.demand as Record<string, unknown>)?.id !== request.demandId) fail()
+      break
     case 'message.pending.ls': case 'message.pending.edit': case 'message.pending.send':
+    case 'message.pending.archive': case 'message.pending.restore':
       if (actual.agentSessionId !== request.agentSessionId) fail()
-      if (request.operation === 'message.pending.edit' && (actual.message as { pendingId?: string })?.pendingId !== request.pendingId) fail()
+      if ((request.operation === 'message.pending.edit' || request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') &&
+          (actual.message as { pendingId?: string })?.pendingId !== request.pendingId) fail()
       if (request.operation === 'message.pending.send' && actual.pendingId !== request.pendingId) fail()
       break
     case 'browser.targets':
@@ -153,6 +167,14 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.requestedPath !== request.path) fail()
       const resource = actual.resource as Record<string, unknown> | null
       if (resource && resource.zoneId !== request.zoneId) fail()
+      if (request.tabId) {
+        const placement = (result as Extract<AgentMuxControlResult, { operation: 'open.file' }>).placement
+        if (placement.tabId !== null && placement.tabId !== request.tabId) fail()
+        if ((placement.status === 'created' || placement.status === 'reused') && (placement.tabId !== request.tabId || placement.regionId === null)) fail()
+        if (placement.locations.some(location => location.tabId !== request.tabId || location.regionId !== placement.regionId)) fail()
+        if ((placement.status === 'created' || placement.status === 'reused') && !placement.locations.some(location =>
+          location.displayWorkspaceId === request.displayWorkspaceId && location.groupId === request.groupId)) fail()
+      }
       break
     }
     case 'agent.open': case 'space.mv': case 'space.bind': case 'space.unbind':
@@ -189,16 +211,55 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'inspect.tab': case 'arrange': if (request.target.kind === 'tab' && (actual.tab as Record<string, unknown>).tabId !== request.target.tabId) fail(); break
     case 'send': if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail(); break
     case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key) fail(); break
+    case 'settings.hosts.upgrade-check': {
+      const check = actual.check as { input: Record<string, unknown> }
+      if (request.id !== undefined ? check.input.id !== request.id : !isDeepStrictEqual(check.input, request.input)) fail()
+      break
+    }
+    case 'settings.hosts.upgrade': case 'settings.hosts.upgrade-inspect': {
+      const receipt = actual.receipt as { input: { id: string }; operationId: string; expected: unknown } | null
+      if (request.operation === 'settings.hosts.upgrade' && !receipt) fail()
+      if (receipt && (receipt.input.id !== request.id || receipt.operationId !== request.requestId ||
+        request.operation === 'settings.hosts.upgrade' && !isDeepStrictEqual(receipt.expected, request.expected))) fail()
+      break
+    }
     case 'settings.browser.links.forget': if (actual.scheme !== request.scheme) fail(); break
-    case 'settings.resource.get': case 'settings.resource.add': case 'settings.resource.update':
+    case 'settings.resource.get': {
+      const item = actual.item as Record<string, unknown>
+      if (actual.resource !== request.resource || (request.keyword === undefined
+        ? item.id !== request.id
+        : (item.value as Record<string, unknown>).keyword !== request.keyword)) fail()
+      break
+    }
+    case 'settings.resource.add': case 'settings.resource.update':
       if (actual.resource !== request.resource || (actual.item as Record<string, unknown>).id !== request.id) fail()
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break
-    case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
+    case 'demand.discuss': case 'demand.confirm': case 'demand.accept':
+    case 'demand.continuation-action': case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
     case 'demand.delete': case 'demand.link-session': case 'demand.link-project': case 'demand.decision-log':
       if (actual.demand && (actual.demand as Record<string, unknown>).id !== request.demandId ||
         actual.demandId !== undefined && actual.demandId !== request.demandId ||
         actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== request.demandId) fail()
+      if (request.operation === 'demand.discuss' && ((actual.receipt as Record<string, unknown>).requestId !== request.requestId || (actual.receipt as Record<string, unknown>).mode !== request.mode)) fail()
+      if (request.operation === 'demand.confirm') {
+        const goal = actual.demand as AgentMuxControlResult & { alignment?: { revision: number; confirmedAt: number } }
+        const receipt = actual.receipt as Record<string, unknown>
+        if (receipt.confirmedRevision !== request.expectedRevision || goal.alignment?.revision !== request.expectedRevision || goal.alignment.confirmedAt !== receipt.confirmedAt || !(Number(receipt.confirmedAt) > 0)) fail()
+      }
+      if (request.operation === 'demand.accept') {
+        const goal = actual.demand as { alignment?: { revision: number }; grounding?: { alignmentRevision: number; submissionId: string; acceptedAt: number; checks: { outcome: string }[] } }
+        const receipt = actual.receipt as Record<string, unknown>
+        if (receipt.alignmentRevision !== request.expectedAlignmentRevision || receipt.submissionId !== request.expectedSubmissionId || goal.alignment?.revision !== request.expectedAlignmentRevision || goal.grounding?.alignmentRevision !== request.expectedAlignmentRevision || goal.grounding.submissionId !== request.expectedSubmissionId || goal.grounding.acceptedAt !== receipt.acceptedAt || !(Number(receipt.acceptedAt) > 0) || receipt.acceptedWithGaps !== goal.grounding.checks.some(check => check.outcome === 'gap') || receipt.acceptedWithGaps === true && !request.acceptGaps) fail()
+      }
+      if (actual.goalContinuations && (actual.goalContinuations as import('./continuous-progress-scheduler.js').ContinuousProgressLoop[]).some(loop => loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId)) fail()
+      if (request.operation === 'demand.start' && Boolean(request.continuation) !== Boolean(actual.continuation)) fail()
+      if (actual.continuation) {
+        const loop = actual.continuation as import('./continuous-progress-scheduler.js').ContinuousProgressLoop
+        if (loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId) fail()
+        if (request.operation === 'demand.continuation-action' && (loop.loopId !== request.loopId || loop.lastMutation?.operationId !== request.requestId || loop.lastMutation?.action !== request.action || loop.lastMutation?.expectedRevision !== request.expectedRevision || loop.revision !== request.expectedRevision + 1)) fail()
+        if (request.operation === 'demand.start' && request.continuation && (loop.agentSessionId !== request.sessionId || loop.creationOperationId !== request.requestId || loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== request.continuation.alignmentRevision || loop.intervalMs !== request.continuation.intervalMs)) fail()
+      }
       break
     case 'browser.operation': case 'browser.stop':
       if (actual.runOperation && (actual.runOperation as Record<string, unknown>).id !== request.operationId) fail()

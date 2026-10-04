@@ -8,7 +8,8 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHoste
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
-  'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'inspectManagedHooks',
+  'readDeliveryAttempt',
+  'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
 ])
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
@@ -163,16 +164,16 @@ export class AgentMuxHostedRuntimeService {
     if (!OFFLINE_METHODS.has(invocation.method)) await this.client.connect()
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (this.consumer(id) !== original) throw new AgentMuxError('Host consumer changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
-    if (context.signal && invocation.method === 'submitAgentPrompt') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
+    if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
+    if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
     const source = context.sourceDevice
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
-    const modifying = /^(submit|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|answer|cancel)/.test(invocation.method)
+    const modifying = /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
-    const sessionId = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
-      : typeof first === 'string' && invocation.method.endsWith('Agent') ? first : undefined
-    if (source && invocation.method === 'submitAgentPrompt') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
+    if (source && (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
+    if (source && invocation.method === 'saveAgentFuturePromptIntent') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
     const recordActivity = async (result: 'confirmed' | 'failed' | 'unknown') => {
       if (!source || !modifying) return
@@ -204,9 +205,11 @@ export class AgentMuxHostedRuntimeService {
       value = await operation.apply(this.client, invocation.args)
     }
     } catch (error) { await recordActivity('unknown'); throw error }
+    if (invocation.method === 'sessionHistoryResource') {
+      context.signal?.throwIfAborted(); this.assertFence(p.fence)
+      if (this.consumer(id) !== original) throw new AgentMuxError('The original image reader consumer changed.', 'CONTROL_CANCELLED')
+    }
     await recordActivity('confirmed')
-    if (source && modifying && sessionId && invocation.method !== 'submitAgentPrompt')
-      await this.client.recordDeviceOperation(sessionId, operationId, invocation.method, source, 'confirmed')
     return { value: encodeHostedValue(value) }
   }
   private async acquire(target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',

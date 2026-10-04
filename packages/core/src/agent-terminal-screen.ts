@@ -3,7 +3,7 @@ import {
   AGENT_COMPOSER_SCAN_BACK_ROWS,
   AGENT_SCREEN_SCROLLBACK_ROWS
 } from './agent-prompt-budget.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, agentMuxCancellationError } from './errors.js'
 import { assertTerminalCheckpointRestore } from './terminal-continuation.js'
 import type { AgentMuxTerminalCheckpoint, AgentTerminalScreenSnapshot } from './types.js'
 
@@ -215,12 +215,15 @@ export class AgentTerminalScreenEvidence {
   private frameCarry = Buffer.alloc(0)
   private pendingFrameStartByte: number | null = null
   private completeFrame: { startByte: number; endByte: number } | null = null
+  private geometryOutputBoundary: number
   private failure: AgentTerminalScreenFailure | null = null
   private disposed = false
+  private disposalReason: Error | undefined
 
   constructor(cols: number, rows: number, frame: AgentTerminalFrameMarkers | null, initialByte = 0,
     authoritative = initialByte === 0, resizeRevision = 0) {
     this.screen = new AgentTerminalScreen(cols, rows, initialByte, authoritative, resizeRevision)
+    this.geometryOutputBoundary = initialByte
     this.startMarker = frame ? Buffer.from(frame.start) : null
     this.endMarker = frame ? Buffer.from(frame.end) : null
   }
@@ -237,11 +240,17 @@ export class AgentTerminalScreenEvidence {
     return this.completeFrame
   }
 
+  /** Only authoritative current cells with a closed original update can authorize input. */
+  get completeSnapshot(): { snapshot: AgentTerminalScreenSnapshot; outputThroughByte: number; geometryRevision: number } | null {
+    if (this.failed || !this.screen.authoritative || !this.frameClosed) return null
+    return { snapshot: this.screen.snapshot(), outputThroughByte: this.screen.throughByte, geometryRevision: this.screen.geometryRevision }
+  }
+
   /** Observe actual pre-checkpoint frame markers without replaying their drawing
    * into the restored grid. Only a contiguous original suffix at that exact fence
    * can seed this observation; synthetic restore bytes never prove a native frame.
    */
-  seedFrameEvidence(chunks: readonly AgentTerminalScreenChunk[], throughByte: number): void {
+  seedFrameEvidence(chunks: readonly AgentTerminalScreenChunk[], throughByte: number, geometryBoundaryByte?: number): void {
     if (throughByte !== this.screen.throughByte || chunks.length === 0) return
     let cursor = chunks[0]!.startByte
     for (const chunk of chunks) {
@@ -252,6 +261,9 @@ export class AgentTerminalScreenEvidence {
       cursor = chunk.endByte
     }
     if (cursor !== throughByte) throw new AgentMuxError('Native frame evidence did not reach the checkpoint fence.', 'OUTPUT_GAP')
+    // Only the existing refresh receipt (or original geometry) can associate
+    // historical raw drawing with this geometry. Closure alone cannot do so.
+    if (geometryBoundaryByte !== undefined) this.geometryOutputBoundary = geometryBoundaryByte
   }
 
   subscribe(listener: () => void): () => void {
@@ -273,10 +285,9 @@ export class AgentTerminalScreenEvidence {
       }
       if (event.type === 'resized') {
         this.screen.resize(event.cols, event.rows, event.throughByte, event.resizeRevision)
-        // A past output frame is not evidence of a new drawing at this geometry.
-        this.completeFrame = null
-        this.pendingFrameStartByte = null
-        this.frameCarry = Buffer.alloc(0)
+        // Reflow preserves the authoritative current cells and sync closure.
+        // Keep open/partial markers, but old drawing cannot satisfy a new-frame wait.
+        this.geometryOutputBoundary = event.throughByte
         this.notify()
         return
       }
@@ -303,9 +314,9 @@ export class AgentTerminalScreenEvidence {
       let replayFlushed = false
       let timer: ReturnType<typeof setTimeout> | null = null
       let unsubscribe: () => void = () => {}
-      const abort = (): void => fail(new AgentMuxError(
+      const abort = (): void => fail(agentMuxCancellationError(
         'Terminal screen observation was cancelled.',
-        'AGENT_PROMPT_READINESS_CANCELLED'
+        'AGENT_PROMPT_READINESS_CANCELLED', options.signal?.aborted ? options.signal.reason : undefined
       ))
       const cleanup = (): void => {
         if (timer) clearTimeout(timer)
@@ -320,8 +331,9 @@ export class AgentTerminalScreenEvidence {
       }
       const inspect = (): void => {
         if (settled) return
+        if (options.signal?.aborted) return abort()
         if (this.failure) return fail(this.failureError(this.failure, options))
-        if (this.disposed) return abort()
+        if (this.disposed) return this.disposalReason ? fail(this.disposalReason) : abort()
         if (!replayFlushed) return
         if (!this.screen.authoritative) return fail(new AgentMuxError(
           'Earlier terminal output is no longer retained; the current screen cannot be fully reconstructed yet.',
@@ -332,9 +344,10 @@ export class AgentTerminalScreenEvidence {
           : this.screen.throughByte >= options.boundaryByte
         const frameObserved = !options.requireFrameAfterBoundary ||
           this.startMarker === null ||
-          (this.completeFrame !== null && this.completeFrame.startByte >= options.boundaryByte)
+          (this.completeFrame !== null && this.completeFrame.startByte >= options.boundaryByte &&
+            this.completeFrame.startByte >= this.geometryOutputBoundary)
         if (crossedBoundary && frameObserved && (!options.requireCompleteFrame ||
-          (this.completeFrame !== null && this.pendingFrameStartByte === null)) && options.predicate(this.screen)) {
+          this.frameClosed) && options.predicate(this.screen)) {
           settled = true
           cleanup()
           resolve(this.screen.throughByte)
@@ -354,9 +367,10 @@ export class AgentTerminalScreenEvidence {
     })
   }
 
-  dispose(): void {
+  dispose(reason?: Error): void {
     if (this.disposed) return
     this.disposed = true
+    this.disposalReason = reason
     this.notify()
     this.screen.dispose()
   }
@@ -382,6 +396,15 @@ export class AgentTerminalScreenEvidence {
 
   private notify(): void {
     for (const listener of [...this.listeners]) listener()
+  }
+
+  private get frameClosed(): boolean {
+    if (!this.completeFrame || this.pendingFrameStartByte !== null) return false
+    // A split start marker is still a pending update, including across resize.
+    if (this.startMarker) for (let length = 1; length < this.startMarker.byteLength; length++) {
+      if (this.frameCarry.byteLength >= length && this.frameCarry.subarray(-length).equals(this.startMarker.subarray(0, length))) return false
+    }
+    return true
   }
 
   /**

@@ -12,6 +12,10 @@ for (const [platform, manifestSha256] of Object.entries(contract.manifests)) {
     throw new Error(`CtxMux installation manifest failed verification: ${platform}`)
   }
   const manifest = JSON.parse(manifestBytes.toString())
+  const source = contract.sources[platform]
+  if (!source || manifest.source.commit !== source.commit || manifest.source.tree !== source.tree || manifest.source.worktree_clean !== true) {
+    throw new Error(`CtxMux installation source failed verification: ${platform}`)
+  }
   if (manifest.binaries.length !== 2) throw new Error('CtxMux installation is missing native binaries.')
   for (const binary of manifest.binaries) {
     if (!['ctxmux', 'ctxmuxd'].includes(binary.name) || binary.path !== `bin/${binary.name}` || binary.mode !== '0755') {

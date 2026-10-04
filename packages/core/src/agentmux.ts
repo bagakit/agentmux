@@ -32,6 +32,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   const body = result as Record<string, unknown>
   if (['space.focus', 'goal.focus', 'app.focus'].includes(method) && body.partial === true) return true
   if (method === 'file.write' && (body.result as { status?: string } | undefined)?.status !== 'written') return true
+  if ((method === 'file.upload' || method === 'file.upload.inspect') && body.status !== 'uploaded') return true
   if (body.outcome === 'partial' || body.outcome === 'unknown' || body.outcome === 'refused') return true
   if (method === 'space.inspect' && Object.hasOwn(body, 'request')) {
     const request = body.request as { known?: boolean; report?: { outcome?: string } | null } | null
@@ -192,6 +193,7 @@ function reportFailure(error: unknown): void {
       ...(source?.detail === undefined ? {} : { detail: source.detail }),
       ...(source?.details === undefined ? {} : { details: source.details }),
       ...(source?.controlFailure === undefined ? {} : { controlFailure: source.controlFailure }),
+      ...(source?.logId === undefined ? {} : { logId: source.logId }),
       ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
     }
   }, process.stderr)

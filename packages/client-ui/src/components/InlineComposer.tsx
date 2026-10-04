@@ -81,13 +81,13 @@ export function composerExtensions(
     addNodeView() {
       return ({ node, editor, getPos }) => {
         const reference = node.attrs as ComposerSemanticReference
-        const dom = document.createElement('button')
-        dom.type = 'button'
+        const dom = document.createElement(reference.kind === 'file' ? 'span' : 'button')
+        if (dom instanceof HTMLButtonElement) dom.type = 'button'
         dom.contentEditable = 'false'
         dom.className = `composer-semantic-token composer-semantic-token--${reference.kind}`
         dom.dataset.toolReference = reference.kind
-        dom.textContent = `${reference.kind === 'component' ? '◇' : reference.kind === 'subcommand' ? '›' : '$'} ${reference.label}`
-        dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : 'Open reference'}: ${reference.reference}`
+        dom.textContent = `${reference.kind === 'component' ? '◇' : reference.kind === 'subcommand' ? '›' : reference.kind === 'file' ? '▤' : '$'} ${reference.label}`
+        dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : reference.kind === 'file' ? 'File reference' : 'Open reference'}: ${reference.reference}`
         dom.setAttribute('aria-label', dom.title)
         dom.addEventListener('click', () => {
           if (reference.kind === 'subcommand') {
@@ -105,7 +105,7 @@ export function composerExtensions(
     renderText({ node }) { return node.attrs.text },
     addNodeView() {
       return ReactNodeViewRenderer(({ node }) => <NodeViewWrapper as="span" className="composer-image" contentEditable={false}>
-        <ConversationImage text={node.attrs.text} path={node.attrs.path} readPastedImage={readPastedImage} />
+        <ConversationImage text={node.attrs.text} path={node.attrs.path} readImage={readPastedImage} />
       </NodeViewWrapper>)
     }
   }), keywordUnderlineExtension(keywords)]

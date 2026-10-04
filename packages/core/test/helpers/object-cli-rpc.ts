@@ -87,6 +87,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'message.pending.ls': ['--session', ids.agent],
     'message.pending.edit': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before', '--text', '--help'],
     'message.pending.send': ['--session', ids.agent, '--pending-id', 'PENDING'],
+    'message.pending.archive': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before'],
+    'message.pending.restore': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before'],
     'device.ls': [], 'device.link': [], 'device.hello': ['--name', 'DEVICE'], 'device.revoke': ['--device', 'DEVICE'],
     'agent.open': ['--executor', 'E', '--zone', ids.zone, '--new-tab', '--operation-id', 'BUSINESS'],
     'agent.rename': ['--session', ids.agent, '--name', '--help'], 'agent.view': ['--session', ids.agent],
@@ -124,7 +126,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'settings.inspect': [], 'settings.set': ['client.label', '--help'], 'settings.executors.refresh': ['E', '--host', '--help'],
     'settings.hosts.ls': [], 'settings.hosts.test': ['--help'], 'settings.workspaces.register': ['--input', input],
     'settings.browser-links.ls': [], 'settings.browser-links.forget': ['--help'],
-    'system.doctor': [], 'system.endpoint': [], 'system.crash-log.inspect': [], 'system.crash-log.reveal': [],
+    'system.doctor': [], 'system.endpoint': [], 'system.storage': ['--host', 'local', '--run', 'RUN'], 'system.crash-log.inspect': [], 'system.crash-log.reveal': [],
     'system.metrics.get': [], 'system.metrics.watch': []
   }
   const found = fixed[method]

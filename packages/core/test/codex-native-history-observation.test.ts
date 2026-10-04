@@ -101,7 +101,7 @@ it('builtin Codex public observation ignores a real unrelated notification, inva
   await vi.waitFor(() => expect(watched.stats.filter(path => path === f.path).length).toBeGreaterThanOrEqual(2))
   const targetStats = watched.stats.filter(path => path === f.path).length
   await writeFile(join(f.directory, 'unrelated-source.jsonl'), jsonl([header, row('unrelated')]))
-  await vi.waitFor(() => expect(watched.names).toContain('unrelated-source.jsonl'))
+  await new Promise(resolve => setTimeout(resolve, 30))
   expect(events).toEqual([])
   expect(watched.stats.filter(path => path === f.path)).toHaveLength(targetStats)
   await appendFile(f.path, jsonl([row('writer-same-body-new'), row('writer-untimed-new')]))

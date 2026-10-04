@@ -6,22 +6,30 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
+import { AgentProviderRegistry, type AgentProvider, type AgentProviderPromptExecutionContext } from '../src/agent-provider.js'
+import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
+import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxSessionDurabilityError, loadAgentSessions } from '../src/agent-session-store.js'
+import { DurableWriteError } from '../src/durable-write.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
-import type { AgentMuxNativeSessionConfirmationInput, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
+import type { AgentMuxNativeSessionConfirmationInput, AgentMuxStoredAgentSession, AgentTerminalScreenSnapshot, NativeHookEnvelope } from '../src/types.js'
 
 const SID = 'private-current-conversation', RUN = 'same-private-run', OLD = 'previous-main', NEW = 'current-main'
 const cleanups: Array<() => Promise<void>> = []
+function discoveryProvider(client: AgentMuxClient, id: 'codex' | 'claude'): AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession'>> {
+  const provider = client.providers.get(id)
+  if (!provider.discoverNativeSession) throw new Error('This fixture requires real native session discovery')
+  return provider as AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession'>>
+}
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })
 
 async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 'child' | 'ambiguous' | 'unknown' = 'main') {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-source-change-'))), provider = new AgentProviderRegistry().get(providerId)
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-source-change-'))), nativeProvider = new AgentProviderRegistry().get(providerId)
   const record = (id: string, child = false) => providerId === 'codex'
     ? { type: 'session_meta', payload: { id, source: child ? { subagent: { thread_spawn: { parent_thread_id: OLD } } } : mode === 'unknown' && id !== OLD ? 'unknown' : 'cli' } }
     : { type: 'user', sessionId: id, isSidechain: child ? true : mode === 'unknown' && id !== OLD ? undefined : false, uuid: `${id}-message`, message: { role: 'user', content: `Original ${id} record` } }
@@ -30,11 +38,42 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
   await writeFile(oldPath, JSON.stringify(record(OLD)) + '\n')
   await writeFile(currentPath, JSON.stringify(record(NEW, mode === 'child')) + '\n')
   if (mode === 'ambiguous') { files.push(path('another-main')); await writeFile(files[1]!, JSON.stringify(record('another-main')) + '\n') }
-  const holder = spawn(process.execPath, ['-e', `const fs=require('fs'),mode=${JSON.stringify(providerId === 'claude' ? 'a+' : 'r')};let fds=process.argv.slice(1).map(p=>fs.openSync(p,mode));console.log('ready');process.stdin.on('data',d=>{const s=d.toString();if(s.startsWith('@fixture:open:')){fds.forEach(fd=>fs.closeSync(fd));fds=[fs.openSync(s.slice(14).trim(),mode)];console.log('switched')}else console.log('raw:'+s)});setInterval(()=>{},1000)`, ...files],
+  const holder = spawn(process.execPath, ['-e', `const fs=require('fs'),mode=${JSON.stringify(providerId === 'claude' ? 'a+' : 'r')};let fds=process.argv.slice(1).map(p=>fs.openSync(p,mode));console.log('ready');process.stdin.on('data',d=>{const s=d.toString();if(s.startsWith('@fixture:open:')){fds.forEach(fd=>fs.closeSync(fd));fds=[fs.openSync(s.slice(14).trim(),mode)];console.log('switched')}else if(s.startsWith('@fixture:permission:'))process.stdout.write('\\x1b[2J\\x1b[H'+s.slice(20).trim());else console.log('raw:'+s)});setInterval(()=>{},1000)`, ...files],
     { detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
   await once(holder.stdout!, 'data')
   cleanups.push(async () => { if (holder.exitCode === null && holder.signalCode === null) { const exited = once(holder, 'exit'); holder.kill(); await exited }
     await rm(root, { recursive: true, force: true }) })
+  // This private process speaks an echo permission protocol, not either upstream CLI's menu.
+  // Keep their real discovery/history owners; qualify this fixture's exact source and frame.
+  const screen = new AgentTerminalScreen(240, 4)
+  cleanups.push(async () => screen.dispose())
+  const verifyInteractionTarget = vi.fn(async (context: AgentProviderPromptExecutionContext) => {
+    context.signal?.throwIfAborted()
+    if (context.processId !== holder.pid || context.workspacePath !== root || context.nativeSourceId !== NEW ||
+        context.nativeHandle?.kind !== 'provider' || context.nativeHandle.providerId !== providerId || context.nativeHandle.sessionId !== NEW ||
+        context.nativeHandle.transcriptPath !== currentPath) return false
+    const witness = await nativeProvider.discoverNativeSession!({ processId: holder.pid!, command: process.execPath,
+      args: [], env: {}, workspacePath: root, signal: context.signal ?? new AbortController().signal })
+    if (!witness || witness.handle.providerId !== context.nativeHandle.providerId || witness.handle.sessionId !== NEW ||
+        witness.handle.transcriptPath !== currentPath) return false
+    await witness.assertCurrent()
+    return true
+  })
+  const prepareInteractionResponse = vi.fn<NonNullable<AgentProvider['prepareInteractionResponse']>>(async (context, request, answer) => {
+    expect(context.agentSessionId).toBe(SID); expect(context.run).toEqual({ runId: RUN })
+    expect(request.kind).toBe('permission'); expect(request.nativeToolCallId).toBe(`tool-${NEW}`)
+    expect(request.evidence.run).toEqual({ runId: RUN })
+    expect(answer).toEqual({ kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } })
+    expect(request.kind === 'permission' && request.options.some(option => option.id === 'allow-once')).toBe(true)
+    const targetText = `echo_permission ${SID} ${RUN} ${request.id} ${request.nativeToolCallId} allow-once`
+    const inspectCurrentTarget = (snapshot: AgentTerminalScreenSnapshot) => snapshot.lines.some(line => line.text.trimEnd() === targetText)
+    if (!await verifyInteractionTarget({ ...context, nativeSourceId: NEW })) return null
+    const frame = await context.observeTarget(inspectCurrentTarget)
+    return { plan: nativeProvider.planInteractionResponse(request, answer), target: {
+      agentSessionId: SID, run: { runId: RUN }, requestId: request.id, nativeToolCallId: request.nativeToolCallId!,
+      nativeSourceId: NEW, inputByte: context.inputByte, frame }, inspectCurrentTarget, verifyCurrentTarget: verifyInteractionTarget }
+  })
+  const provider: AgentProvider = { ...nativeProvider, prepareInteractionResponse }
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const response = { kind: 'permission' as const, requestId: 'previous-permission', decision: { outcome: 'selected' as const, optionId: 'allow-once' } }
   const original: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: SID, providerId, executorId: providerId,
@@ -55,8 +94,20 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
   await Reflect.get(client, 'registry').load('local'); Reflect.set(client, 'connected', true)
   vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
   vi.spyOn(kernel, 'identity').mockReturnValue({ daemonInstanceId: 'private-runtime', buildIdentity: 'private-fixture', protocolVersion: 1 } as ReturnType<CtxmuxRunAdapter['identity']>)
-  const run = { runId: RUN, state: { type: 'running' }, pid: holder.pid!, workspacePath: root, program: process.execPath, args: [],
+  const run = { runId: RUN, lifecycleOperationId: null, state: { type: 'running' as const }, pid: holder.pid!, workspacePath: root, program: process.execPath, args: [],
     cols: null, rows: null, firstAvailableByte: 0, nativeService: null, acceptedInputBytes: 0, latestOutputBytes: 0 }
+  const screenEvidence = Reflect.get(client, 'screenEvidence') as AgentScreenEvidenceStore
+  vi.spyOn(screenEvidence, 'wait').mockImplementation(async (session, boundary, _after, predicate, options) => {
+    expect(session.run).toEqual({ runId: RUN }); expect(boundary).toBe(screen.throughByte)
+    expect(options.requireCompleteFrame).toBe(true); options.signal?.throwIfAborted()
+    expect(predicate(screen)).toBe(true)
+    return screen.throughByte
+  })
+  vi.spyOn(screenEvidence, 'currentCompleteFrame').mockImplementation(session => {
+    expect(session.run).toEqual({ runId: RUN })
+    return { snapshot: screen.snapshot(), outputThroughByte: screen.throughByte,
+      geometryRevision: screen.geometryRevision, evidenceGeneration: screenEvidence.generation(SID) }
+  })
   const status = vi.spyOn(kernel, 'status').mockResolvedValue(run as Awaited<ReturnType<CtxmuxRunAdapter['status']>>)
   const input = vi.spyOn(kernel, 'input').mockImplementation(async (_run, data) => {
     const payload = typeof data === 'string' ? data : data.data
@@ -74,6 +125,16 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
     const envelope: NativeHookEnvelope = { receiptId: `${eventName}-${id}-${events.length}`, agentSessionId: SID, providerId, runId: RUN,
       payload: { hook_event_name: eventName, source: 'clear', session_id: id, transcript_path: path(id), tool_name: 'Edit', tool_use_id: `tool-${id}`, tool_input: { file_path: 'private.txt' }, ...extra } }
     await Reflect.get(client, 'acceptHookEvent').call(client, envelope, new AbortController().signal)
+    if (id === NEW && eventName === 'PermissionRequest') {
+      const request = client.agentSession(SID).pendingInteraction?.request
+      if (request?.nativeToolCallId === `tool-${NEW}`) {
+        const drawn = once(holder.stdout!, 'data')
+        holder.stdin!.write(`@fixture:permission:echo_permission ${SID} ${RUN} ${request.id} ${request.nativeToolCallId} allow-once\n`)
+        const bytes = Buffer.from((await drawn)[0])
+        await screen.write({ startByte: screen.throughByte, endByte: screen.throughByte + bytes.length, dataBytes: bytes })
+        run.latestOutputBytes = screen.throughByte
+      }
+    }
   }
   const confirmation = (operationId = 'confirm-current'): AgentMuxNativeSessionConfirmationInput => {
     const session = client.agentSession(SID)
@@ -87,6 +148,7 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
     for (const control of controls) expect(control).not.toHaveBeenCalled() })
   const switchToOld = async () => { const ready = once(holder.stdout!, 'data'); holder.stdin!.write('@fixture:open:' + oldPath + '\n'); expect(String((await ready)[0])).toContain('switched') }
   return { root, oldPath, currentPath, client, store, kernel, status, input, holder, original, run, events, hook, confirmation, rpc, server, switchToOld,
+    prepareInteractionResponse, verifyInteractionTarget,
     cli: (value: unknown) => runCompiledObjectCli(['agent', 'native', 'confirm', '--input', '-'], objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: `unix:${server.path}` }), JSON.stringify(value)) }
 }
 
@@ -102,6 +164,7 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   await expect(f.client.respondAgentInteraction({ agentSessionId: SID, expectedRun: { runId: RUN }, response: f.original.pendingInteraction!.response!.value }))
     .rejects.toMatchObject({ code: 'AGENT_INTERACTION_SOURCE_CHANGED' })
   expect(f.input).not.toHaveBeenCalled()
+  expect(f.prepareInteractionResponse).not.toHaveBeenCalled()
   await Reflect.get(f.client, 'recoverPendingInteractionResponses').call(f.client, [f.run])
   expect(f.input).not.toHaveBeenCalled()
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
@@ -155,6 +218,11 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   await f.client.respondAgentInteraction({ agentSessionId: SID, expectedRun: { runId: RUN },
     response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } })
   expect(f.input).toHaveBeenCalledTimes(2)
+  expect(f.prepareInteractionResponse).toHaveBeenCalledOnce()
+  expect(f.verifyInteractionTarget).toHaveBeenCalledTimes(3)
+  expect(f.input.mock.calls[1]![0]).toBe(RUN)
+  expect(f.input.mock.calls[1]![1]).toMatchObject({ data: new AgentProviderRegistry().get(provider).planInteractionResponse(active,
+    { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } }).data })
   if (provider === 'claude') {
     const old = await f.client.sessionHistoryPage(SID, { nativeSource: 'previous' })
     const current = await f.client.sessionHistoryPage(SID)
@@ -218,7 +286,7 @@ it.each(['codex', 'claude'] as const)('retains the real %s save-failure diagnost
 it('retains the original stale Hook reason when a real current-main confirmation wins its observation race', async () => {
   const f = await fixture('codex'); await f.hook(); const input = f.confirmation()
   await f.client.refreshAgentSession(SID, { runId: RUN })
-  const provider = Reflect.get(f.client, 'providers').get('codex'), discover = provider.discoverNativeSession.bind(provider)
+  const provider = discoveryProvider(f.client, 'codex'), discover = provider.discoverNativeSession.bind(provider)
   let enter!: () => void, release!: () => void, first = true
   const entered = new Promise<void>(resolve => { enter = resolve }), blocked = new Promise<void>(resolve => { release = resolve })
   vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async (context: any) => {
@@ -338,4 +406,108 @@ it('retains both same-Run confirmation receipts and reconciles a historical oper
   const conflict = await f.cli({ ...firstInput, expectedObservationAt: firstInput.expectedObservationAt + 1 })
   expect(conflict.code).not.toBe(0); expect(JSON.parse(conflict.stderr).error.code).toBe('AGENT_NATIVE_CONFIRMATION_CONFLICT')
   expect(f.input).not.toHaveBeenCalled()
+})
+
+
+it('keeps a readable confirmation unconfirmed until main durability acknowledgement succeeds, without replaying input', async () => {
+  const f = await fixture(); await f.hook(); const input = f.confirmation()
+  const persist = f.store.compareAndSwap.bind(f.store)
+  vi.spyOn(f.store, 'compareAndSwap').mockImplementationOnce(async (...args) => {
+    await persist(...args)
+    throw new AgentMuxSessionDurabilityError(new DurableWriteError(join(f.root, 'sessions.json'), 'after-replace', new Error('private directory sync failure')))
+  })
+  const confirmation = vi.spyOn(f.store, 'confirmDurability').mockRejectedValueOnce(new Error('private save still unconfirmed'))
+  await expect(f.client.confirmAgentNativeSession(input)).rejects.toThrow('private save still unconfirmed')
+  expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe(NEW)
+  expect(f.client.agentSession(SID).run).toEqual({ runId: RUN })
+  expect(f.input).not.toHaveBeenCalled()
+  await expect(f.client.confirmAgentNativeSession(input)).resolves.toMatchObject({ persisted: true, current: true })
+  expect(confirmation).toHaveBeenCalledTimes(2)
+  expect(f.input).not.toHaveBeenCalled()
+  await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
+  expect(f.input).toHaveBeenCalledOnce()
+})
+
+
+it('never replays an older-source submission after an intervening prompt and a second native confirmation', async () => {
+  const f = await fixture('claude'); await f.hook()
+  await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
+  await f.client.confirmAgentNativeSession(f.confirmation('first-source'))
+  const first = f.client.agentSession(SID), coordinator = Reflect.get(f.client, 'promptSubmission')
+  await coordinator.submitOwnedInputPlan(first, f.run, 'middle-prompt', 'middle body', { kind: 'single-phase', data: 'middle body\r' }, undefined, undefined, true)
+  expect(f.client.agentSession(SID).promptCompletionAdmission?.submissionId).toBe('middle-prompt')
+  expect(f.input).toHaveBeenCalledTimes(2)
+  await f.switchToOld(); await f.hook(OLD)
+  await f.client.confirmAgentNativeSession(f.confirmation('second-source'))
+  const current = f.client.agentSession(SID)
+  expect(current.nativeConfirmation?.previousPromptSubmissionId).toBe('middle-prompt')
+  expect(current.nativeConfirmationHistory?.[0]?.previousPromptSubmissionId).toBe('previous-prompt')
+  await expect(coordinator.submitOwnedInputPlan(current, f.run, 'previous-prompt', 'original body', { kind: 'single-phase', data: 'original body\r' }))
+    .rejects.toMatchObject({ code: 'AGENT_PROMPT_SOURCE_CHANGED' })
+  expect(f.input).toHaveBeenCalledTimes(2)
+  await f.client.writeAgent({ agentSessionId: SID, expectedRun: current.run, source: 'user', data: 'x' })
+  expect(f.input).toHaveBeenCalledTimes(3)
+})
+
+it('does not let a late failed history read replace a newly confirmed native source with unknown', async () => {
+  const f = await fixture('claude'); await f.hook(); const input = f.confirmation()
+  const registry = Reflect.get(f.client, 'registry'), update = registry.update.bind(registry)
+  let began!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { began = resolve }), hold = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(discoveryProvider(f.client, 'claude'), 'discoverNativeSession').mockRejectedValueOnce(new Error('old source discovery failed'))
+  vi.spyOn(registry, 'update').mockImplementationOnce(async (...args: unknown[]) => { began(); await hold; return update(...args) })
+  const read = f.client.sessionHistoryPage(SID, { refreshNativeSource: true })
+  const result = expect(read).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  try {
+    await entered
+    await f.client.confirmAgentNativeSession(input)
+  } finally { release() }
+  await result
+  const current = f.client.agentSession(SID)
+  expect(current.nativeHandle?.sessionId).toBe(NEW)
+  expect(current.nativeConfirmation?.operationId).toBe(input.operationId)
+  expect(current.nativeSourceObservation).toBeUndefined()
+  await f.client.writeAgent({ agentSessionId: SID, expectedRun: current.run, source: 'user', data: 'x' })
+  expect(f.input).toHaveBeenCalledOnce()
+})
+
+it('reports a failed history-source observation save while retaining readable records and real raw input', async () => {
+  const f = await fixture('claude', 'unknown'), before = await readFile(join(f.root, 'sessions.json'))
+  const failure = Object.assign(new Error('Private history observation save denied'), { code: 'EACCES' })
+  vi.spyOn(f.store, 'compareAndSwap').mockRejectedValueOnce(failure)
+  const page = await f.client.sessionHistoryPage(SID, { refreshNativeSource: true })
+  expect(page.source.nativeSessionId).toBe(OLD)
+  expect(f.events).toHaveLength(1)
+  expect(f.events[0]).toMatchObject({ type: 'agent-error', code: 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED',
+    evidence: { run: { runId: RUN } }, message: expect.stringContaining(failure.message) })
+  expect(f.events[0]).toMatchObject({ message: expect.stringContaining('No unique main native Session was confirmed') })
+  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(before)
+  expect(f.client.agentSession(SID).nativeHandle).toEqual(f.original.nativeHandle)
+  expect(f.client.agentSession(SID).pendingInteraction).toEqual(f.original.pendingInteraction)
+  await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
+  expect(f.input).toHaveBeenCalledOnce()
+})
+
+it('does not publish an old-source persistence diagnostic after another native source is confirmed', async () => {
+  const f = await fixture('claude'); await f.hook(); const input = f.confirmation(); f.events.length = 0
+  let began!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { began = resolve }), hold = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(discoveryProvider(f.client, 'claude'), 'discoverNativeSession').mockRejectedValueOnce(new Error('old source discovery failed'))
+  vi.spyOn(Reflect.get(f.client, 'registry'), 'update').mockImplementationOnce(async () => {
+    began(); await hold
+    throw Object.assign(new Error('late old-source save denied'), { code: 'EACCES' })
+  })
+  const read = f.client.sessionHistoryPage(SID, { refreshNativeSource: true })
+  const result = expect(read).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  try {
+    await entered
+    await f.client.confirmAgentNativeSession(input)
+  } finally { release() }
+  await result
+  expect(f.events.filter(event => (event as { type: string }).type === 'agent-error')).toHaveLength(0)
+  const current = f.client.agentSession(SID)
+  expect(current.nativeHandle?.sessionId).toBe(NEW)
+  expect(current.nativeSourceObservation).toBeUndefined()
+  await f.client.writeAgent({ agentSessionId: SID, expectedRun: current.run, source: 'user', data: 'x' })
+  expect(f.input).toHaveBeenCalledOnce()
 })

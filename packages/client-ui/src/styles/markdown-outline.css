@@ -1,0 +1,14 @@
+.md-outline { position:sticky; top:0; z-index:2; display:flex; justify-content:flex-end; align-self:stretch; min-width:0; margin:0; }
+.md-outline__trigger, .md-outline__close, .md-outline__entry { border:0; background:none; color:var(--text-2); font:inherit; cursor:pointer; }
+.md-outline__trigger { display:inline-flex; align-items:center; gap:var(--sp-2); min-height:26px; padding:var(--sp-1) var(--sp-3); border:1px solid var(--line-soft); border-radius:var(--radius-sm); background:var(--surface-0); font-size:var(--fs-meta); line-height:1.4; }
+.md-outline__trigger:hover, .md-outline__trigger[aria-expanded='true'] { background:var(--surface-2); color:var(--text); }
+.md-outline__trigger:focus-visible, .md-outline__close:focus-visible, .md-outline__entry:focus-visible { outline:1px solid var(--focus-line); outline-offset:-1px; border-radius:var(--radius-sm); }
+.md-outline__popover { position:absolute; top:calc(100% + var(--sp-2)); right:0; width:min(280px, 100%); min-width:0; max-height:min(360px, 60vh); display:flex; flex-direction:column; border:1px solid var(--line-soft); border-radius:var(--radius-md); background:var(--surface-1); box-shadow:0 8px 24px #0003; font-size:var(--fs-body); line-height:1.4; }
+.md-outline__header { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); border-bottom:1px solid var(--line-soft); }
+.md-outline__title { margin:0; color:var(--text-3); font-size:var(--fs-meta); font-weight:500; }
+.md-outline__close { display:grid; place-items:center; width:22px; height:22px; flex-shrink:0; border-radius:var(--radius-sm); }
+.md-outline__close:hover { color:var(--text); background:var(--surface-3); }
+.md-outline__entries { min-height:0; padding:var(--sp-2); overflow:auto; overscroll-behavior:contain; }
+.md-outline__entry { display:block; width:100%; padding-block:var(--sp-2); padding-inline-end:var(--sp-3); text-align:start; white-space:normal; overflow-wrap:anywhere; border-radius:var(--radius-sm); }
+.md-outline__entry[data-level='1'] { color:var(--text); font-weight:600; }
+.md-outline__entry:hover, .md-outline__entry:focus-visible { background:var(--surface-3); color:var(--text); }

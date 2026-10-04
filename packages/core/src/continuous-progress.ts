@@ -1,10 +1,11 @@
 import { agentTurnCompletionIdentity } from './agent-session-identity.js'
 import type { AgentObservation } from './agent-status-freshness.js'
 import type { AgentMuxAgentSession } from './types.js'
+import type { AgentFuturePromptOccurrence } from './types.js'
 
 /** The scheduler's deliberately small, provider-neutral observation contract. */
 export type ContinuousProgressObservation = {
-  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission'>
+  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission' | 'futurePromptIntents'>
   observation: AgentObservation
   tickId: string
   now: number
@@ -43,4 +44,14 @@ export function decideContinuousProgress(observation: ContinuousProgressObservat
   if (current.semantic !== 'idle' || completionId === undefined) return { kind: 'skip', reason: 'unknown-status' }
   if (observation.lastCompletionId === completionId || session.promptCompletionAdmission?.completionId === completionId) return { kind: 'skip', reason: 'completion-consumed' }
   return { kind: 'send', tickId: observation.tickId, completionId }
+}
+
+/** Calendar eligibility retains all healthy-input fences; only the old completion-consumed rule differs. */
+export function decideFutureProgress(observation: ContinuousProgressObservation, occurrence: AgentFuturePromptOccurrence): ContinuousProgressDecision {
+  const saved = observation.session.futurePromptIntents?.[occurrence.intentId]
+  if (!saved?.active || saved.lastOccurrenceAt !== undefined && saved.lastOccurrenceAt >= occurrence.occurrenceAt) return { kind: 'skip', reason: 'completion-consumed' }
+  const { lastCompletionId: _, ...candidate } = observation
+  const { promptCompletionAdmission: _admission, ...session } = observation.session
+  const result = decideContinuousProgress({ ...candidate, session })
+  return result
 }

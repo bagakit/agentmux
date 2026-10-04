@@ -4,11 +4,7 @@ import { AgentMuxError } from './errors.js'
 export function encodeHostedValue(value: unknown): unknown {
   if (value === undefined) return { $agentmuxValue: 'undefined' }
   if (value instanceof Uint8Array) {
-    let binary = ''
-    for (let offset = 0; offset < value.length; offset += 8192) {
-      binary += String.fromCharCode(...value.subarray(offset, offset + 8192))
-    }
-    return { $agentmuxValue: 'bytes', data: btoa(binary) }
+    return { $agentmuxValue: 'bytes', data: encodeBase64(value) }
   }
   if (Array.isArray(value)) return value.map(encodeHostedValue)
   if (value && typeof value === 'object') {
@@ -41,7 +37,7 @@ export function decodeHostedValue(value: unknown): unknown {
     if (record.$agentmuxValue === 'undefined' && Object.keys(record).length === 1) return undefined
     if (record.$agentmuxValue === 'bytes' && Object.keys(record).length === 2 && typeof record.data === 'string') {
       try {
-        return unbase64(record.data)
+        return decodeBase64(record.data)
       } catch { throw new AgentMuxError('RPC bytes are not valid base64.', 'CONTROL_PROTOCOL_ERROR') }
     }
     return Object.fromEntries(Object.entries(record).map(([key, item]) => [key, decodeHostedValue(item)]))
@@ -53,13 +49,18 @@ import type { AgentMuxHostedTransferChunk } from './hosted-client-contract.js'
 
 export const AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES = 48 * 1024
 export const AGENTMUX_HOSTED_TRANSFER_MAX_BYTES = 32 * 1024 * 1024
-function base64(bytes: Uint8Array): string {
+export function encodeBase64(bytes: Uint8Array): string {
   let binary = ''
   for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
   return btoa(binary)
 }
-function unbase64(data: string): Uint8Array {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(data)) {
+function isBase64(data: string): boolean {
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
+  // A flat scan keeps budget-sized images from exhausting the RegExp call stack.
+  return data.length % 4 === 0 && !/[^A-Za-z0-9+/]/u.test(data.slice(0, data.length - padding))
+}
+export function decodeBase64(data: string): Uint8Array {
+  if (!isBase64(data)) {
     throw new AgentMuxError('RPC bytes are not valid base64.', 'CONTROL_PROTOCOL_ERROR')
   }
   const binary = atob(data)
@@ -73,7 +74,7 @@ export function hostedTransfer(value: unknown, transferId: string): AgentMuxHost
   const chunks: AgentMuxHostedTransferChunk[] = []
   for (let offset = 0; offset < bytes.length; offset += AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES) {
     const end = Math.min(bytes.length, offset + AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES)
-    chunks.push({ transferId, index: chunks.length, dataBase64: base64(bytes.subarray(offset, end)), final: end === bytes.length })
+    chunks.push({ transferId, index: chunks.length, dataBase64: encodeBase64(bytes.subarray(offset, end)), final: end === bytes.length })
   }
   return chunks
 }
@@ -87,7 +88,7 @@ export class AgentMuxHostedTransferReader {
     if (this.id === null) { this.id = chunk.transferId; this.index = 0 }
     if (this.id !== chunk.transferId || chunk.index !== this.index++) throw new AgentMuxError(
       'Runtime transfer sequence does not match this reader.', 'CONTROL_PROTOCOL_ERROR')
-    const bytes = unbase64(chunk.dataBase64)
+    const bytes = decodeBase64(chunk.dataBase64)
     if (bytes.length > AGENTMUX_HOSTED_TRANSFER_CHUNK_BYTES || (this.length += bytes.length) > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES) {
       throw new AgentMuxError('Runtime transfer exceeds its reader budget.', 'CONTROL_PROTOCOL_ERROR')
     }
@@ -131,7 +132,7 @@ export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransfer
   const p = wireRecord(value, ['transferId', 'index', 'dataBase64', 'final'])
   wireString(p.transferId); wireCount(p.index)
   if (typeof p.final !== 'boolean' || typeof p.dataBase64 !== 'string' ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(p.dataBase64)) throw new AgentMuxError(
+    !isBase64(p.dataBase64)) throw new AgentMuxError(
       'Runtime transfer frame is malformed.', 'CONTROL_PROTOCOL_ERROR')
   return p as AgentMuxHostedTransferChunk
 }

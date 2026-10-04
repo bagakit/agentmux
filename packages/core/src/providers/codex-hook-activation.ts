@@ -1,6 +1,6 @@
 import { AgentMuxError } from '../errors.js'
 import type { AgentProviderHookActivation, AgentProviderHookActivationContext } from '../agent-provider.js'
-import { withCodexNativeRead } from './codex-native-read.js'
+import { withAppServerNativeRead } from './app-server-native-read.js'
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Native Hook metadata is invalid.', 'INVALID_AGENT_HOOK_RESPONSE')
@@ -28,7 +28,7 @@ export async function inspectCodexHookActivation(context: AgentProviderHookActiv
     })
   })
   if (required.length === 0) throw new AgentMuxError('Codex Hook plan is empty.', 'INVALID_HOOK_PLAN')
-  return await withCodexNativeRead(context, 'hooks', async request => {
+  return await withAppServerNativeRead(context, 'hooks', async request => {
     const result = object(await request('hooks/list', { cwds: [context.workspacePath] }))
     if (!Array.isArray(result.data) || result.data.length !== 1) throw new AgentMuxError('Native Hook workspace is invalid.', 'INVALID_AGENT_HOOK_RESPONSE')
     const entry = object(result.data[0])

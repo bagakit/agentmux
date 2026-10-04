@@ -9,7 +9,10 @@ import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQu
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
 import type { AgentMuxMessageTarget } from './control.js'
 import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
-import type { AgentMuxRunRef, AgentPromptExecution } from './types.js'
+import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOperationDevice } from './types.js'
+import { normalizeMessageChannel } from './message-origin.js'
+import { normalizeOperationDevice } from './operation-device.js'
+import { durableWriteFile } from './durable-write.js'
 
 export type AgentMuxMessageIdentity =
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
@@ -54,6 +57,8 @@ export type DurableAgentMuxMessage = {
   readonly promptCondition?: AgentPromptCondition | null
   /** This journal admission freezes the requested execution independently of the opaque envelope. */
   readonly execution?: AgentPromptExecution
+  readonly sourceChannel?: AgentMessageChannel
+  readonly sourceDevice?: AgentOperationDevice
 }
 
 export type AgentMuxDeliveryReader = {
@@ -84,11 +89,15 @@ export type AgentMuxMessageReceipt = {
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
   readonly promptCondition?: AgentPromptCondition | null
+  readonly sourceChannel?: AgentMessageChannel
+  readonly sourceDevice?: AgentOperationDevice
 }
 
 export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' | 'messageId'> & {
   readonly messageId?: string
   readonly execution?: AgentPromptExecution
+  readonly sourceChannel?: AgentMessageChannel
+  readonly sourceDevice?: AgentOperationDevice
 }
 
 /** Readable recipient-side wrapper; envelope facts have already been validated by Core.
@@ -108,7 +117,7 @@ export type AgentMuxMessageQueueOptions = {
 const processQueueTails = new Map<string, Promise<void>>()
 
 export type AgentMuxMessageJournalRecord =
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
@@ -125,6 +134,30 @@ type DispatchProjection = { readonly sourceMessageId: string; readonly openedAt:
 
 const DEFAULT_MAX_MESSAGES = 2_048
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+
+function storageCause(error: unknown, depth = 0): Record<string, unknown> {
+  if (!error || typeof error !== 'object') return { message: String(error) }
+  const value = error as { name?: unknown; message?: unknown; code?: unknown; detail?: unknown;
+    phase?: unknown; errcode?: unknown; cause?: unknown }
+  return { name: String(value.name ?? 'Error').slice(0, 128), message: String(value.message ?? error).slice(0, 2048),
+    ...(typeof value.code === 'string' ? { code: value.code.slice(0, 128) } : {}),
+    ...(typeof value.detail === 'string' ? { detail: value.detail.slice(0, 8192) } : {}),
+    ...(typeof value.phase === 'string' ? { phase: value.phase.slice(0, 128) } : {}),
+    ...(typeof value.errcode === 'number' ? { errcode: value.errcode } : {}),
+    ...(depth >= 3 || value.cause === undefined ? {} : { cause: storageCause(value.cause, depth + 1) }) }
+}
+
+function storageFailure(stage: string, cause: unknown,
+  cleanup: readonly { stage: string; error: unknown }[] = [],
+  message = 'Message queue store is unavailable.', code = 'MESSAGE_QUEUE_UNAVAILABLE'): AgentMuxError {
+  const original = cause instanceof AgentMuxError ? cause : undefined
+  const error = new AgentMuxError(original?.message ?? message, original?.code ?? code,
+    JSON.stringify({ stage, cause: storageCause(cause),
+      ...(cleanup.length ? { cleanup: cleanup.map(item => ({ stage: item.stage, cause: storageCause(item.error) })) } : {}) }),
+    original?.controlFailure, original?.logId)
+  Object.defineProperty(error, 'cause', { value: cause, configurable: true })
+  return error
+}
 
 function nonEmpty(value: string, label: string): string {
   if (!value.trim() || /[\0\r\n]/u.test(value)) throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
@@ -236,6 +269,8 @@ export class DurableAgentMuxMessageQueue {
   readonly queueId: string
   private loaded = false
   private bytes = 0
+  private content = ''
+  private durabilityAcknowledged = false
   private nextSequence = 1
   private readonly messages = new Map<string, DurableAgentMuxMessage>()
   private readonly operations = new Map<string, string>()
@@ -251,74 +286,102 @@ export class DurableAgentMuxMessageQueue {
     this.queueId = queueIdFor(path)
   }
 
-  private withLock<T>(operation: () => Promise<T>): Promise<T> {
+  private withLock<T>(operation: () => Promise<T>, durableReceipt = false): Promise<T> {
     const key = `${this.path}.mutex.sqlite`
     const processTail = processQueueTails.get(key) ?? Promise.resolve()
     const instanceTail = this.tail
-    const result = processTail.then(() => instanceTail.then(() => this.withFileLock(operation), () => this.withFileLock(operation)), () => this.withFileLock(operation))
+    const result = processTail.then(() => instanceTail.then(() => this.withFileLock(operation, durableReceipt), () => this.withFileLock(operation, durableReceipt)), () => this.withFileLock(operation, durableReceipt))
     this.tail = result.then(() => undefined, () => undefined)
     processQueueTails.set(key, result.then(() => undefined, () => undefined))
     return result
   }
 
-  private async withFileLock<T>(operation: () => Promise<T>): Promise<T> {
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+  private async withFileLock<T>(operation: () => Promise<T>, durableReceipt: boolean): Promise<T> {
     // SQLite's BEGIN IMMEDIATE is the cross-process writer mutex. The kernel releases it when a
     // process dies, including a crash during append, so there is no pathname to reclaim with a
     // check-then-unlink race. A legacy orphan .lock file is deliberately ignored.
     const mutexPath = `${this.path}.mutex.sqlite`
-    let mutex: DatabaseSync
+    let mutex: DatabaseSync | undefined
+    let acquired = false
+    let failed = false
+    let failure: unknown
+    let result!: T
+    let stage = 'journal-directory'
     try {
+      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
       // Loading the queue's validator or CLI help must not initialize SQLite or put an
       // experimental-module warning in the machine-readable error receipt stream.
       const { DatabaseSync } = await import('node:sqlite')
+      stage = 'mutex-open'
       mutex = new DatabaseSync(mutexPath)
+      stage = 'mutex-configure'
       await chmod(mutexPath, 0o600)
-      mutex.exec('PRAGMA busy_timeout = 10000')
-    } catch {
-      throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
-    }
-    let acquired = false
-    try {
-      try { mutex.exec('BEGIN IMMEDIATE'); acquired = true } catch (error) {
-        if ((error as { code?: string }).code !== 'ERR_SQLITE_ERROR' || !String(error).includes('database is locked')) {
-          throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
-        }
-      }
-      if (!acquired) throw new AgentMuxError('Message queue writer is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
+      // A separate writer must not synchronously stall this Core's terminal/Hook event loop.
+      // The caller can retry its original operation after the positively busy owner releases it.
+      mutex.exec('PRAGMA busy_timeout = 0')
+      stage = 'mutex-acquire'
+      mutex.exec('BEGIN IMMEDIATE'); acquired = true
       this.loaded = false
       this.bytes = 0
+      this.content = ''
+      this.durabilityAcknowledged = false
       this.nextSequence = 1
       this.messages.clear()
       this.operations.clear()
       this.consumers.clear()
       this.dispatches.clear()
       this.journal.length = 0
+      stage = 'journal-read'
       await this.ensureLoaded()
-      const result = await operation()
+      // Operation failures already carry their business or precise storage provenance.
+      stage = 'operation'
+      result = await operation()
+      if (durableReceipt && this.bytes > 0 && !this.durabilityAcknowledged) await this.confirmDurability()
+      stage = 'mutex-commit'
       mutex.exec('COMMIT')
       acquired = false
-      return result
+    } catch (error) {
+      failed = true
+      const sqlite = error as { code?: string; errcode?: number }
+      // SQLite may also report busy while committing/releasing its mutex. The file may already
+      // be published: retain that stage and never attach a not-applied input claim to this retry.
+      failure = sqlite?.code === 'ERR_SQLITE_ERROR' && sqlite.errcode === 5
+        ? storageFailure(stage, error, [], 'Message queue lock is busy.', 'MESSAGE_QUEUE_BACKPRESSURE')
+        : stage === 'operation' || error instanceof AgentMuxError ? error : storageFailure(stage, error)
     } finally {
+      const cleanup: { stage: string; error: unknown }[] = []
       if (acquired) {
-        try { mutex.exec('ROLLBACK') } catch { /* A crashed or closed transaction is already released. */ }
+        try { mutex?.exec('ROLLBACK') } catch (error) { cleanup.push({ stage: 'mutex-rollback', error }) }
       }
-      mutex.close()
+      try { mutex?.close() } catch (error) { cleanup.push({ stage: 'mutex-close', error }) }
+      if (cleanup.length) {
+        failure = failed ? storageFailure('mutex-cleanup', failure, cleanup)
+          : storageFailure(cleanup[0]!.stage, cleanup[0]!.error, cleanup.slice(1))
+        failed = true
+      }
     }
+    if (failed) throw failure
+    return result
   }
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    let content = ''
-    try { content = await readFile(this.path, 'utf8') } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new AgentMuxError('Message queue store is unavailable.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    let raw = Buffer.alloc(0)
+    try { raw = await readFile(this.path) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw storageFailure('journal-read', error)
     }
+    const content = raw.toString('utf8')
+    if (!Buffer.from(content).equals(raw)) throw storageFailure('journal-encoding',
+      new Error('Message journal is not valid UTF-8.'), [], 'Message queue journal is invalid.')
+    this.content = content
     this.bytes = Buffer.byteLength(content)
     for (const line of content.split('\n')) {
       if (!line.trim()) continue
       let record: JournalRecord
-      try { record = JSON.parse(line) as JournalRecord } catch { throw new AgentMuxError('Message queue journal is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE') }
+      try { record = JSON.parse(line) as JournalRecord } catch (error) {
+        throw storageFailure('journal-parse', error, [], 'Message queue journal is invalid.')
+      }
       this.journal.push(record)
       this.replay(record)
     }
@@ -332,7 +395,9 @@ export class DurableAgentMuxMessageQueue {
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
       const message = { sequence: record.sequence, envelope, delivery: Object.freeze({ state: 'queued' as const, at: envelope.createdAt }),
         ...(record.promptCondition === null ? { promptCondition: null } : {}),
-        ...(record.execution === undefined ? {} : { execution: record.execution }) }
+        ...(record.execution === undefined ? {} : { execution: record.execution }),
+        ...(record.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(record.sourceChannel) }),
+        ...(record.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(record.sourceDevice) }) }
       this.messages.set(envelope.messageId, message)
       this.operations.set(envelope.operationId, envelope.messageId)
       return
@@ -426,14 +491,39 @@ export class DurableAgentMuxMessageQueue {
 
   private async appendRecord(record: JournalRecord): Promise<void> {
     const line = `${JSON.stringify(record)}\n`
-    if (this.bytes + Buffer.byteLength(line) > (this.options.maxBytes ?? DEFAULT_MAX_BYTES)) {
+    const separator = this.content && !this.content.endsWith('\n') ? '\n' : ''
+    const bytes = this.bytes + Buffer.byteLength(separator) + Buffer.byteLength(line)
+    if (bytes > (this.options.maxBytes ?? DEFAULT_MAX_BYTES)) {
       throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
     }
-    const handle = await open(this.path, 'a', 0o600)
-    try { await handle.write(line); await handle.sync() } finally { await handle.close() }
-    this.bytes += Buffer.byteLength(line)
+    const content = this.content + separator + line
+    try { await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true }) }
+    catch (error) { throw storageFailure('journal-publish', error) }
+    this.content = content
+    this.bytes = bytes
+    this.durabilityAcknowledged = true
     this.journal.push(record)
     this.replay(record)
+  }
+
+  /** Reading an existing idempotent result is not a file/directory durability ACK. */
+  private async confirmDurability(): Promise<void> {
+    for (const [path, stage] of [[this.path, 'journal-confirm-file'], [dirname(this.path), 'journal-confirm-directory']] as const) {
+      let handle: Awaited<ReturnType<typeof open>> | undefined
+      let failure: unknown
+      let failed = false
+      try { handle = await open(path, 'r'); await handle.sync() }
+      catch (error) { failure = storageFailure(stage, error); failed = true }
+      finally {
+        try { await handle?.close() } catch (error) {
+          failure = failed ? storageFailure(stage, failure, [{ stage: `${stage}-close`, error }])
+            : storageFailure(`${stage}-close`, error)
+          failed = true
+        }
+      }
+      if (failed) throw failure
+    }
+    this.durabilityAcknowledged = true
   }
 
   async append(input: AgentMuxMessageAppendInput): Promise<AgentMuxMessageReceipt> {
@@ -442,26 +532,31 @@ export class DurableAgentMuxMessageQueue {
       const messageId = input.messageId ?? randomUUID()
       if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'INVALID_CONTROL_REQUEST')
       const execution = input.execution ?? 'default'
+      const sourceChannel = input.sourceChannel === undefined ? undefined : normalizeMessageChannel(input.sourceChannel)
+      const sourceDevice = input.sourceDevice === undefined ? undefined : normalizeOperationDevice(input.sourceDevice)
+      const sameOrigin = (existing: DurableAgentMuxMessage) => existing.sourceChannel === sourceChannel &&
+        JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice)
       const envelope = validateAgentMuxMessageEnvelope({ ...input, schema: 'agentmux.a2a.v1', messageId })
       const existingId = this.operations.get(envelope.operationId)
       if (existingId) {
         const existing = this.messages.get(existingId)!
-        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution) throw new AgentMuxError('Message operation already names another envelope or execution.', 'MESSAGE_ID_CONFLICT')
+        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message operation already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
       const existing = this.messages.get(messageId)
       if (existing) {
-        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution) throw new AgentMuxError('Message id already names another envelope or execution.', 'MESSAGE_ID_CONFLICT')
+        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message id already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
       const maxMessages = this.options.maxMessages ?? DEFAULT_MAX_MESSAGES
       const maxBytes = this.options.maxBytes ?? DEFAULT_MAX_BYTES
-      const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution }
+      const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
+        ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       const encodedBytes = Buffer.byteLength(`${JSON.stringify(record)}\n`)
       if (this.messages.size >= maxMessages || this.bytes + encodedBytes > maxBytes) throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
       await this.appendRecord(record)
       return this.receipt(this.messages.get(messageId)!)
-    })
+    }, true)
   }
 
   async recordDelivery(messageId: string, state: Exclude<AgentDeliveryState, 'queued'>, at = Date.now(), reason?: string): Promise<AgentMuxMessageReceipt> {
@@ -474,7 +569,7 @@ export class DurableAgentMuxMessageQueue {
       const record: JournalDelivery = { kind: 'delivery', sequence: this.nextSequence, messageId, state, at, ...(reason === undefined ? {} : { reason }) }
       await this.appendRecord(record)
       return this.receipt(this.messages.get(messageId)!)
-    })
+    }, true)
   }
 
   /** An unavailable Control receipt does not establish terminal failure or erase a known delivery. */
@@ -486,7 +581,7 @@ export class DurableAgentMuxMessageQueue {
       await this.appendRecord({ kind: 'delivery-issue', sequence: this.nextSequence, messageId,
         at: finiteTimestamp(at, 'Delivery issue time'), reason })
       return this.receipt(this.messages.get(messageId)!)
-    })
+    }, true)
   }
 
   /** The existing journal owns the first condition even if a Control response is lost. */
@@ -499,7 +594,7 @@ export class DurableAgentMuxMessageQueue {
         'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
       const condition = current.promptCondition
       return { envelope: structuredClone(current.envelope), condition: condition === null ? null : structuredClone(condition) }
-    })
+    }, true)
     if (original.condition !== null) return original.condition
     // Observation is not a journal mutation. A slow target must not hold the global
     // writer while unrelated messages append; the second scope keeps the first binding.
@@ -514,7 +609,7 @@ export class DurableAgentMuxMessageQueue {
       }
       await this.appendRecord({ kind: 'prompt-condition', sequence: this.nextSequence, messageId, condition: candidate })
       return structuredClone(candidate)
-    })
+    }, true)
   }
 
   async listAfter(sequence = 0): Promise<readonly DurableAgentMuxMessage[]> {
@@ -554,7 +649,7 @@ export class DurableAgentMuxMessageQueue {
       }
       return { ...identity, generation: batch.generation,
         messages: batch.deliveryIds.map((messageId) => structuredClone(this.messages.get(messageId)!)) }
-    })
+    }, true)
   }
 
   async ack(
@@ -571,7 +666,7 @@ export class DurableAgentMuxMessageQueue {
       const next = this.cursorAfterAck(record) // Validate before writing, including the pure generation fence.
       await this.appendRecord(record)
       return { ...identity, acknowledgedMessageIds: [...record.deliveryIds], nextGeneration: next.generation }
-    })
+    }, true)
   }
 
   private dispatchMessage(messageId: string): AgentMuxMessageEnvelope {
@@ -616,7 +711,7 @@ export class DurableAgentMuxMessageQueue {
       if (!existing) await this.appendRecord({ kind: 'dispatch-open', sequence: this.nextSequence,
         sourceMessageId: dispatch.sourceMessageId, at: dispatch.openedAt })
       return structuredClone(dispatch)
-    })
+    }, true)
   }
 
   async recordDispatchEvent(
@@ -637,7 +732,7 @@ export class DurableAgentMuxMessageQueue {
         sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId,
         eventKind: input.kind, at: next.events.at(-1)!.at })
       return structuredClone(next)
-    })
+    }, true)
   }
 
   async showDispatch(
@@ -662,7 +757,9 @@ export class DurableAgentMuxMessageQueue {
       sequence: message.sequence,
       envelope: structuredClone(message.envelope),
       delivery: { ...message.delivery },
-      ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) })
+      ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) }),
+      ...(message.sourceChannel === undefined ? {} : { sourceChannel: message.sourceChannel }),
+      ...(message.sourceDevice === undefined ? {} : { sourceDevice: { ...message.sourceDevice } })
     }
   }
 }
