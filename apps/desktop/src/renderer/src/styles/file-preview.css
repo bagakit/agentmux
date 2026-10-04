@@ -24,8 +24,7 @@
 .file-html-preview { height:100%; min-height:0; display:flex; flex-direction:column; background:#fff; }
 .file-html-preview > iframe { flex:1; min-height:0; width:100%; border:0; }
 .file-html-preview__notice { flex:none; padding:var(--sp-3) var(--sp-5); background:var(--surface-2); color:var(--text-2); font-size:var(--fs-micro); }
-.editor-pane { container-type:inline-size; grid-template-rows:30px minmax(0, 1fr); }
-.editor-pane--issue { grid-template-rows:30px auto minmax(0, 1fr); }
+.editor-pane { container-type:inline-size; grid-template-rows:30px auto minmax(0, 1fr); }
 .editor-pane > .editor-header { flex-wrap:nowrap; min-height:30px; gap:var(--sp-3); }
 .editor-header__actions { flex:none; flex-wrap:nowrap; }
 .editor-header__path { flex:1; }
