@@ -232,7 +232,7 @@ export function WorkbenchTabContextMenu({
   fileActions,
   writeClipboardText,
   onRenameTab,
-  onRenameAgent,
+  renameLabel = 'Rename tab',
   onClose,
   onCloseOthers,
   onCloseLeft,
@@ -258,10 +258,9 @@ export function WorkbenchTabContextMenu({
   // 文件 Tab 才传；非文件 Tab 缺席，路径复制与「显示」整组不出现。
   fileActions?: WorkbenchTabFileActions
   writeClipboardText(text: string): Promise<void>
-  // 改名复用这套既有右键菜单，不新增第二套菜单基建。Tab 名总能改；Agent 名只有这张 View 恰好承载
-  // 唯一一个 Agent 时才在这里给（多 Agent 时该在 Region 菜单上对那一格改，此处不冒充）。
+  // One explicit scope: the original Tab, or its same-name single Agent together with the Tab.
   onRenameTab(): void
-  onRenameAgent?(): void
+  renameLabel?: 'Rename tab' | 'Rename tab and agent'
   onClose(): void
   onCloseOthers(): void
   onCloseLeft(): void
@@ -308,14 +307,8 @@ export function WorkbenchTabContextMenu({
         >
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameTab}>
             <Pencil size={14} />
-            <span>Rename Tab</span>
+            <span>{renameLabel}</span>
           </ContextMenu.Item>
-          {onRenameAgent ? (
-            <ContextMenu.Item className="tab-context-menu__item" onSelect={onRenameAgent}>
-              <Pencil size={14} />
-              <span>Rename Agent</span>
-            </ContextMenu.Item>
-          ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           {copyModel.entries.map((entry) => {
             const Icon = entry.action.icon

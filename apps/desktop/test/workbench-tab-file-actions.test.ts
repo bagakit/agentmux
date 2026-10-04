@@ -302,14 +302,14 @@ describe('JSX 里没有可以取反的在场判断', () => {
 
   it('那处合法的条件仍然合法：判据不禁止 Content 里有条件，只禁止那次 map 头上有', () => {
     // 兄弟文件那条「一个条件都没有」的判据搬过来会把这里判红。钉住这个差异本身：
-    // 这个 Content 里**确实**有内联条件（Rename Agent 按可选回调在场与否决定画不画），
+    // 这个 Content 里**确实**有内联条件（Rearrange Splits 按实际可用重排项决定画不画），
     // 而上一条仍然绿。哪天有人把判据「统一」成禁止一切条件，这条会当场提醒他代价是什么。
     expect(
       inlineConditions(jsx).length,
       '这个 Content 里的合法条件没有了——那上一条判据就该收紧成兄弟文件那种全禁式'
     ).toBeGreaterThan(0)
-    expect(content, '合法条件不再是 Rename Agent 那处了，重新判一遍这条注释还成不成立').toContain(
-      'onRenameAgent ?'
+    expect(content, 'Rearrange Splits remains a conditional group independent of the copied entries.').toContain(
+      'layoutEntries.length > 0 ?'
     )
   })
 

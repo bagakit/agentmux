@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import {
   Check,
   GitBranch,
+  FolderGit2,
   GitCompareArrows,
   LoaderCircle,
   Pin,
@@ -261,6 +262,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     // 新的视觉记号（不是空盒子），属产品决定，已单独记录；别在这里写「区别落在 title 上」，那会给一个
     // 不可达的东西背书。
     const sync = branch.isCurrent && syncFacts !== null ? gitSyncBadge(syncFacts) : null
+    const statusKind = branch.isCurrent ? 'current' : worktree !== null ? 'worktree' : 'unbound'
+    const statusLabel = branch.isCurrent ? 'Current branch' : worktree !== null ? 'Worktree' : 'Branch without worktree'
     return (
       <BranchContextMenu
         key={branch.name}
@@ -336,8 +339,13 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                       {sync.label}
                     </span>
                   ) : null}
-                  <span className={`branch-row__state ${worktree !== null ? '' : 'branch-row__state--unbound'}`}>
-                    {branch.isCurrent ? <><Check size={9} /> Current</> : worktree !== null ? 'Worktree' : <><Unlink size={9} /> Branch</>}
+                  <span
+                    className={`branch-row__state branch-row__state--${statusKind}`}
+                    role="img"
+                    aria-label={statusLabel}
+                    title={statusLabel}
+                  >
+                    {branch.isCurrent ? <Check size={12} aria-hidden="true" /> : worktree !== null ? <FolderGit2 size={13} aria-hidden="true" /> : <Unlink size={12} aria-hidden="true" />}
                   </span>
                 </>
               }
