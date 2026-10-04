@@ -117,6 +117,7 @@ export type HookDeliveryFailure = {
   runId: string | null
   receiptId: string
   code: string
+  message?: string
   stage: 'admission' | 'owner'
   accepted: false | 'unknown'
 }
@@ -358,14 +359,21 @@ export class AgentHookServer {
   private deliveryFailed(response: ServerResponse, binding: PendingBinding, receiptId: string, error: unknown): void {
     const queued = error instanceof HookQueueTimeoutError
     const code = error instanceof AgentMuxError ? error.code : 'HOOK_DELIVERY_FAILED'
-    this.fail(response, binding, receiptId, code, queued ? 'admission' : 'owner', queued ? false : 'unknown')
+    // A custom Provider/Store can put content or credentials in any Error message.
+    // Only fixed Store field diagnostics are safe to copy into a public service notice.
+    const message = error instanceof AgentMuxError && code === 'INVALID_AGENT_SESSION_STORE' &&
+      /^hookReceipt\.toolInvocation(?:\.(?:nativeSessionId|nativeToolCallId|nativeTurnId|nativeTranscriptPath|toolName|toolInput))? is invalid\.$/u.test(error.message)
+      ? error.message : undefined
+    this.fail(response, binding, receiptId, code, queued ? 'admission' : 'owner', queued ? false : 'unknown',
+      message)
   }
 
   private fail(response: ServerResponse, binding: PendingBinding, receiptId: string, code: string,
-    stage: 'admission' | 'owner', accepted: false | 'unknown'): void {
-    const failure = { agentSessionId: binding.agentSessionId, runId: binding.runId, receiptId, code, stage, accepted }
+    stage: 'admission' | 'owner', accepted: false | 'unknown', message?: string): void {
+    const failure = { agentSessionId: binding.agentSessionId, runId: binding.runId, receiptId, code, stage, accepted,
+      ...(message === undefined ? {} : { message }) }
     respond(response, stage === 'admission' && binding.accepting ? 429 : 503,
-      JSON.stringify({ error: code, receiptId, stage, accepted, retryable: !binding.closed,
+      JSON.stringify({ error: code, receiptId, stage, accepted, ...(message === undefined ? {} : { message }), retryable: !binding.closed,
         recovery: accepted === 'unknown'
           ? 'Retain the original receipt and verify its result against the native Session source; retry observes the same outcome without repeating owner work. The Agent and terminal remain available.'
           : 'Retry the original receipt after backoff; the Agent and terminal remain available.' }))
