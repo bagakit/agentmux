@@ -3,43 +3,51 @@
 // exact ordered content/resources, neutral unknown activities and native UUID identity.
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
-import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
-  AgentSessionHistoryContentPart, AgentSessionHistoryItem } from '../types.js'
+import {
+  isNativeText,
+  nativeJsonStringify,
+  nativeTextConcat,
+  nativeTextJoin,
+  type NativeTextValue,
+  type NativeHistoryContentPart as AgentSessionHistoryContentPart,
+  type NativeHistoryItem as AgentSessionHistoryItem
+} from '../native-history-value.js'
+import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage } from '../types.js'
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
-function formatToolResultOutput(content: unknown): string {
-  if (typeof content === 'string') return content
+function formatToolResultOutput(content: unknown): NativeTextValue {
+  if (isNativeText(content)) return content
   if (Array.isArray(content)) {
-    return content.map((item) => {
-      if (typeof item === 'string') return item
+    return nativeTextJoin(content.map((item) => {
+      if (isNativeText(item)) return item
       if (item && typeof item === 'object') {
         const text = (item as Record<string, unknown>).text
-        if (typeof text === 'string') return text
+        if (isNativeText(text)) return text
       }
-      return JSON.stringify(item)
-    }).join('\n')
+      return nativeJsonStringify(item)
+    }))
   }
   if (content === undefined || content === null) return ''
-  return JSON.stringify(content)
+  return nativeJsonStringify(content)
 }
 
 function parts(content: unknown): AgentSessionHistoryContentPart[] {
-  if (typeof content === 'string') return [{ kind: 'text', text: content }]
-  if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: JSON.stringify(content) }]
+  if (isNativeText(content)) return [{ kind: 'text', text: content }]
+  if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
   return content.flatMap((value): AgentSessionHistoryContentPart[] => {
     const block = object(value)
-    if (!block) return [{ kind: 'text', text: JSON.stringify(value) }]
-    if (block.type === 'text' && typeof block.text === 'string') return [{ kind: 'text', text: block.text }]
+    if (!block) return [{ kind: 'text', text: nativeJsonStringify(value) }]
+    if (block.type === 'text' && isNativeText(block.text)) return [{ kind: 'text', text: block.text }]
     if (block.type === 'thinking') {
-      const text = typeof block.thinking === 'string' ? block.thinking : typeof block.text === 'string' ? block.text : ''
+      const text = isNativeText(block.thinking) ? block.thinking : isNativeText(block.text) ? block.text : ''
       return [{ kind: 'reasoning', text }]
     }
     if (block.type === 'tool_use') {
       const name = typeof block.name === 'string' && block.name.trim() ? block.name.trim() : 'tool'
-      const input = typeof block.input === 'string' ? block.input : (block.input === undefined || block.input === null ? '' : JSON.stringify(block.input))
+      const input = isNativeText(block.input) ? block.input : (block.input === undefined || block.input === null ? '' : nativeJsonStringify(block.input))
       const callId = typeof block.id === 'string' && block.id ? block.id : undefined
       return [{ kind: 'tool-call', name, input, ...(callId ? { callId } : {}) }]
     }
@@ -50,14 +58,14 @@ function parts(content: unknown): AgentSessionHistoryContentPart[] {
     }
     if (block.type === 'image') {
       const source = object(block.source)
-      if (source?.type === 'base64' && typeof source.data === 'string' && typeof source.media_type === 'string') {
-        return [{ kind: 'resource', resourceType: 'image', reference: `data:${source.media_type};base64,${source.data}` }]
+      if (source?.type === 'base64' && isNativeText(source.data) && typeof source.media_type === 'string') {
+        return [{ kind: 'resource', resourceType: 'image', reference: nativeTextConcat(`data:${source.media_type};base64,`, source.data) }]
       }
-      if (source?.type === 'url' && typeof source.url === 'string' && source.url) {
+      if (source?.type === 'url' && isNativeText(source.url) && source.url) {
         return [{ kind: 'resource', resourceType: 'image', reference: source.url }]
       }
     }
-    return [{ kind: 'text', text: JSON.stringify(block) }]
+    return [{ kind: 'text', text: nativeJsonStringify(block) }]
   })
 }
 
@@ -67,7 +75,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   // Claude accepts mid-turn prompts as attachments, not additional user turns.
   // Queue logs and the rendered system wrapper do not establish accepted speech.
   const queuedInput = attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' &&
-    typeof attachment.prompt === 'string'
+    isNativeText(attachment.prompt)
   const content = queuedInput ? attachment.prompt : message?.content
   const blocks = Array.isArray(content) ? content : []
 
@@ -91,8 +99,8 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     // Keep pure tool/reasoning-only records as activity; mixed records with genuine assistant text are assistant-message.
     const hasAssistantText = blocks.some((b) => {
       const obj = object(b)
-      return obj?.type === 'text' && typeof obj.text === 'string' && obj.text.length > 0
-    }) || (typeof content === 'string' && content.length > 0)
+      return obj?.type === 'text' && isNativeText(obj.text) && obj.text.length > 0
+    }) || (isNativeText(content) && content.length > 0)
     kind = hasAssistantText ? 'assistant-message' : 'activity'
   }
 
@@ -104,7 +112,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   return {
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
-    contentParts: message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text', text: JSON.stringify(record) }],
+    contentParts: message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text', text: nativeJsonStringify(record) }],
     ...(queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
       kind === 'activity' ? { title: typeof record.type === 'string' ? `Claude ${record.type}` : 'Claude activity' } : {}),
     ...(turnId !== undefined ? { turnId } : {}),

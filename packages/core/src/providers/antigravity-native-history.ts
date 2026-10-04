@@ -1,12 +1,22 @@
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, type NativeHistoryReadBudget } from '../native-jsonl-history-reader.js'
+import {
+  isNativeText,
+  nativeJsonStringify,
+  nativeTextConcat,
+  nativeTextHasSpeech,
+  nativeTextTrim,
+  type NativeTextValue,
+  type NativeHistoryContentPart as AgentSessionHistoryContentPart,
+  type NativeHistoryItem as AgentSessionHistoryItem
+} from '../native-history-value.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
-  AgentSessionHistoryContentPart,
-  AgentSessionHistoryItem
 } from '../types.js'
+
+import { nativeTextBetween } from '../native-history-source.js'
 
 const ANTIGRAVITY_TRANSCRIPT_FILE = 'transcript.jsonl'
 const ANTIGRAVITY_SYSTEM_DIR = '.system_generated'
@@ -31,27 +41,20 @@ export function assertAntigravityHistorySource(context: Pick<AgentProviderSessio
   }
 }
 
-function extractAntigravityUserRequest(content: string): string {
-  const opener = '<USER_REQUEST>'
-  const startIndex = content.indexOf(opener)
-  if (startIndex === -1) {
-    return content.trim()
-  }
-  const bodyStart = startIndex + opener.length
-  const endIndex = content.indexOf('</USER_REQUEST>', bodyStart)
-  const body = endIndex === -1 ? content.slice(bodyStart) : content.slice(bodyStart, endIndex)
-  return body.trim()
+async function extractAntigravityUserRequest(content: NativeTextValue, signal: AbortSignal): Promise<NativeTextValue> {
+  return nativeTextTrim(await nativeTextBetween(content, '<USER_REQUEST>', '</USER_REQUEST>', signal))
 }
 
-function parseRecordParts(
+async function parseRecordParts(
   record: Record<string, unknown>,
   fullRecord: Record<string, unknown> | undefined,
-  fullState: { unavailable?: boolean; budgetExceeded?: boolean }
-): {
+  fullState: { unavailable?: boolean; budgetExceeded?: boolean },
+  signal: AbortSignal
+): Promise<{
   kind: AgentSessionHistoryItem['kind']
   title?: string
   contentParts: AgentSessionHistoryContentPart[]
-} {
+}> {
   const source = typeof record.source === 'string' ? record.source : ''
   const type = typeof record.type === 'string' ? record.type : ''
 
@@ -91,17 +94,17 @@ function parseRecordParts(
   // 1. User message (source USER_EXPLICIT and type USER_INPUT per agy specification)
   if (source === 'USER_EXPLICIT' && type === 'USER_INPUT') {
     const parts: AgentSessionHistoryContentPart[] = []
-    const text = typeof content === 'string'
-      ? extractAntigravityUserRequest(content)
-      : JSON.stringify(content ?? '')
-    if (text) {
+    const text = isNativeText(content)
+      ? await extractAntigravityUserRequest(content, signal)
+      : nativeJsonStringify(content ?? '')
+    if (text.length) {
       parts.push({ kind: 'text', text })
     }
 
     if (Array.isArray(media)) {
       for (const item of media) {
-        if (item && typeof item === 'object' && typeof (item as { uri?: unknown }).uri === 'string') {
-          const uri = (item as { uri: string }).uri
+        if (item && typeof item === 'object' && isNativeText((item as { uri?: unknown }).uri)) {
+          const uri = (item as { uri: NativeTextValue }).uri
           const mimeType = typeof (item as { mime_type?: unknown }).mime_type === 'string'
             ? (item as { mime_type: string }).mime_type
             : ''
@@ -129,10 +132,10 @@ function parseRecordParts(
   // 2. MODEL / PLANNER_RESPONSE
   if (source === 'MODEL' && type === 'PLANNER_RESPONSE') {
     const parts: AgentSessionHistoryContentPart[] = []
-    const hasAssistantText = typeof content === 'string' && content.trim().length > 0
+    const hasAssistantText = isNativeText(content) && nativeTextHasSpeech(content)
 
     // Source order per embedded specification: thinking -> content -> tool_calls -> media
-    if (typeof thinking === 'string' && thinking.trim().length > 0) {
+    if (isNativeText(thinking) && nativeTextHasSpeech(thinking)) {
       parts.push({ kind: 'reasoning', text: thinking })
     }
 
@@ -147,7 +150,7 @@ function parseRecordParts(
           if (typeof callObj.name === 'string' && callObj.name.length > 0) {
             const name = callObj.name
             const args = callObj.args !== undefined
-              ? (typeof callObj.args === 'string' ? callObj.args : JSON.stringify(callObj.args))
+              ? (isNativeText(callObj.args) ? callObj.args : nativeJsonStringify(callObj.args))
               : ''
             const callId = typeof callObj.id === 'string' && callObj.id.length > 0
               ? callObj.id
@@ -166,8 +169,8 @@ function parseRecordParts(
 
     if (Array.isArray(media)) {
       for (const item of media) {
-        if (item && typeof item === 'object' && typeof (item as { uri?: unknown }).uri === 'string') {
-          const uri = (item as { uri: string }).uri
+        if (item && typeof item === 'object' && isNativeText((item as { uri?: unknown }).uri)) {
+          const uri = (item as { uri: NativeTextValue }).uri
           const mimeType = typeof (item as { mime_type?: unknown }).mime_type === 'string'
             ? (item as { mime_type: string }).mime_type
             : ''
@@ -183,8 +186,8 @@ function parseRecordParts(
 
     // A1: status === 'ERROR' preservation
     if (effectiveRecord.status === 'ERROR') {
-      const errorMsg = typeof effectiveRecord.error === 'string' && effectiveRecord.error.trim().length > 0
-        ? `[Antigravity error: ${effectiveRecord.error.trim()}]`
+      const errorMsg = isNativeText(effectiveRecord.error) && nativeTextHasSpeech(effectiveRecord.error)
+        ? nativeTextConcat('[Antigravity error: ', nativeTextTrim(effectiveRecord.error), ']')
         : '[Antigravity status: ERROR]'
       parts.push({ kind: 'text', text: errorMsg })
     }
@@ -207,12 +210,12 @@ function parseRecordParts(
   const title = type ? `Antigravity ${type}` : source ? `Antigravity ${source}` : 'Antigravity activity'
   const parts: AgentSessionHistoryContentPart[] = []
 
-  const text = typeof content === 'string' ? content : JSON.stringify(effectiveRecord, null, 2)
+  const text = isNativeText(content) ? content : nativeJsonStringify(effectiveRecord, null, 2)
   parts.push({ kind: 'text', text })
 
   if (effectiveRecord.status === 'ERROR') {
-    const errorMsg = typeof effectiveRecord.error === 'string' && effectiveRecord.error.trim().length > 0
-      ? `[Antigravity error: ${effectiveRecord.error.trim()}]`
+    const errorMsg = isNativeText(effectiveRecord.error) && nativeTextHasSpeech(effectiveRecord.error)
+      ? nativeTextConcat('[Antigravity error: ', nativeTextTrim(effectiveRecord.error), ']')
       : '[Antigravity status: ERROR]'
     parts.push({ kind: 'text', text: errorMsg })
   }
@@ -229,14 +232,15 @@ function parseRecordParts(
   }
 }
 
-function convert(
+async function convert(
   record: Record<string, unknown>,
   start: number,
   nativeSessionId: string,
   fullRecord: Record<string, unknown> | undefined,
-  fullState: { unavailable?: boolean; budgetExceeded?: boolean }
-): AgentSessionHistoryItem {
-  const { kind, title, contentParts } = parseRecordParts(record, fullRecord, fullState)
+  fullState: { unavailable?: boolean; budgetExceeded?: boolean },
+  signal: AbortSignal
+): Promise<AgentSessionHistoryItem> {
+  const { kind, title, contentParts } = await parseRecordParts(record, fullRecord, fullState, signal)
   const id = typeof record.id === 'string' && record.id
     ? record.id
     : record.step_index !== undefined
@@ -356,7 +360,6 @@ export async function readAntigravitySessionHistoryPage(
             }
           }
         } finally {
-          compactReader.adoptContent(fullReader)
           await fullReader.close()
         }
       }
@@ -371,7 +374,7 @@ export async function readAntigravitySessionHistoryPage(
     for (const { record, start } of rawEntries) {
       const stepIndex = typeof record.step_index === 'number' ? record.step_index : undefined
       const fullRecord = stepIndex !== undefined ? resolvedFull.get(stepIndex) : undefined
-      items.push(convert(record, start, context.source.nativeSessionId, fullRecord, fullState))
+      items.push(await convert(record, start, context.source.nativeSessionId, fullRecord, fullState, context.signal))
     }
 
     let continuationToSave = compactReader.continuation

@@ -4,8 +4,14 @@
 // last durable entry, parent traversal, including history before compaction; no mutating loader.
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
-import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
-  AgentSessionHistoryContentPart, AgentSessionHistoryItem } from '../types.js'
+import {
+  isNativeText,
+  nativeJsonStringify,
+  nativeTextConcat,
+  type NativeHistoryContentPart as AgentSessionHistoryContentPart,
+  type NativeHistoryItem as AgentSessionHistoryItem
+} from '../native-history-value.js'
+import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage } from '../types.js'
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -18,14 +24,14 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
   const failed = isToolResult && message.isError === true ? true : undefined
   const hasToolIdentity = callId !== undefined || name !== undefined || failed !== undefined
 
-  if (typeof content === 'string') {
+  if (isNativeText(content)) {
     if (isToolResult && hasToolIdentity) {
       return [{ kind: 'tool-result', output: content, ...(name ? { name } : {}), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
     }
     return [{ kind: 'text', text: content }]
   }
   if (!Array.isArray(content)) {
-    return content === undefined ? [] : [{ kind: 'text', text: JSON.stringify(content) }]
+    return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
   }
   if (content.length === 0) {
     if (isToolResult && hasToolIdentity) {
@@ -36,15 +42,15 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
 
   const converted = content.flatMap((value): AgentSessionHistoryContentPart[] => {
     const block = object(value)
-    if (block?.type === 'text' && typeof block.text === 'string') {
+    if (block?.type === 'text' && isNativeText(block.text)) {
       if (isToolResult && hasToolIdentity) {
         return [{ kind: 'tool-result', output: block.text, ...(name ? { name } : {}), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
       }
       return [{ kind: 'text', text: block.text }]
     }
     if (block?.type === 'thinking') {
-      if (typeof block.thinking === 'string') {
-        const signature = typeof block.thinkingSignature === 'string' ? block.thinkingSignature : undefined
+      if (isNativeText(block.thinking)) {
+        const signature = isNativeText(block.thinkingSignature) ? block.thinkingSignature : undefined
         const redacted = typeof block.redacted === 'boolean' ? block.redacted : undefined
         return [{
           kind: 'reasoning',
@@ -53,22 +59,22 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
           ...(redacted !== undefined ? { redacted } : {})
         }]
       }
-      return [{ kind: 'text', text: JSON.stringify(value) }]
+      return [{ kind: 'text', text: nativeJsonStringify(value) }]
     }
     if (block?.type === 'toolCall' && typeof block.name === 'string') {
       const rawArgs = block.arguments
-      const input = typeof rawArgs === 'string'
+      const input = isNativeText(rawArgs)
         ? rawArgs
         : rawArgs === undefined || rawArgs === null
           ? ''
-          : JSON.stringify(rawArgs)
+          : nativeJsonStringify(rawArgs)
       const callId = typeof block.id === 'string' && block.id ? block.id : undefined
       return [{ kind: 'tool-call', name: block.name, input, ...(callId ? { callId } : {}) }]
     }
-    if (block?.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string') {
-      return [{ kind: 'resource', resourceType: 'image', reference: `data:${block.mimeType};base64,${block.data}` }]
+    if (block?.type === 'image' && isNativeText(block.data) && typeof block.mimeType === 'string') {
+      return [{ kind: 'resource', resourceType: 'image', reference: nativeTextConcat(`data:${block.mimeType};base64,`, block.data) }]
     }
-    return [{ kind: 'text', text: JSON.stringify(value) }]
+    return [{ kind: 'text', text: nativeJsonStringify(value) }]
   })
 
   if (isToolResult && hasToolIdentity && !converted.some((p) => p.kind === 'tool-result')) {
@@ -88,9 +94,9 @@ function convert(entry: Record<string, unknown>): AgentSessionHistoryItem {
   const role = message?.role
   const content = message?.content ?? (entry.type === 'custom_message' ? entry.content : entry.summary)
   const blocks = Array.isArray(content) ? content : []
-  const hasAssistantText = (typeof content === 'string' && content.length > 0) || blocks.some((block) => {
+  const hasAssistantText = (isNativeText(content) && content.length > 0) || blocks.some((block) => {
     const obj = object(block)
-    return obj?.type === 'text' && typeof obj.text === 'string' && obj.text.length > 0
+    return obj?.type === 'text' && isNativeText(obj.text) && obj.text.length > 0
   })
   const hasActivity = role === 'toolResult' || blocks.some((block) => {
     const type = object(block)?.type
@@ -104,7 +110,7 @@ function convert(entry: Record<string, unknown>): AgentSessionHistoryItem {
     id: entry.id as string,
     kind,
     contentParts: content === undefined && role !== 'toolResult'
-      ? [{ kind: 'text', text: JSON.stringify(entry) }]
+      ? [{ kind: 'text', text: nativeJsonStringify(entry) }]
       : parts(content, message),
     ...(kind === 'activity' ? { title: `Pi ${typeof role === 'string' ? role : String(entry.type)}` } : {}),
     ...(Number.isSafeInteger(time) && time >= 0 ? { startedAt: time } : {})

@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from './session-history.js'
-import { randomUUID } from 'node:crypto'
 import parser from 'stream-json/parser.js'
 import Assembler from 'stream-json/assembler.js'
 import type { Token } from 'stream-json/parser.js'
-import { materializeNativeContent, type NativeContentRange } from './native-history-content.js'
+import { materializeNativeContent } from './native-history-content.js'
+import { nativeSourceText, nativeStringMetadata, appendNativeStringMetadata, type NativeHistoryItem, type NativeText } from './native-history-value.js'
 import type { AgentProviderSessionHistoryContext, AgentSessionHistoryItem } from './types.js'
 
 type Cursor = {
@@ -94,15 +94,8 @@ export class NativeJsonlHistoryReader {
   private tail = ''
   private readonly permitsPartialTail: boolean
   readonly continuation: string | undefined
-  private readonly contentRanges = new Map<string, NativeContentRange>()
-
-  /** Child physical sources remain contributed by their Provider, under the same semantic source. */
-  adoptContent(reader: NativeJsonlHistoryReader): void {
-    for (const [marker, range] of reader.contentRanges) this.contentRanges.set(marker, range)
-  }
-
-  materializeItem(item: AgentSessionHistoryItem): Promise<AgentSessionHistoryItem> {
-    return materializeNativeContent(this.context, item, this.contentRanges)
+  materializeItem(item: NativeHistoryItem): Promise<AgentSessionHistoryItem> {
+    return materializeNativeContent(this.context, item)
   }
 
   private constructor(
@@ -186,18 +179,29 @@ export class NativeJsonlHistoryReader {
 
   /** Streaming tokens retain small metadata while large strings stay at their exact physical extent. */
   private async parseRange(start: number, end: number, partialTail = false): Promise<Record<string, unknown> | null> {
-    const assembler = new Assembler<unknown>(), stream = parser.asStream({ packKeys: true, streamKeys: false,
+    let deferred: NativeText | undefined
+    // The public reviver inserts the physical value at exactly this string's slot. No
+    // placeholder text can enter Provider interpretation, concatenation or encoding.
+    const assembler = new Assembler<unknown>({ reviver: (_key, value) => {
+      if (!deferred) return value
+      const result = deferred; deferred = undefined; return result
+    } }), stream = parser.asStream({ packKeys: true, streamKeys: false,
       packStrings: false, streamStrings: true, packNumbers: true, streamNumbers: false })
     const strings: Array<{ start: number; end: number }> = []
     let quoted = false, escaped = false, stringIndex = 0, value = '', valueBytes = 0, big = false, currentRange: { start: number; end: number } | undefined
     let retainedBytes = 0, parserError: unknown
+    let metadata = nativeStringMetadata()
     const decoder = new TextDecoder('utf-8', { fatal: true })
     stream.on('error', error => { parserError = error })
     stream.on('data', (token: Token) => {
       try {
         if (token.name === 'keyValue') { stringIndex++; retainedBytes += Buffer.byteLength(token.value); assembler.consume(token) }
-        else if (token.name === 'startString') { currentRange = strings[stringIndex++]; value = ''; valueBytes = 0; big = false }
+        else if (token.name === 'startString') {
+          currentRange = strings[stringIndex++]; value = ''; valueBytes = 0; big = false
+          metadata = nativeStringMetadata()
+        }
         else if (token.name === 'stringChunk') {
+          appendNativeStringMetadata(metadata, token.value)
           if (!big) {
             value += token.value
             valueBytes += Buffer.byteLength(token.value)
@@ -206,9 +210,11 @@ export class NativeJsonlHistoryReader {
         } else if (token.name === 'endString') {
           if (big || currentRange && currentRange.end - currentRange.start > SESSION_HISTORY_MAX_PAGE_BYTES / 2) {
             if (!currentRange || currentRange.end <= currentRange.start) return failure('INVALID_TRANSCRIPT', 'A native string extent is incomplete.')
-            value = `__AMUX_CONTENT_${randomUUID().replaceAll('-', '')}__`
-            this.contentRanges.set(value, { path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
-              head: this.head, tail: this.tail, start: currentRange.start, end: currentRange.end })
+            deferred = nativeSourceText({ path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
+              head: this.head, tail: this.tail, start: currentRange.start, end: currentRange.end },
+              metadata)
+            retainedBytes += 4096 // bounded source metadata, not its unmaterialized body
+            value = ''
           }
           retainedBytes += Buffer.byteLength(value)
           assembler.consume({ name: 'stringValue', value })

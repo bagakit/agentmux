@@ -10,12 +10,21 @@ import {
   readNativeHistoryBytes,
   type NativeHistoryReadBudget
 } from '../native-jsonl-history-reader.js'
+import {
+  isNativeText,
+  nativeJsonStringify,
+  nativeTextJoin,
+  nativeTextHasSpeech,
+  nativeTextStartsWith,
+  nativeTextEndsWith,
+  type NativeTextValue,
+  type NativeHistoryContentPart as AgentSessionHistoryContentPart,
+  type NativeHistoryItem as AgentSessionHistoryItem
+} from '../native-history-value.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryObservationContext,
   AgentProviderSessionHistoryPage,
-  AgentSessionHistoryContentPart,
-  AgentSessionHistoryItem,
   AgentSessionHistoryObservationHandle
 } from '../types.js'
 
@@ -124,10 +133,12 @@ export function encodeCwdDirname(cwd: string): string {
   return `${slug}-${hash16}`
 }
 
-function stringifyValue(value: unknown): string {
-  if (typeof value === 'string') return value
+function extractText(value: unknown): NativeTextValue | undefined { return isNativeText(value) ? value : undefined }
+
+function stringifyValue(value: unknown): NativeTextValue {
+  if (isNativeText(value)) return value
   if (value === undefined || value === null) return ''
-  return JSON.stringify(value)
+  return nativeJsonStringify(value)
 }
 
 export async function resolveGrokChatHistoryPath(
@@ -246,21 +257,21 @@ async function verifySummaryIdentity(
 }
 
 function parseContentParts(content: unknown): AgentSessionHistoryContentPart[] {
-  if (typeof content === 'string') {
+  if (isNativeText(content)) {
     return content.length > 0 ? [{ kind: 'text', text: content }] : []
   }
   if (Array.isArray(content)) {
     const parts: AgentSessionHistoryContentPart[] = []
     for (const item of content) {
-      if (typeof item === 'string') {
+      if (isNativeText(item)) {
         if (item.length > 0) parts.push({ kind: 'text', text: item })
       } else if (isRecord(item)) {
         const itemType = extractString(item.type)
         if (itemType === 'text') {
-          const text = extractString(item.text)
+          const text = extractText(item.text)
           if (text) parts.push({ kind: 'text', text })
         } else if (itemType === 'image') {
-          const url = extractString(item.url)
+          const url = extractText(item.url)
           if (url) parts.push({ kind: 'resource', resourceType: 'image', reference: url })
         }
       }
@@ -270,9 +281,9 @@ function parseContentParts(content: unknown): AgentSessionHistoryContentPart[] {
   return []
 }
 
-function grokUserQueryRange(text: string): { start: number; end: number } | undefined {
+function grokUserQueryRange(text: NativeTextValue): { start: number; end: number } | undefined {
   const opening = '<user_query>\n', closing = '\n</user_query>'
-  return text.startsWith(opening) && text.endsWith(closing) && text.length >= opening.length + closing.length
+  return nativeTextStartsWith(text, opening) && nativeTextEndsWith(text, closing) && text.length >= opening.length + closing.length
     ? { start: opening.length, end: text.length - closing.length } : undefined
 }
 
@@ -301,7 +312,7 @@ function convertGrokRecord(
     }
 
     // Grok's whole-string native user envelope is a reading projection, never author/source authority.
-    if (typeof record.content === 'string') {
+    if (isNativeText(record.content)) {
       const readingRange = grokUserQueryRange(record.content)
       if (readingRange) contentParts[0] = { kind: 'text', text: record.content, readingRange }
     }
@@ -314,7 +325,7 @@ function convertGrokRecord(
 
   if (type === 'assistant') {
     const contentParts: AgentSessionHistoryContentPart[] = []
-    const textContent = extractString(record.content)
+    const textContent = extractText(record.content)
 
     if (textContent && textContent.length > 0) {
       contentParts.push({ kind: 'text', text: textContent })
@@ -325,7 +336,7 @@ function convertGrokRecord(
         if (!isRecord(call)) continue
         const name = extractString(call.name) ?? 'tool'
         const callId = extractString(call.id)
-        const input = typeof call.arguments === 'string' ? call.arguments : stringifyValue(call.arguments)
+        const input = isNativeText(call.arguments) ? call.arguments : stringifyValue(call.arguments)
         contentParts.push({
           kind: 'tool-call',
           name,
@@ -335,7 +346,7 @@ function convertGrokRecord(
       }
     }
 
-    const hasText = contentParts.some((p) => p.kind === 'text' && p.text.trim().length > 0)
+    const hasText = contentParts.some((p) => p.kind === 'text' && nativeTextHasSpeech(p.text))
     const kind = hasText ? 'assistant-message' : 'activity'
 
     return {
@@ -350,27 +361,25 @@ function convertGrokRecord(
     const contentParts: AgentSessionHistoryContentPart[] = []
 
     const summary = Array.isArray(record.summary)
-      ? record.summary
-          .map((s) => (isRecord(s) && s.type === 'summary_text' ? extractString(s.text) : null))
-          .filter(Boolean)
-          .join('\n')
+      ? nativeTextJoin(record.summary
+          .map((s) => (isRecord(s) && s.type === 'summary_text' ? extractText(s.text) : null))
+          .filter((value): value is NativeTextValue => !!value))
       : null
 
     const contentText = Array.isArray(record.content)
-      ? record.content
-          .map((c) => (isRecord(c) && c.type === 'text' ? extractString(c.text) : null))
-          .filter(Boolean)
-          .join('\n')
+      ? nativeTextJoin(record.content
+          .map((c) => (isRecord(c) && c.type === 'text' ? extractText(c.text) : null))
+          .filter((value): value is NativeTextValue => !!value))
       : null
 
     const parts = [summary, contentText].filter(Boolean)
-    const text = parts.length > 0 ? parts.join('\n') : (extractString(record.text) ?? '')
+    const text = parts.length > 0 ? nativeTextJoin(parts as NativeTextValue[]) : (extractText(record.text) ?? '')
 
     if (text) {
       contentParts.push({ kind: 'reasoning', text })
     }
 
-    const encrypted = extractString(record.encrypted_content)
+    const encrypted = extractText(record.encrypted_content)
     if (encrypted) {
       contentParts.push({
         kind: 'resource',
@@ -396,7 +405,7 @@ function convertGrokRecord(
     const kindRecord = isRecord(record.kind) ? record.kind : undefined
     const name = extractString(kindRecord?.tool_type) ?? 'backend_tool'
     const callId = extractString(kindRecord?.id) ?? extractString(record.id)
-    const input = JSON.stringify(kindRecord ?? record)
+    const input = nativeJsonStringify(kindRecord ?? record)
 
     return {
       id,
@@ -415,7 +424,7 @@ function convertGrokRecord(
 
   if (type === 'tool_result') {
     const toolCallId = extractString(record.tool_call_id)
-    const output = typeof record.content === 'string' ? record.content : stringifyValue(record.content)
+    const output = isNativeText(record.content) ? record.content : stringifyValue(record.content)
 
     const contentParts: AgentSessionHistoryContentPart[] = [
       {
@@ -428,7 +437,7 @@ function convertGrokRecord(
     if (Array.isArray(record.images)) {
       for (const img of record.images) {
         if (!isRecord(img)) continue
-        const url = extractString(img.url)
+        const url = extractText(img.url)
         if (url) {
           contentParts.push({ kind: 'resource', resourceType: 'image', reference: url })
         }
@@ -444,7 +453,7 @@ function convertGrokRecord(
   }
 
   if (type === 'system') {
-    const text = typeof record.content === 'string' ? record.content : stringifyValue(record.content)
+    const text = isNativeText(record.content) ? record.content : stringifyValue(record.content)
     return {
       id,
       kind: 'activity',
@@ -457,7 +466,7 @@ function convertGrokRecord(
     id,
     kind: 'activity',
     title: `Grok ${type}`,
-    contentParts: [{ kind: 'text', text: JSON.stringify(record) }]
+    contentParts: [{ kind: 'text', text: nativeJsonStringify(record) }]
   }
 }
 
