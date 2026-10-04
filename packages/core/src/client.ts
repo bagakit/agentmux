@@ -4523,7 +4523,6 @@ export class AgentMuxClient {
       await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
       const intents = { ...current.futurePromptIntents }, previous = intents[intentId]
       if (previous && (previous.operationId !== operationId || previous.prompt !== composed.text)) throw new AgentMuxError('Future intent identity was reused with different content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      if (!previous && Object.keys(intents).length >= 256) throw new AgentMuxError('This Session has reached its retained future-message limit. Existing messages and manual input remain available.', 'AGENT_FUTURE_INTENT_LIMIT')
       intents[intentId] = { ...previous, operationId, prompt: composed.text, active: input.active,
         message: previous?.message ?? { userContent: input.prompt, ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
           ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(input.sourceDevice ? { sourceDevice: structuredClone(input.sourceDevice) } : {}) } }
