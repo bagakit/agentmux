@@ -9,9 +9,17 @@ const MAX_BODY_BYTES = 128 * 1024
 const MAX_BINDINGS = 256
 const MAX_PENDING_EVENTS = 8
 const MAX_PENDING_DELIVERIES = 8
-// Keep completed receipts for the sender's entire two-observation retry window.
+// Keep completed and unknown receipts for the sender's two-observation retry window.
 const RECEIPT_RETRY_WINDOW_MS = 2 * (HOOK_REQUEST_TIMEOUT_MS + HOOK_RETRY_DELAY_MS) + HOOK_RETRY_DELAY_MS
 const MAX_RECEIPT_BYTES = MAX_PENDING_DELIVERIES * MAX_BODY_BYTES
+
+// Only ingress can establish that the owner never started. An arbitrary owner
+// error (even one with the same code) cannot establish that no mutation committed.
+class HookQueueTimeoutError extends AgentMuxError {
+  constructor() {
+    super('Hook observation expired before owner execution; no work was started.', 'HOOK_QUEUE_TIMEOUT')
+  }
+}
 
 function withHookDeliveryDeadline(
   delivery: Promise<void>,
@@ -290,10 +298,6 @@ export class AgentHookServer {
       respond(response, 400, JSON.stringify({ error: 'invalid_hook_envelope' }))
       return
     }
-    if (!binding.accepting) {
-      this.fail(response, binding, parsed.receiptId, 'HOOK_BINDING_RECOVERING', 'admission', false)
-      return
-    }
     const fingerprint = createHash('sha256').update(JSON.stringify({ eventName: parsed.eventName, payload: parsed.payload },
       (_key, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)).digest('hex')
@@ -312,6 +316,12 @@ export class AgentHookServer {
       }
       try { await existing.response; respond(response, 204) }
       catch (error) { this.deliveryFailed(response, binding, parsed.receiptId, error) }
+      return
+    }
+    // Backpressure applies to new work. An existing receipt must retain its
+    // original owner outcome and conflict checks while aborted work drains.
+    if (!binding.accepting) {
+      this.fail(response, binding, parsed.receiptId, 'HOOK_BINDING_RECOVERING', 'admission', false)
       return
     }
     // Receipt metadata consumes a bounded part of the existing in-flight byte budget.
@@ -346,7 +356,7 @@ export class AgentHookServer {
   }
 
   private deliveryFailed(response: ServerResponse, binding: PendingBinding, receiptId: string, error: unknown): void {
-    const queued = error instanceof AgentMuxError && error.code === 'HOOK_QUEUE_TIMEOUT'
+    const queued = error instanceof HookQueueTimeoutError
     const code = error instanceof AgentMuxError ? error.code : 'HOOK_DELIVERY_FAILED'
     this.fail(response, binding, receiptId, code, queued ? 'admission' : 'owner', queued ? false : 'unknown')
   }
@@ -356,7 +366,9 @@ export class AgentHookServer {
     const failure = { agentSessionId: binding.agentSessionId, runId: binding.runId, receiptId, code, stage, accepted }
     respond(response, stage === 'admission' && binding.accepting ? 429 : 503,
       JSON.stringify({ error: code, receiptId, stage, accepted, retryable: !binding.closed,
-        recovery: 'Retry the original receipt after backoff; the Agent and terminal remain available.' }))
+        recovery: accepted === 'unknown'
+          ? 'Retain the original receipt and verify its result against the native Session source; retry observes the same outcome without repeating owner work. The Agent and terminal remain available.'
+          : 'Retry the original receipt after backoff; the Agent and terminal remain available.' }))
     try { this.onFailure?.(failure) } catch { /* Diagnostic consumers cannot break ingress. */ }
   }
 
@@ -368,12 +380,12 @@ export class AgentHookServer {
     const queueTimeout = new Promise<never>((_resolve, reject) => {
       queueTimer = setTimeout(() => {
         expired = true
-        reject(new AgentMuxError('Hook observation expired before owner execution; no work was started.', 'HOOK_QUEUE_TIMEOUT'))
+        reject(new HookQueueTimeoutError())
       }, HOOK_REQUEST_TIMEOUT_MS)
     })
     const started = binding.tail.catch(() => {}).then(() => {
       clearTimeout(queueTimer)
-      if (expired || Date.now() >= deadline) throw new AgentMuxError('Hook observation expired before owner execution; no work was started.', 'HOOK_QUEUE_TIMEOUT')
+      if (expired || Date.now() >= deadline) throw new HookQueueTimeoutError()
       return this.publish(binding, event, Math.min(HOOK_OWNER_TIMEOUT_MS, deadline - Date.now()))
     })
     const response = Promise.race([queueTimeout, started.then(async (delivery) => await delivery.response)])
@@ -385,10 +397,15 @@ export class AgentHookServer {
     const receipt = binding.receipts.get(event.receiptId)
     if (receipt) {
       receipt.response = response
-      void response.then(() => { receipt.expiresAt = Date.now() + RECEIPT_RETRY_WINDOW_MS }, () => {
-        // Failed work may still be draining. Retrying before that exits must join
-        // the old response, never race a second owner mutation.
-        void binding.tail.then(() => { if (binding.receipts.get(event.receiptId) === receipt) binding.receipts.delete(event.receiptId) })
+      void response.then(() => { receipt.expiresAt = Date.now() + RECEIPT_RETRY_WINDOW_MS }, (error: unknown) => {
+        // Keep the original response while work drains. Afterward only the
+        // ingress-proven not-started case may execute again. Owner rejection or
+        // abort is unknown, so preserve its fingerprint and outcome for retry.
+        void binding.tail.then(() => {
+          if (binding.receipts.get(event.receiptId) !== receipt) return
+          if (error instanceof HookQueueTimeoutError) binding.receipts.delete(event.receiptId)
+          else receipt.expiresAt = Date.now() + RECEIPT_RETRY_WINDOW_MS
+        })
       })
     }
     return response
