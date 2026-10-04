@@ -1048,7 +1048,7 @@ export type AgentMuxAgentSession = {
   terminalHandshake?: AgentTerminalHandshakeState
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
-  /** Host-saved future messages. Civil calendars remain Host facts; Core owns admission. */
+  /** Stored admission facts; control observations omit bodies. Use the exact future-intent read APIs. Civil calendars remain Host facts. */
   futurePromptIntents?: Record<string, AgentFuturePromptIntent>
   /** Latest claimed prompt range; successful completion is consumed by the same admission. */
   promptCompletionAdmission?: {

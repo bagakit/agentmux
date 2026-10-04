@@ -11,7 +11,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'listHostExecutors', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',
-  'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
+  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity',
@@ -21,6 +21,13 @@ export const AGENTMUX_HOSTED_METHODS = [
   'answerAsk', 'cancelAsk', 'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch'
 ] as const satisfies readonly (keyof AgentMuxClient)[]
 
+/** Physical Runtime operations do not require a Session catalog or general event observation. */
+export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
+  'connectRuntime', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'listRuns',
+  'reattachAgent', 'writeAgent', 'pasteAgent', 'resizeAgent', 'signalAgent',
+  'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
+  'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal'
+] as const satisfies readonly (typeof AGENTMUX_HOSTED_METHODS[number])[]
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]] : Parameters<AgentMuxClient[M]>

@@ -1789,7 +1789,7 @@ export class AgentMuxClient {
   }
 
   agentSessions(): AgentMuxAgentSession[] {
-    return this.registry.list().map(cloneSession)
+    return this.registry.listPublic()
   }
 
   /** Current durable identities, without replacing the active registry or probing Runs. */
@@ -1799,6 +1799,36 @@ export class AgentMuxClient {
     // Expose that real projection as explicitly unconfirmed; durable identities always take precedence.
     return [...durable, ...this.registry.list().filter(session => session.creation?.persistence === 'unconfirmed' &&
       !durable.some(current => current.agentSessionId === session.agentSessionId))].map(cloneSession)
+  }
+
+  /** Retained body by exact identity; absence is explicit, never inferred from a control projection. */
+  async readAgentFuturePromptIntent(agentSessionId: string, intentId: string): Promise<import('./types.js').AgentFuturePromptIntent | null> {
+    safeId(intentId, 'Future message intent id')
+    const session = this.requireAgentSession(agentSessionId)
+    const intent = session.futurePromptIntents?.[intentId]
+    return intent ? structuredClone(intent) : null
+  }
+
+  /** A bounded read window over all original future identities, including inactive history. */
+  async listAgentFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<{
+    intents: Array<{ intentId: string; intent: import('./types.js').AgentFuturePromptIntent }>; nextIntentId: string | null
+  }> {
+    const limit = options.limit ?? 16
+    // 16 individual 64KiB prompts plus their original message bodies fit one Hosted read transfer.
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16) throw new AgentMuxError('Future-message read window must be between 1 and 16.', 'INVALID_CONTROL_REQUEST')
+    const entries = Object.entries(this.requireAgentSession(agentSessionId).futurePromptIntents ?? {})
+    const index = options.afterIntentId === undefined ? -1 : entries.findIndex(([id]) => id === options.afterIntentId)
+    if (options.afterIntentId !== undefined && index < 0) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
+    const selected: typeof entries = []
+    let bytes = 0
+    for (const entry of entries.slice(index + 1, index + 1 + limit)) {
+      const size = Buffer.byteLength(JSON.stringify({ intentId: entry[0], intent: entry[1] }))
+      // Bound this read response, never retained intent count or subsequent windows.
+      if (selected.length && bytes + size > 4 * 1024 * 1024) break
+      selected.push(entry); bytes += size
+    }
+    return { intents: selected.map(([intentId, intent]) => ({ intentId, intent: structuredClone(intent) })),
+      nextIntentId: index + 1 + selected.length < entries.length ? selected.at(-1)![0] : null }
   }
 
   /** Resolve durable creation bindings before choosing an identity for a new operation. No process or input is started. */

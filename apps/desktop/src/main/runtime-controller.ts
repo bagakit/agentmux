@@ -1663,7 +1663,7 @@ export class RuntimeController {
   }
 
   /** Read the authoritative session facts used by the durable progress loop immediately before delivery. */
-  async observeContinuousProgress(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, tickId: string, now: number, signal?: AbortSignal) {
+  async observeContinuousProgress(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string }, tickId: string, now: number, signal?: AbortSignal) {
     const host = this.hosts.get(loop.hostId)
     if (!host) throw new AgentMuxError('Continuous progress target host is unavailable.', 'UNKNOWN_AGENT_SESSION')
     const status = await host.client.statusAgent(loop.agentSessionId)
@@ -1675,7 +1675,9 @@ export class RuntimeController {
     const observer = this.progressInputObserver
     if (!observer) throw new Error('User input observation is unavailable. Automatic progress is paused; manual input remains available.')
     const inputOccupied = await observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal)
-    return { session: status.session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
+    const saved = loop.futureIntentId ? await host.client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId) : null
+    const session = loop.futureIntentId ? { ...status.session, futurePromptIntents: saved ? { [loop.futureIntentId]: saved } : {} } : status.session
+    return { session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
   }
 
   /** Read the original Core input transaction; absence is never a replacement admission. */

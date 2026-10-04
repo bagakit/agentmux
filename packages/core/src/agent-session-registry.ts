@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { randomUUID } from 'node:crypto'
+import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import {
   loadAgentSessions,
@@ -127,6 +128,11 @@ export class AgentMuxAgentSessionRegistry {
 
   list(): AgentMuxStoredAgentSession[] {
     return [...this.sessions.values()].map((session) => structuredClone(session))
+  }
+
+  /** Current public control facts, without cloning retained business bodies. */
+  listPublic(): AgentMuxAgentSession[] {
+    return [...this.sessions.values()].map(cloneSession)
   }
 
   has(agentSessionId: string): boolean {
