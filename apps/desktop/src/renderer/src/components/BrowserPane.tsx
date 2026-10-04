@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import {
   BROWSER_VIEWPORT_PRESETS,
   type BrowserScreenshotCapture,
@@ -69,7 +70,11 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
-import { WorkbenchPresentationContext, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { sameWorkbenchProjectionSelection, type WorkbenchProjection } from '../lib/workbench-projection'
+import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
+import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+import { readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
@@ -131,6 +136,9 @@ export function BrowserPane({
   const resourceWorkspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === tab.workspaceId))
   const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
   const openFile = useAppStore((state) => state.openFile)
+  const primaryPresentation = useWorkbenchBrowserPresentation()
+  const sourcePresentations = useRef({ primary: primaryPresentation, targets: presentations })
+  sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
@@ -749,10 +757,50 @@ export function BrowserPane({
   const saveBookmark = () => void runCommand(async () => {
     await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
   })
-  const viewBookmarkSource = () => void runCommand(async () => {
+  const viewBookmarkSource = (target?: WorkbenchViewTarget) => void runCommand(async () => {
     const origin = tab.bookmarkOrigin
     if (!origin || origin.binary) return
-    await openFile(origin.path, undefined, undefined, tab.workspaceId, true)
+    const presentation = target ?? primaryPresentation
+    if (presentation.surface !== 'survey' && presentation.surface !== 'mote') {
+      await openFile(origin.path, undefined, undefined, tab.workspaceId, true)
+      return
+    }
+    const state = useAppStore.getState(), reference = presentation.reference && { ...presentation.reference, regionId: tab.regionId }
+    const workspace = state.config?.workspaces.find(workspace => workspace.id === tab.workspaceId)
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace) ?? []
+    const catalog = spatialCatalog(state, topics), zone = catalog.zones.find(zone => zone.zoneId === catalog.tabs.find(item => item.tabId === reference?.tabId)?.zoneId)
+    if (!reference || !workspace || !zone || state.tabs[reference.tabId]?.regions[tab.regionId] !== tab ||
+      !catalog.locations.some(location => location.displayWorkspaceId === reference.displayWorkspaceId && location.groupId === reference.groupId && location.tabId === reference.tabId && location.regionId === reference.regionId) ||
+      !presentation.onSelectRegion && !presentation.projection) throw new Error('The original bookmark source occurrence is unconfirmed. Its Browser and file are kept.')
+    flushSync(() => {
+      if (presentation.onSelectRegion) presentation.onSelectRegion(reference.regionId)
+      else presentation.projection!.onSelect(reference)
+    })
+    const choice = () => {
+      if (presentation.surface === 'survey') return JSON.stringify(useAppStore.getState().surveyZoneSelection)
+      const floating = readPmoTeamsTopicFloatingState()
+      return JSON.stringify([floating?.open, floating?.preview, floating?.targetTopicId, floating?.targetTabId, floating?.reference])
+    }
+    const expected = choice()
+    let superseded = false
+    const observe = () => { if (choice() !== expected) superseded = true }
+    const release = presentation.surface === 'mote' ? subscribePmoTeamsTopicFloatingState(observe) : useAppStore.subscribe(observe)
+    const projection: WorkbenchProjection = { ...presentation.projection, entity: { kind: 'tab', tabId: reference.tabId }, catalog,
+      presentationId: presentation.projection?.presentationId ?? (presentation.surface === 'survey' ? 'survey-workbench' : 'mote-floating-tab'),
+      displayWorkspaceId: reference.displayWorkspaceId, selectionMode: 'occurrence', selection: [reference], onSelect: next => {
+        if (superseded || choice() !== expected) return
+        const current = target ? sourcePresentations.current.targets.find(item => item.target.hostId === target.hostId)?.target : sourcePresentations.current.primary
+        if (!current || current.surface !== presentation.surface || !current.reference ||
+          !sameWorkbenchProjectionSelection({ ...current.reference, regionId: tab.regionId }, reference)) return
+        release()
+        if (current.onSelectRegion) current.onSelectRegion(next.regionId)
+        else current.projection?.onSelect(next)
+      } }
+    try {
+      await openFile(origin.path, reference.groupId, undefined, tab.workspaceId, true, { displayWorkspaceId: reference.displayWorkspaceId,
+        resource: { hostId: workspace.hostId, path: workspace.path }, space: { zoneId: zone.zoneId, spaceId: zoneContext(state, topics, zone) },
+        fileOnly: true, split: { tabId: reference.tabId, regionId: reference.regionId, direction: 'right' }, projection })
+    } finally { release() }
   })
   const viewportOptions = (
     <DropdownMenu.RadioGroup
@@ -1005,7 +1053,7 @@ export function BrowserPane({
               ? "This bookmark is a binary file — its source can't be shown as text"
               : "View this bookmark's source"}
             disabled={tab.bookmarkOrigin.binary || busy}
-            onClick={viewBookmarkSource}
+            onClick={() => viewBookmarkSource(presentation?.target)}
           >
             <FileCode2 size={14} />
           </button>
@@ -1041,7 +1089,7 @@ export function BrowserPane({
                 {toolbar?.saveBookmark ? <DropdownMenu.Item className="browser-menu__item" aria-label="Save this page as a bookmark" disabled={pageToolDisabled} onSelect={saveBookmark}>
                   <Bookmark size={12} /><span>Save bookmark</span>
                 </DropdownMenu.Item> : null}
-                {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={viewBookmarkSource}>
+                {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={() => viewBookmarkSource(presentation?.target)}>
                   <FileCode2 size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}

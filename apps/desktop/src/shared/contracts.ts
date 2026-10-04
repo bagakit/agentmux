@@ -518,6 +518,7 @@ export type AppConfig = {
   appearance: AppearanceConfig
   browser: BrowserConfig
   toolkit?: ToolkitPreferences
+  focus?: import('./focus-preferences').FocusPreferences
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
   // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".

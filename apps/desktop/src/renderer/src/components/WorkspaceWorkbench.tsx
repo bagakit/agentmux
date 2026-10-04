@@ -1145,8 +1145,10 @@ function PaneGroup({
   )
   const retainedHere = retainedSpatialFocus?.displayWorkspaceId === workspaceId && retainedSpatialFocus.groupId === group.id &&
     retainedSpatialFocus.tabId === activeTab?.id
-  const activeRegionId = activeTab ? logicalRegionId(activeTab, retainedHere ? retainedSpatialFocus.regionId :
-    projection?.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId) : null
+  const mainRegionId = useAppStore(state => showWindowChrome && state.workbenchSpaceSelection?.workspaceId === workspaceId &&
+    state.workbenchSpaceSelection.groupId === group.id && state.workbenchSpaceSelection.tabId === activeTab?.id ? state.workbenchSpaceSelection.regionId : null)
+  const activeRegionId = activeTab ? logicalRegionId(activeTab, mainRegionId ?? (retainedHere ? retainedSpatialFocus.regionId :
+    projection?.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId)) : null
   const activeSurface = activeTab && activeRegionId ? activeTab.regions[activeRegionId] : null
   // Route through isSessionSurface (SSOT in workbench-surface-kinds.ts). This site was invisible
   // to the exhaustiveness guard for months because it read `.kind` off a nullable receiver
@@ -1614,6 +1616,7 @@ export function WorkspaceWorkbench({
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
   const navigationInputPolicy = useAppStore(state => state.workbenchNavigationInputPolicy)
   const requestedInputRegionId = useAppStore(state => state.workbenchNavigationInputPolicy === 'target' ? state.workbenchSpaceSelection?.regionId : undefined)
+  const mainSelection = useAppStore(state => state.workbenchSpaceSelection)
   const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId) : null,
     [residentLayout, tabs, projection, projectionActiveGroupId])
   const projectionContext = useMemo(() => projection && zoneLayout
@@ -1947,7 +1950,11 @@ export function WorkspaceWorkbench({
         const inputTarget = navigationInputPolicy === 'preserve' ? focusedPrimaryWorkbenchTarget(tab, targets) : undefined
         // A unique visible activity presentation keeps its input tree through
         // preview and pin. Activation still belongs to the actual target.
+        const mainTarget = targets.find(target => target.surface === 'space' && target.visible !== false &&
+          target.reference?.displayWorkspaceId === mainSelection?.workspaceId && target.reference?.groupId === mainSelection?.groupId &&
+          target.reference?.tabId === mainSelection?.tabId && target.reference?.regionId === mainSelection?.regionId)
         const proposedProjection = confirmedReferenceGroup(secondaryInputTarget) ? undefined : (confirmedReferenceGroup(inputTarget) ? inputTarget : undefined) ??
+          mainTarget ??
           (visibleExternal.length === 1 ? visibleExternal[0] : undefined) ??
           [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space' && !target.reference) ??
           (repeatableContent ? targets.find(target => target.surface === 'space') : undefined) ??

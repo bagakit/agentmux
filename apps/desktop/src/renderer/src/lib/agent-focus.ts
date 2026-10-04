@@ -28,7 +28,7 @@ export type AgentFocusContext = {
   execution: {
     sessionId: string | null
     history: AgentFocusHistoryEntry[]
-    /** The last explicitly selected occurrence; Session identity is not a spatial address. */
+    /** Last confirmed semantic Agent focus occurrence, not the current Work/Survey/Mote navigation target. */
     reference?: WorkbenchProjectionSelection
   }
   pmo: {

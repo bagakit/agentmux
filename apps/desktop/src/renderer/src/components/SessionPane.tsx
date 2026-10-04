@@ -1,4 +1,5 @@
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
+import { useSessionLinkOpening } from '../lib/session-link-opening'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { AlertTriangle, ArrowRight, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
@@ -9,12 +10,7 @@ import { effectiveSessionViewMode, sessionPresentationById } from '../lib/sessio
 import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { projectNativeSourceFacts } from '../../../shared/agent-native-source'
-import {
-  dismissOpenDestinationRequest,
-  type OpenDestination,
-  type OpenHttpLinkOrigin
-} from '../lib/open-destination'
-import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
@@ -33,9 +29,8 @@ import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentat
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { ActivityView } from './ActivityView'
-import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
+import { OpenDestinationPopover } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
-import { isMacPlatform } from '../lib/host-platform'
 import {
   classifyContinuityFailure,
   continuityRefreshEnabled,
@@ -117,9 +112,20 @@ export function SessionPane({
   useObservedConsumerCommit('sessionPane', observationVisible)
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const [takeoverSelection, setTakeoverSelection] = useState<string | null>(null)
-  const { reference: primaryReference } = useWorkbenchBrowserPresentation()
+  const primaryPresentation = useWorkbenchBrowserPresentation()
+  const primaryReference = primaryPresentation.reference
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
     tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
+  const selectOwnRegion = (): void => {
+    if (!linkOrigin.regionId) return
+    // The current presentation owns navigation. The Session's resource home
+    // cannot stand in for a Survey, Mote or Focus selection callback.
+    if (primaryPresentation.onSelectRegion) primaryPresentation.onSelectRegion(linkOrigin.regionId)
+    else if (mailboxOrigin.tabId && !primaryPresentation.survey && (!primaryPresentation.surface || primaryPresentation.surface === 'space')) {
+      useAppStore.getState().focusRegion(mailboxOrigin.workspaceId, mailboxOrigin.tabId, linkOrigin.regionId,
+        'pointer', mailboxOrigin.tabGroupId)
+    }
+  }
   const session = useObservedAppStore('sessionPane', observationVisible, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, (state) => state.pendingAgentLaunches[sessionId])
@@ -183,6 +189,10 @@ export function SessionPane({
   const resultAnchorId = useId()
   const resultSurfaceAnchor = `--result-surface-${resultAnchorId.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const historyReturnFocusRef = useRef<HTMLButtonElement | null>(null)
+  const historyReturnContext = JSON.stringify([activitySourceKey, primaryPresentation.tabHostId, primaryPresentation.surface,
+    mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, linkOrigin.regionId])
+  const historyReturnContextRef = useRef(historyReturnContext)
+  historyReturnContextRef.current = historyReturnContext
   const historyOpenRef = useRef(historyOpen)
   historyOpenRef.current = historyOpen
   const visibleRef = useRef(visible)
@@ -206,11 +216,10 @@ export function SessionPane({
     const target = historyReturnFocusRef.current
     const closingFocus = document.activeElement
     setHistoryOpen(false)
-    if (linkOrigin.tabId && linkOrigin.regionId) {
-      useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId, 'pointer')
-    }
+    selectOwnRegion()
     requestAnimationFrame(() => {
-      if (!visibleRef.current || historyOpenRef.current || !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
+      if (historyReturnContextRef.current !== historyReturnContext || !visibleRef.current || historyOpenRef.current ||
+        !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
       const active = document.activeElement
       if (active && active !== document.body && (active !== closingFocus || !reader?.contains(active))) return
       target.focus()
@@ -429,29 +438,25 @@ export function SessionPane({
   // workspaceRootForPath asks containment, not ownership — a subdirectory terminal (fixtureRoot/repo/sub) is
   // owned by no workspace exactly, and answering '' there would make its absolute path links
   // unclickable. See the same note in TerminalView.
-  const openFile = useObservedAppStore('sessionPane', observationVisible, (state) => state.openFile)
   const reportError = useObservedAppStore('sessionPane', observationVisible, (state) => state.reportError)
   const activeWorkspaceRoot = useObservedAppStore('sessionPane', observationVisible, (state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
-  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, linkOrigin),
-    [sessionId, linkOrigin.workspaceId, linkOrigin.tabGroupId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.sessionId])
+  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, mailboxOrigin),
+    [sessionId, mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, mailboxOrigin.sessionId])
   const fileContext = useObservedAppStore('sessionPane', observationVisible, selectFileContext)
   const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)
   useEffect(() => { setFileLinkIssue(null) }, [fileContext])
-  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }) => {
+  const fileOrigin = useMemo(() => ({ ...mailboxOrigin, sessionId }), [mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, sessionId])
+  const linkOpening = useSessionLinkOpening(fileOrigin, setFileLinkIssue, selectOwnRegion)
+  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => {
     // Freeze the rendered scope and exact display occurrence. Never resolve again from focus.
     if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
       setFileLinkIssue('The rendered file context changed before this click could be confirmed.')
       return
     }
-    void openFile(path, linkOrigin.tabGroupId, location,
-      fileContext.project?.workspaceId ?? linkOrigin.workspaceId, undefined, fileContext.placement).then((opened) => {
-      if (!opened) setFileLinkIssue('The file resource or original display occurrence could not be confirmed.')
-    }).catch((error: unknown) => {
-      setFileLinkIssue(error instanceof Error ? error.message : String(error))
-    })
-  }, [fileContext, selectFileContext, openFile, linkOrigin.tabGroupId, linkOrigin.workspaceId])
+    linkOpening.activateFile(path, location, event)
+  }, [fileContext, selectFileContext, linkOpening])
   const fileReferenceNotice = fileContext.kind !== 'session' || fileLinkIssue ? <>
     {fileContext.kind === 'goal' ? <div className="activity-feed__read-notice" data-file-reference-scope="current-goal">
       <span>File links use current Goal project: {fileContext.project!.name}.{!fileContext.homeDir ? ' Home paths are unconfirmed for this Host; ~/ references stay as written.' : ''} Earlier messages may have another origin.</span>
@@ -467,55 +472,16 @@ export function SessionPane({
       }
     }} /> : null}
   </> : null
-  // Lands the file in this pane's own Tab Group, exactly as a terminal path click does. A miss
-  // surfaces through reportError — "click opened nothing" is never silent.
-  const openWorkspaceFile = useCallback(
-    (path: string, location?: { line: number; column?: number }) => {
-      void openFile(path, linkOrigin.tabGroupId, location, linkOrigin.workspaceId).catch(reportError)
-    },
-    [openFile, reportError, linkOrigin.tabGroupId, linkOrigin.workspaceId]
-  )
+  const openWorkspaceFile = openProjectFile
   // A pasted image cited in the conversation is read back through main (the only place that can reach a
   // file outside the workspace) as an <img>-ready data URI. Main confines the read to the pasted
   // directory; a null return means "not a readable pasted image", and the renderer falls back to the
   // plain-text reference. Stable identity so the thumbnail's load effect does not re-fire each render.
   const readPastedImage = useCallback((path: string) => api.ui.readPastedImage(path), [])
-  // An http(s) link in agent prose gets the SAME destination menu the Terminal gives, opening into this
-  // pane's own Region — never a jump straight to the system browser. This is the host that owns the menu
-  // because it is the host that holds the Region origin, mirroring TerminalView exactly.
-  const openHttpLink = useObservedAppStore('sessionPane', observationVisible, (state) => state.openHttpLink)
-  const [linkRequest, setLinkRequest] = useState<OpenDestinationRequest | null>(null)
-  const nextLinkRequestIdRef = useRef(0)
-  // canSplit reports the TRUTH of this origin: a directional destination needs a precise Tab+Region, and
-  // choosing one without them throws in the Store. Only when both are present are the split items live.
-  const canSplit = Boolean(linkOrigin.tabId && linkOrigin.regionId)
-  const onProseLinkClick = useCallback(
-    (url: string, event: LinkClickModifiers) => {
-      const isMac = isMacPlatform()
-      // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the menu —
-      // the SAME judgement the Terminal uses, so the two surfaces cannot drift on the modifier.
-      if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
-        void openHttpLink(linkOrigin, url, 'system').catch(reportError)
-        return
-      }
-      setLinkRequest({
-        id: ++nextLinkRequestIdRef.current,
-        url,
-        x: event.clientX,
-        y: event.clientY
-      })
-    },
-    [openHttpLink, linkOrigin, reportError]
-  )
-  const onProseLinkSelect = useCallback(
-    (destination: OpenDestination) => {
-      const request = linkRequest
-      if (!request) return
-      setLinkRequest((current) => dismissOpenDestinationRequest(current, request.id))
-      void openHttpLink(linkOrigin, request.url, destination).catch(reportError)
-    },
-    [linkRequest, openHttpLink, linkOrigin, reportError]
-  )
+  const linkRequest = linkOpening.request
+  const canSplit = linkOpening.canSplit
+  const onProseLinkClick = linkOpening.activateHttp
+  const onProseLinkSelect = linkOpening.choose
   const [refreshing, setRefreshing] = useState(false)
   const [observationMounted, setObservationMounted] = useState(false)
   const observationRefreshRef = useRef<(() => Promise<void>) | null>(null)
@@ -979,9 +945,7 @@ export function SessionPane({
             {...(hasAgentComposer ? { onOpenTerminal: () => {
               useAppStore.getState().setViewMode(session.id, 'terminal')
               setHistoryOpen(false)
-              if (linkOrigin.tabId && linkOrigin.regionId) {
-                useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId)
-              }
+              selectOwnRegion()
             } } : {})}
             // A pending request outlives the process that asked it, so the card must go inert on the
             // same terms as the composer below it — otherwise a dead Run still shows live buttons and
@@ -995,9 +959,7 @@ export function SessionPane({
       <OpenDestinationPopover
         request={linkRequest}
         canSplit={canSplit}
-        onDismiss={(requestId) =>
-          setLinkRequest((current) => dismissOpenDestinationRequest(current, requestId))
-        }
+        onDismiss={linkOpening.dismiss}
         onSelect={onProseLinkSelect}
       />
       <ConversationAnnotationNote ref={annotationNoteRef} sessionId={sessionId} regionRef={surfaceRef}

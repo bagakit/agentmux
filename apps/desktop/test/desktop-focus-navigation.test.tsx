@@ -242,14 +242,14 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     expect(document.activeElement).toBe(document.body)
     expect(useAppStore.getState().regionCaretFocus).toBeNull()
   })
-  it('opens an exact Goal from the full projection and preserves it through pure Surface selection without PMO launch', async () => {
+  it('opens an exact Goal then follows the uniquely associated Work Goal on reentry without PMO launch', async () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), send = vi.spyOn(api.sessions, 'submitPrompt')
     const result = await control({ kind: 'goal', goalId: 'exact' })
     expect(result.navigation.selection).toMatchObject({ surface: 'goals', mainSurface: 'board', goalId: 'exact' })
     expect(container.querySelector('[data-goal-detail-id="exact"]')).not.toBeNull()
     expect(result.presentation.state).toBe('main-visible')
     for (const surface of ['space', 'focus', 'survey', 'goals'] as const) await control({ kind: 'surface', surface })
-    expect(useAppStore.getState().selectedDemandId).toBe('exact')
+    expect(useAppStore.getState().selectedDemandId).toBe('first')
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled(); expect(document.activeElement).toBe(outside)
   })
   it('transfers input only through the exact mounted Terminal owner and cancels an old intent on later explicit navigation', async () => {
@@ -522,39 +522,32 @@ describe('actual Desktop navigation and content-free observation owners', () => 
       expect(homeInput.closest('[data-agent-surface-mode="activity"]')).toBeTruthy()
       expect(homeInput.closest('[data-workbench-primary-tab-id]')).toBeNull()
       input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '组' }))
-      // Explicit input reaches the exact Space occurrence. The current unique external
-      // Activity policy can keep the primary in Mote while Space consumes a secondary.
+      // Explicit input reaches the exact Space occurrence while both original
+      // content presentations retain their hosts and drafts.
       focus.mockRestore(); blur.mockRestore()
       const transferred = await physicalControl('target')
       process.stdout.write('explicit-primary-transfer-facts ' + JSON.stringify({ input: transferred.input, primaryInMote: floating.contains(primary), actualSameSpaceInput: document.activeElement === homeInput, actualSameMoteInput: document.activeElement === input, primaryReference: primary.dataset.workbenchPrimaryReference }) + '\n')
       expect(transferred.input).toMatchObject({ policy: 'target', outcome: 'transferred',
-        after: { scope: 'floating', ownerKind: 'composer', tabId: tab.id, regionId: 'primary-input-region', sessionId: mote.id } })
-      expect(transferred.presentation.state).toBe('floating'); expect(transferred.partial).toBe(true)
-      expect(document.activeElement).toBe(input); expect(homeInput.isConnected).toBe(true)
-      expect(homeInput.textContent).toBe('Primary unsent draft')
-      expect(floating.contains(primary)).toBe(true)
+        after: { scope: 'main', ownerKind: 'composer', tabId: tab.id, regionId: 'primary-input-region', sessionId: mote.id } })
+      expect(transferred.presentation.state).toBe('main-visible'); expect(transferred.partial).toBe(false)
+      expect(document.activeElement).toBe(input); expect(input.isConnected).toBe(true)
+      expect(floating.contains(primary)).toBe(false)
       expect([...document.querySelectorAll<HTMLElement>('[data-workbench-primary-tab-id]')]
         .filter(node => node.dataset.workbenchPrimaryTabId === tab.id)).toEqual([primary])
-      expect(homeInput.closest('[data-workbench-primary-tab-id]')).toBeNull()
-      const secondary = homeInput.closest<HTMLElement>('[data-workbench-view-reference]')!
-      const spaceParent = secondary.parentElement
-      homeInput.focus()
-      const secondarySelection = document.getSelection()!, secondaryRange = document.createRange()
-      secondaryRange.setStart(homeInput.firstChild!.firstChild!, 4); secondaryRange.collapse(true)
-      secondarySelection.removeAllRanges(); secondarySelection.addRange(secondaryRange)
-      const secondaryCaret = { node: secondarySelection.anchorNode, offset: secondarySelection.anchorOffset }
-      const secondaryFocus = vi.spyOn(homeInput, 'focus'), secondaryBlur = vi.spyOn(homeInput, 'blur')
-      const preservedSecondary = await physicalControl()
-      expect(preservedSecondary.input).toMatchObject({ policy: 'preserve', outcome: 'preserved',
+      const spaceParent = primary.parentElement
+      const currentSelection = document.getSelection()!, currentRange = document.createRange()
+      currentRange.setStart(input.firstChild!.firstChild!, 4); currentRange.collapse(true)
+      currentSelection.removeAllRanges(); currentSelection.addRange(currentRange)
+      const currentCaret = { node: currentSelection.anchorNode, offset: currentSelection.anchorOffset }
+      const currentFocus = vi.spyOn(input, 'focus'), currentBlur = vi.spyOn(input, 'blur')
+      const preserved = await physicalControl()
+      expect(preserved.input).toMatchObject({ policy: 'preserve', outcome: 'preserved',
         after: { scope: 'main', tabId: tab.id, regionId: 'primary-input-region', sessionId: mote.id } })
-      expect(document.activeElement).toBe(homeInput); expect(secondary.parentElement).toBe(spaceParent)
-      expect(secondarySelection.anchorNode).toBe(secondaryCaret.node); expect(secondarySelection.anchorOffset).toBe(secondaryCaret.offset)
-      expect(homeInput.textContent).toBe('Primary unsent draft')
-      expect(secondaryFocus).not.toHaveBeenCalled(); expect(secondaryBlur).not.toHaveBeenCalled()
-      expect(homeInput.closest('[data-workbench-primary-tab-id]')).toBeNull()
-      expect(floating.contains(primary)).toBe(true)
-      // Closing the original presentation returns its unique primary normally;
-      // durable draft/Session identity never depends on the secondary DOM.
+      expect(document.activeElement).toBe(input); expect(primary.parentElement).toBe(spaceParent)
+      expect(currentSelection.anchorNode).toBe(currentCaret.node); expect(currentSelection.anchorOffset).toBe(currentCaret.offset)
+      expect(input.textContent).toBe('Primary unsent draft')
+      expect(currentFocus).not.toHaveBeenCalled(); expect(currentBlur).not.toHaveBeenCalled()
+      // Closing Mote keeps the exact primary already handed to Space.
       const close = floating.querySelector<HTMLButtonElement>('[aria-label="Close Mote"]')!
       await act(async () => close.click()); await settle()
       expect(primary.isConnected).toBe(true); expect(primary.parentElement).toBe(spaceParent)
@@ -764,7 +757,8 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     expect(current.activeWorkspaceId).toBe(before.activeWorkspaceId); expect(current.mainSurface).toBe(before.mainSurface)
     // Core spatial ACK may hydrate equal objects; all Group/Tab IDs, selection and geometry stay exact.
     expect(current.layouts).toStrictEqual(before.layouts); expect(current.retainedSpatialFocus).toBe(before.retainedSpatialFocus)
-    expect(current.tabs[tab.id]?.layout.activeRegionId).toBe('mote-right-region')
+    expect(current.tabs[tab.id]?.layout.activeRegionId).toBe(leftRegionId)
+    expect(readPmoTeamsTopicFloatingState()?.reference?.regionId).toBe('mote-right-region')
     expect(current.agentFocus.pmo.sessionId).toBe(right.id); expect(current.regionCaretFocus).toBeNull()
     const inspected = await current.executeControl({ schemaVersion: 5, requestId: 'mote-split-observe', operation: 'inspect.client' })
     if (inspected.operation !== 'inspect.client') throw new Error('Wrong operation')

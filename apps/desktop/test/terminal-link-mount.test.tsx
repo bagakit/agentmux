@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IBufferCell, IBufferLine, ILink, ILinkHandler, ILinkProvider } from '@xterm/xterm'
+import { createWorkspaceLayout } from '@agentmux/layout'
 
 // Mount the product owner; only xterm's canvas/parser and the private API are fixtures.
 // This proves provider callbacks and rendered menus, not native hit testing or a real Run.
@@ -76,6 +77,9 @@ import { TerminalView } from '../src/renderer/src/components/TerminalView.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners.js'
+import { WorkbenchPresentationContext, type WorkbenchPresentation } from '../src/renderer/src/lib/workbench-presentation.js'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import * as sessionLinkOpening from '../src/renderer/src/lib/session-link-opening.js'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 
 const initial = useAppStore.getState()
@@ -138,10 +142,19 @@ beforeEach(async () => {
     const width = readout ? 200 : 240, height = readout ? 40 : 480
     return { x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }
   })
-  openHttp = vi.fn().mockResolvedValue(undefined); openFile = vi.fn().mockResolvedValue(undefined)
+  openHttp = vi.fn().mockResolvedValue(undefined)
+  openFile = vi.fn<typeof initial.openFile>().mockImplementation(async (_path, _group, _location, _workspace, _preview, placement) => {
+    placement?.onResult?.({ placement: { status: 'created', tabId: 'file-result', regionId: 'file-result-region' },
+      data: { kind: 'text', reason: null }, navigation: 'applied' })
+    return true
+  })
+  const tab = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, workspaceId: origin.workspaceId,
+    kind: 'terminal', phase: 'attached', sessionId: session.id })
   useAppStore.setState({ openHttpLink: openHttp, openFile, config: {
-    ...initial.config, workspaces: [{ id: origin.workspaceId, hostId: 'local', path: session.workspacePath }]
-  } as NonNullable<typeof initial.config> })
+    ...initial.config, hosts: [{ id: 'local', kind: 'local', label: 'Local' }],
+    workspaces: [{ id: origin.workspaceId, hostId: 'local', name: 'Source project', kind: 'folder', path: session.workspacePath }]
+  } as NonNullable<typeof initial.config>, sessions: [session], tabs: { [tab.id]: tab },
+    layouts: { [origin.workspaceId]: createWorkspaceLayout(origin.tabGroupId, [tab.id]) } })
   element = document.createElement('div'); host = document.createElement('div')
   host.id = 'agentmux-window-overlay-host'; host.className = 'window-overlay-host'; host.dataset.overlayHost = ''
   document.body.append(element, host); root = createRoot(element)
@@ -202,7 +215,8 @@ describe('mounted Terminal link exits', () => {
     expect(second![0]!.range).toEqual({ start: { x: 6, y: 1 }, end: { x: 11, y: 2 } })
     expect(api.files.openSystem).not.toHaveBeenCalled(); expect(openFile).not.toHaveBeenCalled(); expect(openHttp).not.toHaveBeenCalled()
     await act(async () => second![0]!.activate(pointer(), second![0]!.text))
-    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3, column: 2 }, origin.workspaceId)
+    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3, column: 2 }, origin.workspaceId,
+      undefined, expect.objectContaining({ resource: { hostId: session.hostId, path: session.workspacePath } }), undefined)
     expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
   })
   for (const provider of ['bare URL', 'OSC 8'] as const) {
@@ -213,9 +227,9 @@ describe('mounted Terminal link exits', () => {
       expect(host.textContent).toContain('https://example.test/path')
       expect(openHttp).not.toHaveBeenCalled()
       await act(async () => { host.querySelector('button[data-destination="tab"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
-      expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/path', 'tab')
+      expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/path', 'tab', expect.objectContaining({ active: true, retainedRegionId: null }))
       await act(async () => { activate(new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80, metaKey: true }), 'https://example.test/path', range) })
-      expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/path', 'system')
+      expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/path', 'system', expect.objectContaining({ active: true, retainedRegionId: null }))
     })
     it(`${provider}: right button, drag and selection never open`, async () => {
       const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
@@ -230,6 +244,141 @@ describe('mounted Terminal link exits', () => {
       expect(openHttp).not.toHaveBeenCalled()
     })
   }
+  it.each(['bare URL', 'OSC 8'] as const)('%s keeps the terminal mounted while its Mote presentation owns modifier and chooser navigation above Focus', async provider => {
+    const focus: WorkbenchPresentation = { active: true, retainedRegionId: null, surface: 'focus', onSelectRegion: vi.fn() }
+    const mote: WorkbenchPresentation = { active: true, retainedRegionId: null, surface: 'mote', onSelectRegion: vi.fn() }
+    const render = (presentation: WorkbenchPresentation) => <WorkbenchPresentationContext.Provider value={presentation}>
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />
+    </WorkbenchPresentationContext.Provider>
+    await act(async () => {
+      useAppStore.setState({ mainSurface: 'agents' })
+      root.render(render(focus))
+    })
+    terminal = renderer.Terminal.instances.at(-1)!
+    web = renderer.WebLinksAddon.instances.at(-1)!
+    const mounted = [...renderer.Terminal.instances]
+    vi.mocked(api.sessions.attach).mockClear(); vi.mocked(api.sessions.detach).mockClear()
+    await act(async () => root.render(render(mote)))
+    const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
+    await act(async () => activate(new MouseEvent('mouseup', { button: 0, metaKey: true }), 'https://example.test/mote', range))
+    expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/mote', 'system', mote)
+    await act(async () => activate(pointer(), 'https://example.test/held-mote', range))
+    await act(async () => root.render(render(focus)))
+    await act(async () => host.querySelector('button[data-destination="right"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/held-mote', 'right', mote)
+    expect(renderer.Terminal.instances).toEqual(mounted)
+    expect(api.sessions.attach).not.toHaveBeenCalled(); expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
+  it.each(['bare URL', 'OSC 8'] as const)('%s uses a foreign display occurrence for navigation and keeps OS files in the original resource without rebuilding the terminal', async provider => {
+    const reference = { displayWorkspaceId: 'foreign-display', groupId: 'foreign-group', tabId: origin.tabId, regionId: 'another-selected-region' }
+    const presentation: WorkbenchPresentation = { active: true, retainedRegionId: null, surface: 'mote', reference, onSelectRegion: vi.fn() }
+    const render = (value: WorkbenchPresentation) => <WorkbenchPresentationContext.Provider value={value}>
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />
+    </WorkbenchPresentationContext.Provider>
+    await act(async () => root.render(render({ ...presentation, reference: undefined })))
+    terminal = renderer.Terminal.instances.at(-1)!
+    web = renderer.WebLinksAddon.instances.at(-1)!
+    const mounted = [...renderer.Terminal.instances]
+    const resource = useAppStore.getState().config!.workspaces[0]!
+    await act(async () => {
+      const config = useAppStore.getState().config!
+      useAppStore.setState({ mainSurface: 'agents', config: { ...config,
+        hosts: [...config.hosts, { id: 'foreign-host', kind: 'ssh', label: 'Foreign Host', hostname: 'foreign.invalid' } as typeof config.hosts[number]],
+        workspaces: [...config.workspaces, { ...resource, id: reference.displayWorkspaceId, hostId: 'foreign-host', path: _hygiene_fixturePath("foreign/display") }] },
+        layouts: { [reference.displayWorkspaceId]: createWorkspaceLayout(reference.groupId, [origin.tabId]) } })
+      root.render(render(presentation))
+    })
+    vi.mocked(api.sessions.attach).mockClear(); vi.mocked(api.sessions.detach).mockClear()
+    const expectedOrigin = { ...origin, workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId: reference.tabId }
+    const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
+    await act(async () => activate(new MouseEvent('mouseup', { button: 0, metaKey: true }), 'https://example.test/foreign-display', range))
+    expect(openHttp).toHaveBeenLastCalledWith(expectedOrigin, 'https://example.test/foreign-display', 'system', presentation)
+    await act(async () => activate(pointer(), 'https://example.test/foreign-chooser', range))
+    await act(async () => host.querySelector('button[data-destination="right"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(openHttp).toHaveBeenLastCalledWith(expectedOrigin, 'https://example.test/foreign-chooser', 'right', presentation)
+    await act(async () => root.render(render({ ...presentation, surface: 'space' })))
+    const file = await fileLink()
+    await act(async () => file.activate(pointer(), file.text))
+    expect(openFile).toHaveBeenCalledOnce()
+    expect(openFile).toHaveBeenCalledWith('src/example.ts', expect.any(String), { line: 3 }, origin.workspaceId,
+      undefined, expect.objectContaining({ resource: { hostId: session.hostId, path: session.workspacePath } }), undefined)
+    const artifact = await fileLink('release/Example.dmg')
+    await act(async () => artifact.activate(pointer(), artifact.text))
+    expect(api.files.openSystem).toHaveBeenCalledWith(origin.workspaceId, 'release/Example.dmg')
+    expect(renderer.Terminal.instances).toEqual(mounted)
+    expect(api.sessions.attach).not.toHaveBeenCalled(); expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
+  it.each(['mote', 'survey'] as const)('%s ordinary File links stay in the local Region and consume only the latest callback for the same occurrence', async surface => {
+    const reference = { displayWorkspaceId: origin.workspaceId, groupId: origin.tabGroupId, tabId: origin.tabId, regionId: origin.regionId }
+    const originalSelect = vi.fn(), latestSelect = vi.fn(), foreignSelect = vi.fn()
+    const presentation: WorkbenchPresentation = { active: true, retainedRegionId: null, surface, reference, onSelectRegion: originalSelect }
+    const render = (value: WorkbenchPresentation) => <WorkbenchPresentationContext.Provider value={value}>
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />
+    </WorkbenchPresentationContext.Provider>
+    const open = vi.spyOn(sessionLinkOpening, 'openSessionFileLink').mockResolvedValue(undefined)
+    await act(async () => root.render(render(presentation)))
+    terminal = renderer.Terminal.instances.at(-1)!
+    const mounted = [...renderer.Terminal.instances]
+    vi.mocked(api.sessions.attach).mockClear(); vi.mocked(api.sessions.detach).mockClear()
+    const file = await fileLink()
+    await act(async () => file.activate(pointer(), file.text))
+    expect(open).toHaveBeenCalledOnce()
+    expect(open).toHaveBeenCalledWith({ ...origin, sessionId: session.id }, expect.objectContaining({ kind: 'session' }),
+      'src/example.ts', { line: 3 }, 'right', surface, expect.objectContaining({ reference, surface }))
+    const callback = open.mock.calls[0]![6]!.onSelectRegion!
+    await act(async () => root.render(render({ ...presentation, reference: { ...reference, regionId: 'sibling-region' }, onSelectRegion: latestSelect })))
+    await act(async () => callback('file-region'))
+    expect(latestSelect).toHaveBeenCalledWith('file-region')
+    expect(originalSelect).not.toHaveBeenCalled()
+    await act(async () => root.render(render({ ...presentation, reference: undefined, onSelectRegion: foreignSelect })))
+    await act(async () => callback('unconfirmed-parent-region'))
+    expect(foreignSelect).not.toHaveBeenCalled()
+    await act(async () => root.render(render({ ...presentation, reference: { ...reference, groupId: 'another-occurrence' }, onSelectRegion: foreignSelect })))
+    await act(async () => callback('late-file-region'))
+    expect(foreignSelect).not.toHaveBeenCalled()
+    expect(latestSelect).toHaveBeenCalledOnce()
+    expect(renderer.Terminal.instances).toEqual(mounted)
+    expect(api.sessions.attach).not.toHaveBeenCalled(); expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
+  it('keeps an unaddressed legacy File callback only while both presentations stay unaddressed', async () => {
+    const originalSelect = vi.fn(), latestSelect = vi.fn(), addressedSelect = vi.fn()
+    const presentation: WorkbenchPresentation = { active: true, retainedRegionId: null, surface: 'space', onSelectRegion: originalSelect }
+    const render = (value: WorkbenchPresentation) => <WorkbenchPresentationContext.Provider value={value}>
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />
+    </WorkbenchPresentationContext.Provider>
+    const open = vi.spyOn(sessionLinkOpening, 'openSessionFileLink').mockResolvedValue(undefined)
+    await act(async () => root.render(render(presentation)))
+    terminal = renderer.Terminal.instances.at(-1)!
+    const file = await fileLink()
+    await act(async () => file.activate(pointer(), file.text))
+    expect(open).toHaveBeenCalledOnce()
+    const callback = open.mock.calls[0]![6]!.onSelectRegion!
+    await act(async () => root.render(render({ ...presentation, onSelectRegion: latestSelect })))
+    await act(async () => callback('legacy-file-region'))
+    expect(latestSelect).toHaveBeenCalledWith('legacy-file-region')
+    expect(originalSelect).not.toHaveBeenCalled()
+    await act(async () => root.render(render({ ...presentation, onSelectRegion: addressedSelect,
+      reference: { displayWorkspaceId: origin.workspaceId, groupId: origin.tabGroupId, tabId: origin.tabId, regionId: origin.regionId } })))
+    await act(async () => callback('late-legacy-file-region'))
+    expect(addressedSelect).not.toHaveBeenCalled()
+    expect(latestSelect).toHaveBeenCalledOnce()
+  })
+  it.each([['region', 'right'], ['tab', 'tab']] as const)('Focus ordinary File links consume the existing %s preference', async (preference, destination) => {
+    const presentation: WorkbenchPresentation = { active: true, retainedRegionId: null, surface: 'focus' }
+    const open = vi.spyOn(sessionLinkOpening, 'openSessionFileLink').mockResolvedValue(undefined)
+    await act(async () => {
+      const config = useAppStore.getState().config!
+      useAppStore.setState({ mainSurface: 'agents', config: { ...config, focus: { recentActivityHours: 48, linkDestination: preference } } })
+      root.render(<WorkbenchPresentationContext.Provider value={presentation}>
+        <TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />
+      </WorkbenchPresentationContext.Provider>)
+    })
+    terminal = renderer.Terminal.instances.at(-1)!
+    const file = await fileLink()
+    await act(async () => file.activate(pointer(), file.text))
+    expect(open).toHaveBeenCalledWith({ ...origin, sessionId: session.id }, expect.objectContaining({ kind: 'session' }),
+      'src/example.ts', { line: 3 }, destination, 'focus', expect.objectContaining({ surface: 'focus' }))
+  })
   it('file primary retains editor/system seam, while right-button and drag do not open', async () => {
     const file = await fileLink()
     await act(async () => { file.activate(pointer(2), file.text) })
@@ -240,7 +389,8 @@ describe('mounted Terminal link exits', () => {
     await act(async () => { pointer(); file.activate(new MouseEvent('mouseup', { button: 0, clientX: 150, clientY: 80 }), file.text) })
     expect(openFile).not.toHaveBeenCalled()
     await act(async () => { file.activate(pointer(), file.text) })
-    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3 }, origin.workspaceId)
+    expect(openFile).toHaveBeenCalledWith('src/example.ts', origin.tabGroupId, { line: 3 }, origin.workspaceId,
+      undefined, expect.objectContaining({ resource: { hostId: session.hostId, path: session.workspacePath } }), undefined)
     const artifact = await fileLink('release/Example.dmg')
     await act(async () => { artifact.activate(pointer(2), artifact.text) })
     expect(api.files.openSystem).not.toHaveBeenCalled()
@@ -292,7 +442,7 @@ describe('mounted passive link readout', () => {
     expect(terminal.cellLines).toHaveLength(24)
     expect(terminal.cellLines[23]!.getCell(0)!.getChars()).toBe('h')
     await act(async () => web.activate(new MouseEvent('mouseup', { metaKey: true }), 'https://example.test/path'))
-    expect(openHttp).toHaveBeenCalledWith(origin, 'https://example.test/path', 'system')
+    expect(openHttp).toHaveBeenCalledWith(origin, 'https://example.test/path', 'system', expect.objectContaining({ active: true, retainedRegionId: null }))
     expect(renderer.Terminal.instances).toEqual([terminal]); expect([terminal.cols, terminal.rows]).toEqual([80, 24])
     expect(api.sessions.detach).not.toHaveBeenCalled()
   })
