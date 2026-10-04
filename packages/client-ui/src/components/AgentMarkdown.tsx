@@ -7,11 +7,14 @@ import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
 import { agentLinkReference, splitAgentLinkReferences } from '../lib/agent-link-reference.js'
 import { useAgentLinkRenderer, type ClientUiPlatform } from '../platform.js'
+import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
+import { MarkdownMath } from './MarkdownMath.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
 export type OpenWorkspaceFile = (path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => void
 export type RenderWorkspaceImage = (path: string, alt: string, linked?: boolean) => ReactNode
+export type RenderMarkdownImage = (href: string, alt: string, linked?: boolean) => ReactNode | undefined
 
 // The Host owns file reads and link destinations; this renderer never opens a URL on its own.
 function defaultOpenHttpLink(): void {}
@@ -21,12 +24,14 @@ type InlineContext = {
   openWorkspaceFile?: OpenWorkspaceFile
   readPastedImage?: ReadPastedImage
   renderWorkspaceImage?: RenderWorkspaceImage
+  renderImage?: RenderMarkdownImage
   workspaceRoot: string
   homeDir: string
   sourcePath?: string
   documentMode: boolean
   inputMode: boolean
   readOnly: boolean
+  visible: boolean
   inLink?: boolean
   renderAgentLink?: ClientUiPlatform['renderAgentLink']
 }
@@ -69,6 +74,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     if (node.kind === 'text') return <TextWithFileReferences key={key} text={node.text} context={context} />
     if (node.kind === 'break') return <br key={key} />
     if (node.kind === 'code') return <code key={key} className="md-code"><TextWithFileReferences text={node.text} context={{ ...context, renderAgentLink: undefined }} /></code>
+    if (node.kind === 'math') return <MarkdownMath key={key} expression={node.text} source={node.source} visible={context.visible && !context.readOnly} />
     if (node.kind === 'strong') return <strong key={key}><Inline nodes={node.children} context={context} /></strong>
     if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} context={context} /></em>
     if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} context={context} /></del>
@@ -83,6 +89,8 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     }
     if (node.kind === 'image') {
       if (context.readOnly) return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Image reference">🖼️ {node.alt || node.href}</span>
+      const image = context.renderImage?.(node.href, node.alt, context.inLink)
+      if (image !== undefined) return <Fragment key={key}>{image}</Fragment>
       const file = classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath)
       if (file && context.documentMode && context.renderWorkspaceImage) return <Fragment key={key}>{context.inLink
         ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</Fragment>
@@ -127,7 +135,8 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
       {context.inputMode && node.sourceMarker ? `${node.sourceMarker}${node.children.length ? ' ' : ''}` : null}
       <Inline nodes={node.children} context={context} /></Heading>
   }
-  if (node.kind === 'code') return <pre className="md-block-code" {...(node.language ? { 'data-language': node.language } : {})}><code>{node.text}</code></pre>
+  if (node.kind === 'code') return <MarkdownCodeBlock code={node.text} language={node.language} visible={context.visible && !context.readOnly} />
+  if (node.kind === 'math') return <MarkdownMath expression={node.text} source={node.source} display visible={context.visible && !context.readOnly} />
   if (node.kind === 'list') {
     const Tag = node.ordered ? 'ol' : 'ul'
     return <Tag className="md-list" start={node.ordered ? node.start : undefined}>{node.items.map((item, index) => {
@@ -154,9 +163,11 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
 
 /** Shared safe content renderer. Document mode retains document semantics; the Host retains IO. */
 export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
-  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false, renderWorkspaceImage, outline = false }: {
+  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false, renderWorkspaceImage, renderImage, outline = false, visible = true }: {
   content: string
   className?: string
+  /** Host activity; viewport visibility is checked independently for each expensive block. */
+  visible?: boolean
   openHttpLink?: OpenHttpLink
   openWorkspaceFile?: OpenWorkspaceFile
   readPastedImage?: ReadPastedImage
@@ -172,13 +183,16 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   readOnly?: boolean
   /** Root-confined path resolved against the document. A linked image must return noninteractive phrasing content. */
   renderWorkspaceImage?: RenderWorkspaceImage
+  /** Host-owned attachment/resource presentation. Undefined delegates to the existing path policy. */
+  renderImage?: RenderMarkdownImage
 }) {
   const renderAgentLink = useAgentLinkRenderer()
   const isInput = inputMode && !documentMode
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly,
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, visible,
     ...(!readOnly && !documentMode && renderAgentLink ? { renderAgentLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
-    ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}) }
+    ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),
+    ...(!readOnly && renderImage ? { renderImage } : {}) }
   if (!documentMode && !isInput && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
   const document = documentMode && outline && !readOnly ? parseAgentMarkdownDocument(content) : null
   const blocks = document?.blocks ?? parseAgentMarkdown(content)
