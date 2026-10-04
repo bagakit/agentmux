@@ -54,7 +54,8 @@
 .log-turn__head > .log-turn__actions { grid-column: 3; grid-row: 1; }
 .log-turn__head .conversation-input-details__toggle { grid-column: 4; grid-row: 1; }
 .log-turn__head .conversation-input-details__body { grid-column: 1 / -1; grid-row: 2; }
-.log-turn__meta { grid-column: 2; grid-row: 2; display: grid; gap: var(--sp-1); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.log-turn__meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.log-turn__meta > * { max-width: 100%; }
 
 .log-turn__actions { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: auto; opacity: 0; transition: opacity var(--dur-fast) ease; }
 .log-turn:hover .log-turn__actions, .log-turn:focus-within .log-turn__actions, .log-turn__actions[data-copy-state='failed'] { opacity: 1; }
