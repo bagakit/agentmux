@@ -27,10 +27,10 @@ describe('Monaco-based language detection', () => {
     expect(detectLanguage('src/main.nim')).toBe('plaintext')
     expect(detectLanguage('Makefile')).toBe('plaintext')
     expect(detectLanguage('CMakeLists.txt')).toBe('plaintext')
-    expect(detectLanguage('diagram.mermaid')).toBe('plaintext')
+    expect(detectLanguage('diagram.mermaid')).toBe('mermaid')
     expect(detectLanguage('src/main.erl')).toBe('plaintext')
     expect(detectLanguage('src/Main.hs')).toBe('plaintext')
-    expect(detectLanguage('data.csv')).toBe('plaintext')
+    expect(detectLanguage('data.csv')).toBe('csv')
   })
 
   it('uses registered Monaco ids for notebook and MDX source files', () => {
