@@ -1,3 +1,4 @@
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -30,7 +31,7 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel }: {
     event.stopPropagation()
     if (!isImeOwnedKeyboardEvent(event) && event.key === 'Escape' && !saving) { event.preventDefault(); onCancel() }
   }}>
-    <label>编辑待发消息<textarea ref={textareaRef} autoFocus aria-label="编辑待发消息" value={text} onChange={event => setText(event.target.value)} readOnly={saving} /></label>
+    <label>编辑待发消息<ComposerTextarea ref={textareaRef} autoFocus aria-label="编辑待发消息" value={text} onValueChange={setText} readOnly={saving} /></label>
     {!entry.editable ? <p role="status">原消息已锁定，不能保存修改；编辑稿仍保留，可复制。</p> : null}
     {error ? <p role="alert">{error}</p> : null}
     <div className="composer-queued-editor__actions"><button type="button" className="composer-tool" onClick={onCancel} disabled={saving}>取消</button>
