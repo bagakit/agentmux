@@ -8,11 +8,17 @@ import {
   readNativeHistoryBytes,
   type NativeHistoryReadBudget
 } from '../native-jsonl-history-reader.js'
+import {
+  isNativeText,
+  nativeJsonStringify,
+  nativeTextConcat,
+  type NativeTextValue,
+  type NativeHistoryContentPart as AgentSessionHistoryContentPart,
+  type NativeHistoryItem as AgentSessionHistoryItem
+} from '../native-history-value.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
-  AgentSessionHistoryContentPart,
-  AgentSessionHistoryItem
 } from '../types.js'
 
 function failure(code: string, message: string): never {
@@ -200,8 +206,10 @@ export async function resolveKimiWirePath(
   return provenWirePath
 }
 
+function extractText(value: unknown): NativeTextValue | undefined { return isNativeText(value) && value.length > 0 ? value : undefined }
+
 export function parseContentBlocks(content: unknown): AgentSessionHistoryContentPart[] {
-  if (typeof content === 'string') {
+  if (isNativeText(content)) {
     return [{ kind: 'text', text: content }]
   }
   if (!Array.isArray(content)) {
@@ -211,23 +219,23 @@ export function parseContentBlocks(content: unknown): AgentSessionHistoryContent
   for (const block of content) {
     const obj = object(block)
     if (!obj) continue
-    if (obj.type === 'text' && typeof obj.text === 'string') {
+    if (obj.type === 'text' && isNativeText(obj.text)) {
       parts.push({ kind: 'text', text: obj.text })
       continue
     }
-    if (obj.type === 'think' && typeof obj.think === 'string') {
+    if (obj.type === 'think' && isNativeText(obj.think)) {
       parts.push({ kind: 'reasoning', text: obj.think })
       continue
     }
     if (obj.type === 'image_url') {
-      const url = extractString(object(obj.imageUrl)?.url)
+      const url = extractText(object(obj.imageUrl)?.url)
       if (url) {
         parts.push({ kind: 'resource', resourceType: 'image', reference: url })
         continue
       }
     }
     // Resource fallback for media with url; unknown non-text is not converted to fake assistant speech
-    const url = extractString(obj.url) ?? extractString(obj.reference)
+    const url = extractText(obj.url) ?? extractText(obj.reference)
     if (url) {
       parts.push({ kind: 'resource', resourceType: 'other', reference: url })
     }
@@ -339,7 +347,7 @@ export async function readKimiSessionHistoryPage(
             currentStep.startOffset = start
           }
           const res = object(event.result)
-          const output = typeof res?.output === 'string' ? res.output : JSON.stringify(res?.output ?? '')
+          const output = isNativeText(res?.output) ? res.output : nativeJsonStringify(res?.output ?? '')
           const callId = extractString(event.toolCallId)
           const failed = res?.isError === true ? true : undefined
           currentStep.parts.unshift({
@@ -365,7 +373,7 @@ export async function readKimiSessionHistoryPage(
             currentStep.startOffset = start
           }
           const name = extractString(event.name) || 'tool'
-          const input = typeof event.args === 'string' ? event.args : JSON.stringify(event.args ?? {})
+          const input = isNativeText(event.args) ? event.args : nativeJsonStringify(event.args ?? {})
           const callId = extractString(event.toolCallId)
           currentStep.parts.unshift({
             kind: 'tool-call',
@@ -390,20 +398,20 @@ export async function readKimiSessionHistoryPage(
             currentStep.startOffset = start
           }
           const part = object(event.part)
-          if (part?.type === 'think' && typeof part.think === 'string') {
+          if (part?.type === 'think' && isNativeText(part.think)) {
             if (currentStep.parts.length > 0 && currentStep.parts[0]!.kind === 'reasoning') {
-              currentStep.parts[0]!.text = part.think + currentStep.parts[0]!.text
+              currentStep.parts[0]!.text = nativeTextConcat(part.think, currentStep.parts[0]!.text)
             } else {
               currentStep.parts.unshift({ kind: 'reasoning', text: part.think })
             }
-          } else if (part?.type === 'text' && typeof part.text === 'string') {
+          } else if (part?.type === 'text' && isNativeText(part.text)) {
             if (currentStep.parts.length > 0 && currentStep.parts[0]!.kind === 'text') {
-              currentStep.parts[0]!.text = part.text + currentStep.parts[0]!.text
+              currentStep.parts[0]!.text = nativeTextConcat(part.text, currentStep.parts[0]!.text)
             } else {
               currentStep.parts.unshift({ kind: 'text', text: part.text })
             }
           } else if (part?.type === 'image_url') {
-            const url = extractString(object(part.imageUrl)?.url)
+            const url = extractText(object(part.imageUrl)?.url)
             if (url) {
               currentStep.parts.unshift({ kind: 'resource', resourceType: 'image', reference: url })
             }

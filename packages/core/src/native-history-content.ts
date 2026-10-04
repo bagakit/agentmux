@@ -1,13 +1,12 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { constants } from 'node:fs'
-import { open, stat, type FileHandle } from 'node:fs/promises'
 import { AgentMuxError } from './errors.js'
 import type { AgentProviderSessionHistoryContext, AgentSessionHistoryContentPart, AgentSessionHistoryItem,
   AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
+import { NativeText, nativeJsonStringify, type NativeHistoryItem, type NativeTextSegment } from './native-history-value.js'
+import { nativeRangeBytes, nativeStringChunks, nativeStringRange, type NativeContentRange } from './native-history-source.js'
 
-export type NativeContentExtent = { path: string; dev: number; ino: number; cut: number; head: string; tail: string }
-export type NativeContentRange = NativeContentExtent & { start: number; end: number }
-type Segment = { literal: string } | (NativeContentRange & { escapeDepth: number; byteLength: number })
+type SourceBlock = NativeContentRange & { rawSha256: string }
+type Segment = { literal: string; sourceBlocks?: SourceBlock[] } | (SourceBlock & { escapeDepth: number; byteLength: number; base64?: { skip: number; length: number } })
 type Reference = { version: 1; authority: string; agentSessionId?: string; providerId: string; nativeSessionId: string; ownerPath: string;
   recordId: string; partIndex: number; turnId?: string; segments: Segment[]; byteLength: number; sha256: string }
 const key = randomBytes(32)
@@ -40,36 +39,6 @@ function decode(reference: string, secret?: string, verify = true): Reference {
     return failure('Native content reference is invalid.')
   }
 }
-async function exactFile(range: NativeContentRange, signal: AbortSignal): Promise<FileHandle> {
-  signal.throwIfAborted()
-  const file = await open(range.path, constants.O_RDONLY | constants.O_NONBLOCK)
-  try {
-    const current = await file.stat(), named = await stat(range.path)
-    if (!current.isFile() || current.dev !== range.dev || current.ino !== range.ino || current.size < range.cut ||
-      named.dev !== current.dev || named.ino !== current.ino) {
-      return failure('The original native content file was replaced or truncated.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    }
-    const length = Math.min(128, range.cut), head = Buffer.alloc(length), tail = Buffer.alloc(length)
-    const first = await file.read(head, 0, length, 0), last = await file.read(tail, 0, length, range.cut - length)
-    signal.throwIfAborted()
-    if (first.bytesRead !== length || last.bytesRead !== length || digest(head) !== range.head || digest(tail) !== range.tail) {
-      return failure('The original native content boundary changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    }
-    return file
-  } catch (error) { await file.close(); throw error }
-}
-async function rangeBytes(range: NativeContentRange, offset: number, length: number, signal: AbortSignal): Promise<Buffer> {
-  const file = await exactFile(range, signal)
-  try {
-    const data = Buffer.alloc(length), read = await file.read(data, 0, length, range.start + offset)
-    signal.throwIfAborted()
-    if (read.bytesRead !== length) return failure('The original native content changed during reading.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    const after = await file.stat(), named = await stat(range.path)
-    if (after.dev !== range.dev || after.ino !== range.ino || after.size < range.cut || named.dev !== after.dev || named.ino !== after.ino)
-      return failure('The original native content changed during reading.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    return data
-  } finally { await file.close() }
-}
 const lengthOf = (segment: Segment) => 'literal' in segment ? Buffer.byteLength(segment.literal) : segment.byteLength
 function escapeBytes(input: Buffer, depth: number): Buffer {
   let bytes = input
@@ -83,49 +52,77 @@ function escapeBytes(input: Buffer, depth: number): Buffer {
   return bytes
 }
 
-/** Replace only this reader's private markers after the Provider has interpreted role, tools and filtering. */
+async function verifiedBlockBytes(block: SourceBlock, signal: AbortSignal): Promise<Buffer> {
+  const raw = await nativeRangeBytes(block, 0, block.end - block.start, signal)
+  if (digest(raw) !== block.rawSha256) return failure('The original native content block changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  return raw
+}
+async function segmentBytes(segment: Exclude<Segment, { literal: string }>, signal: AbortSignal): Promise<Buffer> {
+  const raw = await verifiedBlockBytes(segment, signal)
+  if (segment.base64) {
+    const text = JSON.parse('"' + raw.toString('utf8') + '"') as string
+    return Buffer.from(Buffer.from(text, 'utf8').subarray(segment.base64.skip, segment.base64.skip + segment.base64.length).toString('base64'))
+  }
+  const decoded = JSON.parse('"' + raw.toString('utf8') + '"') as string
+  return escapeBytes(Buffer.from(JSON.stringify(decoded).slice(1, -1)), segment.escapeDepth - 1)
+}
+
+/** Compile only Provider-selected semantics, with bounded source blocks for transformed values. */
+async function contentSegments(value: NativeText, signal: AbortSignal): Promise<Segment[]> {
+  const segments: Segment[] = []
+  for (const valueSegment of value.segments) {
+    if ('literal' in valueSegment) { segments.push(valueSegment); continue }
+    const segment = valueSegment as Exclude<NativeTextSegment, { literal: string }>
+    const range = await nativeStringRange(segment.source, segment.start, segment.end, segment.metadata.length, signal)
+    if (range.start === range.end) continue
+    if (!segment.base64) {
+      if (!segment.escapeDepth) return failure('A semantic string was not JSON encoded.')
+      // Canonical JSON formatting follows decoded values, including alternate native
+      // escapes. Each signed physical block is independently verified at later offsets.
+      for await (const chunk of nativeStringChunks(range, signal))
+        segments.push({ ...chunk.range, escapeDepth: segment.escapeDepth, byteLength: 0, rawSha256: digest(Buffer.from(chunk.raw)) })
+      continue
+    }
+    let carry = Buffer.alloc(0), carryBlocks: SourceBlock[] = []
+    for await (const chunk of nativeStringChunks(range, signal)) {
+      const bytes = Buffer.from(chunk.text, 'utf8'), block = { ...chunk.range, rawSha256: digest(Buffer.from(chunk.raw)) }
+      let consumed = 0
+      if (carry.length) {
+        const take = Math.min(3 - carry.length, bytes.length), combined = Buffer.concat([carry, bytes.subarray(0, take)])
+        if (combined.length < 3) { carry = combined; carryBlocks.push(block); continue }
+        segments.push({ literal: combined.toString('base64'), sourceBlocks: [...carryBlocks, block] })
+        carry = Buffer.alloc(0); consumed = take
+      }
+      const available = bytes.length - consumed, length = available - available % 3
+      if (length) segments.push({ ...chunk.range, escapeDepth: 0, byteLength: length / 3 * 4,
+        rawSha256: digest(Buffer.from(chunk.raw)), base64: { skip: consumed, length } })
+      carry = bytes.subarray(consumed + length); carryBlocks = carry.length ? [block] : []
+    }
+    if (carry.length) segments.push({ literal: carry.toString('base64'), sourceBlocks: carryBlocks })
+  }
+  return segments
+}
+
 export async function materializeNativeContent(
-  context: AgentProviderSessionHistoryContext, item: AgentSessionHistoryItem,
-  ranges: ReadonlyMap<string, NativeContentRange>
+  context: AgentProviderSessionHistoryContext, item: NativeHistoryItem
 ): Promise<AgentSessionHistoryItem> {
-  if (!ranges.size) return item
   const contentParts: AgentSessionHistoryContentPart[] = []
   for (const part of item.contentParts) {
-    const json = JSON.stringify(part)
-    const matches = [...ranges].filter(([marker]) => json.includes(marker))
-    if (!matches.length) { contentParts.push(part); continue }
-    // Splice exact JSON string lexemes into the Provider's semantic part. A JSON-stringified
-    // marker has quotes; a marker inside an already formatted string only replaces its body.
-    const segments: Segment[] = []
-    let position = 0
-    const occurrences = matches.flatMap(([marker, range]) => {
-      const result: Array<{ at: number; marker: string; range: NativeContentRange }> = []
-      let at = json.indexOf(marker)
-      while (at !== -1) { result.push({ at, marker, range }); at = json.indexOf(marker, at + marker.length) }
-      return result
-    }).sort((a, b) => a.at - b.at)
-    for (const { at, marker, range } of occurrences) {
-      segments.push({ literal: json.slice(position, at) })
-      // Inside the serialized semantic string, the native string's original escapes are exact.
-      // Dropping its outer quotes preserves the enclosing semantic string and any prefix/suffix.
-      let slashes = 0
-      if (json[at - 1] === '"' && json[at + marker.length] === '\\') {
-        for (let before = at - 2; before >= 0 && json[before] === '\\'; before--) slashes++
-      }
-      const depth = Math.log2(slashes + 1)
-      segments.push({ ...range, start: range.start + 1, end: range.end - 1,
-        escapeDepth: Number.isInteger(depth) ? depth : 0, byteLength: 0 })
-      position = at + marker.length
+    const json = nativeJsonStringify(part)
+    if (typeof json === 'string') { contentParts.push(part as AgentSessionHistoryContentPart); continue }
+    const segments = await contentSegments(json, context.signal)
+    if (segments.every(segment => 'literal' in segment)) {
+      contentParts.push(JSON.parse(segments.map(segment => 'literal' in segment ? segment.literal : '').join('')) as AgentSessionHistoryContentPart)
+      continue
     }
-    segments.push({ literal: json.slice(position) })
     const hash = createHash('sha256')
     for (const segment of segments) {
-      if ('literal' in segment) { hash.update(segment.literal); continue }
-      for (let offset = 0; offset < segment.end - segment.start; offset += 64 * 1024) {
-        context.signal.throwIfAborted()
-        const bytes = escapeBytes(await rangeBytes(segment, offset, Math.min(64 * 1024, segment.end - segment.start - offset), context.signal), segment.escapeDepth)
-        hash.update(bytes); segment.byteLength += bytes.length
+      if ('literal' in segment) {
+        for (const block of segment.sourceBlocks ?? []) await verifiedBlockBytes(block, context.signal)
+        hash.update(segment.literal); continue
       }
+      const bytes = await segmentBytes(segment, context.signal)
+      hash.update(bytes); segment.byteLength = bytes.length
     }
     const byteLength = segments.reduce((total, segment) => total + lengthOf(segment), 0), sha256 = hash.digest('hex')
     const reference = encode({ version: 1, authority: digest(signingKey(context.contentSigningSecret)), ...(context.agentSessionId === undefined ? {} : { agentSessionId: context.agentSessionId }),
@@ -155,19 +152,13 @@ export async function readNativeContentResource(
     const bytes = lengthOf(segment)
     if (skip >= bytes) { skip -= bytes; continue }
     const take = Math.min(remaining, bytes - skip)
-    if ('literal' in segment) chunks.push(Buffer.from(segment.literal).subarray(skip, skip + take))
-    else if (!segment.escapeDepth) chunks.push(await rangeBytes(segment, skip, take, context.signal))
+    if ('literal' in segment) {
+      for (const block of segment.sourceBlocks ?? []) await verifiedBlockBytes(block, context.signal)
+      chunks.push(Buffer.from(segment.literal).subarray(skip, skip + take))
+    }
     else {
-      // Formatted JSON inside a semantic string has another escape layer. Stream it without
-      // materializing the value; an explicit offset may require scanning that related value.
-      let valueSkip = skip, left = take
-      for (let physical = 0; physical < segment.end - segment.start && left; physical += 64 * 1024) {
-        const bytes = escapeBytes(await rangeBytes(segment, physical, Math.min(64 * 1024, segment.end - segment.start - physical), context.signal), segment.escapeDepth)
-        if (valueSkip >= bytes.length) { valueSkip -= bytes.length; continue }
-        const available = Math.min(left, bytes.length - valueSkip)
-        chunks.push(bytes.subarray(valueSkip, valueSkip + available)); left -= available; valueSkip = 0
-      }
-      if (left) return failure('Native content escaped extent is invalid.')
+      const bytes = await segmentBytes(segment, context.signal)
+      chunks.push(bytes.subarray(skip, skip + take))
     }
     skip = 0; remaining -= take
     if (!remaining) break
@@ -185,8 +176,11 @@ export function nativeContentNeedsRevalidation(reference: string, secret?: strin
 /** Only a newly issued reference from the original Provider may authorize an old credential's extent. */
 export function revalidateNativeContentReference(original: string, fresh: string, secret?: string): void {
   const old = decode(original, secret, false), current = decode(fresh, secret)
+  const sourceFacts = (block: SourceBlock) => ({ path: block.path, dev: block.dev, ino: block.ino,
+    start: block.start, end: block.end, rawSha256: block.rawSha256 })
   const facts = ({ authority: _authority, segments, ...rest }: Reference) => ({ ...rest, segments: segments.map(segment =>
-    'literal' in segment ? segment : { path: segment.path, dev: segment.dev, ino: segment.ino, start: segment.start,
-      end: segment.end, escapeDepth: segment.escapeDepth, byteLength: segment.byteLength }) })
+    'literal' in segment ? { literal: segment.literal, ...(segment.sourceBlocks ? { sourceBlocks: segment.sourceBlocks.map(sourceFacts) } : {}) }
+      : { ...sourceFacts(segment), escapeDepth: segment.escapeDepth, byteLength: segment.byteLength,
+        ...(segment.base64 ? { base64: segment.base64 } : {}) }) })
   if (JSON.stringify(facts(old)) !== JSON.stringify(facts(current))) failure('The original Provider record or content changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
 }

@@ -1,10 +1,19 @@
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
+import {
+  isNativeText,
+  nativeJsonStringify,
+  nativeTextConcat,
+  nativeTextJoin,
+  nativeTextHasSpeech,
+  nativeTextBase64,
+  type NativeTextValue,
+  type NativeHistoryContentPart as AgentSessionHistoryContentPart,
+  type NativeHistoryItem as AgentSessionHistoryItem
+} from '../native-history-value.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
-  AgentSessionHistoryContentPart,
-  AgentSessionHistoryItem
 } from '../types.js'
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -33,13 +42,13 @@ function parseDocumentBlock(block: Record<string, unknown>): AgentSessionHistory
             ? 'application/pdf'
             : 'text/plain'
 
-  if (typeof src.parsed_data === 'string' && src.parsed_data.length > 0) {
+  if (isNativeText(src.parsed_data) && src.parsed_data.length > 0) {
     parts.push({ kind: 'text', text: src.parsed_data })
-  } else if (typeof src.parsedData === 'string' && src.parsedData.length > 0) {
+  } else if (isNativeText(src.parsedData) && src.parsedData.length > 0) {
     parts.push({ kind: 'text', text: src.parsedData })
   } else if (
     src.type === 'text' &&
-    typeof src.data === 'string' &&
+    isNativeText(src.data) &&
     src.data.length > 0
   ) {
     parts.push({ kind: 'text', text: src.data })
@@ -47,13 +56,13 @@ function parseDocumentBlock(block: Record<string, unknown>): AgentSessionHistory
 
   const name = typeof src.name === 'string' && src.name ? src.name : undefined
   const path = typeof src.path === 'string' && src.path ? src.path : undefined
-  let reference: string | undefined
+  let reference: NativeTextValue | undefined
   if (path) {
     reference = path
-  } else if (src.type === 'base64' && typeof src.data === 'string' && src.data.length > 0) {
-    reference = `data:${mediaType};base64,${src.data}`
-  } else if (src.type === 'text' && typeof src.data === 'string' && src.data.length > 0) {
-    reference = `data:${mediaType};base64,${Buffer.from(src.data, 'utf8').toString('base64')}`
+  } else if (src.type === 'base64' && isNativeText(src.data) && src.data.length > 0) {
+    reference = nativeTextConcat(`data:${mediaType};base64,`, src.data)
+  } else if (src.type === 'text' && isNativeText(src.data) && src.data.length > 0) {
+    reference = nativeTextConcat(`data:${mediaType};base64,`, nativeTextBase64(src.data))
   }
 
   if (reference) {
@@ -69,10 +78,10 @@ function parseDocumentBlock(block: Record<string, unknown>): AgentSessionHistory
 }
 
 function parseContentBlocks(content: unknown): ParsedBlocks {
-  if (typeof content === 'string') {
+  if (isNativeText(content)) {
     return {
       parts: [{ kind: 'text', text: content }],
-      hasSpeech: content.trim().length > 0
+      hasSpeech: nativeTextHasSpeech(content)
     }
   }
 
@@ -84,38 +93,38 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
   let hasSpeech = false
 
   for (const item of content) {
-    if (typeof item === 'string') {
+    if (isNativeText(item)) {
       parts.push({ kind: 'text', text: item })
-      if (item.trim().length > 0) hasSpeech = true
+      if (nativeTextHasSpeech(item)) hasSpeech = true
       continue
     }
 
     const block = object(item)
     if (!block) {
-      parts.push({ kind: 'text', text: JSON.stringify(item) })
+      parts.push({ kind: 'text', text: nativeJsonStringify(item) })
       continue
     }
 
-    if (block.type === 'text' && typeof block.text === 'string') {
+    if (block.type === 'text' && isNativeText(block.text)) {
       parts.push({ kind: 'text', text: block.text })
-      if (block.text.trim().length > 0) hasSpeech = true
+      if (nativeTextHasSpeech(block.text)) hasSpeech = true
       continue
     }
 
     if (
       (block.type === 'thinking' || block.type === 'redacted_thinking') &&
-      typeof (block.thinking ?? block.data) === 'string'
+      isNativeText((block.thinking ?? block.data))
     ) {
       parts.push({
         kind: 'reasoning',
-        text: (block.thinking ?? block.data) as string
+        text: (block.thinking ?? block.data) as NativeTextValue
       })
       const meta: Record<string, unknown> = {}
       if (block.signature !== undefined) meta.signature = block.signature
       if (block.signatureProvider !== undefined) meta.signatureProvider = block.signatureProvider
       if (block.durationMs !== undefined) meta.durationMs = block.durationMs
       if (Object.keys(meta).length > 0) {
-        parts.push({ kind: 'text', text: JSON.stringify(meta) })
+        parts.push({ kind: 'text', text: nativeJsonStringify(meta) })
       }
       continue
     }
@@ -124,9 +133,9 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
       const rawName = typeof block.name === 'string' ? block.name : 'tool'
       const name = rawName === 'MultiEdit' ? 'Edit' : rawName
       const input =
-        typeof block.input === 'string'
+        isNativeText(block.input)
           ? block.input
-          : JSON.stringify(block.input ?? block.arguments ?? block.tool_input ?? {})
+          : nativeJsonStringify(block.input ?? block.arguments ?? block.tool_input ?? {})
       const callId = typeof block.id === 'string' && block.id ? block.id : undefined
       parts.push({
         kind: 'tool-call',
@@ -141,7 +150,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
       if (block.script_execution !== undefined) meta.script_execution = block.script_execution
       if (block.scriptExecution !== undefined) meta.scriptExecution = block.scriptExecution
       if (Object.keys(meta).length > 0) {
-        parts.push({ kind: 'text', text: JSON.stringify(meta) })
+        parts.push({ kind: 'text', text: nativeJsonStringify(meta) })
       }
       continue
     }
@@ -163,7 +172,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
 
       let emittedToolResult = false
 
-      if (typeof block.content === 'string') {
+      if (isNativeText(block.content)) {
         parts.push({
           kind: 'tool-result',
           output: block.content,
@@ -175,7 +184,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
       } else if (Array.isArray(block.content)) {
         for (const sub of block.content) {
           const subObj = object(sub)
-          if (typeof sub === 'string') {
+          if (isNativeText(sub)) {
             parts.push({
               kind: 'tool-result',
               output: sub,
@@ -184,7 +193,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
               ...(name !== undefined ? { name } : {})
             })
             emittedToolResult = true
-          } else if (subObj?.type === 'text' && typeof subObj.text === 'string') {
+          } else if (subObj?.type === 'text' && isNativeText(subObj.text)) {
             parts.push({
               kind: 'tool-result',
               output: subObj.text,
@@ -195,7 +204,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
             emittedToolResult = true
           } else if (subObj?.type === 'image') {
             const src = object(subObj.source)
-            if (src?.type === 'base64' && typeof src.data === 'string') {
+            if (src?.type === 'base64' && isNativeText(src.data)) {
               const mediaType =
                 typeof src.media_type === 'string'
                   ? src.media_type
@@ -205,7 +214,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
               parts.push({
                 kind: 'resource',
                 resourceType: 'image',
-                reference: `data:${mediaType};base64,${src.data}`
+                reference: nativeTextConcat(`data:${mediaType};base64,`, src.data)
               })
             }
           } else if (subObj?.type === 'document') {
@@ -225,13 +234,13 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
               }
             }
           } else if (sub !== undefined) {
-            parts.push({ kind: 'text', text: JSON.stringify(sub) })
+            parts.push({ kind: 'text', text: nativeJsonStringify(sub) })
           }
         }
       } else if (block.content !== undefined) {
         parts.push({
           kind: 'tool-result',
-          output: JSON.stringify(block.content),
+          output: nativeJsonStringify(block.content),
           ...(callId !== undefined ? { callId } : {}),
           ...(failed !== undefined ? { failed } : {}),
           ...(name !== undefined ? { name } : {})
@@ -265,7 +274,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
 
     if (block.type === 'image') {
       const src = object(block.source)
-      if (src?.type === 'base64' && typeof src.data === 'string') {
+      if (src?.type === 'base64' && isNativeText(src.data)) {
         const mediaType =
           typeof src.media_type === 'string'
             ? src.media_type
@@ -275,18 +284,18 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
         parts.push({
           kind: 'resource',
           resourceType: 'image',
-          reference: `data:${mediaType};base64,${src.data}`
+          reference: nativeTextConcat(`data:${mediaType};base64,`, src.data)
         })
         continue
       }
-      if (src?.type === 'url' && typeof src.url === 'string') {
+      if (src?.type === 'url' && isNativeText(src.url)) {
         parts.push({ kind: 'resource', resourceType: 'image', reference: src.url })
         continue
       }
     }
 
     // Preserved neutral unknown serialized data; per DROID-08 never treated as assistant speech.
-    parts.push({ kind: 'text', text: JSON.stringify(block) })
+    parts.push({ kind: 'text', text: nativeJsonStringify(block) })
   }
 
   return { parts, hasSpeech }
@@ -337,7 +346,7 @@ function convertDroidRecord(
     if (Object.keys(meta).length > 0) {
       parts.push({
         kind: 'text',
-        text: JSON.stringify(meta, null, 2)
+        text: nativeJsonStringify(meta, null, 2)
       })
     }
 
@@ -353,7 +362,7 @@ function convertDroidRecord(
 
   if (record.type === 'compaction_state') {
     const summaryText =
-      typeof record.summaryText === 'string' && record.summaryText
+      isNativeText(record.summaryText) && record.summaryText
         ? record.summaryText
         : 'Compaction state'
     return {
@@ -372,7 +381,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid message',
-        contentParts: [{ kind: 'text', text: JSON.stringify(record, null, 2) }],
+        contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2) }],
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -383,7 +392,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid message',
-        contentParts: [{ kind: 'text', text: JSON.stringify(record, null, 2) }],
+        contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2) }],
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -401,10 +410,10 @@ function convertDroidRecord(
 
     // Prepend reasoning metadata if present on native message
     const reasoningText =
-      typeof messageObj.chatCompletionReasoningContent === 'string' &&
+      isNativeText(messageObj.chatCompletionReasoningContent) &&
       messageObj.chatCompletionReasoningContent
         ? messageObj.chatCompletionReasoningContent
-        : typeof messageObj.openaiReasoningSummary === 'string' &&
+        : isNativeText(messageObj.openaiReasoningSummary) &&
             messageObj.openaiReasoningSummary
           ? messageObj.openaiReasoningSummary
           : undefined
@@ -415,18 +424,18 @@ function convertDroidRecord(
     // Preserve hook execution results if hook content was empty
     if (isHook && parts.length === 0) {
       if (Array.isArray(messageObj.hookResults) && messageObj.hookResults.length > 0) {
-        const resultsText = messageObj.hookResults
+        const resultsText = nativeTextJoin(messageObj.hookResults
           .map((r: unknown) => {
             const res = object(r)
             if (!res) return ''
             return (
-              (typeof res.stdout === 'string' ? res.stdout : '') ||
-              (typeof res.stderr === 'string' ? res.stderr : '') ||
+              (isNativeText(res.stdout) ? res.stdout : '') ||
+              (isNativeText(res.stderr) ? res.stderr : '') ||
               (typeof res.exitCode === 'number' ? `exit code ${res.exitCode}` : '')
             )
           })
           .filter(Boolean)
-          .join('\n')
+          )
         parts.push({
           kind: 'text',
           text: resultsText || `Hook ${messageObj.hookEventName ?? 'event'}`
@@ -444,7 +453,7 @@ function convertDroidRecord(
       return {
         id,
         kind,
-        contentParts: parts.length > 0 ? parts : [{ kind: 'text', text: JSON.stringify(record) }],
+        contentParts: parts.length > 0 ? parts : [{ kind: 'text', text: nativeJsonStringify(record) }],
         ...(kind === 'activity' ? { title: 'Droid tool' } : {}),
         ...(startedAt !== undefined ? { startedAt } : {})
       }
@@ -488,7 +497,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid message',
-        contentParts: [{ kind: 'text', text: JSON.stringify(record) }],
+        contentParts: [{ kind: 'text', text: nativeJsonStringify(record) }],
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -506,7 +515,7 @@ function convertDroidRecord(
     id,
     kind: 'activity',
     title: typeof record.type === 'string' ? `Droid ${record.type}` : 'Droid activity',
-    contentParts: [{ kind: 'text', text: JSON.stringify(record, null, 2) }],
+    contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2) }],
     ...(startedAt !== undefined ? { startedAt } : {})
   }
 }
