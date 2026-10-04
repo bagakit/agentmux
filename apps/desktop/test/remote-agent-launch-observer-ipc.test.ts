@@ -100,9 +100,11 @@ async function owner() {
   let destroyed = false
   const sender = Object.assign(new EventEmitter(), { id: 77, isDestroyed: () => destroyed, send: vi.fn() })
   let wireSender = sender
+  const unexpectedFileAccess = () => { throw new Error('Remote Agent launch must not access workspace files.') }
   const dispose = await registerIpc({ window: { id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics,
+    workspaceFiles: { read: unexpectedFileAccess, listFiles: unexpectedFileAccess, write: unexpectedFileAccess, dispose: async () => {} } as unknown as WorkspaceFiles })
   cleanups.push(dispose)
   ipc.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = ipc.handlers.get(channel); expect(handler).toBeTypeOf('function')
