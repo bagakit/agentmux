@@ -6,17 +6,30 @@ import { AgentAvatar } from './AgentAvatar'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { SelectionField } from './SelectionField'
 
-/** The same configured, Host-scoped choices in the Launcher and an existing workface. */
-export function AgentExecutorPicker({ executors, selected, onSelect, active = true, disabled = false }: {
+type ExecutorPickerProps = {
   executors: readonly ExecutorChoice[]
   selected: string | null
   onSelect(id: string): void
   active?: boolean
   disabled?: boolean
-}) {
+} & ({ presentation?: 'catalog' } | { presentation: 'field'; id?: string; label: string; unsetLabel: string })
+
+/** Host-scoped Executor identities. Catalog starts a choice; field configures one without launching. */
+export function AgentExecutorPicker(props: ExecutorPickerProps) {
+  const { executors, selected, onSelect, active = true, disabled = false } = props
   const settings = useContext(SettingsNavigation)
   const [showUnavailable, setShowUnavailable] = useState(false)
+  if (props.presentation === 'field') return <SelectionField id={props.id} label={props.label} value={selected ?? ''}
+    disabled={disabled} onValueChange={onSelect} options={[
+      { value: '', label: props.unsetLabel },
+      ...(selected && !executors.some(executor => executor.id === selected)
+        ? [{ value: selected, label: selected, description: 'Configuration unavailable' }] : []),
+      ...executors.map(executor => ({ value: executor.id, label: executor.label,
+        description: `${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`,
+        icon: <AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={18} /> }))
+    ]} />
   // Only an authoritative missing command excludes a configured Agent.
   const available = executors.filter(item => item.detection?.state !== 'missing')
     .sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))

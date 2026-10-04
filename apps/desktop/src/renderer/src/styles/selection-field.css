@@ -8,3 +8,9 @@
 .selection-field__option { gap: var(--sp-3); }
 .selection-field__menu .selection-field__option > span:nth-child(2) { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
 .selection-field__mark { display: inline-flex; flex: 0 0 13px; width: 13px; color: var(--text); }
+
+.selection-field__choice { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.selection-field__choice > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.selection-field__icon { display: inline-flex; flex: 0 0 auto; align-items: center; }
+.selection-field__description { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: normal; }
+.selection-field__menu .selection-field__choice > span:last-child { overflow: visible; white-space: normal; overflow-wrap: anywhere; }

@@ -14,6 +14,7 @@ import { executorsForHost } from '../lib/executors'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { SelectionField } from './SelectionField'
+import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import '../styles/mote-quick-mode.css'
 
@@ -24,12 +25,14 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   const [editing, setEditing] = useState(false), invoker = useRef<HTMLElement | null>(null)
   const saved = scope.topic.quickMode, defaults = saved?.status === 'saved' ? saved.defaults : {}
   const resolved = useMoteDefaultConversation(scope.topic, scope.workspace.id, active)
-  const executorLabel = useAppStore(state => state.config?.executors[defaults.executorId ?? '']?.label ?? defaults.executorId)
+  const executorFacts = useAppStore(useShallow(state => ({ config: state.config, detections: state.executorDetections, inventory: state.hostExecutorInventories[scope.workspace.hostId] })))
+  const executorLabel = useMemo(() => executorsForHost(executorFacts.config, scope.workspace.hostId, executorFacts.detections, executorFacts.inventory)
+    .find(item => item.id === defaults.executorId)?.label ?? defaults.executorId, [executorFacts, scope.workspace.hostId, defaults.executorId])
   const conversationLabel = useAppStore(state => defaults.conversation ? moteConversationLabel(state, defaults.conversation) : undefined)
   const edit = () => { invoker.current = document.activeElement as HTMLElement; setEditing(true) }
   return <section className="mote-quick-mode" aria-label="Quick mode">
     <div className="mote-details__section-actions"><span><Zap size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><Pencil size={14} /></MoteBehaviorAction></div>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><Bot size={14} /><span>Default Agent</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Agent'}</strong></button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><Bot size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><MessageCircle size={14} /><span>Default conversation</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved conversation' : 'Choose conversation')}</strong>{defaults.conversation ? <Pin size={12} aria-label="Kept open" /> : null}</button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
@@ -93,12 +96,10 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
         if (node?.isConnected && (active === document.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
       <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · ready to continue</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><X size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
-        <label htmlFor={id + '-agent'}><Bot size={16} /><span>Default Agent<small>Preselected for new conversations.</small></span></label>
-        <SelectionField id={id + '-agent'} label="Default Agent" value={draft.executorId ?? ''}
-          onValueChange={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }}
-          options={[{ value: '', label: 'Use normal Launcher choice' },
-            ...(draft.executorId && !executors.some(item => item.id === draft.executorId) ? [{ value: draft.executorId, label: draft.executorId + ' · configuration unavailable' }] : []),
-            ...executors.map(item => ({ value: item.id, label: item.label + (item.detection?.state === 'missing' ? ' · not installed' : '') }))]} />
+        <label htmlFor={id + '-agent'}><Bot size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
+        <AgentExecutorPicker presentation="field" id={id + '-agent'} label="Executor for new chat"
+          selected={draft.executorId ?? null} executors={executors} unsetLabel="Use normal Launcher choice"
+          onSelect={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }} />
         <label htmlFor={id + '-conversation'}><Pin size={16} /><span>Default conversation<small>Opens first and stays in this Mote’s tab row.</small></span></label>
         <SelectionField id={id + '-conversation'} label="Default conversation" value={selected}
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
