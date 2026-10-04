@@ -23,6 +23,7 @@ const fixture = vi.hoisted(() => ({
     // 所以这个 key 缺席时整组测试在渲染期就炸。
     viewModes: {} as Record<string, 'terminal' | 'timeline'>,
     scratchTopicSnapshots: {},
+    timelines: {},
     agentComposerDrafts: {} as Record<string, string>,
     noticeReadReceipts: {},
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId?: string; text: string; status: 'queued' | 'restoring' | 'deferred' | 'failed'; error?: string }>>,

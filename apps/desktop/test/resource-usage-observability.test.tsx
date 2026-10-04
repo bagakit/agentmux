@@ -67,7 +67,7 @@ describe('mounted Toolkit resource observation', () => {
     await render(snapshot)
     expect(container.querySelector('.performance-metric strong')!.textContent).toBe('—')
     expect(container.textContent).toContain('CPU warming up · waiting for the second sample')
-    expect(fact('CPU · App / Run')).toBe('Interval average / ps average · 10s reading peak')
+    expect(fact('CPU · App / Run')).toBe('100% = one logical core · interval / ps averages · 10s reading peak')
     await scope('runtime')
     expect(container.textContent).toContain('CPU / RSS unavailable')
     expect(container.textContent).toContain('3.0 MiB'); expect(container.textContent).toContain('1.5 GiB')

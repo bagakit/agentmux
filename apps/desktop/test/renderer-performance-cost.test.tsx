@@ -9,11 +9,11 @@ import { writeFileSync } from 'node:fs'
 
 it('compares the same mounted selectors and unrelated updates with observation enabled and disabled', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const initial = useAppStore.getState(), selectors = Array.from({ length: 28 }, () => (state: typeof initial) => state.error)
+  const initial = useAppStore.getState(), selectors = Array.from({ length: 28 }, () => (state: { error: typeof initial.error }) => state.error)
   const samples: { mode: string; elapsedMs: number; updates: number; checks: number; commits: number }[] = []
   function Direct() { for (const selector of selectors) useAppStore(selector); return null }
   function Observed({ visible }: { visible: boolean }) {
-    for (const selector of selectors) useObservedAppStore('composer', visible, selector)
+    for (const selector of selectors) useObservedAppStore('composer', visible, { sessionIds: ['own'], navigation: false }, selector)
     useObservedConsumerCommit('composer', visible)
     return null
   }
@@ -30,7 +30,7 @@ it('compares the same mounted selectors and unrelated updates with observation e
       const after = rendererPerformance.snapshot().consumers.composer.hidden
       samples.push({ mode, elapsedMs, updates: 100, checks: after.checks - before.checks, commits: after.commits - before.commits })
       expect(after.commits).toBe(before.commits)
-      if (mode === 'observed') expect(after.checks - before.checks).toBe(96 * 28 * 100)
+      if (mode === 'observed') expect(after.checks - before.checks).toBe(0)
       await act(async () => root.unmount())
     }
     const evidence = { conditions: { environment: 'happy-dom; React development build; real Zustand store', consumers: 97, hidden: 96, selectorsPerConsumer: 28, warmupUpdates: 20, updatesPerTrial: 100, rounds: 6, order: 'alternating', changedSelection: false }, samples }

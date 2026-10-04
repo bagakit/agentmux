@@ -1,0 +1,25 @@
+import { provePerformanceOwner } from './performance-owner-proof.mjs'
+provePerformanceOwner({ name:'stage-diagnostics', owners: ['packages/core/src/performance-diagnostics.ts','packages/core/src/client.ts','packages/core/src/metrics.ts',
+  'packages/core/src/public-rpc-service.ts','packages/core/src/hosted-client.ts','packages/core/src/hosted-runtime-service.ts','apps/desktop/src/main/performance-diagnostics.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/process-resource-sampler.ts','apps/desktop/src/shared/process-usage.ts','apps/desktop/src/main/resource-usage-control.ts','apps/desktop/src/renderer/src/lib/renderer-performance.ts','apps/desktop/src/renderer/src/components/TerminalView.tsx'],
+  astOwners: [['apps/desktop/src/renderer/src/components/TerminalView.tsx','__AGENTMUX_TERMINAL_VIEW_SOURCE__']],
+  tests: ['packages/core/test/performance-stage-diagnostics.test.ts','packages/core/test/performance-public-diagnostics.test.ts','packages/core/test/performance-hosted-diagnostics.test.ts','packages/core/test/metrics-control-host.test.ts','apps/desktop/test/performance-stage-sampler.test.ts','apps/desktop/test/main-performance-diagnostics.test.ts','apps/desktop/test/terminal-input-performance.test.ts','apps/desktop/test/main-terminal-input-diagnostics.test.ts'], minimumTests: 39,
+  mutantTests: ['packages/core/test/performance-stage-diagnostics.test.ts','apps/desktop/test/performance-stage-sampler.test.ts'], mutants: [
+    ['active-bound-removed','packages/core/src/performance-diagnostics.ts','if (active.size < 64)','if (true)'],
+    ['recent-bound-removed','packages/core/src/performance-diagnostics.ts','if (recent.length === 32)','if (false)'],
+    ['queue-delay-lost','packages/core/src/performance-diagnostics.ts','add(queueWait, Math.max(0, now() - start))','add(queueWait, 0)'],
+    ['native-stage-lost','packages/core/src/client.ts',"result = await diagnostic.measure('native-input'","result = await diagnostic.measure('operation'"],
+    ['main-input-stage-lost','apps/desktop/src/main/runtime-controller.ts',"const accepted = await diagnostic.measure('native-input'","const accepted = await diagnostic.measure('operation'",['apps/desktop/test/main-terminal-input-diagnostics.test.ts']],
+    ['get-lease-once-lost','packages/core/src/public-rpc-service.ts','if (released === value) return','void released',['packages/core/test/metrics-control-host.test.ts']],
+    ['mouse-category-lost','packages/core/src/client.ts',"mousePreparation ? 'mouse' : 'user'","'user'"],
+    ['cpu-basis-lost','apps/desktop/src/main/process-resource-sampler.ts','100_000 * (seconds - previous.seconds)','12_500 * (seconds - previous.seconds)'],
+    ['sample-window-monotonic-lost','apps/desktop/src/main/process-resource-sampler.ts','const windowAt = this.cpuNow()','const windowAt = observedAt'],
+    ['sample-history-bound-lost','apps/desktop/src/shared/process-usage.ts','.slice(-limit)',''],
+    ['loop-background-leak','apps/desktop/src/main/process-resource-sampler.ts','this.eventLoop.disable(); this.eventLoop.reset()','this.eventLoop.reset()'],
+    ['host-singleflight-lost','apps/desktop/src/main/performance-diagnostics.ts','if (!current)','if (true)',['apps/desktop/test/main-performance-diagnostics.test.ts']],
+    ['volume-singleflight-lost','apps/desktop/src/main/performance-diagnostics.ts','if (!this.storage)','if (true)',['apps/desktop/test/main-performance-diagnostics.test.ts']],
+    ['renderer-write-observation-lost','apps/desktop/src/renderer/src/components/TerminalView.tsx',"rendererPerformance.observeInputRequest(source === 'user' ? 'user' : 'protocol', request, startedAt)",'void request',['apps/desktop/test/terminal-input-performance.test.ts']],
+    ['renderer-paste-observation-lost','apps/desktop/src/renderer/src/components/TerminalView.tsx',"rendererPerformance.observeInputRequest('paste', request, startedAt)",'void request',['apps/desktop/test/terminal-input-performance.test.ts']],
+    ['old-generation-accepted','apps/desktop/src/main/process-resource-sampler.ts','if (generation !== this.generation) return\n        this.diagnostics','if (false) return\n        this.diagnostics'],
+    ['public-bound-lost','packages/core/src/metrics.ts','active: boundedArray(64, inputEntryParser)','active: boundedArray(4096, inputEntryParser)',['packages/core/test/performance-public-diagnostics.test.ts']]
+  ], callers: [['apps/desktop/src/main/runtime-controller.ts','this.performanceObservation.observe('],['apps/desktop/src/main/performance-diagnostics.ts','client.clientPerformanceDiagnostics('],['apps/desktop/src/main/ipc.ts','args.runtime.performanceDiagnostics(signal)'],
+    ['apps/desktop/src/main/resource-usage-control.ts','diagnostics: source('],['apps/desktop/src/renderer/src/components/TerminalView.tsx','rendererPerformance.observeInputRequest('],['apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts','rendererPerformance.observeOverlay(']] })

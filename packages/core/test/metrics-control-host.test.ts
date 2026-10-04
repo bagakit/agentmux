@@ -8,17 +8,18 @@ import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlRequest 
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
 import { parseMetricsObservation, type AgentMuxMetricsPort, type MetricsObservation } from '../src/metrics.js'
 import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from '../src/public-rpc-frame.js'
+import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'metrics-proof' } as const
 const pending = { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null } as const
 function observation(): MetricsObservation {
   return { schema: 'agentmux.metrics.v1', observedAt: 1000,
     scope: { kind: 'unix-host', hostId: 'local', hostname: 'private-host', mainPid: 100 }, window: null,
-    units: { cpu: 'percent', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
+    units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
     process: { state: 'available', observedAt: 900, lastSuccessAt: 900, reason: null,
       data: [{ runId: 'healthy-run', hostId: 'local', rootPid: 100, processCount: 1, cpuPercent: 2,
         rssKib: 42, rootRssKib: 42, descendantsRssKib: 0, descendantProcessCount: 0 }] },
-    app: pending, runtime: pending, main: pending, renderer: pending }
+    app: pending, runtime: pending, main: pending, diagnostics: pending, renderer: pending }
 }
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -58,6 +59,17 @@ function firstFrame(socket: Socket): Promise<Record<string, unknown>> {
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
 describe('public metrics Control owner', () => {
+  it('releases once when cancellation follows opening fulfillment before its await continuation', async () => {
+    const controller = new AbortController(), dispose = vi.fn()
+    const service = new AgentMuxRpcService({ metrics: { subscribe(push) {
+      push(observation())
+      queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => controller.abort())))
+      return Promise.resolve({ dispose })
+    } } })
+    await service.call('system.metrics.get', {}, { signal: controller.signal })
+    await Promise.resolve()
+    expect(dispose).toHaveBeenCalledOnce()
+  })
   it('keeps unsupported typed and validates complete schema, parameters and source ages', async () => {
     const { path } = await server()
     await expect(metricsGet(path)).rejects.toMatchObject({ code: 'METRICS_UNSUPPORTED' })
@@ -151,6 +163,20 @@ describe('public metrics Control owner', () => {
     if (kind === 'disconnect') { await flush(); socket.destroy(); await flush(); await flush() }
     else expect(await firstFrame(socket)).toMatchObject({ jsonrpc: '2.0', id: base.requestId, error: { data: { code: 'CONTROL_TIMEOUT' } } })
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+  })
+  it.each(['disconnect', 'deadline'] as const)('releases a get lease established after %s exactly once', async kind => {
+    let settle!: (value: { dispose(): void }) => void, enter!: () => void
+    const entered = new Promise<void>(resolve => { enter = resolve }), dispose = vi.fn()
+    const { path } = await server({ subscribe() { enter(); return new Promise(resolve => { settle = resolve }) } })
+    const socket = await raw(path, 'metrics.get')
+    const frame = kind === 'deadline' ? firstFrame(socket) : undefined
+    await entered
+    if (kind === 'disconnect') socket.destroy()
+    else expect(await frame).toMatchObject({ error: { data: { code: 'CONTROL_TIMEOUT' } } })
+    await flush(); await flush()
+    expect(dispose).not.toHaveBeenCalled()
+    settle({ dispose }); await flush(); await flush()
+    expect(dispose).toHaveBeenCalledOnce()
   })
   it('rejects a real JSON-RPC opening whose response identity does not match', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'agentmux-metrics-corrupt-')), path = join(directory, 'control.sock')

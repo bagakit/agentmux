@@ -22,6 +22,7 @@ type Inner = {
     status(runId: string): Promise<CtxmuxAdapterRun>
     input(runId: string, operation: Input): Promise<Ack>
     observeOutput: (...args: unknown[]) => Promise<CtxmuxAdapterOutputObservation>
+    replay: (...args: unknown[]) => Promise<CtxmuxAdapterOutputObservation>
   }
   writeAgentInput(session: AgentMuxStoredAgentSession, data: string): Promise<unknown>
 }
@@ -61,6 +62,9 @@ async function fixture(providerId: 'codex' | 'claude') {
   })
   const status = vi.fn(async () => run())
   inner.kernel.status = status
+  // Screen evidence also reads the original ordered frame bytes. This fixture
+  // owns a confirmed empty Run; keep that read local to the same synthetic owner.
+  inner.kernel.replay = async () => blankTerminalObservation(run(), async () => {})
   const writes: Input[] = []
   inner.kernel.input = async (_runId, input) => {
     expect(input.expectedByte).toBe(acceptedBytes)
