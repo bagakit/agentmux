@@ -14,7 +14,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
-  'createAgent', 'createAgentWithDelivery', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity',
+  'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity',
   'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
   'respondAgentInteraction', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',

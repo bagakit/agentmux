@@ -1800,6 +1800,24 @@ export class AgentMuxClient {
       !durable.some(current => current.agentSessionId === session.agentSessionId))].map(cloneSession)
   }
 
+  /** Resolve durable creation bindings before choosing an identity for a new operation. No process or input is started. */
+  async resolveAgentCreationSessionId(createOperationId: string): Promise<string> {
+    if (typeof createOperationId !== 'string' || !createOperationId.trim() || /[\0\r\n]/u.test(createOperationId)) {
+      throw new AgentMuxError('Creation operation id is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
+    const [storedId, queued] = await Promise.all([
+      this.store.loadCreationSessionId(createOperationId), this.messageQueue.readByOperationId(createOperationId)
+    ])
+    const queuedId = queued?.envelope.recipientSessionId
+    if (queued && (queued.envelope.recipient.kind !== 'agent-session' || queued.envelope.recipient.agentSessionId !== queuedId)) {
+      throw new AgentMuxError('This operation already names another message target. Keep its original identity.', 'AGENT_CREATION_OPERATION_CONFLICT')
+    }
+    if (storedId && queuedId && storedId !== queuedId) {
+      throw new AgentMuxError('The creation and message owners disagree on this operation. Keep both original identities and inspect the operation.', 'AGENT_CREATION_OPERATION_CONFLICT')
+    }
+    return storedId ?? queuedId ?? await deriveAgentSessionId(createOperationId)
+  }
+
   /** Reconcile only the original prepared operation with authoritative Runs, never start or input. */
   async inspectAgentCreation(agentSessionId: string): Promise<AgentMuxAgentSession> {
     const existing = (await this.readAgentSessions()).find(session => session.agentSessionId === agentSessionId)
@@ -3305,7 +3323,7 @@ export class AgentMuxClient {
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
     const createOperationId = input.createOperationId ?? randomUUID()
     const agentSessionId = safeId(input.agentSessionId ?? (input.initialMessage || forkSource
-      ? await deriveAgentSessionId(createOperationId)
+      ? await this.resolveAgentCreationSessionId(createOperationId)
       : mintAgentSessionId()), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
     let initialAuthor: AgentMuxStoredAgentSession | undefined
