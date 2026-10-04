@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import {
   Check,
+  ChevronDown,
   GitBranch,
   FolderGit2,
   GitCompareArrows,
@@ -9,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   Unlink,
+  Workflow,
   X
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -30,6 +32,7 @@ import {
 } from '../lib/branch-agent-presence'
 import { defaultWorktreePath, workspaceProjectId } from '../lib/workspace-projects'
 import { partitionPinned } from '../lib/topic-order'
+import { isPathWithinSubtree } from '../lib/workspace-paths'
 import { branchHasWorktree, branchOpenIntent, branchWorktreePath } from '../lib/workspace-branches-state'
 import {
   nextAfterWorktreeRemoval,
@@ -84,6 +87,8 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   const [busyBranch, setBusyBranch] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [comparisonOpen, setComparisonOpen] = useState(false)
+  const [worktreesExpanded, setWorktreesExpanded] = useState(true)
+  const [branchesExpanded, setBranchesExpanded] = useState(true)
   useEffect(() => { setComparisonOpen(false) }, [workspace.id])
   const [fanOutOpen, setFanOutOpen] = useState(false)
   const [fanOutPrompt, setFanOutPrompt] = useState('')
@@ -255,6 +260,10 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
     const pinned = pinnedBranches.includes(branch.name)
     // 一次判断给出标志与取值。分开算两次是这一族缺陷的来源，所以这里也不许再判第二次。
     const worktree = branchWorktreePath(branch)
+    const repoPath = snapshot?.kind === 'git-repository' ? snapshot.repoPath.replace(/\/$/u, '') : null
+    const pathSummary = worktree !== null && repoPath !== null && isPathWithinSubtree(worktree, repoPath)
+      ? worktree === repoPath ? '.' : `./${worktree.slice(repoPath.length + 1)}`
+      : worktree !== null ? displayPath(worktree, workspace.hostId) : null
     // 只有当前分支能带同步计数（见 syncFacts 处注释）。`label` 为空的两种状态（没 upstream / 已同步）
     // 不画徽标——它们没有数字可报，画一个空盒子只是噪声。
     // 代价要说清：`gitSyncBadge` 为这两种各准备了一句不同的 `title`，而这里两者都不渲染，于是那两句
@@ -323,7 +332,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : pinned ? <Pin size={12} aria-label="Pinned branch" /> : <GitBranch size={12} />}
               title={branch.name}
               titleTooltip={worktree ? `${branch.name} · ${displayPath(worktree, workspace.hostId)}` : branch.name}
-              subtitle={worktree && worktree !== workspace.path ? displayPath(worktree, workspace.hostId) : null}
+              subtitle={worktree && worktree !== workspace.path ? pathSummary : null}
               subtitleTooltip={worktree ? displayPath(worktree, workspace.hostId) : undefined}
               presence={worktree !== null && snapshot?.kind === 'git-repository'
                 ? <WorktreeAgentPresence hostId={snapshot.hostId} path={worktree} />
@@ -368,9 +377,9 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
   }
 
   return (
-    <section className="branches-panel">
+    <section className="branches-panel branches-panel--branches">
       <header className="branches-header branches-header--tools" aria-label="Branch actions">
-        <span className="source-control-count" aria-label="Local branch count">{snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0}</span>
+        <span className="source-control-count" aria-label="Local branch count">{snapshot?.kind === 'git-repository' ? snapshot.branches.length : 0} branches</span>
         <div className="source-control-actions">
             {snapshot?.kind === 'git-repository' ? (
               <button type="button" title="Compare two local branches" aria-label="Compare two local branches" aria-pressed={comparisonOpen} onClick={() => setComparisonOpen((open) => !open)}>
@@ -386,7 +395,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 aria-label="Fan out a prompt"
                 onClick={() => { setActionError(null); setFanOutOpen(true) }}
               >
-                <GitCompareArrows size={13} />
+                <Workflow size={13} />
               </button>
             ) : null}
             <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
@@ -398,8 +407,18 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         <BranchComparisonPanel key={JSON.stringify([workspace.id, snapshot.hostId, snapshot.repoPath])} workspaceId={workspace.id} branches={snapshot.branches} />
       ) : null}
       <div className="branches-scroll" hidden={comparisonOpen && snapshot?.kind === 'git-repository'}>
-        {bound.length > 0 ? <div className="branch-group"><span>Worktrees</span>{pinFirst(bound).map(branchRow)}</div> : null}
-        {unbound.length > 0 ? <div className="branch-group"><span>Without worktree</span>{pinFirst(unbound).map(branchRow)}</div> : null}
+        {bound.length > 0 ? <div className={`branch-group${worktreesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="worktrees">
+          <button className="branch-group__heading" type="button" aria-expanded={worktreesExpanded} onClick={() => setWorktreesExpanded(expanded => !expanded)}>
+            <ChevronDown size={12} /><span>Worktrees</span><span className="branch-group__count">{bound.length}</span>
+          </button>
+          {worktreesExpanded && <div className="branch-group__rows">{pinFirst(bound).map(branchRow)}</div>}
+        </div> : null}
+        {unbound.length > 0 ? <div className={`branch-group${branchesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="branches">
+          <button className="branch-group__heading" type="button" aria-expanded={branchesExpanded} title="Branches without a worktree" onClick={() => setBranchesExpanded(expanded => !expanded)}>
+            <ChevronDown size={12} /><span>Branches</span><span className="branch-group__count">{unbound.length}</span>
+          </button>
+          {branchesExpanded && <div className="branch-group__rows">{pinFirst(unbound).map(branchRow)}</div>}
+        </div> : null}
         {!loading && snapshot?.kind === 'not-a-git-repository' ? (
           <div className="branches-empty"><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
         ) : null}

@@ -24,6 +24,14 @@
 .branches-scroll { min-height: 0; flex: 1; padding:var(--sp-1) var(--sp-2) var(--sp-2); overflow: auto; }
 .branch-group { display: grid; gap:1px; margin-bottom:var(--sp-2); }
 .branch-group > span { padding:var(--sp-1) var(--sp-2) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
+.branches-panel--branches .branches-scroll { display: flex; flex-direction: column; gap: var(--sp-2); }
+.branches-panel--branches .branch-group { display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; margin-bottom: 0; }
+.branches-panel--branches .branch-group--expanded { flex: 1 1 0; }
+.branch-group__heading { flex: 0 0 24px; display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); font-weight: 650; text-align: left; cursor: pointer; }
+.branch-group__heading:hover { color: var(--text-2); background: var(--surface-1); }
+.branch-group__heading[aria-expanded="false"] > svg { transform: rotate(-90deg); }
+.branch-group__count { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; }
+.branch-group__rows { min-height: 0; padding-right: var(--sp-4); overflow: auto; overscroll-behavior: contain; }
 .branch-row { position: relative; gap: var(--sp-2); width: 100%; min-width: 0; display: flex; align-items: center; min-height: 30px; padding:var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .branch-row__open { flex: 1; min-width: 0; display: flex; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .branch-row:hover { color: var(--text-2); background: var(--surface-2); }
@@ -35,7 +43,8 @@
 .branch-row .selector-row { gap:var(--sp-2); }
 .branch-row .selector-row__leading { flex: 0 0 16px; color: var(--green-2); }
 .branch-row--selected .selector-row__leading { color: var(--green); }
-.branch-row .selector-row__identity strong { color: inherit; }
+.branch-row .selector-row { align-items: flex-start; }
+.branch-row .selector-row__identity strong { color: inherit; white-space: normal; overflow-wrap: anywhere; }
 .branch-row .selector-row__identity small { font-family: "SFMono-Regular", monospace; line-height: 12px; }
 .branch-row__state { flex: 0 0 16px; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); }
 .branch-row__state--current { color: var(--green); }
@@ -88,6 +97,10 @@
 .change-row__identity strong, .change-row__identity small { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .change-row__identity strong { flex: 1; font-size: var(--fs-meta); color: var(--text-2); }
 .change-row__identity small { flex: 0 1 auto; max-width: 35%; color: var(--text-3); font-family: "SFMono-Regular", monospace; font-size: var(--fs-micro); line-height: 12px; }
+.changes-panel { container: git-changes / inline-size; }
+@container git-changes (max-width: 320px) {
+  .change-row__identity small { display: none; }
+}
 /* 同一块身份区域现在是个按钮（点开该文件的 diff）。它复用上面那几条布局，但 <button> 自带浏览器
    默认外观——边框、灰底、居中、继承不到的字体——所以必须逐项抹掉，否则这一行在列表里长得和别的
    行完全不一样。名字与次级目录同行，子项宽度受身份区域约束，长名字不能越过状态和动作槽。 */
