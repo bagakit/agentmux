@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentSessionHistoryQuestionRequest, AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import { AgentQuestionChoices } from './AgentQuestionChoices.js'
 import { presentError } from '../lib/error-presentation.js'
+import { ComposerTextarea } from '../input/ComposerTextarea.js'
 
 export type QuestionDiagnostic = { code: string; message: string }
 export type QuestionNoticeRenderer = (diagnostic: QuestionDiagnostic) => ReactNode
@@ -67,8 +68,8 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, onSubmit, ren
       const selectedId = hasAnswer ? question.options.find(option => option.label === original)?.id ?? null : draft?.optionId ?? null
       const editor = question.acceptsText ? <label className="agent-question__custom">
         {question.options.length === 0 ? <span>Your answer</span> : null}
-        <textarea rows={2} aria-label={`Your answer: ${question.prompt}`} disabled={unavailable}
-          value={draft?.optionId === null ? draft.text : ''} onChange={event => choose(question.id, null, event.currentTarget.value)} />
+        <ComposerTextarea rows={2} aria-label={`Your answer: ${question.prompt}`} disabled={unavailable}
+          value={draft?.optionId === null ? draft.text : ''} onValueChange={text => choose(question.id, null, text)} />
       </label> : null
       return <fieldset key={question.id} className="agent-question__field" data-question-id={question.id}>
         <legend>{question.prompt}</legend>
