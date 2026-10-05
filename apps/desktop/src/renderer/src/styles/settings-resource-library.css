@@ -113,3 +113,7 @@
 @media (max-width: 640px) {
   .settings-content__scroll:is([data-settings-pane='agents'], [data-settings-pane='hosts']) { padding-inline: var(--sp-5); }
 }
+
+.settings-resource-library > .settings-resource-search:focus-within { border-color: var(--focus-line); }
+.settings-resource-library > .settings-resource-search input:focus-visible { outline: none; }
+@media (forced-colors: active) { .settings-resource-library > .settings-resource-search:focus-within { border-color: Highlight; } }
