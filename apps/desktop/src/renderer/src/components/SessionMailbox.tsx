@@ -113,8 +113,10 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation }: {
   children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
+  /** Presentation of an existing notice, shared by this mailbox and its right dock. */
+  noticePresentation?: { id: string; content: ReactNode } | undefined
   pendingInteraction?: boolean
   onRevealMessage?: RevealMailboxMessage | undefined
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
@@ -435,15 +437,15 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
         {open && folder === 'system' ? selectedNotice ? <article className="composer-mailbox__detail composer-notice" data-kind={selectedNotice.notice.kind}>
-          <div className="composer-notice__body"><ServiceWindowNotice notice={selectedNotice.notice} />
+          <div className="composer-notice__body">{noticePresentation?.id === selectedNotice.id ? noticePresentation.content : <><ServiceWindowNotice notice={selectedNotice.notice} />
             <MailboxTime value={selectedNotice.observedAt} complete />
             {selectedNotice.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => chooseFolder('outbox')}>View outbox</button> : null}
-            {selectedNotice.action ? <button type="button" className="composer-tool" onClick={selectedNotice.action.run}>{selectedNotice.action.label}</button> : null}
+            {selectedNotice.action ? <button type="button" className="composer-tool" onClick={selectedNotice.action.run}>{selectedNotice.action.label}</button> : null}</>}
           </div>
         </article> : notices.length ? <ol className="composer-mailbox__messages" aria-label="Current service notices">
           {notices.map(item => <li key={item.id} className="composer-notice" data-kind={item.notice.kind}><MailboxRecordRow
-            recordKey={`notice:${item.id}:${serviceNoticeFingerprint(item)}`} label={item.notice.notice.step}
-            text={item.notice.notice.mode.slice(0,240)}
+            recordKey={`notice:${item.id}:${serviceNoticeFingerprint(item)}`} label={(item.summary ?? item.notice.notice).step}
+            text={(item.summary ?? item.notice.notice).mode.slice(0,240)}
             metadata={<><span>{item.notice.kind === 'indeterminate' ? 'Status unknown' : 'Service notice'}</span>{item.observedAt === undefined ? null : <MailboxTime value={item.observedAt} />}</>}
             onOpen={selectRecord} /></li>)}
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
@@ -454,5 +456,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }

@@ -7,10 +7,13 @@ export type MessageDeliveryFailureProps = MessageDeliveryDiagnostic & {
   copyText(text: string): Promise<boolean>
   onRetry?: (() => void) | undefined
   onDismiss?: (() => void) | undefined
+  /** Host-selected density; facts, eligibility and the complete report are unchanged. */
+  compact?: boolean
 }
 
-export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, ...diagnostic }: MessageDeliveryFailureProps) {
+export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, compact = false, ...diagnostic }: MessageDeliveryFailureProps) {
   const summary = presentMessageDeliveryFailure(diagnostic)
+  const compactCause = 'compactCause' in summary ? summary.compactCause : undefined
   const report = messageDeliveryDiagnosticReport(diagnostic)
   const [copy, setCopy] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle')
   const generation = useRef(0)
@@ -26,21 +29,22 @@ export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, ...diagno
     if (generation.current === attempt) setCopy(copied ? 'copied' : 'failed')
   }
   const feedback = copy === 'copied' ? '完整诊断已复制' : copy === 'failed' ? '复制失败，请重试或在详情中选取原文。' : copy === 'copying' ? '正在复制…' : ''
-  return <section className="message-delivery-failure" data-kind={summary.kind} aria-label="Message Tool 操作说明">
-    <div className="message-delivery-failure__heading"><SemanticIcon name="status.warning" size={15} aria-hidden="true" />
-      <strong>{summary.title}</strong>
+  return <section className="message-delivery-failure" data-compact={compact || undefined} data-kind={summary.kind} aria-label="Message Tool 操作说明">
+    <div className="message-delivery-failure__heading" role={compact ? 'alert' : undefined} title={compact ? summary.state : undefined}><SemanticIcon name="status.warning" size={15} aria-hidden="true" />
+      <strong>{summary.title}{compact && compactCause ? ` · ${compactCause}` : ''}</strong>
     </div>
-    <div className="message-delivery-failure__state" role="alert">{summary.state}</div>
-    <p className="message-delivery-failure__next">{summary.action}</p>
+    {!compact ? <><div className="message-delivery-failure__state" role="alert">{summary.state}</div>
+      <p className="message-delivery-failure__next">{summary.action}</p></> : null}
     <div className="message-delivery-failure__actions">
-      {onRetry && summary.kind !== 'condition-changed' ? <button type="button" onClick={onRetry}>重试此操作</button> : null}
-      <button type="button" onClick={() => void copyReport()} disabled={copy === 'copying'} aria-label="复制完整诊断">
-        {copy === 'copied' ? <SemanticIcon name="action.confirm" size={13} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={13} aria-hidden="true" />}复制完整诊断</button>
+      {onRetry && summary.kind !== 'condition-changed' ? <button type="button" onClick={onRetry}>{compact ? '重试' : '重试此操作'}</button> : null}
+      <button type="button" className="message-delivery-failure__copy" onClick={() => void copyReport()} disabled={copy === 'copying'} aria-label="复制完整诊断">
+        {copy === 'copied' ? <SemanticIcon name="action.confirm" size={13} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={13} aria-hidden="true" />}{compact ? copy === 'copied' ? '已复制' : copy === 'failed' ? '复制失败' : copy === 'copying' ? '复制中' : '复制诊断' : '复制完整诊断'}</button>
       {onDismiss ? <button type="button" className="message-delivery-failure__dismiss" onClick={onDismiss} aria-label="关闭操作说明" title="关闭操作说明"><SemanticIcon name="action.close" size={14} /></button> : null}
       <span role="status" aria-live="polite" data-copy-state={copy}>{feedback}</span>
     </div>
     <details className="message-delivery-failure__details">
-      <summary>技术详情</summary>
+      <summary>{compact ? '详情' : '技术详情'}</summary>
+      {compact ? <><p className="message-delivery-failure__state">{summary.state}</p><p className="message-delivery-failure__next">{summary.action}</p></> : null}
       {diagnostic.logId ? <DeliveryLogDetails logId={diagnostic.logId} log={diagnostic.log} copyText={copyText} /> : null}
       <pre tabIndex={0} aria-label="完整诊断原文">{report}</pre>
     </details>

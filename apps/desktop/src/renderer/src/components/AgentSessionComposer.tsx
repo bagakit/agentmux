@@ -272,6 +272,7 @@ export function AgentSessionComposer({
 
   return (
     <SessionMailbox key={sessionId} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+        noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
@@ -315,7 +316,6 @@ export function AgentSessionComposer({
     >
     {(mailbox, pending) => (
     <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
-      feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
