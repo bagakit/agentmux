@@ -10,7 +10,7 @@ import { isBuiltin } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
 export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel', prepareOnly = false }) {
-  assert.ok(['full','placement','buttons','toolkit','attribution'].includes(captureScope),'已知明确 capture scope')
+  assert.ok(['full','placement','buttons','toolkit','attribution','agent-cards'].includes(captureScope),'已知明确 capture scope')
   assert.ok(typeof prepareOnly === 'boolean' && (!prepareOnly || captureScope === 'attribution'), 'Compile preparation is explicit attribution-only, never a full qualification')
   const toolkitFixture = fixtureName === 'toolkit-custom-ui'
   assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
@@ -29,13 +29,21 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,prepareOnly,cssMutant,evidence,privateRoot,processes:[],frames:[],rawInputs:[],
     actualApp:!prepareOnly,actualSettings:!prepareOnly,actualTerminalView:!prepareOnly,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
-  if(captureScope==='attribution')await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
+  if(captureScope==='attribution'||captureScope==='agent-cards')await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
   try {
     for(const file of [configFile,path.join(desktop,'electron.vite.config.ts'),path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
     if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
-    if(captureScope==='attribution')for(const file of [path.join(desktop,'scripts/capture-performance-attribution.mjs'),path.join(fixture,'attribution-owner-entry.ts')])await bind(file)
+    if(captureScope==='attribution'||captureScope==='agent-cards')for(const file of [path.join(desktop,`scripts/capture-${captureScope==='agent-cards'?'toolkit-agent-cards':'performance-attribution'}.mjs`),path.join(fixture,'attribution-owner-entry.ts')])await bind(file)
+    if(captureScope==='agent-cards') {
+      const customFile=process.env.AGENTMUX_TOOLKIT_AGENT_CARDS_CUSTOM_RESULT
+      assert.ok(customFile&&path.isAbsolute(customFile),'Exact confirmed Custom product result is required')
+      const bytes=await fs.readFile(customFile),proof=JSON.parse(bytes)
+      assert.equal(proof.executionProof.privateChildExited,true)
+      receipt.customResult={file:customFile,sha256:sha(bytes),executionProof:proof.executionProof}
+      await fs.writeFile(path.join(evidence,'custom-result.json'),bytes)
+    }
     const aliases=new Map()
     for(const name of ['core','demand','layout','identity','relay','client-ui']){
       const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
@@ -79,7 +87,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     for(const [entry,outfile,format]of [
       [path.join(desktop,'src/preload/index.ts'),path.join(compiled,'product-preload.cjs'),'cjs'],
       [path.join(fixture,'preload.cjs'),path.join(compiled,'fixture-preload.cjs'),'cjs'],
-      [path.join(fixture,captureScope==='attribution'?'attribution-owner-entry.ts':'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
+      [path.join(fixture,(captureScope==='attribution'||captureScope==='agent-cards')?'attribution-owner-entry.ts':'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
       [path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm'],
       ...(toolkitQualification?[[path.join(fixture,'health-entry.ts'),path.join(compiled,'health.mjs'),'esm']]:[])
     ])await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:format==='cjs'?'bundle':'external',logLevel:'error',
@@ -132,8 +140,10 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs'),...(toolkitQualification?[path.join(fixture,'qualification.cjs')]:[])]
       const executable=toolkitQualification?globalThis.process.execPath:require('electron')
       const args=toolkitQualification?[path.join(fixture,'coordinator.cjs'),require('electron'),path.join(compiled,'health.mjs'),...guiArgs]:guiArgs
+      const stderr=[]
       const process=await runProbeProcess(executable,args,
-        {temporaryRoot:privateRoot,cwd:root,env,timeoutMs:90000})
+        {temporaryRoot:privateRoot,cwd:root,env,timeoutMs:90000,onLine:line=>stderr.push(line)})
+      await fs.writeFile(path.join(evidence,phase+'-stderr.log'),stderr.join('\n')+'\n')
       receipt.processes.push({...process,phase})
       const rawFile=phase+'-render.json',rawBytes=await fs.readFile(path.join(evidence,rawFile));const raw=JSON.parse(rawBytes)
       receipt.rawInputs.push({phase,file:rawFile,bytes:rawBytes.length,sha256:sha(rawBytes)})
@@ -147,6 +157,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     if(captureScope==='buttons')receipt.boundary='仅T005底栏七常规按钮actual App样式/几何/原生焦点与原工作面保持；私有CSS输入变异。无旧full hidden/restart/joined、Backend或用户FPS资格。'
     if(captureScope==='toolkit')receipt.boundary=toolkitQualification?'T008 finite actual App/unique ConfigOwner/ToolkitOwner/product preload/compiled CLI/Core Raw actions, original TerminalView input and two ordinary GUI durable restoration. Actual Terminal Session scope; not Agent Provider recovery, user App/Runtime, T004 hidden or aesthetic acceptance.':'T008 actual App准备图：真实ConfigStore/ConfigOwner/ToolkitOwner/registerToolkitIpc及私有Core Raw port；现preview Session transport仍受控，无完整动作/健康Run恢复或Task资格。capture完成不代独立审美。'
     if(captureScope==='attribution')receipt.boundary='仅资源归因 actual App/Performance Toolkit/真实 styles：宽窄主题、原生键盘展开、同实例刷新保节点焦点滚动、新实例隔离、工作等待/未知/过期/暂停。私有 sandbox preload 与受控严格 Metrics DTO；不执行 full control/restart/joined/Native，不签用户现场或实际内存归因。'
+    if(captureScope==='agent-cards')receipt.boundary='Actual App shared Toolkit cards/Performance totals/Custom result with exact product styles and isolated preload. Controlled Metrics DTO and private ordinary-script confirmed output; no user Runtime or installation claim.'
     if(prepareOnly)receipt.boundary='Attribution actual source compilation preparation only; no mounted App, process, screenshot, native input or behavioral qualification.'
     receipt.completed=true
   } catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack}}

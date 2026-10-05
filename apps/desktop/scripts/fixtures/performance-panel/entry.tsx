@@ -21,6 +21,12 @@ const sessions = originalSnapshot.sessions.map(session => session.hostId === 'lo
   ? { ...session, workspacePath: localPath, label: 'Review Toolkit ownership and resource observation across the complete Agent workspace' } : session)
 api.sessions.snapshot = async () => ({ ...originalSnapshot, sessions: structuredClone(sessions) })
 const setup = await bridge.setup(preview)
+if (setup.phase === 'agent-cards') {
+  // Controlled local identity input for the second Provider; original preview Sessions stay intact.
+  const original = sessions.find(candidate => candidate.kind === 'agent' && candidate.providerId === 'claude')!
+  sessions.push({...original,id:'cards-preview-claude',hostId:'local',workspacePath:localPath,label:'Review the prepared changes',
+    control:{kind:'agent',hostId:'local',agentSessionId:'cards-preview-claude',run:{runId:'cards-preview-claude-run'}}})
+}
 api.config.get = () => bridge.get()
 api.config.save = (next, expected) => bridge.save(next, expected)
 api.config.onChange = listener => bridge.onChange(listener)
@@ -37,7 +43,7 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 const state = useAppStore.getState(), session = state.sessions.find(s => s.id === 'session-codex')!
 if (!session) throw Error('原 preview Session 非空正控缺失')
 const workspace = state.config!.workspaces.find(workspace => workspace.path === session.workspacePath) ?? state.config!.workspaces[0]!
-if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons' || setup.phase === 'attribution') {
+if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons' || setup.phase === 'attribution' || setup.phase === 'agent-cards') {
   const tab = createWorkbenchTab('performance-original-tab', { regionId: 'performance-original-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('performance-original-group', [tab.id]) },
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
@@ -45,6 +51,18 @@ if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 
 }
 const snapshot = structuredClone(setup.phase === 'attribution' ? performanceAttributionSnapshots.fresh : performanceSnapshot)
 snapshot.observation!.process.data![0] = { ...snapshot.observation!.process.data![0]!, hostId: session.hostId, runId: session.control.run.runId }
+// Same public document references as the adjusted controlled process sample.
+const firstCard = snapshot.document?.agentCards?.items[0]
+if (firstCard) firstCard.reference = {kind:'run',hostId:session.hostId,runId:session.control.run.runId}
+if (setup.phase === 'agent-cards') {
+  snapshot.observation!.runTotals = {coverage:{trackedRuns:8,observedRoots:8,missingRoots:0},cpuPercent:42.8,rssKib:3133440,processCount:22}
+  snapshot.document!.items = [{label:'Total CPU',value:'42.8%'},{label:'Total RSS',value:'3133440 KiB'}]
+  const other = state.sessions.find(candidate => candidate.kind === 'agent' && candidate.hostId === session.hostId && candidate.id !== session.id)
+  if (other) {
+    snapshot.observation!.process.data![1] = {...snapshot.observation!.process.data![1]!,hostId:other.hostId,runId:other.control.run.runId}
+    snapshot.document!.agentCards!.items[1]!.reference = {kind:'run',hostId:other.hostId,runId:other.control.run.runId}
+  }
+}
 await bridge.publish(snapshot)
 const surface = () => {
   const current = useAppStore.getState()

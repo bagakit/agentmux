@@ -8,8 +8,16 @@ const [html, ownerBundle, privateRoot, evidence, phase, asset, cli] = process.ar
 for (const key of ['home','userData','sessionData']) { const p=path.join(privateRoot,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p) }
 const raw = { phase, frames:[], actions:[], nativeEvents:[], windowEvents:[], leaseEvents:[], errors:[], qualified:false,
   boundary:'Actual mounted App, Settings and TerminalView / native input / isolated product preload and registered Toolkit IPC; Metrics DTO port and original preview Session transport controlled. No official CLI/nativeRun or live-user claim.' }
+const stage = value => {
+  if (phase !== 'agent-cards') return
+  fs.writeFileSync(path.join(evidence,'agent-cards-progress.json'), JSON.stringify({stage:value,at:Date.now(),pid:process.pid})+'\n')
+}
+stage('main-entered')
 let win, stop=()=>{}, current, snapshot, serial=0, delay=0, toolkit, sampler, runtime, metrics, controlServer, detachRuntime
 const leases = new Map()
+const customProof=phase==='agent-cards'?JSON.parse(fs.readFileSync(process.env.AGENTMUX_TOOLKIT_AGENT_CARDS_CUSTOM_RESULT,'utf8')):null
+const customSnapshot=customProof?.snapshot
+if(customProof){assert.equal(customProof.executionProof.privateChildExited,true);assert.equal(customSnapshot.kind,'script');assert.equal(customSnapshot.state,'succeeded')}
 const performanceCurrent = async () => {
   assert.ok(toolkit, 'The registered Toolkit owner exists')
   const result = await toolkit.execute({operation:'toolkit.get',toolId:'performance'},new AbortController().signal)
@@ -21,38 +29,43 @@ const facts = async () => ({active:toolkit?(await performanceCurrent()).consumer
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms))
 app.whenReady().then(async()=>{
   try {
+    stage('app-ready')
     const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,localRuntimeConnector,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer,parseMetricsRendererResult}=await import(pathToFileURL(ownerBundle).href)
+    stage('owner-imported')
     const configStore = new ConfigStore(path.join(privateRoot,'userData','config.json'))
     const initialConfigExists = fs.existsSync(configStore.filePath)
     current = await configStore.get()
+    stage('config-read')
     const owner = new ConfigOwner({read:()=>current,save:next=>configStore.save(next),publish:saved=>{current=saved;win?.webContents.send('proof:config:changed',saved)}})
     ipcMain.handle('proof:setup',async(_event,preview)=>{
-      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
+      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution'||phase==='agent-cards') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
         workspaces:[...preview.workspaces,...current.workspaces.filter(workspace=>!preview.workspaces.some(item=>item.id===workspace.id))],
-        appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{performance:{enabled:true,statusBar:'label'}},
+        appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{...preview.toolkit,performance:{enabled:true,statusBar:'label'},...(customSnapshot?{tools:[customSnapshot.definition]}:{})},
         composerShortcuts:[{id:'original',keyword:'original',label:'Original authored prompt',body:'Original saved body remains exact.'}]})) }
       else assert.equal(fs.existsSync(configStore.filePath),true,'Restart复用真实durable Config，不seed')
-      return {phase}
+      return {phase,customSnapshot}
     })
     ipcMain.handle('proof:config:get',()=>owner.current)
     ipcMain.handle('proof:config:save',(_event,next,expected)=>owner.edit(expected,next))
     ipcMain.handle('proof:flush',()=>win.webContents.session.flushStorageData())
     ipcMain.handle('proof:facts',facts)
-    ipcMain.handle('proof:snapshot',(_event,value)=>{snapshot=value;for(const lease of leases.values())lease.push(snapshot);return true})
+    ipcMain.handle('proof:snapshot',(_event,value)=>{snapshot=value;for(const lease of leases.values())if(lease.toolId==='performance')lease.push(snapshot);return true})
     const scriptText=fs.readFileSync(asset,'utf8'),scriptSHA=createHash('sha256').update(scriptText).digest('hex')
     if(phase!=='joined')stop=registerToolkitIpc({
       async execute(request) {
+        if(customSnapshot&&request.toolId===customSnapshot.toolId&&request.operation==='toolkit.get')return {operation:request.operation,snapshot:customSnapshot}
+        if(customSnapshot&&request.toolId===customSnapshot.toolId&&request.operation==='toolkit.script')return {operation:request.operation,script:{toolId:customSnapshot.toolId,path:'inline:'+customSnapshot.toolId,sha256:createHash('sha256').update(customSnapshot.definition.script).digest('hex'),text:customSnapshot.definition.script}}
         if(request.operation==='toolkit.script')return {operation:request.operation,script:{toolId:'performance',path:asset,sha256:scriptSHA,text:scriptText}}
         if(request.operation==='toolkit.get')return {operation:request.operation,snapshot}
         throw Error('UI不应调用manual run/stop/list: '+request.operation)
       },
-      async subscribe(_id,push,_end,signal) {
+      async subscribe(toolId,push,_end,signal) {
         const id=++serial;let closed=false
         const dispose=()=>{if(!closed){closed=true;leases.delete(id);raw.leaseEvents.push({event:'disposed',id,at:Date.now()})}}
         signal.addEventListener('abort',dispose,{once:true})
-        raw.leaseEvents.push({event:'entered',id,at:Date.now()});leases.set(id,{push})
+        raw.leaseEvents.push({event:'entered',id,at:Date.now()});leases.set(id,{push,toolId})
         if(delay)await pause(delay)
-        push(snapshot);raw.leaseEvents.push({event:'returned',id,at:Date.now()})
+        push(customSnapshot&&toolId===customSnapshot.toolId?customSnapshot:snapshot);raw.leaseEvents.push({event:'returned',id,at:Date.now()})
         return {dispose}
       }
     },(channel,handler)=>ipcMain.handle(channel,handler))
@@ -78,7 +91,8 @@ app.whenReady().then(async()=>{
     }
     win.webContents.on('console-message',(_event,_level,message)=>raw.errors.push(message))
     win.webContents.on('preload-error',(_event,_p,error)=>raw.errors.push(String(error)))
-    await win.loadFile(html);win.showInactive();win.webContents.debugger.attach('1.3')
+    stage('window-created')
+    await win.loadFile(html);stage('renderer-loaded');win.showInactive();win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     const read=expression=>win.webContents.executeJavaScript(expression)
     const q=selector=>'document.querySelector('+JSON.stringify(selector)+')'
@@ -182,6 +196,49 @@ app.whenReady().then(async()=>{
       assert.ok((await read('window.performanceScene.attachments')).length>0,'Restart原TerminalView自动实际reattach previewRun正控')
       assert.equal(leases.size,0,'Restart关闭布局不建立Performance观察')
       raw.surface=surface;raw.restart={exactSurface:true,attachmentCount:await read('window.performanceScene.attachments.length')}
+    } else if(phase==='agent-cards') {
+      raw.qualificationScope='toolkit-agent-cards-only'
+      raw.boundary='Actual App/Toolkit shared standard cards and all-observed-Run totals; controlled Metrics source, no user Run or install action.'
+      assert.equal(leases.size,0)
+      await click(q('.performance-trigger'));await click(q('[data-settings-target="runs"]'))
+      await until('!!document.querySelector("[data-toolkit-agent-card][data-agent-card-state=resolved]")')
+      assert.equal(await read('document.querySelectorAll(".performance-contributor").length'),5)
+      assert.ok((await read('document.querySelector("[data-run-total-values]").textContent')).includes('42.8%'))
+      await capture('1480-dark-agent-runs.png','Actual App Runs / shared standard Agent cards / all Run totals')
+      await key('Tab')
+      await read('window.keptRun=document.querySelector(".performance-contributor");window.keptSummary=window.keptRun.querySelector("summary");window.keptSummary.focus()')
+      await key('Return')
+      assert.equal(await read('window.keptRun.open'),true,'Native keyboard opens the original Run summary')
+      await read('document.querySelector(".performance-body").scrollTop=85')
+      await settle()
+      await read('(()=>{const next=structuredClone(window.performanceScene.snapshot);next.sequence++;next.observation.process.data[0].cpuPercent=0.1;return window.performanceScene.publish(next)})()')
+      assert.equal(await read('document.querySelector(".performance-contributor")===window.keptRun&&window.keptRun.open&&document.activeElement===window.keptSummary'),true,'Exact row/details/focus kept on update')
+      assert.equal(await read('document.querySelector(".performance-body").scrollTop'),85,'Run scroll retained on update')
+      raw.refresh={sameRow:true,expanded:true,focused:true,scrollTop:85}
+      await capture('1480-dark-selected-agent-run.png','Selected Run is separate from all Run totals; exact node/focus retained')
+      await click(q('[data-toolkit-close]'))
+      await scene(380,'light');await click(q('[data-toolkit-id="performance"]'));await click(q('[data-settings-target="runs"]'))
+      await read('document.querySelector(".performance-body").scrollTop=0')
+      await capture('380-light-agent-runs.png','Narrow light standard Agent face, long name and complete all-Run totals')
+      await read('(()=>{const next=structuredClone(window.performanceScene.snapshot);next.observedAt+=30000;next.observation.observedAt+=30000;next.observation.process.state="stale";next.observation.process.reason="Process source could not be refreshed.";return window.performanceScene.publish(next)})()')
+      await capture('380-light-agent-runs-stale.png','Retained source totals/cards with actual stale age')
+      await scene(1480,'dark');await click(q('[data-performance-observation-toggle]'))
+      assert.equal(leases.size,0);await capture('1480-dark-agent-runs-paused.png','Only this UI observation paused; original totals/cards kept')
+      await click(q('[data-performance-observation-toggle]'))
+      await read('(()=>{const next=structuredClone(window.performanceScene.snapshot);next.observation.runTotals={coverage:{trackedRuns:8,observedRoots:7,missingRoots:1},cpuPercent:null,rssKib:null,processCount:null};return window.performanceScene.publish(next)})()')
+      await capture('1480-dark-agent-runs-partial.png','Missing root coverage does not become a zero total')
+      await click(q('[data-toolkit-close]'))
+      // This exact confirmed result was produced by the ordinary script/CustomToolkitOwner/Unix/CLI proof.
+      await scene(1480,'dark')
+      await click(q('[data-toolkit-id="'+customSnapshot.toolId+'"]'))
+      await until('!!document.querySelector(".toolkit-result__document [data-agent-card-state=resolved]")')
+      assert.equal(await read('document.querySelector(".toolkit-result__document [data-card-field=sessionId]").textContent'),'session-codex')
+      assert.equal(await read('document.querySelector(".toolkit-result__document [data-toolkit-card-metric]").textContent'),'Queue3')
+      await capture('1480-dark-custom-agent-card.png','Ordinary Custom exact confirmed script result / shared standard Agent card')
+      await scene(380,'light');await capture('380-light-custom-agent-card.png','Narrow ordinary Custom card / configured identity fields and metric')
+      raw.custom={snapshotSHA256:createHash('sha256').update(JSON.stringify(customSnapshot)).digest('hex'),executionProof:customProof.executionProof,reference:'local/session-codex',boundary:'Exact prior ordinary-script/CustomToolkitOwner/Unix/CLI confirmed result replayed through actual App registered IPC; Runtime execution is qualified separately.'}
+      await click(q('[data-toolkit-close]'))
+      raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface,'Cards/observation preserve original workface and unsent draft')
     } else if(phase==='attribution') {
       raw.qualificationScope='resource-attribution-only'
       raw.boundary='Actual App/Toolkit/isolated sandbox preload with controlled Metrics DTO; bounded keyboard/refresh/scroll captures only. No full control/restart/joined/Native or user Run actions.'
