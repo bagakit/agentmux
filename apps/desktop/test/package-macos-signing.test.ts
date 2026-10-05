@@ -15,7 +15,7 @@ function runner(meta = metadata, dr = requirement) {
 
 it('rejects an absent stable identity before any native command', async () => {
   const run = vi.fn()
-  await expect(preflightMacosSigning({ argv: [], env: {}, run })).rejects.toThrow(/certificate SHA1.*existing App.*healthy Runs/i)
+  await expect(preflightMacosSigning({ argv: [], env: {}, run, loadLocal: async () => null })).rejects.toThrow(/certificate SHA1.*existing App.*healthy Runs/i)
   expect(run).not.toHaveBeenCalled()
 })
 it.each(['-', 'Developer ID Application: Partial name', 'B'.repeat(39)])('does not interpret %s as a stable certificate selector', async (value) => {
@@ -41,6 +41,41 @@ it('allows explicit development ad hoc without looking for a certificate', async
   expect(await preflightMacosSigning({ argv: ['--ad-hoc'], env: {}, run })).toEqual({ kind: 'ad-hoc' })
   expect(run).not.toHaveBeenCalled()
   await expect(preflightMacosSigning({ argv: ['--ad-hoc'], env, run })).rejects.toThrow(/cannot be requested together/)
+})
+it('refuses ad hoc canonical installation before any build or identity operation', async () => {
+  const run = vi.fn(), loadLocal = vi.fn()
+  await expect(preflightMacosSigning({ argv: ['--ad-hoc', '--install'], env: {}, run, loadLocal })).rejects.toThrow(/cannot install.*privacy authorization identity/)
+  expect(run).not.toHaveBeenCalled()
+  expect(loadLocal).not.toHaveBeenCalled()
+})
+const localPlan = { kind: 'certificate', profile: 'local', identity }
+it('reuses the explicitly saved exact local identity under native codesigning policy', async () => {
+  const loadLocal = vi.fn(async () => localPlan)
+  const run = vi.fn(async () => ({ stdout: `1) ${identity} "AgentMux Local UUID"\n`, stderr: '' }))
+  expect(await preflightMacosSigning({ argv: [], env: {}, run, loadLocal })).toEqual(localPlan)
+  expect(run).toHaveBeenCalledExactlyOnceWith('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'])
+  await expect(preflightMacosSigning({ argv: [], env: {}, loadLocal, run: vi.fn(async () => ({ stdout: `1) ${'B'.repeat(40)} "AgentMux Local UUID"`, stderr: '' })) })).rejects.toThrow(/not uniquely available and valid/)
+})
+it('does not replace an unreadable or missing original local Keychain identity', async () => {
+  const run = vi.fn()
+  await expect(preflightMacosSigning({ argv: [], env: {}, run, loadLocal: async () => { throw new Error('record damaged') } })).rejects.toThrow(/record damaged.*never regenerates/)
+  expect(run).not.toHaveBeenCalled()
+  await expect(preflightMacosSigning({ argv: [], env: {}, loadLocal: async () => localPlan, run: vi.fn(async () => ({ stdout: '0 valid identities found', stderr: '' })) })).rejects.toThrow(/not uniquely available.*Restore the original/)
+})
+it('uses local codeSign qualification without broadening trust to satisfy the signer basic policy', async () => {
+  const signer = vi.fn(async options => {
+    expect(options.identity).toBe(identity)
+    expect(options.identityValidation).toBe(false)
+    expect(options.strictVerify).toBe(true)
+    expect(options.optionsForFile(app).timestamp).toBe('none')
+    expect(options.optionsForFile(app)).not.toHaveProperty('requirements')
+  })
+  await signMacosApplication(app, localPlan, { signer })
+  const dr = `designated => identifier "dev.agentmux.desktop" and anchor H"${identity.toLowerCase()}"`
+  const run = runner('Identifier=dev.agentmux.desktop\nAuthority=AgentMux Local UUID\nTeamIdentifier=not set', dr)
+  expect(await verifyMacosSigning(app, localPlan, { run })).toMatchObject({ profile: 'local', identity, designatedRequirement: dr, authorizationContinuity: 'unverified' })
+  expect(run.mock.calls[0][1]).toContain(`=identifier "dev.agentmux.desktop" and certificate leaf = H"${identity}"`)
+  await expect(verifyMacosSigning(app, localPlan, { run: runner('Identifier=dev.agentmux.desktop', dr.replace(identity.toLowerCase(), 'b'.repeat(40))) })).rejects.toThrow(/original certificate anchor/)
 })
 it.each([undefined, { kind: 'unknown' }, { kind: 'certificate', identity: '-', teamId }])('rejects an invalid plan before it can silently become development signing', async (invalid) => {
   const signer = vi.fn(), run = vi.fn()
