@@ -156,6 +156,7 @@ export async function brandApplication(appPath) {
   await plistReplace(plist, 'CFBundleShortVersionString', 'string', manifest.version)
   await plistReplace(plist, 'CFBundleVersion', 'string', manifest.version)
   await plistReplace(plist, 'LSApplicationCategoryType', 'string', 'public.app-category.developer-tools')
+  await plistReplace(plist, 'NSScreenCaptureUsageDescription', 'string', 'AgentMux captures the screen area you select to attach it to your message.')
   for (const key of [
     'NSAppTransportSecurity',
     'NSAudioCaptureUsageDescription',
@@ -371,6 +372,7 @@ async function verifyIdentity(appPath) {
   assert(await plistValue(plist, 'CFBundleIdentifier') === BUNDLE_ID, 'Packaged bundle id is wrong.')
   assert(await plistValue(plist, 'CFBundleURLTypes.0.CFBundleURLSchemes.0') === 'amux', 'Packaged spatial link scheme is wrong.')
   assert(await plistValue(plist, 'CFBundleIconFile') === 'agentmux.icns', 'Packaged icon is wrong.')
+  assert((await plistValue(plist, 'NSScreenCaptureUsageDescription')).length > 0, 'Packaged screen capture purpose is missing.')
   assert(!await pathExists(join(contents, 'Resources', 'default_app.asar')), 'Electron default app entered the package.')
   for (const suffix of ['', ' (Renderer)', ' (GPU)', ' (Plugin)']) {
     assert(
