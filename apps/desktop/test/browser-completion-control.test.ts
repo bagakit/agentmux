@@ -6,7 +6,7 @@ import { AgentMuxControlServer, BROWSER_COMPLETION_UNAVAILABLE_WARNING,
   connectAgentMuxRpc, type AgentMuxRpcClient, type AgentMuxRpcStreamInitial, type AgentMuxControlBrowserEvent,
   type AgentMuxControlBrowserOperation, type AgentMuxControlHost } from '@agentmux/core'
 import { BrowserOperationFileStore, BrowserOperationJournal,
-  type BrowserOperationJournalDocument, type BrowserOperationJournalStore } from '../src/main/browser-operation-journal'
+  type BrowserOperationJournalChanges, type BrowserOperationJournalStore } from '../src/main/browser-operation-journal'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from '../src/main/browser-completion-control'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '../src/shared/browser-outcome-criteria'
 
@@ -105,7 +105,7 @@ it('delivers one truthful checked event after the optional save acknowledges, in
   let release!: () => void, entered = false, hold = false
   const ack = new Promise<void>(resolve => { release = resolve })
   const store: BrowserOperationJournalStore = { async load() { return { version: 1, operations: [], events: [] } },
-    async save(_document: BrowserOperationJournalDocument) { if (hold) { entered = true; await ack; throw new Error('Private optional store failure') } } }
+    async save(_changes: BrowserOperationJournalChanges) { if (hold) { entered = true; await ack; throw new Error('Private optional store failure') } } }
   const journal = new BrowserOperationJournal(store)
   await completed(journal)
   const events: unknown[] = [], subscription = await journal.subscribe(context.operationId, 4, item => events.push(projectBrowserControlEvent(item.event)))

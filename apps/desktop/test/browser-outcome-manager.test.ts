@@ -110,7 +110,7 @@ describe('finite field checks through the real Main execution owner', () => {
   it('saves registration before real extraction and joins journal evidence and T003 bytes, then verifies without repeating the producer', async () => {
     const f = await fixture()
     let beforeProducer: any
-    f.view.webContents.beforeRead = async () => { beforeProducer = JSON.parse(await readFile(f.path, 'utf8')).operations.at(-1) }
+    f.view.webContents.beforeRead = async () => { beforeProducer = (await new BrowserOperationFileStore(f.path).load())!.operations.at(-1) }
     const result = await f.manager.checkOutcomeFields('browser-a', input)
     expect(result.status, JSON.stringify(await f.journal.list())).toBe('passed')
     expect(beforeProducer.steps).toHaveLength(1)
@@ -252,7 +252,7 @@ describe('declared task completion consumes the actual asset owner through Main'
     const saved = await f.taskAssets.saveVersion(edited.id, edited.revision)
     let beforeProducer: any
     f.view.webContents.beforeLoad = async () => {
-      beforeProducer = { journal: JSON.parse(await readFile(f.path, 'utf8')), tasks: JSON.parse(await readFile(f.taskPath, 'utf8')) }
+      beforeProducer = { journal: (await new BrowserOperationFileStore(f.path).load())!, tasks: JSON.parse(await readFile(f.taskPath, 'utf8')) }
     }
     const waiting = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: saved.id, version: 1, parameters: {} })
     expect(waiting.status).toBe('waiting-human')

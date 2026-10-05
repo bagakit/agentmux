@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { DatabaseSync } from 'node:sqlite'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -25,7 +26,7 @@ describe('completion conditions use the original durable operation owner', () =>
   it('persists registration before the producer and retains the exact result across ordinary store restart', async () => {
     const f = await fixture()
     expect((await f.journal.registerOutcome(context.operationId, declaration))?.saved).toBe(true)
-    const before = JSON.parse(await readFile(f.path, 'utf8'))
+    const before = (await new BrowserOperationFileStore(f.path).load())!
     expect(before.operations).toHaveLength(1)
     expect(before.operations[0].steps).toEqual([])
     expect(before.operations[0].outcome).toEqual({ registration: declaration })
@@ -66,10 +67,13 @@ describe('completion conditions use the original durable operation owner', () =>
   it('keeps unreadable completion history visibly unavailable while preserving the operation on recovery', async () => {
     const f = await fixture()
     await f.journal.finish(context.operationId, 'completed')
-    const document = JSON.parse(await readFile(f.path, 'utf8'))
+    const document = (await new BrowserOperationFileStore(f.path).load())!
     expect(document.operations).toHaveLength(1)
     document.operations[0].outcome = { registration: { ...declaration, criteria: [] }, evaluation: result }
-    await writeFile(f.path, JSON.stringify(document))
+    const database = new DatabaseSync(f.path)
+    const { steps: _steps, ...metadata } = document.operations[0]!
+    database.prepare('UPDATE operations SET metadata = ? WHERE id = ?').run(JSON.stringify(metadata), context.operationId)
+    database.close()
     const restarted = new BrowserOperationJournal(new BrowserOperationFileStore(f.path))
     const operation = await restarted.get(context.operationId)
     expect(operation?.id).toBe(context.operationId)
@@ -93,6 +97,39 @@ describe('completion conditions use the original durable operation owner', () =>
     expect((await journal.recordOutcome(context.operationId, result))?.saved).toBe(true)
     const restarted = new BrowserOperationJournal(base)
     expect((await restarted.get(context.operationId))?.outcome?.evaluation).toEqual(result)
+  })
+
+  it('keeps a failed checked event dirty when an older captured snapshot later receives its ACK', async () => {
+    const base = new BrowserOperationFileStore(join((await fixture()).path, '..', 'checked-ack-order.json'))
+    let captures = 0, armed = false
+    let checkedEntered!: () => void, phaseEntered!: () => void, failChecked!: () => void, releasePhase!: () => void
+    const checking = new Promise<void>(resolve => { checkedEntered = resolve })
+    const phasing = new Promise<void>(resolve => { phaseEntered = resolve })
+    const checkedGate = new Promise<void>(resolve => { failChecked = resolve })
+    const phaseGate = new Promise<void>(resolve => { releasePhase = resolve })
+    const journal = new BrowserOperationJournal({ load: () => base.load(), async save(changes) {
+      if (armed && ++captures === 1) {
+        checkedEntered(); await checkedGate
+        throw new Error('Original checked ACK failed')
+      }
+      if (armed && captures === 2) { phaseEntered(); await phaseGate }
+      await base.save(changes)
+    } })
+    await journal.start({ id: context.operationId, browserId: context.browserId, operator: { id: 'person', name: 'Person' }, summary: 'Check field', url: 'https://generic.invalid/form' })
+    await journal.registerOutcome(context.operationId, declaration)
+    armed = true
+    const checked = journal.recordOutcome(context.operationId, result)
+    await checking
+    const phase = journal.setPhase(context.operationId, 'waiting')
+    await phasing
+    failChecked()
+    expect((await checked)?.saved).toBe(false)
+    releasePhase(); await phase
+    await journal.finish(context.operationId, 'completed')
+    const saved = (await base.load())!
+    const event = saved.events.find(event => event.type === 'operation-checked')!
+    expect(event.type === 'operation-checked' && event.operation.outcome?.evaluation?.warning)
+      .toContain('result was checked but could not be saved')
   })
 
   it('retains the current result-save notice in get and list until a subsequent successful check', async () => {
