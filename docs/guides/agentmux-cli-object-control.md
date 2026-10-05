@@ -1,6 +1,6 @@
 # AgentMux：按对象操作桌面
 
-先用 `agentmux --skill` 看当前公开合同，具体命令用 `--help`。命令经同一公开 JSON-RPC 服务调用各自业务 owner；Core 持有 AgentSession 语义与[持久空间图](../architecture/spatial-state.md)，Client 消费原位置，负责呈现、真实输入焦点及原宿主资源能力；Run 的进程事实由 ctxmux 持有。
+先用 `amux --skill` 看当前公开合同，具体命令用 `--help`。命令经同一公开 JSON-RPC 服务调用各自业务 owner；Core 持有 AgentSession 语义与[持久空间图](../architecture/spatial-state.md)，Client 消费原位置，负责呈现、真实输入焦点及原宿主资源能力；Run 的进程事实由 ctxmux 持有。
 
 CLI 的 Space 是[概念词典](../design/behavior/spaces-and-layout.md#统一概念与空间寻址)中的持久实体；Agent 空间地址使用同一实体及展示绑定。Work 下的 Space 按钮是操作这些对象的视图，不是第二种 Space。Project 是仓库／目录归属，与 Space 不等同。Zone 可以关联 worktree、普通目录或 Topic/Mote 工作面。Tab 是完整工作面，Region 是其中一格。Session 回答“哪个 Agent”，它可以有多个展示位置。ID 原样使用，不从名称、当前目录或第一处展示位置猜身份。
 
@@ -23,21 +23,21 @@ CLI 的 Space 是[概念词典](../design/behavior/spaces-and-layout.md#统一�
 先发现 Executor 与空间：
 
 ```sh
-agentmux settings executors ls
-agentmux app snapshot
-agentmux space ls
+amux settings executors ls
+amux app snapshot
+amux space ls
 ```
 
 以下是需替换 ID／路径的模板。在已有 Zone 开第一张或新 Tab：
 
 ```sh
-agentmux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab --prompt '完成这份任务'
+amux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab --prompt '完成这份任务'
 ```
 
 明确选择 Project 资源与 Space 落点，创建 Git Zone，并直接拉起 Agent：
 
 ```sh
-agentmux agent open --executor '<executor-id>' --project '<project-id>' --space '<space-id>' --new-zone --worktree --new-branch feat/task --path "$WORKTREE_PATH" --prompt '完成这份任务'
+amux agent open --executor '<executor-id>' --project '<project-id>' --space '<space-id>' --new-zone --worktree --new-branch feat/task --path "$WORKTREE_PATH" --prompt '完成这份任务'
 ```
 
 新 Zone 必须指定资源 `--project`；Project 多个来源且没有唯一根目录时，用 `--source-workspace` 选择精确来源，不从当前目录或第一个 worktree 猜起点。非 Git 来源使用 `--new-zone --directory "$EXISTING_DIRECTORY"`。存在多个绑定／展示位置时，需要从 `space ls` 取得准确的 `--space`、`--display-workspace`、`--group`，不能猜第一项。后台打开是默认行为，`--focus` 才导航过去。
@@ -47,20 +47,20 @@ agentmux agent open --executor '<executor-id>' --project '<project-id>' --space 
 后续任务用精确 SID：
 
 ```sh
-agentmux agent send --to-session '<session-id>' --text '继续下一步'
-agentmux agent inspect --session '<session-id>'
+amux agent send --to-session '<session-id>' --text '继续下一步'
+amux agent inspect --session '<session-id>'
 ```
 
-如果创建回执丢失，先按原 `--operation-id` 业务操作号 `agentmux space inspect --operation-id '<operation-id>'` 对账，不能盲目重建、拉 Agent 或重发初始任务。`settings workspaces register` 仅登记已有目录，不建 Git worktree，也不拉起 Agent。
+如果创建回执丢失，先按原 `--operation-id` 业务操作号 `amux space inspect --operation-id '<operation-id>'` 对账，不能盲目重建、拉 Agent 或重发初始任务。`settings workspaces register` 仅登记已有目录，不建 Git worktree，也不拉起 Agent。
 
 ## 移动和切换位置
 
 ```sh
-agentmux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
-agentmux space focus --region '<region-id>'
-agentmux space focus --region '<region-id>' --expect-session '<session-id>'
-agentmux goal focus --goal '<goal-id>'
-agentmux app inspect
+amux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
+amux space focus --region '<region-id>'
+amux space focus --region '<region-id>' --expect-session '<session-id>'
+amux goal focus --goal '<goal-id>'
+amux app inspect
 ```
 
 移动改变空间位置，保留原 Session、Run、执行目录；`--expect-session` 防止位置内容已更换后操作另一个 Agent。源位置有歧义时，提供准确 `--from-space`／`--from-display-workspace`／`--from-group`。当前不支持移动所属 Tab 有多个 Group 展示的 Region，拒绝时保留全部引用和健康 Agent。`focus --expect-session` 在准确 Region 上核对原 SID，并在回执 `navigation.expectedAgentSessionId` 保留条件；已更换的对象只拒绝本次导航。`focus` 默认保留当前输入；明确需要把输入转给目标时才用 `--input target`。选择到目标与目标已经可见、已拿到输入，是回执里的不同事实。
@@ -76,7 +76,7 @@ agentmux app inspect
 以原组的精确 ID 替换占位符，不从名称猜 ID。`removed.json` 是精确组 ID JSON 数组；`--removed-project-groups` 只接受文件路径，不能用 `-`，完整 `graph.json` 仍由 stdin 传入。
 
 ```sh
-agentmux space commit --revision N --removed-project-groups removed.json < graph.json
+amux space commit --revision N --removed-project-groups removed.json < graph.json
 ```
 
 仅在新图中省略组不构成解散授权。按 [Core 项目组删除意图](../design/behavior/spaces-and-layout.md#跨设备关联项目组)与 [`AgentMuxSpatialCommit`](../../packages/core/src/spatial-graph.ts)，仅移除本次组的组织关系，保留其他组及原 Space／Zone／Tab／Region、Session 与 Run；该示例不请求实体删除。
@@ -84,10 +84,10 @@ agentmux space commit --revision N --removed-project-groups removed.json < graph
 ## 打开文件，切换正文，交换格子
 
 ```sh
-agentmux file open --zone '<zone-id>' --path 'docs/设计.md'
-agentmux agent view --session '<session-id>' --mode activity
-agentmux file view --region '<file-region-id>' --mode diff
-agentmux space swap --region '<region-a>' --with '<region-b>'
+amux file open --zone '<zone-id>' --path 'docs/设计.md'
+amux agent view --session '<session-id>' --mode activity
+amux file view --region '<file-region-id>' --mode diff
+amux space swap --region '<region-a>' --with '<region-b>'
 ```
 
 文件路径相对 Zone 的真实目录。默认后台打开或复用原 File Tab；`--focus` 才导航到它，多个展示位置用准确 `--display-workspace`／`--group` 指定。目录不会顺带打开 Explorer；媒体与二进制沿原预览，书签文件按源码打开。回执分别报告 `resource`、`placement`、`data`、`navigation`、`save`。读取或导航失败后，已打开的原工作面仍保留；不能用非零退出判断“什么都没创建”，也不能在回执未知时自动重试。
@@ -99,7 +99,7 @@ agentmux space swap --region '<region-a>' --with '<region-b>'
 读取已经保存的原文件，不打开 Tab 或读取编辑器中的未保存草稿：
 
 ```sh
-agentmux file read --zone '<zone-id>' --path 'saved.md' --host '<host-id>' --workspace '<resource-workspace-id>' --workspace-path "$RESOURCE_DIRECTORY"
+amux file read --zone '<zone-id>' --path 'saved.md' --host '<host-id>' --workspace '<resource-workspace-id>' --workspace-path "$RESOURCE_DIRECTORY"
 ```
 
 先从 `space ls`／`space inspect` 的原 Zone 资源确认 Host、Workspace 与目录；这些是文件资源，不是当前显示 Workspace。`--path` 相对该 Zone；可加 `--space` 核对原绑定，多处合法绑定不会改变文件身份。结果的 `resource` 与 `result` 分别表达准确来源和原 Files 的读取事实：文本保留完整 `sha256` revision，二进制、已删除、目录和原错误保持原状态。`unknown` 表示这次观察未确认，保留原引用并重新发现／读取；不解释为文件已删除，也不影响原文件编辑或健康 Agent。
@@ -107,7 +107,7 @@ agentmux file read --zone '<zone-id>' --path 'saved.md' --host '<host-id>' --wor
 保存已经读过的原文本文件，正文从 stdin 原样输入：
 
 ```sh
-agentmux file write --zone '<zone-id>' --path 'saved.md' --resource '<原 file read 回执的完整 resource JSON>' --expected-revision 'sha256:<完整原修订>' < draft.md
+amux file write --zone '<zone-id>' --path 'saved.md' --resource '<原 file read 回执的完整 resource JSON>' --expected-revision 'sha256:<完整原修订>' < draft.md
 ```
 
 它委托原 Files 的 revision-aware 保存，不创建新文件或新 Note 身份。`written` 返回新修订，`conflict` 保留观察到的修订；`error` 与 `unknown` 不冒保存成功。未知回执先读取同一资源核对，保留草稿，不自动重复写入。
@@ -115,12 +115,12 @@ agentmux file write --zone '<zone-id>' --path 'saved.md' --resource '<原 file r
 日历提醒使用显式 JSON，沿原 Session／调度 owner 执行：
 
 ```sh
-agentmux schedule list
-agentmux schedule inspect --data request.json
-agentmux schedule create --data request.json
-agentmux schedule pause --data request.json
-agentmux schedule resume --data request.json
-agentmux schedule cancel --data request.json
+amux schedule list
+amux schedule inspect --data request.json
+amux schedule create --data request.json
+amux schedule pause --data request.json
+amux schedule resume --data request.json
+amux schedule cancel --data request.json
 ```
 
 `--data` 接受文件或 `-` 标准输入。创建包含 `target: {hostId, agentSessionId, providerId, workspacePath}`、非空 `prompt`、`operationId` 和 `calendar`。日历显式给出 IANA `timezone`、本地 `time`、`kind`（`once|daily|weekly|monthly|yearly`）及 `policies: {gap:'skip', fold:'earlier'|'later', monthEnd:'clamp', overdue:'latest'}`；各周期的日期字段以公共类型为准。检查在 `scheduleId` 与原 `operationId` 中选一个；暂停／恢复／取消包含 `scheduleId`、已读 `expectedRevision` 与本次 `operationId`。每次变更核真实 caller，不允许用 timer 冒人类作者。未知回执先检查原 operation；不自动重发。保存不等于已投递，投递不等于 Agent 完成；断开宿主时不会假装仍在云端执行。
@@ -132,10 +132,10 @@ agentmux schedule cancel --data request.json
 先读取准确对象的名称版本。Agent 使用 `agent inspect` 的 `displayName.nameRevision`；Tab 使用 `space inspect` 中该 Tab 的 `nameRevision`。只有版本已观察且为有效整数时才提交，不能猜零或从另一对象复用版本。
 
 ```sh
-agentmux agent inspect --session '<session-id>'
-agentmux agent rename --session '<session-id>' --name-revision N --name 'CLI 实现'
-agentmux space inspect --tab '<tab-id>'
-agentmux space rename --tab '<tab-id>' --name-revision M --name '评审'
+amux agent inspect --session '<session-id>'
+amux agent rename --session '<session-id>' --name-revision N --name 'CLI 实现'
+amux space inspect --tab '<tab-id>'
+amux space rename --tab '<tab-id>' --name-revision M --name '评审'
 ```
 
 `N` 与 `M` 分别替换为同一目标刚读到的名称版本。版本冲突时重新读取目标并由调用者确认新意图，不自动覆盖并发改名。准确参数与版本校验归[CLI parser](../../packages/core/src/agentmux-cli-commands.ts)和[空间状态名称 owner](../../packages/core/src/spatial-state.ts)。
@@ -174,8 +174,8 @@ agentmux space rename --tab '<tab-id>' --name-revision M --name '评审'
 Message Tool 的待发意图由原 Client owner 持有。先按原 Session 读取 `pendingId` 和等待进度，再停止这一条正在退避的消息：
 
 ```sh
-agentmux message pending ls --session '<session-id>'
-agentmux message pending stop --session '<session-id>' --pending-id '<pending-id>'
+amux message pending ls --session '<session-id>'
+amux message pending stop --session '<session-id>' --pending-id '<pending-id>'
 ```
 
 `stop` 经公开 `message.pending.stop` 调用与界面「停止等待」相同的 owner，只结束本条自动准备退避；原文、操作号、目标 Run 和手动发送入口保留。回执的 `preparationWait.state: "stopped"` 与 `changed` 说明等待事实，不表示撤回已写入输入或停止 Agent。没有活跃退避、目标不存在或已进入提交时，拒绝这一次停止，保留消息、原会话与终端；对已停止的原记录再次调用返回 `changed: false`。修改、发送和停止人工待发意图需要服务认证的 user／device，managed Agent 不能借此操作人工草稿。具体参数与当前执行版本的 `--help`／`--skill` 保持一致。
@@ -187,23 +187,23 @@ Endpoint、Host 路由与源身份的行为边界见[公共控制合同](../desi
 命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint 与 `connection: "not-attempted"`，不连接、不创建服务，也不证明机器可达或 Agent 健康。直接 RPC 调用该方法得到 `connection: "responded"`，只证明本次服务响应。
 
 ```sh
-agentmux system endpoint
-agentmux --endpoint 'unix:/path/to/control.sock' agent ls
-agentmux --endpoint 'http://127.0.0.1:8787/' app snapshot
-agentmux --endpoint 'ssh://user@host/' app inspect
+amux system endpoint
+amux --endpoint "unix:$CONTROL_SOCKET" agent ls
+amux --endpoint 'http://127.0.0.1:8787/' app snapshot
+amux --endpoint 'ssh://user@host/' app inspect
 ```
 
-HTTP 服务默认关闭，宿主必须显式配置监听地址与授权 token；HTTP client 从 `AGENTMUX_RPC_HTTP_TOKEN` 取得 token。Agent 的 Session capability 仍在同一服务里验证。SSH 需要远端已有服务和 `agentmux` 可执行文件；远端 `system endpoint --stdio` 只做转发。SSH endpoint 可以通过 `socket` 或 `command` 查询参数选择远端 socket 或可执行文件，值按 URI 编码。
+HTTP 服务默认关闭，宿主必须显式配置监听地址与授权 token；HTTP client 从 `AGENTMUX_RPC_HTTP_TOKEN` 取得 token。Agent 的 Session capability 仍在同一服务里验证。SSH 需要远端已有服务和 `amux` 可执行文件；远端 `system endpoint --stdio` 只做转发。SSH endpoint 可以通过 `socket` 或 `command` 查询参数选择远端 socket 或可执行文件，值按 URI 编码。
 
 `--endpoint` 选择公共服务；命令支持的 `--host` 选择该服务认识的 Host 路由 ID，不是 SSH 地址。`local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。`agent ls` 每个观察及 `agent inspect` 返回 `routeHostId`，原 `session.hostId` 保留；用发现出的路由 ID 继续 `agent context --host`，其 `sourceHostId` 与 descriptor 保留源服务身份。发现和后续操作须使用同一 endpoint，Host ID 不能跨 endpoint 当作全局机器身份。`settings hosts ls` 是配置发现，不代表已连接。
 
 ```sh
 # Direct service: local is the remote Core service's machine.
-agentmux --endpoint 'ssh://user@build-node/' agent ls
-agentmux --endpoint 'ssh://user@build-node/' agent context --host local --session SID
+amux --endpoint 'ssh://user@build-node/' agent ls
+amux --endpoint 'ssh://user@build-node/' agent context --host local --session SID
 # Via the default service: use its discovered routeHostId, such as build-host.
-agentmux agent ls
-agentmux agent context --host build-host --session SID
+amux agent ls
+amux agent context --host build-host --session SID
 ```
 
 Project／Zone 的真实资源决定 `agent open` 的执行机器；展示 Space 或 Region 不改变已有 Session 的 Host／cwd。未知 Host、Session 未发现、owner 歧义与服务不可达保留各自错误，不自动选择首项或重路由。
@@ -221,9 +221,9 @@ A `submitted` receipt confirms ordinary input submission. Read native history by
 新建先持有准确 Goal ID，明确保存一个待定义目标，再打开同一 Goal 在原主 Mote 的专属 Tab。省略 `--project` 表示未分配，不代替 Goal 定义或开始执行：
 
 ```sh
-agentmux goal create --goal '<held-goal-id>' --title 'Untitled goal' --risk low --confirm user --operation-id '<create-operation-id>'
-agentmux goal inspect --goal '<held-goal-id>'
-agentmux goal discuss --goal '<held-goal-id>' --mode open --operation-id '<discussion-operation-id>'
+amux goal create --goal '<held-goal-id>' --title 'Untitled goal' --risk low --confirm user --operation-id '<create-operation-id>'
+amux goal inspect --goal '<held-goal-id>'
+amux goal discuss --goal '<held-goal-id>' --mode open --operation-id '<discussion-operation-id>'
 ```
 
 创建回执未知时先 inspect 这个准确 ID；不能按标题猜实例或另建 Goal。讨论的 `open|grill|grounding` 复用原 PMO 工作面与输入 owner；Tab、导航或队列回执不证明 Prompt 已应用、接受或完成。已保存但讨论失败的 Goal 保留，只明确重开同一个 Goal。
@@ -231,8 +231,8 @@ agentmux goal discuss --goal '<held-goal-id>' --mode open --operation-id '<discu
 确认提案与接受结果仅允许经运输层认证的人或设备。先读当前内容，再使用原版本与准确提交 ID：
 
 ```sh
-agentmux goal confirm --goal '<goal-id>' --revision 3 --operation-id '<human-confirm-operation-id>'
-agentmux goal accept --goal '<goal-id>' --revision 3 --submission '<submission-id>' --operation-id '<human-accept-operation-id>'
+amux goal confirm --goal '<goal-id>' --revision 3 --operation-id '<human-confirm-operation-id>'
+amux goal accept --goal '<goal-id>' --revision 3 --submission '<submission-id>' --operation-id '<human-accept-operation-id>'
 ```
 
 接受报告中的差距须明确加 `--accept-gaps`；原差距不会被抹掉。Agent 可以讨论、提出提案和报告，不能凭业务字段自称人来确认或接受。认可回执未知时保留准确意图，先读取原 Goal 当前事实，不能自动重复提交。完整行为见 [Goals 与 Demand](../design/behavior/goals-and-demand.md)。
