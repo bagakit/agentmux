@@ -72,7 +72,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, send: vi.fn(),
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
-  try { release = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
