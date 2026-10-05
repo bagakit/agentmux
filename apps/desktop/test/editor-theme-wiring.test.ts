@@ -7,7 +7,8 @@ describe('EditorPane Monaco theme wiring', () => {
   it('uses one resolved theme for edit and diff surfaces', () => {
     const shell = readFileSync(new URL('../src/renderer/src/components/EditorPane.tsx', import.meta.url), 'utf8')
     const hook = readFileSync(new URL('../src/renderer/src/hooks/useMonacoTheme.ts', import.meta.url), 'utf8')
-    expect(hook).toContain('monacoThemeForAppAppearance')
+    expect(hook).toContain('MONACO_THEME_ID')
+    expect(hook).not.toContain('matchMedia')
     expect(shell).toContain('useMonacoTheme()')
     expect(shell).toContain('theme={monacoTheme}')
     expect(source).toContain('useMonacoTheme()')
