@@ -118,6 +118,8 @@ Toolkit 设置以同一层级的工具列表呈现内置与 Custom 工具，按�
 
 手动执行与定时启用让用户能审阅内容、身份、范围和权限，未知权限不自动批准。应用关闭后的定时执行、Agent 完成与结果协议、在途工作修改 / 删除 / 停止、凭据与日志隐私在相应能力交付前明确边界，不预设新后台调度平台。查询余量、刷新鉴权、切换账号仅是用户工具示例，不成为厂商专用核心分支。Idea、使用旅程与尚未确认选择见 Toolkit idea（本机过程资料：`docs/ideas/toolkit.md`）；视觉语言见密度 SSOT[《Toolkit 的入口、结果与配置》](../presentation/settings-and-observation.md#toolkit-的入口结果与配置)。
 
+Toolkit 的 Desktop IPC 是原 Workbench 的本地用户通道。执行、配置、停止及声明后的展示求值均须绑定准确的原 WebContents 与主 WebFrame；名称来源记录、显示位置、可见性和相同标题不能授权，缺少发送者或 frame 保持未确认并拒绝本次调用。拒绝不关闭原工具执行或健康 Agent。公共 RPC／CLI 继续沿原 transport caller 与 Toolkit 执行授权合同，不由 IPC 的展示身份代签。
+
 ### Toolkit 展示时求值
 
 inline 工具和本地包可选择声明独立、可重复求值的展示入口，普通工具默认不声明。声明及实际源码沿原配置／包 owner 可发现、可审阅；它不把普通主脚本或历史 action 变成自动执行，也不宣称平台强制只读或 sandbox。公开 evaluate 与显式选择 evaluateOnDisplay 的 watch 表达展示求值意图，CLI evaluate／watch --evaluate 与界面共用同一 owner；get／inspect 和默认 watch 始终只读，无展示入口的 watch --evaluate 仍为被动观察。官方入口继续守可信 local-user 权限，不能因展示升级 managed Agent 或远端设备权限。
