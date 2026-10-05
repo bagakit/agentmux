@@ -1170,8 +1170,6 @@ export class RuntimeController {
   async sessionTimeline(control: SessionHistoryReference) {
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
-    if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
     const timeline = await host.client.sessionTimeline(control.agentSessionId)
     if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
     if (timeline.agentSessionId !== control.agentSessionId) {
@@ -1201,10 +1199,13 @@ export class RuntimeController {
     }
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
-    if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
-    if (!descriptor.history) throw new Error('No native history locator was retained for this Session.')
-    const executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
+    let executor: Pick<AgentMuxAgentResumeInput, 'commandOverride' | 'args' | 'env'> = {}
+    if (host.config.kind !== 'ssh') {
+      const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
+      if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
+      if (!descriptor.history) throw new Error('No native history locator was retained for this Session.')
+      executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
+    }
     const page = await host.client.sessionHistoryPage(control.agentSessionId, {
       ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
       ...(options?.limit === undefined ? {} : { limit: options.limit }),
@@ -1230,9 +1231,12 @@ export class RuntimeController {
     if (this.hostReconfigurationReservations.has(control.hostId)) throw new Error(`Runtime host is being reconfigured: ${control.hostId}`)
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
-    if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
-    const executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
+    let executor: Pick<AgentMuxAgentResumeInput, 'commandOverride' | 'args' | 'env'> = {}
+    if (host.config.kind !== 'ssh') {
+      const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
+      if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
+      executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
+    }
     // Renderer supplies a recorded locator, never an invocation or an arbitrary file read.
     const result = await host.client.sessionHistoryResource(control.agentSessionId, {
       source: input.source, recordId: input.recordId, partIndex: input.partIndex, expectedReference: input.expectedReference,
@@ -1282,10 +1286,14 @@ export class RuntimeController {
     host.historyObservationDisposers.add(retire)
     signal.addEventListener('abort', dispose, { once: true })
     try {
-      const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
+      let executor: Pick<AgentMuxAgentResumeInput, 'commandOverride' | 'args' | 'env'> = {}
+      if (host.config.kind !== 'ssh') {
+        const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
+        controller.signal.throwIfAborted()
+        if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
+        executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
+      }
       controller.signal.throwIfAborted()
-      if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
-      const executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
       const acquired = await host.client.observeSessionHistory(control.agentSessionId, observation => {
         if (!disposed) listener(observation)
       }, { ...executor, signal: controller.signal })
