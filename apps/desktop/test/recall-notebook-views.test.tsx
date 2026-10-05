@@ -374,3 +374,34 @@ it('keeps a later directory view when an earlier page write finishes', async () 
     expect(savedNotes().at(-1)?.status).toBe('written'); intactOriginalWork()
   } finally { release() }
 }))
+
+it('keeps the selected dirty parent editor and caret throughout a delayed canonical read with a child active in the shared layout', async () => withActualNotes(async () => {
+  await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  const parentId = useAppStore.getState().recallNoteId!, parentReference = useAppStore.getState().recallZoneSelection!.active!
+  await act(async () => { await changeNotebook({ kind: 'rename-page', noteId: parentId, title: 'Retained parent' }) })
+  await dom.click('[aria-label="Add subpage to Retained parent"]')
+  await vi.waitFor(() => expect(useAppStore.getState().recallNoteId).not.toBe(parentId), { timeout: 5000 }); await readyNoteRegion()
+  const childReference = useAppStore.getState().recallZoneSelection!.active!
+  const parentButton = [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-notebook-page')].find(button => button.textContent?.includes('Retained parent'))!
+  await act(async () => parentButton.click())
+  await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active).toEqual(parentReference))
+  const originalEditor = editor()
+  await act(async () => { originalEditor.commands.insertContent('Original unsaved parent selection'); originalEditor.commands.setTextSelection(12) })
+  const caret = originalEditor.state.selection.toJSON(), before = useAppStore.getState(), layout = before.layouts[NOTES_WORKSPACE_ID]!
+  await act(async () => useAppStore.setState({ layouts: { ...before.layouts, [NOTES_WORKSPACE_ID]: { ...layout, groups: layout.groups.map(group => ({ ...group, activeTabId: group.tabOrder.includes(childReference.tabId) ? childReference.tabId : group.activeTabId })) } } }))
+  await directory(); await dom.click('[aria-label="Cards view"]')
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), read = vi.mocked(api.files.read).getMockImplementation()!
+  const delayed = vi.mocked(api.files.read).mockImplementationOnce(async (workspaceId, path) => { await gate; return read(workspaceId, path) })
+  try {
+    await dom.click(`.recall-note-card[data-note-id="${parentId}"]`)
+    await act(async () => {})
+    expect(delayed).toHaveBeenCalled()
+    expect(editor()).toBe(originalEditor)
+    expect(editor().state.selection.toJSON()).toEqual(caret)
+    release()
+    await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active).toEqual(parentReference))
+    expect(editor()).toBe(originalEditor); expect(editor().state.selection.toJSON()).toEqual(caret)
+    expect(useAppStore.getState().recallNoteId).toBe(parentId); intactOriginalWork()
+  } finally { release() }
+}))
