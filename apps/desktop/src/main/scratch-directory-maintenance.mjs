@@ -1,3 +1,4 @@
+import { scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from '../shared/scratch-topic-identity.mjs'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstat, mkdir, open, readdir, readlink, realpath, stat, constants } from 'node:fs/promises'
@@ -6,7 +7,6 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { inspectDirectoryIdentity, retainDirectoryIdentity, normalizeDirectoryIdentity, moteDirectoryName,
   SCRATCH_DIRECTORY_IDENTITY_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH, SCRATCH_DIRECTORY_ALIAS_PENDING_PATH } from './scratch-directory-identity.mjs'
 
-const directoryPattern = /^topic--(launcher|session|view)--([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
 const defaultHelper = resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move')
 const failure = (message, code) => Object.assign(new Error(message), { code })
 const issue = error => ({ code: error?.code ?? 'DIRECTORY_MIGRATION_FAILED', message: error instanceof Error ? error.message : String(error) })
@@ -75,8 +75,8 @@ export async function migrateTopicDirectories({ home = homedir(), scratchRoot = 
       await requireDirectory(roots[role]); const actual = await realpath(roots[role])
       context.roots[role] = [...new Set([roots[role], actual])]
       for (const name of (await readdir(actual)).sort()) {
-        const match = directoryPattern.exec(name)
-        if (match) ids.add(`${match[1]}:${match[2]}`)
+        const id = scratchTopicIdFromDirectoryName(name)
+        if (id) ids.add(id)
         else if (role === 'motes' && /^[0-9a-f]{16}$/.test(name)) hashEntries.push({ path: join(actual, name), name })
         else if (role === 'scratch') report.looseEntries.push(name)
       }
@@ -94,7 +94,7 @@ export async function migrateTopicDirectories({ home = homedir(), scratchRoot = 
     } catch (error) { report.issues.push({ ...issue(error), directoryName: entry.name }); report.success = false }
   }
   for (const id of [...ids].sort()) {
-    const long = `topic--${id.replace(':', '--')}`, short = moteDirectoryName(id), local = { ...context, topicId: id }
+    const long = scratchTopicDirectoryName(id), short = moteDirectoryName(id), local = { ...context, topicId: id }
     const addresses = [...(context.roots.scratch.length ? [join(roots.scratch, long)] : []),
       ...(context.roots.topics.length ? [join(roots.topics, long)] : []),
       ...(context.roots.motes.length ? [join(roots.motes, long), join(roots.motes, short)] : [])]

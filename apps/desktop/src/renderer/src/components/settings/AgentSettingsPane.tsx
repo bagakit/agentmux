@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENT_AVATAR_BADGE_IDS, AGENT_AVATAR_BADGE_LABELS } from '../../../../shared/contracts'
 import { AgentAvatar } from '../AgentAvatar'
 import {
@@ -239,9 +240,9 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setDrafts((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
   }
 
-  function createExecutorId(providerId: string): string {
+  function createExecutorId(): string {
     let id: string
-    do { id = `${providerId}-${crypto.randomUUID().slice(0, 8)}` }
+    do { id = mintObjectId() }
     while (Object.hasOwn(drafts, id) || Object.hasOwn(config.executors, id) || Object.hasOwn(resource.expected, id))
     return id
   }
@@ -251,7 +252,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     if (saving || Object.hasOwn(resource.expected, id) || draft.providerId === providerId) return
     const previous = providerCatalog.find((provider) => provider.id === draft.providerId)
     const next = providerCatalog.find((provider) => provider.id === providerId)!
-    const nextId = createExecutorId(providerId)
+    const nextId = createExecutorId()
     setDrafts((current) => {
       const records = { ...current }
       records[nextId] = { ...records[id]!, providerId,
@@ -314,7 +315,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
 
   function addExecutor(provider = providerCatalog[0]): void {
     if (!provider) { openProviders(); return }
-    const id = createExecutorId(provider.id)
+    const id = createExecutorId()
     setDrafts((current) => ({ ...current, [id]: {
       label: `${provider.label} ${Object.keys(current).length + 1}`, providerId: provider.id,
       command: provider.executable, args: '', env: '{}', injectAgentMuxGuide: true

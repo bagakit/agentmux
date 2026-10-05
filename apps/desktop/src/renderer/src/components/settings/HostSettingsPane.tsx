@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Plus, RadioTower, Trash2 } from 'lucide-react'
 import { HostIcon } from '../HostBadge'
@@ -122,7 +123,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   }
 
   function addHost(): void {
-    const id = `ssh-${crypto.randomUUID().slice(0, 8)}`
+    const id = mintObjectId()
     setUpgradeHosts(current => [...current, id])
     setHosts((current) => [...current, {
       id,

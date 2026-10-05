@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
@@ -24,7 +25,7 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
   rpc: TopicsRpc; action: Action; categories: TopicCategory[]; onClose(): void; onSaved(): void
 }) {
   const [original] = useState(action)
-  const [newId] = useState(() => crypto.randomUUID())
+  const [newId] = useState(() => mintObjectId())
   const [title, setTitle] = useState(original.kind === 'category-rename' ? original.category.title : '')
   const [destination, setDestination] = useState(''), [busy, setBusy] = useState(false), [unknown, setUnknown] = useState(false), [issue, setIssue] = useState('')
   const [checked, setChecked] = useState(false)
@@ -37,7 +38,7 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
     setBusy(true)
     try {
       if (original.kind === 'category-create') await rpc('topic.category.create', { categoryId: newId, title: title.trim() })
-      else if (original.kind === 'topic-create') await rpc('topic.create', { topicId: `view:${newId}`, categoryId: original.category.categoryId, title: title.trim() })
+      else if (original.kind === 'topic-create') await rpc('topic.create', { topicId: newId, categoryId: original.category.categoryId, title: title.trim() })
       else if (original.kind === 'category-rename') await rpc('topic.category.rename', { categoryId: original.category.categoryId, expectedRevision: revision!, title: title.trim() })
       else await rpc('topic.move', { topicId: original.topic.topicId, categoryId: destination, expectedRevision: spatialRevision })
       onSaved()
@@ -47,7 +48,7 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
   async function inspect() {
     try {
       if (original.kind === 'topic-create' || original.kind === 'topic-move') {
-        const result = await rpc('topic.inspect', { topicId: original.kind === 'topic-create' ? `view:${newId}` : original.topic.topicId })
+        const result = await rpc('topic.inspect', { topicId: original.kind === 'topic-create' ? newId : original.topic.topicId })
         if (result.topic) setSpatialRevision(result.topic.spatialRevision)
         setChecked(result.unavailable.length === 0 && (original.kind === 'topic-create' || result.topic !== null))
         setIssue(result.topic ? `原 Topic 已读回：${result.topic.title}。请刷新目录核对分类与工作面；没有重放操作。` : '当前未找到原 Topic。草稿与创建身份保留，未重放操作。')

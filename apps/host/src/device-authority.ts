@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError, durableWriteFile, type TrustedDevice, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
@@ -54,7 +55,7 @@ export class DeviceAuthority {
     try { state = stateFrom(JSON.parse(await readFile(path, 'utf8'))) }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      state = { schema: 'agentmux.device-authority.v1', hostId: randomUUID(), devices: [] }
+      state = { schema: 'agentmux.device-authority.v1', hostId: mintObjectId(), devices: [] }
       await durableWriteFile(path, JSON.stringify(state) + '\n')
     }
     return new DeviceAuthority(path, state, now)
@@ -105,7 +106,9 @@ export class DeviceAuthority {
       const existing = state.devices.find(device => device.credentialHash === hash)
       if (existing) { if (existing.revokedAt !== undefined) throw denied(); admitted = publicDevice(existing); return state }
       if (state.devices.length >= MAX_DEVICES) throw new AgentMuxError('Device admission is full. Existing Sessions remain available.', 'CONTROL_OWNER_BUSY')
-      admitted = { deviceId: randomUUID(), name: `设备 ${hash.slice(0, 6)}`, createdAt: this.now() }
+      let deviceId: string
+      do { deviceId = mintObjectId() } while (state.devices.some(device => device.deviceId === deviceId))
+      admitted = { deviceId, name: `设备 ${hash.slice(0, 6)}`, createdAt: this.now() }
       return { ...state, devices: [...state.devices, { ...admitted, credentialHash: hash }] }
     })
     return admitted!

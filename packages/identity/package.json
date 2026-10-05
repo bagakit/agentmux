@@ -1,0 +1,39 @@
+{
+  "name": "@agentmux/identity",
+  "version": "0.1.0",
+  "description": "Portable product identity allocation shared by AgentMux domain packages",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/bagakit/agentmux.git",
+    "directory": "packages/identity"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "@scure/base": "2.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

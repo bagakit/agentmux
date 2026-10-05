@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentScheduleCalendar, AgentScheduleCheckInPolicy, AgentScheduleCheckInState } from './agent-schedule.js'
 
@@ -60,7 +60,7 @@ export class ContinuousProgressScheduler {
 
   constructor(options: ContinuousProgressSchedulerOptions = {}) {
     this.now = options.now ?? Date.now
-    this.id = options.id ?? randomUUID
+    this.id = options.id ?? mintObjectId
   }
 
   restore(records: readonly ContinuousProgressLoop[]): void {

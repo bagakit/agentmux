@@ -494,8 +494,8 @@ function sessionOnlyTab(tab: WorkbenchTab): WorkbenchTab | null {
     if (sessionSurface(surface)) continue
     // 文件面必须活过重启——它就是用户报的「重启后 tab 和分屏没了」的一半：一个纯 file tab 曾被整面剥成
     // 0 面（整 tab 消失），agent+file 分屏曾塌成单面。file 面本身只有 {regionId,kind,workspaceId,path}，
-    // 没有运行时内容可剥，且 tab id 本就是 `file:${workspaceId}:${path}`——存 file 面与存路径是同一件事，
-    // 分不开。path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。谁若日后以「过时的直接删」为由
+    // 没有运行时内容可剥。Tab ID 是持久的 opaque 身份，文件路径须读原 File Region，
+    // path 原样保留（相对存相对、绝对存绝对，不 normalize/重写）。谁若日后以「过时的直接删」为由
     // 把下面这条 file→存 一并删掉，就会原样重犯这个 bug——这个机制不是冗余，删它=回归。
     if (persistedSurfaceSurvives(surface, { spatiallyBound: Boolean(tab.space), fileSurvives: () => true })) {
       continue

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ArrowLeft, Check, Plus, Search, Trash2, X } from 'lucide-react'
 import { PROMPT_REACTION_ICONS, PROMPT_REACTION_STARTERS, isPromptReactionCode, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
 import { PromptReactionIconView } from '@agentmux/client-ui/components/ConversationReactionActions'
@@ -98,7 +99,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   }
   function open(id: string): void { setSelectedId(id); setView('editor') }
   function add(): void {
-    const id = `prompt-${crypto.randomUUID()}`
+    const id = mintObjectId()
     resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '' } }))
     setQuery('')
     focusNewName.current = true

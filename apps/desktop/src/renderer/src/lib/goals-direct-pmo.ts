@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentFocusContext } from './agent-focus'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from './pmo-teams-topic-floating'
 import { useAppStore } from '../store'
@@ -82,7 +83,7 @@ function runDirectGoal(current: DirectGoalRequest, intent: PresentationIntent, c
 export function startDirectGoal(project?: { id: string; name: string }): Promise<void> {
   if (flight) return flight
   if (request) return retryDirectGoal()
-  return runDirectGoal({ id: `demand_${crypto.randomUUID()}`, phase: 'save', pending: false, error: null, ...(project ? { project: { id: project.id, name: project.name } } : {}) }, presentationIntent(),
+  return runDirectGoal({ id: mintObjectId(), phase: 'save', pending: false, error: null, ...(project ? { project: { id: project.id, name: project.name } } : {}) }, presentationIntent(),
     { projectId: project?.id ?? null, projectName: project?.name ?? null })
 }
 export function retryDirectGoal(): Promise<void> {

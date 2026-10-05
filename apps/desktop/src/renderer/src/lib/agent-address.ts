@@ -71,8 +71,7 @@ ${LIST_SESSIONS}`
     // 'duplicate-launcher' 的开着的 Tab，拿到的就是这个码。
     //
     // 它今天不可达靠的是**另一个**前提：没有任何生产路径能让一个 regionId 同时留在两张开着的 Tab 的
-    // `regions` 表里。两种铸造拼法（`region:${crypto.randomUUID()}` 与 `initialWorkbenchRegionId` 的
-    // `region:${tabId}`，而 tabId 自己也带 uuid）都全局唯一；唯一刻意复用 id 的 `promoteRegionToTab`
+    // `regions` 表里。新 Region 通过公共对象 ID allocator／domain derive 生成；唯一刻意复用 id 的 `promoteRegionToTab`
     // 由 `removeWorkbenchRegion` 从源 Tab 上 `delete` 掉那一格，源只剩一格时它整条不做（返回
     // unchanged）。这个前提被 promote 那条守卫钉着——见 agent-address.test.ts 里"唯一刻意复用
     // regionId 的路径"那条，它按"跨 Tab 持有计数恰好为 1"判，与那处 `matches.length !== 1` 同形。

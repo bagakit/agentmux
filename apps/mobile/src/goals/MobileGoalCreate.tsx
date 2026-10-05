@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult } from '@agentmux/core'
@@ -71,7 +72,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
     try {
       if (action === 'new') {
         if (request && request.phase !== 'ready') return
-        const value: Creation = { input: { goalId: `demand_${crypto.randomUUID()}`, title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: crypto.randomUUID() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存待定义目标；创建不会开始执行。' }
+        const value: Creation = { input: { goalId: mintObjectId(), title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: crypto.randomUUID() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存待定义目标；创建不会开始执行。' }
         setRequest(value); owner.retainGoalIntent(intent(value)); await save(value)
       } else if (request && action === 'save-same' && request.phase === 'not-saved') {
         const value = { ...request, phase: 'saving' as const, issue: '正在明确保存原 ID 的同一个目标。' }

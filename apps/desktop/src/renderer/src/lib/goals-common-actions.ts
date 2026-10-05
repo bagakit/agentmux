@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AppConfig, ComposerShortcut, GoalsCommonActionRef, GoalsCommonActionsConfig } from '../../../shared/contracts'
 import { resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { configuredExecutors, type ConfiguredExecutor } from './executors'
@@ -31,7 +32,7 @@ export function resolveGoalsCommonAction(ref: GoalsCommonActionRef, config: AppC
 }
 
 /** Only the body is required by this entry; helper fields meet the original library contract. */
-export function createCommonActionPrompt(body: string, prompts: readonly ComposerShortcut[], id = `prompt-${crypto.randomUUID()}`): ComposerShortcut {
+export function createCommonActionPrompt(body: string, prompts: readonly ComposerShortcut[], id = mintObjectId()): ComposerShortcut {
   const used = new Set(prompts.map(prompt => prompt.keyword))
   const base = `action-${id.replace(/^prompt-/, '').slice(0, 8)}`
   let keyword = base, suffix = 2

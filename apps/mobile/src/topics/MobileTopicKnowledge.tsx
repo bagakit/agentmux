@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -77,10 +78,10 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, visible
   </section>
 }
 
-/** Original target/revision and one new entry UUID are held for the entire edit intent. */
+/** Original target/revision and one new entry ID are held for the entire edit intent. */
 export function MobileTopicKnowledgeEditor({ rpc, target, onClose, onSaved }: { rpc: TopicsRpc;
   target: { topicId: string; entry?: TopicKnowledge }; onClose(): void; onSaved(entry: TopicKnowledge): void }) {
-  const [original] = useState(() => ({ ...target, entryId: target.entry?.entryId ?? crypto.randomUUID() }))
+  const [original] = useState(() => ({ ...target, entryId: target.entry?.entryId ?? mintObjectId() }))
   const [title, setTitle] = useState(original.entry?.title ?? ''), [content, setContent] = useState(original.entry?.content ?? '')
   const [scope, setScope] = useState(original.entry?.scope ?? '')
   const [certainty, setCertainty] = useState<TopicKnowledge['certainty']>(original.entry?.certainty ?? 'proposal')

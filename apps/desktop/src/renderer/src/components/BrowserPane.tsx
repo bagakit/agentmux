@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
@@ -618,7 +619,7 @@ function BrowserPaneContent({
   function addElementAnnotation(): void {
     if (!elementSelection) return
     addBrowserAnnotation({
-      id: crypto.randomUUID(),
+      id: mintObjectId(),
       workspaceId: tab.workspaceId,
       browserId: tab.browserId,
       navigationId: tab.navigationId,

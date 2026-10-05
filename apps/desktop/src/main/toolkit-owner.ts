@@ -1,5 +1,5 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitSnapshot, type AgentMuxToolkitPort,
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
@@ -140,7 +140,9 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
     if (this.starting) return await this.starting
     if (this.execution?.ref && !this.execution.ended) return
-    const execution = this.newExecution(randomUUID())
+    let id: string
+    do { id = mintObjectId() } while (id === this.value.executionId)
+    const execution = this.newExecution(id)
     this.execution = execution
     this.value = { ...this.value, executionId: execution.id, run: null, state: 'starting', reason: null,
       startedAt: (this.args.now ?? Date.now)(), observation: null, observedAt: null, sequence: 0, trend: [] }

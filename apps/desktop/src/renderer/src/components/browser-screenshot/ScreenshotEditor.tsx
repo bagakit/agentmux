@@ -1,4 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import { mintObjectId } from '@agentmux/core/object-id'
 // Portions adapted from a third-party MIT-licensed implementation (commit 4fd93ead1999dc34e13ac5915693ad8467a39a6e).
 // Copyright (c) 2026 Lovecast Inc., MIT License. See THIRD_PARTY_NOTICES.md.
 
@@ -207,7 +208,7 @@ export function ScreenshotEditor({
       return
     }
     event.currentTarget.setPointerCapture(event.pointerId)
-    const id = crypto.randomUUID()
+    const id = mintObjectId()
     const shape: ScreenshotShape = tool === 'pen' || tool === 'highlight'
       ? { id, kind: tool, color, width, points: [at] }
       : { id, kind: tool, color, width, from: at, to: at }
@@ -239,7 +240,7 @@ export function ScreenshotEditor({
     const text = value.trim().slice(0, 500)
     if (!at || !text) return
     setDocumentState((current) => commitShape(current, {
-      id: crypto.randomUUID(),
+      id: mintObjectId(),
       kind: 'text',
       color,
       at,

@@ -1,3 +1,4 @@
+import { isObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
@@ -107,10 +108,10 @@ function string(value: unknown, code: string, max = 4096): asserts value is stri
   if (typeof value !== 'string' || !value.length || value.length > max || /[\0\r\n]/u.test(value)) invalid('Topic identity or text is invalid.', code)
 }
 function categoryId(value: unknown, code: string): void {
-  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)) invalid('An exact Topic Category UUID is required.', code)
+  if (!isObjectId(value) && (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value))) invalid('An exact stored Topic object ID is required.', code)
 }
 function topicId(value: unknown, code: string): void {
-  if (typeof value !== 'string' || !/^(launcher|session|view):[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(value)) invalid('An exact Topic identity is required.', code)
+  if (!isObjectId(value) && (typeof value !== 'string' || !/^(launcher|session|view):[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(value))) invalid('An exact Topic identity is required.', code)
 }
 function count(value: unknown, code: string): void {
   if (!Number.isSafeInteger(value) || (value as number) < 0) invalid('Topic spatial revision is invalid.', code)

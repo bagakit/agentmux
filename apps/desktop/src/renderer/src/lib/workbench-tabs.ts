@@ -1,3 +1,4 @@
+import { deriveObjectId } from '@agentmux/core/object-id'
 import type { GitDiffDescriptor } from '../../../shared/git-contracts'
 import type {
   AppConfig,
@@ -128,7 +129,18 @@ export type WorkbenchTab = {
 }
 
 export function initialWorkbenchRegionId(tabId: string): string {
-  return `region:${tabId}`
+  return deriveObjectId('workbench.initial-region', tabId)
+}
+
+/** A newly derived presentation cannot take a Tab or Region already held by another entity. */
+export function availableWorkbenchTabIdentity(tabs: Readonly<Record<string, WorkbenchTab>>, candidate: (incarnation: number) => string) {
+  const occupiedRegions = new Set(Object.values(tabs).flatMap(tab => Object.keys(tab.regions)))
+  let incarnation = 0, tabId: string, regionId: string
+  do {
+    tabId = candidate(incarnation++)
+    regionId = initialWorkbenchRegionId(tabId)
+  } while (tabs[tabId] || occupiedRegions.has(regionId))
+  return { tabId, regionId }
 }
 
 export function createWorkbenchTab(
@@ -361,12 +373,12 @@ export function swapWorkbenchTabRegions(
   return next
 }
 
-export function sessionTabId(sessionId: string): string {
-  return `session:${sessionId}`
+export function sessionTabId(sessionId: string, incarnation = 0): string {
+  return deriveObjectId('workbench.session-tab', JSON.stringify([sessionId, incarnation]))
 }
 
-export function fileTabId(workspaceId: string, path: string): string {
-  return `file:${workspaceId}:${path}`
+export function fileTabId(workspaceId: string, path: string, incarnation = 0): string {
+  return deriveObjectId('workbench.file-tab', JSON.stringify([workspaceId, path, incarnation]))
 }
 
 /** Fixed Git object coordinates form the identity, independently of the current disk document. */
@@ -526,22 +538,6 @@ export function tabDisplayName(input: {
     agents,
     fallback: input.fallback
   }).name
-}
-
-export function remapLayoutTabIds(
-  layout: WorkspaceLayout,
-  replacements: ReadonlyMap<string, string>
-): WorkspaceLayout {
-  const replace = (id: string): string => replacements.get(id) ?? id
-  return {
-    ...layout,
-    groups: layout.groups.map((group) => ({
-      ...group,
-      tabOrder: group.tabOrder.map(replace),
-      activeTabId: group.activeTabId ? replace(group.activeTabId) : null,
-      recentTabIds: group.recentTabIds.map(replace)
-    }))
-  }
 }
 
 export function removeTabsFromLayouts(

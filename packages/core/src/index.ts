@@ -1,3 +1,4 @@
+export { mintObjectId, deriveObjectId, isObjectId } from './object-id.js'
 export * from './agent-provider.js'
 export * from './agent-plugin.js'
 export * from './agent-launch-option.js'

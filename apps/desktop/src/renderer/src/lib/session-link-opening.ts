@@ -8,7 +8,7 @@ import { mainFocusPresentation } from './focus-tab-projection'
 import { createSessionProjectFileContextSelector, type SessionProjectFileContext } from './session-project-file-context'
 import { spatialCatalog, spatialDestination } from './space-agent-control'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
-import { fileTabId, initialWorkbenchRegionId } from './workbench-tabs'
+import { fileWorkbenchIdentity } from './file-workbench-state'
 import { terminalLinkModifierOpensSystemBrowser } from './terminal-link-gesture'
 import { isMacPlatform } from './host-platform'
 import type { FileOpenResult } from './file-workbench-state'
@@ -51,7 +51,7 @@ export async function openSessionFileLink(origin: OpenHttpLinkOrigin, context: S
     return JSON.stringify([floating?.open, floating?.preview, floating?.targetTopicId, floating?.targetTabId, floating?.reference])
   })()
   if (destination === 'tab') {
-    const tabId = fileTabId(workspace.id, path), regionId = initialWorkbenchRegionId(tabId)
+    const { tabId, regionId } = fileWorkbenchIdentity(state, workspace.id, path, placement)
     const target = spatialDestination(catalog, { zoneId: placement.space.zoneId, spaceId: placement.space.spaceId, newTab: true }, { tabId, regionId }, state.layouts).address
     const controller = surface === 'survey' || surface === 'mote' ? new AbortController() : undefined
     if (controller) {

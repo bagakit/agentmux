@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary } from '../lib/notebook-library'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
 import { spatialCatalog } from '../lib/space-agent-control'
@@ -292,7 +293,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     }
     setLocationChoice(null)
     setRecallCapture({ draftId: `survey-new-note:${zoneId}:${browser.browserId}:${encodeURIComponent(browser.url)}`,
-      source: { sourceId: crypto.randomUUID(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
+      source: { sourceId: mintObjectId(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
         position: { zoneId, tabId: reference.tabId, regionId: reference.regionId } } })
   }
 
@@ -334,7 +335,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   function saveToRecall(): void {
     if (!currentBrowser || currentBrowser.url === 'about:blank' || !currentZone || !currentPanel) return
     setRecallCapture({ draftId: `survey-recall:${currentBrowser.browserId}:${encodeURIComponent(currentBrowser.url)}`,
-      source: { sourceId: crypto.randomUUID(), url: currentBrowser.url, title: currentBrowser.title ?? null, recordedAt: Date.now(),
+      source: { sourceId: mintObjectId(), url: currentBrowser.url, title: currentBrowser.title ?? null, recordedAt: Date.now(),
         position: { zoneId: currentZone.zoneId, tabId: currentPanel.tabId, regionId: currentPanel.regionId } } })
   }
 

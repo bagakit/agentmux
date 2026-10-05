@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeSource } from '@agentmux/core/control'
@@ -21,7 +22,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
   const input = useRef<HTMLInputElement>(null), entryId = useRef('')
   const sources = target?.entry?.sources ?? target?.sources ?? []
   useEffect(() => {
-    entryId.current = target?.entry?.entryId ?? crypto.randomUUID()
+    entryId.current = target?.entry?.entryId ?? mintObjectId()
     setTitle(target?.entry?.title ?? target?.title ?? ''); setContent(target?.entry?.content ?? ''); setScope(target?.entry?.scope ?? '')
     setForm(target?.entry?.form ?? (target?.sources?.length ? 'reference' : 'derived')); setCertainty(target?.entry?.certainty ?? 'proposal'); setError(null)
   }, [target])
@@ -69,7 +70,7 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
     return [topic.title, ...categoryNames, ...context].join(' · ')
   }
   useEffect(() => { if (!target) return; let live = true; setError(null); setTopicId(''); setTopics([]); setLoading(true)
-    newTopicId.current = 'view:' + crypto.randomUUID(); setNewTitle(target.title.slice(0, 120)); setCategoryId('')
+    newTopicId.current = mintObjectId(); setNewTitle(target.title.slice(0, 120)); setCategoryId('')
     void api.topics.call('topic.ls', {}).then(result => { if (live) { setTopics(result.topics); if (result.unavailable.length) setError(result.unavailable.map(issue => issue.message).join(' ')) } }).catch(cause => { if (live) setError(presentError(cause)) }).finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [target])

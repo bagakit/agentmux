@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { unwrapSessionInputWriteResult } from '../../../shared/session-input-result'
 import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
 import type {
@@ -29,7 +30,6 @@ import { applyAppLinkForget } from '../../../shared/browser-settings'
 import { resolveBrowserAddress } from '../../../shared/browser-address'
 import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
-import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
@@ -414,7 +414,7 @@ const mockApi: AgentMuxDesktopApi = {
     acceptGrounding: async () => { throw new Error('Result acceptance requires the Desktop durable owner. This preview does not record acknowledgement.') },
     create: async (input) => {
       const now = Date.now()
-      const demand: Demand = { id: input.id ?? crypto.randomUUID(), title: input.title, description: input.description ?? '', status: input.status ?? 'backlog', priority: input.priority ?? 'normal', projectId: input.projectId ?? null, projectName: input.projectName ?? null, executorId: input.executorId ?? null, tags: [...(input.tags ?? [])], plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, sessionIds: [...(input.sessionIds ?? [])], activities: [], decisions: [], createdAt: now, updatedAt: now }
+      const demand: Demand = { id: input.id ?? mintObjectId(), title: input.title, description: input.description ?? '', status: input.status ?? 'backlog', priority: input.priority ?? 'normal', projectId: input.projectId ?? null, projectName: input.projectName ?? null, executorId: input.executorId ?? null, tags: [...(input.tags ?? [])], plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, sessionIds: [...(input.sessionIds ?? [])], activities: [], decisions: [], createdAt: now, updatedAt: now }
       mockDemands.set(demand.id, demand)
       return { schema: 'agentmux.demand-receipt.v1', operation: 'create', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) }
     },
@@ -440,7 +440,7 @@ const mockApi: AgentMuxDesktopApi = {
       const existing = mockConfig.workspaces.find(item => item.hostId === input.hostId && item.path === input.path)
       if (existing) return structuredClone(existing)
       const item = {
-        id: crypto.randomUUID(),
+        id: mintObjectId(),
         name: input.name?.trim() || input.path.split(/[\\/]/).filter(Boolean).pop() || input.path,
         hostId: input.hostId,
         path: input.path,
@@ -478,7 +478,7 @@ const mockApi: AgentMuxDesktopApi = {
       )
       if (!workspace) {
         workspace = {
-          id: crypto.randomUUID(),
+          id: mintObjectId(),
           name: branch,
           hostId: snapshot.hostId,
           path: record.worktreePath,
@@ -494,7 +494,7 @@ const mockApi: AgentMuxDesktopApi = {
       const source = mockConfig.workspaces.find((item) => item.id === input.workspaceId)
       if (!source) throw new Error(`Unknown workspace: ${input.workspaceId}`)
       const workspace = {
-        id: crypto.randomUUID(),
+        id: mintObjectId(),
         name: input.branch,
         hostId: source.hostId,
         path: input.path,
@@ -867,7 +867,7 @@ const mockApi: AgentMuxDesktopApi = {
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]
       if (!executor) throw new Error(`Unknown Agent Executor: ${input.executorId}`)
-      const agentSessionId = input.agentSessionId ?? mintAgentSessionId()
+      const agentSessionId = input.agentSessionId ?? mintObjectId()
       const runId = crypto.randomUUID()
       const session: SessionSnapshot = {
         id: agentSessionId,
@@ -996,7 +996,7 @@ const mockApi: AgentMuxDesktopApi = {
         const timeline = mockSnapshot.timelines[session.id]
         if (!timeline) throw new Error(`Timeline not found: ${session.id}`)
         const item = {
-          id: crypto.randomUUID(),
+          id: mintObjectId(),
           agentSessionId: session.id,
           kind: 'user_message' as const,
           status: 'complete' as const,
@@ -1223,7 +1223,7 @@ const mockApi: AgentMuxDesktopApi = {
     clearInputHistory: async () => { throw new Error('Browser input history requires the Desktop host.') },
     createProfile: async (label) => {
       const profile: BrowserProfileSummary = {
-        id: crypto.randomUUID(),
+        id: mintObjectId(),
         label,
         createdAt: Date.now(),
         isDefault: false,
@@ -1247,7 +1247,7 @@ const mockApi: AgentMuxDesktopApi = {
       mockBrowserImportSources = mockBrowserImportSources.filter((candidate) => candidate.token !== sourceToken)
       if (!source) throw new Error('Unknown or already consumed Browser Profile import source')
       const profile: BrowserProfileSummary = {
-        id: crypto.randomUUID(),
+        id: mintObjectId(),
         label,
         createdAt: Date.now(),
         isDefault: false,

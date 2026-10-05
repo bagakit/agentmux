@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Link2, X } from 'lucide-react'
@@ -24,7 +25,7 @@ export function ProjectGroupDialog({ projects, seed, editing, related, observati
   const save = useAppStore(state => state.saveProjectGroup)
   const selectWorkspace = useAppStore(state => state.selectWorkspace)
   const displayPath = usePathDisplay()
-  const [groupId] = useState(() => editing?.groupId ?? `project-group:${crypto.randomUUID()}`)
+  const [groupId] = useState(() => editing?.groupId ?? mintObjectId())
   const [name, setName] = useState(editing?.name ?? projects.find(project => project.id === seed)?.name ?? '')
   const [selected, setSelected] = useState(editing?.projectIds ?? (seed ? [seed] : []))
   const [busy, setBusy] = useState(false)

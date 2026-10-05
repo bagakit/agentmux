@@ -1,4 +1,4 @@
-import { randomClientRequestId } from './client-request-id.js'
+import { isObjectId, mintObjectId } from './object-id.js'
 import { AgentMuxError, type AgentMuxControlFailure } from './errors.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import type { AgentOperationDevice } from './types.js'
@@ -57,10 +57,14 @@ export type DeliveryAttemptLookup = {
   issue: string | null
 }
 
-export const newDeliveryLogId = (): string => `delivery-${randomClientRequestId()}`
+export const newDeliveryLogId = (): string => mintObjectId()
+
+function isDeliveryLogId(value: unknown): value is string {
+  return isObjectId(value) || typeof value === 'string' && /^delivery-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)
+}
 
 export function validateDeliveryLogId(value: unknown): string {
-  if (typeof value !== 'string' || !/^delivery-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)) {
+  if (!isDeliveryLogId(value)) {
     throw new AgentMuxError('A delivery log needs its exact diagnostic ID.', 'INVALID_CONTROL_REQUEST')
   }
   return value
@@ -84,7 +88,7 @@ export function deliveryFailure(error: unknown, depth = 0): DeliveryFailure {
     ...(control && ['not_applied', 'unknown'].includes(control.disposition) &&
       (control.confirmedInputBytes === null || Number.isSafeInteger(control.confirmedInputBytes) && control.confirmedInputBytes >= 0)
       ? { controlFailure: { disposition: control.disposition, confirmedInputBytes: control.confirmedInputBytes } } : {}),
-    ...(typeof value?.logId === 'string' && /^delivery-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value.logId) ? { logId: value.logId } : {}),
+    ...(value && isDeliveryLogId(value.logId) ? { logId: value.logId } : {}),
     ...(value?.cause !== undefined && depth < 2 && value.cause !== error ? { cause: deliveryFailure(value.cause, depth + 1) } : {}),
     ...(truncated || value?.cause !== undefined && depth >= 2 ? { truncated: true as const } : {})
   }

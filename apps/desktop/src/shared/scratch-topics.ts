@@ -1,3 +1,5 @@
+import { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from './scratch-topic-identity.mjs'
+export { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from './scratch-topic-identity.mjs'
 import type { MoteQuickMode } from './mote-quick-mode'
 export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Topics'
@@ -98,9 +100,6 @@ Use the original Project, Goal and Task records to find current ownership and pr
 Current user instructions, authorization, actual capabilities and authoritative Runtime and Session facts take precedence over historical content.
 `
 
-const SCRATCH_TOPIC_ID = /^(launcher|session|view):([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
-const SCRATCH_TOPIC_DIRECTORY = /^topic--(launcher|session|view)--([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
-
 export type ScratchTopicCollaborator = {
   fileName: string
   providerId: string
@@ -146,23 +145,8 @@ export type TopicWikiSnapshot = {
   updatedAt: number | null
 }
 
-export function isScratchTopicId(topicId: string): boolean {
-  return SCRATCH_TOPIC_ID.test(topicId)
-}
-
 export function isPmoTopicId(topicId: string): boolean {
   return topicId === PMO_TEAMS_TOPIC_ID
-}
-
-export function scratchTopicDirectoryName(topicId: string): string {
-  const match = SCRATCH_TOPIC_ID.exec(topicId)
-  if (!match) throw new Error('Invalid Scratch Topic identity')
-  return `topic--${match[1]}--${match[2]}`
-}
-
-export function scratchTopicIdFromDirectoryName(name: string): string | null {
-  const match = SCRATCH_TOPIC_DIRECTORY.exec(name)
-  return match ? `${match[1]}:${match[2]}` : null
 }
 
 function trimTrailingSeparators(path: string): string {

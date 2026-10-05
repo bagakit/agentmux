@@ -1,3 +1,4 @@
+import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -10,7 +11,7 @@ import { EXTERNAL_BROWSER_PROTOCOL, MAX_BRIDGE_BYTES, EXTERNAL_CDP_METHODS, isSh
 const id = z.string().min(1).max(200)
 const grantSchema = z.object({ tabId: z.number().int().nonnegative(), grantId: z.string().uuid(),
   navigationId: id, url: z.string().max(8192).refine(isShareUrl), title: z.string().max(512) }).strict()
-const savedSchema = grantSchema.extend({ id: z.string().uuid(), workspaceId: id,
+const savedSchema = grantSchema.extend({ id: z.string().refine(value => isObjectId(value) || z.uuid().safeParse(value).success), workspaceId: id,
   extensionId: z.string().regex(/^[a-p]{32}$/), instanceId: z.string().uuid(),
   status: z.enum(['ready', 'disconnected', 'revoked', 'closed', 'unavailable']), warning: z.string().max(2000).optional(),
   ledgerNavigationId: id.optional() })
@@ -129,7 +130,9 @@ export class ExternalBrowserBridge {
         for (const previous of this.connections) {
           if (previous.extensionId === extensionId && previous.instanceId === hello.data.instanceId) { this.end(previous); previous.socket.close() }
         }
-        connection = { id: randomUUID(), extensionId, instanceId: hello.data.instanceId, workspaceId: pairing.workspaceId,
+        let connectionId: string
+        do { connectionId = mintObjectId() } while ([...this.connections].some(known => known.id === connectionId))
+        connection = { id: connectionId, extensionId, instanceId: hello.data.instanceId, workspaceId: pairing.workspaceId,
           socket, pending: new Map(), targets: new Set(), byGrant: new Map() }
         this.connections.add(connection); clearTimeout(timeout)
         const bindings = []
@@ -173,7 +176,9 @@ export class ExternalBrowserBridge {
     if (row && ['revoked', 'closed'].includes(row.status)) return null
     if (!row) {
       if (this.targets.size >= 64) return null
-      row = { ...grant, id: randomUUID(), workspaceId: connection.workspaceId,
+      let targetId: string
+      do { targetId = mintObjectId() } while (this.targets.has(targetId))
+      row = { ...grant, id: targetId, workspaceId: connection.workspaceId,
         extensionId: connection.extensionId, instanceId: connection.instanceId, status: 'ready', connection: null }
       this.targets.set(row.id, row)
     }

@@ -1,7 +1,9 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/contracts'
 import { activateTab, addTab, addTabOccurrence, groupIds, removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
+  availableWorkbenchTabIdentity,
   addWorkbenchRegion,
   focusWorkbenchTabRegion,
   documentKey,
@@ -10,7 +12,6 @@ import {
   removeWorkbenchRegion,
   replaceWorkbenchRegion,
   tabGroupForTab,
-  remapLayoutTabIds,
   titleWorkbenchSurface,
   workbenchSurfaces,
   type FileWorkbenchSurface,
@@ -154,18 +155,29 @@ export function fileOpenReferenceMatches(
 }
 
 
-/** Reuse the original visible File, including one promoted out of its initial Tab. */
-export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string) {
-  const layout = state.layouts[workspaceId]
-  if (!layout) return undefined
-  const ids = [...new Set([fileTabId(workspaceId, path), ...layout.groups.flatMap(group => group.tabOrder)])]
+/** Reuse the original File, including an unplaced owner or one promoted out of its initial Tab. */
+export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string,
+  context?: { displayWorkspaceId?: string; space?: { spaceId: string; zoneId: string } }) {
+  const layout = state.layouts[context?.displayWorkspaceId ?? workspaceId]
+  const ordered = [...(layout?.groups.flatMap(group => group.tabOrder) ?? []),
+    ...Object.values(state.layouts).flatMap(item => item.groups.flatMap(group => group.tabOrder))]
+  const ids = [...new Set([fileTabId(workspaceId, path), ...ordered, ...Object.keys(state.tabs)])]
   for (const id of ids) {
     const tab = state.tabs[id]
-    if (!tab || !tabGroupForTab(layout, id)) continue
+    if (!tab || context?.space && tab.space &&
+      (tab.space.spaceId !== context.space.spaceId || tab.space.zoneId !== context.space.zoneId)) continue
     const surface = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
     if (surface) return { tab, surface }
   }
   return undefined
+}
+
+/** Read existing entity facts before deriving an identity for a genuinely new File. */
+export function fileWorkbenchIdentity(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string,
+  context?: { displayWorkspaceId?: string; space?: { spaceId: string; zoneId: string } }): { tabId: string; regionId: string } {
+  const original = findFileWorkbenchSurface(state, workspaceId, path, context)
+  if (original) return { tabId: original.tab.id, regionId: original.surface.regionId }
+  return availableWorkbenchTabIdentity(state.tabs, incarnation => fileTabId(workspaceId, path, incarnation))
 }
 
 /** Place every format through the same durable File surface; content is a separate fact. */
@@ -186,7 +198,7 @@ export function reduceFileSurfaceOpened(
     const tab = state.tabs[placement.split.tabId]!
     const existing = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
     const opened = existing ? focusWorkbenchTabRegion(tab, existing.regionId) : addWorkbenchRegion(tab, placement.split.regionId, placement.split.direction,
-      { kind: 'file', workspaceId, path, regionId: `region:${crypto.randomUUID()}` })
+      { kind: 'file', workspaceId, path, regionId: mintObjectId() })
     const retained = placement.projection || placement.focus === false
       ? { ...opened, layout: { ...opened.layout, activeRegionId: tab.layout.activeRegionId } } : opened
     return { ...state, tabs: { ...state.tabs, [tab.id]: retained },
@@ -208,8 +220,8 @@ export function reduceFileSurfaceOpened(
       lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
       layouts: { ...state.layouts, [displayId]: activateTab(layout, reference.groupId, reference.tabId) } }
   }
-  const original = placement ? undefined : findFileWorkbenchSurface(state, workspaceId, path)
-  const tabId = original?.tab.id ?? fileTabId(workspaceId, path)
+  const original = findFileWorkbenchSurface(state, workspaceId, path, placement)
+  const { tabId } = fileWorkbenchIdentity(state, workspaceId, path, placement)
   const existingTabGroupId = tabGroupForTab(layout, tabId)
   const targetTabGroupId = placement ? preferredTabGroupId : existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
   if (!targetTabGroupId) return state
@@ -220,7 +232,7 @@ export function reduceFileSurfaceOpened(
   const placedTab = original ? focusWorkbenchTabRegion(original.tab, original.surface.regionId)
     : existingFile ? existingTab! : existingTab ? addWorkbenchRegion(existingTab, existingTab.layout.activeRegionId, 'right', {
       kind: 'file', workspaceId, path,
-      regionId: existingTab.regions[initialWorkbenchRegionId(tabId)] ? `region:${crypto.randomUUID()}` : initialWorkbenchRegionId(tabId)
+      regionId: existingTab.regions[initialWorkbenchRegionId(tabId)] ? mintObjectId() : initialWorkbenchRegionId(tabId)
     }) : (() => {
     const surface: FileWorkbenchSurface = {
       regionId: initialWorkbenchRegionId(tabId),
@@ -574,7 +586,7 @@ export function reduceFileRename(
   workspaceId: string,
   path: string,
   nextPath: string
-): FileWorkbenchState & { tabIds: ReadonlyMap<string, string> } {
+): FileWorkbenchState {
   const affectedTabs = Object.values(state.tabs).flatMap((tab) => {
     const surfaces = workbenchSurfaces(tab).filter((surface): surface is FileWorkbenchSurface => (
       surface.kind === 'file' &&
@@ -583,16 +595,7 @@ export function reduceFileRename(
     ))
     return surfaces.length > 0 ? [{ tab, surfaces }] : []
   })
-  const replacements = new Map(
-    affectedTabs.flatMap(({ tab }) => {
-      const titleSurface = titleWorkbenchSurface(tab)
-      return titleSurface.kind === 'file' &&
-        titleSurface.workspaceId === workspaceId &&
-        isPathWithinSubtree(titleSurface.path, path)
-        ? [[tab.id, fileTabId(workspaceId, remapPathWithinSubtree(titleSurface.path, path, nextPath))] as const]
-        : []
-    })
-  )
+  // Renaming the file changes its resource path, never its durable Tab or Region identity.
   const tabs = { ...state.tabs }
   const documents = { ...state.documents }
   const dirtyDocuments = { ...state.dirtyDocuments }
@@ -602,11 +605,8 @@ export function reduceFileRename(
   const retainedDocumentDrafts = { ...state.retainedDocumentDrafts }
   const savingDocuments = { ...state.savingDocuments }
   for (const { tab, surfaces } of affectedTabs) {
-    const nextId = replacements.get(tab.id) ?? tab.id
-    delete tabs[tab.id]
-    tabs[nextId] = {
+    tabs[tab.id] = {
       ...tab,
-      id: nextId,
       regions: Object.fromEntries(Object.entries(tab.regions).map(([regionId, surface]) => [
         regionId,
         surfaces.includes(surface as FileWorkbenchSurface)
@@ -675,7 +675,6 @@ export function reduceFileRename(
     savingDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = false
   }
   return {
-    tabIds: replacements,
     tabs,
     documents,
     dirtyDocuments,
@@ -684,12 +683,7 @@ export function reduceFileRename(
     documentIssues,
     retainedDocumentDrafts,
     savingDocuments,
-    layouts: Object.fromEntries(
-      Object.entries(state.layouts).map(([id, layout]) => [
-        id,
-        remapLayoutTabIds(layout, replacements)
-      ])
-    ),
+    layouts: state.layouts,
     lastActiveFileByWorkspace: {
       ...state.lastActiveFileByWorkspace,
       [workspaceId]: state.lastActiveFileByWorkspace[workspaceId]
@@ -721,10 +715,10 @@ export function findFileRenameProjectionCollision(
     ) ? [] : [{ tab, titleSurface }]
   })
   const affectedTabIds = new Set(affectedTitleTabs.map(({ tab }) => tab.id))
-  for (const { tab, titleSurface } of affectedTitleTabs) {
+  for (const { titleSurface } of affectedTitleTabs) {
     const renamedPath = remapPathWithinSubtree(titleSurface.path, path, nextPath)
-    const nextTabId = fileTabId(workspaceId, renamedPath)
-    if (nextTabId !== tab.id && state.tabs[nextTabId] && !affectedTabIds.has(nextTabId)) {
+    if (tabs.some(tab => !affectedTabIds.has(tab.id) && workbenchSurfaces(tab).some(surface =>
+      surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === renamedPath))) {
       return { owner: 'tab', path: renamedPath }
     }
   }

@@ -1,3 +1,4 @@
+import { isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, open } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -14,7 +15,7 @@ export const MAX_BROWSER_INPUT_HISTORY_FILE_BYTES = 256 * 1024
 
 const scopeSchema = z.object({
   workspaceId: z.string().min(1).max(1024),
-  profileId: z.string().uuid()
+  profileId: z.string().refine(value => isObjectId(value) || z.uuid().safeParse(value).success)
 }).strict()
 const textSchema = z.string().min(1).refine(text =>
   text === text.trim() && Buffer.byteLength(text, 'utf8') <= MAX_BROWSER_INPUT_HISTORY_TEXT_BYTES)

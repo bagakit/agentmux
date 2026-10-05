@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
 import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '@agentmux/git'
@@ -253,7 +253,7 @@ export class WorktreeService {
     const existing = findWorkspaceByLocation(config.workspaces, snapshot.hostId, branch.worktreePath)
     if (existing) return { config, workspace: existing }
     return await this.register(config, {
-      id: randomUUID(),
+      id: mintObjectId(),
       name: branch.name,
       hostId: snapshot.hostId,
       path: branch.worktreePath,
@@ -303,7 +303,7 @@ export class WorktreeService {
     // materialise would edit the user's repository on behalf of an operation that did not happen.
     await excludeWorktreeRootFromStatus(host, snapshot.repoPath)
     return await this.register(config, {
-      id: randomUUID(),
+      id: mintObjectId(),
       name: branchName,
       hostId: snapshot.hostId,
       path,

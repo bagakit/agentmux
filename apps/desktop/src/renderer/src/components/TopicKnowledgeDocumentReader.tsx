@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { spatialCatalog, spatialDestination, zoneContext } from '../lib/space-agent-control'
-import { fileTabId, initialWorkbenchRegionId } from '../lib/workbench-tabs'
+import { fileWorkbenchIdentity } from '../lib/file-workbench-state'
 import { useAppStore } from '../store'
 
 /** A view of the original Files receipt. It never creates a knowledge entry or saves its body. */
@@ -49,7 +49,8 @@ export function TopicKnowledgeDocumentReader({ document: original, refresh, onCl
       const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace) ?? []
       const catalog = spatialCatalog(state, topics), zone = catalog.zones.find(candidate => candidate.zoneId === resource.zoneId)
       if (!zone || zone.workspaceId !== resource.workspaceId || zone.hostId !== resource.hostId) throw new Error('The original file Zone is unconfirmed. Refresh its source before opening this file.')
-      const filePath = path ?? resource.path, tabId = fileTabId(resource.workspaceId, filePath), regionId = initialWorkbenchRegionId(tabId)
+      const filePath = path ?? resource.path
+      const { tabId, regionId } = fileWorkbenchIdentity(state, resource.workspaceId, filePath, { space: { spaceId: zoneContext(state, topics, zone), zoneId: zone.zoneId } })
       const target = spatialDestination(catalog, { zoneId: zone.zoneId, newTab: true }, { tabId, regionId }, state.layouts).address
       if (!await state.openFile(filePath, target.groupId, location, resource.workspaceId, true, {
         displayWorkspaceId: target.displayWorkspaceId,

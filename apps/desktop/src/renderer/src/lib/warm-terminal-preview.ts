@@ -51,9 +51,7 @@ export type WarmTerminalPreview = {
  * 冷卡片。所以缺 region 时退到 `tabGroupId`：一个 group 在同一时刻最多只有一个空占位 launcher，
  * 所以它在那条路径上同样唯一。
  *
- * 两个命名空间不会撞：region id 是 `region:...`（见 `workbench-tabs.ts` 的 `initialWorkbenchRegionId`
- * 与 store 的 uuid 版），group id 由调用方给且不带这个前缀；这里再各自加前缀，让「同一个字符串
- * 既是 region 又是 group」不可能发生。
+ * Region 和 Group 的实体 ID 都是 opaque。这里给归属键各自加类型前缀，区分两种挂载点。
  */
 export function warmLauncherId(input: { tabGroupId: string; regionId: string | undefined }): string {
   return input.regionId === undefined ? `group:${input.tabGroupId}` : `region:${input.regionId}`
