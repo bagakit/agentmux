@@ -8,7 +8,7 @@ import type { FileDocument } from '../src/shared/contracts'
 import { newNoteDocument } from '../src/shared/note-document'
 
 // Observe the real derivation and real knowledge implementation, not mocked results.
-const work = vi.hoisted(() => ({ subsets: 0, indexes: 0, latestText: '' }))
+const work = vi.hoisted(() => ({ subsets: 0, indexes: 0, graphs: 0, latestText: '' }))
 vi.mock('../src/renderer/src/lib/note-knowledge', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/lib/note-knowledge')>()
   return { ...actual,
@@ -20,6 +20,10 @@ vi.mock('../src/renderer/src/lib/note-knowledge', async importOriginal => {
       return result
     }
   }
+})
+vi.mock('../src/renderer/src/lib/notebook-view-model', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/lib/notebook-view-model')>()
+  return { ...actual, notebookGraph: (...args: Parameters<typeof actual.notebookGraph>) => { work.graphs++; return actual.notebookGraph(...args) } }
 })
 import { NotebookHome } from '../src/renderer/src/components/NotebookNavigation'
 import { useAppStore } from '../src/renderer/src/store'
@@ -36,15 +40,15 @@ function note(text: string, withReference = false): FileDocument {
 }
 let root: Root, container: HTMLDivElement
 const initialState = useAppStore.getState()
-async function render(active: boolean) {
-  await act(async () => root.render(<div hidden={!active}><NotebookHome notebook={notebook} pages={pages} pending={false} onCreate={() => {}} onOpen={() => {}} query="" onQuery={() => {}} view="graph" active={active} /></div>))
+async function render(active: boolean, displayedPages: NotebookPage[] = pages) {
+  await act(async () => root.render(<div hidden={!active}><NotebookHome notebook={notebook} pages={displayedPages} pending={false} onCreate={() => {}} onOpen={() => {}} query="" onQuery={() => {}} view="graph" active={active} /></div>))
 }
 async function replaceDocument(key: string, document: FileDocument) {
   await act(async () => useAppStore.setState({ documents: { ...useAppStore.getState().documents, [key]: document } }))
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  work.subsets = 0; work.indexes = 0; work.latestText = ''
+  work.subsets = 0; work.indexes = 0; work.graphs = 0; work.latestText = ''
   useAppStore.setState({ config: { workspaces: [{ id: 'work', hostId: 'local', path: _hygiene_fixturePath("work") }] } as never, documents: { [noteKey]: note('Original text') } })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
@@ -84,6 +88,23 @@ describe('Notebook Graph subscribes only to active Note inputs', () => {
     expect(container.querySelector('input')).toBe(input)
     expect(container.querySelector('.recall-graph-scroll')).toBe(scroll)
     expect(scroll.scrollTop).toBe(37)
+  })
+
+  it('parent presentation rerenders preserve unchanged Graph inputs while visible and hidden', async () => {
+    await render(true)
+    const activeGraphs = work.graphs
+    expect(activeGraphs).toBeGreaterThan(0)
+    await render(true)
+    expect(work.graphs).toBe(activeGraphs)
+    await render(false)
+    const hiddenGraphs = work.graphs
+    await render(false)
+    await replaceDocument('work\0unrelated.txt', { path: 'unrelated.txt', content: 'Hidden Work edit', revision: 'one' })
+    await render(false)
+    expect(work.graphs).toBe(hiddenGraphs)
+    await render(false, [...pages, { ...pages[0]!, noteId: 'second-page', title: 'Second page' }])
+    expect(work.graphs).toBeGreaterThan(hiddenGraphs)
+    expect(container.querySelector('[data-note-id="second-page"]')).not.toBeNull()
   })
 
   it('active Note body updates still rebuild knowledge and update confirmed edges for the same page', async () => {
