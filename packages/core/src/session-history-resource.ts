@@ -116,7 +116,8 @@ export function parseSessionHistoryResourceResult(value: unknown, expected: Agen
     if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 ||
       imageBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, String(result.mimeType)).status !== 'read') invalid('Recorded resource bytes or MIME are invalid.', code)
   } else if (result.status === 'fragment') {
-    rpcRecord(result, ['status', 'encoding', 'dataBase64', 'byteLength', 'offsetBytes', 'totalBytes', 'sha256', 'nextOffsetBytes'], code)
+    rpcRecord(result, ['status', 'encoding', 'dataBase64', 'byteLength', 'offsetBytes', 'totalBytes', 'sha256', 'nextOffsetBytes', 'continuationReference'], code)
+    if (result.continuationReference !== undefined) exactString(result.continuationReference, 'Renewed content authority', code, MAX_REFERENCE_CHARS)
     const max = expected.maxBytes ?? 64 * 1024
     if (result.encoding !== 'json-utf8' || max > 128 * 1024 || typeof result.dataBase64 !== 'string' ||
       result.dataBase64.length > Math.ceil(max / 3) * 4 || !Number.isSafeInteger(result.byteLength) || (result.byteLength as number) < 1 ||
