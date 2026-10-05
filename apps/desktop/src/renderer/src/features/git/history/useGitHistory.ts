@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GitHistoryResult } from '../../../shared/git-contracts'
-import type { WorkspaceRecord } from '../../../shared/contracts'
-import { gitBridge } from '../lib/git-bridge'
+import type { GitHistoryResult } from '../../../../../shared/git-contracts'
+import type { WorkspaceRecord } from '../../../../../shared/contracts'
+import { gitBridge } from '../../../lib/git-bridge'
 
 type HistoryState = {
   key: string
@@ -84,12 +84,14 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     return () => { generation.current += 1; busy.current = false }
   }, [key, reference, enabled, read, publish])
 
+  const selectReference = useCallback((value: string | null) => setSelection({ key, reference: value }), [key])
+  const refresh = useCallback(() => read(false), [read])
+  const loadMore = useCallback(() => read(true), [read])
   const owned = state?.key === key && state.reference === reference ? state : null
   return {
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
     refs: state?.key === key && state.result?.kind === 'ready' ? state.result.snapshot.refs : [],
     reference, enabled,
-    selectReference: (value: string | null) => setSelection({ key, reference: value }),
-    refresh: () => read(false), loadMore: () => read(true)
+    selectReference, refresh, loadMore
   }
 }
