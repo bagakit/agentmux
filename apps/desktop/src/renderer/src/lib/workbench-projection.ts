@@ -61,6 +61,21 @@ export function sameWorkbenchProjectionSelection(a: WorkbenchProjectionSelection
   return a?.displayWorkspaceId === b.displayWorkspaceId && a.groupId === b.groupId && a.tabId === b.tabId && a.regionId === b.regionId
 }
 
+/** Space bindings may repeat one physical occurrence; every row must keep its original owner. */
+export function workbenchProjectionLocationsMatchOwner(catalog: AgentMuxSpaceCatalog, tabId: string,
+  locations: readonly AgentMuxSpaceLocation[]): boolean {
+  if (!locations.length) return false
+  const members = catalog.tabs.filter(tab => tab.tabId === tabId)
+  const member = members.length === 1 ? members[0] : undefined
+  if (!member) return false
+  const zones = catalog.zones.filter(zone => zone.zoneId === member.zoneId)
+  if (member.zoneId !== null && (zones.length !== 1 || zones[0]!.workspaceId !== member.workspaceId)) return false
+  const spaces = new Set(catalog.bindings.filter(binding => binding.zoneId === member.zoneId).map(binding => binding.spaceId))
+  const regions = new Set(member.regionIds)
+  return locations.every(location => location.tabId === member.tabId && location.workspaceId === member.workspaceId &&
+    regions.has(location.regionId) && location.zoneId === member.zoneId && (location.spaceId === null ? spaces.size === 0 : spaces.has(location.spaceId)))
+}
+
 /** Distinct occurrence slots; Topic and Region products never mint another slot. */
 export function workbenchProjectionSlotId(prefix: string, reference: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId' | 'tabId'>): string {
   return `${prefix}:${JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId])}`
@@ -116,10 +131,10 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
     const reference = references[0]!
     const parentLocations = scope.selectionMode === 'parent-occurrence' && scope.entity.kind !== 'region' &&
       tabs[reference.tabId] && !Object.hasOwn(tabs[reference.tabId]!.regions, reference.regionId)
-      ? scope.catalog.locations.filter(location => workbenchProjectionMatches(scope, location) &&
-        location.displayWorkspaceId === reference.displayWorkspaceId && location.groupId === reference.groupId &&
+      ? scope.catalog.locations.filter(location => location.displayWorkspaceId === reference.displayWorkspaceId && location.groupId === reference.groupId &&
         location.tabId === reference.tabId && tabs[reference.tabId]?.regions[location.regionId]) : []
-    const parentConfirmed = parentLocations.length > 0 && new Set(parentLocations.map(location => location.regionId)).size === parentLocations.length
+    const parentConfirmed = workbenchProjectionLocationsMatchOwner(scope.catalog, reference.tabId, parentLocations) &&
+      parentLocations.every(location => workbenchProjectionMatches(scope, location))
     if (!inTree.has(groupId) || !layout.groups.some(group => group.id === groupId && group.tabOrder.includes(reference.tabId)) ||
       !parentConfirmed && (!scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference)) ||
       !tabs[reference.tabId]?.regions[reference.regionId])) {

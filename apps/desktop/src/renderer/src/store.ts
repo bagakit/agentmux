@@ -7470,6 +7470,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
     )
     const reveal = options?.reveal ?? true
+    const backgroundTab = !reveal && options?.tabId ? state.tabs[options.tabId] : undefined
     const pendingOwners = Object.values(state.tabs).filter(tab => tab.workspaceId === workspaceId && tab.topicId === topicId && tab.topicPreparation && !tab.space)
     const pendingBorn = options?.tabId ? pendingOwners.find(tab => tab.id === options.tabId) : pendingOwners.length === 1 ? pendingOwners[0] : undefined
     const pendingRegion = pendingBorn?.regions[pendingBorn.layout.activeRegionId]
@@ -7652,6 +7653,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'Topic metadata is unavailable. Original workface, references and healthy Agents are retained; retry this Topic.' }); throw error }
     finally { release() }
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
+    if (!reveal && options?.tabId) {
+      const current = get(), live = current.tabs[options.tabId]
+      const resource = current.config?.workspaces.find(item => item.id === workspace.id)
+      if (!resource || scratchTopicsScope(resource) !== scratchTopicsScope(workspace))
+        throw new Error('The original Scratch resource changed during preparation. Its workface and references are kept.')
+      if (!backgroundTab || backgroundTab.workspaceId !== workspace.id || backgroundTab.topicId !== topicId ||
+        live?.workspaceId !== workspace.id || live.topicId !== topicId ||
+        backgroundTab.space && live.space?.zoneId !== backgroundTab.space.zoneId)
+        throw new Error('The original discussion owner is no longer confirmed. Its content and references are kept.')
+      if (snapshot.id !== topicId || snapshot.readError)
+        throw new Error(snapshot.readError ?? 'The prepared Topic differs from its original owner. Its workface and references are kept.')
+      const address = topicSpatialAddress(current.config, snapshot, current.spaceZoneBindings, current.topicCategories)
+      if (!address || live.space && live.space.zoneId !== address.zoneId)
+        throw new Error('The prepared Topic binding differs from its original owner. Its workface and references are kept.')
+    }
     remember(snapshot)
     if (pendingBorn && snapshot.id === topicId && !snapshot.readError) {
       const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
@@ -7661,6 +7677,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const { topicPreparation: _prepared, ...prepared } = live
         return { tabs: { ...current.tabs, [live.id]: { ...prepared, space: address } } }
       })
+    }
+    if (!reveal && options?.tabId) {
+      const current = get(), live = current.tabs[options.tabId]
+      const address = topicSpatialAddress(current.config, snapshot, current.spaceZoneBindings, current.topicCategories)
+      const member = workbenchSelectionCatalog(current).tabs.find(tab => tab.tabId === options.tabId)
+      if (!address || live?.workspaceId !== workspace.id || live.topicId !== topicId ||
+        member?.workspaceId !== workspace.id || member.zoneId !== address.zoneId || pendingBorn && !live.space)
+        throw new Error('The original discussion binding is unconfirmed. Its workface and references are kept.')
+      // Preparation confirms the original owner. Display placement and navigation remain with
+      // their caller, including Tabs presented only outside their resource Workspace.
+      return true
     }
     const mayReveal = reveal && !options?.signal?.aborted && !laterIntent
     if (reveal && !mayReveal) return false
