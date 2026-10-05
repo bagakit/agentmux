@@ -1,7 +1,7 @@
 import { GitPullRequestArrow, LoaderCircle, X } from 'lucide-react'
 import type { FormEvent, ReactElement } from 'react'
 import type { PrLaunchPlan } from '../lib/pr-launch'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 
 export type PrLaunchSurfaceProps = {
   /** The one plan from the one readiness read, or null when nothing has been asked for yet. */
@@ -110,7 +110,7 @@ export function PrLaunchSurface({
               opening.
             </p>
           ) : null}
-          <input
+          <TextInput
             className="pr-form__title"
             placeholder="Pull request title"
             value={title}
