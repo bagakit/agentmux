@@ -3,6 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { act, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolkitScriptSnapshot, ToolkitToolDefinition } from '@agentmux/core/control'
+import { isObjectId } from '@agentmux/core/object-id'
 import { ToolkitPopover } from '../src/renderer/src/components/performance/PerformancePopover'
 import { useToolkitScriptObservation } from '../src/renderer/src/components/toolkit/use-toolkit-script-observation'
 import { ToolkitSettingsPane } from '../src/renderer/src/components/settings/ToolkitSettingsPane'
@@ -112,18 +113,21 @@ describe('Toolkit visible reader and shared selection',()=> {
     const add=vi.fn(async(id:string,value:Omit<ToolkitToolDefinition,'id'|'revision'>)=>({...value,id,revision:'owner-issued'}))
     const onRunTool=vi.fn(async()=> 'Admitted')
     await dom.render(<ToolkitSettingsPane tools={[]} active performance={{enabled:true,statusBar:'icon'}} writer={{add,update:vi.fn()}} onSave={vi.fn()} onRemoveTool={vi.fn()} onRunTool={onRunTool}/>)
-    const addButton=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.includes('Add tool'))!
+    const addButton=dom.container.querySelector<HTMLButtonElement>('.toolkit-workbench__toolbar .toolkit-workbench__create')!
+    expect(addButton).not.toBeNull()
     await act(async()=>addButton.click())
     const name=dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')!
     expect(document.activeElement).toBe(name)
     const input=(node:HTMLInputElement,value:string)=> { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true})) }
-    await act(async()=> { input(name,'Local summary');input(dom.container.querySelector<HTMLInputElement>('.toolkit-editor__fields input:not([type])')!,_hygiene_fixturePath("fixed")) })
+    const directory = dom.container.querySelector<HTMLInputElement>('.toolkit-editor__fields > label input[type="text"]')!
+    expect(directory).not.toBeNull()
+    await act(async()=> { input(name,'Local summary');input(directory,_hygiene_fixturePath("fixed")) })
     const save=dom.container.querySelector<HTMLButtonElement>('.toolkit-editor .primary-button')!
     expect(save.disabled).toBe(false)
     await act(async()=>save.click())
     expect(add).toHaveBeenCalledTimes(1)
     const [id,value]=add.mock.calls[0]!
-    expect(id).toMatch(/^tool-/)
+    expect(isObjectId(id)).toBe(true)
     expect(value).toEqual({name:'Local summary',icon:'terminal',enabled:true,statusBar:'icon',workspacePath:_hygiene_fixturePath("fixed"),script:"console.log('Hello from your toolkit')\n",args:[],actions:[]})
     expect(onRunTool).not.toHaveBeenCalled()
     expect(save.disabled).toBe(true)
@@ -214,7 +218,7 @@ describe('Toolkit visible reader and shared selection',()=> {
     const label=dom.container.querySelector<HTMLInputElement>('.toolkit-editor__action-heading input')!
     expect(document.activeElement).toBe(label)
     const actionId=dom.container.querySelector<HTMLElement>('[data-toolkit-edit-action]')!.dataset.toolkitEditAction!
-    expect(actionId).toMatch(/^action-/)
+    expect(isObjectId(actionId)).toBe(true)
     const input=(node:HTMLInputElement|HTMLTextAreaElement,value:string)=> { Object.getOwnPropertyDescriptor(node instanceof HTMLInputElement?HTMLInputElement.prototype:HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true})) }
     await act(async()=> { input(label,'Refresh identity');input(dom.container.querySelector<HTMLTextAreaElement>('[data-script-tool]')!,"console.log('Refreshed')") })
     expect(dom.container.querySelectorAll('[data-script-tool]')).toHaveLength(1)
