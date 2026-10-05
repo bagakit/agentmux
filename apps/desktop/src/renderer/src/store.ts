@@ -2352,6 +2352,8 @@ type WarmTerminal = {
   session: SessionSnapshot | null
   /** Retained until its original creation is confirmed; absent on an already known Run. */
   creation?: WarmTerminalCreation
+  /** Explicit request ownership survives the temporary receipt claim. */
+  explicitOpening?: true
   /** One explicit opening owns the retained slot until its original receipt settles. */
   claimToken?: object
 }
@@ -3685,16 +3687,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeSpatialLinkIssues()
       disposeFileInvalidations()
       disposeNotesStorage()
-      void stopWarmTerminal(get().warmTerminal).then((sessionId) => {
-        if (!sessionId) return
-        set((state) => ({
-          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
-            state.unclaimedTerminalSessionIds,
-            sessionId
-          )
-        }))
-      })
-      set({ warmTerminal: null })
+      const warm = get().warmTerminal
+      // Observation cleanup may release unused prewarming, never an explicit opening.
+      if (!warm?.explicitOpening) {
+        void stopWarmTerminal(warm).then((sessionId) => {
+          if (!sessionId) return
+          set((state) => ({
+            unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+              state.unclaimedTerminalSessionIds,
+              sessionId
+            )
+          }))
+        })
+        set({ warmTerminal: null })
+      }
     }
     try {
       // Do not let the runtime snapshot race the Renderer persistence layer. The persisted Workbench
@@ -8501,6 +8507,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       let held = state.warmTerminal
       const claimToken = {}
+      held = { ...held, explicitOpening: true }
       set({ warmTerminal: { ...held, claimToken } })
       try {
         if (held.creation?.issue) {
