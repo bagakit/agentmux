@@ -1,3 +1,4 @@
+import { diagnosticCauseCode } from './delivery-evidence-reader.js'
 import { link, mkdir, open, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -5,18 +6,85 @@ import { isDeepStrictEqual } from 'node:util'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { AgentMuxError } from './errors.js'
 import { deliveryFailure, parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttempt, type DeliveryAttemptLookup } from './delivery-attempt.js'
+import { isObjectId, mintObjectId } from './object-id.js'
+import type { AgentMuxDiagnosticAuthorityObservation } from './diagnostic-evidence.js'
 
 /** Immutable diagnostic records. No retry queue, Input authority or Runtime cache. */
 export class DeliveryAttemptStore {
+  private readonly reading = new Map<string, Promise<DeliveryAttemptLookup>>()
   private readonly memory = new Map<string, DeliveryAttemptLookup>()
   private readonly writing = new Map<string, Promise<DeliveryAttemptLookup>>()
-  constructor(readonly directory: string) {}
+  private identityRead: Promise<AgentMuxDiagnosticAuthorityObservation> | null = null
+  private identityWrite: Promise<void> | null = null
+  constructor(readonly directory: string, private readonly options: { clientJournal?: true } = {}) {
+    if (options.clientJournal) void this.ensureJournalIdentity()
+  }
+
+  /** Storage identity only; never an original click producer or a Core runtime ID.
+   * A pending metadata IO is shared, so repeated queries cannot multiply it.
+   */
+  async readJournalAuthority(): Promise<AgentMuxDiagnosticAuthorityObservation> {
+    const operation = this.identityRead ??= this.readJournalIdentity()
+    void operation.finally(() => { if (this.identityRead === operation) this.identityRead = null }).catch(() => {})
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try { return await Promise.race([operation, new Promise<AgentMuxDiagnosticAuthorityObservation>(resolve => {
+      timer = setTimeout(() => resolve({ authority: null, status: 'unavailable', causeCode: null }), 150)
+    })]) } finally { clearTimeout(timer) }
+  }
+
+  private async readJournalIdentity(): Promise<AgentMuxDiagnosticAuthorityObservation> {
+    try {
+      const handle = await open(join(this.directory, 'journal-identity.json'), 'r')
+      let data: Buffer
+      try { const buffer = Buffer.alloc(4097), read = await handle.read(buffer, 0, buffer.length, 0); data = buffer.subarray(0, read.bytesRead) }
+      finally { await handle.close() }
+      if (data.length > 4096) throw new AgentMuxError('Journal metadata exceeds its budget.', 'DELIVERY_LOG_CORRUPT')
+      const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data)) as Record<string, unknown>
+      if (!value || Object.keys(value).sort().join() !== 'journalId,schema' ||
+          value.schema !== 'agentmux.delivery-journal.v1' || !isObjectId(value.journalId)) {
+        throw new AgentMuxError('Journal metadata is malformed.', 'DELIVERY_LOG_CORRUPT')
+      }
+      return { authority: { kind: 'client-journal', id: value.journalId as string, lifetime: 'durable' }, status: 'verified', causeCode: null }
+    } catch (error) {
+      const code = (error as { code?: unknown })?.code
+      return { authority: null, status: code === 'ENOENT' ? 'unconfirmed' : 'unavailable',
+        causeCode: diagnosticCauseCode(code) }
+    }
+  }
+
+  private ensureJournalIdentity(): Promise<void> {
+    if (!this.options.clientJournal) return Promise.resolve()
+    if (this.identityWrite) return this.identityWrite
+    const operation = (async () => {
+      const existing = await this.readJournalIdentity()
+      if (existing.authority || existing.causeCode !== 'ENOENT') return
+      await mkdir(this.directory, { recursive: true, mode: 0o700 })
+      const temporary = join(this.directory, `journal-${randomUUID()}.candidate`)
+      try {
+        await durableWriteFile(temporary, JSON.stringify({ schema: 'agentmux.delivery-journal.v1', journalId: mintObjectId() }) + '\n', { mode: 0o600, requireDirectorySync: true })
+        try { await link(temporary, join(this.directory, 'journal-identity.json')) }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+        const directory = await open(this.directory, 'r')
+        try { await directory.sync() } finally { await directory.close() }
+      } finally { await unlink(temporary).catch(() => {}) }
+    })().catch(() => { /* Separate metadata observations report failure; original records stay usable. */ })
+    this.identityWrite = operation
+    void operation.finally(() => { if (this.identityWrite === operation) this.identityWrite = null })
+    return operation
+  }
 
   async read(logId: string): Promise<DeliveryAttemptLookup> {
     validateDeliveryLogId(logId)
     const known = this.memory.get(logId)
     if (known) return structuredClone(known)
-    return await this.finite(this.readDisk(logId), () => ({ logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic file read is still pending.' }))
+    let operation = this.reading.get(logId)
+    if (!operation) {
+      if (this.reading.size >= 8) return { logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic reader is busy.' }
+      operation = this.readDisk(logId)
+      this.reading.set(logId, operation)
+      void operation.finally(() => { if (this.reading.get(logId) === operation) this.reading.delete(logId) }).catch(() => {})
+    }
+    return await this.finite(operation, () => ({ logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic file read is still pending.' }))
   }
 
   private async readDisk(logId: string): Promise<DeliveryAttemptLookup> {
@@ -39,6 +107,7 @@ export class DeliveryAttemptStore {
   }
 
   async record(input: DeliveryAttempt): Promise<DeliveryAttemptLookup> {
+    if (this.options.clientJournal) void this.ensureJournalIdentity()
     const record = structuredClone(parseDeliveryAttempt(input)), logId = record.logId
     const active = this.writing.get(logId)
     if (active) return await this.finite(active.then(() => this.record(record)), () => ({

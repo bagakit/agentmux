@@ -113,6 +113,18 @@ function parseFailure(value: unknown, depth = 0): void {
   }
   if (f.cause !== undefined) { if (depth >= 2) fail(); parseFailure(f.cause, depth + 1) }
 }
+export function parseDeliveryInputObservation(value: unknown): NonNullable<DeliveryAttempt['observation']> {
+    const o = rpcRecord(value, ['source', 'observedAt', 'runId', 'submissionId', 'admissionAcknowledged', 'payload', 'submit'])
+    if (o.source !== 'core-session-projection') fail()
+    count(o.observedAt); text(o.runId, false, 512); text(o.submissionId, true, 512)
+    if (o.admissionAcknowledged !== null && typeof o.admissionAcknowledged !== 'boolean') fail()
+    for (const key of ['payload', 'submit'] as const) if (o[key] !== null) {
+      const f = rpcRecord(o[key], ['operationId', 'startByte', 'endByte', 'acknowledged', 'notApplied'])
+      text(f.operationId, false, 512); count(f.startByte); count(f.endByte)
+      if ((f.endByte as number) < (f.startByte as number) || typeof f.acknowledged !== 'boolean' || typeof f.notApplied !== 'boolean') fail()
+    }
+  return value as NonNullable<DeliveryAttempt['observation']>
+}
 export function parseDeliveryAttempt(value: unknown): DeliveryAttempt {
   const p = rpcRecord(value, ['logId', 'source', 'agentSessionId', 'operationId', 'hostId', 'expectedRunId', 'afterSubmissionId',
     'promptDigest', 'conditionAvailable', 'sourceDevice', 'execution', 'startedAt', 'failedAt', 'stage', 'error', 'coreLogId', 'observation', 'reporter'])
@@ -127,15 +139,7 @@ export function parseDeliveryAttempt(value: unknown): DeliveryAttempt {
   if (p.coreLogId !== undefined) validateDeliveryLogId(p.coreLogId)
   if (p.observation !== undefined) {
     if (p.source !== 'core') fail()
-    const o = rpcRecord(p.observation, ['source', 'observedAt', 'runId', 'submissionId', 'admissionAcknowledged', 'payload', 'submit'])
-    if (o.source !== 'core-session-projection') fail()
-    count(o.observedAt); text(o.runId, false, 512); text(o.submissionId, true, 512)
-    if (o.admissionAcknowledged !== null && typeof o.admissionAcknowledged !== 'boolean') fail()
-    for (const key of ['payload', 'submit'] as const) if (o[key] !== null) {
-      const f = rpcRecord(o[key], ['operationId', 'startByte', 'endByte', 'acknowledged', 'notApplied'])
-      text(f.operationId, false, 512); count(f.startByte); count(f.endByte)
-      if ((f.endByte as number) < (f.startByte as number) || typeof f.acknowledged !== 'boolean' || typeof f.notApplied !== 'boolean') fail()
-    }
+    parseDeliveryInputObservation(p.observation)
   }
   if (p.reporter !== undefined) {
     if (p.source !== 'client') fail()

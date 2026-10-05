@@ -402,6 +402,9 @@ importers:
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../demand
+      '@agentmux/diagnostic-evidence':
+        specifier: workspace:*
+        version: link:../diagnostic-evidence
       '@agentmux/git':
         specifier: workspace:*
         version: link:../git
@@ -473,6 +476,12 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
+
+  packages/diagnostic-evidence:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   packages/git:
     devDependencies:
@@ -6946,8 +6955,6 @@ snapshots:
   jsonfile@6.2.1:
     dependencies:
       universalify: 2.0.1
-    optionalDependencies:
-      graceful-fs: 4.2.11
 
   katex@0.16.47:
     dependencies:

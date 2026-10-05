@@ -79,7 +79,8 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     })()
     // Reserve the endpoint before loading Store/Hook/Core. A workflow probe never displaces an old owner.
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
-      deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts')) },
+      deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
+      diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
       coreClients: async () => [{ hostId: 'local', client: await ready }],
       hostedRuntime: async () => { await ready; return hosted! },
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })

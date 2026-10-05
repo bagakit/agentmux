@@ -1,3 +1,6 @@
+import { DiagnosticEvidenceQuery } from '@agentmux/diagnostic-evidence'
+import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
+import { inspectDiagnosticEvidence } from './diagnostic-evidence-service.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup } from './delivery-attempt.js'
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
@@ -64,6 +67,8 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
+  /** Original semantic owner identity; never ctxmux identity or a route alias. */
+  diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
   notebookStore?: AgentMuxNotebookStore
   files?: AgentMuxRpcFilesOwner
   git?: AgentMuxRpcGitOwner
@@ -120,6 +125,7 @@ const NATIVE_FIELDS = {
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'sourceChannel'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
+  'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
@@ -154,6 +160,7 @@ function validateFilters(p: Record<string, unknown>): void {
 
 /** All business orchestration lives here; transports carry messages, clients parse argv. */
 export class AgentMuxRpcService {
+  private readonly diagnosticQuery = new DiagnosticEvidenceQuery()
   private readonly notebooks: AgentMuxNotebookStore
   private readonly spatial: AgentMuxSpatialStateStore
   private local: Promise<AgentMuxClient> | undefined
@@ -692,6 +699,8 @@ export class AgentMuxRpcService {
         const observation = await owner.client.observeRunStorage({ runId })
         result = { ...observation, runtime: { ...observation.runtime, hostId } }; break
       }
+      case 'system.diagnostics.inspect':
+        result = await inspectDiagnosticEvidence(this.diagnosticQuery, parseDiagnosticEvidenceParams(p), this.ports, caller, context.signal); break
       case 'message.delivery.inspect': {
         const logId = validateDeliveryLogId(p.logId)
         const hostId = p.hostId === undefined ? undefined : rpcString(p.hostId, 'Original diagnostic Host')
