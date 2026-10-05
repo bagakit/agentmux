@@ -98,8 +98,8 @@ export function recoveryReferenceNote(source: RecoverySource, mode: RecoveryMode
     `Original Agent Session reference: ${JSON.stringify({ hostId: source.hostId, agentSessionId: source.agentSessionId, historySource, mode })}`,
     'This is an analysis request, not authorization to continue or execute the original task. Keep the original Session and unsent inputs intact.',
     'Read the original owner before answering or continuing:',
-    `agentmux agent history ${reference} --source ${historySource} --limit 20 --max-bytes 32768`,
-    `Optional diagnostics: agentmux agent inspect --session ${shellWord(source.agentSessionId)}. This inspect command is not Host-qualified. Consume its diagnostics only after verifying the returned execution Host matches ${JSON.stringify(source.hostId)}; otherwise report diagnostics unavailable and use the Host-qualified history above. Do not infer a cross-Host binding from the Session ID alone.`,
+    `amux agent history ${reference} --source ${historySource} --limit 20 --max-bytes 32768`,
+    `Optional diagnostics: amux agent inspect --session ${shellWord(source.agentSessionId)}. This inspect command is not Host-qualified. Consume its diagnostics only after verifying the returned execution Host matches ${JSON.stringify(source.hostId)}; otherwise report diagnostics unavailable and use the Host-qualified history above. Do not infer a cross-Host binding from the Session ID alone.`,
     'Follow nextCursor with the same exact Host, Session and source. Preserve revision, provenance, gaps and unavailable/empty distinctions. For a fragment, read its contiguous continuation, concatenate json-utf8-base64 bytes, verify sha256, then decode the item; do not silently skip oversized items. An invalid cursor requires re-reading the first page.',
     'Report completed work, unfinished work, blockers and suggested next steps. Do not execute those steps or switch into takeover without a new user instruction.',
     `Observed recovery diagnostic (not a lifetime claim): ${source.diagnostic.slice(0, 700) || 'Current native resume identity or state is unconfirmed.'}`
