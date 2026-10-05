@@ -1,3 +1,4 @@
+import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { appendFileSync, readFileSync } from 'node:fs'
@@ -222,8 +223,8 @@ it('executes the actual Store metrics.renderer callback and strict result parser
   expect(callback).toBeDefined()
   const expression = ts.transpileModule('const invoke = ' + callback!.getText(file), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const counts = { monacoEditors: null, monacoModels: null, documents: 0, runtimeSubscriptions: 4, terminalViews: 0, terminalAddons: 0, terminalListeners: 0 }
-  const invoke = new Function('readContinuousProgressInput', 'get', 'readRendererResourceOwnerCounts', 'rendererPerformance', expression + ';return invoke')(
-    () => { throw new Error('wrong branch') }, () => { throw new Error('wrong branch') }, () => counts, rendererPerformance)
+  const invoke = new Function('readContinuousProgressInput', 'get', 'readRendererResourceOwnerCounts', 'rendererPerformance', 'api', expression + ';return invoke')(
+    () => { throw new Error('wrong branch') }, () => { throw new Error('wrong branch') }, () => counts, rendererPerformance, { readRendererMemory: () => rendererMemoryFixture() })
   rendererPerformance.sessionEvent('must-not-leak', rendererPerformance.start())
   const request = { operation: 'metrics.renderer', window: { windowId: 1, webContentsId: 1, generation: 1 } }
   let response: unknown

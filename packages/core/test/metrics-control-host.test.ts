@@ -1,3 +1,4 @@
+import { rendererMemoryFixture } from './helpers/toolkit-metrics.js'
 import { performanceFixture } from './helpers/renderer-performance.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -85,7 +86,7 @@ describe('public metrics Control owner', () => {
     const reordered = observation()
     reordered.window = { windowId: 1, webContentsId: 2, generation: 3 }
     reordered.renderer = { state: 'available', observedAt: 950, lastSuccessAt: 950, reason: null,
-      data: { window: { generation: 3, windowId: 1, webContentsId: 2 }, counts: { monacoEditors: null, monacoModels: 0,
+      data: { ...rendererMemoryFixture(), window: { generation: 3, windowId: 1, webContentsId: 2 }, counts: { monacoEditors: null, monacoModels: 0,
         documents: 1, runtimeSubscriptions: 1, terminalViews: 1, terminalAddons: 0, terminalListeners: 0 }, performance: performanceFixture() } }
     expect(parseMetricsObservation(reordered).renderer.data!.counts.documents).toBe(1)
     reordered.renderer.data!.performance.sessionEvents.totalMs = Number.NaN

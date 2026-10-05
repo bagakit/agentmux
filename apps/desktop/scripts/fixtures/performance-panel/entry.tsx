@@ -7,7 +7,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
-import { performanceSnapshot } from './data'
+import { performanceSnapshot, performanceAttributionSnapshots } from './data'
 import '../../../src/renderer/src/styles/index.css'
 
 // 实际 App/Settings/TerminalView/CSS 与实际 isolated preload/registered Toolkit IPC。
@@ -37,13 +37,13 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 const state = useAppStore.getState(), session = state.sessions.find(s => s.id === 'session-codex')!
 if (!session) throw Error('原 preview Session 非空正控缺失')
 const workspace = state.config!.workspaces.find(workspace => workspace.path === session.workspacePath) ?? state.config!.workspaces[0]!
-if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons') {
+if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons' || setup.phase === 'attribution') {
   const tab = createWorkbenchTab('performance-original-tab', { regionId: 'performance-original-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('performance-original-group', [tab.id]) },
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
     viewModes: { [session.id]: 'terminal' }, agentComposerDrafts: { [session.id]: 'Original unsent draft remains exact.' } })
 }
-const snapshot = structuredClone(performanceSnapshot)
+const snapshot = structuredClone(setup.phase === 'attribution' ? performanceAttributionSnapshots.fresh : performanceSnapshot)
 snapshot.observation!.process.data![0] = { ...snapshot.observation!.process.data![0]!, hostId: session.hostId, runId: session.control.run.runId }
 await bridge.publish(snapshot)
 const surface = () => {
@@ -54,6 +54,10 @@ const surface = () => {
 w.performanceScene = {
   ready: true, phase: setup.phase, snapshot, writes, attachments, events, surface, mainSurface: () => useAppStore.getState().mainSurface,
   publish: (next: typeof snapshot) => bridge.publish(next),
+  publishAttribution: (state: keyof typeof performanceAttributionSnapshots) => {
+    if (setup.phase !== 'attribution' || !Object.hasOwn(performanceAttributionSnapshots, state)) throw Error('Explicit attribution scene required')
+    return bridge.publish(structuredClone(performanceAttributionSnapshots[state]))
+  },
   theme: async (appearance: 'light' | 'dark') => { const current = await api.config.get(); return api.config.save({ ...current, appearance: { ...current.appearance, appAppearance: appearance } }, current) },
   preferences: async (enabled: boolean, statusBar: 'icon' | 'label') => { const current = await api.config.get(); return api.config.save({ ...current, toolkit: { ...current.toolkit, performance: { enabled, statusBar } } }, current) },
   flush: () => bridge.flush(), facts: () => bridge.facts()

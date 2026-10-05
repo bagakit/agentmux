@@ -9,8 +9,9 @@ import { createRequire } from 'node:module'
 import { isBuiltin } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
-export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel' }) {
-  assert.ok(['full','placement','buttons','toolkit'].includes(captureScope),'已知明确 capture scope')
+export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel', prepareOnly = false }) {
+  assert.ok(['full','placement','buttons','toolkit','attribution'].includes(captureScope),'已知明确 capture scope')
+  assert.ok(typeof prepareOnly === 'boolean' && (!prepareOnly || captureScope === 'attribution'), 'Compile preparation is explicit attribution-only, never a full qualification')
   const toolkitFixture = fixtureName === 'toolkit-custom-ui'
   assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
   assert.ok(['baseline','state','focus'].includes(cssMutant)&& (captureScope==='buttons'||cssMutant==='baseline'),'明确有界私有CSS变异')
@@ -25,21 +26,29 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const privateRoot=await fs.mkdtemp(path.join(os.tmpdir(),'amx-performance-ui-'))
   await fs.mkdir(evidence,{recursive:true})
   const compiled=path.join(evidence,'compiled'),inputs=new Map(),artifacts=[],cssInputs=[]
-  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,cssMutant,evidence,privateRoot,processes:[],frames:[],rawInputs:[],
-    actualApp:true,actualSettings:true,actualTerminalView:true,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
+  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,prepareOnly,cssMutant,evidence,privateRoot,processes:[],frames:[],rawInputs:[],
+    actualApp:!prepareOnly,actualSettings:!prepareOnly,actualTerminalView:!prepareOnly,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
+  if(captureScope==='attribution')await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
   try {
-    for(const file of [configFile,path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
+    for(const file of [configFile,path.join(desktop,'electron.vite.config.ts'),path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
     if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
+    if(captureScope==='attribution')for(const file of [path.join(desktop,'scripts/capture-performance-attribution.mjs'),path.join(fixture,'attribution-owner-entry.ts')])await bind(file)
     const aliases=new Map()
-    for(const name of ['core','demand','layout']){
+    for(const name of ['core','demand','layout','identity','relay','client-ui']){
       const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
       for(const [key,value]of Object.entries(pkg.exports)){
-        const target=typeof value==='string'?value:value.import
+        const target=typeof value==='string'?value:value.browser??value.import
         aliases.set('@agentmux/'+name+(key==='.'?'':key.slice(1)),path.join(dir,target.replace('./dist/src/','./src/').replace('./dist/','./src/').replace(/\.js$/u,'.ts')))
       }
+    }
+    const aliasEntries=[...aliases.entries()].sort(([a],[b])=>Number(a.includes('*'))-Number(b.includes('*'))||b.length-a.length)
+    const resolveAlias=specifier=>{
+      if(aliases.has(specifier))return aliases.get(specifier)
+      for(const [name,target]of aliasEntries){if(!name.includes('*'))continue;const [prefix,suffix]=name.split('*')
+        if(specifier.startsWith(prefix)&&specifier.endsWith(suffix)&&specifier.length>prefix.length+suffix.length)return target.replace('*',specifier.slice(prefix.length,suffix?-suffix.length:undefined))}
     }
     const asset=path.join(desktop,'resources/toolkit/performance.mjs');await bind(asset)
     // Vite 的 CSS @import 由 PostCSS 内部读取，不经过 JS transform。显式绑定真实层叠输入。
@@ -47,7 +56,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     const imports=[...css.matchAll(/^\s*@import\s+['"]([^'"]+)['"];\s*$/gm)]
     assert.ok(imports.length>0,'实际CSS入口引用非空')
     assert.equal(imports.length,(css.match(/^\s*@import\s/gm)??[]).length,'所有实际CSS imports均绑定，不静默跳过')
-    for(const [,relative]of imports)await bind(path.resolve(path.dirname(styles),relative))
+    for(const [,relative]of imports)await bind(relative.startsWith('.')?path.resolve(path.dirname(styles),relative):resolveAlias(relative)??require.resolve(relative))
     const vendor=path.join(root,'packages/core/vendor')
     await fs.symlink(vendor,path.join(evidence,'vendor'),'dir')
     const artifactRoot=path.join(vendor,'ctxmux',`${process.platform}-${process.arch}`)
@@ -64,19 +73,23 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       receipt.sdkClosure={archive:path.relative(root,archive),archiveSHA256:sha(await bind(archive)),entry:path.relative(evidence,fixedSdkEntry),entrySHA256:sha(await fs.readFile(fixedSdkEntry)),actualProtocol:sdk.PROTOCOL_VERSION,manifestProtocol:manifest.product.protocol,boundary:'Only this run uses its bound SDK archive; shared node_modules and product protocol checks remain unchanged.'}
     }
     await fs.symlink(path.join(desktop,'node_modules'),path.join(compiled,'node_modules'),'dir')
+    // Core's createRequire(import.meta.url) also needs its native dependencies at runtime.
+    // This private ancestor supplies them without changing either shared node_modules directory.
+    await fs.symlink(path.join(root,'packages/core/node_modules'),path.join(evidence,'node_modules'),'dir')
     for(const [entry,outfile,format]of [
       [path.join(desktop,'src/preload/index.ts'),path.join(compiled,'product-preload.cjs'),'cjs'],
       [path.join(fixture,'preload.cjs'),path.join(compiled,'fixture-preload.cjs'),'cjs'],
-      [path.join(fixture,'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
+      [path.join(fixture,captureScope==='attribution'?'attribution-owner-entry.ts':'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
       [path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm'],
       ...(toolkitQualification?[[path.join(fixture,'health-entry.ts'),path.join(compiled,'health.mjs'),'esm']]:[])
-    ])await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:'external',logLevel:'error',
+    ])await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:format==='cjs'?'bundle':'external',logLevel:'error',
       plugins:[{name:'bind-product-node-source',setup(builder){
-        builder.onResolve({filter:/^@agentmux\//},args=>aliases.has(args.path)?{path:aliases.get(args.path)}:undefined)
+        builder.onResolve({filter:/^@agentmux\//},args=>{const target=resolveAlias(args.path);return target?{path:target}:undefined})
         builder.onResolve({filter:/^[^./]/},args=>{
-          if(args.path==='electron'||isBuiltin(args.path)||aliases.has(args.path))return
+          if(args.path==='electron'||isBuiltin(args.path))return {path:args.path,external:true}
+          if(resolveAlias(args.path))return
           if(args.path==='@ctxmux/sdk')return {path:fixedSdkEntry,external:true}
-          return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:true}
+          return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:format!=='cjs'}
         })
         builder.onLoad({filter:/\.[cm]?tsx?$/},async args=>{
           if(!args.path.startsWith(root+'/apps/')&&!args.path.startsWith(root+'/packages/'))return
@@ -100,11 +113,11 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
           originalSHA256:sha(originalRule),consumedSHA256:sha(rule.toString()),mutated:cssMutant===kind})
       })
     }}
-    await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{...config.resolve,alias:[
-      ...aliases.entries()].map(([name,replacement])=>({find:new RegExp('^'+name.replace(/[.*+?^$()|[\]\\]/g,'\\$&')+'$'),replacement})).concat(config.resolve.alias??[])},
+    const bindRendererSource=()=>({name:'bind-actual-mounted-renderer-source',enforce:'pre',async transform(_code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/'))await bind(file)}})
+    await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{...config.resolve,alias:aliasEntries.map(([name,replacement])=>({find:new RegExp('^'+name.split('*').map(part=>part.replace(/[.*+?^$()|[\]\\]/g,'\\$&')).join('(.+)')+'$'),replacement:replacement.replace('*','$1')})).concat(config.resolve.alias??[])},
       esbuild:{jsx:'automatic'},define:{...config.define,'process.env.NODE_ENV':'"production"'},
       ...(captureScope==='buttons'?{css:{postcss:{plugins:[cssPlugin]}}}:{}),
-      plugins:[{name:'bind-actual-mounted-renderer-source',enforce:'pre',async transform(_code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/'))await bind(file)}}],
+      plugins:[bindRendererSource()],worker:{format:'es',plugins:()=>[bindRendererSource()]},
       build:{target:'esnext',outDir:path.join(compiled,'renderer'),sourcemap:false,emptyOutDir:false}})
     if(captureScope==='buttons'){
       assert.equal(cssInputs.length,4,'实际PostCSS owning规则四个非空唯一')
@@ -115,7 +128,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     const env={...process.env,AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD:path.join(compiled,'fixture-preload.cjs'),AGENTMUX_PERFORMANCE_BUTTON_MUTANT:cssMutant,
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
-    for(const phase of captureScope==='full'?['control','restart','joined']:[captureScope]){
+    for(const phase of prepareOnly?[]:captureScope==='full'?['control','restart','joined']:[captureScope]){
       const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs'),...(toolkitQualification?[path.join(fixture,'qualification.cjs')]:[])]
       const executable=toolkitQualification?globalThis.process.execPath:require('electron')
       const args=toolkitQualification?[path.join(fixture,'coordinator.cjs'),require('electron'),path.join(compiled,'health.mjs'),...guiArgs]:guiArgs
@@ -133,6 +146,8 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     if(captureScope==='placement')receipt.boundary='仅本次 Settings 左归属修正：实际 App 9 geometry、7 native keyboard、Settings toggle/Escape/snapshot retention、完整 Footer 图；不运行或签原full hidden/restart/joined/T004。'
     if(captureScope==='buttons')receipt.boundary='仅T005底栏七常规按钮actual App样式/几何/原生焦点与原工作面保持；私有CSS输入变异。无旧full hidden/restart/joined、Backend或用户FPS资格。'
     if(captureScope==='toolkit')receipt.boundary=toolkitQualification?'T008 finite actual App/unique ConfigOwner/ToolkitOwner/product preload/compiled CLI/Core Raw actions, original TerminalView input and two ordinary GUI durable restoration. Actual Terminal Session scope; not Agent Provider recovery, user App/Runtime, T004 hidden or aesthetic acceptance.':'T008 actual App准备图：真实ConfigStore/ConfigOwner/ToolkitOwner/registerToolkitIpc及私有Core Raw port；现preview Session transport仍受控，无完整动作/健康Run恢复或Task资格。capture完成不代独立审美。'
+    if(captureScope==='attribution')receipt.boundary='仅资源归因 actual App/Performance Toolkit/真实 styles：宽窄主题、原生键盘展开、同实例刷新保节点焦点滚动、新实例隔离、工作等待/未知/过期/暂停。私有 sandbox preload 与受控严格 Metrics DTO；不执行 full control/restart/joined/Native，不签用户现场或实际内存归因。'
+    if(prepareOnly)receipt.boundary='Attribution actual source compilation preparation only; no mounted App, process, screenshot, native input or behavioral qualification.'
     receipt.completed=true
   } catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack}}
   finally {

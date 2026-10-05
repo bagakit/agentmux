@@ -13,7 +13,13 @@ const runs = Array.from({ length: 8 }, (_, i) => ({ runId: `preparation-run-${i 
 const observation: MetricsObservation = {
   schema: 'agentmux.metrics.v1', observedAt: at, scope: { kind: 'unix-host', hostId: 'local', hostname: 'local-mac', mainPid: 1234 },
   window: { windowId: 1, webContentsId: 1, generation: 1 }, units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
-  app: available({ processCount: 7, cpuPercent: 18.4, rssKib: 655360, unavailable: null, groups: [
+  app: available({ logicalCpuCount: 14, omittedProcesses: 0, processes: [
+    {pid:1234,creationTime:at-400000,role:'main',type:'Browser',cpuPercent:3.1,intervalMs:1000,rssKib:131072},
+    {pid:2345,creationTime:at-300000,role:'renderer',type:'Tab',cpuPercent:8.2,intervalMs:1000,rssKib:262144},
+    {pid:2346,creationTime:at-200000,role:'renderer',type:'Tab',cpuPercent:2.3,intervalMs:1000,rssKib:65536},
+    {pid:3456,creationTime:at-300000,role:'gpu',type:'GPU',cpuPercent:2.5,intervalMs:1000,rssKib:131072},
+    ...[4567,4568,4569].map((pid,i)=>({pid,creationTime:at-100000,role:'utility' as const,type:'Utility' as const,cpuPercent:0,intervalMs:1000,rssKib:i===0?32768:16384}))
+  ], processCount: 7, cpuPercent: 18.4, rssKib: 655360, unavailable: null, groups: [
     { role: 'main', processCount: 1, cpuPercent: 3.1, rssKib: 131072 }, { role: 'renderer', processCount: 2, cpuPercent: 12.8, rssKib: 327680 },
     { role: 'gpu', processCount: 1, cpuPercent: 2.5, rssKib: 131072 }, { role: 'utility', processCount: 3, cpuPercent: 0, rssKib: 65536 }
   ] }), process: available(runs),
@@ -22,7 +28,7 @@ const observation: MetricsObservation = {
     runtimeStorage: { path: _hygiene_fixturePath("Users/fixture/workspaces/editor/.runtime/history"), bytes: 1572864000 }, runtimeStorageUnavailable: null, runtimeStorageObservedAt: at - 60000 }], at - 60000),
   diagnostics: { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null },
   main: available({ sessionAttachmentOwners: 3, sessionAttachmentLeases: 4, fileWatchers: 5, browserViews: 2, releasedBrowserViews: 1 }),
-  renderer: available({ window: { windowId: 1, webContentsId: 1, generation: 1 }, counts: { monacoEditors: 3, monacoModels: 5, documents: 4, runtimeSubscriptions: 2, terminalViews: 3, terminalAddons: 6, terminalListeners: 9 }, performance: createRendererPerformance(() => 0, () => at).snapshot() })
+  renderer: available({ process:{pid:2345,creationTime:at-300000},memory:{sampledAt:at,scope:'renderer-v8-isolate',heap:{usedHeapKib:122880,totalHeapKib:196608,physicalHeapKib:180224,heapLimitKib:4194304},unavailable:null}, window: { windowId: 1, webContentsId: 1, generation: 1 }, counts: { monacoEditors: 3, monacoModels: 5, documents: 4, runtimeSubscriptions: 2, terminalViews: 3, terminalAddons: 6, terminalListeners: 9 }, performance: createRendererPerformance(() => 0, () => at).snapshot() })
 }
 export const performanceSnapshot: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
   startedAt: at - 47000, manual: false, consumerCount: 1, sequence: 1,
@@ -33,3 +39,38 @@ export const performanceContexts = Object.fromEntries(runs.slice(0, 7).map((run,
   label: ['Review resource observation and Toolkit ownership', 'Improve the Settings workspace', 'Verify keyboard interactions', 'Implement the next source slice', 'Review pending changes', 'Inspect the terminal history', 'Summarize the current evidence'][i],
   context: ['codex · agentmux', 'claude · editor', 'codex · workspace', 'codex · agentmux', 'claude · workbench', 'codex · terminal', 'claude · docs'][i], state: i < 4 ? 'working' : 'idle 3m'
 }]))
+
+// Controlled inputs for actual product rendering only; not live machine attribution.
+function attributionSnapshot() {
+  const result = structuredClone(performanceSnapshot), observation = result.observation!, app = observation.app.data!
+  app.cpuPercent = 148.4
+  const group = app.groups.find(value => value.role === 'renderer')!
+  group.cpuPercent = 126; group.rssKib = 1887437 + 65536
+  const process = app.processes.find(value => value.pid === 2345)!
+  process.cpuPercent = 114.6; process.rssKib = 1887437
+  app.rssKib = app.groups.reduce((sum, value) => sum + value.rssKib, 0)
+  observation.renderer.data!.memory.heap = {usedHeapKib:786432,totalHeapKib:1048576,physicalHeapKib:983040,heapLimitKib:4194304}
+  let mono = 1500
+  const recorder = createRendererPerformance(() => mono, () => at)
+  mono = 2500; recorder.sessionEvent('fixture', mono - 123)
+  mono = 3500; recorder.terminalWrite(false, 'fixture', mono - 520)
+  mono = 4500; recorder.terminalInteraction('write-request', 80, 4200)
+  mono = 12500; observation.renderer.data!.performance = recorder.snapshot()
+  return result
+}
+const fresh = attributionSnapshot(), refresh = structuredClone(fresh), newInstance = structuredClone(fresh)
+refresh.sequence++; refresh.observedAt! += 1000; refresh.observation!.observedAt += 1000
+refresh.observation!.app.observedAt! += 1000; refresh.observation!.app.lastSuccessAt! += 1000
+refresh.observation!.app.data!.processes.find(value => value.pid === 2345)!.cpuPercent = 118
+const replaced = newInstance.observation!.app.data!.processes.find(value => value.pid === 2345)!
+replaced.creationTime += 1 // same PID reused; old window memory must not be joined.
+const stale = structuredClone(refresh)
+stale.observedAt! += 30000; stale.observation!.observedAt += 30000
+stale.observation!.app.state = 'stale'; stale.observation!.app.reason = 'Application sample could not be refreshed.'
+stale.observation!.renderer.state = 'stale'; stale.observation!.renderer.reason = 'Renderer has not answered.'
+const unknown = structuredClone(fresh)
+unknown.observation!.app.data!.processes.forEach(value => {value.cpuPercent=null;value.intervalMs=null})
+unknown.observation!.app.data!.groups.forEach(value => {value.cpuPercent=null})
+unknown.observation!.app.data!.cpuPercent = null; unknown.observation!.app.data!.logicalCpuCount = null
+unknown.observation!.renderer.data!.memory.heap = null; unknown.observation!.renderer.data!.memory.unavailable = 'V8 heap reading unavailable.'
+export const performanceAttributionSnapshots = {fresh,refresh,waiting:fresh,newInstance,stale,unknown}

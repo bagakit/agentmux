@@ -21,13 +21,13 @@ const facts = async () => ({active:toolkit?(await performanceCurrent()).consumer
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms))
 app.whenReady().then(async()=>{
   try {
-    const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,localRuntimeConnector,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer}=await import(pathToFileURL(ownerBundle).href)
+    const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,localRuntimeConnector,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer,parseMetricsRendererResult}=await import(pathToFileURL(ownerBundle).href)
     const configStore = new ConfigStore(path.join(privateRoot,'userData','config.json'))
     const initialConfigExists = fs.existsSync(configStore.filePath)
     current = await configStore.get()
     const owner = new ConfigOwner({read:()=>current,save:next=>configStore.save(next),publish:saved=>{current=saved;win?.webContents.send('proof:config:changed',saved)}})
     ipcMain.handle('proof:setup',async(_event,preview)=>{
-      if(phase==='control'||phase==='placement'||phase==='buttons') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
+      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
         workspaces:[...preview.workspaces,...current.workspaces.filter(workspace=>!preview.workspaces.some(item=>item.id===workspace.id))],
         appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{performance:{enabled:true,statusBar:'label'}},
         composerShortcuts:[{id:'original',keyword:'original',label:'Original authored prompt',body:'Original saved body remains exact.'}]})) }
@@ -182,6 +182,107 @@ app.whenReady().then(async()=>{
       assert.ok((await read('window.performanceScene.attachments')).length>0,'Restart原TerminalView自动实际reattach previewRun正控')
       assert.equal(leases.size,0,'Restart关闭布局不建立Performance观察')
       raw.surface=surface;raw.restart={exactSurface:true,attachmentCount:await read('window.performanceScene.attachments.length')}
+    } else if(phase==='attribution') {
+      raw.qualificationScope='resource-attribution-only'
+      raw.boundary='Actual App/Toolkit/isolated sandbox preload with controlled Metrics DTO; bounded keyboard/refresh/scroll captures only. No full control/restart/joined/Native or user Run actions.'
+      assert.equal(leases.size,0,'归因浮窗关闭时无观察')
+      const memoryBefore=Date.now(), actualMemory=await read('window.agentmux.readRendererMemory()'), memoryAfter=Date.now()
+      const actualPid=win.webContents.getOSProcessId(), nativeProcess=app.getAppMetrics().find(value=>value.pid===actualPid)
+      const preferences=win.webContents.getLastWebPreferences()
+      assert.equal(preferences.sandbox,true);assert.equal(preferences.contextIsolation,true);assert.equal(preferences.nodeIntegration,false)
+      assert.ok(Number.isInteger(actualPid)&&actualPid>0,'实际私有Renderer OS PID非空')
+      assert.equal(actualMemory.process.pid,actualPid,'实际preload堆归属当前Renderer进程')
+      assert.ok(actualMemory.process.creationTime>0,'实际preload创建身份非空')
+      assert.equal(actualMemory.process.creationTime,nativeProcess?.creationTime,'实际preload与同批native创建身份精确匹配')
+      assert.equal(actualMemory.memory.scope,'renderer-v8-isolate')
+      assert.ok(actualMemory.memory.sampledAt>=memoryBefore&&actualMemory.memory.sampledAt<=memoryAfter,'真实heap读取时间在有界调用内')
+      assert.equal(actualMemory.memory.unavailable,null,'此候选actual sandbox堆API必须可用')
+      const heap=actualMemory.memory.heap
+      for(const field of ['usedHeapKib','totalHeapKib','physicalHeapKib','heapLimitKib'])assert.ok(Number.isFinite(heap?.[field])&&heap[field]>=0,'真实heap固定KiB数值字段: '+field)
+      assert.ok(heap.usedHeapKib<=heap.totalHeapKib&&heap.totalHeapKib<=heap.heapLimitKib,'真实heap used/total/limit数值关系')
+      const controlledRenderer=await read('window.performanceScene.snapshot.observation.renderer.data')
+      const strictMemory=parseMetricsRendererResult({operation:'metrics.renderer',window:controlledRenderer.window,observedAt:memoryAfter,
+        ...actualMemory,counts:controlledRenderer.counts,performance:controlledRenderer.performance})
+      assert.deepEqual(strictMemory.memory,actualMemory.memory,'真实preload数值通过实际Core strict parser未变形')
+      raw.rendererMemoryProof={actual:actualMemory,osPid:actualPid,nativeCreationTime:nativeProcess.creationTime,units:'KiB',
+        contextIsolation:preferences.contextIsolation,sandbox:preferences.sandbox,nodeIntegration:preferences.nodeIntegration,
+        compiledIsolatedPreloadSHA256:createHash('sha256').update(fs.readFileSync(process.env.AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD)).digest('hex'),
+        strictCoreParserPassed:true,boundary:'process/memory are the actual isolated product preload read; window/counts/performance complete the strict envelope using controlled DTO facts, not actual resource qualification. No GC/heap dump/Run action.'}
+      await read('window.attributionOriginalTerminal=document.querySelector(".xterm-helper-textarea")')
+      const originalWrites=await read('window.performanceScene.writes.length')
+      const renderer='details[data-performance-role="renderer"]', summary=renderer+' > summary', processRow=renderer+' [data-process-pid]'
+      const focusByKeyboard=async selector=>{
+        for(let i=0;i<32;i++) {
+          if(await read('document.activeElement===document.querySelector('+JSON.stringify(selector)+')'))return
+          await key('Tab')
+        }
+        throw Error('Native Tab did not reach attribution control: '+selector)
+      }
+      const wheelBody=async deltaY=>{
+        const p=await point(q('.performance-body'))
+        const before=await read('document.querySelector(".performance-body").scrollTop')
+        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:p.x,y:p.y,deltaX:0,deltaY});await settle()
+        const after=await read('document.querySelector(".performance-body").scrollTop')
+        const result={type:'native-wheel',channel:'CDP Input.dispatchMouseEvent',deltaY,before,after};raw.actions.push(result);return result
+      }
+      const publish=async state=>{await read('window.performanceScene.publishAttribution('+JSON.stringify(state)+')');await settle();raw.actions.push({type:'attribution-publish',state,at:Date.now()})}
+      await click(q('.performance-trigger'));await until('!!document.querySelector('+JSON.stringify(renderer)+')')
+      assert.equal(leases.size,1,'归因实际Toolkit一个观察consumer')
+      await focusByKeyboard(summary)
+      assert.equal(await read('document.querySelector('+JSON.stringify(renderer)+').open'),false,'真实details初始收拢')
+      await key('Return')
+      assert.equal(await read('document.querySelector('+JSON.stringify(renderer)+').open'),true,'原生键盘展开Renderer进程组')
+      raw.attributionKeyboard=await read('(()=>{const n=document.activeElement,s=getComputedStyle(n);return {summary:n===document.querySelector('+JSON.stringify(summary)+'),focusVisible:n.matches(":focus-visible"),outlineStyle:s.outlineStyle,outlineWidth:parseFloat(s.outlineWidth)}})()')
+      assert.equal(raw.attributionKeyboard.summary,true);assert.equal(raw.attributionKeyboard.focusVisible,true)
+      assert.ok(raw.attributionKeyboard.outlineStyle==='solid'&&raw.attributionKeyboard.outlineWidth>0,'真实键盘summary焦点轮廓可见')
+      assert.ok(await read('document.querySelectorAll('+JSON.stringify(processRow)+').length')>0,'实际Renderer PID行非空')
+      assert.equal(await read('!!document.querySelector("[data-renderer-memory]")'),true,'精确实例匹配的当前窗口内存实际消费')
+      await wheelBody(-2000)
+      await capture('1480-dark-attribution.png','Actual App / Renderer expanded / logical cores and PID heatmap / wide dark')
+      await publish('waiting')
+      await focusByKeyboard('details[data-performance-work] > summary');await key('Return')
+      assert.equal(await read('document.querySelector("details[data-performance-work]").open'),true,'原生键盘展开工作等待')
+      await focusByKeyboard('[data-performance-period="previous"]');await key('Return')
+      assert.equal(await read('document.querySelector("[data-performance-period=previous]").getAttribute("aria-pressed")'),'true','原生键盘选择实际Previous period')
+      await wheelBody(-240)
+      const lowerReading=await wheelBody(240)
+      assert.ok(lowerReading.after>lowerReading.before,'真实原生wheel确实推进唯一body阅读位置')
+      const scrollers=await read('(()=>{const p=document.querySelector(".performance-popover");return [...p.querySelectorAll("*")].filter(n=>n.scrollHeight>n.clientHeight+1&&/(auto|scroll)/.test(getComputedStyle(n).overflowY)).map(n=>n.className)})()')
+      assert.deepEqual(scrollers,['performance-body'],'展开归因仍为唯一实际滚动容器')
+      await read('window.attributionReading={group:document.querySelector('+JSON.stringify(renderer)+'),process:document.querySelector('+JSON.stringify(processRow)+'),body:document.querySelector(".performance-body"),focus:document.activeElement,scroll:document.querySelector(".performance-body").scrollTop,text:document.querySelector('+JSON.stringify(processRow)+').textContent}')
+      assert.ok(await read('window.attributionReading.scroll')>0,'真实wheel产生非零阅读位置')
+      await publish('refresh')
+      raw.attributionRefresh=await read('(()=>{const a=window.attributionReading;return {sameGroup:a.group===document.querySelector('+JSON.stringify(renderer)+'),sameProcess:a.process===document.querySelector('+JSON.stringify(processRow)+'),sameBody:a.body===document.querySelector(".performance-body"),sameFocus:a.focus===document.activeElement,scrollBefore:a.scroll,scrollAfter:a.body.scrollTop,priorText:a.text,currentText:document.querySelector('+JSON.stringify(processRow)+').textContent}})()')
+      for(const key of ['sameGroup','sameProcess','sameBody','sameFocus'])assert.equal(raw.attributionRefresh[key],true,'同PID实例刷新保原'+key)
+      assert.ok(Math.abs(raw.attributionRefresh.scrollAfter-raw.attributionRefresh.scrollBefore)<=1,'同实例刷新保持非零原滚动位置')
+      assert.notEqual(raw.attributionRefresh.currentText,raw.attributionRefresh.priorText,'刷新数据实际消费且保原PID节点')
+      await capture('1480-dark-work-wait.png','Actual work and wait / native wheel lower reading / same instance refresh keeps DOM focus and scroll')
+      await publish('newInstance')
+      raw.attributionReplacement=await read('(()=>{const old=window.attributionReading.process,n=document.querySelector('+JSON.stringify(processRow)+');return {oldDisconnected:!old.isConnected,newNode:n!==old,newPid:n?.dataset.processPid,newCreation:n?.dataset.processCreated,oldPid:old.dataset.processPid,oldCreation:old.dataset.processCreated}})()')
+      assert.equal(raw.attributionReplacement.oldDisconnected,true,'新进程实例不可复用旧PID节点')
+      assert.equal(raw.attributionReplacement.newNode,true,'新实例确实产生新进程节点')
+      assert.notEqual(raw.attributionReplacement.newPid+':'+raw.attributionReplacement.newCreation,raw.attributionReplacement.oldPid+':'+raw.attributionReplacement.oldCreation,'PID+创建身份替换正控非空')
+      assert.equal(await read('document.querySelector("[data-renderer-memory]")'),null,'同PID复用创建身份不匹配不可串旧窗口heap与工作等待')
+      await publish('fresh');await scene(380,'light');await wheelBody(-2000)
+      assert.equal(await read('document.querySelector('+JSON.stringify(renderer)+').open'),true,'主题宽度及实例刷新保持Renderer组展开')
+      await capture('380-light-attribution.png','Actual narrow light App / Renderer expanded / one scroll / no horizontal overflow')
+      await publish('stale');await capture('380-light-attribution-stale.png','Independent stale source age / previous readings remain / neutral heat')
+      assert.ok(await read('[...document.querySelectorAll(".performance-state,.performance-note")].some(n=>/previous|stale/i.test(n.textContent))'),'过期服务状态真实可见')
+      assert.equal(await read('[...document.querySelectorAll(".performance-heat-cell")].every(n=>!n.style.background)'),true,'过期数据不着当前热度')
+      await scene(1480,'dark');await publish('unknown');await wheelBody(320)
+      await capture('1480-dark-attribution-unknown.png','Unknown heap or source is explicit / retained workface / no fabricated allocation')
+      assert.ok(await read('[...document.querySelectorAll(".performance-state,.performance-note")].some(n=>/unavailable|unknown/i.test(n.textContent))'),'未知归因明确呈现')
+      assert.equal(await read('/[0-9]+(?:\\.[0-9]+)?%/.test(document.querySelector('+JSON.stringify(processRow)+').textContent)'),false,'未知PID CPU不制造百分比数值')
+      assert.ok(await read('document.querySelector("[data-renderer-memory]").textContent.includes("Heap unavailable")'),'真实heap缺测明确呈现')
+      await publish('fresh');await wheelBody(-2000)
+      await click(q('[data-performance-observation-toggle]'))
+      assert.equal(leases.size,0,'暂停仅释放本归因UI观察')
+      assert.equal(await read('document.querySelector('+JSON.stringify(renderer)+').open'),true,'暂停保原Renderer展开')
+      await capture('1480-dark-attribution-paused.png','Paused observation / latest attribution retained / no live heat claim')
+      assert.equal(await read('window.attributionOriginalTerminal===document.querySelector(".xterm-helper-textarea")&&window.attributionOriginalTerminal.isConnected'),true,'归因交互保原Terminal输入节点')
+      assert.equal(await read('window.performanceScene.writes.length'),originalWrites,'归因键盘不泄漏到原Terminal写入')
+      raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface,'归因操作保原Tab/Region/layout/Session/draft')
+      await close()
     } else {
       assert.equal(leases.size,0,'icon/label关闭不观察')
       assert.equal(await read('document.querySelectorAll(".window-status-bar [aria-label=Settings]").length'),1,'实际App唯一Settings入口')

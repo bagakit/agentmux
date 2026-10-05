@@ -1,6 +1,11 @@
-import type { MetricsObservation } from '../../src/metrics.js'
+import type { MetricsObservation, RendererMemorySnapshot } from '../../src/metrics.js'
 import type { ToolkitMetricsSnapshot } from '../../src/toolkit.js'
 import { performanceFixture } from './renderer-performance.js'
+
+export function rendererMemoryFixture(pid = 1): RendererMemorySnapshot {
+  return { process: { pid, creationTime: 1 }, memory: { sampledAt: 1000, scope: 'renderer-v8-isolate',
+    heap: { usedHeapKib: 64, totalHeapKib: 128, physicalHeapKib: 96, heapLimitKib: 4096 }, unavailable: null } }
+}
 
 /** Same public shape as live available observations, with synthetic identities. */
 export function deepMetricsSnapshot(): ToolkitMetricsSnapshot {
@@ -27,7 +32,7 @@ export function deepMetricsSnapshot(): ToolkitMetricsSnapshot {
     scope: { kind: 'unix-host', hostId: 'local', hostname: 'test-host', mainPid: 1 }, window: { ...window },
     units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
     diagnostics: pending, process: pending, app: pending, runtime: pending, main: pending,
-    renderer: { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null, data: { window,
+    renderer: { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null, data: { window, ...rendererMemoryFixture(),
       counts: { monacoEditors: 0, monacoModels: 0, documents: 0, runtimeSubscriptions: 1, terminalViews: 1, terminalAddons: 1, terminalListeners: 1 }, performance } } }
   return { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'execution',
     run: { hostId: 'local', runId: 'observer-run' }, state: 'observing', reason: null, startedAt: 1,

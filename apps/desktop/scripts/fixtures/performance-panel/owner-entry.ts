@@ -7,3 +7,4 @@ export { localRuntimeConnector } from '../../../test/helpers/local-runtime-conne
 export { ProcessResourceSampler } from '../../../src/main/process-resource-sampler'
 export { createResourceMetricsPort } from '../../../src/main/resource-usage-control'
 export { AgentMuxMemoryAgentSessionStore, AgentMuxControlServer } from '@agentmux/core'
+export { parseMetricsRendererResult } from '@agentmux/core/control'
