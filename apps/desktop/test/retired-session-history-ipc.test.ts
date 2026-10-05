@@ -1,4 +1,3 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -10,11 +9,11 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionHistoryReference } from '../src/shared/contracts'
 import { RuntimeController } from '../src/main/runtime-controller'
 
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }))
+const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>(), directory: '' }))
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => _hygiene_fixturePath("private-retired-history-ipc"), getAppPath: () => _hygiene_fixturePath("private-retired-history-ipc"), isPackaged: false },
+  app: { getPath: () => bridge.directory, getAppPath: () => new URL('../', import.meta.url).pathname, isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
@@ -31,6 +30,8 @@ import { DEFAULT_CONFIG } from '../src/main/config-store'
 
 it('reads retired source, native and captured content through actual preload/IPC/Main without a Run lease or Runtime connection', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-retired-ipc-'))
+  bridge.directory = root
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', root)
   const native = join(root, 'native.jsonl')
   await writeFile(native, JSON.stringify({ sessionId: 'retained-native', uuid: 'native-body', type: 'user', message: { role: 'user', content: 'Original retained input' } }) + '\n')
   const store = new AgentMuxFileAgentSessionStore(join(root, 'agent-sessions.json'))
@@ -49,15 +50,15 @@ it('reads retired source, native and captured content through actual preload/IPC
   const kernel = (client as unknown as { kernel: Record<string, () => Promise<void>> }).kernel
   const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name))
   const controller = new RuntimeController(store, localRuntimeConnector)
-  controller.commit({ hosts: [{ id: 'private-host', config: { id: 'private-host', kind: 'local', label: 'Private' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  controller.commit({ hosts: [{ id: 'private-host', config: { id: 'private-host', kind: 'ssh', label: 'Private', hostname: 'target.invalid' }, client, executionHost: { kind: 'ssh', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { 'private-claude': { providerId: 'claude', label: 'Private', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime: controller,
-      configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
-      scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
+    dispose = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
+      configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as never, progressLoops: { subscribe: () => () => {} } as never,
+      scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as never })
     bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => {
       const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
       return handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)
@@ -73,5 +74,5 @@ it('reads retired source, native and captured content through actual preload/IPC
     expect(connect).not.toHaveBeenCalled()
     expect(controls).toHaveLength(6)
     for (const control of controls) expect(control).not.toHaveBeenCalled()
-  } finally { await dispose?.(); await client.dispose(); await rm(root, { recursive: true, force: true }) }
+  } finally { await dispose?.(); await client.dispose(); await rm(root, { recursive: true, force: true }); vi.unstubAllEnvs(); vi.restoreAllMocks() }
 })
