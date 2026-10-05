@@ -8,6 +8,9 @@ export const goalsSettings = [
   booleanSetting('goals.showFinished', resolveGoalsPreferences(undefined).showFinished,
     config => resolveGoalsPreferences(config.goals).showFinished,
     (config, showFinished) => ({ ...config, goals: { ...config.goals, showFinished } })),
+  booleanSetting('goals.requesterAsSupervisor', resolveGoalsPreferences(undefined).requesterAsSupervisor,
+    config => resolveGoalsPreferences(config.goals).requesterAsSupervisor,
+    (config, requesterAsSupervisor) => ({ ...config, goals: { ...config.goals, requesterAsSupervisor } })),
   booleanSetting('goalsCommonActions.collapsed', DEFAULT_GOALS_COMMON_ACTIONS.collapsed,
     config => resolveGoalsCommonActions(config.goalsCommonActions).collapsed,
     (config, collapsed) => ({ ...config, goalsCommonActions: { ...resolveGoalsCommonActions(config.goalsCommonActions), collapsed } }))
