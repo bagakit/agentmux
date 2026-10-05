@@ -67,6 +67,8 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 
 `system.diagnostics.inspect` 是 typed、只读 RPC；CLI 为 `amux system diagnostics inspect`。`--list` 只列本服务实际组装的领域合同，不读 owner，也不宣称当前来源在线。具体签名见 [public-rpc](../../packages/core/src/public-rpc.ts)，命令和 help/skill 来自 [CLI 注册](../../packages/core/src/agentmux-cli-commands.ts)。
 
+公共宿主已有 business-owner 转接时，发现并列本地与原 client 实际返回的能力，同 domain 保本地合同。已有本地 domain 始终沿原 reader、journal、authority 和原件，不依赖 GUI；只有本地未组装的 domain 才通过原通用转接读取。转接缺失或真实 transport 不可用时保本地事实；远端明确拒绝、取消、预算结果或坏回执不改成本地重读，也不凭转接 callback 广告能力。原 client query 继续持其实际在途成本，不新建第二 query 或跨跳完成期限。
+
 | domain | 准确目标 | 原 owner 与范围 |
 | --- | --- | --- |
 | delivery.client | hostId、logId，可选 authority | receiving client journal；默认安全投影、显式原件 |

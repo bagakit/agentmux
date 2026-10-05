@@ -49,6 +49,8 @@ amux system diagnostics inspect --input mote-context-query.json
 
 跨进程使用原 `connectAgentMuxRpc` 的 `call('system.diagnostics.inspect', {target,...})`，结果严格解析为 [Core 类型](../../packages/core/src/diagnostic-evidence.ts)。`--no-related` 只读取 root；预算参数只收紧。原领域 CLI 可以负责发现 logId/executionId、专属恢复或 artifact 内容，通用查询不直接读本地文件。
 
+默认公共 Host 复用已有 `forwardControl` 接原 client 的缺域读面；现有本地 domain 仍由原服务读取，不能因 GUI 在场换成同 logId 的另一 journal。能力发现先保本地，再并列原 client 的实际合同。验证须经过真实 Host factory、原 Main business endpoint、typed client 与默认 CLI；只直连 Main 不能证明默认入口接线，callback 存在不能证明 reader 安装。
+
 先查看 availability、失败阶段、已确认事实、issue、completeness 与原目标，再看关系的 verification。Native not-exposed 表示根因材料缺失，不能以关联成功补造根因。raw 明确请求且来源有权限才读取；retained 不等于本次 included，也不代表无限保留。
 
 ## owner 的必要取舍
