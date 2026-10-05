@@ -88,7 +88,7 @@ export { executorDetectionKey } from './lib/executor-detection'
 import { executorsForHost } from './lib/executors'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
-import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
+import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import { configValuesEqual } from '../../shared/config-edit'
 import { inspectSpaceIconOverrides } from '../../shared/space-object-appearance'
@@ -3165,12 +3165,23 @@ let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 /** The existing Space and Survey selection facts captured by file display intents. */
-function surveyPresentationAfterClose(state: Pick<AppState, 'tabs' | 'surveyZoneSelection' | 'recallZoneSelection' | 'recallNotebookId' | 'recallNoteId'>, tabs: AppState['tabs']) {
+function surveyPresentationAfterClose(state: AppState, tabs: AppState['tabs']) {
   const active = state.recallZoneSelection?.active
   const closedPage = state.recallNotebookId && state.recallNoteId && active && state.tabs[active.tabId]?.regions[active.regionId]?.kind === 'file' && !tabs[active.tabId]?.regions[active.regionId]
+  let surveyCollectedZones = state.surveyCollectedZones
+  if (coreSpatialPersistence?.ready && Object.keys(surveyCollectedZones).length && Object.keys(state.tabs).some(id => !tabs[id])) {
+    const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch) ?? []
+    const catalog = spatialCatalog(state, topics)
+    // Core members with unavailable host descriptors still exist. Only explicit prior deletions can exclude them.
+    const retained = coreSpatialPersistence.current!.graph.tabs.filter(tab => !state.tabs[tab.tabId] && !coreSpatialPersistence!.removedEntities.has(tab.tabId))
+    surveyCollectedZones = surveyCollectionAfterClose(state.tabs, tabs, surveyCollectedZones, { ...catalog, tabs: [...catalog.tabs, ...retained] })
+  }
   return { recallNoteId: closedPage ? null : state.recallNoteId,
     recallZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.recallZoneSelection),
-    surveyZoneSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
+    surveyCollectedZones,
+    surveyZoneSelection: state.surveyZoneSelection && state.surveyCollectedZones[state.surveyZoneSelection.zoneId] && !surveyCollectedZones[state.surveyZoneSelection.zoneId]
+      ? null : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
 }
 
 export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise<NoteCreationReceipt> {
@@ -5741,6 +5752,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Publish only the exact View deletion committed here, independently of cleanup receipts.
     const commitClose = (tab: WorkbenchTab | null): void => {
       let removedTab: WorkbenchTab | undefined
+      let collectionChanged = false
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
         const committed = { ...reconcileWorkbenchFileProjection(current, topology),
@@ -5748,10 +5760,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
+        collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
         if(removedTab) coreSpatialPersistence?.removeEntity(removedTab.id)
         return committed
       })
       if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, error => get().reportError(error))
+      if (collectionChanged) void saveWorkbenchSelection(false)
     }
     if (!plan.closesView) {
       commitClose(null)
