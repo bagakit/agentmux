@@ -41,7 +41,7 @@ Goals 与 Mote 消费同一[Demand 文件事实](../behavior/goals-and-demand.md
 
 ## Demand 专属 PMO Tab 的表面
 
-New Goal 与已有目标讨论的实体关系和恢复资格唯一见[《Demand 的专属 PMO Tab》](../behavior/goals-and-demand.md#demand-的专属-pmo-tab)。目标卡与详情保一个紧凑讨论入口，打开后显示主 Mote 中该 Goal 的准确专属 Tab；原 Mote 名／头像、目标标题和执行者各有层级，不能把 Tab 画成新 Mote 或将不同目标合成共享 Session。当前下一步沿下节呈现，不重复整段对话。
+New Goal 与已有目标讨论的实体关系和恢复资格唯一见[《Demand 的专属 PMO Tab》](../behavior/goals-and-demand.md#demand-的专属-pmo-tab)。目标卡与详情保一个紧凑讨论入口，打开后显示主 Mote 中该 Goal 的准确专属 Tab；原 Mote 名／头像、目标标题和执行者各有层级，不能把 Tab 画成新 Mote，也不能暗中合并或更换原 Tab／Session 映射。PMO／主对话的复用关系遵循上述行为合同。当前下一步沿下节呈现，不重复整段对话。
 
 Core 空间 owner 持久化准确 Tab／Region、拓扑与绑定，Client 只呈现原目标。读取或恢复未知时保原 Goal／Tab／Region／Session 与服务窗，不自行新建替代上下文；原 Tab 已权威确认关闭后的显式新讨论按行为 owner 处理。等待目标 Agent 挂载时沿同一 Tab 的真实状态，不先闪回别的目标或旧 PMO。
 
