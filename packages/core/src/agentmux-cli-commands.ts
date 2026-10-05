@@ -33,12 +33,14 @@ export interface AgentMuxCliCommand {
   positionalData?: number
   stream?: boolean
   local?: boolean
+  documentOutput?: boolean
   parse(args: readonly string[]): Promise<Record<string, unknown>>
 }
 export interface AgentMuxCliInvocation {
   command: AgentMuxCliCommand
   params: Record<string, unknown>
   endpoint?: string
+  output?: string
 }
 
 const invalid = (message: string): never => { throw new AgentMuxError(message, 'INVALID_CLI_ARGUMENT') }
@@ -472,8 +474,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts', 'themes'] as const).flatMap(resource => [
     settings(`settings.${resource}.ls`, '', resource === 'themes' ? 'List built-in and custom themes, readonly metadata and retained-record issues.' : `List configured ${resource}, not active Sessions.`),
-    settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--keyword <code>' : '<id>',
-      resource === 'prompts' ? 'Read an exact saved Prompt by ID or its explicit keyword; quick reply meaning is its saved body.' : 'Inspect an exact saved resource.', 1),
+    { ...settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--keyword <code>' : resource === 'themes' ? '<id> [--output FILE]' : '<id>',
+      resource === 'prompts' ? 'Read an exact saved Prompt by ID or its explicit keyword; quick reply meaning is its saved body.' : 'Inspect an exact saved resource.', 1), ...(resource === 'themes' ? { documentOutput: true } : {}) },
     settings(`settings.${resource}.create`, '<id> --input <file|->', 'Create a complete saved resource.', 1),
     settings(`settings.${resource}.update`, '<id> --input <file|->', resource === 'themes' ? 'Update a custom theme using {changes, expected}; expected is the full original value.' : 'Update using {changes, expected?}.', 1),
     settings(`settings.${resource}.delete`, resource === 'themes' ? '<id> --input <file|->' : '<id> [--input <file|->]', resource === 'themes' ? 'Delete a custom theme using {expected: originalValue}; an active theme returns atomically to the default.' : 'Delete using optional complete expected fields.', 1)
@@ -563,5 +565,10 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
   const match = agentMuxCliMatch(args)
   if (!match) invalid('Unknown command. Run amux --help.')
   const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
-  return { command, params: await match!.command.parse(match!.tail), ...(endpoint === undefined ? {} : { endpoint }) }
+  let tail = match!.tail, output: string | undefined
+  if (command.documentOutput && tail.length !== 1) {
+    if (tail.length !== 3 || tail[1] !== '--output' || !tail[2]?.length || tail[2] === '-') invalid('Use inspect <id> --output FILE; output creates a new file and never overwrites an existing file.')
+    output = tail[2]; tail = tail.slice(0, 1)
+  }
+  return { command, params: await match!.command.parse(tail), ...(output === undefined ? {} : { output }), ...(endpoint === undefined ? {} : { endpoint }) }
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
 import { randomUUID } from 'node:crypto'
 import packageManifest from '../package.json' with { type: 'json' }
@@ -189,7 +190,8 @@ async function main(): Promise<number> {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }
     const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)
-    write({ ok: true, operation: method, ...(operationId === undefined ? {} : { operationId }), result })
+    const output = invocation.output === undefined ? undefined : await writeCliResourceDocument(invocation.output, result)
+    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result })
     return partial(method, result) ? 1 : 0
   } finally { await client.dispose() }
 }

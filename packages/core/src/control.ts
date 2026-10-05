@@ -336,7 +336,7 @@ export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
   | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
   | { operation: 'settings.hosts.upgrade-inspect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
-export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields; readonly?: boolean }
+export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields; readonly?: boolean; document?: AgentMuxControlSettingsResourceFields }
 /** Unreadable authored records remain in their owner; these diagnostics never imply deletion. */
 export type AgentMuxControlSettingsResourceIssue = { id: string; message: string }
 export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
