@@ -48,7 +48,8 @@ describe('Headless semantic owner ordinary process continuity', () => {
     client.onEvent(event => events.push(event))
     const command = resolve(import.meta.dirname, 'fixtures/fake-codex-cli.mjs')
     const session = await client.createAgent({ providerId: 'codex', executorId: 'codex', workspacePath: scope.root,
-      injectAgentMuxGuide: false, createOperationId: 'continuity-create', commandOverride: command })
+      injectAgentMuxGuide: false, createOperationId: 'continuity-create', commandOverride: command,
+      env: { AGENTMUX_FAKE_NATIVE_RECORD: '1' } })
     const original = await client.reattachAgent(session.agentSessionId, 0, 'terminal')
     await until(() => client.agentSession(session.agentSessionId), value => Boolean(value.nativeHandle) && value.semanticStatus?.state === 'done', 'original native locator')
     await scope.failProbe()
