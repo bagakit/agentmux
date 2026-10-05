@@ -21,7 +21,7 @@ type Props = Omit<ComponentPropsWithoutRef<typeof TextInput>, 'value' | 'onChang
 }
 
 /** One human-input consumer; navigation, Profile and durable history remain Main-owned. */
-export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryNotice, onDeferredHistoryFailure, historyTarget, submitDisabled = false, ref, onFocus, onBlur, onKeyDown, onContextMenu, ...props }: Props) {
+export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryNotice, onDeferredHistoryFailure, historyTarget, submitDisabled = false, ref, onFocus, onBlur, onKeyDown, onContextMenu, onClick, ...props }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const request = useRef(0)
@@ -34,12 +34,14 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   const [loadedHistory, setLoadedHistory] = useState<{ key: string; snapshot: BrowserInputHistorySnapshot } | null>(null)
   const history = loadedHistory?.key === currentTarget ? loadedHistory.snapshot : null
   const [open, setOpen] = useState(false)
+  const [filtering, setFiltering] = useState(false)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(-1)
   const [notice, setNotice] = useState<string | null>(null)
   const id = useId()
   useEffect(() => onHistoryNotice(notice), [notice, onHistoryNotice])
-  const entries = history?.entries.filter(entry => !value.trim() || entry.text.toLocaleLowerCase().includes(value.trim().toLocaleLowerCase())).slice(0, 8) ?? []
+  // A current URL is context, not a query. Filter only once the person edits it.
+  const entries = history?.entries.filter(entry => !filtering || !value.trim() || entry.text.toLocaleLowerCase().includes(value.trim().toLocaleLowerCase())).slice(0, 8) ?? []
   const live = (key: string, token: number) => targetKey.current === key && request.current === token
 
   async function reload(): Promise<void> {
@@ -59,7 +61,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   function submit(text = value): void {
     if (props.disabled || submitDisabled || composing.current) return
     if (!text.trim()) { setOpen(false); onSubmit(text); return }
-    setOpen(false); setSelected(-1)
+    setOpen(false); setFiltering(false); setSelected(-1)
     const key = currentTarget, target = historyTarget, token = ++request.current
     if (target) {
       // Capture this human submission before navigation/creation; never read a later draft.
@@ -78,7 +80,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   useImperativeHandle(ref, () => ({ submit }), [value, currentTarget, props.disabled, submitDisabled, historyTarget, onSubmit, onDeferredHistoryFailure])
 
   useEffect(() => {
-    ++request.current; setLoadedHistory(null); setOpen(false); setSelected(-1); setLoading(false); setNotice(null)
+    ++request.current; setLoadedHistory(null); setOpen(false); setFiltering(false); setSelected(-1); setLoading(false); setNotice(null)
     return () => { ++request.current }
   }, [currentTarget])
 
@@ -115,11 +117,12 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   return <>
     <TextInput {...props} ref={input} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={open ? id : undefined} aria-activedescendant={open && selected >= 0 && entries[selected] ? `${id}-${selected}` : undefined}
       value={composerRenderValue(value, composition)} autoComplete="off"
-      onChange={event => { setSelected(-1); ime.change(event.currentTarget.value); if (!composing.current) setOpen(true) }}
+      onChange={event => { setSelected(-1); setFiltering(true); ime.change(event.currentTarget.value); if (!composing.current) setOpen(true) }}
       onCompositionStart={event => { composing.current = true; dismiss(); ime.compositionStart(event.currentTarget.value) }}
       onCompositionUpdate={event => ime.compositionUpdate(event.currentTarget.value)}
-      onCompositionEnd={event => { composing.current = false; ime.compositionEnd(event.currentTarget.value) }}
-      onFocus={event => { onFocus?.(event); void reload() }}
+      onCompositionEnd={event => { composing.current = false; setFiltering(true); ime.compositionEnd(event.currentTarget.value) }}
+      onFocus={event => { onFocus?.(event); if (!composing.current) { setOpen(true); void reload() } }}
+      onClick={event => { onClick?.(event); if (!open && !composing.current) { setOpen(true); void reload() } }}
       onBlur={event => { onBlur?.(event); if (!panel.current?.contains(event.relatedTarget as Node)) dismiss() }}
       onContextMenu={event => { event.stopPropagation(); dismiss(); onContextMenu?.(event) }}
       onKeyDown={event => {
