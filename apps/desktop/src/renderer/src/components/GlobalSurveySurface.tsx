@@ -23,7 +23,7 @@ import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { resolveWorkbenchZone } from '../lib/workbench-projection'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
-import { SurveyItemOptions } from './SurveyItemOptions'
+import { SurveyItemOptions, SurveyItemContextMenu } from './SurveyItemOptions'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { SurveyRecallCapture } from './SurveyRecallCapture'
 import type { SurveyRecallCapture as RecallCaptureTarget } from '../lib/survey-recall-capture'
@@ -56,6 +56,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
   const explorationNames = useAppStore(state => state.surveyExplorationNames)
+  const contextOrigin = useRef<HTMLElement | null>(null)
+  const [contextZoneId, setContextZoneId] = useState<string | null>(null)
+  const contextZone = catalog?.zones.find(zone => zone.zoneId === contextZoneId)
   const [renamingZoneId, setRenamingZoneId] = useState<string | null>(null)
   const collected = useAppStore(state => state.surveyCollectedZones)
   const setCollected = useAppStore(state => state.setSurveyZoneCollected)
@@ -321,17 +324,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       { tabId: tab.id, regionId: tab.layout.activeRegionId }))
   }
 
-  function saveToTopic(scope: 'research' | 'panel'): void {
-    if (!currentZone || !collected[currentZone.zoneId] || (scope === 'panel' && !currentPanel)) return
-    const panel = currentPanel ? tabs[currentPanel.tabId]?.regions[currentPanel.regionId] : null
+  function saveToTopic(zone: AgentMuxZoneFact | undefined, scope: 'research' | 'panel'): void {
+    const targetPanel = selection?.zoneId === zone?.zoneId ? currentPanel : null
+    if (!zone || !collected[zone.zoneId] || (scope === 'panel' && !targetPanel)) return
+    const panel = targetPanel ? tabs[targetPanel.tabId]?.regions[targetPanel.regionId] : null
     // Capture original durable references once; later navigation cannot retarget this draft.
-    setCapture({ title: `${scope === 'panel' ? 'Current panel' : 'Research'}: ${itemTitle(currentZone)}`,
-      sources: [{ kind: 'survey', zoneId: currentZone.zoneId,
-        ...(scope === 'panel' && currentPanel ? { tabId: currentPanel.tabId, regionId: currentPanel.regionId } : {}) },
+    setCapture({ title: `${scope === 'panel' ? 'Current panel' : 'Research'}: ${itemTitle(zone)}`,
+      sources: [{ kind: 'survey', zoneId: zone.zoneId,
+        ...(scope === 'panel' && targetPanel ? { tabId: targetPanel.tabId, regionId: targetPanel.regionId } : {}) },
         ...[...new Set((scope === 'panel' ? panel?.kind === 'browser' ? [panel] : []
-          : (tabsByZone.get(currentZone.zoneId) ?? []).flatMap(tabId => workbenchSurfaces(tabs[tabId]!).filter(surface => surface.kind === 'browser')))
+          : (tabsByZone.get(zone.zoneId) ?? []).flatMap(tabId => workbenchSurfaces(tabs[tabId]!).filter(surface => surface.kind === 'browser')))
           .filter(surface => surface.url !== 'about:blank').map(surface => surface.url))].map(url => ({ kind: 'url' as const, url }))],
-      noteIds: pages.filter(page => page.workface?.zoneId === currentZone.zoneId && (scope !== 'panel' || panel?.kind === 'file' && page.resource.workspaceId === panel.workspaceId && page.resource.path === panel.path)).map(page => page.noteId) })
+      noteIds: pages.filter(page => page.workface?.zoneId === zone.zoneId && (scope !== 'panel' || panel?.kind === 'file' && page.resource.workspaceId === panel.workspaceId && page.resource.path === panel.path)).map(page => page.noteId) })
   }
 
   function saveToRecall(): void {
@@ -344,7 +348,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const options = <SurveyItemOptions key={String(sidebarCollapsed)} visible={visible && !controlsCoverPage} title={currentZone ? itemTitle(currentZone) : selection ? 'Retained exploration' : 'New exploration'}
     zone={currentZone ?? null} workspace={workspace ?? null} collected={!!selection && collected[selection.zoneId] === true} relatedSpaces={related.spaces} relatedSpacesUnconfirmed={related.unconfirmed}
     activityDetails={currentZone ? activity(currentZone).details : null}
-    onSaveToTopic={saveToTopic} currentPanelAvailable={Boolean(currentPanel)}
+    onSaveToTopic={scope => saveToTopic(currentZone, scope)} currentPanelAvailable={Boolean(currentPanel)}
     {...(currentZone ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
     onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
     onManageBrowsers={() => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
@@ -357,6 +361,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
+        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} visible={visible && !controlsCoverPage} title={contextZone ? itemTitle(contextZone) : 'Exploration'}
+          zone={contextZone ?? null} workspace={contextZone ? resourceWorkspaces.get(contextZone.workspaceId) ?? null : null}
+          collected={!!contextZone && collected[contextZone.zoneId] === true}
+          relatedSpaces={contextZone && catalog ? catalog.bindings.filter(binding => binding.zoneId === contextZone.zoneId).flatMap(binding => catalog.spaces.filter(space => space.spaceId === binding.spaceId)) : null}
+          relatedSpacesUnconfirmed={!!contextZone && !!catalog?.bindings.some(binding => binding.zoneId === contextZone.zoneId && !catalog.spaces.some(space => space.spaceId === binding.spaceId && !space.issue))}
+          activityDetails={contextZone ? activity(contextZone).details : null}
+          onRename={() => { if (contextZone) { setSidebarCollapsed(false); setRenamingZoneId(contextZone.zoneId) } }}
+          onCollectedChange={value => { if (contextZone && !setCollected(contextZone.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
+          onSaveToTopic={scope => saveToTopic(contextZone, scope)} currentPanelAvailable={contextZone?.zoneId === selection?.zoneId && Boolean(currentPanel)}
+          onNewNote={() => { if (contextZone) newItemNote(contextZone.zoneId) }} onNewAgent={() => { if (contextZone) newItemAgent(contextZone.zoneId) }}
+          onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }}>
         <div className="survey-page-list">
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
@@ -366,10 +381,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => {
             const status = activity(zone)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
-              onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
+              onContextMenu={button => { contextOrigin.current = button; setContextZoneId(zone.zoneId) }} onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
           })}
         </div>
+        </SurveyItemContextMenu>
       </aside>
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
         onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : newItemAgent(locationChoice.zoneId, reference)} /> : null}

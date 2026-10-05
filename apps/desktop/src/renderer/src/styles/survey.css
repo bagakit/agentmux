@@ -70,7 +70,7 @@
 .survey-topic-trigger > svg { flex: none; }
 .survey-topic-trigger:hover, .survey-topic-trigger[data-state="open"] { color: var(--text); background: var(--wash-2); }
 .survey-topic-trigger:focus-visible, .survey-item:focus-visible, .survey-item-details:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
-.survey-topic-menu { width: min(320px, calc(100vw - 16px)); max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; }
+.survey-topic-menu { width: min(320px, calc(100vw - 16px), var(--radix-context-menu-content-available-width, 100vw)); max-height: var(--radix-context-menu-content-available-height, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; }
 .survey-topic-menu__label, .survey-topic-menu__notice { margin: 0; padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
 .survey-topic-menu__label { font-size: var(--fs-micro); font-weight: 500; }
 .survey-topic-menu__item { align-items: flex-start; }
