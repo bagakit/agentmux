@@ -171,7 +171,7 @@ import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-
 import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
-import { assertManualPromptSenderTrusted, assertSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
+import { assertManualPromptSenderTrusted, assertSenderTrusted, assertToolkitSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
 import { executeCrashLogControl, requestCrashLogReveal } from './crash-log-access.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
@@ -980,7 +980,10 @@ export async function registerIpc(args: {
   handle('demands:inspectActivity', async (id: string, operationId: string) => await demands.inspectActivity(id, operationId))
   handle('demands:readActivities', async (id: string) => await demands.readActivities(id))
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
-  const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
+  const disposeToolkitIpc = registerToolkitIpc(toolkit, (channel, handler) => handleWithEvent(channel, (event, ...values) => {
+    assertToolkitSenderTrusted(event.sender, event.senderFrame, args.window.webContents, args.window.webContents.mainFrame)
+    return handler(event, ...values)
+  }))
 
   const notebookStore = new AgentMuxNotebookStore(undefined, notesStorageOwner.storage)
   handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
