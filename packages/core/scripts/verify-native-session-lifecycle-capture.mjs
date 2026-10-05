@@ -109,7 +109,7 @@ if (process.argv[2] === '--worker') {
     const restored = await run('restored-green', ['node_modules/vitest/vitest.mjs', 'run', test,
       'packages/core/test/native-hook-session-scope.test.ts', '--maxWorkers', '1', '--config', './vitest.config.ts', '--root', '.'])
     assert.equal(restored.exitCode, 0, restored.text)
-    assert.match(restored.text, /Tests\s+22 passed \(22\)/)
+    assert.match(restored.text, /Tests\s+28 passed \(28\)/)
     const client = await readFile(join(root, clientPath), 'utf8')
     const lifecycle = calls(client, clientPath, ['queueNativeIdentityCapture'])
     assert.deepEqual(new Set(lifecycle.map(call => call.owner)), new Set(['open', 'refreshAgentSession', 'createAgentWithDelivery', 'resumeAgentRun']))
@@ -126,7 +126,7 @@ if (process.argv[2] === '--worker') {
     assert.deepEqual(sourceAfter, sourceBefore)
     assert.deepEqual(await bindInputs(), inputPins, 'Durability inputs must match this actual qualification')
     const receipt = { schema: 'agentmux.native-session-lifecycle-proof.v1', sourceBefore, sourceAfter, inputPins,
-      mutations, restoredGreen: true, tests: 22, lifecycle, definitionExternalProductionCallers: [...capture, ...external], runs,
+      mutations, restoredGreen: true, tests: 28, lifecycle, definitionExternalProductionCallers: [...capture, ...external], runs,
       scope: 'Private real process/open native artifacts and public Core lifecycle; no user Run or GUI actions.' }
     await writeFile(join(output, 'qualification.json'), JSON.stringify(receipt, null, 2) + '\n')
     process.stdout.write(relative(root, join(output, 'qualification.json')) + '\n')
