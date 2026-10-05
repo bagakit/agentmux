@@ -130,6 +130,10 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 
 用户确认对象优先的统一 CLI，保留 `agent open` 和 `space mv`。PMO 仍是协调工作方法／角色，不把原 PMO 查询改名为 Mote 查询；跨对象观察归 `app snapshot`，各对象的 inspect 归其对象，原 PMO activity 来自 Goal 的活动事实，归 `goal activity`。本节定义新的统一目标；旧顶层动词与原公开 Demand 词汇在对应能力落地时直接替换，不留兼容别名。已有能力的当前来源不等于本目标已经实现。
 
+**主公开 CLI 的可执行名统一为 `amux`。** 命令发现与帮助、版本输出、skill／运行时指引、复制与错误恢复动作、`AGENTMUX_CLI` 注入的可执行路径、默认远端 CLI 调用及打包安装产物必须使用同一真实 `amux` 入口，不依赖 shell alias 或保留另一主 CLI 名作为兼容用法。源码、编译产物、安装入口与实际消费分别核对，不能只改展示文本或用别名可执行代签一致。
+
+`AGENTMUX_CLI` 环境变量键名保持不变，其值仍须指向实际 `amux`。产品品牌 `AgentMux`、包作用域 `@agentmux`、内部文件与符号、环境变量、schema、协议及独立 helper 的身份各有原 owner，不随主 CLI 拼写机械替换。用户已保存的显式 command／path 保持原值；统一默认入口不改写这些配置，不停止、重启或替换健康 Run，也不更改原 Session、持久数据或工作面。
+
 - **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI、HTTP 与 SSH 共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
 - **权威职责与空间来源。** Core 保持无 Electron／React 依赖，持有 Provider、AgentSession、权限、Hook、readiness、语义恢复，以及前端独立的持久空间身份、拓扑、布局、选择与全部绑定；空间与执行身份的含义见[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)。ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Client 消费 Core 空间事实，负责屏幕呈现与真实输入焦点；配置、编辑、文件／Topic 目录、Git 与 Browser 资源能力仍由原 Host／Client owner 提供，经同一公共服务接入。不新增一套 Runtime、Topic／Project／Space／Session registry、持久空间镜像或 CLI 专用业务判断。
 - **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配请求与响应，不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation。丢回执时按原 owner 的精确业务身份对账；未知不当从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
@@ -206,7 +210,7 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 
 用户要的流程是：「人在别的 Workspace，指定一个项目，给它创建 worktree，在这个 worktree 上开出第一张 tab，拉起指定 Agent，并把第一句任务交给它执行。」随后明确「还是要 agent first，所以命令是同等重要，但是必须完全满足 pmo 视角」。人和 PMO 使用同一套控制命令，PMO 无需切换当前工作面即可发现别处的 Space、Zone、Tab 与 Region，创建目标的首张 Tab，取得新 AgentSession 的精确 ID 并发送后续任务；不能要求目标已经有锚点 Tab。
 
-最新主干是 `agentmux agent open ...` 与 `agentmux space mv ...`，空间目标使用[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的 **Space / Zone / Tab / Region**。`agent open` 能显式选择已有 Zone 或创建新 Zone，并在首张/新 Tab、已有空 Region 或明确分屏位置打开指定 Agent、交付首句。worktree 只是新 Zone 的一种资源来源，Topic/Mote 和非 Git 目录沿相同空间模型可用；Project 与 Workspace 作为真实绑定事实返回，不能冒充 Space/Zone 身份。精确子目标应能反推其上层，不强迫每次逐层填写四个 ID。新 Tab 的落点表达目标 Zone，`--new-tab-after` 不再承担落点语义；不引入旧命令兼容层或焦点 fallback。
+最新主干是 `amux agent open ...` 与 `amux space mv ...`，空间目标使用[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的 **Space / Zone / Tab / Region**。`agent open` 能显式选择已有 Zone 或创建新 Zone，并在首张/新 Tab、已有空 Region 或明确分屏位置打开指定 Agent、交付首句。worktree 只是新 Zone 的一种资源来源，Topic/Mote 和非 Git 目录沿相同空间模型可用；Project 与 Workspace 作为真实绑定事实返回，不能冒充 Space/Zone 身份。精确子目标应能反推其上层，不强迫每次逐层填写四个 ID。新 Tab 的落点表达目标 Zone，`--new-tab-after` 不再承担落点语义；不引入旧命令兼容层或焦点 fallback。
 
 用户要求把「在某处打开的 agent 移动到别处」，并确认「不改变执行目录，只改变在agentmux里的空间位置」。`space mv` 绑定源 Region 及其预期 Session，使用同一目标层级；多投影时不得凭 Session 猜来源，目标占用时不得静默替换健康 Agent。落地结果须明确源投影移除、目标位置保留，同一 Session/Run/cwd/原生句柄与其他投影保留；不能复制、合并到第一块同 Session 投影或把关闭源 Region 当成停止 Agent。跨 Zone 目标如实显示原执行目录。源与目标的持久化恢复一致，未知提交不能报告已移动或盲目重移。
 
@@ -270,7 +274,7 @@ Mobile 消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，�
   - 新 Agent ID 的等长 Base58 生成与既有 ID／持久创建重试保全只定义在[Session、Run 与 View](session-recovery.md#sessionrun-与-view)；链接仍准确引用原 SID，不增加分享别名或另一种地址格式。
   - 生成与严格解析来自无 UI 依赖的同一 Core 公共出口；ID 按 URI path segment 编码并准确还原，不携带正文、命令、父位置暗示或自动执行参数。格式有效不证明对象存在、健康、已呈现、跨设备可达或内容作者可信。非法 URI 只拒绝这次打开，保留工作面与其他健康能力，并明确原因和重取链接的恢复动作。
   - Agent 链接定位为唯一现有 Region 时，原 focus owner 在提交导航前按预期 SID 原子核对该格当前 Agent，导航回执保留该条件。位置已更换只拒绝这次导航，后续异步呈现或持久确认期间变化只报告未确认、保留用户后来工作面，不回滚或操作替换者。相同条件由已有 `space focus --region … --expect-session …` 可用，空间身份与 Agent 身份仍分开。
-  - 接收 Agent 在既有启动引导中知道 `amux://` 是对象引用，遇到链接先查 `amux --skill`，再按类型和原 ID 使用已有公开 inspect、send 或 focus 能力。用法在原 skill 按需发现，不在每次分享附带一份命令；短可执行名 `amux` 正式指向同一公开 CLI 程序，不依赖用户 shell alias。当前能力以实际构建的 `--help`／`--skill` 为准，没有相关工具或引导的外部 Agent 不被假定自动知道用法。
+  - 接收 Agent 在既有启动引导中知道 `amux://` 是对象引用，遇到链接先查 `amux --skill`，再按类型和原 ID 使用已有公开 inspect、send 或 focus 能力。用法在原 skill 按需发现，不在每次分享附带一份命令；可执行名及入口一致性只见[对象优先 CLI 与统一公共业务服务](#对象优先-cli-与统一公共业务服务)。当前能力以实际构建的 `--help`／`--skill` 为准，没有相关工具或引导的外部 Agent 不被假定自动知道用法。
   - Core 持有 Session、耐久空间组成与全部 bindings，client 只消费原事实，不另建对象或位置名册。Agent 链接的语义收件人始终唯一；其多个展示不是多个 Agent，也不能据 SID 猜唯一 Region。打开时沿原空间发现与导航通路解析准确现有展示，多候选完整可辨并要求明确位置，无已知展示时说明本次位置未确认并提供原对象检查／打开／恢复入口，不把观察缺口冒成 Session 终局或创建替代 Agent。
   - Desktop/client 负责系统协议注册、外部冷／热启动接收、屏幕呈现与输入焦点。冷启动沿[原恢复合同](session-recovery.md#冷启动按需恢复p0-末位)先保全工作面并承接定位请求，不能因初始化未完成丢请求或猜目标不存在。热启动进入原对象的真实展示，导航与输入分别表达、默认保留输入；不更改 Session、健康 Run、执行 cwd、空间组成或草稿。未知、不可读、未找到与明确终局分别表达，失败保留原能力并提供具体原因与恢复入口。
 
