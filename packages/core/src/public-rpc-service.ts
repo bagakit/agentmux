@@ -736,7 +736,20 @@ export class AgentMuxRpcService {
         const workspacePath = p.workspacePath === undefined ? caller?.session.workspacePath : rpcString(p.workspacePath, 'Workspace path')
         result = await diagnoseAgentMux({ client, ...(workspacePath === undefined ? {} : { workspacePath }) }); break
       }
-      case 'agent.ls': result = await this.sessions(p); break
+      case 'agent.ls': {
+        validateFilters(p)
+        let aggregationIssue: ReturnType<typeof cause> | undefined
+        if (this.ports.forwardControl) {
+          try { return await this.ports.forwardControl(method, params, context) }
+          catch (error) {
+            if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error
+            aggregationIssue = { ...cause(error), message: `Client Session aggregation is unavailable; only local observations follow. ${error.message}` }
+          }
+        }
+        const list = await this.sessions(p)
+        if (aggregationIssue) list.errors.push({ hostId: 'local', agentSessionId: null, ...aggregationIssue })
+        result = list; break
+      }
       case 'agent.context': {
         const input = parseAgentContextParams(p)
         const scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
@@ -758,16 +771,24 @@ export class AgentMuxRpcService {
       }
       case 'agent.inspect': {
         const target = rpcRecord(p.target)
-        if (target.kind === 'self') { this.requireCaller(caller); rpcRecord(target, ['kind']) }
+        const allowed = target.kind === 'self' ? ['kind'] : target.kind === 'agent-session' ? ['kind', 'agentSessionId'] : target.kind === 'run' ? ['kind', 'run']
+          : target.kind === 'provider-native' ? ['kind', 'providerId', 'sessionId'] : target.kind === 'acp-native' ? ['kind', 'adapterId', 'sessionId'] : []
+        rpcRecord(target, allowed)
+        if (!allowed.length) throw new AgentMuxError('Agent inspection target is invalid.', 'INVALID_CONTROL_REQUEST')
+        if (target.kind === 'self') this.requireCaller(caller)
         const clients = await this.clients()
         const sessions: Array<{ routeHostId: string; client: AgentMuxRpcCorePort; session: ReturnType<AgentMuxClient['agentSession']> }> = []
         const lookupIssues: AgentMuxRpcUnavailable[] = []
-        const selected = target.kind === 'self' ? caller! : target.kind === 'agent-session' ? await this.owner(rpcString(target.agentSessionId, 'Session ID')) : null
+        let selected: Awaited<ReturnType<AgentMuxRpcService['owner']>> | null = target.kind === 'self' ? caller! : null
+        if (target.kind === 'agent-session') {
+          const id = rpcString(target.agentSessionId, 'Session ID')
+          try { selected = await this.owner(id) }
+          catch (error) {
+            if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION' || !this.ports.forwardControl) throw error
+            return await this.ports.forwardControl(method, params, context)
+          }
+        }
         const lookup = selected ? { kind: 'agent-session' as const, agentSessionId: selected.agentSessionId } : target
-        const allowed = lookup.kind === 'agent-session' ? ['kind', 'agentSessionId'] : lookup.kind === 'run' ? ['kind', 'run']
-          : lookup.kind === 'provider-native' ? ['kind', 'providerId', 'sessionId'] : lookup.kind === 'acp-native' ? ['kind', 'adapterId', 'sessionId'] : []
-        rpcRecord(target, target.kind === 'self' ? ['kind'] : allowed)
-        if (!allowed.length) throw new AgentMuxError('Agent inspection target is invalid.', 'INVALID_CONTROL_REQUEST')
         if (lookup.kind === 'run') rpcString(rpcRecord(lookup.run, ['runId']).runId, 'Run ID')
         else if (lookup.kind === 'provider-native') { rpcString(lookup.providerId, 'Provider ID'); rpcString(lookup.sessionId, 'Native Session ID') }
         else if (lookup.kind === 'acp-native') { rpcString(lookup.adapterId, 'Adapter ID'); rpcString(lookup.sessionId, 'Native Session ID') }
@@ -1161,7 +1182,19 @@ export class AgentMuxRpcService {
     }
     await this.assertRuntimeFence(context)
     const caller = await this.authenticated(context)
-    if (this.ports.forwardSubscription && (method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch')) {
+    let outputOwner: Awaited<ReturnType<AgentMuxRpcService['owner']>> | undefined, forwardOutput = false
+    if (method === 'agent.output') {
+      rpcRecord(params, NATIVE_FIELDS['agent.output'])
+      if (params.follow !== undefined && typeof params.follow !== 'boolean') throw new AgentMuxError('Output follow must be boolean.', 'INVALID_CONTROL_REQUEST')
+      const id = rpcString(params.agentSessionId, 'Session ID')
+      rpcCount(params.afterByte, 0)
+      try { outputOwner = id === 'self' ? this.requireCaller(caller) : await this.owner(id) }
+      catch (error) {
+        if (id === 'self' || !(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION' || !this.ports.forwardSubscription) throw error
+        forwardOutput = true
+      }
+    }
+    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch')) {
       let initial: AgentMuxRpcStreamInitial<M> | undefined
       const subscription = await this.ports.forwardSubscription(method, params as import('./public-rpc.js').AgentMuxRpcStreamParams<M>, {
         onInitial: value => { initial = value }, onEvent: event => { void onEvent(event) },
@@ -1183,10 +1216,7 @@ export class AgentMuxRpcService {
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
       if (method === 'agent.output') {
-        rpcRecord(params, NATIVE_FIELDS['agent.output'])
-        if (params.follow !== undefined && typeof params.follow !== 'boolean') throw new AgentMuxError('Output follow must be boolean.', 'INVALID_CONTROL_REQUEST')
-        const id = rpcString(params.agentSessionId, 'Session ID')
-        const owner = id === 'self' ? this.requireCaller(caller) : await this.owner(id)
+        const owner = outputOwner!
         const cursor = rpcCount(params.afterByte, 0)
         const current = await owner.client.refreshAgentSession(owner.agentSessionId, owner.session.run), runId = current.run.runId
         const ordered = new OrderedSessionOutputFollow(runId, cursor,

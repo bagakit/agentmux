@@ -262,6 +262,7 @@ class RpcClient implements AgentMuxRpcClient {
     let opened = false, responseSeen = false, responseDelivered = false, subscriptionId: string | undefined, sequence = 0
     let initial: unknown, outputCursor = typeof body.afterByte === 'number' ? body.afterByte : 0
     let reader: Reader | undefined, finalReader: Reader | undefined, opening: Promise<Reader> | undefined
+    let unavailableTransport: AgentMuxError | undefined
     let finished = false
     const abort = () => controller.abort()
     signal?.addEventListener('abort', abort, { once: true })
@@ -284,6 +285,9 @@ class RpcClient implements AgentMuxRpcClient {
         if (isAgentMuxRpcDeviceMethod(method) && failure instanceof AgentMuxError) {
           failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId)
         }
+        // A local connection absence is not a refusal returned by the owner.
+        // Preserve that distinction for callers retaining available local facts.
+        if (!responseSeen && failure instanceof AgentMuxError && failure.code === 'CONTROL_UNAVAILABLE') unavailableTransport = failure
         rpc.receive(rpcFailure(request.id!, failure))
       }
       else if (opened) handlers?.onEnd?.(error)
@@ -342,7 +346,7 @@ class RpcClient implements AgentMuxRpcClient {
     let response: JSONRPCResponse
     try { response = await rpc.requestAdvanced(request, undefined)
       if (opening) await opening.catch(() => {})
-      const error = rpcResponseError(response); if (error) throw error
+      const error = rpcResponseError(response); if (error) throw unavailableTransport ?? error
     } catch (error) { end(transportError(error)); throw error }
     return { response, reader: finalReader!, ...(subscriptionId === undefined ? {} : { subscriptionId }) }
   }
