@@ -9790,7 +9790,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (error) persistHydrationError = error
   },
   merge: (persisted, current) => {
-    const local = persisted as Partial<PersistedAppState>
+    const local = (persisted ?? {}) as Partial<PersistedAppState>
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
     // Old Chromium reads never overwrite acknowledged names or clear tombstones.
