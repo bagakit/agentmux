@@ -1025,6 +1025,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
       terminalOutputChannel?: AgentTerminalOutputChannelState
       pendingInteraction?: AgentMuxInteractionRequest
+      /** Completed native request whose original typed answer receipt still belongs to Core. */
+      completedInteractionResponse?: { requestId: string; operationId: string; acknowledged: boolean }
       interactionResponseUnavailableReason?: string
       /**
        * The launch-option choice ids that fixed this Agent's security posture at spawn, projected from

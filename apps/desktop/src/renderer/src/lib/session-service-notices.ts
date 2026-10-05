@@ -29,6 +29,18 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     } }
   })
   const identity = [session.hostId, session.id, session.control.run.runId]
+  const receipt = session.completedInteractionResponse
+  if (receipt) notices.push({ id: 'interaction-receipt',
+    occurrence: JSON.stringify([...identity, receipt.requestId, receipt.operationId]),
+    cause: JSON.stringify([receipt.acknowledged, session.interactionResponseUnavailableReason]),
+    notice: { kind: 'indeterminate', notice: {
+      step: 'Typed answer receipt unsettled',
+      mode: session.interactionResponseUnavailableReason ?? (receipt.acknowledged
+        ? 'The original native request ended. Its acknowledged answer is waiting for settlement.'
+        : 'The original native request ended. Its earlier typed answer receipt is unconfirmed.'),
+      restore: 'Inspect the original Session and response before retrying. No answer is replayed automatically.'
+    } }
+  })
   if (session.timelineObservation) notices.push({ id: 'timeline-observation',
     occurrence: JSON.stringify([session.hostId, session.id, session.timelineObservation.run.runId]),
     cause: JSON.stringify([session.timelineObservation.code, session.timelineObservation.message]),

@@ -223,6 +223,11 @@ export function SessionPane({
   }
   if (viewMode !== 'terminal') activityLifetime.current.opened = true
   const [historyOpen, setHistoryOpen] = useState(false)
+  const openTerminal = (): void => {
+    useAppStore.getState().setViewMode(sessionId, 'terminal')
+    setHistoryOpen(false)
+    selectOwnRegion()
+  }
   useEffect(() => {
     if (navigation.current.isCurrent && !navigation.current.isCurrent()) navigation.current.cancel?.()
   })
@@ -1047,11 +1052,7 @@ export function SessionPane({
             readOnly={!hasAgentComposer}
             responseUnavailableReason={session.interactionResponseUnavailableReason}
             sourceNotice={session.nativeSourceObservation ? 'This request belongs to the retained native source, which is pending confirmation.' : undefined}
-            {...(hasAgentComposer ? { onOpenTerminal: () => {
-              useAppStore.getState().setViewMode(session.id, 'terminal')
-              setHistoryOpen(false)
-              selectOwnRegion()
-            } } : {})}
+            {...(hasAgentComposer ? { onOpenTerminal: openTerminal } : {})}
             // A pending request outlives the process that asked it, so the card must go inert on the
             // same terms as the composer below it — otherwise a dead Run still shows live buttons and
             // answering it fails on a Run that can no longer accept input.
@@ -1077,7 +1078,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>

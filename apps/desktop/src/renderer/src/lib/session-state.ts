@@ -12,7 +12,7 @@ import { runInterruptionFact } from '../../../shared/contracts'
 import { nativeBindingKey, projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { configValuesEqual } from '../../../shared/config-edit'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses } from '@agentmux/core'
-import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptNotApplied, agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import { agentDisplayState, isAgentActivityStatusSource, currentAgentSemanticStatus } from '@agentmux/core/agent-status'
@@ -783,6 +783,7 @@ export function projectRuntimeEvent(
     if (!item || item.kind !== 'agent' || !acceptsAgentSessionTransition(item, core.session)) return { state }
     const {
       pendingInteraction: _pendingInteraction,
+      completedInteractionResponse: _completedInteractionResponse,
       interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
       semanticStatus: _semanticStatus,
       terminalCapability: _terminalCapability,
@@ -802,6 +803,8 @@ export function projectRuntimeEvent(
     const currentActivityAdvanced = sameRun(item.control.run, core.session.run) &&
       (core.session.semanticStatus?.currentActivityRevision ?? 0) > (item.semanticStatus?.currentActivityRevision ?? 0)
     const reason = core.session.pendingInteraction ? agentInteractionResponseUnavailableReason(core.session.pendingInteraction) : undefined
+    const pending = core.session.pendingInteraction
+    const activeRequest = agentInteractionActiveRequest(pending)
     const next = {
       ...current,
       providerId: core.session.providerId,
@@ -860,9 +863,12 @@ export function projectRuntimeEvent(
         (semantic.observedAt > item.status.observedAt || currentActivityAdvanced)
         ? { status: structuredClone(semantic) }
         : {}),
-      ...(core.session.pendingInteraction
-        ? { pendingInteraction: structuredClone(core.session.pendingInteraction.request) }
+      ...(activeRequest
+        ? { pendingInteraction: structuredClone(activeRequest) }
         : {}),
+      ...(pending?.response && activeRequest?.id !== pending.request.id ? { completedInteractionResponse: {
+        requestId: pending.request.id, operationId: pending.response.operationId, acknowledged: pending.response.acknowledged
+      } } : {}),
       ...(reason ? { interactionResponseUnavailableReason: reason } : {}),
       control: {
         kind: 'agent' as const,

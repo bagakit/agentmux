@@ -25,6 +25,7 @@ import {
   runtimeStorageUsage,
   loadSessionHistorySources,
   agentInteractionResponseUnavailableReason,
+  agentInteractionActiveRequest,
   type AgentCapabilities,
   type AgentCatalogEntry,
   type AgentExecutorId,
@@ -288,6 +289,7 @@ function projectSession(
     const semanticFacts = subject.agentSession.semanticStatus
     const semantic = currentAgentSemanticStatus(semanticFacts)
     const pending = subject.agentSession.pendingInteraction
+    const activeRequest = agentInteractionActiveRequest(pending)
     const unavailableReason = pending ? agentInteractionResponseUnavailableReason(pending) : undefined
     const status = run.state === 'running' && semantic && isAgentActivityStatusSource(semantic.source)
       ? structuredClone(semantic)
@@ -334,7 +336,10 @@ function projectSession(
       processState: run.state,
       ...runInterruptionFact(run),
       status,
-      ...(pending ? { pendingInteraction: structuredClone(pending.request) } : {}),
+      ...(activeRequest ? { pendingInteraction: structuredClone(activeRequest) } : {}),
+      ...(pending?.response && activeRequest?.id !== pending.request.id ? { completedInteractionResponse: {
+        requestId: pending.request.id, operationId: pending.response.operationId, acknowledged: pending.response.acknowledged
+      } } : {}),
       ...(unavailableReason ? { interactionResponseUnavailableReason: unavailableReason } : {}),
       // 最近一 turn 的真实原生用量，随收尾事件的 hook 回执落在会话上。缺席就不投影，UI 据此显示
       // "此 Provider 不报 token 用量"或"还没有一 turn 的用量"，绝不落成 0。
