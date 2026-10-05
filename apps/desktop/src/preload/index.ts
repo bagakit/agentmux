@@ -8,6 +8,7 @@ import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
+import { unwrapSessionObservationResult } from '../shared/session-observation-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -61,6 +62,8 @@ import type {
   SessionHistoryObservationEvent,
   SessionHistoryObservationReady,
   SessionControl,
+  SessionAttachResult,
+  SessionReplayResult,
   TerminalLaunchInput,
   WorkspaceFileInvalidated,
   WorkspaceFileWriteInput,
@@ -434,12 +437,12 @@ const api: AgentMuxPreloadApi = {
         return { source: ready.source, dispose }
       } catch (error) { dispose(); throw error }
     },
-    attach: (session: SessionControl, afterSequence = 0) =>
-      ipcRenderer.invoke('sessions:attach', session, afterSequence),
-    refreshAttachment: (session: SessionControl, attachmentId: string | null, afterByte: number) =>
-      ipcRenderer.invoke('sessions:refreshAttachment', session, attachmentId, afterByte),
-    replay: (attachmentId: string, afterByte: number) =>
-      ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
+    attach: async (session: SessionControl, afterSequence = 0) =>
+      unwrapSessionObservationResult<SessionAttachResult>(await ipcRenderer.invoke('sessions:attach', session, afterSequence)),
+    refreshAttachment: async (session: SessionControl, attachmentId: string | null, afterByte: number) =>
+      unwrapSessionObservationResult<SessionAttachResult>(await ipcRenderer.invoke('sessions:refreshAttachment', session, attachmentId, afterByte)),
+    replay: async (attachmentId: string, afterByte: number) =>
+      unwrapSessionObservationResult<SessionReplayResult>(await ipcRenderer.invoke('sessions:replay', attachmentId, afterByte)),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference) => {
       const parent = readInputObservation(observation)

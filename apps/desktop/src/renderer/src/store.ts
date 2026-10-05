@@ -2213,12 +2213,8 @@ function startSessionMembershipResync(
         const timelineGaps = new Set(entry.timelineGaps)
         entry.timelineGaps.clear()
         useAppStore.setState((state) => {
-          const protectedAgentSessionIds = new Set([...savedCut.rejectedSavedIds, ...events.flatMap((pending) => (
-            pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId]
-              : sessionEventAgentId(pending.event) ? [sessionEventAgentId(pending.event)!] : []
-          ))])
-          let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
-          projected = reduceTerminalMembershipSnapshot(projected, snapshot, savedCut.rejectedSavedIds)
+          let projected = reduceAgentMembershipSnapshot(state, snapshot)
+          projected = reduceTerminalMembershipSnapshot(projected, snapshot)
           for (const candidate of startupCandidates) {
             if (projected.sessions.some((session) => session.id === candidate.agentSessionId)) continue
             const decision = agentStartupRecoveryDecision({
