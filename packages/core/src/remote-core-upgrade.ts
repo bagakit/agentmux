@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, readdir, type FileHandle } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readFile, readdir, rm, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { AgentMuxError } from './errors.js'
@@ -73,9 +73,22 @@ export class RemoteCoreUpgradeManager {
   private async artifact(): Promise<PortableCoreArtifact> {
     const pending = this.candidate ??= (async () => {
       if (this.options.artifact) return await this.options.artifact()
-      const directory = join(this.options.stateDirectory, 'candidate-' + randomUUID())
-      await mkdir(directory, { recursive: true, mode: 0o700 })
-      return await createPortableCoreArtifact(directory, this.options.packageRoot)
+      await mkdir(this.options.stateDirectory, { recursive: true, mode: 0o700 })
+      const directory = await mkdtemp(join(this.options.stateDirectory, 'candidate-'))
+      try { return await createPortableCoreArtifact(directory, this.options.packageRoot) }
+      catch (error) {
+        try { await rm(directory, { recursive: true, force: true }) }
+        catch (cleanupError) {
+          const failure = new AgentMuxError(
+            `${errorText(error)} Incomplete candidate cleanup failed: ${errorText(cleanupError)} (${directory}).`,
+            error instanceof AgentMuxError ? error.code : 'CORE_ARTIFACT_UNAVAILABLE',
+            JSON.stringify({ directory, assembly: { message: errorText(error), ...(error instanceof AgentMuxError ? { code: error.code, detail: error.detail } : {}) },
+              cleanup: { message: errorText(cleanupError) } }))
+          failure.cause = error
+          throw failure
+        }
+        throw error
+      }
     })()
     try { return await pending }
     catch (error) {
