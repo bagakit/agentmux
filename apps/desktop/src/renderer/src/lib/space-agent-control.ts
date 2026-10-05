@@ -401,7 +401,7 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
   const currentLocation = () => {
     const state = ports.get(), catalog = spatialCatalog(state, topics)
     const region = catalog.regions.find(item => item.regionId === binding.regionId && item.agentSessionId === binding.agentSessionId)
-    const requested = region ? addressOf(catalog, region.regionId, binding.target) : null
+    const requested = region ? addressOf(catalog, region.regionId, { ...binding.target, regionId: binding.regionId }) : null
     return { state, catalog, to: requested ?? (region ? addressOf(catalog, region.regionId) : null), atTarget: Boolean(requested && requested.tabId === binding.tabId),
       snapshot: state.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === binding.agentSessionId && session.kind === 'agent' && (!binding.executionHostId || session.hostId === binding.executionHostId)) }
   }
