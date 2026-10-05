@@ -5134,9 +5134,13 @@ export class AgentMuxClient {
     return applied
   }
 
-  async signalAgent(agentSessionId: string, signal: string): Promise<void> {
+  async signalAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, signal: string): Promise<void> {
     this.requireConnected()
-    await this.signalTerminal(this.requireAgentSession(agentSessionId).run, signal)
+    const session = this.requireAgentSession(agentSessionId)
+    if (!sameRun(session.run, expectedRun)) {
+      throw new AgentMuxError('Agent Session changed before its Run was interrupted.', 'STALE_AGENT_SESSION')
+    }
+    await this.signalTerminal(expectedRun, signal)
   }
 
   async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<void> {
