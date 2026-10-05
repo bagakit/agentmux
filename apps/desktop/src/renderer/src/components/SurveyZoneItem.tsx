@@ -1,5 +1,4 @@
 import { Bot, NotebookPen } from 'lucide-react'
-import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { currentDisplayNameRevision } from '../store'
