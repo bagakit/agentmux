@@ -1,5 +1,5 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -77,9 +77,33 @@ it('refuses malformed admissions and wrong-object replies before accepting any u
   expect(() => parseRpcControlResult('settings.hosts.upgrade-check', { check: { ...check, eligible: true } }, { id: 'local' })).toThrow()
   const receipt = { input: saved, operationId: 'other-operation', expected, status: 'failed', stage: 'preparing', detail: 'Refused before mutation.', updatedAt: 1 }
   expect(() => parseRpcControlResult('settings.hosts.upgrade-inspect', { receipt }, { id: 'local', operationId: 'one' })).toThrow('another target')
+  const original = { ...receipt, operationId: 'one' }
+  const params = { id: 'local', operationId: 'one', expected }
+  expect(parseRpcControlResult('settings.hosts.upgrade', { receipt: original }, params)).toEqual({ receipt: original })
+  expect(parseRpcControlResult('settings.hosts.upgrade-inspect', { receipt: null }, { id: 'local', operationId: 'absent' })).toEqual({ receipt: null })
+  expect(() => parseRpcControlResult('settings.hosts.upgrade', { receipt: null }, params)).toThrow('another target')
+  expect(() => parseRpcControlResult('settings.hosts.upgrade', { receipt: { ...original, input: { ...saved, id: 'other' } } }, params)).toThrow('another target')
+  expect(() => parseRpcControlResult('settings.hosts.upgrade', { receipt: { ...original, expected: { ...expected, candidateDigest: 'b'.repeat(64) } } }, params)).toThrow('another target')
+  expect(() => parseRpcControlResult('settings.hosts.upgrade', { receipt: { ...original, requestId: 'one' } }, params)).toThrow('invalid fields')
+  expect(() => parseRpcControlResult('settings.hosts.upgrade', { receipt: { ...original, extra: true } }, params)).toThrow('invalid fields')
 })
 
-it('reports a completed remote update with an unconfirmed connection and inspects the original operation without deploying again', async () => {
+it.each(['completed', 'failed', 'unknown'] as const)('built CLI reads the original %s upgrade receipt without replaying deployment', async status => {
+  const operationId = 'retained-' + status
+  const receipt = { input: saved, operationId, expected, status, stage: status === 'completed' ? 'completed' : 'verifying',
+    detail: 'Original maintenance facts.', remoteCommand: fixturePath("candidate/core"), updatedAt: 1 }
+  const directory = join(root, 'upgrade', 'operations')
+  await mkdir(directory, { recursive: true })
+  const ledger = join(directory, operationId + '.json'), bytes = JSON.stringify({ receipt })
+  await writeFile(ledger, bytes)
+  const result = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-inspect', 'local', '--operation-id', operationId], objectCliEnvironment(root))
+  expect(result.code, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).result.receipt).toEqual(receipt)
+  expect(await readFile(ledger, 'utf8')).toBe(bytes)
+  expect(seen.map(request => request.operation)).toEqual(['settings.hosts.upgrade-inspect'])
+})
+
+it('keeps maintenance eligibility independent of ordinary handshake while reconciling the original update without replay', async () => {
   const host = { id: 'remote', kind: 'ssh' as const, label: 'Remote', hostname: 'remote.invalid', runtimeId: 'original',
     remoteCommand: fixturePath("original/core"), remoteSocketPath: fixturePath("original/control.sock") }
   const pinned = { ...expected, targetDigest: remoteCoreUpgradeTargetDigest(host) }
@@ -92,15 +116,29 @@ it('reports a completed remote update with an unconfirmed connection and inspect
   const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value as typeof config } })
   const connection = vi.fn(async (): Promise<{ detail: string }> => { throw new Error('fresh handshake could not be confirmed') })
   const upgrades = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection })
+  expect(await upgrades.check(host)).toMatchObject({ eligible: false, reason: 'unverified', latestOperation: { status: 'unknown' } })
+  expect(connection).not.toHaveBeenCalled()
   expect(await upgrades.upgrade(host, pinned, receipt.operationId)).toMatchObject({ status: 'unknown', stage: 'verifying' })
   expect(config.hosts[0].remoteCommand).toBe(receipt.remoteCommand)
-  // A new Main owner reconstructs the connection uncertainty from the retained
-  // Core receipt. It does not depend on the Renderer remembering this click.
+  // Maintenance qualifies the old owner even when the new ordinary SDK cannot
+  // handshake with it. Only upgrade/inspect claims a fresh client connection.
   const restarted = new SettingsHostsUpgradeOwner(manager, configOwner, { checkHost: connection })
-  expect(await restarted.check(config.hosts[0])).toMatchObject({ eligible: false, reason: 'unverified', latestOperation: { operationId: receipt.operationId, status: 'unknown' } })
+  expect(await restarted.check(config.hosts[0])).toMatchObject({ eligible: true, reason: 'ready', latestOperation: { operationId: receipt.operationId, status: 'completed' } })
+  expect(connection).toHaveBeenCalledTimes(1)
+  const check = await manager.check(config.hosts[0])
+  for (const rejected of [
+    { ...check, eligible: false, expected: undefined, reason: 'runtime-update-required' },
+    { ...check, eligible: false, expected: undefined, reason: 'unverified', latestOperation: { ...receipt, status: 'unknown' } }
+  ]) {
+    vi.mocked(manager.check).mockResolvedValueOnce(rejected as Awaited<ReturnType<RemoteCoreUpgradeManager['check']>>)
+    expect(await restarted.check(config.hosts[0])).toEqual(rejected)
+  }
+  expect(connection).toHaveBeenCalledTimes(1)
+  expect(await restarted.inspect(config.hosts[0], receipt.operationId)).toMatchObject({ status: 'unknown', stage: 'verifying' })
+  expect(receipt.status).toBe('completed')
   connection.mockImplementation(async () => ({ detail: 'fresh connection confirmed' }))
   expect((await restarted.inspect(config.hosts[0], receipt.operationId))?.status).toBe('completed')
-  expect(inspect).toHaveBeenCalledTimes(1); expect(deploy).toHaveBeenCalledTimes(1)
+  expect(inspect).toHaveBeenCalledTimes(2); expect(deploy).toHaveBeenCalledTimes(1)
 })
 
 it('keeps an early SSH request-pipe failure scoped to an unknown maintenance response', async () => {
