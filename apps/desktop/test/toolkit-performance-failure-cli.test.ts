@@ -23,7 +23,13 @@ it('normal compiled public CLI watch capture and inspect consume original Owner 
  const server=new AgentMuxControlServer({socketPath:join(dir,'control.sock'),coreClients:()=>[],execute:vi.fn(),toolkit:owner});await server.start();cleanup.push(()=>server.stop())
  const child=spawn(process.execPath,[cli,'toolkit','watch','performance','--capture-failure','--failure-evidence'],{env,stdio:['ignore','pipe','pipe']});cleanup.push(()=>{if(child.exitCode===null)child.kill('SIGTERM')})
  const frames:any[]=[],stderr:string[]=[];let buffer='';child.stdout.on('data',bytes=>{buffer+=bytes;let lf;while((lf=buffer.indexOf('\n'))>=0){frames.push(JSON.parse(buffer.slice(0,lf)));buffer=buffer.slice(lf+1)}});child.stderr.on('data',bytes=>stderr.push(bytes.toString()))
- await vi.waitFor(()=>expect(owner.current.diagnostics.captureEnabled).toBe(true))
+ // Capture admission precedes asynchronous port creation. Inject output only
+ // after the original Run is attached and the public subscription has opened.
+ await vi.waitFor(()=>{
+  expect(child.exitCode,stderr.join('')).toBeNull()
+  expect(owner.current).toMatchObject({state:'observing',run:{hostId:'local',runId:'private-cli-toolkit-run'},diagnostics:{captureEnabled:true}})
+  expect(frames.some(frame=>typeof frame.result?.subscriptionId==='string')).toBe(true)
+ },{timeout:5000})
  const raw=Buffer.from('[bad]\n');accept({type:'terminal-output',dataBytes:raw,evidence:{outputByteRange:{startByte:0,endByte:raw.length}}})
  await vi.waitFor(()=>expect(frames.some(frame=>frame.method==='system.subscription.event'&&frame.params.event.type==='snapshot'&&frame.params.event.data.diagnostics.lastFailure)).toBe(true))
  const ordinary=await runCompiledObjectCli(['toolkit','inspect','performance'],env)
