@@ -71,6 +71,25 @@ beforeAll(async () => {
 afterAll(async () => { await server?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
 
 describe('public CLI to Desktop Git owner to neutral Git on a real private repository', () => {
+  it('preserves real fixed RPC reads and opens when reference observation is unavailable', async () => {
+    const run = host.run.bind(host)
+    const observed = vi.spyOn(host, 'run').mockImplementation((command, args, options) => args.includes('for-each-ref')
+      ? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'Reference observation temporarily unavailable' })
+      : run(command, args, options))
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+    try {
+      const selected = ready(await client.call('git.commit', { ...target(), oid: rootOid }))
+      expect(selected.commit.message).toBe('Root title\n\n完整 root body\nsecond line\n')
+      expect(selected.entries).toHaveLength(1)
+      expect(selected.warnings.join('\n')).toContain('Commit references unavailable')
+      const entry = selected.entries[0]!
+      const diff = await client.call('git.diff', { ...target(), input: { kind: 'commit', snapshot: selected.snapshot, file: { path: entry.path, origPath: entry.origPath } } })
+      expect(diff.new).toMatchObject({ present: true, text: 'original content\nline two\nline three\n' })
+      const opened = await client.call('git.open', { ...target(), oid: rootOid })
+      expect(opened).toMatchObject({ read: { kind: 'ready', snapshot: selected.snapshot }, presentation: { regionId: 'original-git-region' } })
+    } finally { observed.mockRestore(); await client.dispose() }
+  })
+
   it('reads all messages, root/rename entries and immutable file contents over actual Unix RPC', async () => {
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
     const before = await git('status', '--porcelain')
