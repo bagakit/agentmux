@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
@@ -5,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
-import type { AgentSessionRecoveryCandidate, AppConfig, SessionRecoveryResult, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentSessionRecoveryCandidate, AppConfig, NativeAgentSessionsInput, NativeAgentSessionsResult, SessionRecoveryResult, SessionSnapshot } from '../src/shared/contracts.js'
 import { LauncherResumePicker } from '../src/renderer/src/components/LauncherResumePicker.js'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation.js'
 import { api } from '../src/renderer/src/lib/api.js'
@@ -32,15 +33,15 @@ const initial = useAppStore.getState()
 let container: HTMLDivElement
 let root: Root
 
-function candidate(id: string, path = _hygiene_fixturePath("repo"), hostId = 'local', updatedAt = 1000): AgentSessionRecoveryCandidate {
+function candidate(id: string, path = _hygiene_fixturePath("repo"), hostId = 'local', updatedAt = _reshape_fixtureEpoch(0, 0, 1000)): AgentSessionRecoveryCandidate {
   return { agentSessionId: id, hostId, workspacePath: path, providerId: 'codex', executorId: 'codex',
     capabilities: { providerResume: true } as AgentSessionRecoveryCandidate['capabilities'],
-    label: `Agent ${id}`, createdAt: 500, updatedAt, run: { runId: `old-${id}` } }
+    label: `Agent ${id}`, createdAt: _reshape_fixtureEpoch(0, 0, 500), updatedAt, run: { runId: `old-${id}` } }
 }
 function timeline(id: string, prompt: string, answer: string): AgentTimelineSnapshot {
   return { agentSessionId: id, revision: 2, items: [
-    { id: `${id}-user`, agentSessionId: id, kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 100, updatedAt: 100, title: 'Prompt', content: prompt },
-    { id: `${id}-answer`, agentSessionId: id, kind: 'assistant_message', status: 'complete', source: 'native-hook', createdAt: 200, updatedAt: 200, title: 'Reply', content: answer }
+    { id: `${id}-user`, agentSessionId: id, kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 100), updatedAt: _reshape_fixtureEpoch(0, 0, 100), title: 'Prompt', content: prompt },
+    { id: `${id}-answer`, agentSessionId: id, kind: 'assistant_message', status: 'complete', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 200), updatedAt: _reshape_fixtureEpoch(0, 0, 200), title: 'Reply', content: answer }
   ] }
 }
 function page(id: string, text?: string): AgentSessionHistoryPage {
@@ -49,8 +50,14 @@ function page(id: string, text?: string): AgentSessionHistoryPage {
 }
 function running(source: AgentSessionRecoveryCandidate): SessionSnapshot {
   return { ...recoveryCandidateSession(source, { kind: 'pending', detail: 'Pending check' }), processState: 'running',
-    status: { state: 'working', source: 'native-hook', observedAt: 2000 },
+    status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 2000) },
     control: { kind: 'agent', hostId: source.hostId, agentSessionId: source.agentSessionId, run: { runId: `new-${source.agentSessionId}` } } } as SessionSnapshot
+}
+function nativeCatalog(input: NativeAgentSessionsInput, id = 'native-original', path = _hygiene_fixturePath("repo")): NativeAgentSessionsResult {
+  return { hostId: input.hostId, executorId: input.executorId, providerId: 'codex', availability: 'available',
+    capabilities: candidate('capabilities').capabilities,
+    sessions: [{ source: { nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: id, transcriptPath: _hygiene_fixturePath(`history/${id}.jsonl`) },
+      workspacePath: path, revision: 'original-file-lifetime' }, title: `Saved Codex ${id}`, createdAt: _reshape_fixtureEpoch(0, 0, 100), updatedAt: _reshape_fixtureEpoch(0, 0, 4000) }], issues: [] }
 }
 function seed(candidates: AgentSessionRecoveryCandidate[], extra: Partial<ReturnType<typeof useAppStore.getState>> = {}) {
   const tab = createWorkbenchTab('launcher', { regionId: 'launcher-region', kind: 'launcher', workspaceId: workspace.id })
@@ -117,7 +124,7 @@ describe('Launcher saved Session picker', () => {
   })
 
   it('shows true names, sourced recap, Provider/Executor, time and distinguishable IDs; searches these facts', async () => {
-    const a = candidate('abcdefgh-one'), b = candidate('abcdefgh-two', _hygiene_fixturePath("repo"), 'local', 2000)
+    const a = candidate('abcdefgh-one'), b = candidate('abcdefgh-two', _hygiene_fixturePath("repo"), 'local', _reshape_fixtureEpoch(0, 0, 2000))
     await open([a, b], { timelines: { [a.agentSessionId]: timeline(a.agentSessionId, 'Original request', 'Recap: investigate transport ownership') }, agentNames: { [a.agentSessionId]: 'Transport reviewer' } })
     expect(options()).toHaveLength(2)
     await search('transport ownership')
@@ -127,7 +134,7 @@ describe('Launcher saved Session picker', () => {
     expect(detail.textContent).toContain('Last assistant message · Captured conversation')
     expect(detail.textContent).toContain('Codex · Code Review')
     expect(detail.textContent).toContain('abcdefgh-one')
-    expect(detail.querySelector('time')?.dateTime).toBe(new Date(1000).toISOString())
+    expect(detail.querySelector('time')?.dateTime).toBe(new Date(_reshape_fixtureEpoch(0, 0, 1000)).toISOString())
     expect(options()[0]?.querySelector('code')?.textContent).toBe('#abcdefgh-o…')
     await search('abcdefgh-two')
     expect(optionIds()).toEqual(['two'])
@@ -149,7 +156,7 @@ describe('Launcher saved Session picker', () => {
     let releaseFirst!: (value: AgentSessionHistoryPage) => void
     vi.mocked(api.sessions.historyPage).mockImplementation(identity => identity.agentSessionId === 'first'
       ? new Promise(resolve => { releaseFirst = resolve }) : Promise.resolve(page(identity.agentSessionId, 'Second actual recap')))
-    await open([candidate('first', _hygiene_fixturePath("repo"), 'local', 2000), candidate('second')])
+    await open([candidate('first', _hygiene_fixturePath("repo"), 'local', _reshape_fixtureEpoch(0, 0, 2000)), candidate('second')])
     expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
     expect(api.sessions.historyPage).toHaveBeenLastCalledWith({ hostId: 'local', agentSessionId: 'first' }, { limit: 6 })
     await click(options().find(option => option.id.endsWith('-second'))!)
@@ -185,7 +192,7 @@ describe('Launcher saved Session picker', () => {
   })
 
   it('executes the real Store path for a catalogue-only exact Session, opens its original project and preserves the launcher/draft/healthy Run', async () => {
-    const first = candidate('first'), chosen = candidate('chosen', _hygiene_fixturePath("other"), 'local', 2000), healthy = running(candidate('healthy'))
+    const first = candidate('first'), chosen = candidate('chosen', _hygiene_fixturePath("other"), 'local', _reshape_fixtureEpoch(0, 0, 2000)), healthy = running(candidate('healthy'))
     const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'resumed', session: running(chosen) })
     const stop = vi.spyOn(api.sessions, 'stop')
     await open([first, chosen], { sessions: [healthy] })
@@ -228,7 +235,7 @@ describe('Launcher saved Session picker', () => {
     const reloaded = JSON.parse(JSON.stringify(persisted)) as typeof persisted
     const restoredTab = hydratePersistedTab(reloaded.tabs[savedTab.id]!)
     const recover = vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'unavailable', reason: 'provider-resume-unsupported', agentSessionId: chosen.agentSessionId,
-      previousRun: chosen.run, evidence: { kind: 'run-missing', observedAt: 2000 } } satisfies SessionRecoveryResult)
+      previousRun: chosen.run, evidence: { kind: 'run-missing', observedAt: _reshape_fixtureEpoch(0, 0, 2000) } } satisfies SessionRecoveryResult)
     const stop = vi.spyOn(api.sessions, 'stop')
     await open([chosen], { tabs: { [savedTab.id]: restoredTab }, layouts: reloaded.layouts })
     await click(button('Resume Session'))
@@ -248,7 +255,7 @@ describe('Launcher saved Session picker', () => {
   })
 
   it('preserves picker, original draft and Session when recovery throws; keyboard chooses the exact second candidate', async () => {
-    const first = candidate('first', _hygiene_fixturePath("repo"), 'local', 2000), second = candidate('second')
+    const first = candidate('first', _hygiene_fixturePath("repo"), 'local', _reshape_fixtureEpoch(0, 0, 2000)), second = candidate('second')
     const recover = vi.spyOn(api.sessions, 'recover').mockRejectedValue(new Error('Core transport unavailable'))
     await open([first, second])
     const input = document.querySelector<HTMLInputElement>('input[aria-label="Search saved Sessions"]')!
@@ -280,7 +287,7 @@ describe('Launcher saved Session picker', () => {
     let reject!: (cause: Error) => void
     vi.spyOn(api.sessions, 'recover').mockImplementation(() => new Promise((_resolve, no) => { reject = no }))
     vi.spyOn(api.sessions, 'refresh').mockRejectedValue(new Error('No current Runtime observation'))
-    await open([candidate('alpha', _hygiene_fixturePath("repo"), 'local', 2000), candidate('beta')])
+    await open([candidate('alpha', _hygiene_fixturePath("repo"), 'local', _reshape_fixtureEpoch(0, 0, 2000)), candidate('beta')])
     await click(button('Resume Session'))
     await click(options().find(option => option.id.endsWith('-beta'))!)
     await act(async () => reject(new Error('Alpha recovery failed')))
@@ -332,5 +339,111 @@ describe('Launcher saved Session picker', () => {
     expect(builds).toHaveBeenCalledTimes(afterCloseBuilds)
     expect(paints).toHaveBeenCalledTimes(afterClosePaints)
     expect(api.sessions.historyPage).not.toHaveBeenCalled()
+  })
+})
+
+describe('Launcher native conversation resume', () => {
+  it('discovers native history only when opened and resumes the selected original conversation without a prompt', async () => {
+    const discovery = vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => nativeCatalog(input))
+    const resume = vi.fn(async () => running(candidate('new-managed')))
+    seed([], { resumeNativeSession: resume })
+    await act(async () => root.render(<LauncherResumePicker workspace={workspace} />))
+    expect(discovery).not.toHaveBeenCalled()
+    await click(button('Resume', container))
+    expect(discovery).toHaveBeenCalled()
+    expect(options()).toHaveLength(1)
+    expect(options()[0]!.textContent).toContain('Saved Codex native-original')
+    expect(dialog().textContent).toContain('Provider Session ID')
+    expect(dialog().textContent).toContain('native-original')
+    await click(button('Resume Session', dialog()))
+    expect(resume).toHaveBeenCalledTimes(1)
+    const [request, original] = resume.mock.calls[0] as unknown as [import('../src/shared/contracts.js').AgentLaunchInput, import('@agentmux/core').AgentNativeSessionCandidate]
+    expect(request.nativeResumeSource).toEqual(original.source)
+    expect(request.nativeResumeSource?.nativeHandle.sessionId).toBe('native-original')
+    expect(request.prompt).toBeUndefined()
+    expect(request.agentSessionId).not.toBe('native-original')
+    expect(request.createOperationId).toBeTruthy()
+    expect(useAppStore.getState().agentComposerDrafts['launcher-region']).toBe('UNSENT DRAFT')
+  })
+
+  it('shows running managed Sessions and removes their duplicate native history row', async () => {
+    vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => nativeCatalog(input))
+    const live = running({ ...candidate('live'), nativeSessionId: 'native-original' })
+    const recover = vi.fn(async () => live)
+    await open([], { sessions: [live], recoverSession: recover })
+    expect(options()).toHaveLength(1)
+    expect(options()[0]!.textContent).toContain('Agent live')
+    expect(options()[0]!.textContent).toContain('Running')
+    await click(button('Resume Session', dialog()))
+    expect(recover).toHaveBeenCalledWith('live', expect.any(String), expect.objectContaining({ stillCurrent: expect.any(Function) }))
+  })
+
+  it('keeps the exact native operation and Session ID when an unknown result is retried', async () => {
+    vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => nativeCatalog(input))
+    const resume = vi.fn().mockRejectedValue(new Error('Native resume acknowledgement is unknown'))
+    await open([], { resumeNativeSession: resume })
+    await click(button('Resume Session', dialog()))
+    const first = resume.mock.calls[0][0]
+    expect(dialog().textContent).toContain('acknowledgement is unknown')
+    expect(options()).toHaveLength(1)
+    await click(button('Resume Session', dialog()))
+    expect(resume.mock.calls[1][0]).toEqual(first)
+    expect(useAppStore.getState().agentComposerDrafts['launcher-region']).toBe('UNSENT DRAFT')
+  })
+
+  it('reports native discovery failure while the saved managed Session remains resumable', async () => {
+    vi.spyOn(api.sessions, 'nativeSessions').mockRejectedValue(new Error('History directory is unreadable'))
+    const recover = vi.fn(async () => running(candidate('managed')))
+    await open([candidate('managed')], { recoverSession: recover })
+    expect(dialog().textContent).toContain('History directory is unreadable')
+    expect(button('Retry discovery', dialog())).toBeTruthy()
+    expect(button('Resume Session', dialog()).disabled).toBe(false)
+    await click(button('Resume Session', dialog()))
+    expect(recover).toHaveBeenCalledWith('managed', expect.any(String), expect.objectContaining({ stillCurrent: expect.any(Function) }))
+  })
+
+  it('keeps native candidates after a failed refresh and ignores unrelated conversation output', async () => {
+    const discovery = vi.spyOn(api.sessions, 'nativeSessions').mockImplementation(async input => nativeCatalog(input))
+    await open([])
+    const reads = discovery.mock.calls.length
+    await act(async () => useAppStore.setState({ timelines: { unrelated: timeline('unrelated', 'other', 'more output') } }))
+    expect(discovery).toHaveBeenCalledTimes(reads)
+    discovery.mockRejectedValue(new Error('Host observation unavailable'))
+    await click(button(/All projects/, dialog()))
+    expect(options()).toHaveLength(1)
+    expect(options()[0]!.textContent).toContain('Saved Codex native-original')
+    expect(dialog().textContent).toContain('Host observation unavailable')
+  })
+
+  it('uses the actual Store creation consumer and opens the resumed native Session in its original project', async () => {
+    seed([])
+    const native = nativeCatalog({ hostId: 'local', executorId: 'codex' }).sessions[0]!
+    const restored = running({ ...candidate('adopted'), nativeSessionId: 'native-original' })
+    const launch = vi.spyOn(api.sessions, 'launchAgent').mockResolvedValue({ created: {
+      kind: 'agent', agentSessionId: restored.id, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), providerId: 'codex', executorId: 'codex',
+      run: restored.control.run, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 100), updatedAt: _reshape_fixtureEpoch(0, 0, 4000), nativeHandle: native.source.nativeHandle
+    }, session: restored as Extract<SessionSnapshot, { kind: 'agent' }>, projectionFailures: [] })
+    const result = await act(async () => useAppStore.getState().resumeNativeSession({ hostId: 'local', executorId: 'codex', workspacePath: _hygiene_fixturePath("repo"),
+      agentSessionId: 'adopted', createOperationId: 'original-resume', nativeResumeSource: native.source }, native, candidate('caps').capabilities))
+    expect(result?.id).toBe('adopted')
+    expect(launch.mock.calls[0]![0].nativeResumeSource).toEqual(native.source)
+    const state = useAppStore.getState()
+    expect(state.sessions.find(session => session.id === 'adopted')?.nativeSessionId).toBe('native-original')
+    expect(Object.values(state.tabs).some(tab => Object.values(tab.regions).some(region => region.kind === 'agent' && region.sessionId === 'adopted'))).toBe(true)
+    expect(state.activeWorkspaceId).toBe('project')
+  })
+
+  it('continues a retired managed native conversation through its original Core reopen owner', async () => {
+    seed([])
+    const native = nativeCatalog({ hostId: 'local', executorId: 'codex' }).sessions[0]!
+    native.managed = { agentSessionId: 'retired-original', executorId: 'codex', run: { runId: 'retired-run' }, state: 'retired', retiredAt: _reshape_fixtureEpoch(0, 0, 500) }
+    const restored = running({ ...candidate('retired-original'), nativeSessionId: 'native-original' })
+    const reopen = vi.spyOn(api.sessions, 'reopen').mockResolvedValue(restored)
+    const launch = vi.spyOn(api.sessions, 'launchAgent')
+    await act(async () => useAppStore.getState().resumeNativeSession({ hostId: 'local', executorId: 'codex', workspacePath: _hygiene_fixturePath("repo"),
+      agentSessionId: 'unused-new-id', createOperationId: 'retired-resume', nativeResumeSource: native.source }, native, candidate('caps').capabilities))
+    expect(reopen).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'retired-original' }, 500, 'retired-resume')
+    expect(launch).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions.some(session => session.id === 'retired-original')).toBe(true)
   })
 })
