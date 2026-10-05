@@ -21,6 +21,14 @@
 .recall-directory-state p { margin: 0; line-height: 1.7; font-size: 13px; }
 .global-recall-surface .survey-page-list { min-height: 0; }
 .global-recall-surface .survey-tabs { gap: 12px; }
+
+/* Keep the directory readable when a side-by-side rail would consume the work surface. */
+.global-recall-surface[data-navigation-stacked="true"] { flex-direction: column; }
+.global-recall-surface[data-navigation-stacked="true"] > .survey-navigation {
+  flex: 0 1 320px; max-height: min(50%, 320px);
+  border-right: 0; border-bottom: 1px solid var(--survey-edge); padding-bottom: var(--sp-3);
+}
+.global-recall-surface[data-navigation-stacked="true"] .survey-tabs { overflow: auto; }
 .recall-view-picker { display: flex; gap: 3px; padding: 3px; width: fit-content; border: 1px solid var(--line-soft); border-radius: 8px; margin: 18px 0 24px; }
 .recall-view-picker button { display: flex; align-items: center; gap: 7px; padding: 7px 11px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; }
 .recall-view-picker button:hover, .recall-view-picker button[aria-pressed="true"] { background: var(--wash-2); color: var(--text); }
