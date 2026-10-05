@@ -16,9 +16,8 @@ import { launcherTimelineRecap, type LauncherRecap } from './launcher-resume'
 import { observeAgentSession } from './agent-observation'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 
-export type FocusBucket = 'attention' | 'working' | 'results' | 'idle'
-export const FOCUS_COLUMNS = ['attention', 'working', 'results', 'idle', 'disconnected'] as const
-export type FocusColumn = typeof FOCUS_COLUMNS[number]
+export const FOCUS_BUCKETS = ['attention', 'working', 'results', 'idle'] as const
+export type FocusBucket = typeof FOCUS_BUCKETS[number]
 export type FocusContext = {
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
   processState: SessionSnapshot['processState']
@@ -35,14 +34,9 @@ export type FocusContext = {
   detailKind?: 'activity' | 'message' | 'service'
   activitySemantic?: AgentObservation['semantic']
 }
-/** Observation loss cannot retire a running Run. All Focus grouping uses this rule. */
-export function focusColumnFor(context: FocusContext): FocusColumn {
-  return context.bucket !== 'attention' && context.state === 'disconnected' && context.processState !== 'running' && !context.runUnobserved
-    ? 'disconnected' : context.bucket
-}
-export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusColumn, FocusContext[]> {
-  const groups: Record<FocusColumn, FocusContext[]> = { attention: [], working: [], results: [], idle: [], disconnected: [] }
-  for (const row of rows) groups[focusColumnFor(row)].push(row)
+export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusBucket, FocusContext[]> {
+  const groups: Record<FocusBucket, FocusContext[]> = { attention: [], working: [], results: [], idle: [] }
+  for (const row of rows) groups[row.bucket].push(row)
   return groups
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
@@ -73,6 +67,7 @@ function workingEntryTime(session: SessionSnapshot): number | null {
 export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult: boolean, now = Date.now()): FocusBucket {
   const state = session.status.state
   if ((session.kind === 'agent' && session.pendingInteraction) || isNeedsYouState(state) || state === 'error') return 'attention'
+  if (session.runUnobserved || session.processState !== 'running') return 'idle'
   if (turnWorking(state) && (state === 'starting' || session.kind !== 'agent' || observeAgentSession(session, now).semantic === 'active')) return 'working'
   if (hasCurrentResult && state === 'done') return 'results'
   return 'idle'
@@ -85,7 +80,7 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
     else if (row.activitySemantic === 'unknown' || row.activitySemantic === 'unsupported' || row.state === 'running') unknown++
     else idle++
   }
-  const label = unknown && !idle && !recovery ? 'Activity unknown'
+  const label = recovery ? 'Idle / Recovery' : unknown && !idle ? 'Activity unknown'
     : unknown ? 'Idle / Unknown' : 'Idle / Recovery'
   return { label, detail: `Idle ${idle} · Activity unknown ${unknown} · Recovery ${recovery}` }
 }
@@ -99,6 +94,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   const bucket = focusBucketForSession(session, Boolean(result), now)
   const activitySemantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
   const stateLabel = session.runUnobserved && bucket === 'idle' ? 'Run not observed'
+    : session.processState === 'interrupted' && bucket === 'idle' ? 'Interrupted'
     : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unknown'
     ? 'Activity unknown' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
       ? 'Activity not reported' : sessionStatusLabel(session)
@@ -108,7 +104,10 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   const recap = items.length ? launcherTimelineRecap(timeline) : null
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
-  if (session.kind === 'terminal' && (state === 'error' || state === 'exited' || state === 'disconnected')) {
+  if (bucket === 'idle' && (session.runUnobserved || session.processState === 'interrupted')) {
+    detail = `${session.runUnobserved ? 'Run not observed' : 'Run interrupted'} · ${session.status.detail?.trim() || (session.runUnobserved ? 'Original Run state is unknown' : 'Cause unknown')}`
+    detailKind = 'service'
+  } else if (session.kind === 'terminal' && (state === 'error' || state === 'exited' || state === 'disconnected')) {
     const facts = [session.status.exitReason === 'user-stopped' ? 'Stopped by you' : null,
       session.status.detail?.trim(), session.status.exitCode === undefined ? null : `Exit code ${session.status.exitCode}`].filter(Boolean)
     detail = facts.length ? facts.join(' · ') : session.processState === 'running'
@@ -198,7 +197,7 @@ function createFocusProjectionCache() {
           next.detailIsRecap = false
           next.detailKind = 'service'
         }
-        const groupKey = JSON.stringify([next.runId, next.hostId, next.workspaceId, next.workspacePath, next.topicId, focusColumnFor(next)])
+        const groupKey = JSON.stringify([next.runId, next.hostId, next.workspaceId, next.workspacePath, next.topicId, next.bucket])
         // State entry is an honest initial seed only when it explains this displayed group.
         // A pending request can enter Attention while the semantic state is still Working.
         const initialEntry = !session.pendingInteraction && next.state === session.status.state ? next.stateEnteredAt ?? null : null

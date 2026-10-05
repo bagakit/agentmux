@@ -7,7 +7,7 @@ import type { MoteAvatarImage, MoteAvatarRef, MoteAvatarTarget } from '../../../
 import type { SpaceZoneBindings } from '../../../shared/space-addresses'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { createFocusProjectionSelector, focusColumnFor } from './focus-context'
+import { createFocusProjectionSelector } from './focus-context'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
 import { moteExpression } from './mote-expression'
 import type { RendererAgentTimelineSnapshot } from './session-state'
@@ -21,7 +21,7 @@ export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCa
     const executorId = original?.kind === 'agent' ? original.executorId : undefined
     const avatar = executorId ? state.config?.executors[executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[executorId] : undefined
     return { agentSessionId: row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
-      detail: row.detail, group: focusColumnFor(row), state: row.state, providerId: row.providerId ?? '',
+      detail: row.detail, group: row.bucket, state: row.state, providerId: row.providerId ?? '',
       recap: row.recap ? { text: row.recap.text, source: row.recap.source } : null, ...(avatar ? { avatar } : {}) }
   })
 }

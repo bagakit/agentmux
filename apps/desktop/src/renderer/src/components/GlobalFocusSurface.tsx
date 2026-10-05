@@ -1,14 +1,12 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Unplug, Users } from 'lucide-react'
+import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Users } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_COLUMNS, focusColumnFor as columnFor, groupFocusContexts, type FocusColumn } from '../lib/focus-context'
+import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
-import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
-import { FocusDisconnectedProjects } from './FocusDisconnectedProjects'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey } from '../lib/focus-project-lanes'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
 import type { ExecutionFocusPresentation } from '../lib/focus-tab-projection'
@@ -113,10 +111,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('all')
-  const [bucketFilter, setBucketFilter] = useState<FocusColumn | 'all'>('all')
+  const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
   const [requestId, setRequestId] = useState<string | null>(null)
-  const [disconnectedReveal, setDisconnectedReveal] = useState<{ laneId: string; trigger: HTMLElement } | null>(null)
-  const [disconnectedOpen, setDisconnectedOpen] = useState(false)
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const searchRef = useRef<HTMLInputElement | null>(null)
@@ -156,7 +152,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
   const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
     ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.recap?.text ?? ''} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
-  const filtered = matching.filter(row => bucketFilter === 'all' || columnFor(row) === bucketFilter)
+  const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
   const selected = executionRows.find(row => row.id === shownSessionId)
   const filteredIds = new Set(filtered.map(row => row.id))
   const focusProjectLanes = allLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
@@ -168,13 +164,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     rows.push(row)
     rowsByLane.set(lane.id, rows)
   }
-  const disconnectedContexts = new Map(executionRows.filter(row => columnFor(row) === 'disconnected').map(row => [row.id, row]))
-  const disconnectedLanes = allLanes.filter(lane => lane.contextIds.some(id => disconnectedContexts.has(id)))
   const boardLanes = focusProjectLanes
-  const disconnectedExpanded = disconnectedContexts.size > 0 && disconnectedOpen
-  useLayoutEffect(() => {
-    if (disconnectedContexts.size === 0) { setDisconnectedOpen(false); setDisconnectedReveal(null) }
-  }, [disconnectedContexts.size])
   const filteredRetainedProjects = retainedProjects.filter(item => (project === 'all' || item.key === project) && bucketFilter === 'all'
     && `${item.name} ${item.identity.workspacePath} ${item.identity.branch ?? ''} ${item.identity.topicId ?? ''}`.toLocaleLowerCase().includes(search))
   const recentProjects = filteredRetainedProjects.filter(item => item.recent)
@@ -183,18 +173,12 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const at = Math.max(item.lastFocusedAt ?? 0, item.lastActivityAt ?? 0)
     if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
   }
-  const openDisconnected = (laneId?: string, trigger?: HTMLElement) => {
-    setDisconnectedReveal(laneId && trigger ? { laneId, trigger } : null)
-    setDisconnectedOpen(true)
-  }
-  const closeDisconnected = () => { setDisconnectedOpen(false); setDisconnectedReveal(null) }
-  const clearFilters = () => { setQuery(''); setProject('all'); setBucketFilter('all') }
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
   const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
   useLayoutEffect(() => {
     const rows = boardRowsRef.current
-    if (!visible || disconnectedExpanded || !hasBoardLanes || !rows || typeof ResizeObserver === 'undefined') return
+    if (!visible || !hasBoardLanes || !rows || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       const groups = rows.querySelector<HTMLElement>('.focus-project-lanes__groups')
       if (!groups || rows.clientWidth <= 0) return
@@ -207,11 +191,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const observer = new ResizeObserver(measure)
     observer.observe(rows)
     return () => observer.disconnect()
-  }, [visible, hasBoardLanes, disconnectedExpanded])
+  }, [visible, hasBoardLanes])
   const matchingGroups = groupFocusContexts(matching)
   const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
-  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: neutralSummary.label, icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
-  const buckets = FOCUS_COLUMNS
+  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: neutralSummary.label, icon: CirclePause } }
+  const buckets = FOCUS_BUCKETS
   const projectOptions = useMemo(() => {
     const options = [...new Map([...allLanes.map(lane => ({ id: focusProjectKey(lane.hostId, lane.projectId), name: lane.labels[0]!, hostId: lane.hostId })),
       ...retainedProjects.map(item => ({ id: item.key, name: item.name, hostId: item.hostId }))].map(item => [item.id, item])).values()]
@@ -226,7 +210,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const groups = groupFocusContexts(rows)
     const counts: FocusLaneCounts = [groups.attention.length, groups.working.length, groups.results.length, groups.idle.length]
     const sparse = counts.reduce((total, count) => total + count, 0) === 1
-    const groupHeader = (bucket: FocusColumn, inline = false) => {
+    const groupHeader = (bucket: FocusBucket, inline = false) => {
       const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[bucket]
       const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
       const label = neutral?.label ?? meta.label
@@ -234,17 +218,17 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       return <header className="focus-context-group__header" data-bucket={bucket} data-visible-state={inline || undefined} title={countDescription} aria-label={countDescription} key={bucket}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong><span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span></span></header>
     }
     return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Context states">
-      {buckets.filter(bucket => bucket === 'disconnected' || sparse || (counts.some(count => count > 0) && groups[bucket].length === 0)).map(bucket => {
-        if (bucket !== 'disconnected' && groups[bucket].length > 0) return groupHeader(bucket, true)
+      {buckets.filter(bucket => sparse || (counts.some(count => count > 0) && groups[bucket].length === 0)).map(bucket => {
+        if (groups[bucket].length > 0) return groupHeader(bucket, true)
         const meta = bucketMeta[bucket], Icon = meta.icon
         return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · ${groups[bucket].length}`} aria-label={`${meta.label} · ${groups[bucket].length}`} key={bucket}>
-          {bucket === 'disconnected' ? <FocusDisconnectedGroup contexts={groups.disconnected} laneId={lane.id} onReveal={openDisconnected} /> : <Icon size={12} aria-hidden="true" />}
+          <Icon size={12} aria-hidden="true" />
         </span>
       })}
     </div></div>{counts.some(count => count > 0) ? <FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
       buckets.map((bucket, index) => {
         const meta = bucketMeta[bucket], grouped = groups[bucket]
-        if (bucket === 'disconnected' || grouped.length === 0) return null
+        if (grouped.length === 0) return null
         const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
@@ -277,7 +261,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
               </FilterMenu.RadioGroup>
               <FilterMenu.Separator className="tab-context-menu__separator" />
               <FilterMenu.Label className="focus-filter-menu__label">State</FilterMenu.Label>
-              <FilterMenu.RadioGroup aria-label="Focus state filter" value={bucketFilter} onValueChange={value => setBucketFilter(value as FocusColumn | 'all')}>
+              <FilterMenu.RadioGroup aria-label="Focus state filter" value={bucketFilter} onValueChange={value => setBucketFilter(value as FocusBucket | 'all')}>
                 {[{ id: 'all', label: 'All states' }, ...buckets.map(bucket => ({ id: bucket, label: `${bucketMeta[bucket].label} · ${matchingGroups[bucket].length}` }))].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-state={option.id} className="tab-context-menu__item focus-filter-menu__item">
                   <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><Check size={13} /></FilterMenu.ItemIndicator></span><span>{option.label}</span>
                 </FilterMenu.RadioItem>)}
@@ -319,11 +303,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
-          <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined} hidden={disconnectedExpanded} inert={disconnectedExpanded}>
+          <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
             {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
           </div></WorkbenchPresentationContext.Provider>
-          <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={shownSessionId} currentLaneId={currentLaneId} projectKey={project} expanded={disconnectedExpanded} canReturn reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} /></WorkbenchPresentationContext.Provider>
           <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />
         </div>
       </div>}

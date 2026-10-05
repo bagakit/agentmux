@@ -1,7 +1,7 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { AgentContextContent } from './AgentContextContent'
 import { useShallow } from 'zustand/react/shallow'
-import { agentContextForSession, FOCUS_COLUMNS, groupFocusContexts, focusNeutralGroupSummary, type FocusColumn } from '../lib/focus-context'
+import { agentContextForSession, FOCUS_BUCKETS, groupFocusContexts, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
 import {
   ArrowUpRight,
   Bot,
@@ -40,7 +40,7 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
   agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot }
 }
 
-const AGENT_GROUP_LABELS: Record<FocusColumn, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown', disconnected: 'Disconnected' }
+const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown' }
 
 export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   workspace,
@@ -77,7 +77,7 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
             <strong>No Agents in this workspace</strong>
             <span>Use + to start an Agent. Choose “Keep Session” on close to leave it running here.</span>
           </div>
-        ) : FOCUS_COLUMNS.map((column) => {
+        ) : FOCUS_BUCKETS.map((column) => {
           const contexts = groups[column]
           if (contexts.length === 0) return null
           const label = column === 'idle' ? focusNeutralGroupSummary(contexts).label : AGENT_GROUP_LABELS[column]

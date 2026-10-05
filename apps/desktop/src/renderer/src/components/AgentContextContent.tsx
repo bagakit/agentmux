@@ -6,7 +6,7 @@ import { FocusContextStateMark } from './FocusContextState'
 
 /** Pure held-fact content. Each surface keeps its own button, navigation and disclosures. */
 export function AgentContextContent({ context, metadata }: { context: FocusContext; metadata?: ReactNode }) {
-  const recap = context.bucket !== 'attention' && context.state !== 'disconnected' ? context.recap : null
+  const recap = context.bucket !== 'attention' && context.state !== 'disconnected' && context.processState === 'running' && !context.runUnobserved ? context.recap : null
   const showActivity = context.detailKind === 'service' && !context.detailIsRecap
   return <>
     <span className="focus-context__avatar focus-context__avatar--compact-content" inert aria-hidden="true">{context.kind === 'agent' ? <AgentAvatar sessionId={context.id} label={context.name} state={context.state} providerId={context.providerId ?? undefined} size={18} visible={false} /> : <SquareTerminal size={16} />}</span>
