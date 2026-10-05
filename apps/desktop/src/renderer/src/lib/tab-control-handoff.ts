@@ -6,7 +6,7 @@ import { workbenchSurfaces, type WorkbenchSurface, type WorkbenchTab } from './w
  * Agent identity.
  *
  * This is deliberately NOT `isSessionSurface`. A Terminal is a Session — it has a `sessionId` — but it
- * is not an *Agent*, and the messaging/session addresses this feeds (`agentmux agent send --to-session=…`)
+ * is not an *Agent*, and the messaging/session addresses this feeds (`amux agent send --to-session=…`)
  * only mean something for an Agent. So the two questions genuinely differ, and conflating them would
  * hand out an address that resolves to nothing.
  *
