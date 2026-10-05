@@ -1458,3 +1458,51 @@ it('shares the product brand between the default Survey and its real blank Brows
   expect(dom.container.querySelector('.global-survey-surface [aria-label="Search or enter a web address"]')).not.toBeNull()
   healthy()
 })
+
+
+it('offers the original Browser choice for a multi-Browser note and captures the chosen second source', async () => {
+  const write = vi.spyOn(api.files, 'createPublic')
+  await renderApp(); await enterSurvey(); await choose()
+  expect(useAppStore.getState().surveyZoneSelection!.active!.regionId).toBe(agent.regionId)
+  const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === originalZoneId())!
+  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  expect(document.querySelector('.survey-recall-capture')).toBeNull()
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(2))
+  const second = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(item => JSON.parse(item.dataset.surveyPanelReference!).regionId === pageB.regionId)!
+  const held = useAppStore.getState().surveyZoneSelection
+  await act(async () => second.click())
+  await vi.waitFor(() => expect(document.querySelector('.survey-recall-capture')).not.toBeNull())
+  expect(document.querySelector('.survey-recall-capture')!.textContent).toContain(pageB.url)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  expect(write).not.toHaveBeenCalled(); healthy()
+})
+
+it('offers the exact original Group choice for an Agent when the multi-Group active position is unconfirmed', async () => {
+  const second = createWorkbenchTab('second', pageC), layout = createWorkspaceLayout('original-group', [mixed.id])
+  layout.groups.push({ id: 'second-group', tabOrder: [second.id], recentTabIds: [second.id], activeTabId: second.id })
+  layout.root = { type: 'split', direction: 'horizontal', ratio: 0.5, first: { type: 'leaf', groupId: 'original-group' }, second: { type: 'leaf', groupId: 'second-group' } }
+  layout.activeGroupId = 'unconfirmed-group'
+  useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second }, layouts: { ...useAppStore.getState().layouts, [workspace.id]: layout } })
+  await renderApp(); await enterSurvey(); await choose()
+  expect(useAppStore.getState().surveyZoneSelection!.active).toBeNull()
+  const owner = vi.spyOn(useAppStore.getState(), 'openLauncher'), held = useAppStore.getState().surveyZoneSelection
+  const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === originalZoneId())!
+  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New agent in"]')!.click())
+  expect(owner).not.toHaveBeenCalled(); expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(5))
+  const choice = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(item => JSON.parse(item.dataset.surveyPanelReference!).groupId === 'second-group')!
+  await act(async () => choice.click())
+  expect(owner).toHaveBeenCalledExactlyOnceWith({ workspaceId: workspace.id, displayWorkspaceId: workspace.id, tabGroupId: 'second-group', zoneId: originalZoneId(), reveal: false })
+  const ref = useAppStore.getState().surveyZoneSelection!.active!
+  expect(useAppStore.getState().layouts[workspace.id]!.groups.find(group => group.id === 'second-group')!.tabOrder).toContain(ref.tabId)
+  expect(useAppStore.getState().tabs[ref.tabId]!.regions[ref.regionId]?.kind).toBe('launcher'); healthy()
+})
+
+it('uses a confirmed current Browser directly even when its original item has other Browser panels', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
+  const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === originalZoneId())!
+  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  await vi.waitFor(() => expect(document.querySelector('.survey-recall-capture')).not.toBeNull())
+  expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(0)
+  expect(document.querySelector('.survey-recall-capture')!.textContent).toContain(pageB.url); healthy()
+})
