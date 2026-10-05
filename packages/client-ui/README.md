@@ -4,7 +4,7 @@
 
 Applications wrap their view in `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, the overlay target, editor focus registration and identity/icon rendering. File opening, HTTP navigation, pasted-image IO, send/queue/interrupt and permission responses are typed component props. `DescribeSpeaker` may supply an already-rendered avatar; platform-specific Mote and project discovery stays in Desktop.
 
-The optional `renderAgentLink` adapter receives an exact `amux://agent/…` URI and its Core-parsed Session ID. Conversation prose and Markdown links share this inline presentation; code, read-only previews and document mode retain their original presentation. Without the adapter, Markdown remains usable as text. The host resolves current names, Mote appearance, state, details and navigation; message storage and copying retain the original source.
+The optional `renderObjectLink` adapter receives an exact `amux://agent|region|tab|space|zone/…` URI and its Core-parsed typed target. Conversation prose and Markdown links share this inline presentation; code, read-only previews and document mode retain their original presentation. Without the adapter, Markdown remains usable as text. The host resolves current names, Mote appearance, state, details and navigation; message storage and copying retain the original source.
 
 Import `@agentmux/client-ui/styles.css` with the client's theme tokens, font and shell. Styles are also exported individually so Desktop keeps its existing cascade order. Mobile can use these surface rules without importing Desktop's application stylesheet or Zustand store.
 
