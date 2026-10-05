@@ -40,9 +40,16 @@ describe('shared filesystem Mote identity', () => {
     const old = deferred<ScratchTopicSnapshot[]>(), next = deferred<ScratchTopicSnapshot[]>()
     const list = vi.spyOn(api.scratch, 'listTopics').mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise)
     const pendingOld = useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID)
-    useAppStore.setState({ workspaceFileRevisions: { [SCRATCH_WORKSPACE_ID]: 1 } })
+    // A new scope starts its own authoritative read; a late old-scope result
+    // must not overwrite it. Same-scope force refreshes are serialized.
+    useAppStore.setState({ config: { ...moteConfig, workspaces: moteConfig.workspaces.map(workspace =>
+      workspace.id === SCRATCH_WORKSPACE_ID ? { ...workspace, path: _hygiene_fixturePath("new-topics") } : workspace) } })
     const pendingNext = useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID)
-    const fresh = moteTopics.map(topic => topic.id === customMoteId ? { ...topic, title: 'Fresh identity' } : topic)
+    const fresh = moteTopics.map(topic => ({ ...topic,
+      ...(topic.id === customMoteId ? { title: 'Fresh identity' } : {}),
+      directoryPath: topic.directoryPath.replace(_hygiene_fixturePath("topics/"), _hygiene_fixturePath("new-topics/")),
+      topicPath: topic.topicPath.replace(_hygiene_fixturePath("topics/"), _hygiene_fixturePath("new-topics/")),
+      ...(topic.soul ? { soul: { ...topic.soul, path: topic.soul.path.replace(_hygiene_fixturePath("topics/"), _hygiene_fixturePath("new-topics/")) } } : {}) }))
     next.resolve(fresh); await pendingNext
     const confirmed = useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!
     old.resolve(moteTopics); await pendingOld
@@ -51,12 +58,15 @@ describe('shared filesystem Mote identity', () => {
     list.mockResolvedValueOnce(fresh.map(topic => { if (topic.id !== customMoteId) return topic; const { soul: _soul, ...unreadable } = topic; return { ...unreadable, readError: 'SOUL unreadable' } }))
     await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)
     const failedFile = useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!
-    expect(failedFile.topics?.find(topic => topic.id === customMoteId)).toBe(fresh[1])
+    expect(failedFile.topics?.find(topic => topic.id === customMoteId)).toEqual({ ...fresh[1], readError: 'SOUL unreadable' })
     expect(failedFile.error).toContain('SOUL unreadable')
     expect(focusLaneForSession(customMoteId, failedFile.topics)).toBe('pmo')
     list.mockRejectedValueOnce(new Error('Directory offline'))
     await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)
-    expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics).toBe(failedFile.topics)
+    const offline = useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics
+    expect(offline).toEqual(failedFile.topics)
+    expect(offline).toHaveLength(failedFile.topics!.length)
+    for (const [index, topic] of offline!.entries()) expect(topic).toBe(failedFile.topics![index])
     expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.error).toContain('Directory offline')
     expect(useAppStore.getState().sessions).toBe(sessions)
   })

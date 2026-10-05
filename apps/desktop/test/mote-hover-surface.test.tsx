@@ -26,11 +26,15 @@ import { customAgent, customMoteId, customTab, defaultAgent, defaultTab, executi
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ sessionId, visible }: { sessionId: string; visible: boolean }) =>
   createElement('div', { 'data-terminal-session': sessionId, 'data-visible': String(visible) }) }))
 vi.mock('../src/renderer/src/components/ActivityView', () => ({ ActivityView: ({ sessionId }: { sessionId: string }) => createElement('div', { 'data-activity-session': sessionId }) }))
-vi.mock('../src/renderer/src/components/SessionMailbox', () => ({ SessionMailbox: () => null }))
+vi.mock('../src/renderer/src/components/SessionMailbox', () => ({ SessionMailbox: ({ children }: {
+  children?: (mailbox: null, pending: null) => import('react').ReactNode
+}) => children?.(null, null) ?? null }))
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 
 const baseline = useAppStore.getState()
 const launcherBaseline = useLauncherState.getState()
+const savedDefaultChoice = JSON.stringify({ open: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id,
+  reference: { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId } })
 let root: Root, container: HTMLDivElement, restorePopover: () => void
 let warm: ReturnType<typeof vi.fn>, detect: ReturnType<typeof vi.fn>, launch: ReturnType<typeof vi.fn>, send: ReturnType<typeof vi.fn>
 function Workface({ focus = false, workbenchVisible = false }: { focus?: boolean; workbenchVisible?: boolean }) {
@@ -76,6 +80,8 @@ async function click(element: HTMLElement) { await pointer(element, 'down'); awa
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   window.localStorage.clear(); restorePopover = installNativePopover(); seedMoteWorkface()
+  // This user already chose a specific discussion; the neighboring Tab is not a default.
+  window.localStorage.setItem(savedMoteKey, savedDefaultChoice)
   // These cases observe an already expanded input. Its existing preference owns
   // that presentation; hovering must never expand or activate the Launcher.
   expect(useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID, 'agents', 'expanded')).toBe(true)
@@ -126,7 +132,7 @@ describe('one operative Mote hover surface', () => {
       expect(choice(PMO_TEAMS_TOPIC_ID).dataset.moteStatus).toBe('Restoring context')
       expect(panel().dataset.moteTargetSession).toBeUndefined()
     }
-    expect(panel().textContent).toContain('Original Tab retained')
+    expect(panel().textContent).toContain(availability === 'other-workspace' ? 'Saved context' : 'Original Tab retained')
     expect(panel().querySelector('[aria-label="Agent prompt"]')).toBeNull()
     expect(container.querySelector(`[data-original-workbench] [data-workbench-tab-id="${neighbor.id}"] [aria-label="Agent prompt"]`)).toBe(input)
     expect(input.textContent).toBe('Neighbor unsent')
@@ -310,6 +316,50 @@ describe('one operative Mote hover surface', () => {
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
   })
 
+  it('keeps a late confirmed preview address ephemeral until the user pins it', async () => {
+    const disk = JSON.stringify({ open: false, targetTopicId: quietMoteId, targetTabId: quietTab.id })
+    window.localStorage.setItem(savedMoteKey, disk)
+    const originalLayouts = useAppStore.getState().layouts
+    useAppStore.setState({ layouts: { ...originalLayouts,
+      [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', Object.keys(useAppStore.getState().tabs).filter(id => id !== quietTab.id)) } })
+    await mount(); await hover()
+    expect(saved()).toBe(disk)
+    const before = useAppStore.getState()
+    await act(async () => useAppStore.setState({ layouts: originalLayouts })); await settle()
+    expect(panel().dataset.motePresentation).toBe('preview')
+    expect(panel().dataset.moteTargetTab).toBe(quietTab.id)
+    launcherInput(panel(), quietTab)
+    expect(saved()).toBe(disk)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(warm).not.toHaveBeenCalled(); expect(detect).not.toHaveBeenCalled()
+    await click(entry())
+    expect(JSON.parse(saved()!)).toEqual({ open: true, targetTopicId: quietMoteId, targetTabId: quietTab.id,
+      reference: { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: quietTab.id, regionId: quietTab.layout.activeRegionId } })
+    expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
+  })
+
+  it('keeps an unselected multi-discussion Mote ambiguous until an explicit discussion choice', async () => {
+    window.localStorage.removeItem(savedMoteKey)
+    await mount(); await hover()
+    expect(panel().dataset.moteTargetTopic).toBe(PMO_TEAMS_TOPIC_ID)
+    expect(panel().dataset.moteTargetTab).toBeUndefined()
+    expect(panel().dataset.moteTargetSession).toBeUndefined()
+    expect(panel().textContent).toContain('Choose a discussion')
+    expect(panel().querySelector('[aria-label="Message Agent"]')).toBeNull()
+    expect(saved()).toBeNull()
+    const original = useAppStore.getState()
+    const choices = Array.from(panel().querySelectorAll<HTMLButtonElement>('button')).filter(button => button.textContent?.includes(defaultTab.name!))
+    expect(choices).toHaveLength(1)
+    await click(choices[0]!)
+    expect(panel().dataset.moteTargetTab).toBe(defaultTab.id)
+    expect(panel().dataset.moteTargetSession).toBe(defaultAgent.id)
+    expect(useAppStore.getState().tabs).toBe(original.tabs)
+    expect(useAppStore.getState().sessions).toBe(original.sessions)
+    expect(useAppStore.getState().agentFocus.execution).toEqual(original.agentFocus.execution)
+    expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
+  })
+
   it('keeps the bridge and pins actual retained portal input pointer and focus interactions', async () => {
     await mount()
     const original = container.querySelector<HTMLInputElement>('#original-input')!; original.focus()
@@ -324,7 +374,7 @@ describe('one operative Mote hover surface', () => {
     await act(async () => input.dispatchEvent(new PointerEvent('pointerover', { pointerType: 'mouse', bubbles: true })))
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 230)) })
     expect(panel().dataset.motePresentation).toBe('preview')
-    expect(saved()).toBeNull()
+    expect(saved()).toBe(savedDefaultChoice)
     expect(document.activeElement).toBe(original)
     await pointer(input, 'down')
     expect(panel().dataset.motePresentation).toBe('pinned')
@@ -428,9 +478,9 @@ describe('one operative Mote hover surface', () => {
       if (state === 'unknown') useAppStore.setState({ sessions: useAppStore.getState().sessions.filter(session => session.id !== customAgent.id) })
       attention.click()
     }); await settle()
-    if (state === 'unknown') {
+    if (state === 'unknown' || state === 'missing') {
       expect(panel().dataset.motePresentation).toBe('closed')
-      expect(saved()).toBeNull()
+      expect(saved()).toBe(savedDefaultChoice)
       expect(api.scratch.ensureMote).not.toHaveBeenCalled()
       expect(useAppStore.getState().reportError).toHaveBeenCalledOnce()
     } else {
@@ -458,7 +508,7 @@ describe('one operative Mote hover surface', () => {
     await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(panel().dataset.motePresentation).toBe('closed')
     expect(document.activeElement).toBe(input)
-    expect(saved()).toBeNull()
+    expect(saved()).toBe(savedDefaultChoice)
     await hover(); await click(choice(customMoteId))
     const draft = useAppStore.getState().agentComposerDrafts, execution = useAppStore.getState().agentFocus.execution
     await act(async () => root.unmount()); root = createRoot(container)
@@ -509,7 +559,7 @@ describe('one operative Mote hover surface', () => {
     expect(useAppStore.getState().layouts).toBe(original.layouts)
     expect(useAppStore.getState().viewModes).toBe(original.viewModes)
     expect(useAppStore.getState().agentFocus.execution).toEqual(original.agentFocus.execution)
-    expect(saved()).toBeNull()
+    expect(saved()).toBe(savedDefaultChoice)
     expect(api.scratch.ensureMote).not.toHaveBeenCalled()
     expect(warm).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
     const background = container.querySelector<HTMLInputElement>('#original-input')!
@@ -532,7 +582,9 @@ describe('one operative Mote hover surface', () => {
     })
     await mount(); await hover()
     const before = scans, list = vi.mocked(api.scratch.listTopics)
-    expect(before).toBeGreaterThan(0)
+    // A confirmed explicit target need not scan candidates at all. The count
+    // must still remain identical across unrelated output events.
+    expect(panel().dataset.moteTargetTab).toBe(defaultTab.id)
     expect(list).toHaveBeenCalledOnce()
     expect(panel().querySelectorAll('[data-mote-topic-id]')).toHaveLength(3)
     const original = panel().querySelector('[data-activity-session]')

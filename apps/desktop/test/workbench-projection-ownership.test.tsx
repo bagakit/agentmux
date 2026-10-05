@@ -7,13 +7,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
-import { usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { pmoTeamsTopicFloatingTargetTabId, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { workbenchProjectionSlotId, type WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-projection'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useAppStore } from '../src/renderer/src/store'
 import { installNativePopover } from './fixtures/mote-workface'
 
@@ -142,34 +144,71 @@ it.each([
     ...(missing ? { tabs: { [second.id]: second }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [second.id]) } } : {}) })
   const topic = { id: PMO_TEAMS_TOPIC_ID, directoryPath: _hygiene_fixturePath("topics/topic--launcher--leader"), topicPath: _hygiene_fixturePath("topics/topic--launcher--leader/topic.md"),
     title: 'Mote', summary: '', collaborators: [] }
+  const workspace = useAppStore.getState().config!.workspaces[0]!
+  useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(workspace),
+    topics: [topic], revision: 0, reading: false, error: null } } })
   vi.spyOn(api.scratch, 'ensureMote').mockResolvedValue(topic)
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
-  const read = vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
+  vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
   const launch = vi.spyOn(api.sessions, 'launchTerminal')
+  const focus = vi.fn<typeof baseline.executeControl>(baseline.executeControl)
+  useAppStore.setState({ executeControl: focus })
   const key = 'agentmux.leader-topic-floating.v1'
-  window.localStorage.setItem(key, JSON.stringify({ open: false, targetTabId: first.id }))
+  window.localStorage.setItem(key, JSON.stringify({ open: false, targetTopicId: PMO_TEAMS_TOPIC_ID,
+    targetTabId: first.id, reference: firstReference }))
   function Floating() {
     const [floating, setFloating] = usePmoTeamsTopicFloatingState()
-    return createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating })
+    const state = useAppStore()
+    const tabId = pmoTeamsTopicFloatingTargetTabId(floating, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
+    const projectionState = moteWorkbenchProjection(spatialCatalog(state, [topic]), tabId ? state.tabs[tabId] : undefined,
+      floating, reference => setFloating({ targetTabId: reference.tabId, reference }), state.layouts)
+    return createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating, projectionState })
   }
   await act(async () => root.render(createElement(Fragment, null, createElement(PmoTeamsTopicEntry), createElement(Floating))))
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open Mote"]')!.click())
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)) })
-  let finish!: (value: typeof topic) => void
-  let fail!: (error: Error) => void
-  read.mockImplementationOnce(() => new Promise((resolve, reject) => { finish = resolve; fail = reject }))
   report.mockClear()
-  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open Mote Space"]')!.click())
-  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(missing ? second.id : first.id)
-  if (missing) await act(async () => useAppStore.setState({ tabs: { [first.id]: first, [second.id]: second },
-    layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [second.id, first.id]) } }))
+  if (missing) {
+    // An absent entity is not a cold metadata request. The exact raw reference
+    // stays unknown until its original owner restores it and the user retries.
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open in Space"]')!.click())
+    expect(focus).not.toHaveBeenCalled()
+    expect(report).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining('not confirmed') }))
+    expect(JSON.parse(window.localStorage.getItem(key)!).reference).toEqual(firstReference)
+    expect(useAppStore.getState().tabs).toEqual({ [second.id]: second })
+    expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(second.id)
+    await act(async () => useAppStore.setState({ tabs: { [first.id]: first, [second.id]: second },
+      layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('group', [second.id, first.id]) } }))
+    report.mockClear()
+  }
+  const originalLayout = useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]
+  let finish!: () => void, fail!: (error: Error) => void
+  const completion = new Promise<Error | undefined>(resolve => { finish = () => resolve(undefined); fail = resolve })
+  focus.mockImplementation(async (request, signal, options) => {
+    const receipt = await baseline.executeControl(request, signal, options)
+    // Hold only this original public focus receipt after the real owner has
+    // committed its Work choice; later local navigation must still win.
+    const failure = await completion
+    if (failure) throw failure
+    return receipt
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open in Space"]')!.click())
+  expect(focus).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'focus', inputPolicy: 'preserve',
+    target: expect.objectContaining({ kind: 'space', ...firstReference }) }), expect.any(AbortSignal))
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID,
+    groupId: firstReference.groupId, tabId: firstReference.tabId, regionId: firstReference.regionId })
+  // This explicit public navigation focuses the original occurrence; subsequent
+  // selection inside the floating presentation must not navigate it again.
+  const focusedLayout = useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]
+  expect(focusedLayout).toEqual({ ...originalLayout, groups: [{ ...originalLayout!.groups[0]!,
+    activeTabId: first.id, recentTabIds: missing ? [second.id, first.id] : [first.id] }] })
   if (choice === 'select') {
     const other = container.querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${second.id}"]`)!
     expect(other).not.toBeNull()
     await act(async () => other.click())
     // Floating selection owns the exact visible target, while the original
     // durable workface behind it keeps its navigation selection.
-    expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(missing ? second.id : first.id)
+    expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]).toBe(focusedLayout)
     expect(JSON.parse(window.localStorage.getItem(key)!).targetTabId).toBe(second.id)
   } else if (choice === 'close-reopen') {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button')!.click())
@@ -177,11 +216,15 @@ it.each([
   } else if (choice === 'navigate') {
     await act(async () => useAppStore.getState().setMainSurface('board'))
   }
-  const error = new Error('Metadata completion failed')
-  await act(async () => { if (outcome === 'success') finish(topic); else fail(error) })
+  const error = new Error('Public focus receipt failed')
+  await act(async () => {
+    if (outcome === 'success') finish(); else fail(error)
+    await focus.mock.results[0]!.value.catch(() => {})
+  })
   const completed = choice === 'keep' && outcome === 'success'
-  const selectedTab = missing && !completed ? second.id : first.id
-  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(selectedTab)
+  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]).toBe(focusedLayout)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID,
+    groupId: firstReference.groupId, tabId: firstReference.tabId, regionId: firstReference.regionId })
   const floating = JSON.parse(window.localStorage.getItem(key)!)
   expect(floating.open).toBe(!completed)
   expect(floating.targetTabId).toBe(choice === 'select' ? second.id : first.id)
