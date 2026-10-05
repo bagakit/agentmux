@@ -1,5 +1,5 @@
 /* Context scan and the original work surface share height; history has its own bottom boundary. */
-.global-focus-surface, .global-focus-surface.global-board-surface--session-open { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.global-focus-surface, .global-focus-surface.global-board-surface--session-open { display: flex; flex-direction: column; min-width: 0; min-height: 0; container: focus-workface / inline-size; }
 .global-focus-layout { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; overflow: hidden; }
 .global-focus-surface .global-focus-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
 .global-focus-surface .global-focus-main .global-board-columns { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; overflow: hidden; }
@@ -139,6 +139,12 @@
 .focus-workspace-resize-handle::after { position: absolute; inset: 0 2px; background: transparent; content: ''; }
 .focus-workspace-resize-handle:hover, .focus-workspace-resize-handle:focus-visible { background: var(--line); outline: none; }
 .global-focus-surface .global-session-workspace { flex: 0 0 var(--focus-workspace-width, calc(61.8% - 6px)); width: var(--focus-workspace-width, calc(61.8% - 6px)); min-width: 0; min-height: 0; overflow: hidden; animation: none; }
+@container focus-workface (max-width: 560px) {
+  .global-focus-layout { flex-direction: column; }
+  .global-focus-surface .global-focus-main { flex: 0 0 min(32%, 180px); }
+  .focus-workspace-resize-handle { display: none; }
+  .global-focus-surface .global-session-workspace { flex: 1 1 auto; width: 100%; border-left: 0; border-top: 1px solid var(--line); }
+}
 .focused-tab-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; width: 100%; overflow: hidden; }
 .global-focus-surface .focus-location-recovery { align-items: stretch; justify-content: flex-start; overflow-y: auto; text-align: left; padding: var(--sp-3); }
 .focus-location-recovery .service-window { flex: none; }
