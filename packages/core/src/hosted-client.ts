@@ -38,7 +38,7 @@ export async function connectHostedAgentMux(options: {
   type HistoryRead = {
     id: string; listener(value: AgentSessionHistoryObservation): void; options: AgentSessionHistoryObservationOptions
     source?: AgentSessionHistoryObservationHandle['source']; stream?: AgentMuxHostedSubscription
-    epoch: number; disposed: boolean; resume: boolean; attempts: number
+    epoch: number; disposed: boolean; retryDelay: number
     retry?: ReturnType<typeof setTimeout>; acquiring?: Promise<void>; abort?: () => void
   }
   const histories = new Set<HistoryRead>()
@@ -201,16 +201,17 @@ export async function connectHostedAgentMux(options: {
     void watch?.dispose().catch(error => { if (!disposed) connectionFailure(error) })
   }
   const retryHistory = (read: HistoryRead): void => {
-    if (disposed || read.disposed || !read.resume || read.retry || read.acquiring || read.attempts >= 8) return
+    if (disposed || read.disposed || read.retry || read.acquiring) return
     read.retry = setTimeout(() => {
-      delete read.retry; read.attempts++
+      delete read.retry
+      read.retryDelay = Math.min(read.retryDelay * 2, 30_000)
       void openHistory(read).catch(error => {
         notifyHistory(read, { kind: 'unavailable', agentSessionId: read.id,
           ...(read.source ? { source: read.source } : {}), code: 'AGENT_SESSION_HISTORY_CONNECTION_UNCONFIRMED',
           message: `The original history watch is unconfirmed; its existing window is retained. ${error instanceof Error ? error.message : String(error)} Explicitly refresh this source if reconnection does not finish.` })
         retryHistory(read)
       })
-    }, Math.min(100 * 2 ** read.attempts, 5000))
+    }, read.retryDelay)
     read.retry.unref?.()
   }
   const openHistory = async (read: HistoryRead): Promise<void> => {
@@ -229,9 +230,9 @@ export async function connectHostedAgentMux(options: {
         onInitial: value => {
           if (!value.source) throw new AgentMuxError('History watch omitted its exact native source.', 'CONTROL_PROTOCOL_ERROR')
           if (read.source && (read.source.providerId !== value.source.providerId || read.source.nativeSessionId !== value.source.nativeSessionId)) {
-            read.resume = false
             notifyHistory(read, { kind: 'unavailable', agentSessionId: read.id, source: read.source,
               code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', message: 'The original native history identity changed; the previous window is retained. Explicitly refresh its source.' })
+            releaseHistory(read)
             throw new AgentMuxError('Original native history identity changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
           }
           read.source = value.source
@@ -243,7 +244,9 @@ export async function connectHostedAgentMux(options: {
             const received = transfer.accept(value.data) as AgentMuxHostedStreamValue | undefined
             if (received?.kind === 'history') {
               notifyHistory(read, received.observation)
-              if (received.observation.kind === 'unavailable') { read.resume = false; releaseHistory(read) }
+              // A busy/read failure is an observation fact. The Provider still owns the
+              // same source watch and may recover on its next exact native event.
+              if (received.observation.kind === 'unavailable' && received.observation.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') releaseHistory(read)
             }
           }
         },
@@ -261,7 +264,8 @@ export async function connectHostedAgentMux(options: {
         await watch.dispose()
         throw new AgentMuxError('History consumer closed during watch admission.', 'AGENT_SESSION_HISTORY_CANCELLED')
       }
-      read.stream = watch; read.attempts = 0
+      read.stream = watch; read.retryDelay = 100
+      if (read.retry) { clearTimeout(read.retry); delete read.retry }
       if (hadSource && read.source) notifyHistory(read, { kind: 'invalidated', agentSessionId: read.id, source: read.source })
     })().finally(() => { delete read.acquiring })
     return read.acquiring
@@ -559,7 +563,7 @@ export async function connectHostedAgentMux(options: {
       await connectControl()
       historyOptions.signal?.throwIfAborted()
       const read: HistoryRead = { id: agentSessionId, listener, options: historyOptions,
-        epoch: 0, disposed: false, resume: true, attempts: 0 }
+        epoch: 0, disposed: false, retryDelay: 100 }
       read.abort = () => releaseHistory(read)
       historyOptions.signal?.addEventListener('abort', read.abort, { once: true })
       histories.add(read)
