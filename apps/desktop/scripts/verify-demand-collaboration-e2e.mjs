@@ -26,13 +26,30 @@ const harnessPaths = ['apps/desktop/scripts/pending-edit-restart-proof.mjs', 'ap
 assert.deepEqual(Object.keys(build.proofOverlays).sort(), harnessPaths.sort(), 'Exactly four declared test-only overlays')
 for (const path of harnessPaths) assert.equal(sha(await readFile(resolve(repository, path))), build.proofOverlays[path], 'Exact loaded/frozen harness: ' + path)
 assert.equal(receipt.probeDigest, build.proofOverlays['apps/desktop/scripts/verify-workbench-persistence-restart.mjs'])
-const retained = [...proof.frames, proof.durableStore.before, proof.durableStore.after, ...proof.agents.flatMap(agent => [agent.argv, agent.nativeRecord]), ...proof.cliOperations.map(operation => operation.raw)]
+const retained = [...proof.frames, proof.durableStore.before, proof.durableStore.after, proof.nameRetention.before, proof.nameRetention.predicted, proof.nameRetention.actual, ...proof.agents.flatMap(agent => [agent.argv, agent.nativeRecord]), ...proof.cliOperations.map(operation => operation.raw)]
 assert.ok(proof.frames.length >= 10, 'Actual UI evidence is nonempty')
 assert.equal(new Set(retained.map(item => item.path)).size, retained.length)
 for (const item of retained) {
   const bytes = await readFile(item.path); assert.equal(bytes.length, item.bytes); assert.equal(sha(bytes), item.sha256, 'Retained actual evidence: ' + item.path)
   if (item.path.endsWith('.png')) assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
 }
+// Recheck the independent pre-crash prediction against actual retained native documents.
+const beforeNames = JSON.parse(await readFile(proof.nameRetention.before.path,'utf8'))
+const predictedNames = JSON.parse(await readFile(proof.nameRetention.predicted.path,'utf8'))
+const actualNames = JSON.parse(await readFile(proof.nameRetention.actual.path,'utf8'))
+const exactNames = structuredClone(beforeNames), addedNames = []
+assert.equal(proof.agents.length,2); assert.equal(new Set(proof.agents.map(agent=>agent.tabId)).size,2)
+for (const agent of proof.agents) {
+  const tab = exactNames.graph.tabs.find(tab=>tab.tabId===agent.tabId)
+  assert.ok(tab && typeof tab.name === 'string' && tab.name.length > 0)
+  const target = {kind:'tab',id:tab.tabId}, key = JSON.stringify(['tab',tab.tabId]), labels = exactNames.graph.resources['agentmux:display-labels'].labels
+  if (Object.hasOwn(labels,key)) continue
+  const label = {target,value:tab.name,source:'retained',nameRevision:1,operationId:'retained:'+key}
+  labels[key] = label; addedNames.push({key,label})
+}
+if (addedNames.length) exactNames.revision++
+assert.deepEqual(proof.nameRetention.added,addedNames)
+assert.deepEqual(predictedNames,exactNames); assert.deepEqual(actualNames,exactNames)
 assert.equal(build.sourceCommit, sourceCommit); assert.equal(build.productOverlayProhibited, true)
 assert.equal(build.archive.mode, 'complete-immutable-product-source-no-product-overlays')
 assert.equal(build.privateRootRemoved, true); assert.equal(build.userRunTouched, false); assert.equal(build.sharedSourceWritten, false)

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { promisify } from 'node:util'
+import { isDeepStrictEqual, promisify } from 'node:util'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicLogicalPath } from '../src/shared/scratch-topics.ts'
 import { openDemandStore } from '../../../packages/demand/dist/src/index.js'
 import { readRecoverySpatialState, assertOriginalRecoveryGraph } from './goals-alignment-restart-proof.mjs'
@@ -26,6 +26,24 @@ function mappedGoal(value, goalId) {
   const presentationId = matches.length === 1 ? matches[0].id : undefined
   return tab && tabResource && region && regionResource && presentationId ? { goalId, tab, tabResource, region, regionResource, presentationId,
     draft: value.agentComposerDrafts[presentationId] ?? null, note: value.agentComposerNotes?.[presentationId] ?? null } : null
+}
+// Ordinary initialization lets the original Core name owner adopt observed aliases once.
+// Predict only these two already-created PMO Tab labels from the pre-crash document;
+// the second process's observations never determine its expected graph or revision.
+function expectedPmoNameRetention(before, agents) {
+  const expected = structuredClone(before), document = expected.graph.resources['agentmux:display-labels'], added = []
+  assert.ok(document && document.labels && Array.isArray(document.records))
+  assert.equal(agents.length, 2); assert.equal(new Set(agents.map(agent=>agent.tabId)).size, 2)
+  for (const agent of agents) {
+    const tab = expected.graph.tabs.find(tab=>tab.tabId===agent.tabId)
+    assert.ok(tab && typeof tab.name === 'string' && tab.name.length > 0)
+    const target = {kind:'tab',id:tab.tabId}, key = JSON.stringify([target.kind,target.id])
+    if (Object.hasOwn(document.labels,key)) continue
+    const label = {target,value:tab.name,source:'retained',nameRevision:1,operationId:'retained:'+key}
+    document.labels[key] = label; added.push({key,label})
+  }
+  if (added.length) expected.revision++ // One original owner's batch commit, never one per Tab.
+  return {expected,added}
 }
 async function birth(pid) { try { return (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,pgid=,lstart='], { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000 })).stdout.trim() } catch (error) { if (error.code === 1) return null; throw error } }
 function parseBirth(text) { const m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(text); assert.ok(m); const pid = Number(m[1]), group = Number(m[2]); assert.ok(pid > 1); assert.equal(group, pid); return { pid, group, born: m[3] } }
@@ -258,6 +276,11 @@ export async function clickDemandCollaborationInActualUI({ cdp, fixture, activat
   assertOriginalRecoveryGraph(after.spatial, expectedOriginalWorkbench)
   assert.deepEqual(after.agentFocus.execution, expectedOriginalFocus.execution)
   fixture.expectedWorkbench = after.spatial; fixture.expectedFocus = after.agentFocus; fixture.expectedMapping = after.demandPmoTabIds
+  const retainedNames = expectedPmoNameRetention(after.spatial, fixture.agents)
+  fixture.expectedRestoredWorkbench = retainedNames.expected
+  fixture.nameRetention = {owner:'original Store.initialize → Main spatial:retainLabels → Core.retainDisplayLabels',added:retainedNames.added,
+    before:await retain(fixture,'spatial-before-restart.json',Buffer.from(JSON.stringify(after.spatial))),
+    predicted:await retain(fixture,'spatial-expected-after-name-retention.json',Buffer.from(JSON.stringify(retainedNames.expected)))}
   fixture.expectedGoals = await fixture.owner.list(); fixture.beforeStore = await retain(fixture, 'demands-before-restart.json', await readFile(fixture.demandStorePath))
   fixture.retained = fixture.agents.map(agent => ({ goalId: agent.goalId, facts: stable(after, agent) }))
   fixture.retry = fixture.normal // original worker's group-qualification seam names the already existing first Run.
@@ -272,11 +295,19 @@ export async function readDemandCollaborationNativeBaseline({ client, fixture })
   }
 }
 export async function restoreDemandCollaborationBeforeSpace({ cdp, fixture, activateButton, waitFor, focusOriginal }) {
-  const restored = await waitFor('original Goals and PMO workface restored before navigation', async () => {
-    const value = await uiState(cdp)
-    return value.selectedDemandId === fixture.off.goalId && value.mainSurface === 'board' && fixture.agents.every(agent => mappedGoal(value, agent.goalId)?.region.kind === 'agent') ? value : null
-  })
-  assert.deepEqual(restored.spatial, fixture.expectedWorkbench); assert.deepEqual(restored.agentFocus, fixture.expectedFocus); assert.deepEqual(restored.demandPmoTabIds, fixture.expectedMapping)
+  let observedRestoration, restored
+  try {
+    restored = await waitFor('original Goals and exact Core name-owner acknowledgement before navigation', async () => {
+      const value = await uiState(cdp); observedRestoration = value
+      return value.selectedDemandId === fixture.off.goalId && value.mainSurface === 'board' &&
+        fixture.agents.every(agent => mappedGoal(value, agent.goalId)?.region.kind === 'agent') &&
+        isDeepStrictEqual(value.spatial, fixture.expectedRestoredWorkbench) ? value : null
+    })
+  } finally {
+    if (observedRestoration) fixture.nameRetention.actual = await retain(fixture,'spatial-actual-after-restart.json',Buffer.from(JSON.stringify(observedRestoration.spatial)))
+  }
+  assert.deepEqual(restored.spatial, fixture.expectedRestoredWorkbench, 'Only exact precomputed original name-owner retention is allowed; all other facts stay exact')
+  assert.deepEqual(restored.agentFocus, fixture.expectedFocus); assert.deepEqual(restored.demandPmoTabIds, fixture.expectedMapping)
   assert.deepEqual(await fixture.owner.list(), fixture.expectedGoals)
   assert.deepEqual(await cdp.evaluate('window.agentmux.demands.list()'), fixture.expectedGoals)
   const afterStore = await retain(fixture, 'demands-after-restart.json', await readFile(fixture.demandStorePath)); assert.equal(afterStore.sha256, fixture.beforeStore.sha256)
@@ -300,7 +331,7 @@ export async function restoreDemandCollaborationBeforeSpace({ cdp, fixture, acti
     sourceOnlyNeverDispatch: true, laterOnNeverBackfillsOff: true, noFinalRoleSeed: true, noMockConfirmed: true,
     initialPromptTransport: 'original Core creation/native CLI argv', humanScope: 'explicit private fixture human authored proposal and actual mounted confirmation; not user approval',
     samePmoRunsAutomaticallyAttached: true, restartAutomaticallyCreatedGoal: false, restartAutomaticallySent: false,
-    durableStore: { before: fixture.beforeStore, after: afterStore }, mote: fixture.mote, settingsOn: fixture.settingsOn, settingsOff: fixture.settingsOff,
+    durableStore: { before: fixture.beforeStore, after: afterStore }, nameRetention: fixture.nameRetention, mote: fixture.mote, settingsOn: fixture.settingsOn, settingsOff: fixture.settingsOff,
     agents: fixture.agents, loop: fixture.loop, cliOperations: fixture.cliOperations, navigation: fixture.navigation, frames: fixture.frames,
     originalOutputBeforeRestart: fixture.originalOutput, sourceBefore: fixture.sourceBefore,
     limitations: ['Private exact Core fake-codex Native protocol CLI; actual Run/native record/Hook/receipt, no paid model discussion or model understanding.', 'The exact private fake-codex CLI does not implement read-only app-server native-history requests; its actual nonblocking read service window is retained, and native history is not qualified.', 'Only original baseline workface/queue was seeded; new Goals/PMOs/roles/confirmation/dispatch came from actual product actions.', 'Paused original Loop is preserved; no automatic tick is claimed. Independent visual acceptance remains a separate review.'] }
