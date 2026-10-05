@@ -436,20 +436,32 @@ export class DeviceWorkfaceStore {
     const captured = parseMoteQuickDraft(next), previous = expected === null ? null : parseMoteQuickDraft(expected)
     const key = moteQuickDraftKey(captured.scope)
     if (previous && moteQuickDraftKey(previous.scope) !== key) throw new MoteQuickDraftInvalidError('原配置、Mote 或 Host 不同；正文保留，本次保存未发送。')
+    let conflicting = false
     return this.update(value => {
       const drafts = value.moteQuickDrafts ?? [], current = drafts.find(item => moteQuickDraftKey(item.scope) === key) ?? null
       let result: DeviceWorkface
-      if (!sameValue(current, previous) && !sameValue(current, captured)) {
+      conflicting = !sameValue(current, previous) && !sameValue(current, captured)
+      if (conflicting) {
         const conflicts = value.moteQuickDraftConflicts ?? []
         result = { ...value, moteQuickDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
       } else result = { ...value, moteQuickDrafts: [...drafts.filter(item => moteQuickDraftKey(item.scope) !== key), captured] }
-      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MoteQuickDraftCapacityError('设备原工作面超过备份范围；本次设备更新未应用，原记录与当前正文保留。')
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) {
+        const error = new MoteQuickDraftCapacityError('设备原工作面超过备份范围；本次设备更新未应用，原记录与当前正文保留。')
+        if (conflicting) throw new MoteQuickDraftInvalidError(`另一页面已改原配置；冲突副本未进入设备备份，当前选择与完整请求保留。${error.message}`, { cause: error })
+        throw error
+      }
       return result
     }, recordId, committed => {
       const draft = committed.moteQuickDrafts?.find(item => moteQuickDraftKey(item.scope) === key) ?? null
       const applied = sameValue(draft, captured)
       const conflict = applied ? null : committed.moteQuickDraftConflicts?.find(item => sameValue(item, captured)) ?? null
       return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
+    }).catch(error => {
+      // A failed conflict-copy write is not permission to forward the stale business request.
+      if (conflicting && !(error instanceof DeviceWorkfaceRecordChangedError || error instanceof MoteQuickDraftInvalidError)) {
+        throw new MoteQuickDraftInvalidError(`另一页面已改原配置；冲突副本未进入设备备份，当前选择与完整请求保留。${error instanceof Error ? error.message : String(error)}`, { cause: error })
+      }
+      throw error
     })
   }
   editConversation(edits: ConversationEdit[], recordId: string | null): Promise<ConversationCommit> {
