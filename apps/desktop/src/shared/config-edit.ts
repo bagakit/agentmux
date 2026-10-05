@@ -67,6 +67,22 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
     }
+    // An object identity is opaque (including dots in its directory); its authored choice is
+    // one value. Merge unrelated identities, but never synthesize a face from concurrent parts.
+    if (path === 'appearance.spaceObjectIcons' && actual && expected && requested &&
+        typeof actual === 'object' && typeof expected === 'object' && typeof requested === 'object' &&
+        !Array.isArray(actual) && !Array.isArray(expected) && !Array.isArray(requested)) {
+      const live = actual as Record<string, unknown>, old = expected as Record<string, unknown>, next = requested as Record<string, unknown>
+      const result = { ...live }
+      for (const key of new Set([...Object.keys(old), ...Object.keys(next)])) {
+        const previous = old[key], choice = next[key], currentChoice = live[key]
+        if (configValuesEqual(previous, choice) || configValuesEqual(currentChoice, choice)) continue
+        if (!configValuesEqual(currentChoice, previous)) throw new ConfigConflict(`${path}[${JSON.stringify(key)}]`)
+        if (!Object.hasOwn(next, key)) delete result[key]
+        else Object.defineProperty(result, key, { value: choice, enumerable: true, configurable: true, writable: true })
+      }
+      return result
+    }
     // Environment is one literal launch value, never a merge of independently authored keys.
     if (/^executors\.[^.]+\.env$/.test(path)) {
       if (!configValuesEqual(actual, expected)) throw new ConfigConflict(path)

@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pinPmoTeamsTopicFloating,
-  floatingMoteDefaultSelection, createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, PMO_FLOATING_TAB_SLOT_PREFIX,
+  createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, PMO_FLOATING_TAB_SLOT_PREFIX,
   readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingTargetTopicId,
   resolvePmoTeamsTopicFloatingSize, type PmoTeamsTopicFloatingSize,
   type PmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
@@ -19,6 +19,7 @@ import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { MoteWorkface } from './MoteWorkface'
+import { MoteProfilePopover } from './MoteProfilePopover'
 import { WorkbenchPresentationContext } from '../lib/workbench-presentation'
 import { StatusDot } from './StatusDot'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -342,9 +343,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
 
   const selectMote = useCallback((topicId: string, tabId: string | undefined) => {
     spaceActionRef.current?.abort()
-    const next = { open: true, preview: false, targetTopicId: topicId, targetTabId: tabId }
-    setFloating(readPmoTeamsTopicFloatingState()?.targetTopicId === topicId ? next : floatingMoteDefaultSelection(next))
-  }, [setFloating])
+    requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tabId ? { targetTabId: tabId } : {}) })
+  }, [])
   const selectFileReference = useCallback((topicId: string, reference: WorkbenchProjectionSelection) => {
     setFloating({ targetTopicId: topicId, targetTabId: reference.tabId, reference })
   }, [setFloating])
@@ -556,15 +556,19 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       </button>)}
     </div> : null}
     <div className="pmo-teams-topic-floating__body">
-      {!target.tabId && !motes.some(topic => topic.id === target.topicId) ?
+      <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} reference={floating.reference}
+        active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
+      !target.tabId && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
-        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open} onTabSelect={selectDiscussion}>
+        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open} reference={floating.reference} conversationEntry={floating.conversationEntry} onTabSelect={selectDiscussion}>
         <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? SCRATCH_WORKSPACE_ID}
           topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
           projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
           retainedTabId={target.tabId} visible={visible} interactiveResize={false}
-          onTabSelect={selectDiscussion} presentationAction={<button type="button" className="pane-action"
-            aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ArrowUpRight size={14} /></button>} /></MoteWorkface>}
+          onTabSelect={selectDiscussion} presentationAction={<>{profileTrigger}
+            <button type="button" className="pane-action"
+            aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ArrowUpRight size={14} /></button></>} /></MoteWorkface>}
+      </MoteProfilePopover>
     </div>
     </div>
     <MoteRenameDialog target={renameTarget && scratch ? { topic: renameTarget, workspace: scratch } : null} onClose={() => setRenameTarget(null)} returnFocus={returnToMote} />

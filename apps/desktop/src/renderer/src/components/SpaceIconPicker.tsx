@@ -37,8 +37,8 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     const saved = target ? useAppStore.getState().spaceObjectIcons[target.key] ?? null : null
     const face = isMoteFace(saved) ? saved : { ...DEFAULT_MOTE_FACE }
     setFaceDraft(face); setAlternativeDraft(isMoteFace(saved) ? null : saved)
-    setDraft(target?.avatarTarget ? face : saved)
-    setEditingFace(Boolean(target?.avatarTarget))
+    setDraft(saved)
+    setEditingFace(Boolean(target?.avatarTarget && isMoteFace(saved)))
     setPreview(null); setPreviewReady(false); setPreparing(false); setBusy(false); setError(null)
     return () => { editor.current = {}; inputRequest.current = {} }
   }, [target?.key])
@@ -138,7 +138,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         </div> : null}
         <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={!editingFace && !preview && draft === null}
           disabled={busy} onClick={() => { select(null); setEditingFace(false) }}><RotateCcw size={13} />Restore automatic</button>
-        {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; retry saving.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
+        {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; review the current avatar before saving again.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         <footer>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
           <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'} disabled={busy || preparing || Boolean(!editingFace && preview && !previewReady)} onClick={() => void save()}>

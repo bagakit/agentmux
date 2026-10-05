@@ -4,13 +4,18 @@ import { useMemo, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { MoteWorkfaceContext, useMoteWorkfaceScope } from '../lib/mote-workface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { useMoteConversationMode } from '../lib/mote-conversation-mode'
+import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 
 /** Mote supplies object context; the shared Space owns files and persona tools. */
-export function MoteWorkface({ workspaceId, topicId, floating = false, visible = true, recoverOnOpen = visible, onTabSelect, children }: {
+export function MoteWorkface({ workspaceId, topicId, floating = false, visible = true, recoverOnOpen = visible, reference, conversationEntry, onTabSelect, children }: {
   workspaceId: string; topicId?: string | undefined; floating?: boolean; visible?: boolean; recoverOnOpen?: boolean
   onTabSelect?: ((tabId: string, groupId?: string) => void) | undefined; children: ReactNode
+  reference?: WorkbenchProjectionSelection | null | undefined
+  conversationEntry?: number | undefined
 }) {
   const scope = useMoteWorkfaceScope(workspaceId, topicId, visible)
+  useMoteConversationMode(scope, { workspaceId, topicId, active: visible && recoverOnOpen, floating, reference, conversationEntry })
   useMoteConversationRecovery(scope?.topic, scope?.workspace.id ?? workspaceId, recoverOnOpen)
   const defaults = useMoteDefaultConversation(scope?.topic, scope?.workspace.id ?? workspaceId, visible)
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation,

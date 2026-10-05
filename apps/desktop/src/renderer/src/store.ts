@@ -1,6 +1,7 @@
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
 import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
 import { moteDefaultExecutor, moteDefaultConversation } from './lib/mote-quick-preferences'
+import { showMoteConversation } from './lib/mote-conversation-mode'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
 import { describeError } from '@agentmux/client-ui/error-presentation'
@@ -85,6 +86,7 @@ import { persist } from 'zustand/middleware'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import { configValuesEqual } from '../../shared/config-edit'
+import { inspectSpaceIconOverrides } from '../../shared/space-object-appearance'
 import { sessionNameMetadataRecord, type SessionNameMetadata } from './lib/session-name-metadata'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -145,6 +147,7 @@ import {
   SCRATCH_WORKSPACE_ID,
   scratchTopicDirectoryName,
   scratchTopicIdentityPath,
+  scratchTopicLogicalPath,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
 } from '../../shared/scratch-topics'
@@ -2421,7 +2424,7 @@ type PersistedAppState = {
   collapsedProjectGroups?: Record<string, true>
   explorerCollapsed?: Record<string, boolean>
   pinnedItems?: Record<string, string[]>
-  spaceObjectIcons?: SpaceIconOverrides
+  spaceObjectIcons?: unknown
   toolsOpen?: boolean
   workspaceTool?: WorkspaceTool
   projectRailWidth?: number
@@ -2585,7 +2588,7 @@ export function restorePersistedUiState(
     collapsedProjectGroups: restoredCollapsedGroups(persisted.collapsedProjectGroups),
     explorerCollapsed: restoredExplorerCollapsed(persisted.explorerCollapsed),
     pinnedItems: restoredPinnedItems(persisted.pinnedItems),
-    spaceObjectIcons: restoreSpaceIconOverrides(persisted.spaceObjectIcons),
+    spaceObjectIcons: restoreSpaceIconOverrides(Object.hasOwn(config.appearance, 'spaceObjectIcons') ? config.appearance.spaceObjectIcons : retainedSpaceIconHandoff ?? persisted.spaceObjectIcons),
     toolsOpen: restoredBoolean(persisted.toolsOpen, true),
     workspaceTool: restoredWorkspaceTool(persisted.workspaceTool),
     projectRailWidth: clampProjectRailWidth(persisted.projectRailWidth ?? PROJECT_RAIL_DEFAULT_WIDTH),
@@ -2664,7 +2667,7 @@ function selectPersistedInputs(state: AppState) {
     // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
     // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
     pinnedItems: state.pinnedItems,
-    spaceObjectIcons: state.spaceObjectIcons,
+    ...(retainedSpaceIconHandoff === undefined ? {} : { spaceObjectIcons: retainedSpaceIconHandoff }),
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
     projectRailWidth: state.projectRailWidth,
@@ -2834,7 +2837,43 @@ const persistentWorkbenchStorage = createDebouncedPersistentStorage<PersistedApp
 // The writer batches real presentation changes before this boundary. A visible localStorage value
 // is not a cross-process durability receipt; ask its existing platform owner to commit that batch.
 // Failure is advisory: retain the written state and retry on the next real storage mutation.
+// Temporary custody of original local bytes until the original Main owner confirms handoff.
+// It is not a second editable store; canonical presence, including {}, always wins.
+let retainedSpaceIconHandoff: unknown = undefined
 const spaceIconSaveRequests = new Map<string, object>()
+async function readCurrentSpaceIconConfig(): Promise<AppConfig | null> {
+  const beforeRead = useAppStore.getState().config
+  const observed = await api.config.get().catch(() => null)
+  const current = useAppStore.getState().config
+  return current !== beforeRead && current !== null ? current : observed
+}
+function spaceIconRecordWarning(value: unknown): string | null {
+  const { invalidKeys } = inspectSpaceIconOverrides(value)
+  return invalidKeys.length ? `${invalidKeys.length} saved avatar record(s) could not be displayed. Original records are retained in configuration; other avatars and work remain available.` : null
+}
+async function handoffSpaceIcons(config: AppConfig): Promise<{ config: AppConfig; warning: string | null }> {
+  if (Object.hasOwn(config.appearance, 'spaceObjectIcons')) {
+    retainedSpaceIconHandoff = undefined
+    return { config, warning: spaceIconRecordWarning(config.appearance.spaceObjectIcons) }
+  }
+  const original = retainedSpaceIconHandoff
+  if (original === undefined) return { config, warning: null }
+  if (!original || typeof original !== 'object' || Array.isArray(original)) return { config,
+    warning: 'Saved local avatar records could not be read. Their original bytes are retained; other work remains available.' }
+  const next = { ...config, appearance: { ...config.appearance, spaceObjectIcons: original as Record<string, unknown> } }
+  try {
+    let saved: AppConfig
+    try { saved = await api.config.save(next, config) }
+    catch (cause) {
+      // A lost receipt is not a failed write. Read the same owner, without blindly replaying.
+      const observed = await readCurrentSpaceIconConfig()
+      if (!observed || !Object.hasOwn(observed.appearance, 'spaceObjectIcons')) throw cause
+      saved = observed
+    }
+    retainedSpaceIconHandoff = undefined
+    return { config: saved, warning: spaceIconRecordWarning(saved.appearance.spaceObjectIcons) }
+  } catch (cause) { return { config, warning: 'Avatar preservation is unconfirmed. Original local choices are retained; reopen avatar settings after restoring configuration access. ' + presentError(cause) } }
+}
 let workbenchSaveRequest = 0
 async function requestWorkbenchStorageFlush(): Promise<void> {
   const request = ++workbenchSaveRequest
@@ -3496,6 +3535,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         api.demands.list()
       ])
       if (configResult.status === 'rejected') throw configResult.reason
+      const avatarHandoff = await handoffSpaceIcons(get().config !== configBeforeRead && get().config !== null ? get().config! : configResult.value)
+      configResult.value = avatarHandoff.config
       if (initialSnapshotResult.status === 'fulfilled') set({
         environmentWarning: initialSnapshotResult.value.environmentWarning ?? null,
         runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? [],
@@ -3507,7 +3548,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (initialSnapshotResult.status === 'fulfilled' && initialSnapshotResult.value.localHome !== undefined) {
         set({ localHome: initialSnapshotResult.value.localHome })
       }
-      const startupWarnings: string[] = []
+      const startupWarnings: string[] = avatarHandoff.warning ? [avatarHandoff.warning] : []
       let emptySessionSnapshotWarning: string | null = null
       let missingRuntimeReferenceIds: string[] | null = null
       let snapshotFailureMessage: string | undefined
@@ -6226,34 +6267,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async setSpaceObjectIcon(key, icon) {
     requireSpaceIconSelection(key, icon)
-    if (!workbenchWriteFence.isOpen()) throw new Error('The saved workbench is still loading. Your icon choice is kept; retry when it is ready.')
+    const before = get().config
+    if (!before) throw new Error('Configuration is still loading. Your avatar draft is kept; retry when it is ready.')
     const request = {}; spaceIconSaveRequests.set(key, request)
-    // Explicitly saving the same image creates a fresh confirmed choice for its bounded read retry.
     const selected = icon && typeof icon === 'object' ? { ...icon } : icon
-    const choice = (current: SpaceIconOverrides) => {
-      const { [key]: _previous, ...others } = current
-      return selected === null ? others : { ...others, [key]: selected }
-    }
-    const writeChoice = (icons: SpaceIconOverrides) => {
-      // The same persisted projection/writer owns the candidate. It is not visible until confirmed.
-      const options = useAppStore.persist.getOptions()
-      persistentWorkbenchStorage.storage.setItem(options.name!, { state: partializeAppState({ ...get(), spaceObjectIcons: icons }), ...(options.version === undefined ? {} : { version: options.version }) })
-      persistentWorkbenchStorage.flush()
-    }
+    const records = { ...(before.appearance.spaceObjectIcons ?? {}) }
+    if (selected === null) delete records[key]
+    else Object.defineProperty(records, key, { value: selected, enumerable: true, configurable: true, writable: true })
+    const next = { ...before, appearance: { ...before.appearance, spaceObjectIcons: records } }
     try {
-      writeChoice(choice(get().spaceObjectIcons))
-      await requestWorkbenchStorageFlush()
-      if (spaceIconSaveRequests.get(key) !== request) return
-      // Validate the latest projection before publication; unrelated edits during the request stay intact.
-      writeChoice(choice(get().spaceObjectIcons))
-      set(state => ({ spaceObjectIcons: choice(state.spaceObjectIcons) }))
-    } catch (error) {
-      if (spaceIconSaveRequests.get(key) === request) {
-        // Replace the rejected pending value with current confirmed facts, never an old workbench.
-        try { writeChoice(get().spaceObjectIcons) } catch { /* Original failure stays visible; only confirmed facts remain pending. */ }
-        get().reportWorkbenchSaveFailure(error)
+      let saved: AppConfig
+      try { saved = await api.config.save(next, before) }
+      catch (cause) {
+        const observed = await readCurrentSpaceIconConfig()
+        if (observed) get().setConfig(observed)
+        const actual = observed?.appearance.spaceObjectIcons
+        if (!observed || !Object.hasOwn(observed.appearance, 'spaceObjectIcons') ||
+            (selected === null ? Object.hasOwn(actual ?? {}, key) : !configValuesEqual(actual?.[key], selected))) throw cause
+        saved = observed
       }
-      throw error
+      if (spaceIconSaveRequests.get(key) !== request) return
+      if (get().config !== before && !configValuesEqual(get().config, saved)) saved = await readCurrentSpaceIconConfig() ?? saved
+      get().setConfig(saved)
+      // An explicit same-image Save retries that original bounded asset read, without changing
+      // durable identity or making unrelated Session events allocate a new projection.
+      if (selected && typeof selected === 'object' && configValuesEqual(get().spaceObjectIcons[key], selected))
+        set(state => ({ spaceObjectIcons: { ...state.spaceObjectIcons, [key]: { ...selected } } }))
     } finally { if (spaceIconSaveRequests.get(key) === request) spaceIconSaveRequests.delete(key) }
   },
   setPortalOverlayCount(portalOverlayCount) {
@@ -7073,6 +7112,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
     }
+    const showConversation = (snapshot: ScratchTopicSnapshot) => {
+      const rootPath = scratchTopicLogicalPath(workspace, snapshot)
+      if (rootPath !== null && !snapshot.readError && scratchTopicKind(snapshot.id, [snapshot]) === 'mote')
+        showMoteConversation({ workspace, topic: snapshot, rootPath })
+    }
     const remember = (snapshot: ScratchTopicSnapshot) => set(current => {
       const scope = scratchTopicsScope(workspace), previous = current.scratchTopicSnapshots[workspace.id]
       const topics = previous?.scope === scope ? previous.topics ?? [] : []
@@ -7198,6 +7242,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             ...(activeRegion && isSessionSurface(activeRegion) ? { agentFocus: focusSessionContext(current, activeRegion.sessionId,
               undefined, { displayWorkspaceId: choice.workspaceId, groupId: choice.groupId!, tabId: choice.tabId!, regionId: choice.regionId! }) } : {}) }
         })
+        showConversation(known)
       }
       if (!known) set((current) => {
         // An unconfirmed discovery cannot replace a previously selected object.
@@ -7266,6 +7311,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set(current => ({ activeWorkspaceId: choice.workspaceId, workbenchSpaceSelection: choice,
           ...(selectedLayout && choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
             [choice.workspaceId]: activateLayoutTab(selectedLayout, choice.groupId, choice.tabId) } } : {}) }))
+        showConversation(snapshot)
       }
       return true
     }
@@ -7331,6 +7377,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
     if (placementFailed) throw new Error('The Tab Group is no longer available')
+    if (mayReveal) showConversation(snapshot)
     // A filesystem Topic with no existing View is still expected to open a usable work
     // surface. Keep the launcher as the durable owner and replace its active Region through
     // the same lifecycle path used by the New Tab Terminal action. Background preparation (the
@@ -9621,6 +9668,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setConfig(config) {
+    if (Object.hasOwn(config.appearance, 'spaceObjectIcons')) retainedSpaceIconHandoff = undefined
+    const iconProjection = restoreSpaceIconOverrides(config.appearance.spaceObjectIcons)
     const runtimeConfigChanged = JSON.stringify(get().config?.hosts) !== JSON.stringify(config.hosts) ||
       JSON.stringify(get().config?.executors) !== JSON.stringify(config.executors)
     if (runtimeConfigChanged) {
@@ -9642,6 +9691,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     disposeObserversForRemovedWorkspaces(get().tabs, config)
     set((state) => ({
       ...adoptedConfig(state.activeWorkspaceId, config),
+      ...(Object.hasOwn(config.appearance, 'spaceObjectIcons') ? { spaceObjectIcons: configValuesEqual(state.spaceObjectIcons, iconProjection) ? state.spaceObjectIcons : iconProjection } : {}),
       ...(runtimeConfigChanged ? { executorDetections: Object.fromEntries(Object.entries(state.executorDetections).filter(([, check]) => {
         const input = check.input
         return input && executorDetectionMatches(input, input.executorId, config.executors[input.executorId], config.hosts.find(host => host.id === input.host.id))
@@ -9736,6 +9786,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (error) persistHydrationError = error
   },
   merge: (persisted, current) => {
+    const local = persisted as Partial<PersistedAppState>
+    if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
     // Old Chromium reads never overwrite acknowledged names or clear tombstones.
     if (current.nameAuthorityRevision > 0) {
@@ -9744,6 +9796,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       state.nameLabels = current.nameLabels
       state.nameAuthorityRevision = current.nameAuthorityRevision
     }
+    state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
+      ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     return { ...state, agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
