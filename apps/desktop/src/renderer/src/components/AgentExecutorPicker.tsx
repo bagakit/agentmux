@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext, useState } from 'react'
 import type { ExecutorChoice } from '../lib/executors'
 import { executorDetectionLabel } from '../lib/executor-detection'
@@ -7,6 +7,10 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { SelectionField } from './SelectionField'
+
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 type ExecutorPickerProps = {
   executors: readonly ExecutorChoice[]
@@ -45,11 +49,11 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
         <span inert aria-hidden="true"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
         <strong>{executor.label}</strong>
         {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" aria-label={executorDetectionLabel(executor.detection)}>?</span> : null}
-        {executor.id === selected ? <Check size={12} className="agent-pick__check" /> : null}
+        {executor.id === selected ? <ThemeStatusSelectedIcon size={12} className="agent-pick__check" /> : null}
       </button>)}
       {unavailable.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable}
         onClick={() => setShowUnavailable(value => !value)}>
-        {showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailable.length}`}<ChevronDown size={12} />
+        {showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailable.length}`}<ThemeNavigationDownIcon size={12} />
       </button> : null}
       {!executors.length ? <div className="agent-catalog__empty">No Agent is configured.
         {settings ? <button type="button" className="small-button" onClick={() => settings.open('agents')}>Configure an Agent</button> : ' Add one in Settings to launch here.'}

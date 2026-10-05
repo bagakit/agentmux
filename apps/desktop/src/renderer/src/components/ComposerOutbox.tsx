@@ -4,12 +4,23 @@ import { messageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { MailboxLocationContext } from './MailboxLocationContext'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
-import { ArrowUp, ArrowDown, Pencil, Archive, ArchiveRestore, Copy, Check, TriangleAlert } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { UNKNOWN_SPEAKER_ID } from '@agentmux/client-ui/conversation-speaker'
 import { MailboxRecordRow, MailboxTime } from './MailboxReading'
+
+const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeActionMoveUpIcon = semanticIconComponent('action.move-up')
+const ThemeActionSubmitIcon = semanticIconComponent('action.submit')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeActionMoveDownIcon = semanticIconComponent('action.move-down')
+const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
+const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+
 
 export type ComposerQueuedMessage = {
   id: string
@@ -82,7 +93,7 @@ function CopyQueuedMessage({ entry, onCopy }: { entry: ComposerQueuedMessage; on
       if (current !== action.current) return
       setResult({text:entry.text,accepted:copied})
       timer.current = setTimeout(() => { if (current === action.current) setResult(null) },1600)
-    }}>{accepted ? <Check size={14} /> : accepted === false ? <TriangleAlert size={14} /> : <Copy size={14} />}</button>
+    }}>{accepted ? <ThemeStatusCopiedIcon size={14} /> : accepted === false ? <ThemeStatusWarningIcon size={14} /> : <ThemeActionCopyIcon size={14} />}</button>
 }
 
 function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMessage; copy?: ((text: string) => Promise<boolean>) | undefined }) {
@@ -134,7 +145,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
           <div className="composer-mailbox__record-actions composer-outbox__actions">
             {!conditionChanged && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool" disabled={!canSend}
               aria-label={(entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message'} title={canSend ? '只发送这条原消息' : state.detail}
-              onClick={() => onSend(entry.id)}><ArrowUp size={14} /></button> : null}
+              onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
             {conditionChanged && !entry.archived && onMoveToDraft ? <button type="button" className="composer-tool" disabled={state.busy || Boolean(editingId)} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={async () => {
               setFailure(null)
               try { await onMoveToDraft(entry.id, entry.text) } catch (error) { setFailure({ id: entry.id, text: entry.text, message: presentError(error) }) }
@@ -142,17 +153,17 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
             {entry.preparationWait?.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
             {onCopy ? <CopyQueuedMessage key="copy" entry={entry} onCopy={onCopy} /> : null}
             {!entry.archived && onEdit ? <button key="edit" type="button" className="composer-tool" aria-label="编辑这条待发消息" title="编辑原消息，保存不会发送"
-              disabled={!entry.editable || Boolean(editingId)} onClick={event => { onSelect(entry.id,event); setEditingId(entry.id) }}><Pencil size={14} /></button> : null}
+              disabled={!entry.editable || Boolean(editingId)} onClick={event => { onSelect(entry.id,event); setEditingId(entry.id) }}><ThemeActionEditIcon size={14} /></button> : null}
             {selected && !entry.archived && onMove ? <>
-              <button key="up" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===0 || queued[index-1]?.sending || queued[index-1]?.preparing} onClick={() => onMove(entry.id,'up')} title="Move up" aria-label="Move up"><ArrowUp size={14} /></button>
-              <button key="down" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===queued.length-1 || queued[index+1]?.sending || queued[index+1]?.preparing} onClick={() => onMove(entry.id,'down')} title="Move down" aria-label="Move down"><ArrowDown size={14} /></button>
+              <button key="up" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===0 || queued[index-1]?.sending || queued[index-1]?.preparing} onClick={() => onMove(entry.id,'up')} title="Move up" aria-label="Move up"><ThemeActionMoveUpIcon size={14} /></button>
+              <button key="down" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===queued.length-1 || queued[index+1]?.sending || queued[index+1]?.preparing} onClick={() => onMove(entry.id,'down')} title="Move down" aria-label="Move down"><ThemeActionMoveDownIcon size={14} /></button>
             </> : null}
             {onArchive ? <button key="archive" type="button" className="composer-tool" aria-label={entry.archived ? '恢复为待发' : '归档这条待发消息'}
               title={entry.archived ? entry.confirmed ? '原输入已确认，请查看 History；不能重新投递' : '恢复原条目，等待明确发送' : '归档原条目，保留原文和投递记录；不会撤回已经输入的内容'}
               disabled={state.busy || Boolean(editingId) || Boolean(entry.archived && entry.confirmed)} onClick={async () => {
                 setFailure(null)
                 try { await onArchive(entry.id,entry.text,!entry.archived) } catch(error) { setFailure({id:entry.id,text:entry.text,message:presentError(error)}) }
-              }}>{entry.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button> : null}
+              }}>{entry.archived ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}</button> : null}
             {entry.archived && entry.confirmed && onHistory ? <button key="history" type="button" className="composer-tool" onClick={() => onHistory(entry.id)}>History</button> : null}
           </div>
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}

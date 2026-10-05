@@ -1,8 +1,11 @@
 import { useEffect, useId, useState } from 'react'
-import { Gauge } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
 import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
 import { useAppStore } from '../store'
+
+const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
+
 
 /**
  * The composer's context-usage indicator: an always-visible chip carrying the one scannable number,
@@ -59,7 +62,7 @@ export function AgentContextUsage({ usage }: { usage?: AgentTurnUsage | undefine
     <>
       <button type="button" className="composer__context" aria-label={ariaLabel}
         popoverTarget={cardId} popoverTargetAction="toggle">
-        <Gauge size={12} aria-hidden="true" /> {chip}
+        <ThemeObjectPerformanceIcon size={12} aria-hidden="true" /> {chip}
       </button>
       <div id={cardId} popover="auto" className="composer__context-card" aria-label="Context window"
         data-state={open ? 'open' : 'closed'}

@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, RefreshCw, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxNativeSessionConfirmationInput } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import * as DropdownMenu from './HoverDropdownMenu'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+
 
 export type AgentNativeSourceReference = Pick<Extract<SessionSnapshot, { kind: 'agent' }>,
   'id' | 'control' | 'nativeHandle' | 'observedNativeHandle' | 'nativeSourceObservation' | 'nativeConfirmation'>
@@ -85,17 +91,17 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
     </DropdownMenu.Label>
     <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
       event.preventDefault(); void recheck()
-    }}><RefreshCw size={14} /><span>{busy ? 'Checking source…' : 'Check native source'}</span></DropdownMenu.Item>
+    }}><ThemeActionRefreshIcon size={14} /><span>{busy ? 'Checking source…' : 'Check native source'}</span></DropdownMenu.Item>
     {review ? <>
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy || readOnly} onSelect={event => {
         event.preventDefault(); void confirm()
-      }}><Check size={14} /><span>Confirm this native source</span></DropdownMenu.Item>
+      }}><ThemeActionConfirmIcon size={14} /><span>Confirm this native source</span></DropdownMenu.Item>
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
         event.preventDefault(); setReview(null)
-      }}><X size={14} /><span>Cancel source change</span></DropdownMenu.Item>
+      }}><ThemeActionCancelIcon size={14} /><span>Cancel source change</span></DropdownMenu.Item>
     </> : canReview ? <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
       event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, crypto.randomUUID()))
-    }}><Check size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
+    }}><ThemeStatusSelectedIcon size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
     <DropdownMenu.Separator className="tab-context-menu__separator" />
   </>
 }

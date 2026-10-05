@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitFork, Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
@@ -9,6 +9,11 @@ import { CURRENT_FORK_DESTINATIONS, currentForkRequest, currentForkSourceMatches
 import { OpenDestinationBar } from './OpenDestinationBar'
 import * as DropdownMenu from './HoverDropdownMenu'
 import '../styles/agent-current-fork.css'
+
+const ThemeGitForkIcon = semanticIconComponent('git.fork')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+
 
 type ForkState = { review: CurrentForkReview | null; operationId: string | null; busy: boolean; dispatching: boolean;
   report: AgentMuxSpaceMutationReport | null; notice: string | null }
@@ -138,7 +143,7 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
   return <>
     <DropdownMenu.Item className="tab-context-menu__item" data-current-fork-action=""
       disabled={Boolean(reason || state.busy || state.dispatching || pending)} onSelect={event => { event.preventDefault(); begin() }}>
-      <GitFork size={14} /><span>Fork current conversation…</span>
+      <ThemeGitForkIcon size={14} /><span>Fork current conversation…</span>
     </DropdownMenu.Item>
     {reason ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span>{reason}</span></DropdownMenu.Label> : null}
     {state.review ? <div className="agent-current-fork agent-current-fork__review" data-current-fork-review="" ref={reviewRef}
@@ -150,7 +155,7 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
       {state.busy || readOnly ? <span>{state.busy ? 'Checking the exact source and location…' : 'This view is read-only.'}</span>
         : <OpenDestinationBar canSplit allowedDestinations={CURRENT_FORK_DESTINATIONS}
           accessibleContext="Choose where to fork the current conversation" onSelect={select} />}
-      <button type="button" className="agent-current-fork__cancel" disabled={state.busy} onClick={cancelReview}><X size={13} />Cancel fork</button>
+      <button type="button" className="agent-current-fork__cancel" disabled={state.busy} onClick={cancelReview}><ThemeActionCancelIcon size={13} />Cancel fork</button>
     </div> : null}
     {state.operationId && !state.review ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork" data-current-fork-operation={state.operationId}>
       <strong>{state.busy ? 'Checking fork…' : state.report?.outcome === 'opened' ? 'Fork opened' : state.dispatching ? 'Fork request pending' : 'Fork needs review'}</strong>
@@ -162,7 +167,7 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
     </DropdownMenu.Label> : null}
     {state.notice ? <DropdownMenu.Label className="agent-region-menu__context agent-current-fork"><span role="status">{state.notice}</span></DropdownMenu.Label> : null}
     {state.operationId && !state.review ? <DropdownMenu.Item className="tab-context-menu__item" disabled={state.busy || readOnly}
-      onSelect={event => { event.preventDefault(); inspect() }}><Search size={14} /><span>Check fork operation</span></DropdownMenu.Item> : null}
+      onSelect={event => { event.preventDefault(); inspect() }}><ThemeActionSearchIcon size={14} /><span>Check fork operation</span></DropdownMenu.Item> : null}
     <DropdownMenu.Separator className="tab-context-menu__separator" />
   </>
 }
