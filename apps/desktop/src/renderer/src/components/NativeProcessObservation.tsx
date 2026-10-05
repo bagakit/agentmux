@@ -3,11 +3,15 @@ import type { ConversationProcessProps } from '@agentmux/client-ui/components/Co
 import { describeActivityRecordTime } from '../lib/activity-ruler'
 import { stepTitle } from '@agentmux/client-ui/activity-step-summary'
 import { useId, useState, type ReactNode } from 'react'
-import { GitBranch, Terminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'
 import { WorkflowAgentRow } from './workflow/WorkflowAgentRow'
 import type { WorkflowObservationStatus, WorkflowRecordedTime } from './workflow/types'
+
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+
 
 function recordedStatus(item: AgentSessionHistoryItem): WorkflowObservationStatus | undefined {
   const collaboration = item.collaboration
@@ -80,7 +84,7 @@ function NativeProcessStep({ item, origin, children }: {
   return <div className="wf-native-process" data-native-step-id={item.id}>
     <WorkflowToolRow observation={{ id: item.id, title, source: 'Native', persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
-      className="log-row" icon={collaboration ? <GitBranch size={12} /> : <Terminal size={12} />}
+      className="log-row" icon={collaboration ? <ThemeObjectBranchIcon size={12} /> : <ThemeObjectTerminalIcon size={12} />}
       expanded={expanded} controls={bodyId} onToggle={toggle} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>

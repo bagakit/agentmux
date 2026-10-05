@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { ChevronRight, RotateCcw, SquareTerminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import bannerUrl from '../../../../resources/startup-background.png'
+
+const ThemeStatusWaitingIcon = semanticIconComponent('status.waiting')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 export type FullPageLoadingPhase = 'loading' | 'recovering' | 'failed' | 'parked'
 
@@ -53,7 +58,7 @@ function WaitingActivity({ surface }: { surface: RefObject<HTMLElement | null> }
     }
   }, [surface])
   return <span className="full-page-loading__waiting" data-waiting-visible={visible} aria-live="off">
-    <RotateCcw ref={activity} className="full-page-loading__activity" size={18} aria-hidden="true" />
+    <ThemeStatusWaitingIcon ref={activity} className="full-page-loading__activity" size={18} aria-hidden="true" />
     <span>{seconds >= 15 ? 'Still waiting' : 'Waiting'}</span>
     <span className="full-page-loading__elapsed" aria-label="Time waiting in this view">{seconds}s</span>
   </span>
@@ -135,12 +140,12 @@ export function FullPageLoadingSurface({
         {children ?? <div className="full-page-loading__heading">
             {busy ? <WaitingActivity key={phase} surface={surfaceRef} /> : null}
             <h1>{title}</h1>
-            {!busy && scope === 'region' ? <span className="full-page-loading__mark" aria-hidden="true"><SquareTerminal size={18} /></span> : null}
+            {!busy && scope === 'region' ? <span className="full-page-loading__mark" aria-hidden="true"><ThemeObjectTerminalIcon size={18} /></span> : null}
         </div>}
         {actions ? <div className="full-page-loading__actions">{actions}</div> : null}
         {children == null && detail ? <p className="full-page-loading__detail">{detail}</p> : null}
         {supplement}
-        {details ? <details className="full-page-loading__details"><summary><ChevronRight size={12} aria-hidden="true" />{details.summary}</summary>{details.content}</details> : null}
+        {details ? <details className="full-page-loading__details"><summary><ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />{details.summary}</summary>{details.content}</details> : null}
       </div>
     </section>
   )

@@ -1,14 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import {
-  ClipboardCopy,
-  ClipboardPaste,
-  Copy,
-  Eraser,
-  ScrollText,
-  Search,
-  TextSelect,
-  UnfoldVertical
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import { Fragment } from 'react'
 import { terminalMenuChords } from '../lib/terminal-menu-chords'
@@ -20,6 +11,15 @@ import {
   type MouseTrackingMode
 } from '../lib/terminal-selection-mode'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeObjectDocumentIcon = semanticIconComponent('object.document')
+const ThemeActionPasteIcon = semanticIconComponent('action.paste')
+const ThemeActionSelectTextIcon = semanticIconComponent('action.select-text')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeLayoutExpandAllIcon = semanticIconComponent('layout.expand-all')
+const ThemeActionEraseIcon = semanticIconComponent('action.erase')
+
 
 export function TerminalContextMenu({
   children,
@@ -96,7 +96,7 @@ export function TerminalContextMenu({
           onCloseAutoFocus={(event) => event.preventDefault()}
         >
           <ContextMenu.Item className="tab-context-menu__item" disabled={!hasSelection} onSelect={onCopy}>
-            <Copy size={14} /><span>Copy</span><kbd>{chords.copy}</kbd>
+            <ThemeActionCopyIcon size={14} /><span>Copy</span><kbd>{chords.copy}</kbd>
           </ContextMenu.Item>
           {/* Copy 变灰不是没缘由的：TUI 占用了鼠标，xterm 停用了选区服务，所以平白拖动选不中东西。
               紧贴 Copy 之下说清「为什么 + 怎么办」，把用户从这个静默死胡同里领出来。ContextMenu.Label
@@ -112,17 +112,17 @@ export function TerminalContextMenu({
               永不 disabled：它们的可用性不取决于有没有选区。紧跟提示之后，因为用户正是在读那句
               「为什么 Copy 是灰的」时需要看见替代动作。 */}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyViewport}>
-            <ClipboardCopy size={14} /><span>Copy visible output</span>
+            <ThemeActionCopyIcon size={14} /><span>Copy visible output</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyScrollback}>
-            <ScrollText size={14} /><span>Copy all output</span>
+            <ThemeObjectDocumentIcon size={14} /><span>Copy all output</span>
           </ContextMenu.Item>
           {historyBoundary ? <div className="tab-context-menu__hint" role="note">{historyBoundary}</div> : null}
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onPaste}>
-            <ClipboardPaste size={14} /><span>Paste</span><kbd>{chords.paste}</kbd>
+            <ThemeActionPasteIcon size={14} /><span>Paste</span><kbd>{chords.paste}</kbd>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onSelectAll}>
-            <TextSelect size={14} /><span>Select all</span>
+            <ThemeActionSelectTextIcon size={14} /><span>Select all</span>
           </ContextMenu.Item>
           {/* 身份那一簇：**回答的不是同一个问题**。上面五项答「画面上有什么」（选区/可视区/回滚/粘贴/全选），
               这一簇答「这是谁」——所以隔一条分隔线，不混进复制文本那一簇，否则用户会以为它复制的是
@@ -160,13 +160,13 @@ export function TerminalContextMenu({
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onSearch}>
-            <Search size={14} /><span>Find</span><kbd>{chords.search}</kbd>
+            <ThemeActionSearchIcon size={14} /><span>Find</span><kbd>{chords.search}</kbd>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onScrollToBottom}>
-            <UnfoldVertical size={14} /><span>Scroll to bottom</span>
+            <ThemeLayoutExpandAllIcon size={14} /><span>Scroll to bottom</span>
           </ContextMenu.Item>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={onClear}>
-            <Eraser size={14} /><span>Clear terminal</span><kbd>{chords.clear}</kbd>
+            <ThemeActionEraseIcon size={14} /><span>Clear terminal</span><kbd>{chords.clear}</kbd>
           </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Portal>

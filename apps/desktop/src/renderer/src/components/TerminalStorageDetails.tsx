@@ -1,9 +1,14 @@
 import type { AgentMuxRunStorageObservation } from '@agentmux/core'
-import { Database, LoaderCircle, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
+
+const ThemeFileDatabaseIcon = semanticIconComponent('file.database')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 function bytes(value: number): string {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
@@ -54,9 +59,9 @@ export function TerminalStorageDetails({ control, scope, visible = true, continu
   const persistence = storage?.persistence
   const lag = persistence ? Math.max(0, persistence.offeredByte - persistence.confirmedByte) : null
   return <section className="terminal-storage-details" aria-label="Terminal storage facts">
-    <header><strong><Database size={13} />Storage</strong><button type="button" className="small-button"
+    <header><strong><ThemeFileDatabaseIcon size={13} />Storage</strong><button type="button" className="small-button"
       disabled={checking || !visible} onPointerDown={event => event.preventDefault()} onClick={() => void checkStorage()}>
-      {checking ? <LoaderCircle size={12} className="spin" /> : <RefreshCw size={12} />}
+      {checking ? <ThemeStatusLoadingIcon size={12} className="spin" /> : <ThemeActionRefreshIcon size={12} />}
       {checking ? 'Checking storage…' : observation ? 'Refresh storage' : 'Check storage'}
     </button></header>
     {!observation && !error ? <p>Read this Run’s storage facts on demand. This check leaves terminal input unchanged.</p> : null}
