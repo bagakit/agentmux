@@ -135,7 +135,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
         </div>
         {open && summary.detail ? <p className="mote-current-work__detail">{summary.detail}</p> : null}
         {unloaded.length ? <p className="mote-details__hint">{unloaded.length} linked discussion{unloaded.length > 1 ? 's' : ''} not loaded. Original references retained.</p> : null}
-        {open ? <GoalContinuationControl demand={goal} active={active} {...(context.selectedSessionId ? { initialSessionId: context.selectedSessionId } : {})} onRefresh={() => void refresh()} /> : null}
+        {open ? <GoalContinuationControl demand={goal} active={active} onRefresh={() => void refresh()} /> : null}
       </div>
     })}
     {!showAll && goals.length && !currentGoals.length ? <p className="mote-details__hint">No current work. Original results are kept below.</p> : null}
