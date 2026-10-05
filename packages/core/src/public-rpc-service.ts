@@ -1,3 +1,4 @@
+import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
 import { DiagnosticEvidenceQuery } from '@agentmux/diagnostic-evidence'
 import { parseDiagnosticEvidenceParams, parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { inspectDiagnosticEvidence } from './diagnostic-evidence-service.js'
@@ -79,6 +80,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   fileUploads?: AgentMuxRpcFileUploadsOwner
   topics?: AgentMuxRpcTopicsOwner
 
+  appearance?: AgentMuxAppearanceObservationPort
   schedules?: AgentMuxRpcSchedulesOwner
   spatialState?: AgentMuxSpatialStateStore
   /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
@@ -119,6 +121,7 @@ export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = A
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 const NATIVE_FIELDS = {
+  'settings.appearance.watch': [],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
@@ -1299,7 +1302,7 @@ export class AgentMuxRpcService {
         forwardOutput = true
       }
     }
-    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch')) {
+    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch')) {
       let initial: AgentMuxRpcStreamInitial<M> | undefined
       const subscription = await this.ports.forwardSubscription(method, params as import('./public-rpc.js').AgentMuxRpcStreamParams<M>, {
         onInitial: value => { initial = value }, onEvent: event => { void onEvent(event) },
@@ -1352,6 +1355,19 @@ export class AgentMuxRpcService {
         if (request.operation !== 'browser.subscribe' || !this.ports.subscribeBrowserOperation) throw new AgentMuxError('Browser subscriptions are unavailable.', 'BROWSER_SUBSCRIBE_UNSUPPORTED')
         const sub = await this.ports.subscribeBrowserOperation(request, event => emit({ type: 'progress', data: event }))
         initial = { runOperation: sub.runOperation, gap: sub.gap }; cleanup = () => sub.dispose()
+      } else if (method === 'settings.appearance.watch') {
+        rpcRecord(params, [])
+        if (!this.ports.appearance) throw new AgentMuxError('Appearance observations are unavailable. Keep the last confirmed theme and reconnect this reader.', 'CONTROL_UNAVAILABLE')
+        let previous: Pick<import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation, 'sourceId' | 'revision'> | undefined
+        const sub = await this.ports.appearance.subscribe(value => {
+          const observation = parseAppearanceObservation(value, previous)
+          previous = { sourceId: observation.sourceId, revision: observation.revision }
+          return emit({ type: 'snapshot', data: observation })
+        }, error => emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }), controller.signal)
+        cleanup = () => sub.dispose()
+        const observation = parseAppearanceObservation(sub.initial)
+        previous = { sourceId: observation.sourceId, revision: observation.revision }
+        initial = { observation }; start = () => sub.start()
       } else if (method === 'toolkit.watch') {
         const request = toolkitRequest!
         if (request.operation !== 'toolkit.watch' || !this.ports.toolkit) throw new AgentMuxError('Toolkit subscriptions are unavailable.', 'TOOLKIT_UNSUPPORTED')

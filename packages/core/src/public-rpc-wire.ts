@@ -80,7 +80,7 @@ export class AgentMuxRpcDispatcher {
               if (channel.signal.aborted || pendingFailure) return
               // All replay and live events share one bounded reader queue. A
               // synchronous journal may publish while an earlier write awaits drain.
-              if ((method === 'system.metrics.watch' || method === 'toolkit.watch') &&
+              if ((method === 'system.metrics.watch' || method === 'toolkit.watch' || method === 'settings.appearance.watch') &&
                 event.type === 'snapshot' && pending.at(-1)?.event.type === 'snapshot') {
                 const previous = pending.pop()!; pendingBytes -= previous.bytes; previous.resolve?.()
               }
