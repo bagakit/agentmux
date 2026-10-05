@@ -2650,12 +2650,15 @@ export class AgentMuxClient {
             }
           } catch (error) {
             if (!controller.signal.aborted && resource.binding === binding) {
-              notify({ kind: 'unavailable', agentSessionId, source,
-                code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE',
+              const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+                ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE'
+              notify({ kind: 'unavailable', agentSessionId, source, code,
                 message: error instanceof Error ? error.message : 'The current native source could not be confirmed. Existing records and input are kept.' })
-              controller.abort(error)
+              // A failed source check does not retire the exact native watch. Only an
+              // actual identity change or cancellation ends it; a new event can revalidate.
+              if (code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' || code === 'AGENT_SESSION_HISTORY_CANCELLED') controller.abort(error)
             }
-          } finally { checkingChange = false }
+          } finally { checkingChange = false; flushChange() }
         })()
       }
       const acquiring = provider.observeSessionHistory({
