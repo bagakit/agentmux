@@ -24,7 +24,7 @@ const config = { ...baseline.config, version: 9, hosts: [{ id: 'local', kind: 'l
 const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Main Mote', summary: '', directoryPath: 'main-mote', topicPath: 'main-mote/Topic.md', collaborators: [], soul: { path: 'SOUL.md', content: '', version: '1' } }
 const proposal = { summary: 'Read real current proposal', criteria: [{ id: 'c', text: 'Original criterion' }], openQuestions: [] }
 beforeEach(async () => {
-  localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
+  localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
   directory = await mkdtemp(join(tmpdir(), 'mgoal-')); owner = openDemandStore({ root: directory })
   useAppStore.setState({ ...baseline, config, sessions: [], tabs: {}, layouts: {}, demandPmoTabIds: {}, demands: {} }, true)
   vi.spyOn(api.demands, 'create').mockImplementation(input => owner.create(input))
@@ -146,7 +146,7 @@ it('device intent I/O failure preserves prior bytes and memory without gating he
   expect(set).toHaveBeenCalled(); expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1); expect(await owner.list()).toHaveLength(1)
   expect(view.element.textContent).toContain('刷新保障不足'); expect(getDeviceWorkface().exportBackup()).toContain('goalIntents')
-  set.mockRestore(); getDeviceWorkface().replaceUnreadableWithCurrent()
+  set.mockRestore(); await getDeviceWorkface().replaceUnreadableWithCurrent()
   expect(getDeviceWorkface().snapshot().issue).toBeNull()
 })
 
@@ -161,7 +161,7 @@ it('device intent I/O failure keeps human acknowledgement and its unknown recove
   await view.click('读取当前提案与报告'); await view.wait('已读取原目标当前内容')
   await view.click('确认当前目标'); await view.wait('已确认读过的当前目标提案')
   expect((await owner.get('original-goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
-  expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); set.mockRestore(); getDeviceWorkface().replaceUnreadableWithCurrent()
+  expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); set.mockRestore(); await getDeviceWorkface().replaceUnreadableWithCurrent()
 })
 
 it('one click uses the strict public service to save one pending ID and enter its original main Mote launcher Tab', async () => {

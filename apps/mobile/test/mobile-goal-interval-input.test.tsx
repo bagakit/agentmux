@@ -6,7 +6,7 @@ import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-w
 import { fixture, mount, mounted } from './conversation-fixture'
 import type { AgentMuxRpcGoal } from '@agentmux/core'
 
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() } })
 it('sends the native numeric interval to the original Goal/Session operation and retains its exact unknown intent', async () => {
   const f = fixture(), goal = { id: 'goal-original', title: '原目标', description: '原意', status: 'todo', priority: 'normal', projectId: null, projectName: null, sessionIds: ['session-original'], createdAt: 1, updatedAt: 2, source: 'session', alignment: { summary: '原范围', criteria: [], openQuestions: [], revision: 2, confirmedAt: 1 } } as AgentMuxRpcGoal

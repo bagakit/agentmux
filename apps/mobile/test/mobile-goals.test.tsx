@@ -9,7 +9,7 @@ import { isObjectId } from '@agentmux/core/object-id'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const mounts: { root: Root; element: HTMLDivElement }[] = []
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } vi.useRealTimers() })
 const original: AgentMuxRpcGoal = {
   id: 'goal-original', title: '原目标', description: '原用户意图', status: 'done', priority: 'high', projectId: 'project-original', projectName: '原项目',

@@ -13,7 +13,7 @@ async function refreshOriginal(element: HTMLElement) {
   await click(button(element, '刷新原对话'))
 }
 const STORAGE = 'agentmux-mobile-workface-v1'
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 function props(f: ReturnType<typeof fixture>): MobileConversationSurfaceProps {
   return { client: f.client, agentSessionId: 'session-original', connection: connected,
     platform: createBrowserPlatform({ clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } }) }

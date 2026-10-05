@@ -41,7 +41,7 @@ function consumer() {
   return { ...f, options, clipboard, report, replaceRuntime: (value: string) => { runtimeId = value } }
 }
 async function settled(check: () => void) { await act(async () => { await vi.waitFor(check) }) }
-beforeEach(() => { localStorage.clear(); remoteRecords.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); remoteRecords.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   vi.unstubAllGlobals()

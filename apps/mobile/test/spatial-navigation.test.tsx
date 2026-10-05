@@ -10,7 +10,7 @@ const catalog = { spaces: [{ spaceId: 'space', kind: 'folder', name: 'Actual Spa
   zones: [], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: 'Original Agent', regionIds: ['region'] }],
   regions: [{ regionId: 'region', tabId: 'tab', kind: 'agent', agentSessionId: 'session-original', runId: 'run-original', execution: { hostId: 'host-original', cwd: fixturePath("workspace") } }],
   bindings: [{ spaceId: 'space', zoneId: 'zone' }], locations: [{ spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' }] }
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
 describe('mobile production workspace navigation', () => {
   it('opens the configured Space through actual bindings, keeps shared conversation mounted and removes history controls', async () => {

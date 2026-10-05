@@ -36,7 +36,7 @@ function originalClient() {
 }
 function nav(element: HTMLElement) { return element.querySelector<HTMLElement>('.mobile-navigation')! }
 function current(element: HTMLElement) { return nav(element).querySelector('[aria-current="page"]')?.textContent }
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   document.body.replaceChildren(); vi.restoreAllMocks()

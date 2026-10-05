@@ -9,7 +9,7 @@ import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-w
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 it('mounts the actual LAN workface without secure-context randomUUID and retains all five original navigation choices', async () => {
-  localStorage.clear(); getDeviceWorkface().replaceBackup({ ...emptyDeviceWorkface(), presentation: {
+  localStorage.clear(); await getDeviceWorkface().replaceBackup({ ...emptyDeviceWorkface(), presentation: {
     primary: 'focus', showSession: false, showGoalWork: false, identity: null, profile: null
   } })
   const element = document.createElement('div'); document.body.append(element)

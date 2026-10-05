@@ -30,7 +30,7 @@ function retry(element: HTMLElement) {
   return [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent?.trim() === '重试原请求')
 }
 function stored() { return JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')!).conversation }
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   vi.unstubAllGlobals()

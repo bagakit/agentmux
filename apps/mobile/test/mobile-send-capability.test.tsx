@@ -23,7 +23,7 @@ import { button, click, editor, fixture, mount, mounted, paste } from './convers
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 const platform = () => createBrowserPlatform({ clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 const disposers: Array<() => Promise<void>> = []
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
