@@ -480,7 +480,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   empty('system.metrics.get', 'Read the first bounded metrics frame; sources may still be pending.'),
   { ...empty('system.metrics.watch', 'Watch source-timed metrics; frame count is not source sample count. Slow readers end without an unbounded queue.'), stream: true },
   toolkit('ls', '', 'List original saved Toolkit resources.', 0),
-  toolkit('inspect', '<id>', 'Inspect current definition, execution and result facts.'),
+  toolkit('inspect', '<id> [--failure-evidence]', 'Inspect current definition, execution and result facts.'),
   toolkit('create', '<id> --input <file|->', 'Create a complete tool using its original owner.'),
   toolkit('install', '<id> --path <absolute-directory> [--cwd <absolute-directory>]', 'Save a local package reference and preferences without running it.'),
   toolkit('update', '<id> --input <file|->', 'Update {changes,expected?} without running the tool.'),
@@ -489,7 +489,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   toolkit('script', '<id>', 'Read the original tool script; do not execute it.'),
   toolkit('run', '<id> [--input <file|->]', 'Admit one execution; service captures omitted CAS baseline once.'),
   toolkit('stop', '<id> [--input <file|->]', 'Stop the exact admitted execution or observation.'),
-  toolkit('watch', '<id>', 'Follow one bounded tool result; closing the reader does not stop its execution.')
+  toolkit('watch', '<id> [--capture-failure] [--failure-evidence]', 'Follow one tool result; closing releases only this reader.')
 ]
 
 export function agentMuxCliArguments(argv: readonly string[]): { args: string[]; endpoint?: string } {

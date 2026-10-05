@@ -71,7 +71,7 @@ Forgetting a remembered choice never expands browser access. There is no choice 
 or bypass of a person's application-link choice. It does not establish human approval.`
 
 export const AGENTMUX_TOOLKIT_GUIDE = `Create a saved local JavaScript ESM tool with a complete input such as:
-  {"name":"Daily summary","icon":"terminal","workspacePath":"<DIRECTORY>",
+  {"name":"Daily summary","icon":"terminal","workspacePath":"<WORKSPACE_DIRECTORY>",
    "script":"console.log('Ready')"}
 Creation defaults: enabled=true, statusBar="icon" (or "label"), args=[], actions=[].
 Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
@@ -103,8 +103,23 @@ output cannot define actions. Scripts use the local user's files/environment/net
 this capability does not provide a sandbox, secret storage, scheduling or remote execution.
 
 Performance consumes public metrics. Run holds one manual observation until stop; watch
-owns an independent lease. Stop ends its exact observation, never Agents or other leases.
+owns an independent lease. Stop ends its exact observation and its readers, never Agents.
 Source identity, availability and each source's actual observation time remain visible.
+For one new Performance observation, toolkit watch performance --capture-failure enables
+finite failure-byte capture. Existing observations are retained unchanged; inspect the actual
+diagnostics.captureEnabled rather than assuming a joined reader enabled capture. inspect/watch
+return diagnostics.lastFailure with its own original executionId and confirmed Run or null;
+cleanup may already have cleared the current snapshot's Run. Ordinary readers neither capture
+nor return raw bytes/stacks or arbitrary diagnostic error/issue messages. The original
+execution reason keeps its existing behavior; safe diagnostic messages are null. --failure-evidence on inspect/watch explicitly reads retained
+evidence independently of capture; original observed error text also counts as retained evidence; failureEvidence is none, retained (withheld), or included.
+Failure stages distinguish Toolkit LF/JSON/typed payload from the packaged metrics CLI/RPC.
+Fragments use base64 with source byte range and omittedBytes; they are not complete original
+frames when clipped. At most 4KiB at each end and an 8KiB stack are kept. A latest explicit
+capture uses one private bounded file, one active write and one replaceable pending write
+(each <=96KiB); droppedWrites counts superseded writes in this owner lifetime. pending/confirmed/unconfirmed describe this writer's
+ACK, observed-on-disk only proves this read. Diagnostic and cleanup issues never replace the
+primary failure; they retain actual operation, code and known write phase or null. This reads Toolkit-owned evidence, not arbitrary Run bytes or Runtime authority.
 system metrics get returns the first bounded frame and releases its own reader; a
 pending Renderer has not failed. Watch frames may update different sources: use the
 app source observation time and process intervalMs to identify actual CPU intervals.
