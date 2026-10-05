@@ -107,9 +107,11 @@ export function useSurfaceMemoryBudget({
     ].join(':')).join('|'),
     [candidates]
   )
-  const hiddenSinceByRegionRef = useRef(new Map<string, number>())
-  const activationOrderByRegionRef = useRef(new Map<string, number>())
-  const navigationContextByRegionRef = useRef(new Map<string, boolean>())
+  const regionsRef = useRef(new Map<string, {
+    hiddenSinceMs: number | null
+    lastActivatedSeq: number
+    navigationContextActive: boolean
+  }>())
   const visibleRegionIdsRef = useRef(new Set<string>())
   const activationSequenceRef = useRef(0)
   const wasMeasuringRef = useRef(false)
@@ -121,32 +123,35 @@ export function useSurfaceMemoryBudget({
     const now = Date.now()
     const currentIds = new Set(candidates.map((candidate) => candidate.id))
     let changed = false
-    for (const id of hiddenSinceByRegionRef.current.keys()) {
+    for (const id of regionsRef.current.keys()) {
       if (!currentIds.has(id)) {
-        hiddenSinceByRegionRef.current.delete(id)
-        activationOrderByRegionRef.current.delete(id)
-        navigationContextByRegionRef.current.delete(id)
+        regionsRef.current.delete(id)
         changed = true
       }
     }
     const visibleNow = new Set<string>()
     for (const candidate of candidates) {
-      const wasContextActive = navigationContextByRegionRef.current.get(candidate.id)
-      navigationContextByRegionRef.current.set(candidate.id, candidate.navigationContextActive)
+      let region = regionsRef.current.get(candidate.id)
+      if (!region) {
+        region = { hiddenSinceMs: null, lastActivatedSeq: 0, navigationContextActive: candidate.navigationContextActive }
+        regionsRef.current.set(candidate.id, region)
+      }
+      const wasContextActive = region.navigationContextActive
+      region.navigationContextActive = candidate.navigationContextActive
       if (candidate.navigationContextActive && wasContextActive === false && !candidate.visible) {
-        hiddenSinceByRegionRef.current.set(candidate.id, now)
+        region.hiddenSinceMs = now
         changed = true
       }
       if (candidate.visible) {
         visibleNow.add(candidate.id)
-        hiddenSinceByRegionRef.current.delete(candidate.id)
+        region.hiddenSinceMs = null
         if (!visibleRegionIdsRef.current.has(candidate.id)) {
           activationSequenceRef.current += 1
-          activationOrderByRegionRef.current.set(candidate.id, activationSequenceRef.current)
+          region.lastActivatedSeq = activationSequenceRef.current
           changed = true
         }
-      } else if (!hiddenSinceByRegionRef.current.has(candidate.id)) {
-        hiddenSinceByRegionRef.current.set(candidate.id, now)
+      } else if (region.hiddenSinceMs === null) {
+        region.hiddenSinceMs = now
         changed = true
       }
     }
@@ -167,8 +172,8 @@ export function useSurfaceMemoryBudget({
       ...candidate,
       hiddenSinceMs: candidate.visible
         ? null
-        : hiddenSinceByRegionRef.current.get(candidate.id) ?? null,
-      lastActivatedSeq: activationOrderByRegionRef.current.get(candidate.id) ?? 0
+        : regionsRef.current.get(candidate.id)?.hiddenSinceMs ?? null,
+      lastActivatedSeq: regionsRef.current.get(candidate.id)?.lastActivatedSeq ?? 0
     })),
     [bookkeepingRevision, candidateKey, candidates, nowMs]
   )
