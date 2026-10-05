@@ -9,7 +9,6 @@ import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSe
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { registerWorkspace } from '../src/main/settings-workspace-add-control'
-import { ConfigStore } from '../src/main/config-store'
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -35,6 +34,9 @@ beforeEach(async () => {
   f.publish.mockImplementation(saved => { publish(saved); useAppStore.getState().setConfig(saved) })
   useAppStore.setState({ config: f.owner.current, activeWorkspaceId: 'original',
     layouts: { original: createWorkspaceLayout('original-group') }, hostChecks: { local: { state: 'ready' }, remote: { state: 'error', detail: 'Check did not acquire facts' } },
+    hostExecutorInventories: { remote: { input: f.owner.current.hosts.find(host => host.id === 'remote')!, state: 'ready',
+      result: { routeHostId: 'remote', runtimeId: 'remote-runtime', executors: [{ executorId: 'codex', label: 'Remote Codex', providerId: 'codex', command: _hygiene_fixturePath("remote/codex"), configRevision: 'remote-revision', source: 'registered', availability: 'available' }] } } },
+    discoverHostExecutors: vi.fn(async () => {}),
     checkHost: vi.fn(async () => {}), detectExecutors: vi.fn(async () => {}), launchAgent: vi.fn(async () => {}) })
   vi.spyOn(api.workspaces, 'add').mockImplementation(async input => (await registerWorkspace(input, f.owner, () => ({}))).workspace)
   close.mockClear(); saveHosts.mockClear()
@@ -88,7 +90,7 @@ it('registers on the exact committed Host despite unknown checks, without openin
   expect(api.workspaces.add).toHaveBeenCalledExactlyOnceWith({ hostId: 'remote', path: _hygiene_fixturePath("owned-new"), name: 'Authored project' })
   const saved = f.owner.current.workspaces.find(workspace => workspace.path === _hygiene_fixturePath("owned-new"))!
   expect(saved.hostId).toBe('remote'); expect(saved.id).toBeTruthy()
-  expect((await new ConfigStore(f.store.filePath).get()).workspaces).toEqual(f.owner.current.workspaces)
+  expect((await f.disk()).workspaces).toEqual(f.owner.current.workspaces)
   expect(selectWorkspace).not.toHaveBeenCalled(); expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
   expect(useAppStore.getState().activeWorkspaceId).toBe('original'); expect(useAppStore.getState().layouts).toEqual(before)
   expect(useAppStore.getState().agentComposerDrafts).toEqual(drafts); expect(close).not.toHaveBeenCalled(); expect(saveHosts).not.toHaveBeenCalled()
