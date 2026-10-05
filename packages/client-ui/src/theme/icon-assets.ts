@@ -16,6 +16,7 @@ export function validIconPath(d: string): boolean {
     const bounds = absolute.getBounds()
     return [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].every(value => Number.isFinite(value) && Math.abs(value) <= ICON_PATH_MAX_COORDINATE)
       && (bounds.maxX > bounds.minX || bounds.maxY > bounds.minY)
+      && bounds.maxX >= 0 && bounds.minX <= 24 && bounds.maxY >= 0 && bounds.minY <= 24
   } catch { return false }
 }
 export function iconShapes(name: SemanticIconId, overrides: Readonly<Partial<Record<SemanticIconId, ThemeIconAsset>>> = {}): readonly IconShape[] {
