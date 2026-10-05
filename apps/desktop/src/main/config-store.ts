@@ -19,6 +19,7 @@ import {
   EDITOR_FONT_SIZE_MIN,
   EDITOR_FONT_SIZE_MAX,
   PROJECT_RAIL_DENSITY_IDS,
+  MESSAGE_TOOL_INITIAL_LAYOUT_IDS,
   MOTE_DIRECTORY_VIEW_IDS,
   MOTE_DIRECTORY_AVATAR_SIZE_MIN,
   MOTE_DIRECTORY_AVATAR_SIZE_MAX,
@@ -289,7 +290,8 @@ const configSchema = z
     // 复制路径给绝对地址还是缩写 `~`。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
     // 没有它，写成必需会让整块判失败）——且**不回填**：缺席与默认（缩写）同义，补盘只是白写；读处
     // 一律 `=== true` 判绝对档，落盘只在用户勾了绝对路径时发生。
-    copyPathsAsAbsolute: z.boolean().optional()
+    copyPathsAsAbsolute: z.boolean().optional(),
+    messageToolInitialLayout: z.enum(MESSAGE_TOOL_INITIAL_LAYOUT_IDS).optional()
   })
   .strict()
   .superRefine((config, context) => {

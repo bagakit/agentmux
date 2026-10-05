@@ -405,6 +405,10 @@ export const PROJECT_RAIL_DENSITY_IDS = ['default', 'compact', 'dense'] as const
 export type ProjectRailDensity = (typeof PROJECT_RAIL_DENSITY_IDS)[number]
 export const PROJECT_RAIL_DENSITY_DEFAULT: ProjectRailDensity = 'default'
 
+export const MESSAGE_TOOL_INITIAL_LAYOUT_IDS = ['one-line', 'two-line'] as const
+export type MessageToolInitialLayout = (typeof MESSAGE_TOOL_INITIAL_LAYOUT_IDS)[number]
+export const MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT: MessageToolInitialLayout = 'one-line'
+
 /** The original Mote roster has two presentations, independent of its identities. */
 export const MOTE_DIRECTORY_VIEW_IDS = ['collaborators', 'list'] as const
 export type MoteDirectoryView = (typeof MOTE_DIRECTORY_VIEW_IDS)[number]
@@ -578,6 +582,8 @@ export type AppConfig = {
    * 勾了绝对路径时发生。
    */
   copyPathsAsAbsolute?: boolean
+  /** Initial layout of newly mounted Agent message tools; absence uses one line without backfilling. */
+  messageToolInitialLayout?: MessageToolInitialLayout
 }
 
 export type FileDocument = {
