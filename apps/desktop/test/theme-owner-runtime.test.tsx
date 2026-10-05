@@ -95,6 +95,23 @@ async function render(appearance: typeof composerConfig.appearance, save: (next:
     expect(readResolvedTheme().id).toBe(theme.id)
     stop()
   })
+  it('applies one palette through the first paint, restores hover motion and releases pending frames on disposal', () => {
+    let id = 0; const frames = new Map<number, FrameRequestCallback>()
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.set(++id, callback); return id })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(frame => { frames.delete(frame) })
+    const root = document.documentElement
+    const paint = () => { const [frame, callback] = frames.entries().next().value!; frames.delete(frame); callback(0) }
+    expect(root.hasAttribute('data-theme-changing')).toBe(false)
+    updateThemeSelection({ appAppearance: 'light' })
+    expect(root.dataset.appearance).toBe('light'); expect(root.hasAttribute('data-theme-changing')).toBe(true)
+    paint(); expect(root.hasAttribute('data-theme-changing')).toBe(true)
+    updateThemeSelection({ appAppearance: 'dark' })
+    expect(frames.size).toBe(1); expect(root.dataset.appearance).toBe('dark')
+    paint(); expect(root.hasAttribute('data-theme-changing')).toBe(true)
+    paint(); expect(root.hasAttribute('data-theme-changing')).toBe(false); expect(frames.size).toBe(0)
+    updateThemeSelection({ appAppearance: 'light' }); dispose()
+    expect(frames.size).toBe(0); expect(root.hasAttribute('data-theme-changing')).toBe(false); expect(listeners.size).toBe(0)
+  })
   it('complete schema roundtrips and rejects active content, missing variants and unsupported versions', () => {
     const theme = custom()
     expect(parseThemeFile(serializeThemeFile(theme))).toEqual(theme)
