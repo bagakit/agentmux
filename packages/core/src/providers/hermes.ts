@@ -115,13 +115,13 @@ export function createHermesManagedHookPlan(env?: Readonly<Record<string, string
         path: join(home, 'config.yaml'),
         content: `${JSON.stringify({ hooks }, null, 2)}\n`,
         mode: 0o600,
-        merge: { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' }
+        merge: { kind: 'yaml-managed-events' }
       },
       {
         path: join(home, 'shell-hooks-allowlist.json'),
         content: `${JSON.stringify({ approvals }, null, 2)}\n`,
         mode: 0o600,
-        merge: { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' }
+        merge: { kind: 'json-managed-approvals' }
       }
     ]
   }

@@ -94,7 +94,7 @@ export function createGrokManagedHookPlan(homeOverride?: string): AgentManagedHo
       path: join(home, '.grok', 'hooks', 'agentmux-status.json'),
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+      merge: { kind: 'json-managed-events' }
     }]
   }
 }

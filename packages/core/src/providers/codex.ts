@@ -152,7 +152,7 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
       path: join(workspace, '.codex', 'hooks.json'),
       content: `${JSON.stringify({ description: 'AgentMux Codex lifecycle bridge.', hooks }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+      merge: { kind: 'json-managed-events' }
     }]
   }
 }

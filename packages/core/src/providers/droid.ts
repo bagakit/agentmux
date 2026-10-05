@@ -118,7 +118,7 @@ export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>
       path: join(home, '.factory', 'hooks.json'),
       content: `${JSON.stringify(events, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-root-managed-events', marker: 'agentmux-hook.js' }
+      merge: { kind: 'json-root-managed-events' }
     }]
   }
 }

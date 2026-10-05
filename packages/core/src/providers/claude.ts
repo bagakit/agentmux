@@ -112,7 +112,7 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
       path: join(workspace, '.claude', 'settings.json'),
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+      merge: { kind: 'json-managed-events' }
     }]
   }
 }

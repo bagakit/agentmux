@@ -130,7 +130,7 @@ export function createCursorManagedHookPlan(
         path: join(cursorDataRoot(workspacePath, env), 'hooks.json'),
         content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
         mode: 0o600,
-        merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+        merge: { kind: 'json-managed-events' }
       },
       {
         path: cursorTrustMarkerPath(workspacePath, env),
