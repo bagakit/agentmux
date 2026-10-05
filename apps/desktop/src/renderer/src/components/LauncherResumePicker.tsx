@@ -17,6 +17,7 @@ import { AgentAvatar } from './AgentAvatar'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { SettingsNavigation } from './SettingsNavigation'
 import { launcherCatalogWarnings, launcherDiscoveryKey, launcherNativeDiscovery, launcherNativeSourceKey, mergeLauncherNativeCatalog } from '../lib/launcher-native-discovery'
+import { launcherPreviewKey, useLauncherResumePreviews } from '../hooks/useLauncherResumePreviews'
 
 type RecapRead = { state: 'loading' | 'ready' | 'error'; recap: LauncherRecap | null; error?: string }
 type NativeRead = RecapRead & { page?: import('@agentmux/core').AgentProviderSessionHistoryPage; loadingMore?: boolean; sourceKey: string }
@@ -50,6 +51,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   const [busyId, setBusyId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<RecoveryFeedback | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const [list, setList] = useState<HTMLDivElement | null>(null)
   const nativeLastMessageRef = useRef<HTMLElement>(null)
   const requestOwner = useRef(0)
   const nativeRequestOwner = useRef(0)
@@ -57,7 +59,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   const listId = useId()
   const topics = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
   const candidates = useMemo(() => launcherManagedCandidates(savedCandidates, facts.sessions), [savedCandidates, facts.sessions])
-  const rows = useMemo(() => open ? [
+  const sourceRows = useMemo(() => open ? [
     ...launcherResumeRows({ topics, candidates, config, workspace, timelines: facts.timelines,
       agentNames: facts.names, sessions: facts.sessions,
       nativeRecaps: Object.fromEntries(Object.entries(reads).map(([id, read]) => [id, read.recap])) }),
@@ -69,6 +71,8 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     })
   ].sort((left, right) => right.candidate.updatedAt - left.candidate.updatedAt || launcherCandidateKey(left.candidate).localeCompare(launcherCandidateKey(right.candidate))) : EMPTY_ROWS,
   [open, candidates, catalogs, config, workspace, facts, reads, nativeReads, topics])
+  const previews = useLauncherResumePreviews(open, list, sourceRows, selectedId, recapRetry)
+  const rows = useMemo(() => sourceRows.map(row => row.recap ? row : { ...row, recap: previews[launcherPreviewKey(row)]?.recap ?? null }), [sourceRows, previews])
   const filtered = useMemo(() => filterLauncherResumeRows(rows, scope, query), [rows, scope, query])
   const idLabels = useMemo(() => {
     const sorted = rows.map(row => row.candidate).sort((a, b) => launcherCandidateIdentity(a) < launcherCandidateIdentity(b) ? -1 : launcherCandidateIdentity(a) > launcherCandidateIdentity(b) ? 1 : 0)
@@ -134,7 +138,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     if (scroller && message) scroller.scrollTop += message.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12
   }, [open, nativeSourceKey, selectedNativeRead?.state])
 
-  // Opening observes metadata only. Every source publishes independently, so a slow
+  // Discovery observes metadata. Every source publishes independently, so a slow
   // Host cannot hide completed conversations or restart reads on unrelated Settings updates.
   useEffect(() => {
     if (!open || !config || discoveryPaused) return
@@ -348,22 +352,28 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><RotateCcw size={14} /></button>
         </div>
         <div className="launcher-resume__body">
-          <div className="launcher-resume__list" id={listId} role="listbox" aria-label="Saved Sessions">
+          <div className="launcher-resume__list" ref={setList} id={listId} role="listbox" aria-label="Saved Sessions">
             {filtered.map(savedRow => {
               const row = selected && launcherCandidateKey(selected.candidate) === launcherCandidateKey(savedRow.candidate) ? selected : savedRow
               const candidate = row.candidate
               const key = launcherCandidateKey(candidate)
               const identity = launcherCandidateIdentity(candidate)
+              const preview = previews[launcherPreviewKey(row)]
               const active = selectedKey === key
               return <button type="button" role="option" aria-selected={active} className="launcher-resume__row"
-                id={`${listId}-${key}`} key={key} onClick={() => choose(key)}
+                id={`${listId}-${key}`} data-resume-key={key} key={key} onClick={() => choose(key)}
                 onKeyDown={event => {
                   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(event.key === 'ArrowDown' ? 1 : -1); searchRef.current?.focus() }
                 }}>
                 <span className="launcher-resume__row-head"><AgentAvatar label={row.name} providerId={candidate.providerId} size={18} />
                   <strong>{row.name}</strong>{active ? <Check size={12} aria-hidden="true" /> : null}
                   <time dateTime={new Date(candidate.updatedAt).toISOString()} title={new Date(candidate.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</time></span>
-                {row.recap ? <span className="launcher-resume__row-recap">{row.recap.text}</span> : null}
+                <span className="launcher-resume__row-recap" title={row.recap ? `${row.recap.source}: ${row.recap.displayText ?? row.recap.text}` : preview?.error}>
+                  {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : 'Input'} · </span>{row.recap.displayText ?? row.recap.text}</>
+                    : preview?.state === 'error' ? 'Preview could not be read'
+                    : preview?.state === 'ready' ? 'No text on this page'
+                    : preview?.state === 'loading' ? 'Reading preview…' : 'Preview not read yet'}
+                </span>
                 <span className="launcher-resume__row-meta"><span title={`${row.executorName} · ${row.projectName} · ${row.hostName}`}>
                   {row.executorName}{scope === 'global' ? ` · ${row.projectName} · ${row.hostName}` : ''}</span>
                   <code title={identity}>#{idLabels.get(identity)}</code><span className="launcher-resume__row-state">{row.stateLabel}</span></span>
