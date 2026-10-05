@@ -1,3 +1,6 @@
+import type { MoteRecentAgent } from './mote-quick-preferences'
+import { sessionPresentationById } from './session-presentation'
+import type { SessionSnapshot } from '../../../shared/contracts'
 import { moteDefaultConversation, moteConversationReference } from './mote-quick-preferences'
 import { useSyncExternalStore } from 'react'
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
@@ -35,6 +38,8 @@ export type PmoTeamsTopicFloatingState = {
   open: boolean
   preview: boolean
   targetTopicId?: string | undefined
+  /** Expected identity of a remembered Agent; absence leaves ordinary explicit targets unchanged. */
+  targetAgent?: Pick<MoteRecentAgent, 'hostId' | 'sessionId' | 'presentationSessionId'> | undefined
   /** null means no current selection; existing Topic members remain navigable. A missing string remains an exact recovery target. */
   targetTabId?: string | null | undefined
   /** Exact selected occurrence; null keeps an unconfirmed saved placement. */
@@ -77,6 +82,7 @@ function readState(): PmoTeamsTopicFloatingState {
       ...(value.targetTabId === null ? { targetTabId: null } :
         typeof value.targetTabId === 'string' && value.targetTabId.trim() ? { targetTabId: value.targetTabId.trim() } : {}),
       ...(Object.hasOwn(value, 'reference') ? { reference: validReference(value.reference) ? value.reference : null } : {}),
+      ...(value.targetAgent && typeof value.targetAgent.hostId === 'string' && typeof value.targetAgent.sessionId === 'string' && typeof value.targetAgent.presentationSessionId === 'string' ? { targetAgent: { hostId: value.targetAgent.hostId, sessionId: value.targetAgent.sessionId, presentationSessionId: value.targetAgent.presentationSessionId } } : {}),
       ...(value.railMode === 'cards' || value.railMode === 'avatars' ? { railMode: value.railMode } : {}),
       ...(validSize(value.size) ? { size: value.size } : {}),
       ...(invalidChoice ? { focusChatTopicId: null, preferenceIssue: 'The saved Chat recipient is unconfirmed. Select a Mote to confirm the recipient.' } : typeof value.focusChatTopicId === 'string' ? { focusChatTopicId: value.focusChatTopicId.trim() } : {}) }
@@ -92,17 +98,19 @@ function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void
   const explicitChoice = Object.hasOwn(next, 'focusChatTopicId') && Boolean(next.focusChatTopicId?.trim())
   const retryPreference = Boolean(current.preferenceIssue && (explicitChoice || Object.hasOwn(next, 'size')))
   const retargeted = (Object.hasOwn(next, 'targetTopicId') && next.targetTopicId !== current.targetTopicId) ||
-    (Object.hasOwn(next, 'targetTabId') && next.targetTabId !== current.targetTabId)
-  const resolved = { ...current, ...(retargeted && !Object.hasOwn(next, 'reference') ? { reference: undefined } : {}), ...next }
+    (Object.hasOwn(next, 'targetTabId') && next.targetTabId !== current.targetTabId) ||
+    (Object.hasOwn(next, 'reference') && JSON.stringify(next.reference) !== JSON.stringify(current.reference))
+  const resolved = { ...current, ...(retargeted && !Object.hasOwn(next, 'reference') ? { reference: undefined } : {}),
+    ...(retargeted && !Object.hasOwn(next, 'targetAgent') ? { targetAgent: undefined } : {}), ...next }
   if (resolved.open === current.open && resolved.preview === current.preview &&
     resolved.targetTopicId === current.targetTopicId && resolved.targetTabId === current.targetTabId &&
-    JSON.stringify(resolved.reference) === JSON.stringify(current.reference) &&
+    JSON.stringify(resolved.reference) === JSON.stringify(current.reference) && JSON.stringify(resolved.targetAgent) === JSON.stringify(current.targetAgent) &&
     resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.focusChatTopicId === current.focusChatTopicId &&
     resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && !retryPreference) return
   state = resolved
-  if (persist && (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
+  if (persist && (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open,
-      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, reference: resolved.reference, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
+      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, targetAgent: resolved.targetAgent, reference: resolved.reference, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
       state = { ...resolved, preferenceIssue: undefined }
     } catch { state = { ...resolved, preferenceIssue: 'Mote preferences could not be saved. This window keeps your choice and size; select the Mote or resize again to retry.' } }
   }
@@ -123,7 +131,7 @@ export function pmoTeamsTopicFloatingTargetTopicId(floating: PmoTeamsTopicFloati
 export function pmoTeamsTopicFloatingTargetTabId(
   floating: PmoTeamsTopicFloatingState,
   tabs: Readonly<Record<string, WorkbenchTab>>,
-  _layout: WorkspaceLayout | undefined,
+  layout: WorkspaceLayout | undefined,
   _pmoSessionId: string | null
 ): string | undefined {
   if (floating.targetTabId === null) return undefined
@@ -131,8 +139,11 @@ export function pmoTeamsTopicFloatingTargetTabId(
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
   const belongs = (tab: WorkbenchTab | undefined): tab is WorkbenchTab =>
     tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId
+  const group = layout?.groups.find(item => item.id === layout.activeGroupId && groupIds(layout.root).includes(item.id))
+  if (group?.activeTabId && belongs(tabs[group.activeTabId])) return group.activeTabId
   const candidates = Object.values(tabs).filter(belongs)
-  // A semantic focus or another workface's active Tab is not this panel's navigation.
+  // No arbitrary array-first choice or another Mote's active member.
+
   return candidates.length === 1 ? candidates[0]!.id : undefined
 }
 
@@ -142,6 +153,10 @@ export function floatingMoteDefaultSelection(floating: PmoTeamsTopicFloatingStat
   const workspace = current.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
   const topic = topics?.find(item => item.id === topicId)
+  const recent = current.recentMoteAgents[topicId]
+  if (recent) return { ...floating, targetTopicId: topicId, targetTabId: recent.tabId,
+    reference: moteConversationReference(recent), targetAgent: { hostId: recent.hostId, sessionId: recent.sessionId, presentationSessionId: recent.presentationSessionId } }
+  if (floating.targetTabId) return floating
   const preferred = topic ? moteDefaultConversation(current, topic, SCRATCH_WORKSPACE_ID) : {}
   return preferred.conversation && !preferred.issue ? { ...floating, targetTopicId: topicId, targetTabId: preferred.conversation.tabId,
     reference: moteConversationReference(preferred.conversation) } : floating
@@ -158,12 +173,28 @@ function initialFloatingSelection(floating: PmoTeamsTopicFloatingState): PmoTeam
   if (Object.hasOwn(floating, 'reference') && floating.reference !== undefined) return next
   const regionId = tab.layout.activeRegionId
   if (!tab.regions[regionId]) return next
+  const activeLayout = current.layouts[SCRATCH_WORKSPACE_ID]
+  const activeGroup = floating.targetTabId === undefined ? activeLayout?.groups.find(group =>
+    group.id === activeLayout.activeGroupId && group.activeTabId === tab.id && groupIds(activeLayout.root).includes(group.id)) : undefined
+  if (activeGroup) return { ...next, reference: {
+    displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: activeGroup.id, tabId: tab.id, regionId } }
   const references = Object.entries(current.layouts).flatMap(([displayWorkspaceId, layout]) => {
     const visible = new Set(groupIds(layout.root))
     return layout.groups.filter(group => visible.has(group.id) && group.tabOrder.includes(tab.id))
       .map(group => ({ displayWorkspaceId, groupId: group.id, tabId: tab.id, regionId }))
   })
   return references.length === 1 ? { ...next, reference: references[0] } : next
+}
+
+/** A bookmark never authorizes a different Agent that later occupies its Region. */
+export function pmoTeamsTopicFloatingAgentIssue(floating: PmoTeamsTopicFloatingState,
+  tab: WorkbenchTab | undefined, session?: SessionSnapshot): string | null {
+  if (!floating.targetAgent || !floating.reference) return null
+  const region = tab?.id === floating.reference.tabId ? tab.regions[floating.reference.regionId] : undefined
+  if (!region || region.kind !== 'agent' || region.sessionId !== floating.targetAgent.presentationSessionId || session?.control.kind === 'agent' &&
+    (session.control.hostId !== floating.targetAgent.hostId || session.control.agentSessionId !== floating.targetAgent.sessionId))
+    return 'The last visited Agent is not confirmed at its original location. Its identity and work are kept; inspect the original Tab to continue.'
+  return null
 }
 
 /** Zustand calls selectors for every output event; resolve only navigation changes. */
@@ -184,6 +215,10 @@ export function pmoTeamsTopicFloatingViewTargets(
   layout: WorkspaceLayout | undefined, pmoSessionId: string | null, projection: WorkbenchProjection | null
 ): WorkbenchViewTargets | undefined {
   if (!(floating.open || floating.preview)) return undefined
+  const current = useAppStore.getState(), heldTab = floating.reference ? tabs[floating.reference.tabId] : undefined
+  const heldRegion = floating.reference ? heldTab?.regions[floating.reference.regionId] : undefined
+  const heldSession = heldRegion?.kind === 'agent' ? sessionPresentationById(current.sessions).get(heldRegion.sessionId) : undefined
+  if (pmoTeamsTopicFloatingAgentIssue(floating, heldTab, heldSession)) return undefined
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
   const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layout, pmoSessionId)
   const tab = tabId ? tabs[tabId] : undefined
@@ -237,10 +272,12 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
   const tabId = options?.targetTabId?.trim() ?? options?.reference?.tabId
   const topicId = options?.targetTopicId?.trim() ?? (tabId ? current.tabs[tabId]?.topicId : undefined)
   const retargeted = Boolean(topicId && topicId !== previous.targetTopicId || tabId && tabId !== previous.targetTabId)
-  let next = initialFloatingSelection({ ...previous, open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
+  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, ...(topicId ? { targetTopicId: topicId } : {}),
     ...(tabId ? { targetTabId: tabId } : topicId && topicId !== previous.targetTopicId ? { targetTabId: undefined } : {}),
-    ...(suppliedReference ? { reference: suppliedReference } : retargeted ? { reference: undefined } : {}) })
+    ...(suppliedReference ? { reference: suppliedReference } : retargeted ? { reference: undefined } : {}),
+    ...(tabId || suppliedReference || retargeted ? { targetAgent: undefined } : {}) }
   if (!tabId && !suppliedReference && (!previous.open || topicId && topicId !== previous.targetTopicId)) next = floatingMoteDefaultSelection(next)
+  next = initialFloatingSelection(next)
   const layout = current.layouts[SCRATCH_WORKSPACE_ID]
   const resolvedTopicId = pmoTeamsTopicFloatingTargetTopicId(next, current.tabs)
   const resolvedTabId = pmoTeamsTopicFloatingTargetTabId(next, current.tabs, layout, current.agentFocus.pmo.sessionId)
@@ -253,9 +290,13 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
     const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
     const topic = topics?.find(one => one.id === resolvedTopicId)
     const rootPath = workspace && topic ? scratchTopicLogicalPath(workspace, topic) : null
-    if (workspace && topic && !topic.readError && rootPath !== null && scratchTopicKind(topic.id, topics) === 'mote')
+    const heldTab = next.reference ? current.tabs[next.reference.tabId] : undefined
+    const heldRegion = next.reference ? heldTab?.regions[next.reference.regionId] : undefined
+    const heldSession = heldRegion?.kind === 'agent' ? sessionPresentationById(current.sessions).get(heldRegion.sessionId) : undefined
+    if (!pmoTeamsTopicFloatingAgentIssue(next, heldTab, heldSession) && workspace && topic && !topic.readError && rootPath !== null && scratchTopicKind(topic.id, topics) === 'mote')
       showMoteConversation({ workspace, topic, rootPath }, { floating: true, reference: next.reference })
   }
+  if ((tabId || suppliedReference) && next.reference) current.rememberMoteAgent(next.reference)
   update(next)
   requestAnimationFrame(() => {
     if (!snapshot().open) return

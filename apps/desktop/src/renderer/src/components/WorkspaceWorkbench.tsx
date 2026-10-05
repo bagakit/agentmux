@@ -1247,7 +1247,7 @@ function PaneGroup({
         {recoveryNotice}
         <div className="pane-body__content">
         {bodyTabs.length > 0 && !group.activeTabId ? <div className="pane-state">
-          <strong>{mote ? 'Choose a discussion' : 'Choose a Tab'}</strong><span>Select a Tab above to display it here.</span>
+          <strong>{mote ? 'Original discussions retained' : 'Choose a Tab'}</strong><span>{mote ? 'The last Agent location is not confirmed yet. Your original Tabs remain available above.' : 'Select a Tab above to display it here.'}</span>
         </div> : null}
         {showEmptySpace ? <EmptyWorkbench visible={surfaceVisible} onCreate={() => onNewTab(group.id)} /> : null}
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
@@ -1578,11 +1578,13 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
     <div className="pane-content"><div className="pane-body">
       {!layout ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Original discussions retained', mode: 'Their display layout is not confirmed yet.',
-        restore: 'Choose a discussion to inspect its original location, or reopen this Mote in Space.'
+        restore: 'Inspect an original Tab above, or reopen this Mote in Space.'
       } }} /> : null}
       {targetTabId ? <RetainedWorkbenchNotice workspaceId={workspaceId} targetTabId={targetTabId} available={Boolean(original)} visible={visible} /> : null}
       {original ? <div id={`${viewHostPrefix}:${targetTabId}`} data-workbench-tab-id={targetTabId} className="workbench-tab-slot" />
-        : <div className="pane-state"><strong>{mote ? 'Choose a discussion' : 'Choose a Tab'}</strong><span>Your existing work surfaces remain available.</span></div>}
+        : mote ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Original discussions retained',
+          mode: 'Their last Agent location is not confirmed yet.', restore: 'The original Tabs remain available above.' } }} />
+        : <div className="pane-state"><strong>Choose a Tab</strong><span>Your existing work surfaces remain available.</span></div>}
     </div></div>
   </>
 }

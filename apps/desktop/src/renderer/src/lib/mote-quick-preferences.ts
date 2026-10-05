@@ -1,14 +1,15 @@
+import { parseMoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sessionPresentationById } from './session-presentation'
 import { useAppStore } from '../store'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
-import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
+import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { scratchTopicIdentityPath } from '../../../shared/scratch-topics'
 import { directoryIdentity, homeZoneId } from '../../../shared/space-addresses'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
-import type { MoteDefaultConversation } from '../../../shared/mote-quick-mode'
+import { sameMoteDefaultConversation, type MoteDefaultConversation } from '../../../shared/mote-quick-mode'
 import { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
 export { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
 
@@ -71,4 +72,35 @@ export function moteConversationLabel(state: Pick<State, 'tabs' | 'sessions'>, c
   const region = state.tabs[conversation.tabId]?.regions[conversation.regionId]
   const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
   return session?.control.kind === 'agent' && session.control.agentSessionId === conversation.sessionId && session.control.hostId === conversation.hostId ? session.label : undefined
+}
+
+export type MoteRecentAgent = MoteDefaultConversation & { presentationSessionId: string }
+/** Validate presentation storage without consulting today's possibly unavailable catalog. */
+export function restoredRecentMoteAgents(value: unknown): Record<string, MoteRecentAgent> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).flatMap(([id, raw]) => {
+    if (!id.trim() || !raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+    try {
+      const { presentationSessionId, ...tuple } = raw as Record<string, unknown>
+      const conversation = parseMoteDefaultConversation(tuple)
+      return typeof presentationSessionId === 'string' && presentationSessionId.trim() === presentationSessionId && presentationSessionId.length > 0
+        ? [[id, { ...conversation, presentationSessionId }]] : []
+    } catch { return [] }
+  }))
+}
+
+/** Only a confirmed explicit Agent visit may replace this Mote's navigation bookmark. */
+export function recentMoteAgentsAfterVisit(state: State & { recentMoteAgents: Record<string, MoteRecentAgent> },
+  reference: WorkbenchProjectionSelection): Record<string, MoteRecentAgent> {
+  const tab = state.tabs[reference.tabId], workspace = state.config?.workspaces.find(item => item.id === tab?.workspaceId)
+  const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)
+  const topic = topics?.find(item => item.id === tab?.topicId)
+  const region = tab?.regions[reference.regionId]
+  const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
+  if (!workspace || !topic || scratchTopicKind(topic.id, topics) !== 'mote' || session?.control.kind !== 'agent') return state.recentMoteAgents
+  const conversation = { ...reference, hostId: session.control.hostId, sessionId: session.control.agentSessionId, presentationSessionId: session.id }
+  const confirmed = resolveMoteDefaultConversation(state, { ...topic, quickMode: { status: 'saved',
+    defaults: { conversation }, version: '' } }, workspace.id, moteDefaultCatalog(state, topic, conversation))
+  if (!confirmed.conversation || confirmed.issue || (sameMoteDefaultConversation(state.recentMoteAgents[topic.id], conversation) && state.recentMoteAgents[topic.id]?.presentationSessionId === conversation.presentationSessionId)) return state.recentMoteAgents
+  return { ...state.recentMoteAgents, [topic.id]: conversation }
 }

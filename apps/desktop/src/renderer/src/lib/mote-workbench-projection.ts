@@ -1,7 +1,7 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import { workbenchDisplayReferenceMatches } from './workbench-resource-display'
-import { PMO_FLOATING_TAB_SLOT_PREFIX, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
+import { pmoTeamsTopicFloatingAgentIssue, PMO_FLOATING_TAB_SLOT_PREFIX, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchTab } from './workbench-tabs'
 
@@ -17,6 +17,8 @@ export type MoteWorkbenchProjectionResult = {
 export function moteWorkbenchProjection(catalog: AgentMuxSpaceCatalog | null, tab: WorkbenchTab | undefined,
   floating: PmoTeamsTopicFloatingState, onSelect: WorkbenchProjection['onSelect'], layouts: Readonly<Record<string, WorkspaceLayout>>): MoteWorkbenchProjectionResult {
   const retained = { catalog, projection: null, choices: [], retainedTabId: floating.targetTabId ?? tab?.id, issue: null }
+  const identityIssue = pmoTeamsTopicFloatingAgentIssue(floating, tab)
+  if (identityIssue) return { ...retained, issue: identityIssue }
   if (!tab || !catalog || floating.targetTopicId && tab.topicId !== floating.targetTopicId) return retained
   const entity = catalog.tabs.find(item => item.tabId === tab.id)
   const zone = entity?.zoneId ? catalog.zones.find(item => item.zoneId === entity.zoneId) : undefined

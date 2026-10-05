@@ -190,7 +190,7 @@ function DesktopApp() {
   const moteProjection = useMemo(() => {
     const id = pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId)
     return moteWorkbenchProjection(surveyCatalog, id ? tabs[id] : undefined, moteFloating, selectMoteReference, layouts)
-  }, [surveyCatalog, moteFloating.targetTabId, moteFloating.targetTopicId, moteFloating.reference, tabs, layouts, agentFocus.pmo.sessionId, selectMoteReference])
+  }, [surveyCatalog, moteFloating.targetTabId, moteFloating.targetTopicId, moteFloating.reference, moteFloating.targetAgent, tabs, layouts, agentFocus.pmo.sessionId, selectMoteReference])
   const moteViewTargets = useMemo(() => {
     const targets = pmoTeamsTopicFloatingViewTargets(
       moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection.projection)

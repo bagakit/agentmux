@@ -41,7 +41,7 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
       onPointerEnter={event => { if (event.pointerType === 'mouse' && event.buttons === 0) requestPmoTeamsTopicFloatingPreview() }}
       onPointerLeave={event => { if (event.pointerType === 'mouse') leavePmoTeamsTopicFloatingPreview() }}
       onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
-      onClick={event => { event.preventDefault(); floating.open ? requestPmoTeamsTopicFloatingClose() : requestPmoTeamsTopicFloatingOpen({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) }) }}
+      onClick={event => { event.preventDefault(); floating.open ? requestPmoTeamsTopicFloatingClose() : requestPmoTeamsTopicFloatingOpen({ targetTopicId: target.topicId }) }}
       >
       <span className={className + '__surface'} data-state="open">
         <SpaceObjectIcon kind="mote" name={target.moteName} manualIcon={manualIcon}
