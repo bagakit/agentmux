@@ -47,8 +47,8 @@ button.agent-avatar:focus-visible { outline: 1px solid var(--focus-line); outlin
 .inline-agent-link { display: inline; }
 button.agent-avatar--inline {
   width: auto; height: auto; max-width: min(100%, 30ch); padding: 1px 6px 1px 4px; gap: 6px;
-  vertical-align: -3px; border: 1px solid var(--line-soft); border-radius: 6px;
-  background: linear-gradient(var(--overlay-line), transparent), var(--surface-1);
+  vertical-align: -3px; border: 1px solid var(--line-soft); border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 75%, transparent);
   box-shadow: inset 0 1px 0 var(--overlay-line); color: var(--text-2);
   font: inherit; font-size: .92em; line-height: 1.35; text-align: left;
   transition: background .12s ease, border-color .12s ease;
@@ -58,7 +58,7 @@ button.agent-avatar--inline:hover { border-color: var(--focus-line); background-
 .agent-avatar__label { text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inline-agent-link__details { border-top: 1px solid var(--line-soft); margin-top: var(--sp-3); padding-top: var(--sp-2); }
 .inline-agent-link__details code { display: block; margin-block: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
-.inline-agent-link__details .small-button { margin-top: var(--sp-1); }
+.inline-agent-link__details .small-button { margin-top: var(--sp-1); margin-right: var(--sp-1); }
 .inline-agent-link[data-motion='off'] .semantic-icon-motion,
 .inline-agent-link[data-motion='off'] .semantic-icon { animation: none; }
 @media (prefers-reduced-motion: reduce) {
@@ -73,3 +73,24 @@ button.agent-avatar--inline:hover { border-color: var(--focus-line); background-
 .agent-avatar-settings__row input[type='color'] { width: 36px; height: 26px; padding: var(--sp-1); }
 .agent-avatar-settings__row input[type='text'] { width: 6ch; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font: inherit; }
 .agent-avatar-settings__row input:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+
+/* Object mentions stay in the prose flow; actions are siblings, never nested buttons. */
+.inline-object-link {
+  display: inline-flex; align-items: stretch; max-width: min(100%, 34ch); vertical-align: -4px;
+  border: 1px solid var(--line-soft); border-radius: 7px; overflow: hidden;
+  color: var(--text-2); background: color-mix(in srgb, var(--surface-2) 75%, transparent);
+  box-shadow: inset 0 1px 0 var(--overlay-line); font: inherit; font-size: .92em; line-height: 1.35;
+  transition: background .12s ease, border-color .12s ease;
+}
+.inline-object-link:hover, .inline-object-link:focus-within { border-color: var(--focus-line); background: var(--surface-2); }
+.inline-object-link button { color: inherit; background: transparent; border: 0; border-radius: 0; font: inherit; cursor: pointer; }
+.inline-object-link__open { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 1px 4px 1px 5px; text-align: left; }
+.inline-object-link__open > svg { flex: 0 0 auto; color: var(--text-3); }
+.inline-object-link__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inline-object-link__kind { margin-right: 5px; font-weight: 600; }
+.inline-object-link__id { color: var(--text-3); font-size: .94em; }
+.inline-object-link__copy { display: inline-grid; place-items: center; flex: 0 0 22px; padding: 2px 4px; opacity: .55; }
+.inline-object-link:hover .inline-object-link__copy, .inline-object-link:focus-within .inline-object-link__copy { opacity: 1; }
+.inline-object-link__copy:hover { background: color-mix(in srgb, var(--text-2) 9%, transparent); }
+.inline-object-link button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { .inline-object-link { transition: none; } }
