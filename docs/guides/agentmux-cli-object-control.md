@@ -180,6 +180,8 @@ amux message pending stop --session '<session-id>' --pending-id '<pending-id>'
 
 `stop` 经公开 `message.pending.stop` 调用与界面「停止等待」相同的 owner，只结束本条自动准备退避；原文、操作号、目标 Run 和手动发送入口保留。回执的 `preparationWait.state: "stopped"` 与 `changed` 说明等待事实，不表示撤回已写入输入或停止 Agent。没有活跃退避、目标不存在或已进入提交时，拒绝这一次停止，保留消息、原会话与终端；对已停止的原记录再次调用返回 `changed: false`。修改、发送和停止人工待发意图需要服务认证的 user／device，managed Agent 不能借此操作人工草稿。具体参数与当前执行版本的 `--help`／`--skill` 保持一致。
 
+当 `pending.send` 返回 `AGENT_PROMPT_CONDITION_CHANGED`，原发送条件已经变化；本次调用未写入输入，不代表原消息此前一定未投递。先用 `message pending ls --session <id>` 与原对话核对全文及投递记录。可用 `message pending archive --session <id> --pending-id <id> --expected-text '<完整原文>'` 保留原记录并退出 Pending；归档不会撤回输入。之后明确编写新消息时使用普通 `agent send`，不要复用旧 operation/message identity。Desktop 的「移至草稿」会将正文追加到同 Session 的已有草稿并归档原条目，等待下一次明确发送。
+
 ## RPC 与远程调用
 
 Endpoint、Host 路由与源身份的行为边界见[公共控制合同](../design/behavior/public-control.md#endpointhost-路由与源身份)；下文按直接连接服务与经配置 Host 两种任务入口操作，准确参数以当前 `--help`／`--skill` 为准。
