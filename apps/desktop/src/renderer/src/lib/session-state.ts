@@ -13,7 +13,7 @@ import { nativeBindingKey, projectNativeSourceFacts } from '../../../shared/agen
 import { configValuesEqual } from '../../../shared/config-edit'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses } from '@agentmux/core'
 import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
-import { agentPromptPredecessor } from '@agentmux/core/prompt-condition'
+import { agentPromptNotApplied, agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import { agentDisplayState, isAgentActivityStatusSource, currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
@@ -818,6 +818,7 @@ export function projectRuntimeEvent(
       agentSessionUpdatedAt: core.session.updatedAt,
       ...(core.session.creation ? { creation: structuredClone(core.session.creation) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(core.session),
+      promptInputNotApplied: agentPromptNotApplied(core.session),
       ...(nativeBindingKey(item) !== nativeBindingKey(core.session) && item.status.state !== 'disconnected' && !semantic
         ? { status: projectRunProcessStatus({ state: item.processState, source: 'run-process', observedAt: core.session.updatedAt }) }
         : {}),

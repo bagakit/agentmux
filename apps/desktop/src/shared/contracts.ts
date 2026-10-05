@@ -1018,6 +1018,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       forkedFrom?: AgentMuxAgentSession['forkedFrom']
       /** Core-owned admission identity. null is confirmed empty; undefined is unknown. */
       promptSubmissionPredecessor?: string | null | undefined
+      /** Core-confirmed refusal of the original complete input, never a later invocation failure. */
+      promptInputNotApplied?: import('@agentmux/core/prompt-condition').AgentPromptNotApplied | undefined
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
       terminalOutputChannel?: AgentTerminalOutputChannelState
       pendingInteraction?: AgentMuxInteractionRequest
