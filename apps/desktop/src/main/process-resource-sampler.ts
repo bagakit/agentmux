@@ -10,6 +10,7 @@ import {
   parseProcessTable,
   pruneSamples,
   rollUpSubtrees,
+  summarizeRunSubtrees,
   type RunUsage,
   type AppUsage,
   type AppProcessRole,
@@ -67,6 +68,7 @@ function readProcessTable(): Promise<string> {
 export class ProcessResourceSampler {
   private readonly runPids = new Map<string, { pid: number; hostId: string }>()
   private readonly samples = new Map<string, UsageSample[]>()
+  private runTotalSamples: UsageSample[] = []
   private readonly subscribers = new Set<(snapshot: ResourceSample) => void>()
   private timer: NodeJS.Timeout | null = null
   private inFlight: Promise<void> | null = null
@@ -167,6 +169,7 @@ export class ProcessResourceSampler {
     this.diagnostics = { observedAt: null, data: null, unavailable: null }
     // 样本一并丢掉：面板再打开时，旧样本描述的是另一段时间。
     this.samples.clear()
+    this.runTotalSamples = []
     this.latest = null
     this.runtime = null
     this.runtimeUnavailable = null
@@ -325,6 +328,17 @@ export class ProcessResourceSampler {
     const windowAt = this.cpuNow()
     const roots = [...this.runPids].map(([runId, { pid, hostId }]) => ({ key: runId, pid, hostId }))
     const usage = rows ? rollUpSubtrees(rows, roots) : null
+    let runTotals = this.latest?.runTotals ?? null
+    if (rows && usage) {
+      runTotals = summarizeRunSubtrees(rows, roots, usage)
+      if (runTotals.coverage.trackedRuns === 0) this.runTotalSamples = []
+      if (runTotals.cpuPercent !== null && runTotals.rssKib !== null) {
+        this.runTotalSamples = pruneSamples([...this.runTotalSamples, {
+          observedAt: windowAt, cpuPercent: runTotals.cpuPercent, rssKib: runTotals.rssKib
+        }], windowAt)
+        runTotals = { ...runTotals, cpuPercent: aggregateUsage(this.runTotalSamples, windowAt).cpuPercent }
+      }
+    }
     const runs: RunUsage[] = usage ? [] : this.latest?.runs ?? []
     for (const { key: runId, pid, hostId } of usage ? roots : []) {
       const subtree = usage!.get(runId) ?? null
@@ -362,6 +376,7 @@ export class ProcessResourceSampler {
     this.latest = {
       observedAt,
       runs,
+      runTotals,
       app: application,
       runtime: this.runtime,
       runtimeUnavailable: this.runtimeUnavailable,

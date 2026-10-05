@@ -2,13 +2,15 @@ import { AgentMuxError } from './errors.js'
 import { parseMetricsObservation, type MetricsObservation } from './metrics.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION } from './control.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
+import { parseToolkitResultDocument, type ToolkitResultDocument } from './toolkit-result-document.js'
+export * from './toolkit-result-document.js'
 
 export const TOOLKIT_STATES = ['idle', 'starting', 'observing', 'paused', 'stopping', 'failed', 'unknown'] as const
 export type ToolkitState = typeof TOOLKIT_STATES[number]
 export type ToolkitMetricsSnapshot = {
   schema: 'agentmux.toolkit.v1'; kind: 'metrics'; toolId: 'performance'; executionId: string | null
   run: { hostId: string; runId: string } | null; state: ToolkitState; reason: string | null
-  startedAt: number | null; observedAt: number | null; observation: MetricsObservation | null
+  startedAt: number | null; observedAt: number | null; observation: MetricsObservation | null; document: ToolkitResultDocument | null
   manual: boolean; consumerCount: number; sequence: number
   trend: { observedAt: number; appCpuPercent: number | null; appRssKib: number | null }[]
 }
@@ -302,7 +304,7 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
 export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
   const source = settingsResourceEnvelope(value, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained',
     'definition', 'state', 'admission', 'latestConfirmed', 'consumerCount', 'sequence',
-    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'manual', 'trend'], 'CONTROL_PROTOCOL_ERROR')
+    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'trend'], 'CONTROL_PROTOCOL_ERROR')
   if (source.schema !== 'agentmux.toolkit.v1') invalid()
   if (source.kind === 'package-unavailable') {
     const r = record(source, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained'])
@@ -327,7 +329,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     count(r.consumerCount); count(r.sequence); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096))
     return { ...r, definition, admission, latestConfirmed } as ToolkitScriptSnapshot
   }
-  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'manual', 'consumerCount', 'sequence', 'trend'])
+  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'consumerCount', 'sequence', 'trend'])
   if (r.kind !== 'metrics' || r.toolId !== 'performance' || !TOOLKIT_STATES.includes(r.state as ToolkitState) || typeof r.manual !== 'boolean') invalid()
   nullable(r.executionId, identity); nullable(r.reason, text); nullable(r.startedAt, time); nullable(r.observedAt, time)
   count(r.consumerCount); count(r.sequence); runRef(r.run)
@@ -335,6 +337,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     const obs = parseMetricsObservation(r.observation)
     if (r.observedAt !== obs.observedAt) invalid()
   } else if (r.observedAt !== null) invalid()
+  if (r.document !== null) parseToolkitResultDocument(r.document)
   // The small arbitrary trend subtree still uses the existing pure JSON guard.
   const trend = record({ trend: r.trend }, ['trend']).trend
   if (!Array.isArray(trend) || trend.length > 60) invalid()

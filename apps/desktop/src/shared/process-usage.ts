@@ -109,6 +109,25 @@ export function rollUpSubtrees(
   return result
 }
 
+/** Same-batch union totals. A claimed overlapping root is observed, not missing. */
+export function summarizeRunSubtrees(
+  rows: readonly ProcessRow[], roots: readonly { pid: number }[],
+  usage: ReadonlyMap<string, SubtreeUsage | null>
+): import('@agentmux/core/control').RunUsageTotals {
+  const pids = new Set(rows.map(row => row.pid))
+  const observedRoots = roots.filter(root => pids.has(root.pid)).length
+  const coverage = { trackedRuns: roots.length, observedRoots, missingRoots: roots.length - observedRoots }
+  if (coverage.missingRoots > 0) return { coverage, processCount: null, cpuPercent: null, rssKib: null }
+  let processCount = 0, cpuPercent = 0, rssKib = 0
+  for (const subtree of usage.values()) {
+    if (!subtree) continue
+    processCount += subtree.processCount
+    cpuPercent += subtree.cpuPercent
+    rssKib += subtree.rssKib
+  }
+  return { coverage, processCount, cpuPercent, rssKib }
+}
+
 /**
  * 采样周期、聚合窗口、聚合方式是三件事，分开定义。
  *
@@ -201,6 +220,7 @@ import type { RunUsage, AppUsage, MainResourceOwnerCounts, RuntimeUsage } from "
 export type UsageSnapshot = {
   observedAt: number
   runs: RunUsage[]
+  runTotals: import('@agentmux/core/control').RunUsageTotals | null
   /** Electron 自身进程，与 Agent 子树分开——混成一个数就没法回答"是谁在吃"。 */
   app: AppUsage | null
   /** One observation on panel open; null until that observation has completed. */
