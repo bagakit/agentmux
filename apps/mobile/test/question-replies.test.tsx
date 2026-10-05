@@ -152,7 +152,12 @@ describe('actual mobile native question intent owner', () => {
   })
   it('allows a fresh answer only after that original invocation was proven completely unapplied', async () => {
     const f = questionFixture()
-    f.rpc.mockRejectedValueOnce(Object.assign(new Error('Original input was not applied'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }))
+    f.rpc.mockImplementationOnce(async (_method, input) => {
+      const frozen = f.sessions.get(sid)!
+      f.sessions.set(sid, { ...frozen, promptCompletionAdmission: { submissionId: input.operationId, operationId: 'original-native-phase', startByte: 0, endByte: 20, notApplied: true,
+        intent: { run: frozen.run, ownerInstanceId: 'original-native-owner', prompt: 'original', plan: { kind: 'single-phase', data: 'original' } } } })
+      throw new Error('Original receipt lost after Core recorded the whole refusal')
+    })
     const view = await mount(surface(f))
     await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
     await vi.waitFor(() => expect(attempt()?.phase).toBe('rejected'))
@@ -236,4 +241,17 @@ it('holds a legacy unknown Runtime despite an exact current refusal and only ret
   expect(attempt()?.phase).toBe('unknown')
   await click(button(view.element, 'Retry original reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledOnce())
   expect(f.rpc.mock.calls[0]![1]).toEqual({ ...input, agentSessionId: sid, sourceChannel: 'api' })
+})
+
+it('holds a first dispatched zero-byte phase failure without an original whole Core refusal and retries the original answer rather than its edited draft', async () => {
+  const f = questionFixture()
+  f.rpc.mockRejectedValueOnce(Object.assign(new Error('Only the submit phase was refused'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }, detail: 'not_applied' }))
+  const view = await mount(surface(f))
+  await click(button(view.element, 'Keep original')); await click(button(view.element, 'Submit reply'))
+  await vi.waitFor(() => expect(attempt()?.phase).toBe('unknown'))
+  const input = f.rpc.mock.calls[0]![1]
+  await click(button(view.element, 'Revise')); await type(view.element, 'Another independent draft')
+  await click(button(view.element, 'Retry original reply')); await vi.waitFor(() => expect(f.rpc).toHaveBeenCalledTimes(2))
+  expect(f.rpc.mock.calls[1]![1]).toEqual(input)
+  expect(view.element.querySelector('textarea')?.value).toBe('Another independent draft')
 })
