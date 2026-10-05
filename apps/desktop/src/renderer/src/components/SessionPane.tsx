@@ -1041,12 +1041,12 @@ export function SessionPane({
         </div>
         {session.kind === 'agent' && session.pendingInteraction ? (
           <div className="agent-interaction-source">
-          {session.nativeSourceObservation ? <p className="agent-interaction-source__notice">This request belongs to the retained native source, which is pending confirmation.</p> : null}
           <AgentInteractionCard
             key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}
             request={session.pendingInteraction}
             readOnly={!hasAgentComposer}
             responseUnavailableReason={session.interactionResponseUnavailableReason}
+            sourceNotice={session.nativeSourceObservation ? 'This request belongs to the retained native source, which is pending confirmation.' : undefined}
             {...(hasAgentComposer ? { onOpenTerminal: () => {
               useAppStore.getState().setViewMode(session.id, 'terminal')
               setHistoryOpen(false)

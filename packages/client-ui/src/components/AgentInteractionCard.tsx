@@ -14,6 +14,7 @@ export function AgentInteractionCard({
   disabled = false,
   readOnly = false,
   responseUnavailableReason,
+  sourceNotice,
   onOpenTerminal,
   onRespond
 }: {
@@ -21,6 +22,7 @@ export function AgentInteractionCard({
   disabled?: boolean
   readOnly?: boolean
   responseUnavailableReason?: string | undefined
+  sourceNotice?: string | undefined
   onOpenTerminal?(): void
   onRespond(response: AgentMuxInteractionResponse): Promise<void>
 }) {
@@ -51,33 +53,37 @@ export function AgentInteractionCard({
   const status = readOnly ? 'Read-only · Answer in the original Session'
     : phase === 'sending' ? 'Sending answer…'
     : phase === 'awaiting' ? 'Answer sent · Waiting for confirmation'
-    : reason ? 'Native confirmation needed'
+    : reason ? 'Confirmation pending'
     : disabled ? 'Answer unavailable · Check this Session'
     : 'Needs your answer'
   const requestStatus = <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
 
   if (reason) return (
-    <section className="agent-interaction" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
-      {requestStatus}
-      {request.kind === 'permission' ? <>
-        <div className="agent-interaction__heading"><div>
-          <strong>{request.title}</strong>
-          {request.toolName ? <span>{request.toolName}</span> : null}
-        </div></div>
-        {request.toolInput ? <pre>{request.toolInput}</pre> : null}
-      </> : request.questions.map(question => (
-        <div className="agent-interaction__heading" key={question.id}><div>
-          {question.title ? <strong>{question.title}</strong> : null}
-          <span>{question.prompt}</span>
-        </div></div>
-      ))}
-      <div className="agent-interaction__heading">
-        <ShieldAlert size={15} />
-        <div><strong>Answer in terminal</strong><span>{reason}</span></div>
+    <section className="agent-interaction agent-interaction--native" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
+      <div className="agent-interaction__native-heading">
+        {request.kind === 'permission' ? <ShieldAlert size={15} /> : <HelpCircle size={15} />}
+        <div>
+          <strong>{request.kind === 'permission' ? request.title : request.questions[0]?.title || request.questions[0]?.prompt || 'Agent question'}</strong>
+          {requestStatus}
+        </div>
       </div>
-      {!readOnly && onOpenTerminal ? <div className="agent-interaction__actions">
-        <button type="button" onClick={onOpenTerminal}>Open terminal</button>
-      </div> : null}
+      <details className="agent-interaction__native-details">
+        <summary>Details</summary>
+        <div>
+          <p>{reason}</p>
+          {sourceNotice ? <p>{sourceNotice}</p> : null}
+          {request.kind === 'permission' ? <>
+            {request.toolName ? <p>Tool: {request.toolName}</p> : null}
+            {request.toolInput ? <pre>{request.toolInput}</pre> : null}
+          </> : request.questions.map(question => (
+            <div key={question.id}>
+              {question.title ? <strong>{question.title}</strong> : null}
+              <p>{question.prompt}</p>
+            </div>
+          ))}
+        </div>
+      </details>
+      {!readOnly && onOpenTerminal ? <button className="agent-interaction__native-terminal" type="button" onClick={onOpenTerminal}>Open terminal</button> : null}
     </section>
   )
 
@@ -90,6 +96,7 @@ export function AgentInteractionCard({
     return (
       <section className="agent-interaction" aria-label="Agent permission request" data-request-id={request.id}>
         {requestStatus}
+        {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
         <div className="agent-interaction__heading">
           <ShieldAlert size={15} />
           <div>
@@ -156,6 +163,7 @@ export function AgentInteractionCard({
   return (
     <section className="agent-interaction" aria-label="Agent question" data-request-id={request.id}>
       {requestStatus}
+      {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
       <div className="agent-interaction__heading">
         <HelpCircle size={15} />
         <div>

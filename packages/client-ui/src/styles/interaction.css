@@ -21,6 +21,23 @@
 .agent-interaction__options button { display: grid; gap:var(--sp-1); padding:var(--sp-3) var(--sp-4); text-align: left; }
 .agent-interaction__options small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .agent-interaction__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-4); }
+.agent-interaction__source-notice { margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
+/* An unconfirmed request is a quiet handoff; the original facts stay in its disclosure. */
+.agent-interaction--native { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); padding: var(--sp-3) var(--sp-4); box-shadow: var(--hl); }
+.agent-interaction__native-heading { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; flex: 1 1 160px; }
+.agent-interaction__native-heading > svg { flex: none; color: var(--text-3); }
+.agent-interaction__native-heading > div { min-width: 0; }
+.agent-interaction__native-heading strong { display: block; color: var(--text); font-size: var(--fs-meta); font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; }
+.agent-interaction--native .agent-interaction__status { margin: 0; color: var(--text-3); }
+.agent-interaction__native-details { flex: 0 0 auto; min-width: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; }
+.agent-interaction__native-details > summary { width: fit-content; padding: var(--sp-1) 0; cursor: pointer; color: var(--text-3); }
+.agent-interaction__native-details > summary:hover { color: var(--text); }
+.agent-interaction__native-details[open] { flex: 1 0 100%; order: 3; }
+.agent-interaction__native-details > div { margin-top: var(--sp-2); }
+.agent-interaction__native-details p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+.agent-interaction__native-details pre { margin-top: var(--sp-2); }
+.agent-interaction--native button.agent-interaction__native-terminal { flex: none; margin-left: auto; }
+.agent-interaction--native :is(button, summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* Every action is the same button: one height, one padding, icon and label centred on a shared axis —
    so a row of mixed icon and text-only actions lines up instead of stepping. */
 .agent-interaction button {
