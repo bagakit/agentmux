@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { FolderOpen, GitBranch, LoaderCircle, Plus, Search } from 'lucide-react'
 import { memo, useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -138,7 +139,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         onClick={() => void openRegistered(progress.workspace!)}>Open registered folder</button> : null}
     </div> : null}
     {projects.length > 0 ? <>
-      <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label={`Find a project on ${host?.label ?? hostId}`}
+      <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><TextInput type="search" aria-label={`Find a project on ${host?.label ?? hostId}`}
         placeholder="Find a project or worktree…" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <div className="host-projects__list">{matches.map(project => <section key={project.id} className="host-projects__project" data-project-id={project.id}>
         <header><FolderOpen size={15} aria-hidden="true" /><strong>{project.name}</strong>
