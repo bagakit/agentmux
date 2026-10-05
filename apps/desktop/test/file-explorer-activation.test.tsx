@@ -3,6 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
+import { mountThemeRuntime, previewTheme, GRAPHITE_THEME } from '@agentmux/client-ui/theme'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
 import { api } from '../src/renderer/src/lib/api'
@@ -72,6 +73,29 @@ it('name click returns to the original file Region in another group without rere
   expect(state.tabs[tabId]!.layout.root).toBe(file.layout.root)
   expect(state.documents[key]).toBe(draft); expect(state.dirtyDocuments[key]).toBe(true)
   expect(read).not.toHaveBeenCalled()
+})
+it('the actual dirty Explorer mark changes drawing while retaining the opened file and unsaved document', async () => {
+  const release = mountThemeRuntime(window)
+  try {
+    await dom.render(<FileExplorer />); await click(label('one.ts'))
+    const tabId = fileTabId(workspace.id, 'one.ts'), regionId = initialWorkbenchRegionId(tabId), key = documentKey(workspace.id, 'one.ts')
+    await act(async () => useAppStore.getState().updateDocument(tabId, 'Retained dirty source', regionId))
+    const mark = element('[data-tree-path="one.ts"] [data-semantic-icon="status.dirty"]')
+    const before = useAppStore.getState(), draft = before.documents[key], tab = before.tabs[tabId]
+    expect(mark.getAttribute('aria-label')).toBe('Unsaved changes')
+    expect(mark.getAttribute('width')).toBe('6')
+    expect(mark.querySelector('use')!.getAttribute('href')).toBe('#agentmux-icon-status.dirty')
+    await act(async () => previewTheme({ ...GRAPHITE_THEME, icons: { 'status.dirty': { kind: 'paths', paths: [{ d: 'M3 3L21 3L21 21L3 21Z', fill: 'currentColor' }] } } }))
+    expect(element('[data-tree-path="one.ts"] [data-semantic-icon="status.dirty"]')).toBe(mark)
+    const shape = document.querySelector('[id="agentmux-icon-status.dirty"] path')
+    expect(shape, 'the live dirty consumer must resolve actual imported path geometry').not.toBeNull()
+    expect(shape!.getAttribute('d')).toBe('M3 3L21 3L21 21L3 21Z')
+    expect(useAppStore.getState().documents[key]).toBe(draft)
+    expect(draft!.content).toBe('Retained dirty source')
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().tabs[tabId]).toBe(tab)
+    expect(read).toHaveBeenCalledTimes(1)
+  } finally { previewTheme(undefined); release() }
 })
 it.each(['icon', 'row', 'Enter'])('existing %s activation shares the same explicit navigation', async target => {
   await dom.render(<FileExplorer />)
