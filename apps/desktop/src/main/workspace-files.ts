@@ -645,8 +645,8 @@ async function runLocalObserver(
   }
 }
 
-async function remoteRealPath(host: ExecutionHost, path: string): Promise<string> {
-  const result = await host.run('realpath', ['--', path], { timeoutMs: 15_000 })
+async function remoteRealPath(host: ExecutionHost, path: string, signal?: AbortSignal): Promise<string> {
+  const result = await host.run('realpath', ['--', path], { timeoutMs: 15_000, ...(signal ? { signal } : {}) })
   if (result.exitCode !== 0) {
     throw new Error(result.stderr.trim() || `Could not resolve ${basename(path)}`)
   }
@@ -688,18 +688,45 @@ const REMOTE_DIRECTORY_READ_SCRIPT = [
   'exec find "$canonical/." ! -name . -prune -exec sh -c "$list_script" agentmux-list {} +'
 ].join('\n')
 
+// A bounded read pins the parent and then the file. Path validation alone cannot
+// protect a later pathname open against a symlink/rename between SSH calls.
+const REMOTE_BOUNDED_READ_SCRIPT = [
+  'root=$1; parent=$2; name=$3; limit=$4; count=$5',
+  'escape() { printf "%s\\n" "Path changed or escapes the workspace root" >&2; exit 6; }',
+  'cd -P -- "$parent" || exit $?',
+  "cwd=$(pwd -P && printf '.') || exit $?; cwd=${cwd%.}; cwd=${cwd%?}",
+  'case "$root" in /) ;; *) case "$cwd" in "$root"|"$root"/*) ;; *) escape ;; esac ;; esac',
+  '[ ! -L "$name" ] || escape',
+  'if [ -d "$name" ]; then exit 3; fi',
+  '[ -f "$name" ] || exit 5',
+  'exec 3< "$name" || exit $?',
+  // Darwin /dev/fd has synthetic device metadata. Its stat with no pathname
+  // fstats stdin; GNU stat follows /dev/fd/3 to the underlying open file.
+  'if metadata=$(LC_ALL=C stat -L -c "%d:%i:%s:%F" /dev/fd/3 2>/dev/null); then style=gnu',
+  'else metadata=$(LC_ALL=C stat -f "%d:%i:%z:%HT" <&3) || exit $?; style=bsd; fi',
+  'case "${metadata##*:}" in "regular file"|"regular empty file"|"Regular File") ;; *) exit 5 ;; esac',
+  'identity=${metadata%:*}; size=${identity##*:}; identity=${identity%:*}',
+  'if [ "$style" = gnu ]; then path_identity=$(stat -c "%d:%i" -- "$name") || exit $?',
+  'else path_identity=$(stat -f "%d:%i" "./$name") || exit $?; fi',
+  '[ "$identity" = "$path_identity" ] && [ ! -L "$name" ] || escape',
+  'if [ "$size" -gt "$limit" ]; then exit 4; fi',
+  // Never reopen the pathname after the identity check. Growth remains bounded.
+  'exec head -c "$count" <&3'
+].join('\n')
+
 async function remoteExistingPathWithin(
   host: ExecutionHost,
   root: string,
-  requested: string
-): Promise<string> {
+  requested: string,
+  signal?: AbortSignal
+): Promise<{ root: string; target: string }> {
   const lexicalTarget = remotePathWithin(root, requested)
   const [realRoot, realTarget] = await Promise.all([
-    remoteRealPath(host, root),
-    remoteRealPath(host, lexicalTarget)
+    remoteRealPath(host, root, signal),
+    remoteRealPath(host, lexicalTarget, signal)
   ])
   assertRealPathWithin(realRoot, realTarget, '/')
-  return realTarget
+  return { root: realRoot, target: realTarget }
 }
 
 async function remoteReadablePath(host: ExecutionHost, root: string, requested: string): Promise<string> {
@@ -1131,7 +1158,24 @@ export class WorkspaceFiles {
           }
         }
       }
-      if (budget) throw new Error('Bounded document search is unavailable for this remote original resource. Its ordinary file read remains available.')
+      if (budget) {
+        // Preserve remote text resources through the existing Host transport. Both the
+        // producer and receiving transport are bounded, including a file that grows.
+        const resolved = await remoteExistingPathWithin(host, workspace.path, requestedPath, budget.signal)
+        const limit = Math.min(budget.maxFileBytes, 4 * 1024 * 1024)
+        const result = await host.run('sh', ['-c', REMOTE_BOUNDED_READ_SCRIPT,
+          'agentmux-bounded-read', resolved.root, posix.dirname(resolved.target), posix.basename(resolved.target), String(limit), String(limit + 1)],
+          { timeoutMs: 15_000, maxOutputBytes: limit + 1, ...(budget.signal ? { signal: budget.signal } : {}) })
+        budget.signal?.throwIfAborted()
+        if (result.exitCode === 3) return { status: 'directory' }
+        const bytes = Buffer.from(result.stdout)
+        if (result.exitCode === 4 || bytes.byteLength > limit)
+          throw Object.assign(new Error(`File content exceeds the ${limit / 1024 / 1024} MiB remote read budget. The original file was kept.`), { code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+        if (result.exitCode !== 0) throw new Error(result.stderr.trim() || 'The original remote file could not be read.')
+        budget.onReadCost?.({ payloadBytes: bytes.byteLength })
+        if (fileBytesAreBinary(bytes)) return { status: 'binary', path: requestedPath, revision: revisionFor(bytes), byteLength: bytes.byteLength }
+        return { status: 'read', document: { path: requestedPath, content: result.stdout, revision: revisionFor(bytes) } }
+      }
       const path = await remoteReadablePath(host, workspace.path, requestedPath)
       // Ask once: if the target is a directory, exit 3 so the caller can reveal it; otherwise stream
       // it. Folding the classification into the same round-trip avoids a locale-fragile "Is a
@@ -1243,13 +1287,14 @@ export class WorkspaceFiles {
   }
 
   /** Main-only bounded snapshot for operation-owned upload staging; one worker scan verifies the bytes. */
-  async snapshotBytes(workspace: WorkspaceRecord, requestedPath: string, options: Pick<WorkspaceFileByteReadOptions, 'expectedRevision'> = {}): Promise<WorkspaceFileByteRead> {
+  async snapshotBytes(workspace: WorkspaceRecord, requestedPath: string, options: Pick<WorkspaceFileByteReadOptions, 'expectedRevision'> & { signal?: AbortSignal } = {}): Promise<WorkspaceFileByteRead> {
     return await this.readByteRange(workspace, requestedPath, { ...options, offset: 0, maxBytes: WORKSPACE_FILE_MAX_BYTES })
   }
 
   /** One visible file consumer, one complete bounded snapshot through the existing byte owner. */
-  async readPreview(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFilePreviewReadOptions = {}): Promise<WorkspaceFilePreviewResult> {
+  async readPreview(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFilePreviewReadOptions & { signal?: AbortSignal } = {}): Promise<WorkspaceFilePreviewResult> {
     try {
+      options.signal?.throwIfAborted()
       if (this.hostFor(workspace.hostId).kind !== 'local') {
         return { status: 'unavailable', code: 'REMOTE_WORKSPACE_PREVIEW_UNAVAILABLE', message: 'Binary preview is unavailable for this remote workspace. Remote file execution is not available.' }
       }

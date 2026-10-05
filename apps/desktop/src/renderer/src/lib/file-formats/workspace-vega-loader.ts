@@ -1,3 +1,4 @@
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { Loader } from 'vega'
 import { api } from '../api'
 import { useAppStore } from '../../store'
@@ -26,33 +27,47 @@ function binding(workspaceId: string): string {
 export function createWorkspaceVegaLoader(workspaceId: string, sourcePath: string, signal: AbortSignal): Loader & { dispose(): void } {
   const original = binding(workspaceId)
   let disposed = false, invalidated = false
+  const pending = new Set<string>()
+  const cancelPending = () => { for (const id of pending) void api.files.cancelPreviewResource(id).catch(error => console.warn('Preview resource cancellation failed.', error)) }
   const unsubscribe = useAppStore.subscribe((next, previous) => {
-    if (next.config !== previous.config && binding(workspaceId) !== original) invalidated = true
+    if (next.config !== previous.config && binding(workspaceId) !== original) { invalidated = true; cancelPending() }
   })
   const dispose = () => {
-    disposed = true; unsubscribe(); signal.removeEventListener('abort', dispose)
+    if (disposed) return
+    disposed = true; cancelPending(); unsubscribe(); signal.removeEventListener('abort', dispose)
   }
   signal.addEventListener('abort', dispose, { once: true })
   const check = () => {
     if (disposed || signal.aborted) throw new DOMException('Chart preview was cancelled.', 'AbortError')
     if (invalidated || binding(workspaceId) !== original) throw new Error('The chart Workspace changed. Retry preview.')
   }
+  const read = async (kind: 'data' | 'image', uri: string) => {
+    check()
+    const path = chartResourcePath(sourcePath, uri), id = crypto.randomUUID()
+    pending.add(id)
+    try {
+      const result = await api.files.readPreviewResource({ id, workspaceId, path, kind })
+      check()
+      return result
+    } catch (error) {
+      check()
+      throw new Error(presentError(error))
+    } finally { pending.delete(id) }
+  }
+  if (signal.aborted) dispose()
   const denied = async (): Promise<never> => { throw new Error('Chart resources are restricted to the original Workspace.') }
   return {
     async load(uri) {
-      check()
-      const result = await api.files.read(workspaceId, chartResourcePath(sourcePath, uri))
-      check()
-      if (result.status !== 'read') throw new Error(`Chart data could not load (${result.status}).`)
-      return result.document.content
+      const result = await read('data', uri)
+      if (result.kind !== 'data') throw new Error('Chart data returned an invalid resource.')
+      return result.content
     },
     async sanitize(uri, options) {
       check()
       if (options?.context !== 'image') throw new Error('Chart navigation is unavailable in a read-only preview.')
       if (/^data:image\/(png|jpeg|gif|webp);base64,[a-z\d+/=\s]+$/i.test(uri)) return { href: uri }
-      const result = await api.files.readPreview(workspaceId, chartResourcePath(sourcePath, uri))
-      check()
-      if (result.status !== 'ready' || result.kind !== 'image' || result.mimeType === 'image/svg+xml') throw new Error('Chart image is unavailable or unsupported.')
+      const result = await read('image', uri)
+      if (result.kind !== 'image' || result.mimeType === 'image/svg+xml') throw new Error('Chart image is unavailable or unsupported.')
       // Private loader metadata crosses only our fixed sanitize port. Vega receives
       // the data URL after the Worker has encoded the already-authorized bytes.
       return { href: uri, bytes: new Uint8Array(result.bytes), mimeType: result.mimeType }

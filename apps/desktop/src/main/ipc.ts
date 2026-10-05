@@ -14,6 +14,7 @@ import { FileUploadOwner } from './file-upload-owner.js'
 import { GitPublicControl } from './git-public-control.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
+import { FilePreviewResources } from './file-preview-resources.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
 import { FileBuilds } from './file-builds.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
@@ -287,9 +288,10 @@ export async function registerIpc(args: {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
   const htmlPreviews = new HtmlFilePreviews(files, id => config.workspaces.find(item => item.id === id))
+  const previewResources = new FilePreviewResources(files, id => config.workspaces.find(item => item.id === id))
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
-  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
+  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
   const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, _inPlace: boolean, mainFrame: boolean) => {
     if (mainFrame) releaseHtmlPreviews()
   }
@@ -711,6 +713,16 @@ export async function registerIpc(args: {
   handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
     await files.readPreview(workspace(config, workspaceId), path, options)
   )
+  handleWithEvent('files:readPreviewResource', async (event, request: import('../shared/workspace-file-preview').WorkspacePreviewResourceRequest) => {
+    requireTrustedSender('files:readPreviewResource', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File preview resources require the original application frame.')
+    return await previewResources.read(request)
+  })
+  handleWithEvent('files:cancelPreviewResource', async (event, id: string) => {
+    requireTrustedSender('files:cancelPreviewResource', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File preview resources require the original application frame.')
+    previewResources.cancel(id)
+  })
   handleWithEvent('files:openHtmlPreview', async (event, workspaceId: string, path: string, content: string) => {
     requireTrustedSender('files:openHtmlPreview', event)
     if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')
@@ -1792,6 +1804,7 @@ export async function registerIpc(args: {
         args.window.webContents.off('render-process-gone', releaseHtmlPreviews)
         args.window.webContents.off('did-start-navigation', releaseNavigatedHtmlPreviews)
       } },
+      { owner: 'preview-resources', dispose: () => previewResources.dispose() },
       { owner: 'workspace-files', dispose: () => files.dispose() },
       ...channels.map(channel => ({ owner: `ipc-handler:${channel}`, dispose: () => ipcMain.removeHandler(channel) }))
     ], 'Failed to dispose Desktop IPC owners.')

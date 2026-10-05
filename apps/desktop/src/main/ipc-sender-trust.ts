@@ -33,6 +33,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'files:readPublic': 'original file read',
   'files:openHtmlPreview': 'HTML file preview',
   'files:releaseHtmlPreview': 'HTML file preview release',
+  'files:readPreviewResource': 'file preview resource',
+  'files:cancelPreviewResource': 'file preview resource',
   'files:renderDiagram': 'diagram preview',
   'files:cancelDiagram': 'diagram preview cancellation',
   'files:build': 'explicit File compilation',

@@ -52,3 +52,9 @@ export type WorkspaceFilePreviewResult =
   | { status: 'changed'; message: string }
   | { status: 'unsupported'; message: string }
   | { status: 'unavailable'; code: string; message: string }
+
+/** Internal, operation-owned resources for a visible read-only file preview. */
+export type WorkspacePreviewResourceRequest = { id: string; workspaceId: string; path: string; kind: 'data' | 'image' }
+export type WorkspacePreviewResourceResult =
+  | { kind: 'data'; content: string }
+  | { kind: 'image'; bytes: Uint8Array; mimeType: string }

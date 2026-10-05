@@ -194,6 +194,8 @@ const api: AgentMuxPreloadApi = {
     read: (workspaceId: string, path: string) => ipcRenderer.invoke('files:read', workspaceId, path),
     readPreview: (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
       ipcRenderer.invoke('files:readPreview', workspaceId, path, options),
+    readPreviewResource: request => ipcRenderer.invoke('files:readPreviewResource', request),
+    cancelPreviewResource: id => ipcRenderer.invoke('files:cancelPreviewResource', id),
     openHtmlPreview: (workspaceId: string, path: string, content: string) => ipcRenderer.invoke('files:openHtmlPreview', workspaceId, path, content),
     releaseHtmlPreview: (id: string) => ipcRenderer.invoke('files:releaseHtmlPreview', id),
     renderDiagram: (request: import('../shared/file-diagram').FileDiagramRequest) => ipcRenderer.invoke('files:renderDiagram', request),
