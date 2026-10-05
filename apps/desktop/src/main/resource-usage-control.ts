@@ -36,9 +36,10 @@ export function createResourceMetricsPort(args: {
       const project = (sample: ResourceSample): MetricsObservation => {
         const window = args.currentWindow()
         const renderer = sample.renderer
-        const sameWindow = renderer.data !== null && window !== null &&
-          renderer.data.window.windowId === window.windowId && renderer.data.window.webContentsId === window.webContentsId &&
-          renderer.data.window.generation === window.generation
+        const matchesWindow = (candidate: MetricsWindow | null) => candidate !== null && window !== null &&
+          candidate.windowId === window.windowId && candidate.webContentsId === window.webContentsId && candidate.generation === window.generation
+        const sameWindow = matchesWindow(renderer.data?.window ?? null)
+        const rendererFailure = matchesWindow(renderer.unavailableWindow) ? renderer.unavailable : null
         return {
           schema: 'agentmux.metrics.v1', observedAt: (args.now ?? Date.now)(),
           scope: { kind: 'unix-host', hostId: 'local', hostname: hostname(), mainPid: process.pid }, window,
@@ -50,8 +51,8 @@ export function createResourceMetricsPort(args: {
           diagnostics: source(sample.diagnostics.data, sample.diagnostics.observedAt, sample.diagnostics.unavailable),
           main: source(sample.mainOwners, sample.mainObservedAt,
             sample.mainUnavailable ?? (sample.mainOwners === null ? 'Main resource owners unavailable' : null)),
-          renderer: sameWindow ? source(renderer.data, renderer.observedAt, renderer.unavailable)
-            : source<MetricsRenderer>(null, null, window === null ? 'Current Renderer window is unavailable' : renderer.unavailable ?? 'Current Renderer has not answered')
+          renderer: sameWindow ? source(renderer.data, renderer.observedAt, rendererFailure)
+            : source<MetricsRenderer>(null, null, window === null ? 'Current Renderer window is unavailable' : rendererFailure)
         }
       }
       try {

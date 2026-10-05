@@ -105,6 +105,9 @@ this capability does not provide a sandbox, secret storage, scheduling or remote
 Performance consumes public metrics. Run holds one manual observation until stop; watch
 owns an independent lease. Stop ends its exact observation, never Agents or other leases.
 Source identity, availability and each source's actual observation time remain visible.
+system metrics get returns the first bounded frame and releases its own reader; a
+pending Renderer has not failed. Watch frames may update different sources: use the
+app source observation time and process intervalMs to identify actual CPU intervals.
 
 Data-only script results may use schema agentmux.toolkit.result.v1 with summary, items
 [{label,value}], links [{label,url}] and notice. Optional agentCards contains fields,
