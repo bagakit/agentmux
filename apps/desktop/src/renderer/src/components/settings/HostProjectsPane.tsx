@@ -5,7 +5,9 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { AppConfig } from '../../../../shared/contracts'
 import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { api } from '../../lib/api'
-import { configuredExecutors } from '../../lib/executors'
+import { executorsForHost, hostExecutorInventoryMatches } from '../../lib/executors'
+import { executorDetectionLabel } from '../../lib/executor-detection'
+import { configValuesEqual } from '../../../../shared/config-edit'
 import { projectRailNavigation } from '../../lib/workspace-projects'
 import { useAppStore } from '../../store'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
@@ -27,23 +29,32 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
   const [path, setPath] = useState('')
   const [name, setName] = useState('')
   const [executorId, setExecutorId] = useState('')
+  const [selectionHost, setSelectionHost] = useState<typeof host>(undefined)
+  const inventory = useAppStore(state => state.hostExecutorInventories[hostId])
+  const detections = useAppStore(state => state.executorDetections)
+  const discover = useAppStore(state => state.discoverHostExecutors)
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const pending = useRef(false)
-  const visible = useRef(active)
-  visible.current = active
-  useEffect(() => { visible.current = active; return () => { visible.current = false } }, [active])
+  const visible = useRef(active && !hidden)
+  visible.current = active && !hidden
+  useEffect(() => { visible.current = active && !hidden; return () => { visible.current = false } }, [active, hidden])
+  const inventoryMatches = hostExecutorInventoryMatches(inventory, host)
+  useEffect(() => {
+    if (active && !hidden && adding && host?.kind === 'ssh' && !inventoryMatches) void discover(host.id)
+  }, [active, hidden, adding, host, inventoryMatches, discover])
   const projects = projectRailNavigation(config.workspaces.filter(workspace => workspace.hostId === hostId)).projects
   const filter = query.trim().toLocaleLowerCase()
   const matches = projects.filter(project => [project.name, project.repoPath,
     ...project.workspaces.flatMap(workspace => [workspace.name, workspace.path, workspace.branch ?? ''])]
     .some(value => value.toLocaleLowerCase().includes(filter)))
-  const executors = configuredExecutors(config)
+  const executors = executorsForHost(config, hostId, detections, inventory).filter(item => item.detection?.state !== 'missing')
+  const selectionCurrent = !executorId || (configValuesEqual(selectionHost, host) && executors.some(item => item.id === executorId))
 
-  async function open(workspace: WorkspaceRecord, startExecutor = ''): Promise<void> {
+  async function open(workspace: WorkspaceRecord, startExecutor = '', selectedHost = selectionHost): Promise<void> {
     if (!visible.current) return
     setProgress({ workspace, stage: 'registered', message: 'Folder registered. Opening its work surface…' })
     try {
@@ -56,6 +67,13 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         if (state.activeWorkspaceId !== workspace.id || current?.hostId !== workspace.hostId) {
           setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent was not started.',
             error: 'The selected work context changed. Open this folder again before starting an Agent.' })
+          return
+        }
+        const currentHost = state.config?.hosts.find(item => item.id === workspace.hostId)
+        const currentExecutors = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId])
+        if (!configValuesEqual(selectedHost, currentHost) || !currentExecutors.some(item => item.id === startExecutor && item.detection?.state !== 'missing')) {
+          setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent was not started.',
+            error: 'The selected Agent configuration or connection changed. Choose an Agent on the saved connection again, or open without an Agent.' })
           return
         }
         const layout = state.layouts[workspace.id]
@@ -79,6 +97,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
     if (!host || pending.current || !path.trim()) return
     const input = { hostId: host.id, path: path.trim(), ...(name.trim() ? { name: name.trim() } : {}) }
     const startExecutor = thenOpen ? executorId : ''
+    const selectedHost = selectionHost
     pending.current = true
     setBusy(true); setError(null); setProgress(null)
     try {
@@ -88,7 +107,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         return
       }
       setProgress({ workspace, stage: 'registered', message: `Folder registered on ${host.label}.` })
-      if (thenOpen) await open(workspace, startExecutor)
+      if (thenOpen) await open(workspace, startExecutor, selectedHost)
     } catch (cause) {
       setError(`Folder registration did not return a confirmed result. ${presentError(cause)}`)
     } finally {
@@ -119,12 +138,20 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <label className="host-projects__path"><span>Folder path</span><TextInput value={path} placeholder="Project directory"
         onChange={event => setPath(event.target.value)} /></label>
       <label><span>Name <small>optional</small></span><TextInput value={name} placeholder="Project name" onChange={event => setName(event.target.value)} /></label>
-      <label><span>Start after opening <small>optional</small></span><select value={executorId} onChange={event => setExecutorId(event.target.value)}>
+      <label><span>Start after opening <small>optional</small></span><select value={executorId} onChange={event => { setExecutorId(event.target.value); setSelectionHost(host ? structuredClone(host) : undefined) }}>
         <option value="">Open without an Agent</option>
-        {executorId && !executors.some(executor => executor.id === executorId) ? <option value={executorId}>Saved Agent configuration unavailable</option> : null}
-        {executors.map(executor => <option key={executor.id} value={executor.id}>{executor.label}</option>)}
+        {!selectionCurrent ? <option value={executorId} disabled>Previous Agent selection unavailable — choose again</option> : null}
+        {executors.filter(executor => selectionCurrent || executor.id !== executorId).map(executor => <option key={executor.id} value={executor.id}>{executor.label} · {executorDetectionLabel(executor.detection)}</option>)}
       </select></label>
       <p className="field-hint host-projects__path">Uses the folder on this environment. Agent startup reports the actual connection and command result.</p>
+      {host?.kind === 'ssh' ? <div className="host-projects__path" role="status">
+        <p className="field-hint">{inventoryMatches && inventory.state === 'error'
+          ? `Agent discovery did not complete. ${inventory.detail ?? 'The connection result is unknown.'} Saved choices remain available.`
+          : inventoryMatches && inventory.state === 'checking' ? 'Checking Agents on this connection…'
+            : executors.length ? 'Agent choices belong to this saved connection.' : 'No launchable Agents are confirmed. Configure Agents for this connection, or open without an Agent.'}</p>
+        <button type="button" className="small-button" data-refresh-executors disabled={inventoryMatches && inventory.state === 'checking'}
+          onClick={() => void discover(host.id)}>Refresh Agents</button>
+      </div> : null}
       <footer className="host-projects__actions">
         <button type="button" className="small-button" data-register-folder disabled={!host || !path.trim() || busy} onClick={() => void register(false)}>Register folder</button>
         <button type="submit" className="primary-button" data-open-folder disabled={!host || !path.trim() || busy}>
