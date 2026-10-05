@@ -73,6 +73,39 @@ it('Escape invalidates a real deferred focus read and the late reply cannot reop
   expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
 })
 
+it('opens on focus before history settles, offers recent input beside the current URL, then filters only edits', async () => {
+  const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
+  await mount(target, 'https://different.test/current'); await focus()
+  expect(popup()?.textContent).toContain('Reading input history')
+  expect(field().getAttribute('aria-expanded')).toBe('true')
+  await act(async () => pending.resolve(snapshot))
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(2)
+  expect(field().value).toBe('https://different.test/current')
+  expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
+  await fill('original search')
+  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
+})
+
+it('clicking the already focused field reopens suggestions after Escape and shows failures without blocking navigation', async () => {
+  await mount(target, 'kept input'); await focus(); await key('Escape')
+  vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('offline history'))
+  await act(async () => field().click())
+  expect(popup()?.textContent).toContain('offline history')
+  expect(document.activeElement).toBe(field()); expect(field().value).toBe('kept input')
+  await key('Enter')
+  expect(submitted).toHaveBeenCalledExactlyOnceWith('kept input')
+})
+
+it('keeps filtering an edited draft after focus leaves and returns', async () => {
+  await mount(target, 'https://different.test/current'); await focus(); await fill('original search')
+  await act(async () => container.querySelector<HTMLButtonElement>('#outside')!.focus())
+  expect(popup()).toBeNull()
+  await focus()
+  expect(field().value).toBe('original search')
+  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
+  expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
+})
+
 it('typing during a real deferred focus read keeps the draft and selection while confirming the actual nonempty history', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
   await mount(); await focus(); await fill('original'); field().setSelectionRange(2, 4)
