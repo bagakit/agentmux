@@ -54,7 +54,7 @@ function sameOwner(current: MoteWorkfaceScope | null, owner: MoteWorkfaceScope):
     current.workspace.hostId === owner.workspace.hostId && current.workspace.path === owner.workspace.path
 }
 
-type FileDestination = Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>
+export type FileDestination = Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>
 
 /** User-authored discussion preparation. The returned original Launcher is never a running Session. */
 export function openMoteDiscussionDraft(owner: MoteWorkfaceScope, prompt: string, options: {
@@ -113,7 +113,7 @@ export function openMoteDiscussionDraft(owner: MoteWorkfaceScope, prompt: string
 
 /** A user's new File/Terminal action in a confirmed empty Mote needs a Group,
  * not a made-up discussion. Saved unknown entities never use this route. */
-function confirmedMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope,
+export function confirmedMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope,
   destination: FileDestination, requireEmpty: boolean): FileDestination | null {
   const workspace = state.config?.workspaces.find(item => item.id === owner.workspace.id)
   const layout = state.layouts[destination.displayWorkspaceId]
@@ -155,6 +155,55 @@ export function emptyMoteDestination(state: ReturnType<typeof useAppStore.getSta
   return destination ? confirmedMoteDestination(state, owner, destination, true) : null
 }
 
+/** The original nonfocus File opener. Callers retain their own navigation/lifetime guard. */
+export async function openMoteMaterialAt(owner: MoteWorkfaceScope, path: string,
+  reference: WorkbenchProjectionSelection | null, destination: FileDestination, signal: AbortSignal) {
+  const state = useAppStore.getState(), workspaceId = owner.workspace.id
+  if (signal.aborted || (reference ? !confirmedMoteReference(state, owner, { reference }) :
+  !confirmedMoteDestination(state, owner, destination, true))) return null
+  const { displayWorkspaceId, groupId } = destination
+  const identity = fileWorkbenchIdentity(state, workspaceId, path, { displayWorkspaceId })
+  const tabId = identity.tabId
+  const existing = state.tabs[tabId]
+  const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace)?.find(item => {
+    const root = scratchTopicLogicalPath(owner.workspace, item)
+    return root !== null && fileExplorerContains(root, path)
+  })
+  const topicId = existing ? existing.topicId : topic?.id ?? (fileExplorerContains(owner.rootPath, path) ? owner.topic.id : undefined)
+  const identityTopic = topic ?? (topicId === owner.topic.id ? owner.topic : undefined)
+  const spaceId = directoryIdentity(owner.workspace.hostId, identityTopic ? scratchTopicIdentityPath(owner.workspace, identityTopic) : owner.workspace.path)
+  const space = existing?.space ?? { spaceId, zoneId: homeZoneId(spaceId) }
+  const fileRegions = existing ? Object.values(existing.regions).filter(region => region.kind === 'file' &&
+    region.workspaceId === workspaceId && region.path === path) : []
+  const heldFileRegion = existing?.id === reference?.tabId ? fileRegions.find(region => region.regionId === reference?.regionId) : undefined
+  if (existing && !heldFileRegion && fileRegions.length !== 1) {
+    state.reportError(new Error('The original File Region is unconfirmed or ambiguous. Its content is kept; choose the exact File Region and retry.')); return
+  }
+  const regionId = heldFileRegion?.regionId ?? fileRegions[0]?.regionId ?? identity.regionId
+  const fileReference = { displayWorkspaceId, groupId, tabId, regionId }
+  const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
+  const alreadyPlaced = catalog.locations.some(location => sameWorkbenchProjectionSelection(location, fileReference))
+  let opened = false, openedReference: WorkbenchProjectionSelection | null = null
+  // A retained File keeps its entity/Space. The File owner adds or reuses only
+  // the requested occurrence, including legacy Tabs without a stored Space.
+  await state.openFile(path, groupId, undefined, workspaceId, true, {
+    displayWorkspaceId, space,
+    resource: { hostId: owner.workspace.hostId, path: owner.workspace.path }, focus: false,
+    ...(existing?.space && alreadyPlaced ? { reference: fileReference } : {}),
+    selection: { ...space, workspaceId: displayWorkspaceId, groupId, tabId, regionId, topicId: topicId ?? null },
+    onResult: result => {
+      opened = result.placement.status === 'created' || result.placement.status === 'reused'
+      if (opened && result.placement.tabId && result.placement.regionId) openedReference = {
+        displayWorkspaceId, groupId, tabId: result.placement.tabId, regionId: result.placement.regionId }
+    }
+  }, signal)
+  if (signal.aborted || !opened || !openedReference || (reference ?
+  !confirmedMoteReference(useAppStore.getState(), owner, { reference }) :
+  !confirmedMoteDestination(useAppStore.getState(), owner, destination, false))) return null
+  return { reference: openedReference as WorkbenchProjectionSelection, tabId, regionId, topicId, space }
+}
+
+
 /** Materials use the original File/launcher owners, never the background Project. */
 export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options: {
   floating?: boolean | undefined
@@ -179,27 +228,6 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     const destination = reference ?? emptyMoteDestination(state, owner, captured.options)
     if (!destination) { state.reportError(new Error('The exact original Mote display is unconfirmed. Your work is kept; choose its Tab and Region, or an exact empty destination, then retry opening the file.')); return }
     const { displayWorkspaceId, groupId } = destination
-    const identity = fileWorkbenchIdentity(state, workspaceId, path, { displayWorkspaceId })
-    const tabId = identity.tabId
-    const existing = state.tabs[tabId]
-    const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace)?.find(item => {
-      const root = scratchTopicLogicalPath(owner.workspace, item)
-      return root !== null && fileExplorerContains(root, path)
-    })
-    const topicId = existing ? existing.topicId : topic?.id ?? (fileExplorerContains(owner.rootPath, path) ? owner.topic.id : undefined)
-    const identityTopic = topic ?? (topicId === owner.topic.id ? owner.topic : undefined)
-    const spaceId = directoryIdentity(owner.workspace.hostId, identityTopic ? scratchTopicIdentityPath(owner.workspace, identityTopic) : owner.workspace.path)
-    const space = existing?.space ?? { spaceId, zoneId: homeZoneId(spaceId) }
-    const fileRegions = existing ? Object.values(existing.regions).filter(region => region.kind === 'file' &&
-      region.workspaceId === workspaceId && region.path === path) : []
-    const heldFileRegion = existing?.id === reference?.tabId ? fileRegions.find(region => region.regionId === reference?.regionId) : undefined
-    if (existing && !heldFileRegion && fileRegions.length !== 1) {
-      state.reportError(new Error('The original File Region is unconfirmed or ambiguous. Its content is kept; choose the exact File Region and retry.')); return
-    }
-    const regionId = heldFileRegion?.regionId ?? fileRegions[0]?.regionId ?? identity.regionId
-    const fileReference = { displayWorkspaceId, groupId, tabId, regionId }
-    const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
-    const alreadyPlaced = catalog.locations.some(location => sameWorkbenchProjectionSelection(location, fileReference))
     const navigation = fileNavigationSelection(state), floating = floatingSelection()
     const controller = new AbortController()
     const unsubscribers: (() => void)[] = []
@@ -219,22 +247,13 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
       if (floatingSelection() !== floating) cancel()
     }))
     for (const event of events) document.addEventListener(event, cancel, true)
-    let opened = false, openedReference: WorkbenchProjectionSelection | null = null
-    // A retained File keeps its entity/Space. The File owner adds or reuses only
-    // the requested occurrence, including legacy Tabs without a stored Space.
-    try { await state.openFile(path, groupId, undefined, workspaceId, true, {
-      displayWorkspaceId, space,
-      resource: { hostId: owner.workspace.hostId, path: owner.workspace.path }, focus: false,
-      ...(existing?.space && alreadyPlaced ? { reference: fileReference } : {}),
-      selection: { ...space, workspaceId: displayWorkspaceId, groupId, tabId, regionId, topicId: topicId ?? null },
-      onResult: result => {
-        opened = result.placement.status === 'created' || result.placement.status === 'reused'
-        if (opened && result.placement.tabId && result.placement.regionId) openedReference = {
-          displayWorkspaceId, groupId, tabId: result.placement.tabId, regionId: result.placement.regionId }
-      }
-    }, controller.signal) } finally { release() }
+    let result
+    try { result = await openMoteMaterialAt(owner, path, reference, destination, controller.signal) } finally { release() }
+    const openedReference = result?.reference
+    const opened = !!result
+    const { tabId, regionId, topicId, space } = result ?? { tabId: '', regionId: '', topicId: undefined, space: undefined }
     const currentOwner = latest.current.scope
-    if (controller.signal.aborted || !opened || !sameOwner(currentOwner, owner) || captured.options.reference &&
+    if (controller.signal.aborted || !opened || !space || !sameOwner(currentOwner, owner) || captured.options.reference &&
       !sameWorkbenchProjectionSelection(latest.current.options.reference ?? null, captured.options.reference)) return
     if (reference ? !confirmedMoteReference(useAppStore.getState(), owner, { ...captured.options, reference }) :
       !confirmedMoteDestination(useAppStore.getState(), owner, destination, false)) {

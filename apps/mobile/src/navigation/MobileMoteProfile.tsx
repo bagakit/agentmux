@@ -7,6 +7,7 @@ import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileObjectIdentity } from './MobileIdentity'
 import { isMoteFilePath, moteFileSources } from '../recovery/mote-file-drafts'
 import { createBrowserPlatform } from '../platform/browser'
+import { MobileMoteQuickEditor } from './MobileMoteQuickEditor'
 import { MobileMoteFileEditor } from './MobileMoteFileEditor'
 
 type Props = { identity: MobileObjectIdentity; client: AgentMuxHostedClient | null; visible?: boolean;
@@ -28,7 +29,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
   const selected = controlled ? sourcePath : localSource
   const [files, setFiles] = useState<Record<string, FileReadResult>>({})
   const [observations, setObservations] = useState<Record<string, FileReadResult>>({})
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(false), [quickEditing, setQuickEditing] = useState(false)
   const [fileIssue, setFileIssue] = useState('')
   const intent = useRef(0)
   const originalContent = useRef(reference)
@@ -57,17 +58,18 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
     return () => { current = false }
   }, [client, spaceId, visible, refresh])
   const changeSource = useCallback((path: string | null) => {
-    setEditing(false)
+    setEditing(false); setQuickEditing(false)
     if (!controlled) setLocalSource(path)
     onSourceChange?.(path)
   }, [controlled, onSourceChange])
   const backToProfile = useCallback(() => { intent.current += 1; setReading(false); changeSource(null) }, [changeSource])
+  const backFromQuick = useCallback(() => setQuickEditing(false), [])
   const backToReading = useCallback(() => setEditing(false), [])
   useLayoutEffect(() => {
     if (!visible || !onBackChange) return
-    onBackChange(selected ? editing ? backToReading : backToProfile : null)
+    onBackChange(quickEditing ? backFromQuick : selected ? editing ? backToReading : backToProfile : null)
     return () => onBackChange?.(null)
-  }, [Boolean(selected), editing, visible, onBackChange, backToProfile, backToReading])
+  }, [Boolean(selected), editing, quickEditing, visible, onBackChange, backToProfile, backToReading, backFromQuick])
   const content = facts?.content ?? originalContent.current
   const loadSource = useCallback(async (path: string) => {
     const token = ++intent.current
@@ -105,7 +107,10 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
     {issue && <p role="status">{issue}</p>}
     {queryDiagnostic && <details><summary>上次资料查询诊断</summary><p>{queryDiagnostic}</p></details>}
     {facts?.issue && <p role="status">{facts.issue}</p>}
-    {selected && editing && spaceId && content && isMoteFilePath(selected) ? <MobileMoteFileEditor
+    {quickEditing && spaceId && content ? <MobileMoteQuickEditor key={JSON.stringify([spaceId, content])} target={{ spaceId, zoneId: content.zoneId,
+      expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }}
+      client={client} visible={visible} copyText={copyText ?? createBrowserPlatform().copyText} onClose={backFromQuick}
+      onSaved={() => setRefresh(value => value + 1)} /> : selected && editing && spaceId && content && isMoteFilePath(selected) ? <MobileMoteFileEditor
       key={JSON.stringify([spaceId, selected, content])} target={{ spaceId, path: selected, reference: content,
         observation: observations[selected] ?? files[selected] ?? null }} client={client} visible={visible}
       copyText={copyText ?? createBrowserPlatform().copyText} onClose={backToReading}
@@ -120,6 +125,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       {document && <><AgentMarkdown content={document.content} sourcePath={document.path} {...(read?.resource?.workspacePath ? { workspaceRoot: read.resource.workspacePath } : {})} />
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
     </section> : <>
+      {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置</span><small>Agent、原主对话与接回时机</small></button>}
       <dl className="mobile-mote-profile__defaults"><dt>原主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的原主对话'}</span><small>{facts?.conversation ? '原展示位置已确认' : '保存引用尚未确认；原会话保留'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '原配置未确认'}</dd>
         <dt>新对话 Executor</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '原配置未确认')}</dd>
         {saved?.defaults.recovery && <><dt>保存的接回时机</dt><dd>{saved.defaults.recovery === 'startup' ? '启动时' : '打开时'}</dd></>}

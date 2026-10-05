@@ -1,13 +1,10 @@
+import { parseMoteDefaultConversation, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+export type { MoteDefaultConversation, MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 import { Document, isMap, isScalar, parseDocument } from 'yaml'
 
 /** Launch/navigation preferences are original files, not personality or Runtime state. */
 export const MOTE_QUICK_MODE_PATH = 'MOTE.md'
-export type MoteDefaultConversation = {
-  hostId: string; sessionId: string
-  displayWorkspaceId: string; groupId: string; tabId: string; regionId: string
-}
 export type MoteRecoveryTiming = 'startup' | 'on-open'
-export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; recovery?: MoteRecoveryTiming }
 export type MoteQuickMode =
   | { status: 'saved'; defaults: MoteQuickDefaults; version: string }
   | { status: 'missing' }
@@ -47,15 +44,16 @@ export function parseMoteQuickMode(content: string): { status: 'valid'; defaults
       const conversation = node.get('conversation', true)
       if (!isMap(conversation)) return { status: 'unconfirmed', message: ISSUE }
       const values = Object.fromEntries(FIELDS.map(field => { const value = conversation.get(field, true); return [field, isScalar(value) ? value.value : null] }))
-      if (!FIELDS.every(field => validId(values[field]))) return { status: 'unconfirmed', message: ISSUE }
-      defaults.conversation = values as MoteDefaultConversation
+      try { defaults.conversation = parseMoteDefaultConversation(values) }
+      catch { return { status: 'unconfirmed', message: ISSUE } }
     }
   }
   return { status: 'valid', defaults }
 }
 /** Only known fields change; the original Markdown, unknown YAML and comments remain. */
 export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefaults): string {
-  if (defaults.recovery !== undefined && defaults.recovery !== 'startup' && defaults.recovery !== 'on-open' || defaults.executorId !== undefined && !validId(defaults.executorId) || defaults.conversation && !FIELDS.every(field => validId(defaults.conversation![field]))) throw new Error(ISSUE)
+  if (defaults.recovery !== undefined && defaults.recovery !== 'startup' && defaults.recovery !== 'on-open' || defaults.executorId !== undefined && !validId(defaults.executorId)) throw new Error(ISSUE)
+  if (defaults.conversation) { try { parseMoteDefaultConversation(defaults.conversation) } catch { throw new Error(ISSUE) } }
   const original = content ? frontmatter(content) : null
   const parsed = content ? parseMoteQuickMode(content) : null
   if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)

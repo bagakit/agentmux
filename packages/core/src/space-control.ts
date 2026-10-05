@@ -252,6 +252,8 @@ export type AgentMuxFileOpenReport = AgentMuxWorkfaceReport & {
 }
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
+  | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadInput)
+  | ({ operation: 'space.mote.preferences.save' } & import('./mote-preferences.js').MotePreferencesSaveInput)
   | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
   | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
   | { operation: 'file.format'; regionId: string }
@@ -280,6 +282,8 @@ export type AgentMuxSpaceControlRequest = Base & (
       destination: AgentMuxSpaceDestination; focus: boolean }
 )
 export type AgentMuxSpaceControlResult =
+  | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadResult)
+  | ({ operation: 'space.mote.preferences.save'; requestId: string } & Omit<import('./mote-preferences.js').MotePreferencesSaveResult, 'operationId'>)
   | ({ operation: 'agent.view' } & AgentMuxAgentViewReport)
   | ({ operation: 'space.view' } & AgentMuxFileViewReport)
   | ({ operation: 'file.format' } & AgentMuxFileFormatReport)

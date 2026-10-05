@@ -956,6 +956,8 @@ export { AGENTMUX_RPC_MAX_MESSAGE_BYTES as AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } 
  * owner 已坏或写入未提交。
  */
 const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
+  'space.mote.preferences.read': 'short',
+  'space.mote.preferences.save': 'long',
   'toolkit.add': 'long',
   'toolkit.update': 'long',
   'toolkit.remove': 'long',

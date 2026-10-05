@@ -10,6 +10,7 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from './browser-task-control.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-rpc.js'
 
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
 import { rpcRecord } from './rpc-data.js'
 export { rpcRecord } from './rpc-data.js'
 
@@ -46,6 +47,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   }
   if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Core maintenance requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
+  }
+  if (method === 'space.mote.preferences.save' && typeof source.operationId !== 'string') {
+    throw new AgentMuxError('Mote preference saves require the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
   if (method.startsWith('goal.')) {
     const oldKeys = (value: Record<string, unknown>): boolean =>
@@ -142,6 +146,16 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     if (refs?.some(ref => !demand.contentRefs?.some(saved => saved.hostId === ref.hostId && saved.workspaceId === ref.workspaceId && saved.zoneId === ref.zoneId))) fail()
   }
   switch (request.operation) {
+    case 'space.mote.preferences.read': {
+      const { operation: _operation, ...body } = result as Extract<AgentMuxControlResult, { operation: 'space.mote.preferences.read' }>
+      parseMotePreferencesReadResult(body, request)
+      break
+    }
+    case 'space.mote.preferences.save': {
+      const { operation: _operation, requestId, ...body } = result as Extract<AgentMuxControlResult, { operation: 'space.mote.preferences.save' }>
+      parseMotePreferencesSaveResult({ ...body, operationId: requestId }, { ...request, operationId: request.requestId })
+      break
+    }
     case 'open.git': {
       const { operation: _operation, ...body } = result as Extract<AgentMuxControlResult, { operation: 'open.git' }>
       parseGitOpenResult(body, request)
