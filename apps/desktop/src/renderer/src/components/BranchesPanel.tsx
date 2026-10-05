@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import {
   Check,
@@ -497,7 +498,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         <div className="branch-search">
           <div className="branch-search__field">
             <Search size={12} aria-hidden="true" />
-            <input
+            <TextInput
               ref={searchInput}
               type="search"
               aria-label="Find branch or worktree path"
@@ -584,7 +585,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               </section>
               <label>
                 <span>Worktree path</span>
-                <input
+                <TextInput
                   autoFocus
                   value={worktreePath}
                   onChange={(event) => setWorktreePath(event.target.value)}
@@ -638,7 +639,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               </header>
               <label>
                 <span>Prompt</span>
-                <input
+                <TextInput
                   autoFocus
                   value={fanOutPrompt}
                   onChange={(event) => setFanOutPrompt(event.target.value)}
@@ -648,7 +649,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
               </label>
               <label>
                 <span>Lanes</span>
-                <input
+                <TextInput
                   type="number"
                   min={2}
                   max={MAX_FANOUT_LANES}
