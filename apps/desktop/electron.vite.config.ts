@@ -28,7 +28,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(import.meta.dirname, 'src/renderer'),
-    resolve: { alias: radixOverlayAliases },
+    resolve: { alias: radixOverlayAliases, dedupe: ['react', 'react-dom'] },
     worker: { format: 'es' },
     plugins: [react(), pdfjsViewerAssets(), fileDiagramAssets(import.meta.dirname)],
     build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/renderer/index.html'), 'file-diagram': resolve(import.meta.dirname, 'src/renderer/file-diagram/index.html') } } },
