@@ -255,3 +255,8 @@
 .survey-start-brand p { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; }
 .survey-start-brand .brand-icon { flex: none; border-radius: 10px; }
 @media (prefers-reduced-motion: reduce) { .global-survey-surface .survey-navigation { transition: none; } }
+
+.survey-page-favicon { display: inline-grid; width: 16px; height: 16px; }
+.survey-page-favicon > svg, .survey-page-favicon > img { grid-area: 1 / 1; width: 16px; height: 16px; object-fit: contain; }
+
+.survey-page-favicon:has(> img:not([hidden])) > svg { visibility: hidden; }

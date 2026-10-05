@@ -1,3 +1,4 @@
+import { readBrowserFavicon } from './browser-favicon.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
@@ -89,6 +90,9 @@ type BrowserEntry = {
   profileId: string
   requestedUrl: string
   navigationId: string
+  faviconDataUrl?: string | undefined
+  faviconUrl?: string | undefined
+  faviconRequest?: AbortController | undefined
   selectionRevision: number
   selectionOperation: number | null
   annotationRevision: number
@@ -278,6 +282,7 @@ export class BrowserViewManager {
     })
   }
   private readonly entries = new Map<string, BrowserEntry>()
+  private readonly faviconUrls = new WeakMap<WebContentsView, string[]>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private readonly webAuthnSessions = new Map<Session, () => void>()
   private readonly presentationLeases = new Map<string, PresentationLease>()
@@ -807,6 +812,7 @@ export class BrowserViewManager {
       requestedUrl,
       viewport: entry.viewport
     }
+    this.clearFavicon(entry)
     this.entries.delete(id)
     this.notifyNativeVisibility()
     this.releasedEntries.set(id, released)
@@ -1031,6 +1037,7 @@ export class BrowserViewManager {
       entry.pendingSwitch = null
       void entry.feedback?.clear()
       this.revokePresentationCapture(entry, 'source-replaced')
+      this.clearFavicon(entry)
       entry.view = candidate
       entry.profileId = profileId
       entry.requestedUrl = candidate.webContents.getURL() || url
@@ -1042,6 +1049,7 @@ export class BrowserViewManager {
       committed = true
       if (!authoritativeView.webContents.isDestroyed()) authoritativeView.webContents.close()
       this.synchronizeVisiblePage(entry, candidate)
+      this.updateFavicon(entry, candidate)
       this.emit(entry)
       return this.snapshot(entry)
     } finally {
@@ -2030,7 +2038,8 @@ export class BrowserViewManager {
         return {
           url: view.webContents.getURL(),
           title: view.webContents.getTitle(),
-          navigationId: entry.navigationId
+          navigationId: entry.navigationId,
+          ...(entry.faviconDataUrl ? { faviconDataUrl: entry.faviconDataUrl } : {})
         }
       },
       gotoUrl: async (url) => {
@@ -2481,6 +2490,7 @@ export class BrowserViewManager {
         [{ code: buildBrowserAnnotationMarkerScript([], annotationRevision) }]
       ).catch(() => {})
     }
+    this.clearFavicon(entry)
     this.entries.delete(id)
     this.notifyNativeVisibility()
     if (!this.window.isDestroyed()) {
@@ -2575,6 +2585,7 @@ export class BrowserViewManager {
       this.applyViewport(entry, view)
     })
     contents.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) this.faviconUrls.delete(view)
       if (!details.isMainFrame || !this.owns(entry, view)) return
       let requestedUrl: string
       try {
@@ -2601,6 +2612,7 @@ export class BrowserViewManager {
         BROWSER_SELECTION_WORLD_ID,
         [{ code: buildBrowserAnnotationMarkerScript([], annotationRevision) }]
       ).catch(() => {})
+      this.clearFavicon(entry, details.isSameDocument)
       entry.requestedUrl = requestedUrl
       entry.navigationId = randomUUID()
       entry.error = null
@@ -2630,6 +2642,10 @@ export class BrowserViewManager {
       entry.requestedUrl = url
       this.emit(entry)
     })
+    contents.on('page-favicon-updated', (_event, urls) => {
+      this.faviconUrls.set(view, urls)
+      if (this.owns(entry, view)) this.updateFavicon(entry, view)
+    })
     contents.on('page-title-updated', () => {
       if (!this.owns(entry, view)) return
       this.emit(entry)
@@ -2647,6 +2663,8 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      if (this.owns(entry, view)) this.clearFavicon(entry)
+
       if (entry.pendingSwitch?.view === view) {
         try { this.cancelPendingSwitch(entry, new Error('Browser profile candidate was destroyed')) } catch (error) {
           if (!this.owns(entry, entry.view) || entry.view.webContents.isDestroyed()) return
@@ -2837,12 +2855,40 @@ export class BrowserViewManager {
     })
   }
 
+  private clearFavicon(entry: BrowserEntry, keepImage = false): void {
+    entry.faviconRequest?.abort()
+    entry.faviconRequest = undefined
+    entry.faviconUrl = undefined
+    if (!keepImage) entry.faviconDataUrl = undefined
+  }
+
+  private updateFavicon(entry: BrowserEntry, view: WebContentsView): void {
+    if (!this.owns(entry, view)) return
+    const reported = this.faviconUrls.get(view)?.[0]
+    if (!reported) { this.clearFavicon(entry); this.emit(entry); return }
+    let url: string
+    try { url = new URL(reported, view.webContents.getURL()).href } catch { this.clearFavicon(entry); this.emit(entry); return }
+    if (entry.faviconUrl === url && (entry.faviconDataUrl || entry.faviconRequest)) return
+    this.clearFavicon(entry)
+    const request = new AbortController(), navigationId = entry.navigationId, profileId = entry.profileId
+    entry.faviconUrl = url
+    entry.faviconRequest = request
+    this.emit(entry)
+    void readBrowserFavicon(view.webContents.session, url, request.signal).then(dataUrl => {
+      if (request.signal.aborted || entry.faviconRequest !== request || !this.owns(entry, view) || entry.navigationId !== navigationId || entry.profileId !== profileId) return
+      entry.faviconRequest = undefined
+      entry.faviconDataUrl = dataUrl
+      this.emit(entry)
+    })
+  }
+
   private snapshot(entry: BrowserEntry): BrowserSnapshot {
     const contents = entry.view.webContents
     const persistenceWarning = this.operationJournal?.getPersistenceWarning()
     return {
       id: entry.id,
       navigationId: entry.navigationId,
+      faviconDataUrl: entry.faviconDataUrl,
       profileId: entry.profileId,
       url: contents.getURL() || entry.requestedUrl,
       title: contents.getTitle(),

@@ -208,6 +208,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   function itemGlyph(zone: AgentMuxZoneFact) {
     const surfaces = (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? workbenchSurfaces(tabs[id]!) : [])
+    const browsers = surfaces.filter(surface => surface.kind === 'browser')
+    if (surfaces.length === 1 && browsers.length === 1 && browsers[0]!.faviconDataUrl) return <span className="survey-page-favicon" aria-hidden="true"><Globe2 size={16} /><img key={browsers[0]!.faviconDataUrl} src={browsers[0]!.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></span>
     const Icon = surfaces.length && surfaces.every(surface => surface.kind === 'browser') ? Globe2
       : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith('.note.json')) ? NotebookPen
         : surfaces.length && surfaces.every(surface => surface.kind === 'file') ? FileText : PanelsTopLeft

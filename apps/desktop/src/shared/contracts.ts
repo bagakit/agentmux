@@ -1200,6 +1200,8 @@ export const CONTROL_RESPONSE_CHANNEL = 'control:response'
 
 export type BrowserSnapshot = {
   id: string
+  /** Current document artwork reported by Chromium, fetched through this original Profile session; transient. */
+  faviconDataUrl?: string | undefined
   navigationId: string
   profileId: string
   url: string
