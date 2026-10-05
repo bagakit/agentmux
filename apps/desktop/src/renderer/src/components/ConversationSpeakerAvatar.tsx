@@ -1,11 +1,16 @@
 import type { AgentProviderId } from '@agentmux/core'
-import { CircleDot, SquareTerminal, UserRound } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { CSSProperties } from 'react'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
 import { AgentProviderIcon } from './AgentProviderIcon'
 import type { MoteConversationIdentity } from '../lib/mote-conversation-identity'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
+
+const ThemeObjectUserIcon = semanticIconComponent('object.user')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
+
 
 /**
  * 说话人头像：把一个 `{role, id}` 身份画成一枚可扫视的小圆片。
@@ -104,11 +109,11 @@ export function ConversationSpeakerAvatar({
         <AgentProviderIcon {...(providerId === undefined ? {} : { providerId })} size={glyphSize} />
       ) : speaker.role === 'human' ? (
         humanAvatar ? <img src={humanAvatar} alt="" aria-hidden="true" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
-          : <UserRound size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
+          : <ThemeObjectUserIcon size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       ) : speaker.role === 'system' ? (
-        <SquareTerminal size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
+        <ThemeObjectTerminalIcon size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       ) : (
-        <CircleDot size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
+        <ThemeStatusNeutralIcon size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       )}
     </span>
   )

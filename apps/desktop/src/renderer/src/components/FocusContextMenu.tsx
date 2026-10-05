@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useRef, type ReactNode } from 'react'
-import { Pencil, Square } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -8,6 +8,10 @@ import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useFocusStopAgent } from './FocusStopAgent'
+
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+
 
 /** A Context card knows its semantic SID, not which of its Regions to address. */
 export function FocusContextMenu({ context, children, onOpenChange, onRename, onRestoreFocus }: {
@@ -38,11 +42,11 @@ export function FocusContextMenu({ context, children, onOpenChange, onRename, on
           else onRestoreFocus()
         }}>
         <ContextMenu.Label className="focus-context-menu__identity"><strong title={context.name}>{context.name}</strong></ContextMenu.Label>
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><Pencil size={14} /><span>Rename Agent</span></ContextMenu.Item>
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item>
         <ContextMenu.Separator className="tab-context-menu__separator" />
         {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
         <ContextMenu.Separator className="tab-context-menu__separator" />
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><Square size={14} /><span>Stop Agent</span></ContextMenu.Item>
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>
   </ContextMenu.Root>{stop.dialog}</>

@@ -2,10 +2,14 @@ import { civilClock } from "../lib/civil-clock"
 import { TextInput } from '@agentmux/client-ui/input'
 import { useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { SlidersHorizontal, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { focusUtcOffset, type FocusRulerMode, type FocusRulerPreferences } from '../lib/focus-timeline-ruler'
 import '../styles/focus-timeline-ruler.css'
+
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 const MODES: Array<{ value: FocusRulerMode; label: string; description: string }> = [
   { value: 'daily', label: 'Daily grid', description: 'Midnight · 6h / 3h / 90m / 45m' },
@@ -34,11 +38,11 @@ export function FocusTimelineRulerSettings({ preferences, onChange, dateChoice, 
   const intervalValid = interval.trim() !== '' && Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440
   const valid = draft.mode !== 'uniform' || (intervalValid && phaseValid)
   return <Dialog.Root open={open || dateChoice !== null} onOpenChange={begin}>
-    <Dialog.Trigger asChild><button data-focus-window-control type="button" className="icon-button" aria-label="Focus timeline settings" title="Time ruler and time zone"><SlidersHorizontal size={12} /></button></Dialog.Trigger>
+    <Dialog.Trigger asChild><button data-focus-window-control type="button" className="icon-button" aria-label="Focus timeline settings" title="Time ruler and time zone"><ThemeActionAdjustIcon size={12} /></button></Dialog.Trigger>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface focus-ruler-settings" onPointerDownCapture={event => event.stopPropagation()}>
-        <header><Dialog.Title>{dateChoice ? 'Choose this clock time' : 'Timeline settings'}</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close timeline settings"><X size={14} /></button></Dialog.Close></header>
+        <header><Dialog.Title>{dateChoice ? 'Choose this clock time' : 'Timeline settings'}</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close timeline settings"><ThemeActionCloseIcon size={14} /></button></Dialog.Close></header>
         <Dialog.Description>{dateChoice ? `${dateChoice.value.replace('T', ' ')} occurs twice in this time zone. Choose its UTC offset.` : 'Set the grid and time zone used throughout this timeline.'}</Dialog.Description>
         {dateChoice ? <div className="focus-ruler-settings__dates">{dateChoice.candidates.map(candidate => <button type="button" className="small-button" key={candidate.instant} onClick={() => { onSelectDate(candidate.instant); setOpen(false) }}>{focusUtcOffset(candidate.offset)}<span>{new Date(candidate.instant).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</span></button>)}</div> : <>
           <fieldset className="focus-ruler-settings__modes"><legend>Time ruler</legend>{MODES.map(mode => <label key={mode.value} data-selected={draft.mode === mode.value}><input type="radio" name="focus-ruler-mode" value={mode.value} checked={draft.mode === mode.value} onChange={() => setDraft(value => ({ ...value, mode: mode.value }))} /><span><strong>{mode.label}</strong><small>{mode.description}</small></span></label>)}</fieldset>

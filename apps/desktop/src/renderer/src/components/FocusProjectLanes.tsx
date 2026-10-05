@@ -1,6 +1,6 @@
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
-import { ChevronRight, GitBranch, Hash, History } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useState, type ReactNode, type Ref } from 'react'
 import { focusProjectKey, type FocusProjectLane, type FocusRetainedProject } from '../lib/focus-project-lanes'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
@@ -8,6 +8,12 @@ import { ProjectIcon } from './ProjectIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeObjectIdentifierIcon = semanticIconComponent('object.identifier')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
+
 
 export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead }: {
   rowsRef?: Ref<HTMLDivElement>
@@ -28,7 +34,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}
-                {lane.labels.map((label, index) => <span className="focus-project-lanes__label" key={index}>{index ? <ChevronRight size={10} /> : null}{index && lane.topicId && index === lane.labels.length - 1 ? <Hash size={11} /> : index ? <GitBranch size={11} /> : null}<strong>{label}</strong></span>)}</>}
+                {lane.labels.map((label, index) => <span className="focus-project-lanes__label" key={index}>{index ? <ThemeNavigationDisclosureIcon size={10} /> : null}{index && lane.topicId && index === lane.labels.length - 1 ? <ThemeObjectIdentifierIcon size={11} /> : index ? <ThemeObjectBranchIcon size={11} /> : null}<strong>{label}</strong></span>)}</>}
             <HostBadge context="Host" host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
           </button>
           {lane.summary ? <span className="focus-project-lanes__summary" title={lane.summary}>{lane.summary}</span> : null}
@@ -59,7 +65,7 @@ function FocusProjectObservation({ project, recent = false, onRead }: { project:
       if (event.button !== 0) return
       event.stopPropagation(); event.preventDefault()
     }} onClick={() => onRead(project)}>
-    <span className="focus-retained-projects__identity">{recent ? <History size={13} aria-hidden="true" /> : null}<strong>{project.name}</strong><HostBadge context="Host" host={hostIdentityProjection(project.hostId, hosts?.find(host => host.id === project.hostId))} /></span>
+    <span className="focus-retained-projects__identity">{recent ? <ThemeObjectHistoryIcon size={13} aria-hidden="true" /> : null}<strong>{project.name}</strong><HostBadge context="Host" host={hostIdentityProjection(project.hostId, hosts?.find(host => host.id === project.hostId))} /></span>
     <span className="focus-retained-projects__date">{activity ? 'Last active' : 'Last focused'} {at === null ? '· Time unknown' : <time dateTime={new Date(at).toISOString()}>{time.dateClock(at)}</time>}</span>
     {recent ? <span className="focus-retained-projects__date">{status}</span> : null}
   </button>
@@ -74,7 +80,7 @@ export function FocusRetainedProjects({ projects, total, onRead }: {
   if (!total) return null
   return <section className="focus-retained-projects" aria-label="Retained project observations">
     <button type="button" className="focus-retained-projects__toggle" aria-label="Retained projects" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-      <ChevronRight size={12} aria-hidden="true" /><History size={13} aria-hidden="true" /><span>Past projects</span>
+      <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" /><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><span>Past projects</span>
       <span className="focus-retained-projects__count">{projects.length === total ? total : `${projects.length} of ${total}`}</span>
     </button>
     <div className="focus-retained-projects__rows" hidden={!expanded}>
