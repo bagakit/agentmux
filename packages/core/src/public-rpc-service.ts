@@ -1251,7 +1251,9 @@ export class AgentMuxRpcService {
         const request = rpcControlRequest(method, params)
         if (request.operation !== 'toolkit.watch' || !this.ports.toolkit) throw new AgentMuxError('Toolkit subscriptions are unavailable.', 'TOOLKIT_UNSUPPORTED')
         const sub = await this.ports.toolkit.subscribe(request.toolId, data => emit({ type: 'snapshot', data }),
-          error => emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }), controller.signal)
+          error => emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }), controller.signal,
+          { ...(request.captureFailure ? { captureFailure: true as const } : {}),
+            ...(request.includeFailureEvidence ? { includeFailureEvidence: true as const } : {}) })
         initial = { toolId: request.toolId }; cleanup = () => sub.dispose()
       } else {
         rpcRecord(params, [])

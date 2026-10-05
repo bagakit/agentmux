@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { parseMetricsObservation, parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES } from '@agentmux/core/control'
+import { parseMetricsObservation, parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES, ToolkitFailureCapture, toolkitFailureError } from '@agentmux/core/control'
 import { AgentMuxRpcLines, rpcEncode, parseRpcRequest, parseRpcResponse, rpcRecord, rpcResponseError } from '@agentmux/core/public-rpc-http'
 const cli = process.argv[2]
 if (!cli) throw new Error('Performance requires the packaged public CLI path.')
@@ -8,8 +8,10 @@ let sequence = 0, ended = false, failed = false, abandoned = false
 let subscriptionId, eventSequence = 0
 const frames = new AgentMuxRpcLines(), cancelled = new AbortController()
 const child = spawn(process.execPath, [cli, 'system', 'metrics', 'watch'], { stdio: ['ignore','pipe','pipe'], env: process.env })
-const closed = new Promise(resolve => child.once('close', resolve))
+const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })))
 const utf8 = new TextEncoder()
+const captureFailure = process.env.AGENTMUX_PERFORMANCE_CAPTURE_FAILURE === '1'
+let stage = 'cli-spawn', frame, stdoutCursor = 0, stderrCursor = 0
 function documentFor(observation) {
   const totals = observation.runTotals, runs = observation.process.data ?? []
   const document = { schema: 'agentmux.toolkit.result.v1', summary: 'Runs',
@@ -35,30 +37,41 @@ function documentFor(observation) {
   return parseToolkitResultDocument(document)
 }
 async function result(value) {
+  stage = 'cli-metrics-payload'
   const observation = parseMetricsObservation(value)
+  stage = 'cli-document'
+  const document = documentFor(observation)
+  stage = 'cli-output'
   await output({ schema: 'agentmux.toolkit.result.v1', event: 'result', sequence: ++sequence,
-    payload: observation, document: documentFor(observation) })
+    payload: observation, document })
 }
 async function output(value) {
   if (ended) return
   // write(false) has admitted this frame. Wait before consuming another one.
   if (!process.stdout.write(rpcEncode(value))) await once(process.stdout, 'drain', { signal: cancelled.signal })
 }
-function stop(reason) {
+function stop(error, details) {
   if (ended) return
   ended = true; cancelled.abort(); child.kill('SIGTERM')
-  if (reason) {
+  if (error !== undefined) {
     failed = true
-    process.stdout.write(rpcEncode({ schema: 'agentmux.toolkit.result.v1', event: 'error', reason: String(reason).slice(0,4096) }))
+    const failure = details ?? { stage, error: toolkitFailureError(error, captureFailure), bytes: frame?.value ?? null, exit: null }
+    process.stdout.write(rpcEncode({ schema: 'agentmux.toolkit.result.v1', event: 'error', reason: failure.error.message, failure }))
   }
 }
 function cancel() { abandoned = true; stop() }
 process.once('SIGINT', cancel); process.once('SIGTERM', cancel)
 process.stdout.once('error', () => stop()); process.stdout.once('close', () => stop())
-child.stderr.on('data', bytes => stop(bytes.toString('utf8')))
-child.once('error', error => stop(error.message))
+child.stderr.on('data', bytes => {
+  const capture = captureFailure ? new ToolkitFailureCapture('metrics-rpc-stderr', stderrCursor) : null
+  capture?.append(bytes); stderrCursor += bytes.length
+  const error = new Error(bytes.toString('utf8'))
+  stop(error, { stage: 'cli-stderr', error: toolkitFailureError(error, captureFailure), bytes: capture?.value ?? null, exit: null })
+})
+child.once('error', error => stop(error, { stage: 'cli-spawn', error: toolkitFailureError(error, captureFailure), bytes: null, exit: null }))
 async function accept(value) {
   if (subscriptionId === undefined) {
+    stage = 'cli-rpc-opening'
     const response = parseRpcResponse(value), failure = rpcResponseError(response)
     if (failure) throw failure
     const opening = rpcRecord(response.result, ['subscriptionId', 'method', 'initial'])
@@ -70,6 +83,7 @@ async function accept(value) {
     await result(initial.observation)
     return
   }
+  stage = 'cli-rpc-notification'
   const frame = parseRpcRequest(value)
   if (frame.id !== undefined || frame.method !== 'system.subscription.event') throw new Error('Metrics stream boundary is invalid.')
   const notification = rpcRecord(frame.params, ['subscriptionId', 'method', 'sequence', 'event'])
@@ -81,7 +95,12 @@ async function accept(value) {
   const event = rpcRecord(notification.event, ['type', 'data', 'error'])
   if (event.type === 'snapshot') await result(event.data)
   else if (event.type === 'end') stop()
-  else if (event.type === 'error') throw new Error(rpcRecord(event.error).message ?? 'Metrics query failed.')
+  else if (event.type === 'error') {
+    const failure = rpcRecord(event.error)
+    const error = new Error(failure.message ?? 'Metrics query failed.')
+    if (typeof failure.code === 'string') error.code = failure.code
+    throw error
+  }
   else throw new Error('Metrics stream boundary is invalid.')
 }
 try {
@@ -92,16 +111,26 @@ try {
     while (!ended && offset < bytes.length) {
       const newline = bytes.indexOf(10, offset), end = newline < 0 ? bytes.length : newline + 1
       let value, complete = false
+      if (captureFailure) {
+        frame ??= new ToolkitFailureCapture('metrics-rpc-stdout', stdoutCursor)
+        frame.append(bytes.subarray(offset, end))
+      }
+      stdoutCursor += end - offset
+      stage = 'cli-rpc-json'
       frames.accept(bytes.subarray(offset, end), frame => { value = frame; complete = true })
-      if (complete) await accept(value)
+      if (complete) { await accept(value); frame = undefined }
       offset = end
     }
     if (ended) break
   }
-  if (!ended) frames.end()
-} catch (error) { if (!ended) stop(error.message) }
-const code = await closed
-process.exitCode = failed || (code !== 0 && code !== null) ? 1 : 0
+  if (!ended) { stage = 'cli-eof'; frames.end() }
+} catch (error) { if (!ended) stop(error) }
+const exit = await closed
+if (!ended && (exit.code !== 0 || exit.signal !== null)) {
+  const error = new Error('Metrics CLI exited unsuccessfully.')
+  stop(error, { stage: 'cli-eof', error: toolkitFailureError(error, captureFailure), bytes: frame?.value ?? null, exit })
+}
+process.exitCode = failed || (exit.code !== 0 && exit.code !== null) ? 1 : 0
 // Explicit cancellation discards this reader's pending output, after the
 // original CLI child has closed. Normal end/EOF still flushes every frame.
 if (abandoned) process.exit(process.exitCode)

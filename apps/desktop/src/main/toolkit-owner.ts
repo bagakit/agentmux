@@ -1,8 +1,10 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join } from 'node:path'
-import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
+import { AgentMuxError, DurableWriteError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitResultDocument, parseToolkitSnapshot, type AgentMuxToolkitPort,
-  type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
+  type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot,
+  ToolkitFailureCapture, toolkitFailureError, parseToolkitPerformanceFailureDetails,
+  type ToolkitPerformanceIssue, type ToolkitPerformanceFailure, type ToolkitPerformanceFailureDetails, type ToolkitPerformanceFailureStage } from '@agentmux/core/control'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import { bundledToolkitTools, bundledToolkitScript } from './toolkit-bundled.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
@@ -11,11 +13,14 @@ import { executeToolkitConfig, prepareToolkitConfig, toolkitTools } from './tool
 import type { ConfigOwner } from './config-owner.js'
 import type { AppConfig } from '../shared/contracts.js'
 import { ToolkitReceiptStore } from './toolkit-receipt-store.js'
+import { PerformanceFailureStore } from './toolkit-performance-failure-store.js'
 import { readToolkitPackageMetadata } from './toolkit-package.js'
 
-type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
+type Lease = { includeFailureEvidence: boolean; snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort | null; ended: boolean
   creationPending: boolean; admissionSaved: boolean; receiptUnconfirmed: boolean; cleanupConfirmed: boolean
+  captureFailure: boolean; stage: ToolkitPerformanceFailureStage; frame: ToolkitFailureCapture | null
+  failureDetails: ToolkitPerformanceFailureDetails | null; frameStart: number
   lastAppObservedAt: number | null; cursor: number; buffer: string; decoder: TextDecoder; sequence: number }
 type PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1'; admission:
   (Pick<ToolkitMetricsSnapshot, 'executionId' | 'run' | 'reason' | 'startedAt'>) | null }
@@ -28,28 +33,51 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private stopping: Promise<void> | null = null
   private loaded: Promise<void> | null = null
   private execution: Execution | null = null
+  private failure: ToolkitPerformanceFailure | null = null
   private value: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: null,
     run: null, state: 'idle', reason: null, startedAt: null, observedAt: null, observation: null,
-    document: null, manual: false, consumerCount: 0, sequence: 0, trend: [] }
+    document: null, diagnostics: { captureEnabled: false, failureEvidence: 'none', droppedWrites: 0, lastFailure: null, persistence: 'not-requested', issue: null, cleanupIssue: null }, manual: false, consumerCount: 0, sequence: 0, trend: [] }
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
-    enabled(): boolean; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>; mainPid?: number; now?: () => number }) {}
-  get current(): ToolkitMetricsSnapshot {
-    return structuredClone({ ...this.value, manual: this.manual, consumerCount: this.leases.size })
+    enabled(): boolean; failures?: Pick<PerformanceFailureStore, 'read' | 'save'>; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>; mainPid?: number; now?: () => number }) {}
+  get current(): ToolkitMetricsSnapshot { return this.snapshot() }
+  private snapshot(includeFailureEvidence = false): ToolkitMetricsSnapshot {
+    const retained = this.failure !== null && this.hasFailureEvidence(this.failure) ||
+      this.value.diagnostics.issue?.message != null || this.value.diagnostics.cleanupIssue?.message != null
+    const safeIssue = (issue: ToolkitPerformanceIssue | null) => issue === null ? null : { ...issue, message: null }
+    const diagnostics = { ...this.value.diagnostics,
+      lastFailure: includeFailureEvidence ? this.failure : this.value.diagnostics.lastFailure,
+      issue: includeFailureEvidence ? this.value.diagnostics.issue : safeIssue(this.value.diagnostics.issue),
+      cleanupIssue: includeFailureEvidence ? this.value.diagnostics.cleanupIssue : safeIssue(this.value.diagnostics.cleanupIssue),
+      failureEvidence: retained ? (includeFailureEvidence ? 'included' as const : 'retained' as const) : 'none' as const }
+    return structuredClone({ ...this.value, diagnostics, manual: this.manual, consumerCount: this.leases.size })
+  }
+  private hasFailureEvidence(failure: ToolkitPerformanceFailure) {
+    return failure.details.bytes !== null || failure.details.error.stack !== null || failure.details.error.message !== null
+  }
+  private safeFailure(failure: ToolkitPerformanceFailure): ToolkitPerformanceFailure {
+    return { ...failure, details: { ...failure.details, bytes: null, error: { ...failure.details.error, message: null, stack: null } } }
   }
   private publish() {
-    const value = this.current
+    let safe: ToolkitMetricsSnapshot | undefined, evidence: ToolkitMetricsSnapshot | undefined
     for (const lease of [...this.leases]) {
-      try { lease.snapshot(value) } catch { lease.release() }
+      try { lease.snapshot(lease.includeFailureEvidence ? (evidence ??= this.snapshot(true)) : (safe ??= this.current)) }
+      catch { lease.release() }
     }
+  }
+  private issue(operation: ToolkitPerformanceIssue['operation'], error: unknown): ToolkitPerformanceIssue {
+    const { message, code } = toolkitFailureError(error)
+    return { operation, message, code, phase: error instanceof DurableWriteError ? error.phase : null }
   }
   private wanted() { return !this.closed && (this.manual || this.leases.size > 0) }
   private newExecution(id: string): Execution {
     return { id, ref: null, port: null, ended: false, creationPending: false, admissionSaved: false,
-      receiptUnconfirmed: false, cleanupConfirmed: false, lastAppObservedAt: null,
+      receiptUnconfirmed: false, cleanupConfirmed: false, captureFailure: false, stage: 'launch', frame: null,
+      failureDetails: null, frameStart: 0, lastAppObservedAt: null,
       cursor: 0, buffer: '', decoder: new TextDecoder('utf-8', { fatal: true }), sequence: 0 }
   }
   private async load(): Promise<void> {
     if (!this.loaded) this.loaded = (async () => {
+      void this.loadFailure()
       try {
         const receipt = await this.args.receipts.read('performance') as PerformanceReceipt | null
         if (receipt === null) return
@@ -81,6 +109,25 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     })()
     return await this.loaded
   }
+  private failureLoaded: Promise<void> | null = null
+  private loadFailure(): Promise<void> {
+    if (!this.failureLoaded) this.failureLoaded = (async () => {
+      if (!this.args.failures) return
+      try {
+        const failure = await this.args.failures.read()
+        // A late disk read cannot replace this process's new original failure.
+        if (failure && this.failure === null) {
+          this.failure = failure
+          this.value.diagnostics = { ...this.value.diagnostics, lastFailure: this.safeFailure(failure),
+            failureEvidence: this.hasFailureEvidence(failure) ? 'retained' : 'none', persistence: 'observed-on-disk' }
+        }
+      } catch (error) {
+        if (this.failure === null) this.value.diagnostics.issue = this.issue('read-failure', error)
+      }
+      this.publish()
+    })()
+    return this.failureLoaded
+  }
   private async save(execution: Execution): Promise<void> {
     execution.receiptUnconfirmed = true
     const receipt: PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1', admission: {
@@ -99,7 +146,10 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [{ kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true }] }
     if (request.operation === 'toolkit.script') return { operation: request.operation, script: await readPerformanceScript(this.args.launch()) }
     await this.load()
-    if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: this.current }
+    if (request.operation === 'toolkit.get') {
+      await this.loadFailure()
+      return { operation: request.operation, snapshot: this.snapshot(request.includeFailureEvidence === true) }
+    }
     if (request.operation === 'toolkit.run') {
       this.allowed(signal)
       if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool outcome is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
@@ -116,11 +166,11 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     }
     throw new AgentMuxError('Watch requires the Toolkit subscription port.', 'INVALID_CONTROL_REQUEST')
   }
-  async subscribe(_toolId: 'performance', snapshot: Lease['snapshot'], end: Lease['end'], signal: AbortSignal) {
+  async subscribe(_toolId: 'performance', snapshot: Lease['snapshot'], end: Lease['end'], signal: AbortSignal, options?: { captureFailure?: true; includeFailureEvidence?: true }) {
     await this.load()
     this.allowed(signal)
     let released = false
-    const lease: Lease = { snapshot, end, release: () => {
+    const lease: Lease = { includeFailureEvidence: options?.includeFailureEvidence === true, snapshot, end, release: () => {
       if (released) return
       released = true; signal.removeEventListener('abort', lease.release); this.leases.delete(lease)
       this.publish(); void this.quiesce()
@@ -128,13 +178,13 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     this.leases.add(lease); signal.addEventListener('abort', lease.release, { once: true })
     if (signal.aborted) lease.release()
     try {
-      await this.ensure()
-      if (!released && !signal.aborted) snapshot(this.current)
+      await this.ensure(options?.captureFailure === true)
+      if (!released && !signal.aborted) snapshot(this.snapshot(lease.includeFailureEvidence))
       else lease.release()
       return { dispose: lease.release }
     } catch (error) { lease.release(); throw error }
   }
-  private async ensure(): Promise<void> {
+  private async ensure(captureFailure = false): Promise<void> {
     if (this.stopping) await this.stopping
     if (!this.wanted()) return
     if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
@@ -143,34 +193,43 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     let id: string
     do { id = mintObjectId() } while (id === this.value.executionId)
     const execution = this.newExecution(id)
+    execution.captureFailure = captureFailure
     this.execution = execution
     this.value = { ...this.value, executionId: execution.id, run: null, state: 'starting', reason: null,
-      startedAt: (this.args.now ?? Date.now)(), observation: null, document: null, observedAt: null, sequence: 0, trend: [] }
+      startedAt: (this.args.now ?? Date.now)(), observation: null, document: null, observedAt: null, sequence: 0, trend: [],
+      diagnostics: { ...this.value.diagnostics, captureEnabled: captureFailure, cleanupIssue: null } }
     this.publish()
     const work = async () => {
       const launch = this.args.launch()
+      execution.stage = 'launch'
       await readPerformanceScript(launch)
       if (!this.wanted() || execution.ended) return
       // Admit durably before acquiring or dispatching the native creation port.
+      execution.stage = 'admission'
       await this.save(execution)
+      execution.stage = 'run-port'
       const port = await this.args.openRunPort()
       execution.port = port
       if (!this.wanted() || execution.ended) return
       execution.creationPending = true
+      execution.stage = 'create'
       const run = await port.create({ createOperationId: execution.id, workspacePath: launch.cwd,
-        command: launch.runner, args: [launch.script, launch.cli], env: launch.env, cols: 80, rows: 24 },
+        command: launch.runner, args: [launch.script, launch.cli], env: { ...launch.env, AGENTMUX_PERFORMANCE_CAPTURE_FAILURE: captureFailure ? '1' : '0' }, cols: 80, rows: 24 },
       event => this.accept(execution, event))
       execution.ref = { runId: run.runId }
       execution.creationPending = false
       this.value.run = { hostId: 'local', runId: run.runId }
+      execution.stage = 'admission'
       await this.save(execution)
       if (!this.wanted() || execution.ended) return
+      execution.stage = 'attach'
       const attached = await port.attach(execution.ref, 0)
       if (attached.gap) throw new AgentMuxError('Tool output replay has a Gap.', 'CONTROL_PROTOCOL_ERROR')
       for (const chunk of attached.replay) this.bytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
       if (!execution.ended) { this.value.state = 'observing'; this.publish() }
     }
     this.starting = work().catch(async error => {
+      this.recordFailure(execution, error)
       this.manual = false; execution.ended = true
       this.value.state = execution.creationPending || execution.receiptUnconfirmed ? 'unknown' : 'failed'
       this.value.reason = String(error instanceof Error ? error.message : error).slice(0,4096)
@@ -196,34 +255,75 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         const range = event.evidence.outputByteRange
         this.bytes(execution, range.startByte, range.endByte, event.dataBytes)
       } else if (event.type === 'terminal-snapshot') {
+        execution.stage = 'run-output-order'
         if (event.gap) throw new AgentMuxError('Tool output snapshot has a Gap.', 'CONTROL_PROTOCOL_ERROR')
         for (const chunk of event.replay) this.bytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
       } else if (event.type === 'agent-error') {
-        throw new AgentMuxError(event.message, 'CONTROL_PROTOCOL_ERROR')
+        execution.stage = 'run-event'
+        const error = new AgentMuxError(event.message, event.code)
+        execution.failureDetails = { stage: execution.stage, error: toolkitFailureError(error, execution.captureFailure), bytes: null, exit: null,
+          eventOrigin: { source: event.evidence.source, observedAt: event.evidence.observedAt, run: event.evidence.run ?? null } }
+        throw error
       } else if (event.type === 'process-state' && event.state !== 'running') {
+        execution.stage = 'run-output-decode'
         execution.buffer += execution.decoder.decode()
+        execution.stage = 'run-output-lf'
         if (execution.buffer.length) throw new AgentMuxError('Tool output ended without a complete LF frame.', 'CONTROL_PROTOCOL_ERROR')
-        this.fail(execution, event.exitCode === 0 ? 'Observation ended.' : 'Performance script exited unsuccessfully.')
+        execution.stage = 'process-exit'
+        const error = new AgentMuxError(event.exitCode === 0 ? 'Observation ended.' : 'Performance script exited unsuccessfully.', 'CONTROL_FAILED')
+        execution.failureDetails = { stage: execution.stage, error: toolkitFailureError(error, execution.captureFailure), bytes: null,
+          exit: { code: event.exitCode ?? null, signal: event.exitSignal ?? null } }
+        this.fail(execution, error)
       }
-    } catch (error) { this.fail(execution, String(error instanceof Error ? error.message : error)) }
+    } catch (error) { this.fail(execution, error) }
   }
   private bytes(execution: Execution, start: number, end: number, bytes: Uint8Array) {
     if (execution.ended || this.execution !== execution || end <= execution.cursor) return
+    execution.stage = 'run-output-order'
     if (start > execution.cursor || end - start !== bytes.byteLength) throw new AgentMuxError('Tool output is not continuous ordered bytes.', 'CONTROL_PROTOCOL_ERROR')
-    execution.buffer += execution.decoder.decode(bytes.subarray(Math.max(0,execution.cursor - start)), { stream: true })
-    execution.cursor = end
-    let lf: number
-    while (!execution.ended && (lf = execution.buffer.indexOf('\n')) >= 0) {
-      const line = execution.buffer.slice(0,lf).replace(/\r$/u, '')
-      execution.buffer = execution.buffer.slice(lf+1)
+    let offset = Math.max(0, execution.cursor - start)
+    while (!execution.ended && offset < bytes.length) {
+      const lf = bytes.indexOf(10, offset), next = lf < 0 ? bytes.length : lf + 1
+      const part = bytes.subarray(offset, next)
+      if (execution.captureFailure) {
+        execution.frame ??= new ToolkitFailureCapture('toolkit-output', execution.frameStart)
+        execution.frame.append(part)
+      }
+      execution.stage = 'run-output-decode'
+      execution.buffer += execution.decoder.decode(part, { stream: true })
+      execution.cursor = start + next
+      offset = next
+      execution.stage = 'run-output-lf'
+      if (lf < 0) {
+        if (Buffer.byteLength(execution.buffer) > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) throw new AgentMuxError('Incomplete Toolkit result exceeds budget.', 'CONTROL_PROTOCOL_ERROR')
+        continue
+      }
+      const line = execution.buffer.slice(0, -1).replace(/\r$/u, '')
+      execution.buffer = ''
+      execution.stage = 'toolkit-json'
       if (Buffer.byteLength(line) > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) throw new AgentMuxError('Toolkit result exceeds budget.', 'CONTROL_PROTOCOL_ERROR')
       const frame = JSON.parse(line)
-      if (frame.schema !== 'agentmux.toolkit.result.v1') throw new AgentMuxError('Toolkit result schema is invalid.', 'CONTROL_PROTOCOL_ERROR')
-      if (frame.event === 'error') throw new AgentMuxError(String(frame.reason).slice(0,4096), 'CONTROL_FAILED')
+      execution.stage = 'toolkit-envelope'
+      if (!frame || typeof frame !== 'object' || Array.isArray(frame) || frame.schema !== 'agentmux.toolkit.result.v1') throw new AgentMuxError('Toolkit result schema is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      if (frame.event === 'error') {
+        if (Object.keys(frame).sort().join() !== 'event,failure,reason,schema') {
+          throw new AgentMuxError('Toolkit error envelope is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        const details = parseToolkitPerformanceFailureDetails(frame.failure)
+        if (typeof frame.reason !== 'string' || frame.reason !== details.error.message ||
+          !details.stage.startsWith('cli-') || (!execution.captureFailure && (details.bytes !== null || details.error.stack !== null))) {
+          throw new AgentMuxError('Toolkit error origin is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        execution.failureDetails = details
+        throw new AgentMuxError(frame.reason, 'CONTROL_FAILED')
+      }
       if (frame.event !== 'result' || Object.keys(frame).sort().join() !== 'document,event,payload,schema,sequence' ||
         frame.sequence !== execution.sequence + 1) throw new AgentMuxError('Toolkit result sequence or framing is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      execution.stage = 'metrics-payload'
       const observation = parseMetricsObservation(frame.payload)
+      execution.stage = 'toolkit-document'
       const document = parseToolkitResultDocument(frame.document)
+      execution.stage = 'metrics-scope'
       if (observation.scope.mainPid !== (this.args.mainPid ?? process.pid)) throw new AgentMuxError('Tool observation belongs to another Main owner.', 'CONTROL_PROTOCOL_ERROR')
       execution.sequence = frame.sequence
       this.value.observation = observation; this.value.observedAt = observation.observedAt
@@ -241,14 +341,43 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         this.value.trend = [...this.value.trend, { observedAt: observation.observedAt,
           appCpuPercent: null, appRssKib: null }].slice(-60)
       }
+      execution.frame = null; execution.frameStart = execution.cursor
       this.publish()
     }
     if (Buffer.byteLength(execution.buffer) > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) throw new AgentMuxError('Incomplete Toolkit result exceeds budget.', 'CONTROL_PROTOCOL_ERROR')
   }
-  private fail(execution: Execution, reason: string) {
+  private recordFailure(execution: Execution, error: unknown) {
+    if (this.failure?.executionId === execution.id) return
+    // Creation callbacks may fail before their receipt. Keep null rather than borrow a nearby Run.
+    const failure = { schema: 'agentmux.performance.failure.v1' as const, executionId: execution.id,
+      run: execution.ref ? { hostId: 'local', runId: execution.ref.runId } : null, recordedAt: (this.args.now ?? Date.now)(),
+      details: execution.failureDetails ?? { stage: execution.stage, error: toolkitFailureError(error, execution.captureFailure),
+        bytes: execution.frame?.value ?? null, exit: null } }
+    this.failure = failure
+    this.value.diagnostics = { captureEnabled: execution.captureFailure, failureEvidence: this.hasFailureEvidence(failure) ? 'retained' : 'none',
+      droppedWrites: this.value.diagnostics.droppedWrites, lastFailure: this.safeFailure(failure),
+      persistence: execution.captureFailure && this.args.failures ? 'pending' : 'not-requested', issue: null, cleanupIssue: null }
+    if (execution.captureFailure && this.args.failures) {
+      const failures = this.args.failures
+      void Promise.resolve().then(() => failures.save(failure)).then(() => {
+        if (this.failure !== failure) return
+        this.value.diagnostics.persistence = 'confirmed'; this.publish()
+      }, diagnosticError => {
+        if (diagnosticError instanceof AgentMuxError && diagnosticError.code === 'TOOLKIT_DIAGNOSTIC_SUPERSEDED') {
+          this.value.diagnostics.droppedWrites++; this.publish()
+        }
+        if (this.failure !== failure) return
+        this.value.diagnostics.persistence = 'unconfirmed'; this.value.diagnostics.issue = this.issue('write-failure', diagnosticError)
+        this.publish()
+      })
+    }
+  }
+  private fail(execution: Execution, error: unknown) {
     if (execution.ended || this.execution !== execution) return
+    this.recordFailure(execution, error)
     execution.ended = true; this.manual = false
-    this.value.state = 'failed'; this.value.reason = reason.slice(0,4096)
+    this.value.state = 'failed'; this.value.reason = toolkitFailureError(error).message
+    this.publish()
     for (const lease of [...this.leases]) { lease.release(); lease.end(new AgentMuxError(this.value.reason, 'CONTROL_FAILED')) }
     void this.quiesce()
   }
@@ -263,7 +392,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       this.value.state = 'unknown'; this.publish(); return
     }
     if (!execution.ref && !execution.admissionSaved && !execution.receiptUnconfirmed) {
-      execution.ended = true; this.execution = null; this.value.run = null
+      execution.ended = true; this.execution = null; this.value.run = null; this.value.diagnostics.captureEnabled = false
       if (this.value.state !== 'failed' && this.value.state !== 'unknown') this.value.state = 'paused'
       this.publish(); return
     }
@@ -271,20 +400,30 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     const failed = this.value.state === 'failed'
     this.value.state = 'stopping'; this.publish()
     this.stopping = (async () => {
+      let operation: ToolkitPerformanceIssue['operation'] = 'open-run-port'
       try {
         if (execution.ref) {
           if (!execution.port) execution.port = await this.args.openRunPort()
           if (!execution.cleanupConfirmed) {
-            try { await execution.port.stop(execution.ref) } finally { await execution.port.release(execution.ref) }
+            operation = 'stop'
+            try { await execution.port.stop(execution.ref) } finally {
+              const primaryOperation = operation
+              operation = 'release'
+              await execution.port.release(execution.ref)
+              operation = primaryOperation
+            }
+            operation = 'remove'
             await execution.port.remove(execution.ref)
             execution.cleanupConfirmed = true
           }
         }
         execution.receiptUnconfirmed = true
+        operation = 'clear-admission'
         await this.args.receipts.save('performance', { schema: 'agentmux.performance.receipt.v1', admission: null } satisfies PerformanceReceipt)
         execution.receiptUnconfirmed = false
-        if (this.execution === execution) { this.execution = null; this.value.run = null; this.value.state = failed ? 'failed' : 'paused' }
+        if (this.execution === execution) { this.execution = null; this.value.run = null; this.value.diagnostics.captureEnabled = false; this.value.state = failed ? 'failed' : 'paused' }
       } catch (error) {
+        this.value.diagnostics.cleanupIssue = this.issue(operation, error)
         this.value.state = 'unknown'; this.value.reason = 'Tool cleanup is unconfirmed: ' + String(error instanceof Error ? error.message : error).slice(0,4000)
         if (!execution.receiptUnconfirmed) {
           try { await this.save(execution) }
@@ -310,7 +449,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
     enabled(): boolean; config: ConfigOwner; receiptPath: string; mainPid?: number; now?: () => number }) {
     const receipts = new ToolkitReceiptStore(args.receiptPath, () => ['performance', ...bundledToolkitTools(args.launch(), args.config.current).map(tool => tool.id), ...toolkitTools(args.config.current).map(tool => tool.id)])
-    this.performance = new PerformanceToolkitOwner({ ...args, receipts })
+    this.performance = new PerformanceToolkitOwner({ ...args, receipts, failures: new PerformanceFailureStore(join(dirname(args.receiptPath), 'toolkit-performance-failure.json')) })
     const launch = args.launch()
     this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
       runner: launch.runner, env: launch.env, snapshotRoot: join(dirname(args.receiptPath), 'toolkit-snapshots'), bundled: () => bundledToolkitTools(args.launch(), args.config.current), ...(args.now ? { now: args.now } : {}),
@@ -352,8 +491,8 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     }
     throw new AgentMuxError('Watch requires the subscription port.', 'INVALID_CONTROL_REQUEST')
   }
-  async subscribe(toolId: string, snapshot: (value: ToolkitSnapshot) => void, end: (error?: Error) => void, signal: AbortSignal) {
-    return toolId === 'performance' ? await this.performance.subscribe('performance', snapshot, end, signal)
+  async subscribe(toolId: string, snapshot: (value: ToolkitSnapshot) => void, end: (error?: Error) => void, signal: AbortSignal, options?: { captureFailure?: true; includeFailureEvidence?: true }) {
+    return toolId === 'performance' ? await this.performance.subscribe('performance', snapshot, end, signal, options)
       : await this.custom.subscribe(toolId, snapshot, end, signal)
   }
   async dispose(): Promise<void> { await Promise.all([this.performance.dispose(), this.custom.dispose()]) }
