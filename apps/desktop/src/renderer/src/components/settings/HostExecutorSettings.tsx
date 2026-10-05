@@ -1,3 +1,4 @@
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState } from 'react'
 import { Bot, Plus, RefreshCw, LoaderCircle, X } from 'lucide-react'
 import type { AppConfig } from '../../../../shared/contracts'
@@ -67,13 +68,13 @@ export function HostExecutorSettings({ config, active }: { config: AppConfig; ac
     {adding ? <section className="agent-settings-card">
       <header className="agent-settings-card__header"><Bot size={18} /><strong>Register on {host?.label ?? hostId}</strong><button className="icon-button" aria-label="Cancel Host registration" disabled={saving} onClick={() => setAdding(false)}><X size={14} /></button></header>
       <p className="settings-group-note">Enter this Host's configuration. Saved credentials stay on that Host and are never returned. Replacing an existing registered configuration uses its revision through the public register command.</p>
-      <div className="settings-grid">
-        <label><span>Executor ID</span><input aria-label="Host Executor ID" value={executorId} onChange={event => setExecutorId(event.target.value)} /></label>
-        <label><span>Name</span><input aria-label="Host Executor name" value={label} onChange={event => setLabel(event.target.value)} /></label>
+      <div className="agent-settings-fields">
+        <label><span>Executor ID</span><TextInput aria-label="Host Executor ID" value={executorId} onChange={event => setExecutorId(event.target.value)} /></label>
+        <label><span>Name</span><TextInput aria-label="Host Executor name" value={label} onChange={event => setLabel(event.target.value)} /></label>
         <label><span>Provider</span><select aria-label="Host Executor Provider" value={providerId} onChange={event => setProviderId(event.target.value)}>{providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>
-        <label><span>Command on this Host</span><input aria-label="Host Executor command" placeholder="Command name or wrapper file" value={command} onChange={event => setCommand(event.target.value)} /></label>
-        <label><span>Arguments</span><textarea aria-label="Host Executor arguments" value={args} onChange={event => setArgs(event.target.value)} /></label>
-        <label><span>Environment JSON</span><textarea aria-label="Host Executor environment" value={env} onChange={event => setEnv(event.target.value)} /></label>
+        <label><span>Command on this Host</span><TextInput aria-label="Host Executor command" placeholder="command or wrapper path" value={command} onChange={event => setCommand(event.target.value)} /></label>
+        <label><span>Arguments</span><ComposerTextarea aria-label="Host Executor arguments" value={args} onValueChange={setArgs} /></label>
+        <label><span>Environment JSON</span><ComposerTextarea aria-label="Host Executor environment" value={env} onValueChange={setEnv} /></label>
       </div>
       <label className="agent-guide-toggle"><input type="checkbox" checked={guide} onChange={event => setGuide(event.target.checked)} /><span>Inject AgentMux guide</span></label>
       <button className="primary-button" disabled={saving} onClick={() => void register()}>{saving ? 'Saving…' : 'Register command'}</button>
