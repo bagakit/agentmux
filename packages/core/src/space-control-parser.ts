@@ -1,6 +1,7 @@
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
+import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
@@ -183,14 +184,16 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'prompt', 'agentSessionId', 'source'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
-      fields(input, ['kind', 'executorId', 'executionWorkspaceId', 'prompt'], code)
+      fields(input, ['kind', 'executorId', 'executionWorkspaceId', 'nativeResumeSource', 'prompt'], code)
       if (target.newZone && Object.hasOwn(input, 'executionWorkspaceId')) fail('An execution Workspace cannot be combined with new Zone resources.', code)
+      if (target.newZone && Object.hasOwn(input, 'nativeResumeSource')) fail('Native resume retains its original execution directory; select an existing execution Workspace.', code)
       content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code),
         ...(Object.hasOwn(input, 'executionWorkspaceId') ? { executionWorkspaceId: spaceControlId(input.executionWorkspaceId, 'Execution Workspace', code) } : {}),
+        ...(Object.hasOwn(input, 'nativeResumeSource') ? { nativeResumeSource: parseAgentNativeResumeSource(input.nativeResumeSource) } : {}),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
     } else if (input.kind === 'fork-agent') {
       fields(input, ['kind', 'source', 'prompt'], code)

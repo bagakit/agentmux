@@ -1188,6 +1188,7 @@ export async function registerIpc(args: {
     return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
       args.environmentWarning, app.getPath('home'))
   })
+  handle('sessions:nativeSessions', async (input: import('../shared/contracts.js').NativeAgentSessionsInput) => args.runtime.nativeAgentSessions(input, config))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
     try {
       if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
@@ -1764,6 +1765,8 @@ export async function registerIpc(args: {
     notebookStore,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
+    nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,
+      ...(params.workspacePath === undefined ? {} : { workspacePath: params.workspacePath }) }, config),
     ...(rpcHttp ? { http: rpcHttp } : {}),
     metrics,
     toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal, options) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal, options),

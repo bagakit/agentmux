@@ -622,6 +622,12 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
       failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact saved local Executor template ID.')
     }
+    if (operation === 'agent.open' && request.content.kind === 'new-agent' && request.content.nativeResumeSource) {
+      const executionPath = executionWorkspace?.path ?? resourceReference?.path ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.directoryPath
+      if (executionPath !== request.content.nativeResumeSource.workspacePath) {
+        failure('AGENT_NATIVE_WORKSPACE_MISMATCH', 'Choose the original conversation execution Workspace. Its saved history and current workface are retained.')
+      }
+    }
     const binding: SpatialRequestBinding = { requestId: request.requestId, inputDigest, operation,
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
@@ -689,6 +695,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
           ? ports.get().config!.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!.path : zone.directoryPath),
         agentSessionId: sessionId, createOperationId: request.requestId,
         ...(request.content.kind === 'fork-agent' ? { forkSource: request.content.source, launchOptions: forkParent!.launchOptions } : {}),
+        ...(request.content.kind === 'new-agent' && request.content.nativeResumeSource ? { nativeResumeSource: request.content.nativeResumeSource } : {}),
         ...(!forkParent && topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
         ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),

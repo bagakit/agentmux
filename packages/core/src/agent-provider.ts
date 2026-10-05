@@ -43,6 +43,9 @@ import type {
   AgentProviderForkContext,
   AgentProviderNativeSessionDiscovery,
   AgentProviderNativeSessionDiscoveryContext,
+  AgentProviderNativeSessionListContext,
+  AgentProviderNativeResumeContext,
+  AgentNativeSessionCatalog,
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryRecordContext,
   AgentSessionHistoryItem,
@@ -161,6 +164,10 @@ export type AgentProvider = {
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
+  /** Persisted conversation discovery is independent of a currently managed Run. */
+  listNativeSessions?(context: AgentProviderNativeSessionListContext): Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>
+  /** Recheck only this exact selected source before starting its native resume. */
+  assertNativeResumeSource?(context: AgentProviderNativeResumeContext): Promise<void>
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
   readSessionHistoryRecord?(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem>
   prepareSessionQuestionReply?(context: AgentProviderSessionQuestionReplyContext): Promise<string>
@@ -208,6 +215,8 @@ export type AgentProviderDefinition = {
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
+  listNativeSessions?: AgentProvider['listNativeSessions']
+  assertNativeResumeSource?: AgentProvider['assertNativeResumeSource']
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
   readSessionHistoryRecord?: (context: AgentProviderSessionHistoryRecordContext) => Promise<AgentSessionHistoryItem>
   prepareSessionQuestionReply?: (context: AgentProviderSessionQuestionReplyContext) => Promise<string>
@@ -303,6 +312,9 @@ function assertManagedHookContribution(contribution: {
 
 export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
   assertManagedHookContribution(definition)
+  if (Boolean(definition.listNativeSessions) !== Boolean(definition.assertNativeResumeSource)) {
+    throw new AgentMuxError('Native conversation discovery and exact source verification must be contributed together.', 'INVALID_AGENT_PROVIDER')
+  }
   const { catalog: catalogSeed } = definition
   if (Boolean(catalogSeed.capabilities.providerFork?.current) !== Boolean(definition.buildForkArgs)) {
     throw new AgentMuxError('Native fork capability and its launch contribution must be declared together.', 'INVALID_AGENT_PROVIDER')
@@ -390,6 +402,8 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.prepareInteractionResponse ? { prepareInteractionResponse: definition.prepareInteractionResponse } : {}),
     ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
+    ...(definition.listNativeSessions ? { listNativeSessions: definition.listNativeSessions } : {}),
+    ...(definition.assertNativeResumeSource ? { assertNativeResumeSource: definition.assertNativeResumeSource } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),
     ...(definition.prepareSessionQuestionReply ? { prepareSessionQuestionReply: definition.prepareSessionQuestionReply } : {}),

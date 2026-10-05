@@ -94,7 +94,7 @@ type AgentMuxLifecycleReservationBase = {
 /** Prepared before start; no Run or input is invented for this durable creation seed. */
 export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
   'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
-  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'launchOptions'>
+  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions'>
 
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
   | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
@@ -1339,7 +1339,7 @@ function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creatio
 function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
-    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'launchOptions'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
+    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
   const creation = creationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
   if (!creation.intentDigest || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
     forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
@@ -1347,6 +1347,7 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
     executorId: string(p.executorId, 'executorId'), hostId: string(p.hostId, 'hostId'), workspacePath: string(p.workspacePath, 'workspacePath', MAX_PATH_BYTES),
     hookBindingId: string(p.hookBindingId, 'hookBindingId'), hookToken: string(p.hookToken, 'hookToken'), capabilityHash: string(p.capabilityHash, 'capabilityHash'),
     createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, ...(forkedFrom ? { forkedFrom } : {}),
+    ...(p.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(p.nativeHandle) }),
     ...(p.launchOptions === undefined ? {} : { launchOptions: launchOptionSelection(p.launchOptions) }) }
 }
 
@@ -1868,6 +1869,23 @@ function preparedCreateReservation(current: AgentMuxLifecycleReservation | undef
   return { ...current, preparedCreation }
 }
 
+/** Atomically reserve a native conversation across different creation operations and Core processes. */
+function assertNativeCreationOwner(seed: AgentMuxPreparedCreation, sessions: readonly AgentMuxStoredAgentSession[],
+  retired: readonly AgentMuxRetiredAgentSession[], reservations: readonly AgentMuxLifecycleReservation[]): void {
+  const source = seed.nativeHandle
+  if (source?.kind !== 'provider') return
+  const same = (handle: AgentNativeSessionHandle | undefined): boolean => handle?.kind === 'provider' &&
+    handle.providerId === source.providerId && handle.sessionId === source.sessionId
+  if (sessions.some(session => session.hostId === seed.hostId && (same(session.nativeHandle) ||
+      session.nativeSourceObservation?.state === 'changed' && same(session.observedNativeHandle))) ||
+      retired.some(session => session.hostId === seed.hostId && same(session.history?.nativeHandle)) ||
+      reservations.some(reservation => reservation.agentSessionId !== seed.agentSessionId &&
+        (reservation.kind === 'create' && reservation.preparedCreation?.hostId === seed.hostId && same(reservation.preparedCreation.nativeHandle) ||
+         reservation.kind === 'reopen' && reservation.expectedRetirement.hostId === seed.hostId && same(reservation.expectedRetirement.history?.nativeHandle)))) {
+    throw new AgentMuxError('This native conversation already has an original Core Session or prepared operation. Inspect that identity before continuing.', 'AGENT_NATIVE_SESSION_ALREADY_MANAGED')
+  }
+}
+
 function claimedCreateReservation(current: AgentMuxLifecycleReservation | undefined, operationId: string, intentDigest: string,
   claim: AgentMuxLifecycleClaim): Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null {
   if (!current) return null
@@ -1920,8 +1938,11 @@ function assertLifecycleCommit(
     throw new AgentMuxError('Lifecycle commit does not match its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'create' && reservation.preparedCreation) {
-    const { run, retiredRuns, creation, ...actual } = next
+    const { run, retiredRuns, creation, terminalPromptReadiness, ...actual } = next
     const { creation: intended, ...prepared } = reservation.preparedCreation
+    // Initial composer readiness belongs to the just-started exact Run. It cannot
+    // exist in a no-Run preparation; normalizeAgentSession already checks its Run.
+    if (terminalPromptReadiness && terminalPromptReadiness.source !== 'initial-composer') throw new AgentMuxError('A creation cannot import another composer readiness epoch.', 'INVALID_AGENT_SESSION_STORE')
     if (!isDeepStrictEqual(actual, prepared) || !isDeepStrictEqual(creation, intended) || retiredRuns.length) throw new AgentMuxError('Creation commit changed its prepared identity or intent.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'reopen') {
@@ -2114,6 +2135,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>> {
     const next = preparedCreateReservation(this.reservations.get(reservation.agentSessionId), reservation, seed)
     assertReservationPrecondition(next, [...this.sessions.values()], this.retiredAgentSessions)
+    assertNativeCreationOwner(next.preparedCreation!, [...this.sessions.values()], this.retiredAgentSessions, [...this.reservations.values()])
     this.reservations.set(next.agentSessionId, structuredClone(next))
     return structuredClone(next)
   }
@@ -2651,6 +2673,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       next = preparedCreateReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, seed)
       assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
+      assertNativeCreationOwner(next.preparedCreation!, document.sessions, document.retiredAgentSessions, document.reservations)
       await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? next! : item) })
     })
     return structuredClone(next!)

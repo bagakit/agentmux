@@ -906,6 +906,40 @@ export type AgentProviderNativeSessionDiscovery = {
   assertCurrent(): Promise<void>
 }
 
+export type AgentNativeResumeSource = {
+  nativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  workspacePath: string
+  /** Provider-issued file lifetime identity. Appends do not change it; replacement does. */
+  revision: string
+}
+
+export type AgentNativeSessionCandidate = {
+  source: AgentNativeResumeSource
+  title?: string
+  createdAt?: number
+  updatedAt: number
+  /** Original Core ownership, never inferred from cwd, title or Runtime Run alone. */
+  managed?: { agentSessionId: string; executorId: string; run: AgentMuxRunRef; state: 'active' | 'retired'; retiredAt?: number }
+}
+
+export type AgentNativeSessionCatalog = {
+  providerId: AgentProviderId
+  capabilities: AgentCapabilities
+  availability: 'available' | 'unsupported'
+  sessions: AgentNativeSessionCandidate[]
+  issues: Array<{ code: string; message: string }>
+}
+
+export type AgentProviderNativeSessionListContext = {
+  workspacePath?: string
+  env: Readonly<Record<string, string | undefined>>
+  signal: AbortSignal
+}
+
+export type AgentProviderNativeResumeContext = AgentProviderNativeSessionListContext & {
+  source: AgentNativeResumeSource
+}
+
 export type AgentProviderSessionHistoryContext = {
   /** Core identity of the original reader, when invoked through a Core Session. */
   agentSessionId?: string
