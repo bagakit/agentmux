@@ -1,3 +1,5 @@
+import type { MobileQuestionReplyAttempt } from './question-replies'
+import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
@@ -25,9 +27,9 @@ function restoredMessage(value: PromptAttempt['phase'], interaction = false): st
 
 /** Device-owned drafts and original intent guards only. No credentials, message log or send queue. */
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
-  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new Map<string, ResponseAttempt>()
+  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new Map<string, ResponseAttempt>(), questions = new Map<string, MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
-  const state = { drafts, attempts, responses, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false }
+  const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
   let durableBaseline = baseline
   let originalRecord: DeviceWorkface = owner.snapshot().record
@@ -52,6 +54,8 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
         const intent = item as PromptAttempt, status = intent.phase === 'sending' ? 'unknown' : intent.phase
         attempts.set(key, { ...intent, phase: status, message: restoredMessage(status) })
       }
+      for (const [key, attempt] of value.questions ?? []) questions.set(key, { ...attempt, phase: attempt.phase === 'sending' ? 'unknown' : attempt.phase })
+      for (const [key, answers] of value.questionDrafts ?? []) questionDrafts.set(key, answers)
       for (const [key, item] of savedResponses) {
         const status = (item as ResponseAttempt).phase === 'sending' ? 'unknown' : (item as ResponseAttempt).phase
         responses.set(key, { phase: status, message: restoredMessage(status, true) })
@@ -73,7 +77,9 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),
           ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {})
-        }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase }]) }
+        }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase }]),
+        ...(questions.size ? { questions: [...questions].map(([key, intent]) => [key, structuredClone(intent)] as [string, MobileQuestionReplyAttempt]) } : {}),
+        ...(questionDrafts.size ? { questionDrafts: [...questionDrafts].map(([key, answers]) => [key, structuredClone(answers)] as [string, AgentSessionHistoryQuestionAnswer[]]) } : {}) }
       return record
   }
   function exportBackup(): string {
@@ -84,8 +90,8 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
   function save(): Promise<boolean> {
     const captured = serialize(), revision = ++saveRevision, expectedRecordId = recordId
     const edits: ConversationEdit[] = []
-    for (const bucket of ['drafts', 'attempts', 'responses'] as ConversationBucket[]) {
-      const before = new Map<string, ConversationValue>(baseline[bucket]), after = new Map<string, ConversationValue>(captured[bucket])
+    for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts'] as ConversationBucket[]) {
+      const before = new Map<string, ConversationValue>(baseline[bucket] ?? []), after = new Map<string, ConversationValue>(captured[bucket] ?? [])
       for (const key of new Set([...before.keys(), ...after.keys()])) {
         if (JSON.stringify(before.get(key)) !== JSON.stringify(after.get(key))) edits.push({ bucket, key, expected: before.get(key), next: after.get(key) })
       }
@@ -102,9 +108,9 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       // Do not erase edits made while saving. Replace a conflicted attempt object,
       // so its pending callback cannot mistake it for the canonical original.
       const current = serialize()
-      for (const bucket of ['drafts', 'attempts', 'responses'] as ConversationBucket[]) {
-        const before = new Map<string, ConversationValue>(captured[bucket]), now = new Map<string, ConversationValue>(current[bucket])
-        const disk = new Map<string, ConversationValue>(saved[bucket])
+      for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts'] as ConversationBucket[]) {
+        const before = new Map<string, ConversationValue>(captured[bucket] ?? []), now = new Map<string, ConversationValue>(current[bucket] ?? [])
+        const disk = new Map<string, ConversationValue>(saved[bucket] ?? [])
         for (const key of new Set([...before.keys(), ...disk.keys()])) {
           if (JSON.stringify(now.get(key)) !== JSON.stringify(before.get(key))) continue
           const value = disk.get(key)
@@ -113,6 +119,13 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
             if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
             if (value === undefined) attempts.delete(key)
             else { const intent = value as Omit<PromptAttempt, 'message'>, phase = intent.phase === 'sending' ? 'unknown' : intent.phase; attempts.set(key, { ...intent, phase, message: restoredMessage(phase) }) }
+          } else if (bucket === 'questions') {
+            if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
+            if (value === undefined) questions.delete(key)
+            else { const intent = value as MobileQuestionReplyAttempt; questions.set(key, { ...intent, phase: intent.phase === 'sending' ? 'unknown' : intent.phase }) }
+          } else if (bucket === 'questionDrafts') {
+            if (value === undefined) questionDrafts.delete(key)
+            else questionDrafts.set(key, value as AgentSessionHistoryQuestionAnswer[])
           } else {
             if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
             if (value === undefined) responses.delete(key)
