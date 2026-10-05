@@ -41,6 +41,7 @@ async function chooseIcon(label: string, value: string) {
 }
 function customizedExecutors() { return { codex: { ...executors.codex!, avatar: appearances.codex }, review: { ...executors.review!, avatar: appearances.review } } }
 const badges = () => [...dom.container.querySelectorAll<HTMLElement>('[data-avatar-badge]')].map((node) => node.dataset.avatarBadge)
+const libraryBadges = () => [...dom.container.querySelectorAll<HTMLElement>('.settings-resource-library [data-avatar-badge]')].map((node) => node.dataset.avatarBadge)
 
 it('edits avatars in Executor templates and preserves both through save and reopen', async () => {
   let config = { ...composerConfig, executors }
@@ -48,18 +49,19 @@ it('edits avatars in Executor templates and preserves both through save and reop
   await dom.render(<AgentSettingsPane config={config} onSave={save} />)
   await change('Codex avatar tint', '#ee7755')
   await chooseIcon('Codex avatar icon', 'spark')
+  await dom.click('[data-resource-row="review"]')
   await change('Reviewer avatar tint', '#6688dd')
   await chooseIcon('Reviewer avatar icon', 'shield')
-  expect(badges()).toEqual(['spark', 'shield'])
+  expect(libraryBadges()).toEqual(['spark', 'shield'])
   await dom.click('.settings-pane-actions button')
   expect(save).toHaveBeenCalledOnce()
   expect(config.executors.codex?.avatar).toEqual(appearances.codex)
   expect(config.executors.review?.avatar).toEqual(appearances.review)
   await dom.render(null)
   await dom.render(<AgentSettingsPane config={config} onSave={save} />)
-  expect(badges()).toEqual(['spark', 'shield'])
+  expect(libraryBadges()).toEqual(['spark', 'shield'])
   await dom.click('[aria-label="Reset Codex avatar"]')
-  expect(badges()).toEqual(['shield'])
+  expect(libraryBadges()).toEqual(['shield'])
   await dom.click('.settings-pane-actions button')
   expect(config.executors.codex?.avatar).toEqual({})
   expect(config.executors.review?.avatar).toEqual(appearances.review)
@@ -70,7 +72,7 @@ it('shows legacy appearance in Executor settings and makes an explicit reset win
   let savedExecutors = legacy.executors
   const save = vi.fn(async (next: typeof legacy.executors) => { savedExecutors = next })
   await dom.render(<AgentSettingsPane config={legacy} onSave={save} />)
-  expect(badges()).toEqual(['spark'])
+  expect(libraryBadges()).toEqual(['spark'])
 
   await dom.click('[aria-label="Reset Codex avatar"]')
   expect(badges()).toEqual([])
@@ -91,10 +93,11 @@ it('shows legacy appearance in Executor settings and makes an explicit reset win
 it('keeps failed Executor saves local without discarding unsaved avatar edits', async () => {
   await dom.render(<AgentSettingsPane config={{ ...composerConfig, executors }}
     onSave={async () => { throw new Error('Settings write failed') }} />)
+  await dom.click('[data-resource-row="review"]')
   await chooseIcon('Reviewer avatar icon', 'bolt')
   await dom.click('.settings-pane-actions button')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('Settings write failed')
-  expect(badges()).toEqual(['bolt'])
+  expect(libraryBadges()).toEqual(['bolt'])
 })
 
 it('shows details on hover and focus, then routes the settings action to the matching Executor', async () => {
@@ -202,7 +205,8 @@ it('Appearance has no avatar controls and the Executor deep link opens the match
   expect(dom.container.querySelectorAll('[aria-label$="avatar icon"]')).toHaveLength(0)
   await dom.render(<SettingsPanel initialSection="agents" executorId="review" onClose={() => {}} />)
   expect(dom.container.querySelector('[aria-label="Reviewer avatar icon"]')).not.toBeNull()
-  expect(dom.container.querySelector<HTMLDetailsElement>('#executor-settings-review')?.open).toBe(true)
+  expect(dom.container.querySelector('[data-resource-editor="review"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-resource-view="editor"]')).not.toBeNull()
 })
 
 it('Topic presence reads the live Session executor rather than its Provider', async () => {
