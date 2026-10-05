@@ -22,7 +22,11 @@ async function candidate(path: string, context: AgentProviderNativeSessionListCo
   }
   // Native child records are ancestry, never independent main conversations in the Resume catalog.
   if (payload!.source && typeof payload!.source === 'object' && 'subagent' in payload!.source) return null
-  if (!['cli', 'exec', 'vscode', 'appServer'].includes(String(payload!.source))) {
+  // The native 0.42/0.43 SessionMeta protocol records originator and cli_version, without source.
+  // These original CLI/editor producers identify retained main conversations; missing metadata is not a child.
+  const legacyMain = payload!.source === undefined && ['codex_cli_rs', 'codex_vscode'].includes(String(payload!.originator)) &&
+    typeof payload!.cli_version === 'string' && payload!.cli_version.trim().length > 0
+  if (!legacyMain && !['cli', 'exec', 'vscode', 'appServer'].includes(String(payload!.source))) {
     throw new AgentMuxError('Codex native conversation provenance is unknown.', 'AGENT_NATIVE_SESSION_PROVENANCE_UNKNOWN')
   }
   if (context.workspacePath !== undefined && cwd !== context.workspacePath) return null

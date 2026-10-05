@@ -47,6 +47,7 @@ import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxR
 import { normalizeOperationDevice } from './operation-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { parseRpcNativeResult } from './rpc-native-codec.js'
+import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
@@ -59,7 +60,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
-  'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' |
+  'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
@@ -90,6 +91,11 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   snapshot?(params: AgentMuxRpcSnapshotParams): Promise<Partial<AgentMuxRpcSnapshot>>
   /** Native catalog uses the selected Host's original Executor configuration. */
   nativeAgentSessions?(params: AgentMuxRpcParams<'agent.native.ls'>): Promise<AgentMuxRpcResult<'agent.native.ls'>>
+  /** Read the selected Executor's exact persisted source; cancellation ends only this reader. */
+  nativeAgentHistory?(params: AgentMuxRpcParams<'agent.native.history'>,
+    readContext?: Pick<AgentMuxRpcCallContext, 'signal'>): Promise<AgentMuxRpcResult<'agent.native.history'>>
+  nativeAgentHistoryResource?(params: AgentMuxRpcParams<'agent.native.history.resource'>,
+    readContext?: Pick<AgentMuxRpcCallContext, 'signal'>): Promise<AgentMuxRpcResult<'agent.native.history.resource'>>
   /** Original Host Authority and native confirmation owner; never constructed here. */
   deviceAdministration?: AgentMuxRpcDeviceAdministration
   /** Original Desktop consumes its in-memory, trusted IPC user intent. */
@@ -122,6 +128,8 @@ const NATIVE_FIELDS = {
   'agent.inspect': ['target'],
   'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
   'agent.native.ls': ['hostId', 'executorId', 'workspacePath'],
+  'agent.native.history': ['hostId', 'executorId', 'source', 'cursor', 'limit'],
+  'agent.native.history.resource': ['hostId', 'executorId', 'nativeSource', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
@@ -723,6 +731,40 @@ export class AgentMuxRpcService {
             ...(input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }) }) }
         }
         result = parseRpcNativeResult('agent.native.ls', result, input)
+        break
+      }
+      case 'agent.native.history': {
+        const input = parseNativeHistoryParams(p)
+        context.signal?.throwIfAborted()
+        if (this.ports.nativeAgentHistory) result = await this.ports.nativeAgentHistory(input,
+          context.signal ? { signal: context.signal } : {})
+        else {
+          const targets = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+          if (targets.length !== 1) throw new AgentMuxError('The exact native history Host is unavailable or ambiguous.', 'UNKNOWN_HOST')
+          const { hostId, ...request } = input
+          result = { hostId, executorId: input.executorId, nativeSource: input.source,
+            ...await targets[0]!.client.readHostNativeAgentHistory({ ...request,
+              ...(context.signal ? { signal: context.signal } : {}) }) }
+        }
+        context.signal?.throwIfAborted()
+        result = parseNativeHistoryResult(result, input)
+        break
+      }
+      case 'agent.native.history.resource': {
+        const input = parseNativeHistoryResourceParams(p)
+        context.signal?.throwIfAborted()
+        if (this.ports.nativeAgentHistoryResource) result = await this.ports.nativeAgentHistoryResource(input,
+          context.signal ? { signal: context.signal } : {})
+        else {
+          const targets = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+          if (targets.length !== 1) throw new AgentMuxError('The exact native resource Host is unavailable or ambiguous.', 'UNKNOWN_HOST')
+          const { hostId, ...request } = input
+          result = { hostId, executorId: input.executorId, nativeSource: input.nativeSource,
+            ...await targets[0]!.client.readHostNativeAgentHistoryResource({ ...request,
+              ...(context.signal ? { signal: context.signal } : {}) }) }
+        }
+        context.signal?.throwIfAborted()
+        result = parseNativeHistoryResourceResult(result, input)
         break
       }
       case 'message.delivery.inspect': {

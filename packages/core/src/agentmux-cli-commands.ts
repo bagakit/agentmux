@@ -2,6 +2,7 @@ import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
 import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams } from './mote-preferences.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
+import { parseNativeHistoryParams, parseNativeHistoryResourceParams } from './public-rpc-native-history.js'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
@@ -253,6 +254,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.native.ls', '--host ID --executor ID [--workspace-path PATH]', 'Discover durable Provider conversations from the exact Host and Executor without starting a Run.',
     { '--host': 'data', '--executor': 'data', '--workspace-path': 'data' }, f => ({ hostId: id(f, '--host', true), executorId: id(f, '--executor', true), ...fields(f, { '--workspace-path': 'workspacePath' }) }),
     'Read-only. Preserve source {nativeHandle,workspacePath,revision} exactly; revision pins the original file lifetime and remains valid as that conversation grows. issues report partial discovery, while unsupported is explicit. A managed candidate names its original AgentMux Session, Executor and Run: inspect and reuse that identity; recover active Sessions or reopen retired Sessions instead of creating a duplicate. An unmanaged source can be continued with agent open --executor ID --native-source FILE|- at its exact execution Workspace.'),
+  command('agent.native.history', '--input FILE|-', 'Read the exact saved Provider conversation without creating a Session or operating a Run.',
+    { '--input': 'data' }, async f => parseNativeHistoryParams(await readControlJsonInput(value(f, '--input', true)!, 'Native history')) as unknown as Record<string, unknown>,
+    'JSON requires hostId, executorId and the complete source {nativeHandle,workspacePath,revision} returned by agent native ls. limit is 1–100; follow nextCursor with the same Host, Executor and source. nativeSource confirms that exact locator while source retains the Provider/nativeSessionId history identity. Reading and cancellation never restore, attach, send input or stop a Run. A replaced or unavailable source reports its original failure; refresh discovery explicitly.'),
+  command('agent.native.history.resource', '--input FILE|-', 'Read one exact recorded native conversation resource without adopting a Session.',
+    { '--input': 'data' }, async f => parseNativeHistoryResourceParams(await readControlJsonInput(value(f, '--input', true)!, 'Native history resource')) as unknown as Record<string, unknown>,
+    'JSON requires hostId, executorId, nativeSource from native discovery, and source, recordId, partIndex, expectedReference from agent native history; preserve turnId when recorded. offsetBytes and maxBytes page exact text fragments. Images retain their original MIME/base64 bytes or readable unavailable reason. A reference grants no arbitrary path access. No network fetch, Session creation, input or Run control occurs.'),
   command('agent.context', '--host ID --session ID [--cursor TOKEN] [--limit N]', 'Read all available original context sources, complete entries and diagnostics without controlling the Agent.',
     { '--host': 'data', '--session': 'data', '--cursor': 'data', '--limit': 'value' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ...fields(f, { '--cursor': 'cursor' }), ...numbers(f, { '--limit': 'limit' }) }),
     'Both saved Core work and native conversation are included automatically. Follow nextCursor with the same exact Host and Session; limit bounds entries per source, never text length. Unavailable sources are reported alongside readable material. local means this Core Host, including on a remote machine. Read-only requests and cancellation never stop the original Run.'),

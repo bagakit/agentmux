@@ -91,7 +91,7 @@ export type { RemoteCoreUpgradeHost, RemoteCoreUpgradeExpected, RemoteCoreUpgrad
 export { createPortableCoreArtifact } from './portable-core-artifact.js'
 export type { PortableCoreArtifact } from './portable-core-artifact.js'
 
-export { SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
+export { SESSION_HISTORY_IMAGE_MAX_BYTES, parseProviderSessionHistoryResourceReadResult } from './session-history-resource.js'
 export type { AgentSessionHistoryResourceParams, AgentSessionHistoryResourceResult } from './session-history-resource.js'
 
 export * from './public-rpc-files.js'

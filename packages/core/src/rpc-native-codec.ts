@@ -21,6 +21,7 @@ import { isGitMethod, parseGitParams, parseGitResult } from './public-rpc-git.js
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
+import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
@@ -203,6 +204,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         array(p.issues, value => { const issue = record(value, ['code', 'message']); string(issue.code); text(issue.message) })
         break
       }
+      case 'agent.native.history': return parseNativeHistoryResult(value, parseNativeHistoryParams(params)) as unknown as Record<string, unknown>
+      case 'agent.native.history.resource': return parseNativeHistoryResourceResult(value, parseNativeHistoryResourceParams(params)) as unknown as Record<string, unknown>
       case 'agent.native.confirm': {
         record(p, ['session', 'confirmation', 'persisted', 'current'])
         const request = parseAgentNativeSessionConfirmation(input), session = parseRpcAgentSession(p.session)

@@ -1,8 +1,8 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
-import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult } from './types.js'
+import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceRequest, AgentProviderSessionHistoryResourceReadResult } from './types.js'
 
-export type SessionHistoryResourceReader = (input: AgentSessionHistoryResourceRequest) => Promise<AgentSessionHistoryResourceReadResult>
+export type SessionHistoryResourceReader = (input: AgentSessionHistoryResourceRequest) => Promise<AgentProviderSessionHistoryResourceReadResult & { agentSessionId?: string }>
 export type SessionHistoryResourceRecord = Pick<AgentSessionHistoryResourceRequest, 'source' | 'recordId' | 'turnId'>
 
 /** Explicit complete-content read. No Runtime operations, cache or guessed file locations. */
@@ -13,16 +13,18 @@ export async function readSessionHistoryTextResource(
   const metadata = part.content
   if (part.resourceType !== 'text' || !metadata || metadata.encoding !== 'json-utf8') throw new Error('This resource does not contain recorded text.')
   const hash = sha256.create(), decoder = new TextDecoder('utf-8', { fatal: true }), chunks: string[] = []
-  let offsetBytes = 0, agentSessionId: string | undefined, expectedReference = part.reference
+  let offsetBytes = 0, agentSessionId: string | undefined, identityRead = false, identityPresent = false, expectedReference = part.reference
   do {
     signal?.throwIfAborted()
     const receipt = await read({ ...record, partIndex, expectedReference, offsetBytes, maxBytes: 128 * 1024 })
     signal?.throwIfAborted()
     if (receipt.source.providerId !== record.source.providerId || receipt.source.nativeSessionId !== record.source.nativeSessionId ||
       receipt.recordId !== record.recordId || receipt.turnId !== record.turnId || receipt.partIndex !== partIndex ||
-      receipt.reference !== expectedReference || (agentSessionId !== undefined && receipt.agentSessionId !== agentSessionId))
+      receipt.reference !== expectedReference ||
+      (Object.hasOwn(receipt, 'agentSessionId') && (typeof receipt.agentSessionId !== 'string' || !receipt.agentSessionId)) ||
+      (identityRead && (Object.hasOwn(receipt, 'agentSessionId') !== identityPresent || receipt.agentSessionId !== agentSessionId)))
       throw new Error('Content response belongs to another recorded resource.')
-    agentSessionId = receipt.agentSessionId
+    agentSessionId = receipt.agentSessionId; identityPresent = Object.hasOwn(receipt, 'agentSessionId'); identityRead = true
     const fragment = receipt.result
     if (fragment.status !== 'fragment') throw new Error(fragment.status === 'unavailable' ? fragment.message : 'Recorded text returned image bytes.')
     if (fragment.encoding !== metadata.encoding || fragment.offsetBytes !== offsetBytes || fragment.totalBytes !== metadata.byteLength ||
