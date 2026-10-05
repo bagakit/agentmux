@@ -1,4 +1,6 @@
 import { Fragment, type ReactNode } from 'react'
+import { semanticIconComponent } from '../theme/icons.js'
+const ImageReferenceIcon = semanticIconComponent('object.image')
 import { looksLikeMarkdown, parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode } from '../lib/agent-markdown.js'
 import { classifyMarkdownLinkHref, referenceRevealLocation, splitMarkdownFileReferences, type MarkdownFileReference } from '../lib/markdown-file-reference.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
@@ -88,7 +90,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote', String(node.number))}>{node.number}</button></sup>
     }
     if (node.kind === 'image') {
-      if (context.readOnly) return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Image reference">🖼️ {node.alt || node.href}</span>
+      if (context.readOnly) return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Image reference"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
       const image = context.renderImage?.(node.href, node.alt, context.inLink)
       if (image !== undefined) return <Fragment key={key}>{image}</Fragment>
       const file = classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath)
@@ -96,8 +98,8 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</Fragment>
       if (context.inLink) return <span key={key}>{node.alt || node.href}</span>
       if (file && context.openWorkspaceFile) return <button key={key} type="button" className="md-image-attachment" title={file.path}
-        onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}>🖼️ {node.alt || file.path}</button>
-      return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed">🖼️ {node.alt || node.href}</span>
+        onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}><ImageReferenceIcon size={14} /> {node.alt || file.path}</button>
+      return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
     }
     const labelContext = { ...context, inLink: true }
     if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
