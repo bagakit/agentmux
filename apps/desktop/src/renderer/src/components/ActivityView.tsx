@@ -2,7 +2,7 @@ import { CapturedConversationMessage } from '@agentmux/client-ui/components/Capt
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { ArrowDown, ArrowLeft, ChevronRight, ChevronUp, FileText, Info, Pencil, Search } from 'lucide-react'
 import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent, type WheelEvent } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -383,7 +383,7 @@ export function ActivityView({
   onSelectAnnotation,
   describeSpeaker,
   moteConversation = false,
-  onReplyQuestion,
+  onReplyQuestion, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionAnswersObserved,
   renderMessageActions
 }: {
   sessionId: string
@@ -420,6 +420,10 @@ export function ActivityView({
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
+  questionReplyDraft?: ComponentProps<typeof ConversationView>['questionReplyDraft']
+  onQuestionDraftChange?: ComponentProps<typeof ConversationView>['onQuestionDraftChange']
+  questionReplyState?: ComponentProps<typeof ConversationView>['questionReplyState']
+  onQuestionAnswersObserved?: (page: AgentSessionHistoryPage, context: AgentSessionHistoryPage | null) => void
   onReplyQuestion?: ConversationQuestionReply
 }) {
   const logRef = useRef<HTMLDivElement>(null)
@@ -457,6 +461,8 @@ export function ActivityView({
   const questionAnswerContext = useMemo(() => recentNativePage
     ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
     [recentNativePage, nativeContextItems])
+  useEffect(() => { if (nativeHistoryPage) onQuestionAnswersObserved?.(nativeHistoryPage, questionAnswerContext) },
+    [nativeHistoryPage, questionAnswerContext, onQuestionAnswersObserved])
   const historyBoundary = readingWindow.historyBoundary
   const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
   const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
@@ -1056,6 +1062,9 @@ export function ActivityView({
         } : {})}
         renderQuestionNotice={renderConversationQuestionNotice}
         {...(onReplyQuestion ? { onReplyQuestion } : {})}
+        {...(questionReplyState ? { questionReplyState } : {})}
+        {...(questionReplyDraft ? { questionReplyDraft } : {})}
+        {...(onQuestionDraftChange ? { onQuestionDraftChange } : {})}
         {...(renderMessageActions ? { renderMessageActions } : {})}
         renderProcess={(props) => <NativeProcessObservation {...props} compact={true} />}
         sessionId={sessionId}

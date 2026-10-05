@@ -1,3 +1,5 @@
+import { mobileQuestionReplyState, observeMobileQuestionAnswers, replyMobileQuestion } from './question-replies'
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
@@ -136,6 +138,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (receipt) confirmPrompt(draftKey, pending)
   }, [reading.timeline, reading.session, agentSessionId, draftKey, revision])
 
+  useEffect(() => {
+    if (reading.page && agentSessionId) void observeMobileQuestionAnswers(local, agentSessionId, reading.page).then(changed => { if (changed && mounted.current) redraw(value => value + 1) })
+  }, [reading.page, agentSessionId, local])
   const diagnosticOwner = (originalClient: AgentMuxHostedClient | null): string | null => {
     const identity = originalClient?.runtimeOwnerIdentity?.()
     return identity ? `runtime:${identity.runtimeId}` : null
@@ -333,7 +338,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       </aside> : null}
       {local.conflicts.filter(item => item.key === draftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
         {local.conflicts.filter(item => item.key === draftKey).map((item, index) => {
-          const body = typeof item.value === 'string' ? item.value : 'draft' in item.value ? item.value.draft : '原请求的答复回执尚未确认。'
+          const body = typeof item.value === 'string' ? item.value : Array.isArray(item.value) ? item.value.map(answer => answer.answer).join('\n') : 'draft' in item.value ? item.value.draft : 'input' in item.value ? item.value.input.answers.map(answer => answer.answer).join('\n') : '原请求的答复回执尚未确认。'
           return <div key={index}>{typeof item.value !== 'string' && <p>原请求记录保留，请核对回执。</p>}<pre>{body}</pre><button type="button" onClick={() => { void platform.copyText(body, error => setCopyNotice(errorMessage(error))) }}>复制这份保全内容</button></div>
         })}
       </details>}
@@ -352,11 +357,14 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {reading.page && agentSessionId ? <>
           <ConversationView page={reading.page} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
-            {...(available && client?.forwardRpc ? { onReplyQuestion: async input => {
-              const condition = agentPromptCondition(client.agentSession(agentSessionId))
-              if (condition.expectedRun.runId !== session?.run.runId) throw new Error('原问题的 Run 已改变；对话与终端仍保留。')
-              return client.forwardRpc!('agent.question.reply', { ...input, ...condition, agentSessionId, sourceChannel: 'api' })
-            } } : {})}
+            questionReplyState={target => mobileQuestionReplyState(local, agentSessionId, target)}
+            questionReplyDraft={target => local.questionDrafts.get(questionReplyKey(agentSessionId, target))}
+            onQuestionDraftChange={(target, answers) => {
+              local.questionDrafts.set(questionReplyKey(agentSessionId, target), structuredClone(answers))
+              void local.save().then(() => { if (mounted.current) redraw(value => value + 1) })
+            }}
+            {...(available && client?.forwardRpc ? { onReplyQuestion: input => replyMobileQuestion(client, agentSessionId, session!.run.runId,
+              input, local, () => { if (mounted.current) redraw(value => value + 1) }) } : {})}
             {...readingProps} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
         {captured.length > 0 || reading.timeline?.items.some(item => item.kind === 'assistant_message') ? <details className="mobile-conversation__captured" open={!reading.page?.items.length}><summary>发送与实时观察{attempt && attempt.phase !== 'confirmed' ? ' · 交付待确认' : ''}</summary><section aria-label="已发送消息">

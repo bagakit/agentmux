@@ -1,3 +1,4 @@
+import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
 import { fileWorkbenchIdentity } from './lib/file-workbench-state'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
@@ -615,6 +616,8 @@ type AppState = {
   agentSteerInFlight: Record<string, string>
   /** Transient display facts from the existing queue drain; never persisted as delivery evidence. */
   agentSteerInFlightPhase: Record<string, 'preparing' | 'submitting'>
+  questionReplyDrafts: DesktopQuestionDrafts
+  questionReplies: DesktopQuestionReplies
   agentSteerQueues: Record<string, AgentSteerQueueEntry[]>
   /**
    * 启动对话框里填的两个可选名字，按 launcher 的 regionId 存——与 {@link agentComposerDrafts} 同一
@@ -2438,6 +2441,8 @@ type PersistedAppState = {
   launcherNameDrafts?: Record<string, LauncherNames>
   launcherOptionDrafts?: LauncherOptionDrafts
   agentComposerNotes?: Record<string, string>
+  questionReplyDrafts?: DesktopQuestionDrafts
+  questionReplies?: DesktopQuestionReplies
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
   retainedDocumentDrafts?: Record<string, FileDocument[]>
@@ -2678,6 +2683,8 @@ function selectPersistedInputs(state: AppState) {
     // 显示为不可投递、交给用户处置，内容不替用户丢掉。已消失的 session 留一条队列无害——它不投影
     // 到任何界面（没有对应 session），与上面 agentNames 同一个道理。
     agentSteerQueues: state.agentSteerQueues,
+    questionReplies: state.questionReplies,
+    questionReplyDrafts: state.questionReplyDrafts,
     documents: state.documents,
     retainedDocumentDrafts: state.retainedDocumentDrafts,
     noteBlockSelections: state.noteBlockSelections,
@@ -2955,6 +2962,24 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
   return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
 }
 
+/** Editing an answer draft never replaces its original submitted intent. */
+export function retainConversationQuestionDraft(sessionId: string, key: string, answers: DesktopQuestionReplyAttempt['input']['answers']): void {
+  const captured = structuredClone(answers)
+  useAppStore.setState(state => ({ questionReplyDrafts: { ...state.questionReplyDrafts, [sessionId]: { ...state.questionReplyDrafts?.[sessionId], [key]: captured } } }))
+  void flushMessageWorkbench(true)
+}
+/** The existing workbench writer retains one exact native-question intent before explicit input. */
+export async function retainConversationQuestionReply(sessionId: string, key: string, attempt: DesktopQuestionReplyAttempt,
+  expected: DesktopQuestionReplyAttempt | undefined): Promise<void> {
+  let admitted = false
+  useAppStore.setState(state => {
+    if (state.questionReplies?.[sessionId]?.[key] !== expected) return state
+    admitted = true
+    return { questionReplies: { ...state.questionReplies, [sessionId]: { ...state.questionReplies?.[sessionId], [key]: attempt } } }
+  })
+  if (!admitted) throw new Error('The original question reply record changed; this callback cannot replace it.')
+  await flushMessageWorkbench(true)
+}
 /** Admit only the chosen recipient's correlation to the existing intent owner before queue input. */
 export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding): Promise<AgentMuxSpatialSave | null> {
   if (binding.operation !== 'agent.message' || binding.createAgent || !binding.recoveryRecipient || !binding.recovery) throw new Error('An exact recovery message reference is required.')
@@ -3459,6 +3484,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentComposerHistoryNavigation: {},
   agentComposerNotes: {},
   agentSteerQueues: {},
+  questionReplies: {},
+  questionReplyDrafts: {},
   agentSteerInFlight: {},
   agentSteerInFlightPhase: {},
   launcherNameDrafts: {},
@@ -10086,7 +10113,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

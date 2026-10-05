@@ -1,3 +1,4 @@
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { useConversationReactions } from '../lib/conversation-reactions'
@@ -33,7 +34,7 @@ import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySour
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
-import { replyConversationQuestion } from '../lib/conversation-question'
+import { replyConversationQuestion, desktopQuestionReplyState, observeConversationQuestionAnswers, editConversationQuestionDraft } from '../lib/conversation-question'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
@@ -169,6 +170,8 @@ export function SessionPane({
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
   const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, firstPromptSelector)
   const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
+  const questionReplies = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplies?.[sessionId])
+  const questionDrafts = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplyDrafts?.[sessionId])
   const appendAgentComposerDraft = useAppStore.getState().appendAgentComposerDraft
   const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.config?.appearance.terminalTheme)
   const autoFocus = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
@@ -892,7 +895,11 @@ export function SessionPane({
     readPastedImage, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
     moteConversation: moteOwner !== null, renderMessageActions,
-    ...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input) } : {})
+    ...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input),
+      questionReplyDraft: target => questionDrafts?.[questionReplyKey(sessionId, target)],
+      onQuestionDraftChange: (target, answers) => editConversationQuestionDraft(session.control, target, answers),
+      questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target),
+      onQuestionAnswersObserved: (page, context) => observeConversationQuestionAnswers(session.control, page, context) } : {})
   }
   // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && activityShown) {

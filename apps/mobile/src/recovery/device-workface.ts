@@ -1,3 +1,6 @@
+import { parseQuestionReplyAttempt } from '@agentmux/client-ui/conversation-question-reply'
+import type { MobileQuestionReplyAttempt } from '../conversation/question-replies'
+import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-lock'
 import { validateDeliveryLogId } from '@agentmux/core/delivery-attempt'
@@ -12,9 +15,10 @@ export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
 export type Navigation = { selectedSessionId: string | null; hostUrl: string; panel: MobilePanel }
 export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
   attempts: Array<[string, Omit<PromptAttempt, 'message'>]>;
-  responses: Array<[string, Pick<ResponseAttempt, 'phase'>]>; conflicts?: ConversationConflict[] }
-export type ConversationBucket = 'drafts' | 'attempts' | 'responses'
-export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Pick<ResponseAttempt, 'phase'>
+  responses: Array<[string, Pick<ResponseAttempt, 'phase'>]>; questions?: Array<[string, MobileQuestionReplyAttempt]>;
+  questionDrafts?: Array<[string, AgentSessionHistoryQuestionAnswer[]]>; conflicts?: ConversationConflict[] }
+export type ConversationBucket = 'drafts' | 'attempts' | 'responses' | 'questions' | 'questionDrafts'
+export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Pick<ResponseAttempt, 'phase'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
 export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
 export type ConversationConflict = { bucket: ConversationBucket; key: string; value: ConversationValue }
 /** Facts written by this transaction, excluding later optimistic edits. */
@@ -89,7 +93,7 @@ function origin(value: unknown): value is string {
     && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' } catch { return false }
 }
 export function parseDraftRecord(value: unknown): DraftRecord {
-  const v = record(value, ['version', 'drafts', 'attempts', 'responses', ...(Object.hasOwn(value ?? {}, 'conflicts') ? ['conflicts'] : [])])
+  const v = record(value, ['version', 'drafts', 'attempts', 'responses', ...['conflicts', 'questions', 'questionDrafts'].filter(key => Object.hasOwn(value ?? {}, key))])
   if (v.version !== 1) throw invalid()
   const drafts = entries(v.drafts), attempts = entries(v.attempts), responses = entries(v.responses)
   for (const [, draft] of drafts) if (!body(draft)) throw invalid()
@@ -121,11 +125,24 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     }
   }
   for (const [, item] of responses) if (!phase(record(item, ['phase']).phase)) throw invalid()
+  if (v.questions !== undefined) for (const [, item] of entries(v.questions)) {
+    const attempt = parseQuestionReplyAttempt(item), scope = item as MobileQuestionReplyAttempt
+    if (!(scope.runtimeId === null || id(scope.runtimeId)) || !id(scope.hostId) || !attempt.input.answers.length) throw invalid()
+  }
+  if (v.questionDrafts !== undefined) for (const [, item] of entries(v.questionDrafts)) {
+    if (!Array.isArray(item) || item.length > MAX_ENTRIES) throw invalid()
+    const ids = new Set<string>()
+    for (const answer of item) {
+      const draft = record(answer, ['questionId', 'answer'])
+      if (!id(draft.questionId) || !body(draft.answer) || ids.has(draft.questionId)) throw invalid()
+      ids.add(draft.questionId)
+    }
+  }
   if (v.conflicts !== undefined) {
     if (!Array.isArray(v.conflicts)) throw invalid()
     for (const item of v.conflicts) {
       const c = record(item, ['bucket', 'key', 'value'])
-      if (!['drafts', 'attempts', 'responses'].includes(String(c.bucket)) || !id(c.key)) throw invalid()
+      if (!['drafts', 'attempts', 'responses', 'questions', 'questionDrafts'].includes(String(c.bucket)) || !id(c.key)) throw invalid()
       parseDraftRecord({ version: 1, drafts: [], attempts: [], responses: [], [String(c.bucket)]: [[c.key, c.value]] })
     }
   }
@@ -331,7 +348,7 @@ export class DeviceWorkfaceStore {
       const conversation = structuredClone(value.conversation)
       const conflicts = conversation.conflicts ?? []
       for (const edit of captured) {
-        const items = conversation[edit.bucket] as Array<[string, ConversationValue]>
+        const items = ((conversation as Record<ConversationBucket, Array<[string, ConversationValue]>>)[edit.bucket] ??= [])
         const at = items.findIndex(([key]) => key === edit.key), current = at < 0 ? undefined : items[at]![1]
         if ((value.recordId ?? null) !== recordId || !sameValue(current, edit.expected) && !sameValue(current, edit.next)) {
           if (edit.next !== undefined && !sameValue(current, edit.next)) {

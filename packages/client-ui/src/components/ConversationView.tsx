@@ -1,4 +1,4 @@
-import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentMuxSessionQuestionReplyInput, AgentSessionQuestionReplyReceipt } from '@agentmux/core'
+import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionQuestionReplyReceipt } from '@agentmux/core'
 import { projectConversationRecords } from '../lib/conversation-records.js'
 import { memo, useMemo, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
@@ -8,15 +8,19 @@ import { ConversationMessage, type ConversationMessageProps } from './Conversati
 import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
+import { recordedQuestionAnswers, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyState } from '../lib/conversation-question-reply.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
-export type ConversationQuestionReply = (input: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'answers' | 'operationId'>) => Promise<AgentSessionQuestionReplyReceipt>
+export type ConversationQuestionReply = (input: ConversationQuestionInput) => Promise<AgentSessionQuestionReplyReceipt>
 
 type Props = ReadingProps & {
   onReplyQuestion?: ConversationQuestionReply
+  questionReplyState?: (target: ConversationQuestionTarget) => QuestionReplyState | undefined
+  questionReplyDraft?: (target: ConversationQuestionTarget) => ConversationQuestionInput['answers'] | undefined
+  onQuestionDraftChange?: (target: ConversationQuestionTarget, answers: ConversationQuestionInput['answers']) => void
   renderQuestionNotice?: QuestionNoticeRenderer
   page: AgentSessionHistoryPage
   /** Already accepted same-source facts; does not change this page or acquire read demand. */
@@ -35,24 +39,13 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
+  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
   if (page.agentSessionId !== sessionId || page.items.length === 0) return null
   const descriptions = new Map(describedRecords.map(record => [record.rawId, record]))
-  const answers = new Map<string, string>()
-  if (questionAnswerContext?.agentSessionId === page.agentSessionId &&
-    questionAnswerContext.source.providerId === page.source.providerId &&
-    questionAnswerContext.source.nativeSessionId === page.source.nativeSessionId) {
-    for (const item of questionAnswerContext.items) if (item.kind === 'user-message') {
-      for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
-    }
-  }
-  // The displayed source-order page remains authoritative for answers it contains.
-  for (const item of page.items) if (item.kind === 'user-message') {
-    for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
-  }
+  const answers = recordedQuestionAnswers(page, questionAnswerContext)
   const records = describedRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
 
   const renderRecord: ConversationRecordRenderer = (item, wrapBody) => {
@@ -80,8 +73,11 @@ export const ConversationView = memo(function ConversationView({
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
         {item.questionRequest ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId])} request={item.questionRequest} recordedAnswers={answers}
-          {...(onReplyQuestion && item.turnId ? { onSubmit: (selected, operationId) => onReplyQuestion({
-            source: { ...page.source }, turnId: item.turnId!, recordId: item.id, answers: selected, operationId }) } : {})}
+          {...(onReplyQuestion && item.turnId ? { onSubmit: selected => onReplyQuestion({
+            source: { ...page.source }, turnId: item.turnId!, recordId: item.id, answers: selected }) } : {})}
+          {...(questionReplyState && item.turnId ? { attempt: questionReplyState({ source: page.source, turnId: item.turnId, recordId: item.id }) } : {})}
+          {...(questionReplyDraft && item.turnId ? { draftAnswers: questionReplyDraft({ source: page.source, turnId: item.turnId, recordId: item.id }) } : {})}
+          {...(onQuestionDraftChange && item.turnId ? { onDraftChange: selected => onQuestionDraftChange({ source: page.source, turnId: item.turnId!, recordId: item.id }, selected) } : {})}
           {...(renderQuestionNotice ? { renderNotice: renderQuestionNotice } : {})} /> : null}
         {item.questionDiagnostic ? renderQuestionNotice ? renderQuestionNotice(item.questionDiagnostic)
           : <p className="agent-interaction__error" role="status">{item.questionDiagnostic.message}</p> : null}
