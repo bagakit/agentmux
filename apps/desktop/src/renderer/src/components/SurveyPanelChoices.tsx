@@ -1,5 +1,5 @@
 import { groupIds, regionIds } from '@agentmux/layout'
-import { Bot, ChevronDown, ChevronRight, FileText, Globe2, PanelsTopLeft, Plus, Terminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import { regionDisplayNames, regionSurfaceLabel } from '../lib/region-display-name'
 import { useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
@@ -9,19 +9,29 @@ import type { useAppStore } from '../store'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeFileTextIcon = semanticIconComponent('file.text')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
+
 type State = ReturnType<typeof useAppStore.getState>
 type Facts = Pick<State, 'config' | 'layouts' | 'tabs'>
 
 function contentKind(surface: WorkbenchSurface | undefined) {
-  if (!surface) return { name: 'Panel unconfirmed', Icon: PanelsTopLeft }
+  if (!surface) return { name: 'Panel unconfirmed', Icon: ThemeObjectLauncherIcon }
   switch (surface.kind) {
-    case 'browser': return { name: 'Browser', Icon: Globe2 }
-    case 'agent': return { name: 'Agent', Icon: Bot }
-    case 'terminal': return { name: 'Terminal', Icon: Terminal }
-    case 'file': return { name: surface.path.endsWith('.note.json') ? 'Note' : 'File', Icon: FileText }
-    case 'git': return { name: 'Git history', Icon: FileText }
-    case 'git-diff': return { name: 'Diff', Icon: FileText }
-    case 'launcher': return { name: 'New Tab', Icon: Plus }
+    case 'browser': return { name: 'Browser', Icon: ThemeObjectBrowserIcon }
+    case 'agent': return { name: 'Agent', Icon: ThemeObjectAgentIcon }
+    case 'terminal': return { name: 'Terminal', Icon: ThemeObjectTerminalIcon }
+    case 'file': return { name: surface.path.endsWith('.note.json') ? 'Note' : 'File', Icon: ThemeFileTextIcon }
+    case 'git': return { name: 'Git history', Icon: ThemeFileTextIcon }
+    case 'git-diff': return { name: 'Diff', Icon: ThemeFileTextIcon }
+    case 'launcher': return { name: 'New Tab', Icon: ThemeActionCreateIcon }
   }
 }
 
@@ -86,11 +96,11 @@ export function SurveyPanelChoices<T extends WorkbenchProjectionSelection>({ cho
   const label = topic ? 'Choose Topic location' : 'Choose original work surface'
   const contents = <PanelChoiceItems choices={choices} facts={facts} topic={topic} onSelect={onSelect} />
   return mode === 'submenu' ? <DropdownMenu.Sub>
-    <DropdownMenu.SubTrigger className="tab-context-menu__item" aria-label={label}><PanelsTopLeft size={14} aria-hidden="true" /><span>Choose panel</span><ChevronRight size={12} aria-hidden="true" /></DropdownMenu.SubTrigger>
+    <DropdownMenu.SubTrigger className="tab-context-menu__item" aria-label={label}><ThemeObjectLauncherIcon size={14} aria-hidden="true" /><span>Choose panel</span><ThemeNavigationDisclosureIcon size={12} aria-hidden="true" /></DropdownMenu.SubTrigger>
     <DropdownMenu.Portal container={resolveOverlayContainer()}><DropdownMenu.SubContent className="tab-context-menu survey-topic-menu survey-panel-menu" sideOffset={4} collisionPadding={8}>{contents}</DropdownMenu.SubContent></DropdownMenu.Portal>
   </DropdownMenu.Sub> : <DropdownMenu.Root modal={false} open={open} onOpenChange={change}>
     <DropdownMenu.Trigger asChild><button type="button" className="survey-topic-trigger" aria-label={label}>
-      <span>{topic ? 'Topic locations' : 'Choose panel…'}</span><ChevronDown size={12} aria-hidden="true" />
+      <span>{topic ? 'Topic locations' : 'Choose panel…'}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" />
     </button></DropdownMenu.Trigger>
     <DropdownMenu.Portal container={resolveOverlayContainer()}><DropdownMenu.Content className="tab-context-menu survey-topic-menu survey-panel-menu" align="end" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>{contents}</DropdownMenu.Content></DropdownMenu.Portal>

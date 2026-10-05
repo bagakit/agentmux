@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, CircleHelp, Minus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useRef, useState } from 'react'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, type DemandGroundingCheck } from '@agentmux/demand/goals'
 import { useAppStore } from '../store'
@@ -11,6 +11,13 @@ import { projectWorkspaces } from '../lib/workspace-projects'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import dialogueArtworkUrl from '../../../../resources/artwork/demand-dialogue.png'
+
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeStatusGapIcon = semanticIconComponent('status.gap')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
+
 
 type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
@@ -53,9 +60,9 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
   const resultExplanation = goalResultExplanation(demand)
   const goalRequest = <div className="goals-request-action">
     <img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} />
-    <div className="goals-request-action__content"><button type="button" className={`goals-button${!failure && (!alignment || confirmIssue) ? ' goals-button--primary' : ''}`} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : alignment ? 'Discuss changes' : 'Clarify goal'}<ArrowUpRight size={13} /></button><span className="goals-caption">Sends a goal request to the agent.</span></div>
+    <div className="goals-request-action__content"><button type="button" className={`goals-button${!failure && (!alignment || confirmIssue) ? ' goals-button--primary' : ''}`} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : alignment ? 'Discuss changes' : 'Clarify goal'}<ThemeActionOpenExternalIcon size={13} /></button><span className="goals-caption">Sends a goal request to the agent.</span></div>
   </div>
-  const resultRequest = alignment?.confirmedAt ? <button type="button" className="goals-button" data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : grounding ? 'Ask agent to check again' : 'Ask agent to check work'}<ArrowUpRight size={13} /></button> : null
+  const resultRequest = alignment?.confirmedAt ? <button type="button" className="goals-button" data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : grounding ? 'Ask agent to check again' : 'Ask agent to check work'}<ThemeActionOpenExternalIcon size={13} /></button> : null
   return <>
     {alignment ? <section className="goals-alignment" aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
       <div className="goals-section-heading"><h2>Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? 'Confirmed by you' : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></div>
@@ -64,7 +71,7 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
       {alignment.criteria.length ? <ol className="goals-criteria">{alignment.criteria.map(criterion => <li key={criterion.id} data-goal-success-criterion={criterion.id}>{criterion.text}</li>)}</ol> : <p className="goals-muted">Define how to recognize success before confirming this goal.</p>}
       {alignment.openQuestions.length ? <div className="goals-open-questions"><h3>Decisions needed</h3><ul>{alignment.openQuestions.map((question, i) => <li key={i}>{question}</li>)}</ul></div> : null}
       {confirmIssue && alignment.openQuestions.length ? <p className="goals-condition">Resolve these decisions before confirming the goal.</p> : null}
-      <div className="goals-inline-actions">{!failure && !alignment.confirmedAt && !confirmIssue ? <button type="button" className="goals-button goals-button--primary" data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<Check size={13} /></button> : null}{goalRequest}</div>
+      <div className="goals-inline-actions">{!failure && !alignment.confirmedAt && !confirmIssue ? <button type="button" className="goals-button goals-button--primary" data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}{goalRequest}</div>
     </section> : <div className="goals-clarification" aria-label="Clarify goal" data-goal-id={demand.id} data-goal-confirmation-state="unconfirmed">
       <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p>{goalRequest}
     </div>}
@@ -75,11 +82,11 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
       {stale ? <details className="goals-previous-report"><summary>Previous agent report</summary><p className="goals-proposal">{grounding.summary}</p>{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId} check={check} demand={demand} workspace={workspace} stale={false} />)}</details> : null}
       {!accepted && !stale && resultExplanation ? <p className="goals-condition">{resultExplanation}</p> : null}
       {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
-      <div className="goals-inline-actions">{!failure && !accepted && alignment && !acceptIssue ? <button type="button" className="goals-button goals-button--primary" data-goal-accept disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: false })}>{pending ? 'Saving…' : 'Accept results'}<Check size={13} /></button> : !failure && !accepted && alignment && gapIssue === null ? <button type="button" className="goals-button goals-button--primary" data-goal-accept-gaps disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: true })}>{pending ? 'Saving…' : 'Accept results, keep gaps'}</button> : null}{resultRequest}</div>
+      <div className="goals-inline-actions">{!failure && !accepted && alignment && !acceptIssue ? <button type="button" className="goals-button goals-button--primary" data-goal-accept disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: false })}>{pending ? 'Saving…' : 'Accept results'}<ThemeStatusCompletedIcon size={13} /></button> : !failure && !accepted && alignment && gapIssue === null ? <button type="button" className="goals-button goals-button--primary" data-goal-accept-gaps disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: true })}>{pending ? 'Saving…' : 'Accept results, keep gaps'}</button> : null}{resultRequest}</div>
     </section> : demand.status === 'done' || alignment?.confirmedAt ? <div className="goals-no-results" data-goal-result-state="missing">
       <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div>
       {demand.status === 'done' ? <><p className="goals-condition"><strong>Results not verified</strong></p><p className="goals-muted">Marked done, but no report has checked the work against success criteria.</p></> : <p className="goals-muted">No result report yet. Continue in your discussion or workspace. When ready, ask the agent to check work against these criteria.</p>}
-      <div className="goals-inline-actions">{alignment?.confirmedAt ? <button type="button" className={`goals-button${!failure ? ' goals-button--primary' : ''}`} disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}<ArrowUpRight size={13} /></button> : null}{resultRequest}</div>
+      <div className="goals-inline-actions">{alignment?.confirmedAt ? <button type="button" className={`goals-button${!failure ? ' goals-button--primary' : ''}`} disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}<ThemeActionOpenExternalIcon size={13} /></button> : null}{resultRequest}</div>
     </div> : null}
     {failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>{failure.attempt.kind === 'confirm' ? 'Goal confirmation' : 'Result acceptance'} is unconfirmed. Your goal and current work are kept. <span>{failure.message}</span><button type="button" className="goals-button goals-button--primary" disabled={pending} onClick={() => void reload()}>Reload current proposal</button>{reloadError ? <span>Reload failed: {reloadError}</span> : null}</div> : null}
   </>
@@ -91,7 +98,7 @@ function GoalResultCheck({ criterionId, criterion, check, demand, workspace, sta
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const [openingError, setOpeningError] = useState<string | null>(null)
   const outcome = stale ? 'stale' : check?.outcome ?? 'missing'
-  const Icon = outcome === 'met' ? Check : outcome === 'gap' ? Minus : CircleHelp
+  const Icon = outcome === 'met' ? ThemeStatusCompletedIcon : outcome === 'gap' ? ThemeStatusGapIcon : ThemeStatusUnknownIcon
   const label = { met: 'Reported met', gap: 'Reported gap', unknown: 'Unknown', missing: 'Missing check', stale: 'Needs current check' }[outcome]
   async function openEvidence(reference: string) {
     setOpeningError(null)
@@ -119,7 +126,7 @@ function GoalResultCheck({ criterionId, criterion, check, demand, workspace, sta
   return <div className="goals-result-check" data-goal-criterion-id={criterionId} data-goal-outcome={outcome}>
     <div className="goals-result-check__heading"><strong>{criterion}</strong><span><Icon size={12} />{label}</span></div>
     {check?.note ? <p className="goals-result-note">{check.note}</p> : null}
-    {check?.evidence.length ? <div className="goals-evidence" aria-label={`Reported evidence for ${criterion}`}>{check.evidence.map((reference, index) => <span key={index}><button type="button" className="goals-evidence__open" title={reference} disabled={!isDemandEvidenceReference(reference)} onClick={() => void openEvidence(reference)}>{reference.replace(/^.*\//u, '') || reference}<ArrowUpRight size={11} /></button><button type="button" className="goals-evidence__copy" aria-label={`Copy evidence location ${reference}`} title="Copy full location" onClick={() => void api.ui.writeClipboardText(reference).catch(error => setOpeningError(String(error)))}>Copy</button></span>)}</div> : check ? <p className="goals-result-note goals-result-note--missing">No evidence provided.</p> : null}
+    {check?.evidence.length ? <div className="goals-evidence" aria-label={`Reported evidence for ${criterion}`}>{check.evidence.map((reference, index) => <span key={index}><button type="button" className="goals-evidence__open" title={reference} disabled={!isDemandEvidenceReference(reference)} onClick={() => void openEvidence(reference)}>{reference.replace(/^.*\//u, '') || reference}<ThemeActionOpenExternalIcon size={11} /></button><button type="button" className="goals-evidence__copy" aria-label={`Copy evidence location ${reference}`} title="Copy full location" onClick={() => void api.ui.writeClipboardText(reference).catch(error => setOpeningError(String(error)))}>Copy</button></span>)}</div> : check ? <p className="goals-result-note goals-result-note--missing">No evidence provided.</p> : null}
     {openingError ? <p className="goals-service" role="status">Reference could not be opened or copied. The reported result is preserved; its contents have not been verified here. <span>{openingError}</span></p> : null}
   </div>
 }

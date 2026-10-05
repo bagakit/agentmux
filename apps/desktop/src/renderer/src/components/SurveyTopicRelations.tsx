@@ -1,8 +1,14 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
-import { ArrowUpRight, Check, LoaderCircle, Minus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 /** Relationship truth and mutations stay at the shared owner; Radix owns disclosure and focus. */
 export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelatedSpaces = [], pendingSpaceId, error, notice, onLinkChange, onOpenTopic }: {
@@ -36,8 +42,8 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
         onSelect={event => event.preventDefault()}
         onCheckedChange={value => onLinkChange(topic.spaceId, value === true)}>
         <span className="survey-topic-menu__indicator" aria-hidden="true">
-          {pendingSpaceId === topic.spaceId ? <LoaderCircle className="spin" size={13} />
-            : <DropdownMenu.ItemIndicator>{checked === 'indeterminate' ? <Minus size={13} /> : <Check size={13} />}</DropdownMenu.ItemIndicator>}
+          {pendingSpaceId === topic.spaceId ? <ThemeStatusLoadingIcon className="spin" size={13} />
+            : <DropdownMenu.ItemIndicator>{checked === 'indeterminate' ? <ThemeActionCollapseIcon size={13} /> : <ThemeStatusSelectedIcon size={13} />}</DropdownMenu.ItemIndicator>}
         </span>
         <span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
       </DropdownMenu.CheckboxItem>
@@ -52,7 +58,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
         checked disabled={pendingSpaceId !== null} aria-label={`Remove unconfirmed link: ${space.hostId}, ${displayPath(space.directoryPath, space.hostId)}`}
         data-survey-topic-id={space.spaceId} onSelect={event => event.preventDefault()}
         onCheckedChange={value => { if (value === false) onLinkChange(space.spaceId, false) }}>
-        <span className="survey-topic-menu__indicator" aria-hidden="true"><DropdownMenu.ItemIndicator><Check size={13} /></DropdownMenu.ItemIndicator></span>
+        <span className="survey-topic-menu__indicator" aria-hidden="true"><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>
         <span className="survey-topic-menu__context"><strong>Unconfirmed linked space</strong><small>{space.hostId} · {displayPath(space.directoryPath, space.hostId)}</small><small>{space.issue}</small></span>
       </DropdownMenu.CheckboxItem>)}
     </> : null}
@@ -63,7 +69,7 @@ export function SurveyTopicRelations({ zone, topics, relatedTopics, unknownRelat
         aria-label={`Open linked Topic: ${topic.name}, ${topic.hostId}, ${displayPath(topic.directoryPath, topic.hostId)}`}
         data-survey-topic-id={topic.spaceId} title={`${topic.name}\n${topic.hostId}\n${displayPath(topic.directoryPath, topic.hostId)}`}
         onSelect={() => onOpenTopic(topic.spaceId)}>
-        <ArrowUpRight size={13} aria-hidden="true" /><span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
+        <ThemeActionOpenExternalIcon size={13} aria-hidden="true" /><span className="survey-topic-menu__context"><strong>{topic.name}</strong><small>{topic.hostId} · {displayPath(topic.directoryPath, topic.hostId)}</small></span>
       </DropdownMenu.Item>)}
     </> : null}
     {error ? <div className="survey-topic-menu__notice">{error}</div> : null}

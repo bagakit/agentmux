@@ -3,13 +3,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import { Orbit } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { AgentAvatar } from './AgentAvatar'
 import { useAppStore } from '../store'
 import '../styles/goal-continuation.css'
+
+const ThemeObjectOrbitIcon = semanticIconComponent('object.orbit')
+
 
 /** A thin original Goal caller, shared by Goal details and the Mote current-work surface. */
 export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor, active = true }: {
@@ -99,7 +102,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
   return <section className="goals-continuation" aria-label="Goal continuous progress">
     <div className="goals-continuation__heading"><span>Continue this work</span><button type="button" className="goals-button" disabled={busy} onClick={() => void run(() => inspect())}>Refresh</button></div>
     {!supervisorId ? <div className="goals-supervisor-guide">
-      <span className="goals-supervisor-guide__orbit" aria-hidden="true"><Orbit size={26} strokeWidth={1.25} /></span>
+      <span className="goals-supervisor-guide__orbit" aria-hidden="true"><ThemeObjectOrbitIcon size={26} strokeWidth={1.25} /></span>
       <div><strong>Keep this work moving</strong><p>Choose one assignee to supervise ongoing progress.</p></div>
       <button type="button" className="goals-button" disabled={busy} onClick={openSupervisor}>Choose Supervisor</button>
     </div> : <div className="goals-supervisor-identity">

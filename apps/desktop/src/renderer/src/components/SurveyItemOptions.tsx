@@ -1,11 +1,22 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { ArrowUpRight, Check, ChevronRight, MoreHorizontal, Bot, NotebookPen, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 /** The selected Item's actions read the original owners; Radix owns disclosure and focus. */
 export type SurveyItemOptionsProps = {
@@ -35,7 +46,7 @@ export function SurveyItemOptions(props: SurveyItemOptionsProps) {
   useEffect(() => { if (!visible) setOpen(false) }, [visible])
   useEffect(() => setOpen(false), [zone?.zoneId])
   return <Menu.Root modal={false} open={visible && open} onOpenChange={setOpen}>
-    <Menu.Trigger asChild><button type="button" className={`survey-item-options ${zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-compact={compact || undefined} aria-label="Exploration options" title="Exploration options"><MoreHorizontal size={16} aria-hidden="true" />{zone && !compact ? <span>Organize</span> : null}</button></Menu.Trigger>
+    <Menu.Trigger asChild><button type="button" className={`survey-item-options ${zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-compact={compact || undefined} aria-label="Exploration options" title="Exploration options"><ThemeActionMoreIcon size={16} aria-hidden="true" />{zone && !compact ? <span>Organize</span> : null}</button></Menu.Trigger>
     <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
       <SurveyItemMenuItems {...props} primitives={Menu} />
@@ -77,25 +88,25 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
-      {onNewNote ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewNote)}><NotebookPen size={14} /><span>New Note</span></M.Item> : null}
-      {onNewAgent ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewAgent)}><Bot size={14} /><span>New Agent</span></M.Item> : null}
+      {onNewNote ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewNote)}><ThemeActionEditNoteIcon size={14} /><span>New Note</span></M.Item> : null}
+      {onNewAgent ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewAgent)}><ThemeObjectAgentIcon size={14} /><span>New Agent</span></M.Item> : null}
       {onNewNote || onNewAgent ? <M.Separator className="tab-context-menu__separator" /> : null}
-      {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><Pencil size={14} /><span>Rename exploration</span></M.Item> : null}
+      {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><ThemeActionEditIcon size={14} /><span>Rename exploration</span></M.Item> : null}
       {zone && collected ? <M.CheckboxItem className="tab-context-menu__item" checked={collected} disabled={!collected && zone.kind === 'unknown'}
         onSelect={event => event.preventDefault()} onCheckedChange={value => { if (value === false) onCollectedChange(false) }}>
-        <span className="survey-topic-menu__indicator"><M.ItemIndicator><Check size={13} aria-hidden="true" /></M.ItemIndicator></span><span>Keep in Survey</span>
+        <span className="survey-topic-menu__indicator"><M.ItemIndicator><ThemeStatusSelectedIcon size={13} aria-hidden="true" /></M.ItemIndicator></span><span>Keep in Survey</span>
       </M.CheckboxItem> : null}
 
       {collected && onSaveToTopic ? <>
-        <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('research'))}><ArrowUpRight size={14} /><span>Save research to Topic…</span></M.Item>
-        {currentPanelAvailable ? <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('panel'))}><ArrowUpRight size={14} /><span>Save current panel to Topic…</span></M.Item> : null}
+        <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('research'))}><ThemeActionOpenExternalIcon size={14} /><span>Save research to Topic…</span></M.Item>
+        {currentPanelAvailable ? <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('panel'))}><ThemeActionOpenExternalIcon size={14} /><span>Save current panel to Topic…</span></M.Item> : null}
       </> : null}
-      {onDeleteNotebook ? <M.Item className="tab-context-menu__item" onSelect={() => run(onDeleteNotebook)}><Trash2 size={14} /><span>Delete notebook…</span></M.Item> : null}
+      {onDeleteNotebook ? <M.Item className="tab-context-menu__item" onSelect={() => run(onDeleteNotebook)}><ThemeActionRemoveIcon size={14} /><span>Delete notebook…</span></M.Item> : null}
       <M.Separator className="tab-context-menu__separator" />
-      {onManageBrowsers ? <M.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={() => run(onManageBrowsers)}><SlidersHorizontal size={14} /><span>Browser tools</span></M.Item> : null}
+      {onManageBrowsers ? <M.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={() => run(onManageBrowsers)}><ThemeActionAdjustIcon size={14} /><span>Browser tools</span></M.Item> : null}
       {workspace ? <M.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${displayPath(workspace.path, workspace.hostId)}`}
-        onSelect={() => run(() => onOpenWorkspace(workspace.id))}><ArrowUpRight size={14} /><span>Open resource in Space</span></M.Item> : null}
-      <M.Sub><M.SubTrigger className="tab-context-menu__item" aria-label="Item details"><span className="survey-topic-menu__indicator" aria-hidden="true" /><span>Details</span><ChevronRight size={12} /></M.SubTrigger>
+        onSelect={() => run(() => onOpenWorkspace(workspace.id))}><ThemeActionOpenExternalIcon size={14} /><span>Open resource in Space</span></M.Item> : null}
+      <M.Sub><M.SubTrigger className="tab-context-menu__item" aria-label="Item details"><span className="survey-topic-menu__indicator" aria-hidden="true" /><span>Details</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>
         <M.Portal container={resolveOverlayContainer()}><M.SubContent className="tab-context-menu survey-topic-menu" collisionPadding={8} sideOffset={4}>
           <div className="survey-item-details-content">
             <span>{workspace ? `${workspace.name}\n${workspace.hostId}\n${displayPath(workspace.path, workspace.hostId)}${workspace.branch ? `\nBranch: ${workspace.branch}` : ''}` : 'Resource Workspace is not confirmed. The original item is retained.'}</span>

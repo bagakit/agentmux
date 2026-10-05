@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { TextInput } from '@agentmux/client-ui/input'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxSpaceMutationReport } from '@agentmux/core/control'
-import { Plus, Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { clearGoalAgentCreationDraft, clearGoalAgentSelectionDraft, retainGoalAgentCreationDraft, retainGoalAgentSelectionDraft, useAppStore } from '../store'
@@ -16,6 +16,11 @@ import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/
 import { AgentAvatar } from './AgentAvatar'
 import { SelectionField } from './SelectionField'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
+
 
 export type GoalRelationSave = (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1], expectedUpdatedAt: number) => Promise<boolean>
 const labels = { assignees: 'Assignees', related: 'Related sessions', supervisor: 'Supervisor' }
@@ -138,12 +143,12 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface goal-agent-picker" aria-busy={busy} onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; openedContent.current = event.target instanceof Element ? event.target : null; search.current?.focus() }} onCloseAutoFocus={event => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement; if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
-        <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">{labels[role]}</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close Agent picker" disabled={busy}><X size={15} /></Dialog.Close></header>
+        <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">{labels[role]}</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close Agent picker" disabled={busy}><ThemeActionCloseIcon size={15} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">{demand.title}<br />{role === 'assignees' ? 'Choose who advances this Goal. Their related history is retained.' : role === 'related' ? 'Keep the conversations involved in this Goal. Responsibilities are edited separately.' : 'Choose one assignee for the next Loop. This selection does not start it.'}</Dialog.Description>
         {role !== 'supervisor' ? <div className="goal-agent-picker__modes">{(['existing', 'mote', 'agent'] as const).map(value => <button key={value} type="button" className="goals-button" aria-pressed={mode === value} disabled={busy} onClick={() => { setMode(value); setIssue(null); if (value === 'mote' && scratch) void useAppStore.getState().refreshScratchTopics(scratch.id) }}>{value === 'existing' ? 'Existing Agents' : value === 'mote' ? 'Mote · new Session' : 'New Agent'}</button>)}</div> : null}
         <form onSubmit={event => { event.preventDefault(); void save() }}>
           {mode === 'existing' ? <>
-            <label className="goal-agent-picker__search"><Search size={14} /><TextInput ref={search} aria-label="Search Agents" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name, Project or Session…" /></label>
+            <label className="goal-agent-picker__search"><ThemeActionSearchIcon size={14} /><TextInput ref={search} aria-label="Search Agents" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name, Project or Session…" /></label>
             <div className="goal-agent-picker__rows" aria-label={`Choose ${labels[role].toLowerCase()}`}>
               {role === 'supervisor' ? <label className="goal-agent-picker__row"><input type="radio" name="goal-supervisor" checked={!selected.length} disabled={busy} onChange={() => changeSelection({ selected: [] })} /><span><strong>No Supervisor</strong><small>Explicitly clear the selection</small></span></label> : null}
               {filtered.map(row => {
@@ -165,7 +170,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
             </> : <label>Execution directory<SelectionField label="New Agent execution directory" value={workspaceId} options={[{ value: '', label: 'Choose a directory…' }, ...(state.config?.workspaces.filter(workspace => workspace.id !== '__scratch__' && workspace.id !== '__notes__') ?? []).map(workspace => ({ value: workspace.id, label: workspace.name, description: workspace.path }))]} onValueChange={setWorkspaceId} disabled={busy || Boolean(draft)} /><button type="button" className="goals-button" disabled={busy || Boolean(draft)} onClick={() => void chooseFolder()}>Choose local folder…</button></label>}
             <label>Agent configuration<SelectionField label="New Session Agent configuration" value={executorId} options={[{ value: '', label: 'Choose a saved configuration…' }, ...Object.entries(state.config?.executors ?? {}).map(([id, executor]) => ({ value: id, label: executor.label, description: `${executor.providerId} · ${executor.command}` }))]} onValueChange={setExecutorId} disabled={busy || Boolean(draft)} /></label>
             {executionPath ? <p className="goal-agent-picker__path">{executionPath}</p> : null}
-            <button type="button" className="goals-button goals-button--primary" disabled={busy} onClick={() => void createSession()}><Plus size={13} />{draft ? draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original creation' : mode === 'mote' ? 'Create Mote Session' : 'Create Agent'}</button>
+            <button type="button" className="goals-button goals-button--primary" disabled={busy} onClick={() => void createSession()}><ThemeActionCreateAgentIcon size={13} />{draft ? draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original creation' : mode === 'mote' ? 'Create Mote Session' : 'Create Agent'}</button>
             <p className="goals-caption">Creation sends no task. Save the relationship below; Continue is a separate action.</p>
           </div>}
           {removingSupervisor ? <label className="goal-agent-picker__replacement">Current Supervisor is being removed<SelectionField label="Replacement Supervisor" value={replacement ?? '__choose__'} options={[{ value: '__choose__', label: 'Choose replacement or clear…', disabled: true }, { value: '', label: 'Clear Supervisor' }, ...rows.filter(row => selected.includes(row.id)).map(row => ({ value: row.id, label: row.name }))]} onValueChange={replacement => changeSelection({ replacement })} /></label> : null}
