@@ -12,7 +12,7 @@
 .git-history-node { color: var(--text-2); fill: currentColor; stroke: var(--surface-0); stroke-width: 1.5; pointer-events: auto; }
 .git-history-continuation { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-dasharray: 2 2; }
 .git-history-commits { min-width: 0; padding: 0; margin: 0; list-style: none; }
-.git-history-commit { min-width: calc(var(--history-graph-width) + 120px); display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2); padding-left: calc(var(--history-graph-width) + var(--sp-2)); container-type: inline-size; box-sizing: border-box; white-space: nowrap; }
+.git-history-commit { position: absolute; left: var(--sp-2); right: var(--sp-2); min-width: calc(var(--history-graph-width) + 120px); display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2); padding-left: calc(var(--history-graph-width) + var(--sp-2)); container-type: inline-size; box-sizing: border-box; white-space: nowrap; }
 .git-history-commit > strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 500; color: var(--text); }
 .git-history-hash { flex-shrink: 0; font-size: var(--fs-micro); color: var(--text-3); }
 .git-history-refs { display: flex; flex: 0 1 auto; min-width: 0; max-width: 38%; height: 14px; align-items: center; gap: var(--sp-1); font-size: var(--fs-micro); }

@@ -1,7 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
-import type { GitHistoryCommit, GitHistoryRef } from '../../../shared/git-contracts'
-import { markWindowOverlayDismissal, WindowOverlayPortal } from './WindowOverlayHost'
+import type { GitHistoryCommit, GitHistoryRef } from '../../../../../shared/git-contracts'
+import { markWindowOverlayDismissal, WindowOverlayPortal } from '../../../components/WindowOverlayHost'
 
 type DetailTarget = { commit: GitHistoryCommit; anchor: HTMLElement | SVGElement; region: Element; scope: string; focus: boolean }
 
@@ -30,16 +30,16 @@ export function useGitHistoryDetails(scope: string, enabled: boolean) {
       queueMicrotask(() => { restoringFocus.current = false })
     }
   }, [])
-  const keepOpen = () => { clearTimeout(departure.current); departure.current = undefined }
+  const keepOpen = useCallback(() => { clearTimeout(departure.current); departure.current = undefined }, [])
   const enterSurface = () => { clearTimeout(intent.current); intent.current = undefined; keepOpen() }
-  const show = (next: DetailTarget) => {
+  const show = useCallback((next: DetailTarget) => {
     clearTimeout(intent.current); intent.current = undefined; keepOpen()
     if (!current.current.enabled || current.current.scope !== next.scope || document.visibilityState === 'hidden' ||
       !next.anchor.isConnected || next.anchor.closest('[inert]')) return
     active.current = next
     setTarget(next)
-  }
-  const leave = (related: EventTarget | null, region: Element | null) => {
+  }, [keepOpen])
+  const leave = useCallback((related: EventTarget | null, region: Element | null) => {
     if (related instanceof Node && (region?.contains(related) || surface.current?.contains(related))) { keepOpen(); return }
     clearTimeout(intent.current); intent.current = undefined; keepOpen()
     departure.current = setTimeout(() => {
@@ -47,7 +47,7 @@ export function useGitHistoryDetails(scope: string, enabled: boolean) {
       if (focused && (region?.contains(focused) || surface.current?.contains(focused))) return
       close()
     }, 160)
-  }
+  }, [close, keepOpen])
 
   useLayoutEffect(() => { close() }, [scope, enabled, close])
   useLayoutEffect(() => () => {
@@ -110,14 +110,14 @@ export function useGitHistoryDetails(scope: string, enabled: boolean) {
     return () => { disposed = true; stop() }
   }, [opened])
 
-  function triggerEvents(commit: GitHistoryCommit, ref?: GitHistoryRef) {
+  const triggerEvents = useCallback((commit: GitHistoryCommit, ref?: GitHistoryRef) => {
     const makeTarget = (anchor: HTMLElement | SVGElement, focus = false): DetailTarget => ({
       commit, anchor, region: anchor.closest('.git-history-commit') ?? anchor, scope, focus
     })
     return {
       tabIndex: 0,
       'aria-haspopup': 'dialog' as const,
-      'aria-controls': opened?.commit.oid === commit.oid ? id : undefined,
+      'aria-controls': id,
       'aria-keyshortcuts': 'Enter',
       'aria-label': ref ? `${ref.kind} reference ${ref.name}. Commit ${commit.oid.slice(0, 7)}` : `${commit.subject || '(No commit message)'}. Commit ${commit.oid.slice(0, 7)}`,
       onPointerEnter: (event: PointerEvent<HTMLElement | SVGElement>) => {
@@ -137,7 +137,7 @@ export function useGitHistoryDetails(scope: string, enabled: boolean) {
         event.preventDefault(); event.stopPropagation(); show(makeTarget(event.currentTarget, true))
       }
     }
-  }
+  }, [scope, enabled, id, show, leave, keepOpen])
   const authoredDate = opened?.commit.authoredAt === null || !opened ? null : new Date(opened.commit.authoredAt)
   const knownTime = authoredDate && Number.isFinite(authoredDate.getTime()) ? authoredDate : null
   const preview = opened ? <WindowOverlayPortal><div ref={surface} id={id} tabIndex={-1}
@@ -160,5 +160,5 @@ export function useGitHistoryDetails(scope: string, enabled: boolean) {
       </li>)}</ul> : <p>No references at this commit</p>}
     </section>
   </div></WindowOverlayPortal> : null
-  return { close: () => close(), triggerEvents, preview }
+  return { close, triggerEvents, preview }
 }
