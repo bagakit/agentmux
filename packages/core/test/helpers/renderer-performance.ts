@@ -1,3 +1,4 @@
+import { createInputPerformanceRecorder } from '../../src/performance-diagnostics.js'
 import type { RendererPerformanceSnapshot } from '../../src/metrics.js'
 export function performanceFixture(): RendererPerformanceSnapshot {
   const timing = () => ({ count: 0, totalMs: 0, maxMs: 0 })
@@ -8,6 +9,7 @@ export function performanceFixture(): RendererPerformanceSnapshot {
   const visibility = () => ({ visible: consumer(), hidden: consumer() })
   return { startedAt: 1, observedAt: 2, recording: 'bounded-lifetime', selectorTiming: 'counts-only', writeTiming: 'parser-callback-wall',
     consumers: { composer: visibility(), sessionPane: visibility() }, sessionEvents: timing(),
+    inputRequestDetails: createInputPerformanceRecorder().snapshot(),
     inputRequests: { user: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() }, protocol: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() }, paste: { started: 0, completed: 0, failed: 0, pending: 0, wall: timing() } },
     overlay: { triggers: { initial: 0, demand: 0, mutation: 0, resize: 0, scroll: 0, toggle: 0, font: 0, collect: 0 }, scheduled: 0, coalesced: 0, candidates: 0, geometryReads: 0, nativeDemandCount: null, latestCandidates: null, latestGeometryReads: null, collect: timing() },
     terminalWrites: { visible: timing(), hidden: timing(), bytes: 0, stringCodeUnits: 0 },

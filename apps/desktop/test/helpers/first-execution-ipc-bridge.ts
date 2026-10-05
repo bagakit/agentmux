@@ -69,10 +69,10 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   } }
   const flush = vi.fn(() => {})
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
-  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, send: vi.fn(),
+  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, isLoadingMainFrame: () => false, send: vi.fn(),
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
-  try { release = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ window: { id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
@@ -81,7 +81,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
-    return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+    return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...structuredClone(values))
   })
   expect(bridge.api).not.toBeNull()
   return { client, sender, flush, pauseTarget, dispose, runtime }
