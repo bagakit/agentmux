@@ -24,7 +24,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
-import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
+import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage, createPrivateRuntimeScope } from './package-runtime-upgrade.mjs'
 import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload, semanticHostProcessIds } from './package-semantic-host.mjs'
 import {
   assertPackageIdentity,
@@ -571,12 +571,12 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const userData = join(verificationRoot, 'user-data')
   const stdoutPath = join(verificationRoot, 'desktop-stdout.log')
   const stderrPath = join(verificationRoot, 'desktop-stderr.log')
-  const runtimeRoot = await mkdtemp(join(sep, 'tmp', `amx-smoke-${process.getuid()}-`))
-  const endpointPath = join(runtimeRoot, 'ctxmux.sock')
+  const privateRuntime = await createPrivateRuntimeScope(join(canonicalAppPath, 'Contents', 'Resources', 'app', 'node_modules', '@agentmux', 'core'))
+  const runtimeRoot = privateRuntime.directory
+  const endpointPath = privateRuntime.socketPath
   const ownerReceiptPath = join(runtimeRoot, 'owner.json')
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
-  const daemonEntrypoint = join(canonicalAppPath, 'Contents', 'Resources', 'app',
-    'node_modules', '@agentmux', 'core', 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
+  const daemonEntrypoint = privateRuntime.daemonPath
   await mkdir(userData, { recursive: true })
   const before = new Set(await processIdsForApplication(canonicalAppPath))
   const ownedApplicationPids = async () => (
@@ -609,14 +609,6 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     })
   }
   assert((await ownedSemanticHostPids()).length === 0, 'Private launch smoke Host already exists.')
-  const ownedDaemonPids = async () => {
-    const processes = await run('ps', ['-axo', 'pid=,command='], { capture: true })
-    return processes.stdout.split('\n').flatMap((line) => {
-      const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
-      if (!match || !match[2].includes(daemonEntrypoint) || !match[2].includes(endpointPath)) return []
-      return [Number(match[1])]
-    })
-  }
   let verificationError
   let verificationStage = 'launch-request'
   const verificationDeadline = Date.now() + 20_000
@@ -651,6 +643,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
       ownerReceipt.socketPath === endpointPath,
       'LaunchServices did not start the exact packaged CtxMux runtime.')
+    await privateRuntime.observeOwner()
     verificationStage = 'application-exit'
     const remainingApplicationPids = await waitForProcessExit(ownedApplicationPids,
       Math.max(1, verificationDeadline - Date.now()))
@@ -663,9 +656,13 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   }
   const cleanupErrors = [
     ...await cleanupProcessScope('application', ownedApplicationPids),
-    ...await cleanupProcessScope('semantic-host', ownedSemanticHostPids),
-    ...await cleanupProcessScope('daemon', ownedDaemonPids)
+    ...await cleanupProcessScope('semantic-host', ownedSemanticHostPids)
   ]
+  try {
+    const receipt = await privateRuntime.cleanup()
+    await writeFile(join(verificationRoot, 'runtime-cleanup.json'), JSON.stringify(receipt, null, 2) + '\n')
+    if (receipt.signals.includes('SIGKILL')) cleanupErrors.push(new Error('Launch smoke Runtime required forced termination.'))
+  } catch (error) { cleanupErrors.push(error) }
   if (cleanupErrors.length === 0) {
     try {
       await rm(runtimeRoot, { recursive: true, force: true })

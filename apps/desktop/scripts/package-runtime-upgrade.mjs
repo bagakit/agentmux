@@ -1,7 +1,7 @@
 import { parseDesktopClientObservation } from '../src/shared/client-observation.ts'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -16,8 +16,7 @@ const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const fail = (condition, message) => { if (!condition) throw new Error(message) }
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
-async function artifact(app) {
-  const core = join(app, coreRelative)
+async function runtimeArtifact(core) {
   const root = join(core, 'vendor/ctxmux', `${process.platform}-${process.arch}`)
   const bytes = await readFile(join(root, 'manifest.json'))
   const manifest = JSON.parse(bytes)
@@ -33,6 +32,10 @@ async function artifact(app) {
   const paths = await import(pathToFileURL(join(core, 'dist/runtime-paths.js')).href)
   return { root, manifest, manifestSha256: hash(bytes), daemonPath, daemonSha256: daemon.sha256, daemonVersion: daemon.version,
     daemonCdHash: await artifactCodeIdentity(daemonPath, daemon.sha256), archivePath, corePath: join(core, 'dist/index.js'), socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
+}
+
+async function artifact(app) {
+  return runtimeArtifact(join(app, coreRelative))
 }
 
 // The full artifact digest binds its static CodeDirectory. The kernel retains
@@ -54,29 +57,52 @@ async function artifactCodeIdentity(path, expectedSHA) {
 }
 
 // Reuse the installer's bounded Python/libSystem bridge. csops STATUS and
-// CDHASH are read-only kernel queries; no process memory, argv or env leaves.
+// CDHASH and libproc BSD starttime are read-only kernel queries; no process
+// memory, argv or env leaves. proc_bsdinfo follows Darwin SDK sys/proc_info.h;
+// pid/uid/starttime fence csops in this same observation, without display dates.
 const CODE_IDENTITY_SOURCE = String.raw`
 import ctypes,json,sys
 lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
 lib.csops.argtypes=[ctypes.c_int,ctypes.c_uint,ctypes.c_void_p,ctypes.c_size_t]
 lib.csops.restype=ctypes.c_int
+class ProcBSDInfo(ctypes.Structure):
+ _fields_=[(name,ctypes.c_uint32) for name in ('pbi_flags','pbi_status','pbi_xstatus','pbi_pid','pbi_ppid','pbi_uid','pbi_gid','pbi_ruid','pbi_rgid','pbi_svuid','pbi_svgid','rfu_1')]+[
+  ('pbi_comm',ctypes.c_char*16),('pbi_name',ctypes.c_char*32)]+[
+  (name,ctypes.c_uint32) for name in ('pbi_nfiles','pbi_pgid','pbi_pjobc','e_tdev','e_tpgid')]+[
+  ('pbi_nice',ctypes.c_int32),('pbi_start_tvsec',ctypes.c_uint64),('pbi_start_tvusec',ctypes.c_uint64)]
+proc=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True)
+proc.proc_pidinfo.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int]
+proc.proc_pidinfo.restype=ctypes.c_int
 pid=int(sys.argv[1]); status=ctypes.c_uint32(); digest=ctypes.create_string_buffer(20)
+def process_identity():
+ value=ProcBSDInfo()
+ if proc.proc_pidinfo(pid,3,0,ctypes.byref(value),ctypes.sizeof(value))!=ctypes.sizeof(value):raise OSError(ctypes.get_errno(),'kernel process identity unavailable')
+ if value.pbi_pid!=pid or not value.pbi_start_tvsec or value.pbi_start_tvusec>=1000000:raise RuntimeError('kernel process identity is invalid')
+ return (value.pbi_pid,value.pbi_uid,value.pbi_start_tvsec,value.pbi_start_tvusec)
 def read(op,value):
  if lib.csops(pid,op,ctypes.byref(value),ctypes.sizeof(value))!=0:raise OSError(ctypes.get_errno(),'kernel code identity unavailable')
+before=process_identity()
 read(0,status)
 if not status.value&1:raise RuntimeError('Runtime code signature is invalid')
 read(5,digest)
 read(0,status)
 if not status.value&1:raise RuntimeError('Runtime code signature became invalid')
-print(json.dumps({'cdHash':digest.raw.hex(),'valid':True}))
+after=process_identity()
+if before!=after:raise RuntimeError('Runtime process changed during kernel code observation')
+print(json.dumps({'pid':after[0],'uid':after[1],'startSeconds':str(after[2]),'startMicroseconds':after[3],'cdHash':digest.raw.hex(),'valid':True}))
 `
-async function kernelCodeIdentity(pid, selected) {
+async function kernelOwnerIdentity(pid, selected) {
   const result = await exec('/usr/bin/python3', ['-c', CODE_IDENTITY_SOURCE, String(pid)],
     { timeout: 5_000, maxBuffer: 4096 })
   const identity = JSON.parse(result.stdout)
   fail(identity.valid === true && /^[a-f0-9]{40}$/.test(identity.cdHash) && identity.cdHash === selected.daemonCdHash,
     'The socket owner executing code is not the selected Runtime artifact.')
-  return { kind: 'kernel-code-directory', cdHash: identity.cdHash, artifactSha256: selected.daemonSha256 }
+  fail(identity.pid === pid && Number.isSafeInteger(identity.uid) && identity.uid >= 0 &&
+    typeof identity.startSeconds === 'string' && /^[1-9][0-9]*$/.test(identity.startSeconds) &&
+    Number.isSafeInteger(identity.startMicroseconds) && identity.startMicroseconds >= 0 && identity.startMicroseconds < 1_000_000,
+    'The Runtime kernel process birth identity is unavailable.')
+  return { pid: identity.pid, uid: identity.uid, birth: `${identity.startSeconds}:${identity.startMicroseconds}`,
+    imageIdentity: { kind: 'kernel-code-directory', cdHash: identity.cdHash, artifactSha256: selected.daemonSha256 } }
 }
 
 async function daemonDeclaration(selected) {
@@ -230,8 +256,9 @@ async function processOwner(socket, selected) {
   fail(owners.length === 1 && Number.isSafeInteger(owners[0].pid) && owners[0].pid > 0 && owners[0].uid === process.getuid(),
     'The selected Runtime socket has no unique process owned by this user.')
   const { pid, uid } = owners[0]
-  const birth = (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,uid=,lstart='], { timeout: 5_000 })).stdout.trim()
-  fail(new RegExp(`^${pid}\\s+${uid}\\s+\\S`).test(birth), 'The Runtime process birth identity is unavailable.')
+  const before = await kernelOwnerIdentity(pid, selected)
+  fail(before.uid === uid, 'The Runtime socket and kernel process owners differ.')
+  const birth = before.birth
   const mapped = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-p', String(pid), '-FpuftDinl'],
     { timeout: 5_000, maxBuffer: 1024 * 1024 })
   const files = processFiles(mapped.stdout, pid)
@@ -239,7 +266,7 @@ async function processOwner(socket, selected) {
   fail(executables.length === 1, 'The Runtime process has no unique ctxmuxd executable mapping.')
   const executable = executables[0].n
   const executableIdentity = mappedIdentity(executables[0])
-  const imageIdentity = await kernelCodeIdentity(pid, selected)
+  const imageIdentity = before.imageIdentity
   const locks = files.filter(file => /^\d+[a-z]*$/i.test(file.fd) && basename(file.n ?? '') === 'state.lock')
   fail(locks.length === 1, 'The Runtime process has no unique state.lock descriptor.')
   const stateIdentity = await fileIdentity(locks[0])
@@ -256,16 +283,15 @@ async function processOwner(socket, selected) {
   fail(finalImages.length === 1 && finalLocks.length === 1 && finalImages[0].n === executable && finalLocks[0].n === state.path,
     'The Runtime files changed while its serving authority was being observed.')
   const finalImageIdentity = mappedIdentity(finalImages[0]), finalStateIdentity = await fileIdentity(finalLocks[0])
-  const finalCodeIdentity = await kernelCodeIdentity(pid, selected)
-  fail(finalCodeIdentity.cdHash === imageIdentity.cdHash, 'The Runtime executing code changed during owner observation.')
   fail(finalImageIdentity.device === executableIdentity.device && finalImageIdentity.inode === executableIdentity.inode &&
     finalStateIdentity.device === state.device && finalStateIdentity.inode === state.inode,
     'The Runtime file identities changed while its serving authority was being observed.')
-  const finalBirth = (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,uid=,lstart='], { timeout: 5_000 })).stdout.trim()
   const finalSockets = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-U', '-Fpuftn', socket],
     { timeout: 5_000, maxBuffer: 1024 * 1024 })
   const finalOwners = socketOwners(finalSockets.stdout, socket)
-  fail(finalBirth === birth && finalOwners.length === 1 && finalOwners[0].pid === pid && finalOwners[0].uid === uid,
+  const after = await kernelOwnerIdentity(pid, selected)
+  fail(after.imageIdentity.cdHash === imageIdentity.cdHash, 'The Runtime executing code changed during owner observation.')
+  fail(after.birth === birth && after.uid === uid && finalOwners.length === 1 && finalOwners[0].pid === pid && finalOwners[0].uid === uid,
     'The Runtime process changed while its serving authority was being observed.')
   return { pid, uid, birth, executable, executableIdentity, imageIdentity, state }
 }
@@ -317,6 +343,70 @@ async function assertRunsKept(plan, inspection, sdk) {
       'Original Run byte cursors moved backwards during handoff.')
   }
   return statuses
+}
+
+/** One invocation owns this fresh private namespace, never the installed/default Runtime. */
+export async function createPrivateRuntimeScope(corePath) {
+  const selected = await runtimeArtifact(corePath)
+  const directory = await realpath(await mkdtemp(join('/tmp', `amx-private-${process.getuid()}-`)))
+  const originalDirectory = await lstat(directory, { bigint: true })
+  const socketPath = join(directory, 'ctxmux.sock'), stateDirectory = join(directory, 'state', 'ctxmux')
+  let originalOwner
+  const assertDirectory = async () => {
+    const current = await lstat(directory, { bigint: true })
+    fail(current.isDirectory() && current.uid === BigInt(process.getuid()) && (current.mode & 0o777n) === 0o700n &&
+      current.dev === originalDirectory.dev && current.ino === originalDirectory.ino,
+      'The private Runtime directory identity changed. Its resources were retained.')
+  }
+  const observeOwner = async () => {
+    await assertDirectory()
+    const current = await processOwner(socketPath, selected)
+    fail(current.state.directory === stateDirectory && current.state.path === join(stateDirectory, 'state.lock'),
+      'The socket owner does not own this private Runtime state.')
+    if (originalOwner) {
+      assertServingOwner(originalOwner, current)
+      fail(JSON.stringify(current.executableIdentity) === JSON.stringify(originalOwner.executableIdentity) &&
+        JSON.stringify(current.imageIdentity) === JSON.stringify(originalOwner.imageIdentity),
+        'The private Runtime executing image changed. Its resources were retained.')
+    } else originalOwner = structuredClone(current)
+    return structuredClone({ ...current, socketPath, stateDirectory })
+  }
+  const originalAlive = () => {
+    try { process.kill(originalOwner.pid, 0); return true }
+    catch (error) { if (error.code === 'ESRCH') return false; throw error }
+  }
+  const waitForExit = async (milliseconds) => {
+    const end = Date.now() + milliseconds
+    while (originalAlive()) {
+      if (Date.now() >= end) return false
+      await sleep(20)
+    }
+    return true
+  }
+  const cleanup = async () => {
+    const signals = []
+    try {
+      await assertDirectory()
+      if (!originalOwner) await observeOwner()
+      if (originalAlive()) {
+        const owner = await observeOwner()
+        try { process.kill(owner.pid, 'SIGTERM'); signals.push('SIGTERM') }
+        catch (error) { if (error.code !== 'ESRCH') throw error }
+        if (!await waitForExit(5_000)) {
+          const current = await observeOwner()
+          process.kill(current.pid, 'SIGKILL'); signals.push('SIGKILL')
+          fail(await waitForExit(2_000), 'The original private Runtime has not exited.')
+        }
+      }
+      fail(await probeSocketLiveness(socketPath) === 'dead', 'The private endpoint exit is unconfirmed.')
+      await assertDirectory()
+      return { status: 'exited', directory, pid: originalOwner.pid, birth: originalOwner.birth, signals, exitConfirmed: true }
+    } catch (cause) {
+      throw Object.assign(new Error('Private Runtime cleanup is unconfirmed; the original profile was retained.', { cause }),
+        { code: 'PRIVATE_RUNTIME_CLEANUP_UNCONFIRMED', detail: { directory, socketPath, originalOwner, signals } })
+    }
+  }
+  return Object.freeze({ directory, socketPath, stateDirectory, daemonPath: selected.daemonPath, observeOwner, cleanup })
 }
 
 /** Bind a serving socket to the installed artifact's actual mapped image and state lock. */
