@@ -15,7 +15,7 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { NameChangeAudit } from './name-change-audit.js'
 import { MOTE_BEHAVIOR_PATH, DEFAULT_MOTE_BEHAVIOR, parseMoteBehaviorDocument, moteBehaviorIntroduction } from '../shared/mote-behavior.js'
 import { moteSoulForBehaviorContext } from '../shared/mote-behavior-legacy.js'
-import { TOPIC_AGENT_INSTRUCTIONS_PATH, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_AGENT_INSTRUCTIONS } from '../shared/topic-agent-instructions.js'
+import { TOPIC_AGENT_INSTRUCTIONS_PATH, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_AGENT_INSTRUCTIONS, MOTE_MEMORY_PATH, DEFAULT_MOTE_MEMORY } from '../shared/topic-agent-instructions.js'
 import {
   SCRATCH_WORKSPACE_ID,
   MOTE_SOUL_PATH,
@@ -566,13 +566,17 @@ export class ScratchTopics {
       ensureDirectory(join(absolutePath, '.agentmux'))
     ])
     await ensureRegularFile(join(absolutePath, 'topic.md'), topicId === PMO_TEAMS_TOPIC_ID ? '# Mote\n\nYour global coordination partner.\n' : initialTitle ? renamedTopicContent(TOPIC_TEMPLATE, initialTitle) : TOPIC_TEMPLATE)
-    let instructionsIssue: string | undefined
+    const contextIssues: string[] = []
     try {
       if (!contextKind) throw new Error('The original object kind is unconfirmed; its existing instructions are kept.')
       await ensureRegularFile(join(absolutePath, TOPIC_AGENT_INSTRUCTIONS_PATH), contextKind === 'mote' ? DEFAULT_MOTE_AGENT_INSTRUCTIONS : DEFAULT_TOPIC_AGENT_INSTRUCTIONS)
     } catch (error) {
       // The original file is preserved. prepareAgent reports its actual read result.
-      instructionsIssue = `${TOPIC_AGENT_INSTRUCTIONS_PATH} could not be prepared: ${error instanceof Error ? error.message : String(error)}`
+      contextIssues.push(`${TOPIC_AGENT_INSTRUCTIONS_PATH} could not be prepared: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (contextKind === 'mote') {
+      try { await ensureRegularFile(join(absolutePath, MOTE_MEMORY_PATH), DEFAULT_MOTE_MEMORY) }
+      catch (error) { contextIssues.push(`${MOTE_MEMORY_PATH} could not be prepared: ${error instanceof Error ? error.message : String(error)}`) }
     }
     if (mote) {
       const createdSoul = await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
@@ -587,7 +591,7 @@ export class ScratchTopics {
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
     const snapshot = (await this.read(workspace, topicId))!
-    return instructionsIssue ? { ...snapshot, readError: [snapshot.readError, instructionsIssue].filter(Boolean).join('\n') } : snapshot
+    return contextIssues.length ? { ...snapshot, readError: [snapshot.readError, ...contextIssues].filter(Boolean).join('\n') } : snapshot
   }
 
   async ensureMote(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
@@ -658,6 +662,7 @@ export class ScratchTopics {
     const snapshot = await this.ensure(workspace, topicId)
     const absolutePath = snapshot.physicalDirectoryPath!
     const instructions = await initialFileContext(absolutePath, TOPIC_AGENT_INSTRUCTIONS_PATH)
+    const memoryContext = snapshot.kind === 'mote' ? `Knowledge for Mote ${topicId}:\n${await initialFileContext(absolutePath, MOTE_MEMORY_PATH)}` : null
     const behaviorContext = snapshot.kind === 'mote' ? await this.behaviorContext(absolutePath) : null
     const identityPath = join(
       absolutePath,
@@ -693,6 +698,7 @@ Current user instructions, authorization, actual capabilities and authoritative 
 
 ${moteSoulForBehaviorContext(snapshot.soul.content, behaviorContext?.present ?? false)}`] : []),
         ...(behaviorContext ? [behaviorContext.prompt] : []),
+        ...(memoryContext ? [memoryContext] : []),
         ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : []),
         ...(snapshot.readError ? [`Some original context could not be read. Keep existing work and inspect the original files before relying on missing context:\n${snapshot.readError}`] : []),
         snapshot.wiki?.enabled

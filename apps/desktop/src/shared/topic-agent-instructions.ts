@@ -1,5 +1,25 @@
 /** Short filesystem entry points; product roles remain in their original owner. */
 export const TOPIC_AGENT_INSTRUCTIONS_PATH = 'AGENTS.md'
+export const MOTE_MEMORY_PATH = 'MEMORY.md'
+
+export const DEFAULT_MOTE_MEMORY = `# Memory
+
+This is the short durable knowledge entry point for this Mote. Follow AGENTS.md when reading, correcting or maintaining it. Current instructions and original evidence take precedence over historical notes.
+
+## Original context
+
+- [topic.md](./topic.md): current context and confirmed work.
+- \`refs/\`: original sources. \`outcome/\`: saved results.
+- \`BEHAVIOR.md\`, when present: saved cooperation preferences; keep their single source there.
+
+## Confirmed knowledge
+
+No additional knowledge has been recorded here yet. Add only useful confirmed facts, preferences, decisions, corrections or commitments, with their source, date and scope. Link detailed original material rather than copying a conversation.
+
+## Last maintenance
+
+Not assessed. An Agent-reported maintenance note is historical context, not a system guarantee or a save receipt.
+`
 
 const PUBLIC_CAPABILITIES = `## AgentMux
 

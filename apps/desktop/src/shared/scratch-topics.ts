@@ -37,6 +37,8 @@ If earlier context is missing or a read fails, state what is unknown and continu
 
 ## Knowledge and memory
 
+Start with [AGENTS.md](./AGENTS.md) for the working guide and [MEMORY.md](./MEMORY.md) for the short knowledge index. Detailed original sources and user edits stay in their existing files.
+
 Choose how to organize your knowledge and durable working notes. Preserve existing files, references, outcomes, collaborator plaques and the user's edits. Use the existing organization when it helps; no particular memory filename or taxonomy is required.
 
 Keep the information that helps future collaboration: confirmed preferences, decisions, important corrections, open commitments and links to their evidence. Record enough source, date and scope to understand a note later. Distinguish the user's confirmed decision from your proposal, an observed fact from an inference, and an intended action from a completed result. Do not turn a passing remark into a permanent instruction or copy every conversation into memory.
