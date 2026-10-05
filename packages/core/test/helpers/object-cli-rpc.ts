@@ -107,6 +107,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'space.bind': ['--zone', ids.zone, '--space', ids.space], 'space.unbind': ['--zone', ids.zone, '--space', ids.space],
     'space.focus': ['--region', ids.region], 'space.promote': ['--region', ids.region], 'space.arrange': ['--tab', 'TAB', '--balance'],
     'file.open': ['--path', '--help', '--zone', ids.zone], 'file.view': ['--region', ids.region],
+    'file.format': ['--region', ids.region], 'file.build': ['--region', ids.region],
+    'file.build.inspect': ['--region', ids.region, '--build', 'BUILD'], 'file.build.cancel': ['--region', ids.region, '--build', 'BUILD'],
     'terminal.open': ['--in-region', ids.region], 'browser.open': ['--url', 'https://example.org', '--in-region', ids.region],
     'browser.targets': [], 'browser.run': ['--browser', 'B', '--operation-id', 'BOP'], 'browser.history': [],
     'browser.task.assets': ['--browser', 'B'], 'browser.task.reliability': ['--browser', 'B', '--asset', 'A', '--version', '1'],
