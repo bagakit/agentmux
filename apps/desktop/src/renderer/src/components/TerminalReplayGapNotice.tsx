@@ -1,9 +1,13 @@
 import { useState } from 'react'
-import { LoaderCircle, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 export const TERMINAL_GAP_NOTICE: RenderableServiceNotice = { kind: 'process-degraded', notice: {
   step: 'Earlier scrollback is unavailable',
@@ -37,7 +41,7 @@ export function TerminalReplayGapNotice({ scope, visible = true, canRedraw, onRe
         }).catch((cause) => setError(`Screen redraw failed: ${presentError(cause)}`))
           .finally(() => setRedrawing(false))
       }}>
-      {redrawing ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />}
+      {redrawing ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />}
       {redrawing ? 'Requesting…' : 'Redraw'}
     </button> : null}
   </div>

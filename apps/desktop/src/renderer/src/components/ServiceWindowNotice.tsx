@@ -1,8 +1,11 @@
-import { Info } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import { serviceNoticeAriaLive, type RenderableServiceNotice } from '../lib/service-window-notice'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
+
+const ThemeStatusInfoIcon = semanticIconComponent('status.info')
+
 
 export type ServiceNoticeDisclosureIdentity = Pick<ServiceNoticeItem, 'id' | 'occurrence' | 'cause'> & {
   scope: string
@@ -53,7 +56,7 @@ export function ServiceWindowNotice({
       aria-live={ariaLive}
     >
       <span className="service-window__icon" aria-hidden="true">
-        <Info size={14} />
+        <ThemeStatusInfoIcon size={14} />
       </span>
       <div className="service-window__body">
         <strong className="service-window__step">{visible.step}</strong>

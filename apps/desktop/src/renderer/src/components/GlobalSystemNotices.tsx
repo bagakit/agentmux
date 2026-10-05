@@ -1,6 +1,6 @@
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
-import { Bell, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
@@ -12,6 +12,10 @@ import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsNavigation } from './SettingsNavigation'
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
+
+const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
+const ThemeLayoutCollapseIcon = semanticIconComponent('layout.collapse')
+
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
@@ -166,7 +170,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
       aria-expanded={open} aria-controls={id} title="System notifications"
       popoverTarget={id} popoverTargetAction="toggle">
-      <Bell size={14} aria-hidden="true" />
+      <ThemeObjectNotificationsIcon size={14} aria-hidden="true" />
       {notices.length ? <span aria-hidden="true">{notices.length}</span> : null}
       {unread ? <span className="global-system-notices__dot" aria-hidden="true" /> : null}
     </button>
@@ -176,7 +180,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       <div className="global-system-notices__heading">
         <strong>System notifications</strong>
         <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Collapse system notifications"
-          popoverTarget={id} popoverTargetAction="hide"><X size={14} /></button>
+          popoverTarget={id} popoverTargetAction="hide"><ThemeLayoutCollapseIcon size={14} /></button>
       </div>
       {inboxes.map((inbox, index) => <div key={index}>
         {inbox.notices.map((item) => <div key={item.id} className="global-system-notices__item">

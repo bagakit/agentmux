@@ -1,7 +1,10 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { AlertTriangle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useRef, type ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+
 
 export function ConfirmationDialog({
   open,
@@ -45,7 +48,7 @@ export function ConfirmationDialog({
           onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
           onInteractOutside={(event) => { if (busy) event.preventDefault() }}>
           <header className="confirmation-dialog__heading">
-            {intent === 'danger' ? <AlertTriangle size={14} aria-hidden="true" /> : null}
+            {intent === 'danger' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" /> : null}
             <Dialog.Title className="confirmation-dialog__title">{title}</Dialog.Title>
           </header>
           {subject ? <p className="confirmation-dialog__subject">{subject}</p> : null}

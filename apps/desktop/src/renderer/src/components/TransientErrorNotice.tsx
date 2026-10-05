@@ -1,5 +1,9 @@
-import { AlertTriangle, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { serviceNoticeAriaLive } from '../lib/service-window-notice'
+
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionDismissIcon = semanticIconComponent('action.dismiss')
+
 
 /**
  * A transient workflow error that never covers the workbench and can be revisited after dismissal.
@@ -46,7 +50,7 @@ export function TransientErrorNotice({
   if (error && !dismissed) {
     return (
       <aside className="error-notice" data-volume={ariaLive} role={ariaLive === 'assertive' ? 'alert' : 'status'} aria-live={ariaLive}>
-        <AlertTriangle size={14} aria-hidden="true" />
+        <ThemeStatusWarningIcon size={14} aria-hidden="true" />
         {summary ? (
           <div className="error-notice__body">
             <span className="error-notice__summary">{summary}</span>
@@ -57,7 +61,7 @@ export function TransientErrorNotice({
           </div>
         ) : <span>{error}</span>}
         <button className="icon-button error-notice__close" type="button" aria-label="Dismiss error" title="Dismiss error" onClick={onDismiss}>
-          <X size={14} />
+          <ThemeActionDismissIcon size={14} />
         </button>
       </aside>
     )
@@ -65,7 +69,7 @@ export function TransientErrorNotice({
   if (dismissed && lastError) {
     return (
       <button className="error-notice__reopen" data-volume={ariaLive} type="button" onClick={onReopen}>
-        <AlertTriangle size={12} aria-hidden="true" /> Show last error
+        <ThemeStatusWarningIcon size={12} aria-hidden="true" /> Show last error
       </button>
     )
   }
