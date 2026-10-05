@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -47,7 +48,7 @@ function original(alias = false) {
   }))
   const sessions = [rendererMain, 'other'].map(id => ({ kind: 'agent', id, providerId: 'codex', executorId: 'original-executor', hostId: workspace.hostId,
     workspacePath: fixturePath("relocated/mote"), label: id === rendererMain ? '继续原协调工作' : '邻居工作', processState: 'running',
-    status: { state: 'working', source: 'native-hook', observedAt: 1 }, capabilities: { timeline: 'complete-events' },
+    status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, capabilities: { timeline: 'complete-events' },
     control: { kind: 'agent', hostId: workspace.hostId, agentSessionId: id === rendererMain ? 'session-original' : id, run: { runId: id === rendererMain ? 'run-original' : `run-${id}` } } }))
   const state = { config: { version: 9, workspaces: [workspace], hosts: [{ id: workspace.hostId, kind: 'local' }], executors: {}, appearance: {} }, sessions, tabs,
     layouts: { 'first-display': createWorkspaceLayout('first-group', Object.keys(tabs)), 'second-display': createWorkspaceLayout('saved-group', Object.keys(tabs)) },
@@ -124,7 +125,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     expect(f.rpc).toHaveBeenCalledWith('file.read', { zoneId: value.fact.content!.zoneId, spaceId: value.spaceId, path: 'BEHAVIOR.md',
       expectedResource: { hostId: value.workspace.hostId, workspaceId: value.workspace.id, workspacePath: value.workspace.path } })
     expect(f.read).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'host-original', path: fixturePath("original/scratch") }), `${scratchTopicDirectoryName(value.topic.id)}/BEHAVIOR.md`, undefined)
-    await click(button(overlay, '返回 Profile')); await click(button(overlay, '关闭面板'))
+    await click(button(overlay, '返回资料')); await click(button(overlay, '关闭面板'))
     expect(editor(view.element)).toBe(input); expect(input.textContent).toContain('保留未发送原草稿')
     expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
   })
@@ -312,7 +313,7 @@ describe('bounded readonly Profile and original avatar cost', () => {
     f.rpc.mockResolvedValueOnce({ resource: null, result: { status: 'unknown', code: 'UNAVAILABLE', message: 'original file temporarily unavailable' } })
     await click(button(view.element, '刷新原文件'))
     expect(view.element.textContent).toContain('先保留原讨论'); expect(view.element.textContent).toContain('temporarily unavailable')
-    await click(button(view.element, '返回 Profile'))
+    await click(button(view.element, '返回资料'))
     const changed: AgentMuxMotePresentation = { ...value.fact, content: { ...value.fact.content!, workspacePath: fixturePath("other/resource") } }
     f.rpc.mockResolvedValueOnce({ catalog: { ...value.catalog, motePresentation: [changed] } })
     await click(button(view.element, '刷新原资料'))
