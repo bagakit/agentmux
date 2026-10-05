@@ -11,6 +11,7 @@ export default defineConfig(({ command }) => ({
     }, injectTo: 'head-prepend' as const }] : []
   }],
   resolve: { conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
+  worker: { format: 'es' },
   server: { host: '127.0.0.1', port: 4321, strictPort: true },
   preview: { host: '127.0.0.1', port: 4321, strictPort: true },
   build: { target: 'es2022', outDir: 'dist', emptyOutDir: true }
