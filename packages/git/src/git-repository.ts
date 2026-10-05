@@ -150,11 +150,6 @@ function parseBranchHeader(header: string): string | null {
   return local || null
 }
 
-// A repository that git itself reports as absent — the exact fatal it prints for a plain directory.
-// Matched as text (not inferred from the exit code) because deciding "not a repo" is the one place a
-// non-zero exit has a specific, benign meaning; every other non-zero exit is a real error to surface.
-const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the parent directories\): .+\n?$/
-
 // The fatal git prints when the path it was asked to remove is not one of its registered worktrees.
 // Anchored for the same reason as the sentence above: an unanchored match would also accept a stderr
 // that merely mentions the phrase beside a real error.
@@ -173,25 +168,6 @@ const NOT_A_GIT_REPOSITORY = /^fatal: not a git repository \(or any of the paren
 // ("cannot change to") print different sentences and are therefore excluded here, which is the point:
 // each of those is a real failure with a real remedy, and neither means the worktree is gone.
 const NOT_A_WORKING_TREE = /^fatal: '.+' is not a working tree\n?$/
-
-/**
- * Is this stderr git's own "there is no repository here" sentence, and nothing else?
- *
- * Exported because two services ask this same question and each used to carry its own byte-identical
- * copy of the pattern. The anchors and the `$` are the load-bearing part: an unanchored match would
- * also accept a stderr that merely *mentions* the phrase alongside a real error, and the two callers
- * then answer "not a repository" for a failure that is actually something else — the shape where a
- * genuine error gets flattened into a benign classification.
- *
- * A predicate rather than the pattern itself, so the anchoring cannot be re-litigated at a call site
- * (a caller holding the RegExp could `.test` a substring, or add `.source` to a wider pattern).
- * The two callers legitimately do different things with the answer — one returns null immediately,
- * the other also checks ancestry for a metadata file — so what is shared is the question, not the
- * response.
- */
-export function isNotAGitRepositoryStderr(stderr: string): boolean {
-  return NOT_A_GIT_REPOSITORY.test(stderr)
-}
 
 /**
  * Is this stderr git's "that path is not one of my worktrees" sentence, and nothing else?
@@ -262,6 +238,47 @@ const GIT_RUN_OPTIONS = {
   maxOutputBytes: 2 * 1024 * 1024
 } as const
 
+// Same-host filesystem facts are independent of Git's display text. A .git
+// entry or HEAD only prevents claiming absence; it never grants a repository.
+const METADATA_OBSERVATION = `
+const fs = require('node:fs'), path = require('node:path');
+const requestedPath = process.argv[1];
+try {
+  let directory = fs.realpathSync(requestedPath);
+  if (!fs.statSync(directory).isDirectory()) throw new Error();
+  const present = name => { try { fs.lstatSync(name); return true } catch (error) { if (error.code === 'ENOENT') return false; throw error } };
+  let hasMetadata = false;
+  while (true) {
+    if (present(path.join(directory, '.git')) || present(path.join(directory, 'HEAD'))) { hasMetadata = true; break }
+    const parent = path.dirname(directory); if (parent === directory) break; directory = parent;
+  }
+  process.stdout.write(JSON.stringify({ requestedPath, hasMetadata }));
+} catch { process.stdout.write(JSON.stringify({ requestedPath, unavailable: true })); process.exitCode = 1 }
+`
+
+/** Shared SDK/host discovery. A failed metadata observation remains unknown. */
+export async function resolveGitWorktreeRoot(host: GitCommandRunner, path: string): Promise<string | null> {
+  const result = await host.run('git', ['-C', path, 'rev-parse', '--show-toplevel'], GIT_RUN_OPTIONS)
+  if (result.exitCode === 0) {
+    const root = result.stdout.trim()
+    if (!root) throw new Error('Git returned an empty repository path')
+    return root
+  }
+  if (result.exitCode === 128) {
+    const observation = await host.run('node', ['-e', METADATA_OBSERVATION, path], {
+      ...GIT_RUN_OPTIONS, env: { ...GIT_NONINTERACTIVE_ENV, NODE_OPTIONS: undefined, NODE_PATH: undefined }
+    })
+    if (observation.exitCode !== 0) throw gitFailureError(result, 'Repository observation is unavailable')
+    let value: unknown
+    try { value = JSON.parse(observation.stdout) } catch { throw new Error('Invalid repository metadata observation') }
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      (value as { requestedPath?: unknown }).requestedPath !== path ||
+      typeof (value as { hasMetadata?: unknown }).hasMetadata !== 'boolean') throw new Error('Invalid repository metadata observation')
+    if ((value as { hasMetadata: boolean }).hasMetadata === false) return null
+  }
+  throw gitFailureError(result, 'Workspace repository observation failed')
+}
+
 // Network verbs (push/pull/fetch) get a longer clock and a larger output ceiling than local plumbing:
 // a real transfer can legitimately take longer than a `rev-parse`, and the no-hang guarantee comes from
 // the non-interactive env (BatchMode ssh + GIT_TERMINAL_PROMPT=0), not from a short timeout. Local
@@ -301,7 +318,7 @@ const NON_FAST_FORWARD = /\(non-fast-forward\)|\bUpdates were rejected because\b
 
 // A pull that cannot be reconciled without a merge/rebase decision. The first phrase is `--ff-only`
 // refusing; the second is a bare pull on a host with no pull.rebase/pull.ff policy, which is exactly
-// the hard-fail the unpinned auto-merge fallback exists to absorb.
+// a diagnostic refusal; it never authorizes a second mutation.
 const DIVERGED = /fatal: Not possible to fast-forward|fatal: Need to specify how to reconcile divergent branches/
 
 // The two shapes git prints when the current branch has no upstream to push to or compare against.
@@ -311,7 +328,7 @@ const NO_UPSTREAM_FATAL =
   /fatal: (no upstream configured for branch|The current branch .+ has no upstream branch|You are not currently on a branch)/
 
 // The pull strategy the caller pins, mapped to the git flag. `auto` (the default) pins nothing and
-// lets git's own config decide — which is what makes the unpinned-only auto-merge fallback meaningful.
+// lets Git's own config decide. Failure never selects a different strategy.
 const STRATEGY_FLAG: Record<GitPullStrategy | 'auto', string | null> = {
   auto: null,
   'ff-only': '--ff-only',
@@ -1164,11 +1181,9 @@ export class GitRepository {
   /**
    * Pull the current branch from its configured upstream — the same integration a bare `git pull`
    * performs, and the same ref ahead/behind measures against. The strategy is either pinned by the
-   * caller (`ff-only` / `merge` / `rebase`) or left to git. When the caller does not pin one and a bare
-   * pull hard-fails because the branch has diverged and the host has no `pull.rebase`/`pull.ff` policy,
-   * this retries once with an explicit merge — the auto-merge fallback that keeps an unconfigured host
-   * from failing a routine pull. A pinned `ff-only` is never second-guessed: its diverged result is
-   * surfaced as-is. No positional remote/refspec is passed: `origin HEAD` is a push idiom (git would
+   * caller (`ff-only` / `merge` / `rebase`) or left to Git. A failure is surfaced
+   * without another integration attempt. No positional remote/refspec is passed:
+   * `origin HEAD` is a push idiom (Git would
    * read `HEAD` as a remote ref to fetch), so pull relies on the upstream tracking push established.
    */
   async pull(
@@ -1181,10 +1196,7 @@ export class GitRepository {
       if (strategyFlag) argv.push(strategyFlag)
       return this.remote(await host.run('git', argv, GIT_REMOTE_RUN_OPTIONS))
     }
-    const first = await run(STRATEGY_FLAG[options.strategy ?? 'auto'])
-    // Only an unpinned caller gets the fallback: a diverged bare pull retries as an explicit merge.
-    if (first.kind === 'diverged' && options.strategy === undefined) return run('--no-rebase')
-    return first
+    return run(STRATEGY_FLAG[options.strategy ?? 'auto'])
   }
 
   /** Fetch from a remote (default `origin`) with `--prune`, so deleted remote branches stop lingering. */
@@ -1204,20 +1216,10 @@ export class GitRepository {
    * `refs/heads/main`). When neither resolves, there is simply no upstream: ahead/behind are both zero.
    */
   async aheadBehind(): Promise<GitAheadBehind> {
-    let repoPath: string
-    try {
-      repoPath = await this.requireRepoPath()
-    } catch (error) {
-      // A folder Workspace is a supported file-tree surface even when it has no Git metadata.
-      // Treat the sync badge as unavailable (0/0 with no upstream) instead of rejecting an
-      // unrelated Workbench initialization request.
-      if (error instanceof Error && error.message === 'Workspace is not a Git repository') {
-        return { upstream: null, ahead: 0, behind: 0 }
-      }
-      throw error
-    }
+    const repoPath = await this.resolveRepoPath(this.runner, this.location.path)
+    if (repoPath === null) return { upstream: null, ahead: 0, behind: 0 }
     const host = this.runner
-    const upstream = (await this.resolveRef(host, repoPath, '@{push}')) ?? (await this.resolveRef(host, repoPath, '@{upstream}'))
+    const upstream = await this.effectiveUpstream(host, repoPath)
     if (upstream === null) return { upstream: null, ahead: 0, behind: 0 }
     const result = await host.run(
       'git',
@@ -1227,24 +1229,34 @@ export class GitRepository {
     this.assertGit(result, 'Could not count commits against the upstream')
     // `--left-right --count HEAD...<upstream>` prints "<ahead>\t<behind>": left of the symmetric-diff
     // is HEAD's own commits (ahead), right is the upstream's (behind).
-    const [ahead, behind] = result.stdout.trim().split(/\s+/).map((value) => Number.parseInt(value, 10))
-    return { upstream, ahead: Number.isFinite(ahead) ? ahead! : 0, behind: Number.isFinite(behind) ? behind! : 0 }
+    const counts = /^(\d+)\s+(\d+)\s*$/u.exec(result.stdout)
+    if (!counts) throw new Error('Git returned invalid upstream counts')
+    const ahead = Number(counts[1]), behind = Number(counts[2])
+    if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind)) throw new Error('Git upstream counts exceed their range')
+    return { upstream, ahead, behind }
   }
 
-  /**
-   * Resolve a magic revision (`@{push}` / `@{upstream}`) to its full ref name, or null when it does not
-   * exist. `--verify --quiet` turns a missing upstream into a clean exit-1 with empty output instead of
-   * a fatal; these two revisions must be passed as plain revision arguments (git cannot resolve them
-   * after `--end-of-options`), which is safe because they are compile-time constants, not user input.
-   */
-  private async resolveRef(host: GitCommandRunner, repoPath: string, revision: string): Promise<string | null> {
-    const result = await host.run(
-      'git',
-      ['-C', repoPath, 'rev-parse', '--symbolic-full-name', '--verify', '--quiet', revision],
-      GIT_RUN_OPTIONS
-    )
-    const ref = result.stdout.trim()
-    return result.exitCode === 0 && ref ? ref : null
+  /** Native ref-format fields: empty means unconfigured, errors remain errors. */
+  private async effectiveUpstream(host: GitCommandRunner, repoPath: string): Promise<string | null> {
+    const branch = await host.run('git', ['-C', repoPath, 'symbolic-ref', '--quiet', 'HEAD'], GIT_RUN_OPTIONS)
+    if (branch.exitCode === 1) return null // Native symbolic-ref contract: detached HEAD.
+    this.assertGit(branch, 'Could not observe the current branch')
+    const ref = branch.stdout.trim()
+    if (!ref.startsWith('refs/heads/')) throw new Error('Git returned an invalid branch ref')
+    const observation = await host.run('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname)%00%(push)%00%(upstream)', '--', ref], GIT_RUN_OPTIONS)
+    this.assertGit(observation, 'Could not observe branch destinations')
+    if (!observation.stdout) return null // Unborn branch: no ref object exists.
+    const row = observation.stdout.replace(/\n$/u, '').split('\0')
+    if (row.length !== 3 || row[0] !== ref) throw new Error('Git returned invalid branch destinations')
+    for (const destination of [row[1]!, row[2]!]) {
+      if (!destination) continue
+      if (!destination.startsWith('refs/')) throw new Error('Git returned an invalid destination ref')
+      const current = await host.run('git', ['-C', repoPath, 'for-each-ref', '--format=%(refname)', '--', destination], GIT_RUN_OPTIONS)
+      this.assertGit(current, 'Could not observe the destination ref')
+      if (current.stdout.trim() === destination) return destination
+      if (current.stdout) throw new Error('Git returned an unexpected destination ref')
+    }
+    return null
   }
 
   /** Fold a captured remote-verb result into the discriminated result the renderer consumes. */
@@ -1259,21 +1271,9 @@ export class GitRepository {
     return repoPath
   }
 
-  /**
-   * The working-tree root for a workspace, or null when it is genuinely not a repository.
-   *
-   * The decision is made from git's output, not its exit code: a non-zero exit whose stderr is the
-   * specific "not a git repository" fatal means null (a plain folder), while any other non-zero exit
-   * is re-thrown as the real failure it is. Trusting the exit code alone would flatten a permissions
-   * or corruption error into a misleading "not a repo".
-   */
+  /** Native root or independently observed metadata absence; never stderr. */
   private async resolveRepoPath(host: GitCommandRunner, path: string): Promise<string | null> {
-    const result = await host.run('git', ['-C', path, 'rev-parse', '--show-toplevel'], GIT_RUN_OPTIONS)
-    if (result.exitCode !== 0 && isNotAGitRepositoryStderr(result.stderr)) return null
-    this.assertGit(result, 'Workspace is not a Git repository')
-    const repoPath = result.stdout.trim()
-    if (!repoPath) throw new Error('Git returned an empty repository path')
-    return repoPath
+    return resolveGitWorktreeRoot(host, path)
   }
 
   /**
