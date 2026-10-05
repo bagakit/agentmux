@@ -87,6 +87,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 }
 @media (max-width: 920px) {
   .browser-screenshot-toolbar { align-items: stretch; flex-direction: column; }
+  .browser-screenshot-toolbar > .browser-screenshot-toolbar__tools { flex-basis: auto; }
   .browser-screenshot-toolbar__actions { justify-content: flex-end; }
   .browser-screenshot-toolbar__actions > span { margin-right:auto; }
 }
