@@ -36,11 +36,13 @@ describe('main window setup wiring', () => {
     expect(closeAt).toBeGreaterThan(startupAt)
     const startup = source.slice(startupAt, closeAt)
 
-    // The smoke harness is the only path allowed to call loadFile directly. Normal startup
+    // Smoke must share the real ready handshake. Normal startup
     // must let RendererUpdates.initialize() perform the one navigation it awaits; a second
     // navigation advances the Renderer generation and makes an otherwise healthy Run's exact
     // Session Attachment look like a failed connection.
-    expect(startup.match(/window\.loadFile\(packagedRendererPath/g)).toHaveLength(1)
+    expect(startup.match(/loadPackagedRenderer\(packagedRendererPath\)/g)).toHaveLength(1)
+    expect(startup).not.toContain('window.loadFile(packagedRendererPath')
+    expect(source).toContain('load: loadPackagedRenderer')
     const normalBranchAt = startup.indexOf('} else {')
     expect(normalBranchAt).toBeGreaterThan(-1)
     const normalBranch = startup.slice(normalBranchAt)
