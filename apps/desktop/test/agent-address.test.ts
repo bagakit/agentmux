@@ -104,7 +104,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
   })
 
   // 恢复文本里出现的每一行命令都必须真能跑。这条是本轮补的：原来那句
-  // `expect(recovery).toContain('agentmux inspect')` 对**裸** `agentmux inspect` 同样为真，
+  // `expect(recovery).toContain('amux inspect')` 对**裸** `amux inspect` 同样为真，
   // 而裸 inspect 跑起来是 INVALID_CLI_ARGUMENT（"requires exactly one of --session/--run/…"）。
   // 断言分不清能跑与不能跑，于是三条恢复全是死路，测试却一直绿着。
   it('恢复里的每一行命令都真能跑，不是长得像命令', () => {
@@ -449,7 +449,7 @@ describe('object-link menu consumers', () => {
     // 每种寻址失败都带上了能直接跑的下一步，而不只是"发生了什么"。
     expect(messages[0]).toContain("amux agent send --to-session='agent-a'")
     // 这三条拿不到 tab/region id，给的是 Session 旁路——它带子命令，真能跑。原来这里断言的是
-    // `toContain('agentmux inspect')`，而裸 inspect 跑不了，那句话分不清能跑与不能跑。
+    // `toContain('amux inspect')`，而裸 inspect 跑不了，那句话分不清能跑与不能跑。
     for (const index of [1, 2, 3]) expect(messages[index]).toContain('amux agent ls')
     // 原始 message 不能被恢复文本顶掉——"怎么办"是附加，不是替代。
     expect(messages[2]).toContain('Tab target is not currently open.')
