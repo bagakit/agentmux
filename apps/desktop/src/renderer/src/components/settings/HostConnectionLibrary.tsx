@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { Check, ChevronRight, FolderOpen, Search, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -39,7 +40,7 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
 
   return <aside className="settings-resource-library settings-host-library">
     <label className="settings-resource-search"><Search size={14} aria-hidden="true" />
-      <input ref={search} type="search" aria-label="Filter hosts" placeholder="Find an environment…" value={query} onChange={(event) => onQuery(event.target.value)} />
+      <TextInput ref={search} type="search" aria-label="Filter hosts" placeholder="Find an environment…" value={query} onChange={(event) => onQuery(event.target.value)} />
     </label>
     <div ref={list} className="settings-resource-library__list" aria-label="Environments">
       {items.map((item) => <details key={item.id} className="settings-host-branch" data-host-disclosure={item.id}
