@@ -2514,7 +2514,8 @@ export class AgentMuxClient {
         }
         const result = await read(readNativeContentResource(context, { ...input, expectedReference: authorizedReference }))
         await read(binding.assertCurrent())
-        return { ...identity, reference: input.expectedReference, result }
+        return { ...identity, reference: input.expectedReference, result: result.status === 'fragment' && authorizedReference !== input.expectedReference
+          ? { ...result, continuationReference: authorizedReference } : result }
       }
       if (input.offsetBytes !== undefined) throw new AgentMuxError('Images do not accept a text-content offset.', 'INVALID_AGENT_SESSION_HISTORY_RESOURCE')
       if (!provider.readSessionHistoryRecord) return { ...identity, reference: input.expectedReference,

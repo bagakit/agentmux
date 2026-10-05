@@ -13,14 +13,14 @@ export async function readSessionHistoryTextResource(
   const metadata = part.content
   if (part.resourceType !== 'text' || !metadata || metadata.encoding !== 'json-utf8') throw new Error('This resource does not contain recorded text.')
   const hash = sha256.create(), decoder = new TextDecoder('utf-8', { fatal: true }), chunks: string[] = []
-  let offsetBytes = 0, agentSessionId: string | undefined
+  let offsetBytes = 0, agentSessionId: string | undefined, expectedReference = part.reference
   do {
     signal?.throwIfAborted()
-    const receipt = await read({ ...record, partIndex, expectedReference: part.reference, offsetBytes, maxBytes: 128 * 1024 })
+    const receipt = await read({ ...record, partIndex, expectedReference, offsetBytes, maxBytes: 128 * 1024 })
     signal?.throwIfAborted()
     if (receipt.source.providerId !== record.source.providerId || receipt.source.nativeSessionId !== record.source.nativeSessionId ||
       receipt.recordId !== record.recordId || receipt.turnId !== record.turnId || receipt.partIndex !== partIndex ||
-      receipt.reference !== part.reference || (agentSessionId !== undefined && receipt.agentSessionId !== agentSessionId))
+      receipt.reference !== expectedReference || (agentSessionId !== undefined && receipt.agentSessionId !== agentSessionId))
       throw new Error('Content response belongs to another recorded resource.')
     agentSessionId = receipt.agentSessionId
     const fragment = receipt.result
@@ -32,6 +32,11 @@ export async function readSessionHistoryTextResource(
       throw new Error('Recorded content fragment is incomplete or changed.')
     const binary = atob(fragment.dataBase64), bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
     if (bytes.length !== fragment.byteLength || btoa(binary) !== fragment.dataBase64) throw new Error('Recorded content fragment bytes are invalid.')
+    if (fragment.continuationReference !== undefined) {
+      if (typeof fragment.continuationReference !== 'string' || !fragment.continuationReference || /[\0\r\n]/u.test(fragment.continuationReference))
+        throw new Error('Recorded content authority is invalid.')
+      expectedReference = fragment.continuationReference
+    }
     hash.update(bytes); chunks.push(decoder.decode(bytes, { stream: true })); offsetBytes += bytes.length
   } while (offsetBytes < metadata.byteLength)
   chunks.push(decoder.decode())
