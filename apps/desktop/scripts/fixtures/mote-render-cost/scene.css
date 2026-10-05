@@ -1,0 +1,14 @@
+html, body, #root { margin:0; width:100%; height:100%; overflow:hidden; }
+main { height:100%; color:#d4d8df; background:#15171b; font:14px system-ui; }
+header { height:196px; padding:16px 28px; border-bottom:1px solid #343941; }
+#faces { display:flex; align-items:center; gap:12px; margin-top:12px; }
+#faces button { display:grid; place-items:center; width:48px; height:48px; border:1px solid #40464f; border-radius:8px; background:#24282e; }
+#faces button:focus-visible { outline:2px solid #b9e3cb; outline-offset:3px; }
+#faces button[data-slot="directory"] { width:64px; height:64px; }
+#faces button[data-slot="preview"] { width:150px; height:150px; }
+.cost-slot { display:contents; }
+#terminal-shell { padding:16px 28px; }
+#terminal-shell p { margin:0 0 16px; color:#a5adb8; }
+#retained { position:absolute; top:100vh; left:0; width:100%; }
+.retained-workface { display:flex; min-height:20px; gap:8px; }
+.retained-workface p { margin:0; }
