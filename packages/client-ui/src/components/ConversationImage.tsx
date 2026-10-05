@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { RotateCcw } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { PastedImage } from '../lib/pasted-images.js'
 import { useClientUiPlatform } from '../platform.js'
@@ -57,7 +57,7 @@ export function ConversationImage({
   currentImage.current = image ? loaded : null
   const failure = readFailure?.path === path && readFailure.reader === readImage ? readFailure.message
     : failed?.path === path && failed.reader === readImage ? 'Recorded image could not be decoded.' : null
-  if (!image) return <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}<button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><RotateCcw size={12} aria-hidden="true" /></button></small> : null}</>
+  if (!image) return <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}<button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><SemanticIcon name="action.rotate-reset" size={12} aria-hidden="true" /></button></small> : null}</>
   const decodeFailed = () => { if (currentImage.current === loaded) setFailed(loaded) }
 
   return (

@@ -4,7 +4,7 @@ import {
   type AgentProviderId,
   type BuiltInAgentProviderId
 } from '@agentmux/core/provider-id'
-import { Bot } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import type { ReactNode } from 'react'
 const hermesIconUrl = new URL('../../src/assets/agent-icons/hermes.png', import.meta.url).href
 const traexIconUrl = new URL('../../src/assets/agent-icons/traex.png', import.meta.url).href
@@ -123,7 +123,7 @@ export function AgentProviderIcon({ providerId, size = 14 }: { providerId?: Agen
     case 'droid': icon = <DroidIcon size={size} />; break
     case 'copilot': icon = <CopilotIcon size={size} />; break
     case 'opencode': icon = <OpenCodeIcon size={size} />; break
-    default: icon = <Bot size={size} strokeWidth={1.8} />
+    default: icon = <SemanticIcon name="object.agent" size={size} strokeWidth={1.8} />
   }
   return (
     <span

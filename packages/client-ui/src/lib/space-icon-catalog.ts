@@ -1,30 +1,28 @@
-import {
-  Bot, BookOpen, Bookmark, Brain, Code, Compass, Database, FileText, FlaskConical,
-  Folder, Gem, Layers, Library, Lightbulb, NotebookText, Package, Puzzle,
-  Rocket, Shapes, SquareTerminal, Wrench
-} from 'lucide-react'
 import type { SpaceIconId } from './space-icon-ids.js'
 export type { SpaceIconId } from './space-icon-ids.js'
+import { createElement, type ComponentProps } from 'react'
+import { SemanticIcon, type SemanticIconId } from '../theme/icons.js'
+const choiceIcon = (name: SemanticIconId) => (props: Omit<ComponentProps<typeof SemanticIcon>, 'name'>) => createElement(SemanticIcon, { ...props, name })
 export const SPACE_ICON_CATALOG = {
-  bot: { label: 'Agent', Icon: Bot },
-  book: { label: 'Book', Icon: BookOpen },
-  bookmark: { label: 'Bookmark', Icon: Bookmark },
-  brain: { label: 'Brain', Icon: Brain },
-  code: { label: 'Code', Icon: Code },
-  compass: { label: 'Compass', Icon: Compass },
-  database: { label: 'Database', Icon: Database },
-  document: { label: 'Document', Icon: FileText },
-  flask: { label: 'Research', Icon: FlaskConical },
-  folder: { label: 'Folder', Icon: Folder },
-  gem: { label: 'Gem', Icon: Gem },
-  layers: { label: 'Layers', Icon: Layers },
-  library: { label: 'Library', Icon: Library },
-  lightbulb: { label: 'Idea', Icon: Lightbulb },
-  notebook: { label: 'Notebook', Icon: NotebookText },
-  package: { label: 'Package', Icon: Package },
-  puzzle: { label: 'Puzzle', Icon: Puzzle },
-  rocket: { label: 'Rocket', Icon: Rocket },
-  shapes: { label: 'Shapes', Icon: Shapes },
-  terminal: { label: 'Terminal', Icon: SquareTerminal },
-  wrench: { label: 'Tools', Icon: Wrench }
-} as const satisfies Record<SpaceIconId, { label: string; Icon: typeof Bot }>
+  bot: { label: 'Agent', Icon: choiceIcon('space.agent') },
+  book: { label: 'Book', Icon: choiceIcon('space.book') },
+  bookmark: { label: 'Bookmark', Icon: choiceIcon('space.bookmark') },
+  brain: { label: 'Brain', Icon: choiceIcon('space.brain') },
+  code: { label: 'Code', Icon: choiceIcon('space.code') },
+  compass: { label: 'Compass', Icon: choiceIcon('space.compass') },
+  database: { label: 'Database', Icon: choiceIcon('space.database') },
+  document: { label: 'Document', Icon: choiceIcon('space.document') },
+  flask: { label: 'Research', Icon: choiceIcon('space.research') },
+  folder: { label: 'Folder', Icon: choiceIcon('space.folder') },
+  gem: { label: 'Gem', Icon: choiceIcon('space.gem') },
+  layers: { label: 'Layers', Icon: choiceIcon('space.layers') },
+  library: { label: 'Library', Icon: choiceIcon('space.library') },
+  lightbulb: { label: 'Idea', Icon: choiceIcon('space.idea') },
+  notebook: { label: 'Notebook', Icon: choiceIcon('space.notebook') },
+  package: { label: 'Package', Icon: choiceIcon('space.package') },
+  puzzle: { label: 'Puzzle', Icon: choiceIcon('space.puzzle') },
+  rocket: { label: 'Rocket', Icon: choiceIcon('space.rocket') },
+  shapes: { label: 'Shapes', Icon: choiceIcon('space.shapes') },
+  terminal: { label: 'Terminal', Icon: choiceIcon('space.terminal') },
+  wrench: { label: 'Tools', Icon: choiceIcon('space.tools') }
+} as const satisfies Record<SpaceIconId, { label: string; Icon: ReturnType<typeof choiceIcon> }>

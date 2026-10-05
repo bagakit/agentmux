@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, TriangleAlert, X } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { DeliveryLogDetails } from './DeliveryLogDetails.js'
 import { messageDeliveryDiagnosticReport, presentMessageDeliveryFailure, type MessageDeliveryDiagnostic } from '../lib/message-delivery-presentation.js'
 
@@ -27,7 +27,7 @@ export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, ...diagno
   }
   const feedback = copy === 'copied' ? '完整诊断已复制' : copy === 'failed' ? '复制失败，请重试或在详情中选取原文。' : copy === 'copying' ? '正在复制…' : ''
   return <section className="message-delivery-failure" data-kind={summary.kind} aria-label="Message Tool 操作说明">
-    <div className="message-delivery-failure__heading"><TriangleAlert size={15} aria-hidden="true" />
+    <div className="message-delivery-failure__heading"><SemanticIcon name="status.warning" size={15} aria-hidden="true" />
       <strong>{summary.title}</strong>
     </div>
     <div className="message-delivery-failure__state" role="alert">{summary.state}</div>
@@ -35,8 +35,8 @@ export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, ...diagno
     <div className="message-delivery-failure__actions">
       {onRetry && summary.kind !== 'condition-changed' ? <button type="button" onClick={onRetry}>重试此操作</button> : null}
       <button type="button" onClick={() => void copyReport()} disabled={copy === 'copying'} aria-label="复制完整诊断">
-        {copy === 'copied' ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}复制完整诊断</button>
-      {onDismiss ? <button type="button" className="message-delivery-failure__dismiss" onClick={onDismiss} aria-label="关闭操作说明" title="关闭操作说明"><X size={14} /></button> : null}
+        {copy === 'copied' ? <SemanticIcon name="action.confirm" size={13} aria-hidden="true" /> : <SemanticIcon name="action.copy" size={13} aria-hidden="true" />}复制完整诊断</button>
+      {onDismiss ? <button type="button" className="message-delivery-failure__dismiss" onClick={onDismiss} aria-label="关闭操作说明" title="关闭操作说明"><SemanticIcon name="action.close" size={14} /></button> : null}
       <span role="status" aria-live="polite" data-copy-state={copy}>{feedback}</span>
     </div>
     <details className="message-delivery-failure__details">

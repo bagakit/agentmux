@@ -1,4 +1,4 @@
-import { Ban, Check, HelpCircle, ShieldAlert } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { useRef, useState } from 'react'
 import type {
   AgentMuxInteractionRequest,
@@ -61,7 +61,7 @@ export function AgentInteractionCard({
   if (reason) return (
     <section className="agent-interaction agent-interaction--native" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
       <div className="agent-interaction__native-heading">
-        {request.kind === 'permission' ? <ShieldAlert size={15} /> : <HelpCircle size={15} />}
+        {request.kind === 'permission' ? <SemanticIcon name="status.permission" size={15} /> : <SemanticIcon name="status.unknown" size={15} />}
         <div>
           <strong>{request.kind === 'permission' ? request.title : request.questions[0]?.title || request.questions[0]?.prompt || 'Agent question'}</strong>
           {requestStatus}
@@ -98,7 +98,7 @@ export function AgentInteractionCard({
         {requestStatus}
         {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
         <div className="agent-interaction__heading">
-          <ShieldAlert size={15} />
+          <SemanticIcon name="status.permission" size={15} />
           <div>
             <strong>{request.title}</strong>
             {request.toolName ? <span>{request.toolName}</span> : null}
@@ -150,7 +150,7 @@ export function AgentInteractionCard({
               className={option.kind === 'allow-once' ? 'is-primary' : undefined}
               onClick={() => void respond(response)}
             >
-              {isAffirmative(option) ? <Check size={12} /> : <Ban size={12} />}
+              {isAffirmative(option) ? <SemanticIcon name="action.confirm" size={12} /> : <SemanticIcon name="action.dismiss" size={12} />}
               {option.label}
             </button>
           ))}
@@ -165,7 +165,7 @@ export function AgentInteractionCard({
       {requestStatus}
       {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
       <div className="agent-interaction__heading">
-        <HelpCircle size={15} />
+        <SemanticIcon name="status.unknown" size={15} />
         <div>
           {question.title ? <strong>{question.title}</strong> : null}
           <span>{question.prompt}</span>

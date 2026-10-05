@@ -1,4 +1,4 @@
-import { Check, HelpCircle, Send } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { useRef, useState, type ReactNode } from 'react'
 import type { AgentSessionHistoryQuestionRequest, AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import { AgentQuestionChoices } from './AgentQuestionChoices.js'
@@ -68,8 +68,8 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, onSubmit, att
     : recordedCount ? `${recordedCount} of ${request.questions.length} answers recorded · Others unconfirmed` : 'Answer not recorded in this window'
   return <section className="agent-interaction agent-interaction--async" aria-label="Native asynchronous question"
     data-question-state={answered ? 'answered' : phase === 'idle' || phase === 'rejected' || phase === 'confirmed' ? 'unknown' : phase}>
-    <div className="agent-question__header"><span><HelpCircle size={14} aria-hidden="true" />Question</span>
-      <span className="agent-question__state" role="status" aria-live="polite">{answered ? <Check size={12} aria-hidden="true" /> : null}{state}</span>
+    <div className="agent-question__header"><span><SemanticIcon name="status.unknown" size={14} aria-hidden="true" />Question</span>
+      <span className="agent-question__state" role="status" aria-live="polite">{answered ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : null}{state}</span>
     </div>
     {request.questions.map(question => {
       const original = recordedAnswers.get(question.id)
@@ -83,10 +83,10 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, onSubmit, att
       </label> : null
       return <fieldset key={question.id} className="agent-question__field" data-question-id={question.id}>
         <legend>{question.prompt}</legend>
-        {hasAnswer ? <div className="agent-question__answer"><Check size={13} aria-hidden="true" /><span>{original}</span></div>
+        {hasAnswer ? <div className="agent-question__answer"><SemanticIcon name="action.confirm" size={13} aria-hidden="true" /><span>{original}</span></div>
           : <>
             <AgentQuestionChoices options={question.options} selectedId={selectedId} disabled={unavailable}
-              onChoose={id => choose(question.id, id)} marker={<Check size={12} />} />
+              onChoose={id => choose(question.id, id)} marker={<SemanticIcon name="action.confirm" size={12} />} />
             {editor && question.options.length > 0 ? <details className="agent-question__write" open={draft?.optionId === null && Boolean(draft.text)}>
               <summary>Write your own answer</summary>{editor}
             </details> : editor}
@@ -101,7 +101,7 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, onSubmit, att
       <span>{!onSubmit ? 'Read-only · Answer in the original Session' : phase === 'submitted'
         ? 'Submission is not confirmation. The original conversation remains available.' : phase === 'unknown' ? 'The original answer is preserved. Retry only that reply, or inspect the original Session.' : 'Choose answers, then submit.'}</span>
       {onSubmit ? <button className="is-primary" type="button" disabled={phase === 'sending' || phase === 'submitted' || phase !== 'unknown' && !ready} onClick={() => void submit()}>
-        <Send size={12} aria-hidden="true" />{phase === 'sending' ? 'Submitting…' : phase === 'submitted' ? 'Submitted' : phase === 'unknown' ? 'Retry original reply' : 'Submit reply'}
+        <SemanticIcon name="action.send" size={12} aria-hidden="true" />{phase === 'sending' ? 'Submitting…' : phase === 'submitted' ? 'Submitted' : phase === 'unknown' ? 'Retry original reply' : 'Submit reply'}
       </button> : null}
     </div> : null}
   </section>

@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
-import { File, Image, LoaderCircle, RefreshCw, Upload, X, Check } from 'lucide-react'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import { FILE_UPLOAD_MAX_BYTES, parseFileUploadParams, type FileUploadIdentity } from '@agentmux/core/files'
@@ -132,22 +132,22 @@ export function MobileAttachments({ client, session, connected, promptOperationI
   }
   const visible = uploads.filter(upload => upload.identity.agentSessionId === session?.agentSessionId && upload.phase !== 'inserted')
   return <div className="mobile-attachments" aria-live="polite">
-    {choosing && <p className="mobile-attachment-notice"><LoaderCircle size={13} className="mobile-attachment-spin" />读取所选附件…</p>}
+    {choosing && <p className="mobile-attachment-notice"><SemanticIcon name="status.loading" size={13} className="mobile-attachment-spin" />读取所选附件…</p>}
     {visible.map(upload => {
       const image = upload.identity.mimeType.startsWith('image/'), file = bytes.current.get(upload.identity.operationId)
       const busy = upload.phase === 'sending', unknown = upload.phase === 'unknown', ready = upload.phase === 'uploaded'
       const canRemove = !busy && !unknown
       return <div className="mobile-attachment" data-phase={upload.phase} key={upload.identity.operationId}>
         {image && file ? <img className="mobile-attachment-preview" alt="" src={`data:${file.mimeType};base64,${file.dataBase64}`} />
-          : <span className="mobile-attachment-icon">{image ? <Image size={19} /> : <File size={19} />}</span>}
+          : <span className="mobile-attachment-icon">{image ? <SemanticIcon name="object.image" size={19} /> : <SemanticIcon name="object.file" size={19} />}</span>}
         <div className="mobile-attachment-copy"><strong title={upload.identity.name}>{upload.identity.name}</strong>
           <small>{upload.identity.byteLength < 1024 ? `${upload.identity.byteLength} B` : `${(upload.identity.byteLength / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB`} · {busy ? '正在核对原 Host…' : unknown ? '回执待核对' : ready ? '已在原 Mac' : '仅在这台设备'}</small>
           {upload.issue && <p role="status">{upload.issue}</p>}</div>
         {!busy && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 原上传` : `上传并加入 ${upload.identity.name}`}
           title={ready ? '加入消息' : unknown ? '核对原上传' : '上传并加入消息'} onClick={() => { void act(upload, unknown) }}>
-          {ready ? <Check size={17} /> : unknown ? <RefreshCw size={17} /> : <Upload size={17} />}</button>}
-        {busy && <LoaderCircle size={17} className="mobile-attachment-spin" aria-label="上传回执待确认" />}
-        {canRemove && <button type="button" className="mobile-icon-button" aria-label={`移除 ${upload.identity.name} 本地引用`} onClick={() => remove(upload)}><X size={15} /></button>}
+          {ready ? <SemanticIcon name="action.confirm" size={17} /> : unknown ? <SemanticIcon name="action.refresh" size={17} /> : <SemanticIcon name="action.upload" size={17} />}</button>}
+        {busy && <SemanticIcon name="status.loading" size={17} className="mobile-attachment-spin" aria-label="上传回执待确认" />}
+        {canRemove && <button type="button" className="mobile-icon-button" aria-label={`移除 ${upload.identity.name} 本地引用`} onClick={() => remove(upload)}><SemanticIcon name="action.close" size={15} /></button>}
       </div>
     })}
     {notice && <p className="mobile-attachment-notice" role="status">{notice}</p>}

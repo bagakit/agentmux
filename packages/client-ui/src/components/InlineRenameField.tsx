@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef } from 'react'
 import { TextInput } from '../input/index.js'
-import { LoaderCircle } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 
 /** The caller owns validation, pending/error facts and the rename transaction. */
@@ -72,7 +72,7 @@ export function InlineRenameField({
           event.preventDefault(); event.stopPropagation(); cancelled.current = true; clearTimeout(deferred.current); onCancel()
         }
       }} />
-    {pending ? <LoaderCircle className="inline-rename-field__pending" size={12} aria-label="Saving name" /> : null}
+    {pending ? <SemanticIcon name="status.loading" className="inline-rename-field__pending" size={12} aria-label="Saving name" /> : null}
     {error ? <span id={errorId} className="inline-rename-field__error" role="alert">{error}</span> : null}
   </span>
 }

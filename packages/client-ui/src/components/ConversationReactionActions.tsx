@@ -1,13 +1,13 @@
 import { conversationReplySourceKey, type ConversationReplySource, type PromptReactionDefinition, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
-import { AlertCircle, Check, LoaderCircle, MessageCircle, Play } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 import { useRef, useState } from 'react'
 
-const glyphs = { check: Check, play: Play, 'message-circle': MessageCircle } as const
+const glyphs = { check: 'action.confirm', play: 'action.start', 'message-circle': 'object.context' } as const
 
 /** The same bounded SVG vocabulary in replies and the Prompt editor. */
 export function PromptReactionIconView({ icon, size = 15 }: { icon: PromptReactionIcon; size?: number }) {
-  const Icon = glyphs[icon]
-  return <Icon size={size} strokeWidth={1.8} aria-hidden="true" />
+  const semantic = glyphs[icon]
+  return <SemanticIcon name={semantic} size={size} strokeWidth={1.8} aria-hidden="true" />
 }
 
 export type ConversationReactionSend = (
@@ -64,8 +64,8 @@ export function ConversationReactionActions({ definitions, source, onSend, pendi
     {currentFeedback ? <span className="conversation-reactions__choice conversation-reactions__feedback"
       role={currentFeedback.state === 'failed' ? 'alert' : 'status'} tabIndex={currentFeedback.state === 'failed' ? 0 : undefined}
       data-reaction-status={currentFeedback.state}>
-      {currentFeedback.state === 'preparing' ? <LoaderCircle size={13} aria-hidden="true" />
-        : currentFeedback.state === 'queued' ? <Check size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
+      {currentFeedback.state === 'preparing' ? <SemanticIcon name="status.loading" size={13} aria-hidden="true" />
+        : currentFeedback.state === 'queued' ? <SemanticIcon name="action.confirm" size={13} aria-hidden="true" /> : <SemanticIcon name="status.warning" size={13} aria-hidden="true" />}
       <span className="conversation-reactions__sr">{currentFeedback.state === 'preparing' ? '准备回复…'
         : currentFeedback.state === 'queued' ? '已加入发件箱' : currentFeedback.error}</span>
       <span className="conversation-reactions__hint" role="tooltip"><strong>{`${definitions.find(item => item.keyword === currentFeedback.code)?.label ?? currentFeedback.code} · `}{currentFeedback.state === 'failed' ? '回复未确认' : currentFeedback.state === 'preparing' ? '准备回复…' : '已加入发件箱'}</strong>

@@ -1,4 +1,4 @@
-import { Bot, Boxes, Circle, LoaderCircle, TriangleAlert, UserRound } from 'lucide-react'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 
 /** Plain LAN browsers use their synchronous, explicitly invoked copy action. */
@@ -67,15 +67,15 @@ export function createBrowserPlatform(options: {
     // Desktop focus owner and never brings up the keyboard on reconnect or foreground.
     bindComposerFocus: () => () => {},
     renderMessageAvatar({ speaker, name }) {
-      const Icon = speaker.role === 'agent' ? Bot : speaker.role === 'system' ? Boxes : UserRound
+      const icon = speaker.role === 'agent' ? 'object.agent' : speaker.role === 'system' ? 'object.system' : 'object.user'
       return <span className={`conversation-avatar conversation-avatar--${speaker.role}`} title={name}
-        data-speaker-id={speaker.id}><Icon size={15} aria-hidden="true" /></span>
+        data-speaker-id={speaker.id}><SemanticIcon name={icon} size={15} aria-hidden="true" /></span>
     },
-    renderProjectIcon: project => <Boxes size={12} aria-label={project.name} />,
+    renderProjectIcon: project => <SemanticIcon name="object.system" size={12} aria-label={project.name} />,
     renderProjectLabel: project => <small>{project.name}</small>,
     renderIcon(name, size) {
-      const Icon = name === 'working' ? LoaderCircle : name === 'failed' ? TriangleAlert : Circle
-      return <Icon size={size} aria-hidden="true" />
+      const icon = name === 'working' ? 'status.working' : name === 'failed' ? 'status.failed' : 'status.queued'
+      return <SemanticIcon name={icon} size={size} aria-hidden="true" />
     }
   }
 }

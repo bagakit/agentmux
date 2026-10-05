@@ -1,4 +1,4 @@
-import { Paperclip } from 'lucide-react'
+import { SemanticIcon } from '../theme/icons.js'
 
 export type ComposerReferenceToolProps = {
   disabled: boolean
@@ -11,7 +11,7 @@ export function ComposerReferenceTool({ disabled, onSelect, label }: ComposerRef
   return (
     <button type="button" className="composer-tool" disabled={disabled || !onSelect}
       onClick={onSelect} aria-label={label} title={label}>
-      <Paperclip size={14} /><span className="composer-tool__label">Files</span>
+      <SemanticIcon name="action.attach" size={14} /><span className="composer-tool__label">Files</span>
     </button>
   )
 }
