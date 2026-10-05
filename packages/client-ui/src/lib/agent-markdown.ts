@@ -41,6 +41,7 @@ type ParseContext = {
   footnotes: Map<string, FootnoteDefinition>
   references: Map<string, { number: number; count: number }>
   anchors: Set<string>
+  nextAnchorSuffix: Map<string, number>
   headings: MarkdownHeading[] | null
 }
 
@@ -117,9 +118,13 @@ function inlineText(nodes: readonly InlineNode[]): string {
 
 function headingAnchor(children: readonly InlineNode[], context: ParseContext): string {
   const base = inlineText(children).toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s+/gu, '-') || 'section'
-  let anchor = base, suffix = 0
+  // Anchors only accumulate within this parse. Resume after the last suffix,
+  // while retaining the Set for collisions with literal headings like "a-1".
+  let suffix = context.nextAnchorSuffix.get(base) ?? 0
+  let anchor = suffix === 0 ? base : `${base}-${suffix}`
   while (context.anchors.has(anchor)) anchor = `${base}-${++suffix}`
   context.anchors.add(anchor)
+  context.nextAnchorSuffix.set(base, suffix + 1)
   return anchor
 }
 
@@ -183,7 +188,10 @@ function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocume
   const headings: MarkdownHeading[] = []
   try {
     const tree = processor.parse(source) as Root
-    const context: ParseContext = { source, definitions: new Map(), footnotes: new Map(), references: new Map(), anchors: new Set(), headings: collectHeadings ? headings : null }
+    const context: ParseContext = {
+      source, definitions: new Map(), footnotes: new Map(), references: new Map(),
+      anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null
+    }
     collectDefinitions(tree, context)
     const blocks = blocksFrom(tree.children, context), notes: MarkdownFootnote[] = []
     // Map iteration includes references introduced by a footnote; each definition is projected once.
