@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import type { AgentNativeSessionHandle } from '@agentmux/core'
@@ -44,11 +45,11 @@ const session: SessionSnapshot = {
   hostId: 'local',
   workspacePath: _hygiene_fixturePath("repo"),
   label: 'Codex',
-  createdAt: 1,
-  updatedAt: 2,
-  agentSessionUpdatedAt: 2,
+  createdAt: _reshape_fixtureEpoch(0, 0, 1),
+  updatedAt: _reshape_fixtureEpoch(0, 0, 2),
+  agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 2),
   processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 2 },
+  status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 2) },
   latestOutputBytes: 0,
   control: {
     kind: 'agent',
@@ -64,8 +65,8 @@ const timelineItem: AgentTimelineItem = {
   kind: 'lifecycle',
   status: 'complete',
   source: 'user',
-  createdAt: 2,
-  updatedAt: 2,
+  createdAt: _reshape_fixtureEpoch(0, 0, 2),
+  updatedAt: _reshape_fixtureEpoch(0, 0, 2),
   title: 'Started'
 }
 
@@ -101,7 +102,7 @@ describe('Renderer resource state owners', () => {
       data: 'Waiting for approval',
       evidence: {
         source: 'terminal-output',
-        observedAt: 4,
+        observedAt: _reshape_fixtureEpoch(0, 0, 4),
         run: session.control.run,
         outputByteRange: { startByte: 0, endByte: 20 }
       }
@@ -113,8 +114,8 @@ describe('Renderer resource state owners', () => {
   it('does not let a newer Run running event erase semantic Agent status', () => {
     const working = {
       ...session,
-      updatedAt: 3,
-      status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 3 }
+      updatedAt: _reshape_fixtureEpoch(0, 0, 3),
+      status: { state: 'working' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 3) }
     }
     const state = {
       sessions: [working],
@@ -131,12 +132,12 @@ describe('Renderer resource state owners', () => {
       run: session.control.run,
       state: 'running',
       pid: 42,
-      evidence: { source: 'run-process', observedAt: 4, run: session.control.run }
+      evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 4), run: session.control.run }
     }))
 
     expect(next.sessions[0]).toMatchObject({
       processState: 'running',
-      status: { state: 'working', source: 'native-hook', observedAt: 3 }
+      status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 3) }
     })
   })
 
@@ -147,9 +148,9 @@ describe('Renderer resource state owners', () => {
     // native-hook 那侧的用例（上一条）此时仍绿，两侧各有独立断言，粗断言吃不掉这里的信号。
     const acpWaiting: SessionSnapshot = {
       ...session,
-      updatedAt: 3,
+      updatedAt: _reshape_fixtureEpoch(0, 0, 3),
       // 语义态由 ACP 侧观测得来；observedAt=3 严格早于下面 process-state 的 4，确保事件真的被 own 并进入分支。
-      status: { state: 'waiting' as const, source: 'acp' as const, observedAt: 3 }
+      status: { state: 'waiting' as const, source: 'acp' as const, observedAt: _reshape_fixtureEpoch(0, 0, 3) }
     }
     const state = {
       sessions: [acpWaiting],
@@ -168,14 +169,14 @@ describe('Renderer resource state owners', () => {
       pid: 42,
       // 注意 evidence.source 是 run-process：守卫一旦坏掉，status 会被这条覆盖成
       // { state: 'running', source: 'run-process', observedAt: 4 }，与下面的期望字面量三个字段全不同。
-      evidence: { source: 'run-process', observedAt: 4, run: session.control.run }
+      evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 4), run: session.control.run }
     }))
 
     // processState 已推进到 running，证明事件确实被 own 并跑进了 process-state 分支（排除「没触碰=看着像保住」的假绿）；
     // 而语义 status 原样保留在 ACP 观测上——期望值锚成写死字面量，不由被测对象算出。
     expect(next.sessions[0]).toMatchObject({
       processState: 'running',
-      status: { state: 'waiting', source: 'acp', observedAt: 3 }
+      status: { state: 'waiting', source: 'acp', observedAt: _reshape_fixtureEpoch(0, 0, 3) }
     })
   })
 
@@ -196,7 +197,7 @@ describe('Renderer resource state owners', () => {
       options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
       evidence: {
         source: 'native-hook' as const,
-        observedAt: 3,
+        observedAt: _reshape_fixtureEpoch(0, 0, 3),
         run: session.control.run,
         hookReceiptId: 'permission-1'
       }
@@ -205,7 +206,7 @@ describe('Renderer resource state owners', () => {
     expect(observed.sessions[0]?.pendingInteraction).toBeUndefined()
     const pending = reduceRuntimeEvent(observed, core({ type: 'agent-session', session: {
       kind: 'agent', agentSessionId: session.id, providerId: 'codex', executorId: 'codex', hostId: 'local',
-      workspacePath: _hygiene_fixturePath("repo"), run: session.control.run, retiredRuns: [], createdAt: 1, updatedAt: 3,
+      workspacePath: _hygiene_fixturePath("repo"), run: session.control.run, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 3),
       pendingInteraction: { request }
     } }))
     expect(pending.sessions[0]).toMatchObject({ pendingInteraction: request })
@@ -222,12 +223,12 @@ describe('Renderer resource state owners', () => {
         run: session.control.run,
         retiredRuns: [],
 
-        createdAt: 1,
-        updatedAt: 4,
+        createdAt: _reshape_fixtureEpoch(0, 0, 1),
+        updatedAt: _reshape_fixtureEpoch(0, 0, 4),
         semanticStatus: {
           state: 'waiting',
           source: 'native-hook',
-          observedAt: 3,
+          observedAt: _reshape_fixtureEpoch(0, 0, 3),
           detail: 'PermissionRequest'
         }
       }
@@ -243,9 +244,9 @@ describe('Renderer resource state owners', () => {
     // 闪一帧。门禁要求严格新于当前观测，这条同 observedAt 的重发必须被跳过。
     const decayed = {
       ...session,
-      updatedAt: 5,
+      updatedAt: _reshape_fixtureEpoch(0, 0, 5),
       // 衰减后的样子：显示态已是 running，但 observedAt 仍是那次 working 观测的 3。
-      status: { state: 'running' as const, source: 'native-hook' as const, observedAt: 3 }
+      status: { state: 'running' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 3) }
     }
     const state = {
       sessions: [decayed],
@@ -269,13 +270,13 @@ describe('Renderer resource state owners', () => {
         retiredRuns: [],
 
         createdAt: session.createdAt,
-        updatedAt: 6,
+        updatedAt: _reshape_fixtureEpoch(0, 0, 6),
         // 陈旧的 working——observedAt 不比当前的 3 新，不许把圈重新转起来。
-        semanticStatus: { state: 'working', source: 'native-hook', observedAt: 3 }
+        semanticStatus: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 3) }
       }
     }))
 
-    expect(republished.sessions[0]?.status).toMatchObject({ state: 'running', observedAt: 3 })
+    expect(republished.sessions[0]?.status).toMatchObject({ state: 'running', observedAt: _reshape_fixtureEpoch(0, 0, 3) })
   })
 
   it('lets a genuinely newer agent-session semanticStatus relight a decayed agent', () => {
@@ -283,8 +284,8 @@ describe('Renderer resource state owners', () => {
     // semanticStatus 一律封死，只挡「同/更旧 observedAt 的重发」。
     const decayed = {
       ...session,
-      updatedAt: 5,
-      status: { state: 'running' as const, source: 'native-hook' as const, observedAt: 3 }
+      updatedAt: _reshape_fixtureEpoch(0, 0, 5),
+      status: { state: 'running' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 3) }
     }
     const state = {
       sessions: [decayed],
@@ -308,12 +309,12 @@ describe('Renderer resource state owners', () => {
         retiredRuns: [],
 
         createdAt: session.createdAt,
-        updatedAt: 7,
-        semanticStatus: { state: 'working', source: 'native-hook', observedAt: 9 }
+        updatedAt: _reshape_fixtureEpoch(0, 0, 7),
+        semanticStatus: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 9) }
       }
     }))
 
-    expect(relit.sessions[0]?.status).toMatchObject({ state: 'working', observedAt: 9 })
+    expect(relit.sessions[0]?.status).toMatchObject({ state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 9) })
   })
 
   it('projects the Core-owned degraded terminal capability and clears it on acknowledgement', () => {
@@ -330,7 +331,7 @@ describe('Renderer resource state owners', () => {
       mode: 'degraded' as const,
       reason: 'handshake-timeout' as const,
       run: session.control.run,
-      observedAt: 4
+      observedAt: _reshape_fixtureEpoch(0, 0, 4)
     }
     const degraded = reduceRuntimeEvent(state, core({
       type: 'agent-session',
@@ -345,7 +346,7 @@ describe('Renderer resource state owners', () => {
         retiredRuns: [],
 
         createdAt: session.createdAt,
-        updatedAt: 4,
+        updatedAt: _reshape_fixtureEpoch(0, 0, 4),
         terminalCapability: capability
       }
     }))
@@ -364,7 +365,7 @@ describe('Renderer resource state owners', () => {
         retiredRuns: [],
 
         createdAt: session.createdAt,
-        updatedAt: 5,
+        updatedAt: _reshape_fixtureEpoch(0, 0, 5),
       }
     }))
     expect(acknowledged.sessions[0]?.terminalCapability).toBeUndefined()
@@ -373,7 +374,7 @@ describe('Renderer resource state owners', () => {
   it('mirrors Core turnUsage: copies a fresh value in, then clears a Core-side clear', () => {
     // fix #1：Core 侧的 turnUsage 覆盖式更新（收尾带就复制、Core 清空就丢弃）必须原样穿过 renderer 的
     // agent-session reducer。两半成对——条件复制把新值带进来，destructure 把陈旧值从 ...current 剔掉。
-    const usage = { inputTokens: 11, outputTokens: 22, totalTokens: 33, observedAt: 100 }
+    const usage = { inputTokens: 11, outputTokens: 22, totalTokens: 33, observedAt: _reshape_fixtureEpoch(0, 0, 100) }
     const state = {
       sessions: [session],
       timelines: {},
@@ -397,7 +398,7 @@ describe('Renderer resource state owners', () => {
         retiredRuns: [],
 
         createdAt: session.createdAt,
-        updatedAt: 4,
+        updatedAt: _reshape_fixtureEpoch(0, 0, 4),
         turnUsage: usage
       }
     }))
@@ -418,7 +419,7 @@ describe('Renderer resource state owners', () => {
         retiredRuns: [],
 
         createdAt: session.createdAt,
-        updatedAt: 5
+        updatedAt: _reshape_fixtureEpoch(0, 0, 5)
       }
     }))
     expect(cleared.sessions[0]?.turnUsage).toBeUndefined()
@@ -436,19 +437,19 @@ describe('Renderer resource state owners', () => {
       : { kind: 'acp', adapterId: 'generic-adapter', sessionId }
     const event = (sessionId: string, updatedAt: number) => core({ type: 'agent-session',
       session: { ...incoming, updatedAt, nativeHandle: handle(sessionId) } })
-    const first = reduceRuntimeEvent(state, event('native-first', 4))
+    const first = reduceRuntimeEvent(state, event('native-first', _reshape_fixtureEpoch(0, 0, 4)))
     expect(first.sessions[0]).toHaveProperty('nativeSessionId', 'native-first')
     expect(first.sessions[0]?.id).toBe(session.id)
     expect(first.sessions[0]).not.toHaveProperty('nativeHandle')
-    expect(reduceRuntimeEvent(first, event('native-first', 4))).toBe(first)
+    expect(reduceRuntimeEvent(first, event('native-first', _reshape_fixtureEpoch(0, 0, 4)))).toBe(first)
 
-    const changed = reduceRuntimeEvent(first, event('native-second', 5))
+    const changed = reduceRuntimeEvent(first, event('native-second', _reshape_fixtureEpoch(0, 0, 5)))
     expect(changed.sessions[0]).toHaveProperty('nativeSessionId', 'native-second')
-    const stale = reduceRuntimeEvent(changed, event('native-stale', 4))
+    const stale = reduceRuntimeEvent(changed, event('native-stale', _reshape_fixtureEpoch(0, 0, 4)))
     expect(stale).toBe(changed)
     expect(stale.sessions[0]).toHaveProperty('nativeSessionId', 'native-second')
 
-    const cleared = reduceRuntimeEvent(changed, core({ type: 'agent-session', session: { ...incoming, updatedAt: 6 } }))
+    const cleared = reduceRuntimeEvent(changed, core({ type: 'agent-session', session: { ...incoming, updatedAt: _reshape_fixtureEpoch(0, 0, 6) } }))
     expect(cleared.sessions[0]).not.toHaveProperty('nativeSessionId')
     expect(cleared.sessions[0]?.id).toBe(session.id)
     expect(cleared.sessions[0]?.control).toEqual(session.control)
@@ -479,7 +480,7 @@ describe('Renderer resource state owners', () => {
       state: 'exited',
       pid: 99,
       exitCode: 1,
-      evidence: { source: 'run-process', observedAt: 10, run: staleRun }
+      evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 10), run: staleRun }
     }))
     const afterTimeline = reduceRuntimeEvent(afterState, core({
       type: 'agent-timeline',
@@ -491,18 +492,18 @@ describe('Renderer resource state owners', () => {
         item: {
           ...timelineItem,
           id: 'stale-run-item',
-          updatedAt: 10,
-          createdAt: 10,
+          updatedAt: _reshape_fixtureEpoch(0, 0, 10),
+          createdAt: _reshape_fixtureEpoch(0, 0, 10),
           title: 'Stale run'
         }
       },
-      evidence: { source: 'native-hook', observedAt: 10, run: staleRun }
+      evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 10), run: staleRun }
     }))
     const afterRemoval = reduceRuntimeEvent(afterTimeline, core({
       type: 'run-removed',
       agentSessionId: session.id,
       run: staleRun,
-      evidence: { source: 'user', observedAt: 11, run: staleRun }
+      evidence: { source: 'user', observedAt: _reshape_fixtureEpoch(0, 0, 11), run: staleRun }
     }))
 
     expect(afterRemoval.sessions[0]).toMatchObject({
@@ -538,7 +539,7 @@ describe('Renderer resource state owners', () => {
       type: 'agent-status',
       agentSessionId: session.id,
       state: 'waiting',
-      evidence: { source: 'native-hook', observedAt: 3, run: session.control.run }
+      evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 3), run: session.control.run }
     }))
     state = reduceRuntimeEvent(state, core({
       type: 'agent-timeline',
@@ -553,18 +554,18 @@ describe('Renderer resource state owners', () => {
           kind: 'assistant_message',
           status: 'streaming',
           source: 'native-hook',
-          createdAt: 4,
-          updatedAt: 4,
+          createdAt: _reshape_fixtureEpoch(0, 0, 4),
+          updatedAt: _reshape_fixtureEpoch(0, 0, 4),
           title: 'Assistant response',
           content: 'Hello'
         }
       },
-      evidence: { source: 'native-hook', observedAt: 4, run: session.control.run }
+      evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 4), run: session.control.run }
     }))
     expect(state.sessions[0]).toMatchObject({
       status: { state: 'waiting' },
       latestOutputBytes: 0,
-      updatedAt: 4
+      updatedAt: _reshape_fixtureEpoch(0, 0, 4)
     })
     state = reduceRuntimeEvent(state, core({
       type: 'agent-timeline',
@@ -574,11 +575,11 @@ describe('Renderer resource state owners', () => {
         type: 'update',
         agentSessionId: session.id,
         itemId: 'activity-2',
-        updatedAt: 5,
+        updatedAt: _reshape_fixtureEpoch(0, 0, 5),
         status: 'complete',
         content: 'Hello, world'
       },
-      evidence: { source: 'native-hook', observedAt: 5, run: session.control.run }
+      evidence: { source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 5), run: session.control.run }
     }))
     expect(state.timelines[session.id]).toMatchObject({ revision: 3 })
     expect(state.timelines[session.id]?.items).toHaveLength(2)
@@ -588,7 +589,7 @@ describe('Renderer resource state owners', () => {
       type: 'run-removed',
       agentSessionId: session.id,
       run: session.control.run,
-      evidence: { source: 'user', observedAt: 6, run: session.control.run }
+      evidence: { source: 'user', observedAt: _reshape_fixtureEpoch(0, 0, 6), run: session.control.run }
     }))
     expect(state.sessions).toEqual([])
     expect(state.timelines[session.id]).toBeUndefined()
@@ -612,7 +613,7 @@ describe('Renderer resource state owners', () => {
       type: 'run-removed',
       agentSessionId: session.id,
       run: session.control.run,
-      evidence: { source: 'user', observedAt: 5, run: session.control.run }
+      evidence: { source: 'user', observedAt: _reshape_fixtureEpoch(0, 0, 5), run: session.control.run }
     }))
 
     expect(state.sessions).toEqual([])
@@ -910,12 +911,12 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
     const { state } = seedAttachedAgent()
     const faulted = { ...session, timelineObservation: { run: session.control.run, code: 'READ_FAILED', message: 'Not observed' } }
     const snapshot = { sessions: [faulted], timelines: {}, recoveryCandidates: [] }
-    expect(reduceAgentMembershipSnapshot(state, snapshot, new Set()).sessions).toEqual([faulted])
-    expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot, sessions: [session] }, new Set())).toThrow('matching Timeline')
+    expect(reduceAgentMembershipSnapshot(state, snapshot).sessions).toEqual([faulted])
+    expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot, sessions: [session] })).toThrow('matching Timeline')
     expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot,
-      sessions: [{ ...faulted, timelineObservation: { ...faulted.timelineObservation, run: { runId: 'another-run' } } }] }, new Set())).toThrow('matching Timeline')
+      sessions: [{ ...faulted, timelineObservation: { ...faulted.timelineObservation, run: { runId: 'another-run' } } }] })).toThrow('matching Timeline')
     expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot,
-      timelines: { [session.id]: { agentSessionId: 'another-session', revision: 1, items: [] } } }, new Set())).toThrow('matching Timeline')
+      timelines: { [session.id]: { agentSessionId: 'another-session', revision: 1, items: [] } } })).toThrow('matching Timeline')
   })
 
   it('a targeted Timeline retry clears only its original Host, Session and Run diagnostic', () => {
@@ -940,7 +941,7 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
     // 空快照分不清「真的没有 session」与「Core 没就绪 / 根目录接错」。此前它被当作权威，于是一个
     // status 仍是 running 的 agent 连 tab 带 layout 一起被摘掉——用户离开时留下的格子，回来就没了。
     const { tabId, state } = seedAttachedAgent()
-    const next = reduceAgentMembershipSnapshot(state, EMPTY, new Set())
+    const next = reduceAgentMembershipSnapshot(state, EMPTY)
 
     expect(next.sessions.map((item) => item.id)).toEqual([session.id])
     expect(next.tabs[tabId]).toBeDefined()
@@ -960,12 +961,10 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
       layouts: {},
       viewModes: {}
     }
-    expect(reduceAgentMembershipSnapshot(state, EMPTY, new Set())).toBe(state)
+    expect(reduceAgentMembershipSnapshot(state, EMPTY)).toBe(state)
   })
 
-  it('说得出别的 session 的快照仍有资格退役一个 Agent', () => {
-    // 反向：守卫只挡整份为空的那一种回答。一份带着别的 session 的快照是可信的成员事实，此时"不在
-    // 快照里"就是"已经不在了"——这正是这个函数存在的理由，不能被守卫一起挡掉。
+  it('非空快照补入别的Session，不以缺席退役原Agent工作面', () => {
     const { tabId, state } = seedAttachedAgent()
     const other: SessionSnapshot = { ...session, id: 'session-2', control: { ...session.control, agentSessionId: 'session-2' } }
     // 快照带 session 就必须带它的 timeline——这是 reducer 自己的不变量，它会对缺项抛错。
@@ -974,30 +973,25 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
       timelines: { 'session-2': { agentSessionId: 'session-2', revision: 1, items: [] } },
       recoveryCandidates: []
     }
-    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+    const next = reduceAgentMembershipSnapshot(state, snapshot)
 
-    expect(next.sessions.map((item) => item.id)).toEqual(['session-2'])
-    expect(next.tabs[tabId]).toBeUndefined()
-    expect(next.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([])
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id, 'session-2'])
+    expect(next.tabs[tabId]).toBe(state.tabs[tabId])
+    expect(next.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([tabId])
   })
 
-  it('只带恢复候选、没有 session 的快照也算说得出话', () => {
-    // 恢复候选是「这个 agent 还在，只是要重连」。一份列着候选的快照不是"空"，它有资格谈成员——
-    // 守卫因此把候选数也计入，与启动那侧的判据逐字对齐（两处都要求 sessions 与候选同时为空）。
-    //
-    // 注意这里的候选是**另一个 id**（session-3）：本地的 session-1 既不在 sessions 里、也不是候选，
-    // 是真的没了，所以删除正确。「候选点名的就是本地这个 agent」是完全不同的一侧，见下一条——
-    // 那一侧此前无人守，而它才是承重的。
+  it('无关恢复候选不授予原Agent的删除资格', () => {
+    // 无关候选和原成员缺席都不是准确退役回执。
     const { tabId, state } = seedAttachedAgent()
     const snapshot = {
       sessions: [],
       timelines: {},
       recoveryCandidates: [recoveryCandidate('session-3')]
     }
-    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+    const next = reduceAgentMembershipSnapshot(state, snapshot)
 
-    expect(next.tabs[tabId]).toBeUndefined()
-    expect(next.sessions).toEqual([])
+    expect(next.tabs[tabId]).toBe(state.tabs[tabId])
+    expect(next.sessions).toEqual(state.sessions)
   })
 
   it('被点名为恢复候选的那个 Agent 自己不许被成员对齐删掉', () => {
@@ -1010,24 +1004,22 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
     // 摘掉，而 partialize 随后把删剩的投影落盘——不可逆，且不给任何理由。
     //
     // 启动那侧对同一个候选是「保留 + 恢复」（store.ts 的 recoveryFailures/retired 分支），两侧
-    // 必须对同一个 Core 概念给出同一个语义。删掉 recoverableIds 那行，这条变红。
+    // 必须对同一个 Core 概念给出同一个语义；恢复候选不会让原工作面消失。
     const { tabId, state } = seedAttachedAgent()
     const snapshot = {
       sessions: [],
       timelines: {},
       recoveryCandidates: [recoveryCandidate(session.id)]
     }
-    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+    const next = reduceAgentMembershipSnapshot(state, snapshot)
 
     expect(next.tabs[tabId]).toBeDefined()
     expect(next.sessions.map((item) => item.id)).toEqual([session.id])
     expect(next.layouts['workspace-1']?.groups[0]?.tabOrder).toEqual([tabId])
   })
 
-  it('候选保护不是"有候选就谁都不删"——同一份快照里的其他陌生 Agent 照删', () => {
-    // 上一条的保护必须精确到被点名的那个 id。若写成「快照里有候选就整体 fail open」，一个真的
-    // 已经消失的 agent 会永远赖在界面上，而这个函数存在的理由正是收掉它。两条一起钉，才不是
-    // 把一个静默删除的 bug 换成一个永不清理的 bug。
+  it('候选与缺席都保留原工作面，退役只消费准确终局', () => {
+    // 保留两个原身份；准确终局回执由 reduceRuntimeEvent 单独验证。
     const { tabId, state } = seedAttachedAgent()
     const strangerTabId = 'session:session-9'
     // 注意不能用 sessionTab()：它把 sessionId 写死成 session.id，那样"陌生 tab"其实指着 session-1，
@@ -1051,11 +1043,11 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
       timelines: {},
       recoveryCandidates: [recoveryCandidate(session.id)]
     }
-    const next = reduceAgentMembershipSnapshot(seeded, snapshot, new Set())
+    const next = reduceAgentMembershipSnapshot(seeded, snapshot)
 
     expect(next.tabs[tabId]).toBeDefined()
-    expect(next.tabs[strangerTabId]).toBeUndefined()
-    expect(next.sessions.map((item) => item.id)).toEqual([session.id])
+    expect(next.tabs[strangerTabId]).toBe(seeded.tabs[strangerTabId])
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id, 'session-9'])
   })
 })
 
@@ -1067,10 +1059,10 @@ describe('运行时成员快照收敛 Terminal projection', () => {
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: 'Terminal · Project',
-    createdAt: 1,
-    updatedAt: 2,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1),
+    updatedAt: _reshape_fixtureEpoch(0, 0, 2),
     processState: 'running',
-    status: { state: 'running', source: 'run-process', observedAt: 2 },
+    status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 2) },
     latestOutputBytes: 0,
     control: {
       kind: 'terminal',
@@ -1104,7 +1096,7 @@ describe('运行时成员快照收敛 Terminal projection', () => {
     expect(reduceTerminalMembershipSnapshot(state, empty)).toBe(state)
   })
 
-  it('removes a missing Terminal Region without manufacturing or deleting unrelated views', () => {
+  it('keeps a missing Terminal Region without manufacturing or deleting unrelated views', () => {
     let tab = createWorkbenchTab('agent-terminal-view', {
       regionId: initialWorkbenchRegionId('agent-terminal-view'),
       kind: 'agent',
@@ -1134,10 +1126,11 @@ describe('运行时成员快照收敛 Terminal projection', () => {
       recoveryCandidates: []
     })
 
-    expect(next.sessions.map((item) => item.id)).toEqual([session.id, 'other-agent'])
+    expect(next.sessions.map((item) => item.id)).toEqual([session.id, terminal.id, 'other-agent'])
     expect(next.tabs[tab.id]).toBeDefined()
     expect(workbenchSurfaces(next.tabs[tab.id]!)).toEqual([
-      expect.objectContaining({ kind: 'agent', sessionId: session.id })
+      expect.objectContaining({ kind: 'agent', sessionId: session.id }),
+      expect.objectContaining({ kind: 'terminal', sessionId: terminal.id })
     ])
   })
 
@@ -1150,7 +1143,7 @@ describe('运行时成员快照收敛 Terminal projection', () => {
       layouts: { 'workspace-1': createWorkspaceLayout('pane', ['terminal-view']) },
       viewModes: {}
     }
-    const canonical = { ...terminal, label: 'Terminal · Renamed', updatedAt: 9 }
+    const canonical = { ...terminal, label: 'Terminal · Renamed', updatedAt: _reshape_fixtureEpoch(0, 0, 9) }
     const unseen: SessionSnapshot = { ...terminal, id: 'terminal-unseen', control: { ...terminal.control, runId: 'terminal-unseen', run: { runId: 'terminal-unseen' } } }
     const next = reduceTerminalMembershipSnapshot(state, {
       sessions: [canonical, unseen],

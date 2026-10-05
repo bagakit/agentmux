@@ -134,12 +134,12 @@ describe('告示说清三件事', () => {
     expect(notice!.notice.mode.toLowerCase()).toContain('usable')
   })
 
-  it('attachment 尚未交接时不宣称输入已经可用', () => {
+  it('output attachment 尚未交接时保留输入并如实说明阅读进度', () => {
     const pendingNotice = serviceNoticeToRender(classifyServiceNotice(
       terminalRevealServiceOutcome({ overdue: true, processState: 'running', liveReady: false })
     ))
-    expect(pendingNotice!.notice.mode.toLowerCase()).toContain('unlock')
-    expect(pendingNotice!.notice.mode.toLowerCase()).not.toContain('usable now')
+    expect(pendingNotice!.notice.mode.toLowerCase()).toContain('output is still catching up')
+    expect(pendingNotice!.notice.mode.toLowerCase()).toContain('input does not wait')
   })
 })
 
@@ -153,31 +153,27 @@ describe('告示说清三件事', () => {
  * 这些断言是补一个真空洞：三条输入通路的 liveReady 卡口此前一条测试都没有，
  * 三个 gate 一起删掉全仓 1512 个测试照样全绿（变异实测）。
  */
-describe('揭示了不等于输入通了', () => {
-  const ready = { canControlRun: true, acceptsInput: true, liveReady: true }
+describe('原Run与视图控制资格拥有输入，output ready没有输入否决权', () => {
+  const ready = { canControlRun: true, acceptsInput: true }
 
-  it('三个条件都成立才送输入', () => {
+  it('Run与视图允许时送输入', () => {
     expect(terminalAcceptsInput(ready)).toBe(true)
-  })
-
-  it('交接未完成时不送——写进一个还没接上的 attachment 等于按键丢失', () => {
-    expect(terminalAcceptsInput({ ...ready, liveReady: false })).toBe(false)
   })
 
   it('进程不可控时不送——Run 已经退了，键入无处可去', () => {
     expect(terminalAcceptsInput({ ...ready, canControlRun: false })).toBe(false)
   })
 
-  it('Session 此刻不收输入时不送——Agent 有待答交互，键入会插进那个问题里', () => {
+  it('视图此刻不收输入时不送', () => {
     expect(terminalAcceptsInput({ ...ready, acceptsInput: false })).toBe(false)
   })
 
-  it('三个条件各自都是必要的——去掉任一个都要红', () => {
-    // 逐个单独置假：三次都必须为 false。少卡一条就等于没卡，用户总会找到那一条。
-    const blocked = (['canControlRun', 'acceptsInput', 'liveReady'] as const).map((key) =>
+  it('Run和视图控制资格各自都是必要的', () => {
+    // 原 Run 与只读边界分别验证，输出 observation 不参与输入授权。
+    const blocked = (['canControlRun', 'acceptsInput'] as const).map((key) =>
       terminalAcceptsInput({ ...ready, [key]: false })
     )
-    expect(blocked).toEqual([false, false, false])
+    expect(blocked).toEqual([false, false])
   })
 
   it('闸的极性真的跑得到：不收输入时一个字节都不许送出', () => {

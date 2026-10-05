@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -20,7 +21,7 @@ afterAll(() => disposeBootstrap?.())
 afterEach(() => vi.useRealTimers())
 const session = () => ({ ...composerSession(), terminalPromptDelivery: {
   state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
-  submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: 1
+  submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: _reshape_fixtureEpoch(0, 0, 1)
 } })
 beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipts: {},
   timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 0, items: [] } } }))
@@ -29,7 +30,7 @@ const mailbox = () => dom.container.querySelector<HTMLDivElement>('.composer-mai
 const unread = () => String(Boolean(trigger().querySelector('.composer-mailbox__unread, .composer-mailbox__attention')))
 const progressLoop = (status: 'active' | 'paused' = 'active'): ContinuousProgressLoop => ({
   loopId: 'mailbox-loop', hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: _hygiene_fixturePath("repo"),
-  intervalMs: 60_000, prompt: 'Continue', nextCheckAt: 60_000, status
+  intervalMs: 60_000, prompt: 'Continue', nextCheckAt: _reshape_fixtureEpoch(0, 0, 60_000), status
 })
 
 it('retries only the original Session Timeline from its notice and keeps the retained page until success', async () => {
@@ -99,7 +100,7 @@ it.each(['status', 'live'] as const)('moves Timeline observation ownership from 
     // A new failed B observation is separate from A's request still in flight.
     useAppStore.setState(state => reduceAgentMembershipSnapshot(state, {
       sessions: [{ ...second, timelineObservation: secondFailure }], timelines: {}, recoveryCandidates: []
-    }, new Set()))
+    }))
     completeA({ ...retained, revision: 4 })
     await pendingA
     expect(useAppStore.getState().sessions[0]).toHaveProperty('timelineObservation', secondFailure)
@@ -287,12 +288,12 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
     source: { kind: 'native', providerId: 'codex', nativeSessionId: 'native-session', recordId: id },
     author: { kind: 'unknown' }, content: id, contentParts: [{ kind: 'text', text: id }],
     ...(recordedAt === undefined ? {} : { recordedAt }) })
-  const items = [{ ...delivered('old'), createdAt: 10 }, { ...delivered('tie-a'), createdAt: 30 },
-    { ...delivered('tie-b'), createdAt: 30 }, { ...delivered('in-old', 'peer'), createdAt: 10 },
-    { ...delivered('in-new', 'peer'), createdAt: 50 }]
-  let userMessages = [native('missing-a'), native('native-new', 40), native('native-tie', 30), native('missing-b')]
-  const queued = [{ id: 'q-a', text: 'First intention', status: 'queued' as const, enqueuedAt: 999 },
-    { id: 'q-b', text: 'Second intention', status: 'queued' as const, enqueuedAt: 1 }]
+  const items = [{ ...delivered('old'), createdAt: _reshape_fixtureEpoch(0, 0, 10) }, { ...delivered('tie-a'), createdAt: _reshape_fixtureEpoch(0, 0, 30) },
+    { ...delivered('tie-b'), createdAt: _reshape_fixtureEpoch(0, 0, 30) }, { ...delivered('in-old', 'peer'), createdAt: _reshape_fixtureEpoch(0, 0, 10) },
+    { ...delivered('in-new', 'peer'), createdAt: _reshape_fixtureEpoch(0, 0, 50) }]
+  let userMessages = [native('missing-a'), native('native-new', _reshape_fixtureEpoch(0, 0, 40)), native('native-tie', _reshape_fixtureEpoch(0, 0, 30)), native('missing-b')]
+  const queued = [{ id: 'q-a', text: 'First intention', status: 'queued' as const, enqueuedAt: _reshape_fixtureEpoch(0, 0, 999) },
+    { id: 'q-b', text: 'Second intention', status: 'queued' as const, enqueuedAt: _reshape_fixtureEpoch(0, 0, 1) }]
   const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
   const render = () => dom.render(<SessionMailbox system={system} queued={queued}
     timeline={{ agentSessionId: 'agent-1', revision: 1, items }} userMessages={userMessages} />)
@@ -304,7 +305,7 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
   await folder('outbox')
   expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(el => el.textContent)).toEqual(['First intention', 'Second intention'])
   expect(items.map(item => item.content)).toEqual(['Body old', 'Body tie-a', 'Body tie-b', 'Body in-old', 'Body in-new'])
-  userMessages = [...userMessages, native('loaded-earlier', 5)]
+  userMessages = [...userMessages, native('loaded-earlier', _reshape_fixtureEpoch(0, 0, 5))]
   await render()
   expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'loaded-earlier', 'missing-a', 'missing-b'])
 })
@@ -312,10 +313,10 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
 it('uses the selected System owner time, keeps unknown times last, and never makes a time-only update unread', async () => {
   const current = session()
   current.terminalPromptDelivery.observedAt = 30
-  current.terminalCapability = { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout', run: current.control.run, observedAt: 20 }
-  current.terminalOutputChannel = { state: 'severed', mode: 'degraded', reason: 'reattach-failed', run: current.control.run, observedAt: 1000 }
-  current.status = { ...current.status, state: 'disconnected', observedAt: 2000 }
-  const queue: AgentSteerQueueEntry[] = [{ operationId: 'unknown-time', text: 'Kept', runId: 'run-agent-1', status: 'failed', enqueuedAt: 9000 }]
+  current.terminalCapability = { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout', run: current.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 20) }
+  current.terminalOutputChannel = { state: 'severed', mode: 'degraded', reason: 'reattach-failed', run: current.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 1000) }
+  current.status = { ...current.status, state: 'disconnected', observedAt: _reshape_fixtureEpoch(0, 0, 2000) }
+  const queue: AgentSteerQueueEntry[] = [{ operationId: 'unknown-time', text: 'Kept', runId: 'run-agent-1', status: 'failed', enqueuedAt: _reshape_fixtureEpoch(0, 0, 9000) }]
   expect(sessionServiceNotices(current, queue).map(item => [item.id, item.observedAt])).toEqual([
     ['connection', 20], ['delivery', 30], ['queue', undefined]])
   await act(async () => useAppStore.setState({ sessions: [current], agentSteerQueues: { 'agent-1': queue } }))
@@ -324,11 +325,11 @@ it('uses the selected System owner time, keeps unknown times last, and never mak
   const steps = () => [...mailbox().querySelectorAll('.composer-notice .composer-mailbox__row strong')].map(el => el.textContent)
   expect(steps()).toEqual(['Screen confirmation from retained terminal output didn’t complete', 'Checking terminal capabilities didn’t complete', 'A queued message has not been sent'])
   expect([...mailbox().querySelectorAll('.composer-notice time')].map(el => el.getAttribute('datetime'))).toEqual([
-    new Date(30).toISOString(), new Date(20).toISOString()])
+    new Date(_reshape_fixtureEpoch(0, 0, 30)).toISOString(), new Date(_reshape_fixtureEpoch(0, 0, 20)).toISOString()])
   await dom.click('[data-record-key^="notice:queue:"]');expect(mailbox().textContent).toContain('Time not recorded');await backToRows()
   await toggle('open'); await toggle('closed')
   await act(async () => useAppStore.setState({ sessions: [{ ...current,
-    terminalCapability: { ...current.terminalCapability!, observedAt: 40 } }] }))
+    terminalCapability: { ...current.terminalCapability!, observedAt: _reshape_fixtureEpoch(0, 0, 40) } }] }))
   expect(unread()).toBe('false')
   await toggle('open'); await folder('system')
   expect(steps()).toEqual(['Checking terminal capabilities didn’t complete', 'Screen confirmation from retained terminal output didn’t complete', 'A queued message has not been sent'])
@@ -608,7 +609,7 @@ it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox 
 
 function delivered(id: string, authorAgentSessionId?: string) {
   return { id: `prompt:${id}`, agentSessionId: 'agent-1', kind: 'user_message' as const,
-    status: 'complete' as const, source: 'user' as const, title: 'Prompt', content: `Body ${id}`, createdAt: 100, updatedAt: 100,
+    status: 'complete' as const, source: 'user' as const, title: 'Prompt', content: `Body ${id}`, createdAt: _reshape_fixtureEpoch(0, 0, 100), updatedAt: _reshape_fixtureEpoch(0, 0, 100),
     ...(authorAgentSessionId ? { authorAgentSessionId } : {}) }
 }
 it('separates actual incoming Agent messages, sent user history and system facts; reading survives restart', async () => {
