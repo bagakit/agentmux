@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ScheduleParamsMap } from '@agentmux/core'
 import { parseAgentScheduleCalendar, DEFAULT_AGENT_SCHEDULE_CHECK_IN, type AgentScheduleCalendar } from '@agentmux/core/schedule'
 import { api } from '../lib/api'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 
 export type CalendarScheduleStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 type Pending = { action: 'create'; params: ScheduleParamsMap['schedule.create'] } | { action: 'pause' | 'resume' | 'cancel'; params: ScheduleParamsMap['schedule.pause'] }
@@ -157,18 +157,18 @@ export function CalendarScheduleControl({ target: requestedTarget, onStatusChang
       {open ? <form className="calendar-schedules__form" onSubmit={event => { event.preventDefault(); create() }}>
         <div className="calendar-schedules__fields">
           <label>Repeat<select aria-label="Arrangement repeat" value={kind} disabled={busy || !!pending} onChange={event => setKind(event.target.value as AgentScheduleCalendar['kind'])}><option value="once">Once</option><option value="daily">Every day</option><option value="weekly">Every week</option><option value="monthly">Every month</option><option value="yearly">Every year</option></select></label>
-          <label>Local time<input aria-label="Arrangement time" type="time" value={time} required disabled={busy || !!pending} onChange={event => setTime(event.target.value)} /></label>
-          {kind === 'once' ? <label>Date<input aria-label="Arrangement date" type="date" value={date} required disabled={busy || !!pending} onChange={event => setDate(event.target.value)} /></label> : null}
+          <label>Local time<TextInput aria-label="Arrangement time" type="time" value={time} required disabled={busy || !!pending} onChange={event => setTime(event.target.value)} /></label>
+          {kind === 'once' ? <label>Date<TextInput aria-label="Arrangement date" type="date" value={date} required disabled={busy || !!pending} onChange={event => setDate(event.target.value)} /></label> : null}
           {kind === 'weekly' ? <label>Weekday<select aria-label="Arrangement weekday" value={weekday} disabled={busy || !!pending} onChange={event => setWeekday(event.target.value)}>{weekdays.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label> : null}
-          {kind === 'yearly' ? <label>Month<input aria-label="Arrangement month" type="number" min="1" max="12" value={month} required disabled={busy || !!pending} onChange={event => setMonth(event.target.value)} /></label> : null}
-          {kind === 'monthly' || kind === 'yearly' ? <label>Day<input aria-label="Arrangement day" type="number" min="1" max="31" value={day} required disabled={busy || !!pending} onChange={event => setDay(event.target.value)} /></label> : null}
+          {kind === 'yearly' ? <label>Month<TextInput aria-label="Arrangement month" type="number" min="1" max="12" value={month} required disabled={busy || !!pending} onChange={event => setMonth(event.target.value)} /></label> : null}
+          {kind === 'monthly' || kind === 'yearly' ? <label>Day<TextInput aria-label="Arrangement day" type="number" min="1" max="31" value={day} required disabled={busy || !!pending} onChange={event => setDay(event.target.value)} /></label> : null}
         </div>
         <label>Message to Agent<ComposerTextarea value={prompt} onValueChange={message => { setPrompt(message); onMessageChange?.(message) }} disabled={busy || !!pending} placeholder="A question or reminder for this Agent" /></label>
         {occurrence.current.initialMessageContext ? <details className="calendar-schedules__rules"><summary>Request context</summary><p className="calendar-schedules__context">{occurrence.current.initialMessageContext}</p></details> : null}
         <label><input aria-label="Enable quiet follow-up" type="checkbox" checked={checkIn} disabled={busy || !!pending} onChange={event => { setCheckIn(event.target.checked); setFormNotice(undefined) }} />Enable quiet follow-up</label>
         {formNotice ? <p className="calendar-schedules__notice" role="status">{formNotice}</p> : null}
         {checkIn ? <p className="continuous-progress-control__help">The Agent asks one short question from this conversation’s confirmed context. Quiet from {civilClock(22)} to {civilClock(8)} in the saved time zone; at least 18h silence, 20h between attempts, and one attempt per local day. Another question waits for a confirmed human reply. Unconfirmed context keeps this occurrence due.</p> : null}
-        <details className="calendar-schedules__rules" onToggle={event => event.stopPropagation()}><summary>Time rules · {timezone}</summary><label>IANA time zone<input aria-label="Arrangement time zone" value={timezone} required disabled={busy || !!pending} onChange={event => setTimezone(event.target.value)} /></label><label>Repeated DST time<select aria-label="Repeated DST time" value={fold} disabled={busy || !!pending} onChange={event => setFold(event.target.value as 'earlier' | 'later')}><option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label><p className="continuous-progress-control__help">Nonexistent DST times are skipped. Short months use their last day. After a delay, only the latest due occurrence is eligible.</p></details>
+        <details className="calendar-schedules__rules" onToggle={event => event.stopPropagation()}><summary>Time rules · {timezone}</summary><label>IANA time zone<TextInput aria-label="Arrangement time zone" value={timezone} required disabled={busy || !!pending} onChange={event => setTimezone(event.target.value)} /></label><label>Repeated DST time<select aria-label="Repeated DST time" value={fold} disabled={busy || !!pending} onChange={event => setFold(event.target.value as 'earlier' | 'later')}><option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label><p className="continuous-progress-control__help">Nonexistent DST times are skipped. Short months use their last day. After a delay, only the latest due occurrence is eligible.</p></details>
         <button type="submit" className="small-button" disabled={busy || !!pending || !prompt.trim()}>Save arrangement</button>
       </form> : null}
     </details>
