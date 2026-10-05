@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { Notebook, NotebookPage } from '@agentmux/core/notebook-catalog'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -11,6 +11,9 @@ import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import '../styles/note-talk-agent.css'
+
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 type Operation = { requestId: string; busy: boolean; dispatched: boolean; report?: AgentMuxSpaceMutationReport | undefined; issue?: string | undefined }
 
@@ -94,7 +97,7 @@ export function NoteTalkAgent({ page, notebook, visible, onDismiss, onActivate, 
             state.mainSurface === original.mainSurface && state.recallNotebookId === original.recallNotebookId &&
             state.recallNoteId === original.recallNoteId && state.recallZoneSelection === original.recallZoneSelection) onRestoreFocus?.()
       }}>
-        <header><Dialog.Title>Talk with Agent</Dialog.Title><button type="button" className="icon-button" aria-label="Close Agent selection" onClick={dismiss}><X size={15} /></button></header>
+        <header><Dialog.Title>Talk with Agent</Dialog.Title><button type="button" className="icon-button" aria-label="Close Agent selection" onClick={dismiss}><ThemeActionCloseIcon size={15} /></button></header>
         <Dialog.Description className="notebook-create-description">Discuss <strong>{page?.title}</strong> beside this note. Choose an Agent to begin.</Dialog.Description>
         {!operation?.dispatched ? <AgentExecutorPicker executors={executors} selected={null} disabled={Boolean(operation?.busy)} onSelect={id => { void start(id) }} /> : null}
         {operation?.busy ? <p role="status">{operation.dispatched ? 'Checking the original Agent operation...' : 'Opening this note and its Agent...'}</p> : null}

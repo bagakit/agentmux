@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { DATA_PREVIEW_MAX_COLUMNS } from '../../lib/file-data-preview'
 import type { StructuredDataKind } from '../../lib/file-formats/data-parse'
 import { requestStructuredPreview } from '../../lib/file-formats/data-structured-request'
@@ -7,6 +7,10 @@ import type { DataNode, DataRecord, StructuredPreview } from '../../lib/file-for
 import { FilePreviewState } from '../FilePreviewState'
 import '../../styles/file-data-preview.css'
 import './StructuredDataPreview.css'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 const PAGE_SIZE = 50
 
@@ -72,7 +76,7 @@ function StructuredContent({ parsed, kind }: { parsed: Extract<StructuredPreview
       {!parsed.records.length ? <p className="file-data-preview__notice">No records in this document.</p> : null}
     </div>
     <footer className="file-data-preview__bar"><span>{parsed.records.length.toLocaleString()} {jsonl ? 'records' : 'documents'}{parsed.truncated ? ' · preview limit reached; use Source for the rest' : ''}</span>
-      {jsonl ? <div className="file-preview__controls" role="group" aria-label="Record pages"><button className="icon-button" aria-label="Previous record page" disabled={active === 0} onClick={() => setPage(active - 1)}><ChevronLeft size={13} /></button><output>{active + 1} / {pages}</output><button className="icon-button" aria-label="Next record page" disabled={active + 1 >= pages} onClick={() => setPage(active + 1)}><ChevronRight size={13} /></button></div> : null}
+      {jsonl ? <div className="file-preview__controls" role="group" aria-label="Record pages"><button className="icon-button" aria-label="Previous record page" disabled={active === 0} onClick={() => setPage(active - 1)}><ThemeNavigationBackIcon size={13} /></button><output>{active + 1} / {pages}</output><button className="icon-button" aria-label="Next record page" disabled={active + 1 >= pages} onClick={() => setPage(active + 1)}><ThemeNavigationDisclosureIcon size={13} /></button></div> : null}
     </footer>
   </section>
 }

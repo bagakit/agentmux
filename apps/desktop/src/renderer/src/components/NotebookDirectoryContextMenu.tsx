@@ -1,8 +1,11 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { MessageSquare } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useRef, type ReactNode } from 'react'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
+
 
 export type NoteTalkHandler = (page: NotebookPage, returnFocus?: HTMLElement | null) => void
 
@@ -48,7 +51,7 @@ export function NotebookDirectoryContextMenu({ pages, onTalk, children }: {
             if (original.button.isConnected) onTalk(original.page, original.button)
           })
         }}>
-          <MessageSquare size={14} /><span>Talk with Agent</span>
+          <ThemeObjectConversationIcon size={14} /><span>Talk with Agent</span>
         </ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>

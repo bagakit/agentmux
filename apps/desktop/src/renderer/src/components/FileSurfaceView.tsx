@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo } from 'react'
-import { Eye, Save } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
 import { workspaceFileFormat } from '../../../shared/workspace-file-format'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
@@ -14,6 +14,10 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SourceFilePreview } from './file-preview/SourceFilePreview'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { registerFileRegionBuilder, type FileBuildSource } from '../lib/file-formats/build-file-region'
+
+const ThemeActionRevealIcon = semanticIconComponent('action.reveal')
+const ThemeActionSaveIcon = semanticIconComponent('action.save')
+
 
 const EditorPane = lazy(async () => ({ default: (await import('./EditorPane')).EditorPane }))
 const NoteFileSurfaceView = lazy(async () => ({ default: (await import('./NoteFileSurfaceView')).NoteFileSurfaceView }))
@@ -134,8 +138,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
       {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
-        <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><Eye size={13} />Preview saved file</DropdownMenu.Item>
-        {dirty ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving || !isLocal} onSelect={() => void previewSavedHtml(true)}><Save size={13} />Save & Preview</DropdownMenu.Item> : null}
+        <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><ThemeActionRevealIcon size={13} />Preview saved file</DropdownMenu.Item>
+        {dirty ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving || !isLocal} onSelect={() => void previewSavedHtml(true)}><ThemeActionSaveIcon size={13} />Save & Preview</DropdownMenu.Item> : null}
       </> } : {})} />
   </Suspense>
 }
