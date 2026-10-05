@@ -4,7 +4,7 @@ import { isAbsolute } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { nativeProcessBirth, nativeProcessFiles } from '../agent-native-process.js'
 import type { AgentProvider, AgentProviderPromptExecutionContext } from '../agent-provider.js'
-import { readCodexPromptExecutionEvidence } from './codex-prompt-execution-evidence.js'
+import { CodexPromptTransportUnconfirmedError, readCodexPromptExecutionEvidence } from './codex-prompt-execution-evidence.js'
 
 /** Startup eligibility is observed before any key/input. The one-shot verifier remains mandatory. */
 export function createCodexPromptTransportPreparation(
@@ -44,7 +44,16 @@ export function createCodexPromptTransportPreparation(
       context.signal.throwIfAborted()
       const state = await readWriter(context)
       if (state === 'changed') return null
-      if (state === 'current' && await verify(context)) {
+      let confirmed = false
+      if (state === 'current') {
+        try { confirmed = await verify(context) }
+        catch (error) {
+          // A diagnostic for the same former false result does not end the
+          // original startup wait. Other errors and cancellation still escape.
+          if (!(error instanceof CodexPromptTransportUnconfirmedError)) throw error
+        }
+      }
+      if (confirmed) {
         // Retain only this preparation's identity, never a reusable true/authorization cache.
         return { nativeSourceId: sourceId, verifyCurrentTransport: async current => {
           if (await readWriter(current) !== 'current' || !await verify(current)) return false
