@@ -2,11 +2,12 @@ import type { AgentMuxAgentSession } from '@agentmux/core'
 
 /** Exact Core facts. Projection never discovers or adopts a native source. */
 export type AgentNativeSourceFacts = Pick<AgentMuxAgentSession,
-  'nativeHandle' | 'observedNativeHandle' | 'nativeSourceObservation' | 'nativeConfirmation'>
+  'nativeHandle' | 'nativeHandlePersistence' | 'observedNativeHandle' | 'nativeSourceObservation' | 'nativeConfirmation'>
 
 export function projectNativeSourceFacts(source: AgentNativeSourceFacts): AgentNativeSourceFacts {
   return {
     ...(source.nativeHandle ? { nativeHandle: structuredClone(source.nativeHandle) } : {}),
+    ...(source.nativeHandlePersistence ? { nativeHandlePersistence: source.nativeHandlePersistence } : {}),
     ...(source.observedNativeHandle ? { observedNativeHandle: structuredClone(source.observedNativeHandle) } : {}),
     ...(source.nativeSourceObservation ? { nativeSourceObservation: structuredClone(source.nativeSourceObservation) } : {}),
     ...(source.nativeConfirmation ? { nativeConfirmation: structuredClone(source.nativeConfirmation) } : {})

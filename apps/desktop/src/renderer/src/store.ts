@@ -429,6 +429,8 @@ export type ErrorNoticeContext = {
   /** Explicit presentation from the diagnostic producer; the complete error remains authoritative. */
   summary?: string
   subject?: SessionControl
+  /** An exact absent-main diagnostic may settle from this Session's later confirmed binding. */
+  cause?: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED'
   lifecycle?: AgentLifecycleFailure
   /** Only this producer may settle its original missing-facts notice, never a later error. */
   startupSessionSnapshot?: {
@@ -438,6 +440,20 @@ export type ErrorNoticeContext = {
   }
   /** The original Provider read owns its retry and may settle only this warning. */
   startupProviderCatalog?: { warningMessage: string }
+}
+
+function resolvedNativeIdentityNotice(state: Pick<AppState, 'sessions' | 'errorNoticeContext'>):
+  Partial<Pick<AppState, 'error' | 'lastError' | 'errorNoticeContext' | 'errorDismissed'>> {
+  const notice = state.errorNoticeContext, subject = notice?.subject
+  if (notice?.cause !== 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' || subject?.kind !== 'agent') return {}
+  const matches = state.sessions.filter(session => session.kind === 'agent' &&
+    session.hostId === subject.hostId && session.id === subject.agentSessionId &&
+    session.control.run.runId === subject.run.runId)
+  const current = matches.length === 1 ? matches[0] : undefined
+  if (current?.kind !== 'agent' || current.nativeHandle?.kind !== 'provider' ||
+    current.nativeHandle.providerId !== current.providerId || current.nativeHandlePersistence !== 'confirmed' ||
+    current.nativeSourceObservation || current.observedNativeHandle) return {}
+  return { error: null, lastError: null, errorNoticeContext: null, errorDismissed: false }
 }
 
 // Persistent user intent uses one operation ID across retries and restarts. Run binding prevents
@@ -1860,6 +1876,7 @@ type BufferedSessionEvent = {
   event: RuntimeEvent
   pendingLaunchAgentSessionId: string | null
   sequence: number
+  nativeIdentityNotice?: ErrorNoticeContext
 }
 type SessionMembershipEventBuffer = {
   events: BufferedSessionEvent[]
@@ -1906,7 +1923,10 @@ function enqueueSessionMembershipEvent(
   if (event.endpointObservation) entry.endpointWarnings.set(JSON.stringify([event.hostId, event.endpointObservation.step]), {
     hostId: event.hostId, warning: event.endpointObservation.warning, observationStep: event.endpointObservation.step, restored: false
   })
-  entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence })
+  const diagnostic = event.event.type === 'agent-error' ? runtimeDiagnosticNotice(useAppStore.getState(), event) : null
+  entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence,
+    ...(diagnostic?.cause ? { nativeIdentityNotice: { kind: 'indeterminate' as const,
+      cause: diagnostic.cause, ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) } } : {}) })
   if (entry.events.length <= MAX_SESSION_MEMBERSHIP_EVENTS) return
   const dropped = entry.events.shift()!
   const core = dropped.event.event
@@ -2260,12 +2280,15 @@ function startSessionMembershipResync(
             runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(runtimeEndpointWarnings, hostId, warning, observationStep)
           }
           entry.endpointWarnings.clear()
-          return { ...reconciled, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          const next = { ...reconciled, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          return { ...next, ...resolvedNativeIdentityNotice({ ...state, ...next }) }
         })
         for (const pending of events) {
+          if (pending.nativeIdentityNotice && resolvedNativeIdentityNotice({ sessions: useAppStore.getState().sessions,
+            errorNoticeContext: pending.nativeIdentityNotice }).errorNoticeContext === null) continue
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
           if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
-            ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
+            ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
         }
         for (const candidate of startupCandidates) {
           if (restoredDuringRead.has(candidate.hostId)) continue
@@ -10073,7 +10096,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // They never replace semantic state or its clock.
     const diagnostic = runtimeDiagnosticNotice(get(), event)
     if (diagnostic) get().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
-      ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
+      ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
     if (sessionMembershipResync) {
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
       if (pendingLaunchAgentSessionId) {
@@ -10098,9 +10121,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionMembershipGap = reduced.sessionMembershipGap === true
       const projected = reduced.state.sessions === state.sessions ? reduced.state
         : { ...reduced.state, sessions: projectRuntimeEndpointSessions(reduced.state.sessions, state.runtimeEndpointWarnings) }
-      return core.type === 'agent-timeline' && eventSourceId
+      const next = core.type === 'agent-timeline' && eventSourceId
         ? reconcileDeliveredSteers({ ...state, ...projected }, eventSourceId)
         : projected
+      return core.type === 'agent-session' ? { ...next, ...resolvedNativeIdentityNotice({ ...state, ...next }) } : next
     })
     if (core.type === 'agent-timeline' && eventSourceId && get().agentSteerQueues[eventSourceId] !== pendingBefore &&
       !observationRefresh && !agentSteerDrains.has(eventSourceId)) void get().flushAgentSteerQueue(eventSourceId)
@@ -10183,6 +10207,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (current.errorDismissed && current.lastError !== null
       && (current.errorNoticeContext?.kind ?? 'indeterminate') === (context?.kind ?? 'indeterminate')
       && current.errorNoticeContext?.startupSessionSnapshot === context?.startupSessionSnapshot
+      && current.errorNoticeContext?.cause === context?.cause
       && previousSubject?.hostId === subject?.hostId
       && previousSubject?.kind === subject?.kind
       && (previousSubject?.kind === 'agent' ? previousSubject.agentSessionId : undefined)

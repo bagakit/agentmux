@@ -198,6 +198,10 @@ import type { AgentMuxCreationAdmission, AgentMuxCreationOrigin } from './agent-
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import type { AgentMuxHostExecutorConfigureInput } from './executor-contract.js'
 
+/** Zero means no authoritative observation has been recorded. */
+const unobservedTimestamp = 0
+
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
 function sameNativeHandle(a: AgentNativeSessionHandle | undefined, b: AgentNativeSessionHandle | undefined): boolean {
@@ -1924,9 +1928,9 @@ export class AgentMuxClient {
     this.nativeIdentityCaptures.set(session.agentSessionId, capture)
     const execute = async (): Promise<void> => {
       const timer = setTimeout(() => controller.abort(new Error('Native identity capture timed out.')), 10_000)
-      let failure: unknown
+      let failure: unknown, delayMs = 0
       try {
-        for (const delayMs of [0, 200, 1_000]) {
+        while (!controller.signal.aborted) {
           if (delayMs) await new Promise<void>((resolve, reject) => {
             const abort = () => { clearTimeout(delay); reject(controller.signal.reason) }
             const delay = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve() }, delayMs)
@@ -1961,18 +1965,30 @@ export class AgentMuxClient {
             this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
             return
           } catch (error) {
-            failure = error
+            if (!controller.signal.aborted || failure === undefined) failure = error
             if (controller.signal.aborted) throw error
+            try { if (!sameRun(this.registry.get(session.agentSessionId).run, session.run)) return }
+            catch { return }
+            // A healthy CLI can publish its main record after the first few observations.
+            // Keep the original cancellable period; this passive wait never owns the input lane.
+            delayMs = delayMs === 0 ? 200 : Math.min(2_000, delayMs * 5)
           }
         }
-      } catch (error) { failure = error }
+      } catch (error) { failure ??= error }
       finally { clearTimeout(timer) }
       if (epoch !== this.connectionEpoch || !this.connected || !this.kernel.isConnected()) return
       let current: AgentMuxStoredAgentSession
       try { current = this.registry.get(session.agentSessionId) } catch { return }
       if (!sameRun(current.run, session.run)) return
+      // Another capture or main Hook can durably confirm this Run while discovery is pending.
+      // A retained locator with a source conflict or an unacknowledged save is not that fact.
+      if (current.nativeHandle && !current.nativeSourceObservation && !current.observedNativeHandle &&
+        !this.registry.isDurabilityUnconfirmed(session.agentSessionId)) {
+        this.publisher.publish({ type: 'agent-session', session: this.projectSession(current) })
+        return
+      }
       const code = failure && typeof failure === 'object' && 'code' in failure ? String(failure.code) : ''
-      const persistence = ['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS',
+      const persistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId) || ['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS',
         'AGENT_SESSION_STORE_LIMIT', 'AGENT_SESSION_STORE_BUSY', 'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED'].includes(code)
       this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: persistence ? 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED' : 'AGENT_NATIVE_IDENTITY_UNCONFIRMED',
@@ -5480,6 +5496,8 @@ export class AgentMuxClient {
   /** Public projections overlay live Core observations without writing them to the Session store. */
   private projectSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
     const projected = cloneSession(session)
+    if (session.nativeHandle) projected.nativeHandlePersistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
+      ? 'unconfirmed' : 'confirmed'
     const observation = this.hookIngressObservations.get(session.agentSessionId)
     if (observation && sameRun(observation.run, session.run)) projected.hookIngressObservation = structuredClone(observation)
     return projected
@@ -7381,7 +7399,7 @@ export class AgentMuxClient {
               }
             }
           : {}),
-        ...(normalized.childActivity ? { semanticStatus: { ...(current.semanticStatus ?? { state: 'running' as const, source: 'native-hook' as const, observedAt: 0 }),
+        ...(normalized.childActivity ? { semanticStatus: { ...(current.semanticStatus ?? { state: 'running' as const, source: 'native-hook' as const, observedAt: unobservedTimestamp }),
           aggregateActivityAt: normalized.status.observedAt,
           currentActivityRevision: (current.semanticStatus?.currentActivityRevision ?? 0) + 1 } } : {}),
         ...(witness.handle && witnessTargetMismatch && !(canPromoteLocator && normalized.nativeHandle) ? { observedNativeHandle: witness.handle } : {}),

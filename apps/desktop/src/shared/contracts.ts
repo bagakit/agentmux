@@ -1002,6 +1002,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core's native Provider/ACP Session ID for display; never a replacement for the AgentMux SID. */
       nativeSessionId?: string
       nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
+      nativeHandlePersistence?: NonNullable<AgentMuxAgentSession['nativeHandlePersistence']>
       observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
       nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
       hookIngressObservation?: NonNullable<AgentMuxAgentSession['hookIngressObservation']>
@@ -1136,6 +1137,7 @@ export type AgentSessionRecoveryCandidate = {
   /** Durable native identity remains displayable while its Run is unavailable. */
   nativeSessionId?: string
   nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
+  nativeHandlePersistence?: NonNullable<AgentMuxAgentSession['nativeHandlePersistence']>
   observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
   nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
   nativeConfirmation?: NonNullable<AgentMuxAgentSession['nativeConfirmation']>
