@@ -25,6 +25,7 @@ import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMar
 import { AgentSessionComposer } from './AgentSessionComposer'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
+import { formatConversationAnnotation } from '../lib/conversation-annotation-delivery'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
@@ -441,7 +442,7 @@ export function SessionPane({
     // `setAgentComposerDraft`），两份实现在尾部空白上**不一致**（实测：草稿是 `'Existing\n'` 时
     // 手写那份给出 `Existing\n\nREF`、store 给出 `Existing\n\n\nREF`）。同一个产品动作在两个
     // 表面上给两种结果，而只有其中一份有判据。
-    appendAgentComposerDraft(sessionId, `Regarding message ${JSON.stringify(annotation.messageId)}:\n> ${annotation.quote.replace(/\n/gu, '\n> ')}\n\n批注： ${annotation.note}`)
+    appendAgentComposerDraft(sessionId, formatConversationAnnotation(annotation, sessionId))
   }
   // Same two reads TerminalView makes for its path links, for the same reason: an Agent that writes
   // `src/foo.ts` means the same file in the Activity projection as in the Terminal one. The root comes
@@ -1049,6 +1050,7 @@ export function SessionPane({
         onSelect={onProseLinkSelect}
       />
       <ConversationAnnotationNote ref={annotationNoteRef} sessionId={sessionId} regionRef={surfaceRef}
+        origin={mailboxOrigin}
         active={visible && hasAgentComposer && (historyOpen || inlineHistory || viewMode === 'activity')}
         {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})} />
       {hasAgentComposer && session.kind === 'agent' ? (
