@@ -31,7 +31,7 @@ export function themeCssVariables(theme: ResolvedTheme): Record<string, string> 
   return vars
 }
 type ThemeInput = { kind: 'selection'; selection: ThemeSelection } | { kind: 'observed'; document: ThemeDocument; appearance: AppAppearanceId }
-type Controller = { input: ThemeInput; preview?: ThemeDocument; previewMode?: ThemeMode; resolved: ResolvedTheme; signature?: string; apply(): void }
+type Controller = { input: ThemeInput; preview?: ThemeDocument; previewMode?: ThemeMode; resolved: ResolvedTheme; signature?: string; transitionFrame?: number; apply(): void }
 const controllers = new WeakMap<Window, Controller>()
 
 /** Exactly one root media subscription. Consumers observe this projection, never resolve independently. */
@@ -48,8 +48,20 @@ export function mountThemeRuntime(host: Window = window, initial: ThemeSelection
       controller.resolved = resolved
       const signature = JSON.stringify({ id: resolved.id, mode: resolved.mode, variant: resolved.variant, icons: resolved.value.icons, iconStyle: resolved.value.iconStyle })
       if (controller.signature === signature) return
+      const hadProjection = controller.signature !== undefined
       controller.signature = signature
       const root = host.document.documentElement
+      if (hadProjection) {
+        if (controller.transitionFrame !== undefined) host.cancelAnimationFrame(controller.transitionFrame)
+        root.dataset.themeChanging = ''
+        // Keep the whole palette atomic through its first paint, then restore ordinary hover motion.
+        controller.transitionFrame = host.requestAnimationFrame(() => {
+          controller.transitionFrame = host.requestAnimationFrame(() => {
+            delete root.dataset.themeChanging
+            delete controller.transitionFrame
+          })
+        })
+      }
       updateIconSprite(host.document, resolved.value)
       root.dataset.theme = resolved.id
       root.dataset.appearance = resolved.mode
@@ -64,7 +76,11 @@ export function mountThemeRuntime(host: Window = window, initial: ThemeSelection
   controller.apply()
   return () => {
     media.removeEventListener?.('change', update)
-    if (controllers.get(host) === controller) { controllers.delete(host); removeIconSprite(host.document) }
+    if (controllers.get(host) === controller) {
+      if (controller.transitionFrame !== undefined) host.cancelAnimationFrame(controller.transitionFrame)
+      delete host.document.documentElement.dataset.themeChanging
+      controllers.delete(host); removeIconSprite(host.document)
+    }
   }
 }
 export function updateThemeSelection(selection: ThemeSelection, host: Window = window): { applied: boolean; reason?: string } {

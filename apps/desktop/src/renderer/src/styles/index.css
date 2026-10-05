@@ -5,6 +5,7 @@
  * 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。
  */
 @import './tokens.css';
+@import '@agentmux/client-ui/styles/theme-transition.css';
 @import './base.css';
 @import '@agentmux/client-ui/input/styles.css';
 @import './chrome.css';
