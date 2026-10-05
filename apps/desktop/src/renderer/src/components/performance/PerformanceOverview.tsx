@@ -87,6 +87,7 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
   const contextFor = (run: RunUsage) => run.hostId === snapshot?.run?.hostId && run.runId === snapshot.run.runId
     ? { label: 'Performance toolkit', context: `Official tool · ${run.hostId}`, state: snapshot.state }
     : contexts[runKey(run)]
+  const totals = observation?.runTotals
   const source = scope === 'app' ? observation?.app : scope === 'runs' ? observation?.process : observation?.runtime
   const state = paused ? 'Paused here' : error ? 'Observation unavailable' : pending ? 'Starting…' : snapshot?.state === 'observing' ? 'Observing' : snapshot?.state === 'starting' ? 'Starting…' : snapshot?.state === 'stopping' ? 'Stopping…' : snapshot?.state === 'paused' ? 'Observation stopped' : snapshot?.state === 'failed' ? 'Observation failed' : snapshot?.state === 'unknown' ? 'Unconfirmed' : 'No observation'
   // 只投影真实 owner 的有界点；自己的暂停断点不能被其他 watcher 的连续观察填上。
@@ -192,10 +193,15 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
       {scope !== 'runtime' ? <>
         {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={trend.map(p => p.appCpuPercent)} color="var(--green)" />
           <Metric label="Resident memory" value={memory(app?.rssKib)} hint="Latest · RSS" values={trend.map(p => p.appRssKib)} color="var(--blue)" /></div>
-          : <><div className="performance-run-summary"><Layers size={14} /><span>{activeRun ? (contextFor(activeRun)?.label ?? activeRun.runId) : 'Select a Run to inspect its processes'}</span>
-            <small>{runs.length} {runs.length === 1 ? 'Run' : 'Runs'}</small></div>
-            {activeRun ? <div className="performance-metrics performance-metrics--run"><Metric label="CPU" value={cpu(activeRun.cpuPercent)} hint={`${cpuCoreLabel(activeRun.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={selectedTrend.map(point => point.cpu)} color="var(--green)" />
-              <Metric label="Resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" values={selectedTrend.map(point => point.rss)} color="var(--blue)" /></div> : null}</>}
+          : <><div className="performance-run-summary" data-run-totals><Layers size={14} /><span>All tracked Runs</span>
+            <small>{totals ? `${totals.coverage.observedRoots} / ${totals.coverage.trackedRuns} roots observed` : 'Coverage unavailable'}</small></div>
+            <div className="performance-metrics" data-run-total-values><Metric label="Total CPU" value={cpu(totals?.cpuPercent)} hint={`${cpuCoreLabel(totals?.cpuPercent, observation?.units.cpuBasis)} · 10s peak of batch sums`} color="var(--green)" />
+              <Metric label="Total resident memory" value={memory(totals?.rssKib)} hint="Latest · unique sampled PIDs" color="var(--blue)" /></div>
+            <p className="performance-note">Observed local Run processes · RSS includes shared pages. Each CPU batch is summed before its 10s peak; row peaks can occur at different times.</p>
+            {totals && totals.coverage.missingRoots > 0 ? <p className="performance-state" data-tone="warning">{totals.coverage.missingRoots} tracked roots missing · complete totals unavailable</p> : null}
+            {activeRun ? <><div className="performance-run-summary"><span title={activeRun.runId}>Selected Run · {activeRun.runId}</span></div>
+              <div className="performance-metrics performance-metrics--run"><Metric label="Selected CPU" value={cpu(activeRun.cpuPercent)} hint={`${cpuCoreLabel(activeRun.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={selectedTrend.map(point => point.cpu)} color="var(--green)" />
+              <Metric label="Selected resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" values={selectedTrend.map(point => point.rss)} color="var(--blue)" /></div></> : null}</>}
         <SourceNote source={source} />
         {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU unavailable · waiting for a valid interval</p> : null}
         {scope === 'app' ? <PerformanceAttribution observation={observation} paused={paused} /> : <>
