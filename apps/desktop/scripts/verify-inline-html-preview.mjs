@@ -14,6 +14,7 @@ const arg = name => process.argv.find(value => value.startsWith(name + '='))?.sl
 const evidence = arg('--output') ? resolve(repository, arg('--output')) : join(repository, 'docs/reviews/evidence/editor-inline-html')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const rendererModules = ['components/HtmlFilePreview.tsx', 'components/FileSurfaceView.tsx', 'components/EditorPane.tsx', 'components/FileSourceEditor.tsx',
+  'components/file-preview/SourceFilePreview.tsx',
   'components/WorkspaceWorkbench.tsx', 'components/FileExplorer.tsx', 'components/DesktopClientUiProvider.tsx', 'lib/file-region-presentation.ts',
   'lib/workbench-tabs.ts', 'lib/file-workbench-state.ts', 'lib/workface-file-view.ts', 'lib/api.ts', 'store.ts', 'styles/file-preview.css']
 const productionFiles = [...rendererModules.map(file => 'apps/desktop/src/renderer/src/' + file), 'apps/desktop/src/main/html-file-previews.ts',
@@ -29,7 +30,8 @@ async function bindings() {
 async function callers() {
   const edges = [
     ['FileSurfaceView', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx'],
-    ['HtmlFilePreview', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx'],
+    ['SourceFilePreview', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx'],
+    ['HtmlFilePreview', 'apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx'],
     ['api.files.openHtmlPreview', 'apps/desktop/src/renderer/src/components/HtmlFilePreview.tsx'],
     ['api.files.releaseHtmlPreview', 'apps/desktop/src/renderer/src/components/HtmlFilePreview.tsx'],
     ['htmlPreviews.open', 'apps/desktop/src/main/ipc.ts'],

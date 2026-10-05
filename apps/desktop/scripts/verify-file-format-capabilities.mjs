@@ -3,8 +3,15 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 
 process.env.AGENTMUX_WORKFACE_MUTATION_CONFIG = 'vitest.mutation.config.mts'
 const task = process.argv[process.argv.indexOf('--task') + 1]
-assert.equal(task, 'T-001', 'A task must have its own implemented verification; unsupported tasks cannot pass.')
-await verifyRendererSourceMutations({
+assert.match(task ?? '', /^T-0(?:0[1-9]|1[0-7])$/, 'An exact implemented File format task is required.')
+const integration = task === 'T-017' && !process.argv.includes('--mutations-only')
+if (integration) assert.ok(process.env.AGENTMUX_EDITOR_FORMAT_EVIDENCE && process.env.AGENTMUX_MUTATION_RECEIPTS,
+  'Integration acceptance requires explicit native, independent visual, production bundle and exact mutation evidence.')
+if (task !== 'T-001') {
+  const definition = await import(`./file-format-checks/${task}.mjs`)
+  assert.ok(definition.tests?.length && definition.sources?.length && definition.mutations?.length, 'Every task needs consumer tests and real production mutations.')
+  await verifyRendererSourceMutations({ name: `file-formats-${task}`, ...definition })
+} else await verifyRendererSourceMutations({
   name: 'file-formats-T-001',
   owningConfig: 'apps/desktop/test/file-format-capabilities.config.mts',
   tests: ['apps/desktop/test/workspace-file-format.test.ts', 'apps/desktop/test/workface-file-view-control.test.tsx'],
@@ -18,3 +25,4 @@ await verifyRendererSourceMutations({
     { label: 'renderer-claim-available', file: 'apps/desktop/src/renderer/src/lib/workface-file-view.ts', before: "format.previewConfirmation === 'renderer'", after: 'false' }
   ]
 })
+if (integration) await (await import('./verify-file-format-integration-evidence.mjs')).verifyIntegrationEvidence()

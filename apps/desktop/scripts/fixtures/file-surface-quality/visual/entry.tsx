@@ -102,6 +102,7 @@ const probe = {
     })
   },
   flush() { return prepareRendererUpdate('quit') },
+  unmount() { flushSync(() => root.unmount()) },
   key: (path: string) => documentKey(workspaceId, path)
 }
 Object.assign(window, { filePreviewProbe: probe })

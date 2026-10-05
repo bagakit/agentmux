@@ -1,0 +1,8 @@
+export { WorkspaceFiles } from '../../../src/main/workspace-files'
+export { HtmlFilePreviews } from '../../../src/main/html-file-previews'
+export { FileDiagramRenderer } from '../../../src/main/file-diagram-renderer'
+export { FileBuilds } from '../../../src/main/file-builds'
+export { WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../../../src/shared/contracts'
+export { AgentMuxControlServer, LocalExecutionHost } from '@agentmux/core'
+export { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+export { pdfReaderFixture } from '../../../test/helpers/pdf-reader-fixture'
