@@ -971,7 +971,7 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
     if (operation === 'settings.resource.get') request = { ...base, operation, id: resourceId }
     else if (operation === 'settings.resource.add') {
       const value = settingsResourceRecord(source.value, code)
-      if (Object.hasOwn(value, 'id')) throw new AgentMuxError('Resource ID must occur only in the envelope.', code)
+      if (Object.hasOwn(value, 'id') && (base.resource !== 'themes' || value.id !== resourceId)) throw new AgentMuxError('Resource document ID must match its envelope; other resources carry ID only in the envelope.', code)
       request = { ...base, operation, id: resourceId, value }
     } else {
       const expected = Object.hasOwn(source, 'expected') ? { expected: operation === 'settings.resource.remove' && base.resource === 'themes'
@@ -983,6 +983,7 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
       }
       else {
         const changes = settingsResourceRecord(source.changes, code)
+        if (Object.hasOwn(changes, 'id') && base.resource === 'themes' && changes.id !== resourceId) throw new AgentMuxError('Resource document ID must match its envelope; other resources carry ID only in the envelope.', code)
         if (Object.keys(changes).length === 0) throw new AgentMuxError('Resource changes are empty.', code)
         request = { ...base, operation: 'settings.resource.update', id: resourceId, changes,
           ...(Object.hasOwn(source, 'expected') ? { expected: settingsResourceRecord(source.expected, code) } : {}) }
@@ -994,11 +995,14 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
 }
 
 function resourceItem(value: unknown): AgentMuxControlSettingsResourceItem {
-  const code = 'CONTROL_PROTOCOL_ERROR', source = settingsResourceEnvelope(value, ['id', 'value', 'readonly'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', source = settingsResourceEnvelope(value, ['id', 'value', 'readonly', 'document'], code)
   const fields = settingsResourceRecord(source.value, code)
   if (Object.hasOwn(fields, 'id')) throw new AgentMuxError('Resource ID must occur only in the item envelope.', code)
   if (source.readonly !== undefined && typeof source.readonly !== 'boolean') throw new AgentMuxError('Resource readonly metadata is invalid.', code)
-  return { id: id(source.id, 'Settings resource item ID is invalid.', code), value: fields,
+  const identity = id(source.id, 'Settings resource item ID is invalid.', code)
+  const document = source.document === undefined ? undefined : settingsResourceRecord(source.document, code)
+  if (document && document.id !== identity) throw new AgentMuxError('Resource document belongs to another identity.', code)
+  return { id: identity, value: fields, ...(document === undefined ? {} : { document }),
     ...(source.readonly === undefined ? {} : { readonly: source.readonly }) }
 }
 

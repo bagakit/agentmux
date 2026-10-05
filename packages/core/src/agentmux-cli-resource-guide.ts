@@ -73,10 +73,15 @@ or bypass of a person's application-link choice. It does not establish human app
 Theme resources use settings themes ls / inspect / create / update / delete. The catalog includes
 readonly built-ins and issues for unsupported saved records; those records are retained. Choose an
 available ID using settings set appearance.themeId ID. A theme value is the complete versioned data
-without its envelope ID. Editing a built-in requires a custom. copy. Custom update requires
+without its envelope ID. Create/update also accept the complete exported document when its ID matches the exact target; no ID rename is inferred. Editing a built-in requires a custom. copy. Custom update requires
 {changes, expected: completeOriginalValue}; custom delete requires {expected: originalValue},
 including the original raw JSON for an unsupported record. Deleting the active custom theme
 returns atomically to the default and preserves application brightness and explicit Terminal colors.
+settings themes inspect ID --output FILE creates an atomic new UTF-8 JSON theme file, including its exact ID,
+both variants and embedded icon assets. Existing files or symlinks are not replaced. inspect also returns
+the owner-authored document alongside its usual value metadata; Core does not interpret visual fields.
+That exported file can be used directly by create with the same custom ID; an existing ID requires explicit
+update with {changes: document, expected: originalValueOrDocument}, or a separate ID authored in the file.
 `
 
 export const AGENTMUX_TOOLKIT_GUIDE = `Create a saved local JavaScript ESM tool with a complete input such as:
