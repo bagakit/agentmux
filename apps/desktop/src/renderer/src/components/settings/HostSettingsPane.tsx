@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Plus, RadioTower, Trash2 } from 'lucide-react'
 import { HostIcon } from '../HostBadge'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -267,19 +268,19 @@ function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
   return (
     <div className="host-connection-fields">
       <div className="host-edit-grid host-edit-grid--basic">
-        <label><span>Name</span><input data-host-name value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
-        <label><span>Host or SSH alias</span><input value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="devbox or dev.example.com" /></label>
+        <label><span>Name</span><TextInput data-host-name value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
+        <label><span>Host or SSH alias</span><TextInput value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="devbox or dev.example.com" /></label>
       </div>
       <p className="settings-group-note">Use an alias from your SSH config, or a hostname. Connects to an existing AgentMux service; Test verifies this connection.</p>
       <details className="host-edit-disclosure" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
         <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ChevronDown size={13} /></summary>
         <div className="host-edit-grid">
-        <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="From SSH config" /></label>
-        <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="From SSH config" /></label>
-        <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? onChange({ identityFile: event.target.value }) : onClear('identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
-        <label className="host-edit-grid__wide"><span>Service command <small>optional</small></span><input value={host.remoteCommand ?? ''} onChange={(event) => event.target.value ? onChange({ remoteCommand: event.target.value }) : onClear('remoteCommand')} placeholder="Use the installed AgentMux service" /></label>
-        <label className="host-edit-grid__wide"><span>Service socket path <small>optional; remote absolute path</small></span><input value={host.remoteSocketPath ?? ''} onChange={(event) => event.target.value ? onChange({ remoteSocketPath: event.target.value }) : onClear('remoteSocketPath')} placeholder="Use the service's default socket" /></label>
-        <label className="host-edit-grid__wide"><span>Bound Runtime ID</span><input value={host.runtimeId ?? ''} readOnly placeholder="Confirmed on the first trusted connection" /></label>
+        <label><span>User</span><TextInput value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="From SSH config" /></label>
+        <label><span>Port</span><TextInput type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="From SSH config" /></label>
+        <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><TextInput value={host.identityFile ?? ''} onChange={(event) => event.target.value ? onChange({ identityFile: event.target.value }) : onClear('identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
+        <label className="host-edit-grid__wide"><span>Service command <small>optional</small></span><TextInput value={host.remoteCommand ?? ''} onChange={(event) => event.target.value ? onChange({ remoteCommand: event.target.value }) : onClear('remoteCommand')} placeholder="Use the installed AgentMux service" /></label>
+        <label className="host-edit-grid__wide"><span>Service socket path <small>optional; remote absolute path</small></span><TextInput value={host.remoteSocketPath ?? ''} onChange={(event) => event.target.value ? onChange({ remoteSocketPath: event.target.value }) : onClear('remoteSocketPath')} placeholder="Use the service's default socket" /></label>
+        <label className="host-edit-grid__wide"><span>Bound Runtime ID</span><TextInput value={host.runtimeId ?? ''} readOnly placeholder="Confirmed on the first trusted connection" /></label>
         <p className="field-hint host-edit-grid__wide">Connects to an existing service over SSH. Changing this connection keeps its Runtime binding; a different Runtime must be added as a separate host.</p>
         </div>
       </details>
