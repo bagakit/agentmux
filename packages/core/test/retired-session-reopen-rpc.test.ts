@@ -43,7 +43,7 @@ it.each(['unix', 'http'] as const)('the actual Hosted %s consumer delegates expl
 })
 it('the real CLI parser and execution use the same public RPC owner without a second control route', async () => {
   const f = await endpoint('unix')
-  const { stdout } = await promisify(execFile)(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${join(f.root, 'public.sock')}`,
+  const { stdout } = await promisify(execFile)(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix:${join(f.root, 'public.sock')}`,
     'agent', 'reopen', '--session', f.old.agentSessionId, '--retired-at', String(f.retired.observedAt), '--operation-id', 'cli-explicit-continue'],
     { env: { ...process.env }, timeout: 10_000 })
   const response = JSON.parse(stdout)

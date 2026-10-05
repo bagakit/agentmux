@@ -11,7 +11,7 @@ import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxContro
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxControlRequest, type AgentMuxControlResult } from '../src/control.js'
 
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'browser-settings-proof' }
 const initial: [string, string][] = [['first', 'host-defined-choice'], ['neighbor', 'another-choice']]
 const listArgs = ['settings', 'browser-links', 'ls']

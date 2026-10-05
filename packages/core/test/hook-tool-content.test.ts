@@ -69,7 +69,7 @@ describe('Hook tool content through durable and public consumers', () => {
       await owner.start()
       const env = { ...process.env }
       delete env.AGENTMUX_AGENT_SESSION_ID; delete env.AGENTMUX_AGENT_CAPABILITY
-      const cli = await exec(process.execPath, [new URL('../bin/agentmux', import.meta.url).pathname,
+      const cli = await exec(process.execPath, [new URL('../bin/amux', import.meta.url).pathname,
         '--endpoint', `unix:${owner.path}`, 'agent', 'inspect', '--session', sessionId], { env, maxBuffer: 1024 * 1024 })
       const result = JSON.parse(cli.stdout)
       expect(result).toMatchObject({ ok: true, operation: 'agent.inspect', result: { session: {

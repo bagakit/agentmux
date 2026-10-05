@@ -10,7 +10,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES,
   isLongAgentMuxControlOperation, type AgentMuxControlRequest } from '../src/control.js'
 import { parseSettingsCommand } from '../src/settings-cli.js'
 
-const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'refresh', operation: 'settings.executors.refresh' } as const
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []

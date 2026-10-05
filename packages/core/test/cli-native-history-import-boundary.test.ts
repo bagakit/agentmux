@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const core = fileURLToPath(new URL('../dist/index.js', import.meta.url))
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const roots: string[] = []
 const ownedPids: number[] = []
 const receipts = process.env.AMX_CLI_IMPORT_PROOF_DIRECTORY

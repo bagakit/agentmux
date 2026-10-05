@@ -17,7 +17,7 @@ import { AgentMuxError } from '../src/errors.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 const exec = promisify(execFile)
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 
 
 async function seedSessions(path: string, ids: readonly string[], capability?: string): Promise<void> {

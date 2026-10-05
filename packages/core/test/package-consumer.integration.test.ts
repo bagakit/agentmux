@@ -427,7 +427,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       await packDependencies(join(repositoryRoot, 'packages/core'), sourceManifest.dependencies!)
       expect(dependencyArchives.length).toBeGreaterThan(0)
       const packedPaths = metadata.files.map((file) => file.path)
-      expect(packedPaths).toContain('bin/agentmux')
+      expect(packedPaths).not.toContain('bin/agentmux')
       expect(packedPaths).toContain('bin/amux')
       expect(packedPaths).toContain('dist/sharing.js')
       expect(packedPaths).toContain('dist/sharing.d.ts')
@@ -490,7 +490,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           './runtime': { types: './dist/runtime.d.ts', import: './dist/runtime.js' }
         },
         bin: {
-          agentmux: './bin/agentmux',
           amux: './bin/amux',
           ctxmux: './bin/ctxmux',
           ctxmuxd: './bin/ctxmuxd',
@@ -603,7 +602,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       try {
         // 这里**没有**挂钟预算。期限由外层那个 `it(…, 240_000)` 持有，两个预算守同一件事时，短的
         // 那个只贡献假阴性：它一到点就 SIGTERM 掉整个消费者进程，而进程本来只是在被压满的机器上
-        // 变慢。实测（负载 ~55）：`[packed-consumer] still waiting for handshake race
+        // 变慢。实测（，负载 ~55）：`[packed-consumer] still waiting for handshake race
         // controlled composer pending` 一路数到 50s，然后在 63.55s 整个测试失败——不是里面哪个
         // 等待放弃了，是这条 60 秒把它砍了。
         //
@@ -627,7 +626,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
             AGENTMUX_LIFECYCLE_CRASH_FIXTURE: join(consumerDirectory, 'lifecycle-crash-worker.mjs'),
             AGENTMUX_PROMPT_CRASH_FIXTURE: join(consumerDirectory, 'prompt-submit-crash-worker.mjs'),
             AGENTMUX_INTERACTION_CRASH_FIXTURE: join(consumerDirectory, 'interaction-response-crash-worker.mjs'),
-            AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'agentmux')
+            AGENTMUX_CLI_PATH: join(consumerDirectory, 'node_modules', '.bin', 'amux')
           }
         })
         consumer.stderr?.pipe(process.stderr)

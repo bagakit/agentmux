@@ -95,7 +95,7 @@ it('serves complete deep metrics through real Unix RPC and compiled CLI inspect/
   const env = objectCliEnvironment(root)
   const result = await runCompiledObjectCli(['toolkit', 'inspect', 'performance'], env)
   expect(result.code, result.stderr).toBe(0); expect(JSON.parse(result.stdout).result.snapshot).toEqual(snapshot)
-  const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+  const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
   const child = spawn(process.execPath, [cli, 'toolkit', 'watch', 'performance'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   cleanup.push(() => { if (child.exitCode === null) child.kill('SIGTERM') })
   let stdout = '', stderr = ''; child.stdout.on('data', chunk => { stdout += chunk }); child.stderr.on('data', chunk => { stderr += chunk })

@@ -28,7 +28,7 @@ export function workfaceCliFixture(initial: AgentMuxControlResult) {
   })
   afterAll(async () => { await server?.stop(); if (root) await rm(root, { recursive: true, force: true }) })
   async function run(args: string[]) {
-    try { return { code: 0, ...await exec(process.execPath, [process.env.AGENTMUX_TEST_OBJECT_CLI ?? join(process.cwd(), 'packages/core/bin/agentmux'), ...args], { env, timeout: 5_000 }) } }
+    try { return { code: 0, ...await exec(process.execPath, [process.env.AGENTMUX_TEST_OBJECT_CLI ?? join(process.cwd(), 'packages/core/bin/amux'), ...args], { env, timeout: 5_000 }) } }
     catch (error) {
       const failure = error as { code: number; stdout: string; stderr: string }
       if (typeof failure.code !== 'number') throw error

@@ -15,7 +15,7 @@ try {
   assert.equal(predecessor.previousRun.runId, session.retiredRuns.at(-1).runId)
   server = new AgentMuxControlServer({ socketPath: join(process.env.AGENTMUX_RUNTIME_DIRECTORY, 'cold-control.sock'), coreClients: () => [{ hostId: 'local', client }] })
   await server.start()
-  const reply = await execute(process.execPath, [fileURLToPath(new URL('../../bin/agentmux', import.meta.url)), '--endpoint', 'unix://' + server.path,
+  const reply = await execute(process.execPath, [fileURLToPath(new URL('../../bin/amux', import.meta.url)), '--endpoint', 'unix://' + server.path,
     'agent', 'send', '--to-session', id, '--text', body, '--execution', 'immediate', '--operation-id', operation], { env: process.env, timeout: 50_000, maxBuffer: 1024 * 1024 })
   console.log(JSON.stringify({ coldCoreProcess: process.pid, predecessor, result: JSON.parse(reply.stdout).result,
     submission: client.agentSession(id).terminalPromptSubmission }))

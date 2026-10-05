@@ -126,7 +126,7 @@ it('endpoint selection is explicitly not attempted while an actual public respon
 it('actual compiled CLI SSH carrier reaches the official stdio leaf and original service using ordinary aliases', async () => {
   const h = await originalOwner(), carrier = join(h.root, 'carrier'), log = join(h.root, 'ssh.json')
   await mkdir(carrier)
-  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/agentmux')
+  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
   // Controlled SSH executable tests real child stdio and both compiled CLI leaves.
   // It does not certify network reachability or OpenSSH authentication.
   await writeFile(join(carrier, 'ssh'), `#!${process.execPath}\nconst {writeFileSync}=require('node:fs');const {spawn}=require('node:child_process');writeFileSync(${JSON.stringify(log)},JSON.stringify(process.argv.slice(2)));const child=spawn(${JSON.stringify(process.execPath)},[${JSON.stringify(cli)},'--endpoint',${JSON.stringify(`unix:${h.source.path}`)},'system','endpoint','--stdio'],{env:process.env,stdio:'inherit'});child.on('exit',code=>process.exit(code??1));\n`, { mode: 0o700 })

@@ -15,7 +15,7 @@ const files = directory => readdirSync(directory, { recursive: true, withFileTyp
 for (const file of [...files(join(root, 'packages/core/src')), ...[
   'packages/core/test/agent-context.test.ts', 'packages/core/test/fixtures/native-history-session.ts',
   'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/scripts/verify-agent-context.mjs',
-  'packages/core/bin/agentmux', 'packages/core/package.json', 'packages/core/scripts/build.mjs',
+  'packages/core/bin/amux', 'packages/core/package.json', 'packages/core/scripts/build.mjs',
   'packages/core/scripts/clean-build.mjs', 'packages/core/tsconfig.json', 'packages/core/tsconfig.build.json',
   'tsconfig.base.json', 'vitest.config.ts', 'vitest.dist-freshness.ts', 'vitest.setup.ts'
 ].map(path => join(root, path))]) inputs[relative(root, file)] = sha(readFileSync(file))

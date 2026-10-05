@@ -61,7 +61,7 @@ describe('target Host Executor owner', () => {
       expect(observed.unavailable).toEqual([])
       expect(observed.executors).toHaveLength(303)
       expect(observed.executors.at(-1)?.executorId).toBe('next-wrapper')
-      const result = await exec(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'app', 'snapshot', '--include', 'executors', '--limit', '500'], {
+      const result = await exec(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix:${server.path}`, 'app', 'snapshot', '--include', 'executors', '--limit', '500'], {
         env: { ...process.env, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined, AGENTMUX_RUNTIME_DIRECTORY: f.root, AGENTMUX_ENV: undefined }, timeout: 5000
       })
       expect(JSON.parse(result.stdout).result.executors).toEqual(observed.executors)

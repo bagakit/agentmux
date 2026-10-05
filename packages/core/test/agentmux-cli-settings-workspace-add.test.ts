@@ -13,7 +13,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION,
 import type { AgentMuxControlSettingsWorkspaceAddRequest, AgentMuxControlSettingsResourceItem } from '../src/index.js'
 import { AgentMuxError } from '../src/errors.js'
 
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'workspace-add-proof' }
 const operation = 'settings.workspaces.add'
 const command = ['settings', 'workspaces', 'register']

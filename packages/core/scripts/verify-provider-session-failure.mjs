@@ -36,7 +36,7 @@ const candidate = join(evidence, 'candidate')
 await rm(candidate, { recursive: true, force: true }); await mkdir(join(candidate, 'bin'), { recursive: true })
 await writeFile(join(candidate, 'package.json'), '{"type":"module"}\n')
 await symlink(join(root, 'packages/core/node_modules'), join(candidate, 'node_modules'), 'dir')
-await copyFile(join(root, 'packages/core/bin/agentmux'), join(candidate, 'bin/agentmux'))
+await copyFile(join(root, 'packages/core/bin/amux'), join(candidate, 'bin/amux'))
 const compile = run(['node_modules/typescript/bin/tsc', '--project', 'packages/core/tsconfig.build.json',
   '--composite', 'false', '--incremental', 'false', '--noEmitOnError', 'false', '--outDir', join(candidate, 'dist')])
 await writeFile(join(evidence, 'candidate-compile.log'), compile.stdout + compile.stderr)
@@ -44,7 +44,7 @@ const compileDiagnostics = diagnostics(compile)
 assert.deepEqual(compileDiagnostics.filter(line => sources.some(file => line.startsWith(file + '('))), [], 'Candidate owning compile diagnostics')
 assert.ok(compile.status === 0 || compileDiagnostics.length > 0, 'Compiler startup failure cannot qualify candidate')
 assert.ok((await readFile(join(candidate, 'dist/agentmux.js'))).byteLength > 0)
-const baseEnv = { AMX_FAILURE_CLI: join(candidate, 'bin/agentmux'), AMX_FAILURE_COMPILED: join(candidate, 'dist'), AMX_FAILURE_PROOF: evidence }
+const baseEnv = { AMX_FAILURE_CLI: join(candidate, 'bin/amux'), AMX_FAILURE_COMPILED: join(candidate, 'dist'), AMX_FAILURE_PROOF: evidence }
 const mutations = ['capacity', 'failure-is-done', 'ignore-native-error', 'late-old-turn', 'late-stop', 'no-reconnect', 'old-run', 'batch-start-clock', 'late-phase']
 const receipts = []
 async function execute(label, mutation) {

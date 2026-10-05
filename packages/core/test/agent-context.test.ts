@@ -174,7 +174,7 @@ it('routes an exact configured remote Host through its original forwardRpc names
   expect(wrongRoute).toMatchObject({ code: 'AGENT_CONTEXT_SOURCE_CHANGED' })
 })
 it('actual compiled CLI consumes the same full public owner and meaningful failures', async () => {
-  const f = await endpoint(), cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/agentmux')
+  const f = await endpoint(), cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
   const invoke = async (args: string[]) => promisify(execFile)(process.execPath, [cli, '--endpoint', `unix:${f.socketPath}`, 'agent', 'context', ...args], {
     env: objectCliEnvironment(f.root), timeout: 15_000, maxBuffer: 4 * 1024 * 1024 })
   const args = ['--host', 'local', '--session', f.session.agentSessionId, '--limit', '1']
@@ -207,7 +207,7 @@ it('preserves original sourceDevice and sourceChannel through durable context, p
   if ('error' in observed) throw observed.error
   const page = observed.page
   expect(page.captured!.items.find(item => item.id === original.id)).toEqual(original)
-  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/agentmux')
+  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
   const output = await promisify(execFile)(process.execPath, [cli, '--endpoint', `unix:${f.socketPath}`, 'agent', 'context', '--host', 'local', '--session', f.session.agentSessionId], {
     env: objectCliEnvironment(f.root), timeout: 15_000, maxBuffer: 4 * 1024 * 1024 })
   expect(JSON.parse(output.stdout).result.captured.items.find((item: { id: string }) => item.id === original.id)).toEqual(original)

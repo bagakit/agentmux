@@ -38,7 +38,7 @@ try {
     }
   }
   await writeFile(join(privateBuild, 'package.json'), '{"type":"module"}\n')
-  await writeFile(join(privateBuild, 'bin/agentmux'), "#!/usr/bin/env node\nimport '../dist/agentmux.js'\n")
+  await writeFile(join(privateBuild, 'bin/amux'), "#!/usr/bin/env node\nimport '../dist/agentmux.js'\n")
   const cliBuild = await build({ entryPoints: [join(repo, 'packages/core/src/agentmux.ts')], outfile: join(privateBuild, 'dist/agentmux.js'),
     bundle: true, platform: 'node', format: 'esm', packages: 'external', alias: aliases, metafile: true, sourcemap: false })
   const cliInputs = Object.keys(cliBuild.metafile.inputs)
@@ -60,7 +60,7 @@ try {
     await writeFile(loaded, '')
     let result
     try { const value = await exec(process.execPath, [join(repo, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'packages/core/test/fixtures/native-session-change/vitest.owning.config.mts'],
-      { cwd: repo, env: { ...process.env, AGENTMUX_TEST_OBJECT_CLI: join(privateBuild, 'bin/agentmux'), AMX_SOURCE_CHANGE_MUTATION: mutation,
+      { cwd: repo, env: { ...process.env, AGENTMUX_TEST_OBJECT_CLI: join(privateBuild, 'bin/amux'), AMX_SOURCE_CHANGE_MUTATION: mutation,
         AMX_SOURCE_CHANGE_LOADED: loaded, AMX_SOURCE_CONFIRM_STORE_MODULE: join(privateBuild, 'dist/store.js') }, timeout: 120000, maxBuffer: 4 * 1024 * 1024 }); result = { code: 0, ...value } }
     catch (error) { result = { code: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? '' } }
     await writeFile(join(evidence, name + '.log'), result.stdout + result.stderr)

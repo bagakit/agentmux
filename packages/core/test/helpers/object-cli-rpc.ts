@@ -13,7 +13,7 @@ export function objectCliEnvironment(root: string, overrides: NodeJS.ProcessEnv 
     AGENTMUX_AGENT_SESSION_STORE: join(root, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson'), ...overrides }
 }
 export async function runCompiledObjectCli(args: readonly string[], env: NodeJS.ProcessEnv, stdin = ''): Promise<CliResult> {
-  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? fileURLToPath(new URL('../../bin/agentmux', import.meta.url))
+  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? fileURLToPath(new URL('../../bin/amux', import.meta.url))
   const compiled = resolve(dirname(cli), '../dist/agentmux.js')
   if (!(await readFile(compiled)).byteLength) throw new Error('Compiled CLI is empty.')
   return new Promise((resolve, reject) => {
