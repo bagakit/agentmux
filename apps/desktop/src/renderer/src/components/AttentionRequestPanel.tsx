@@ -1,5 +1,5 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { ArrowRight, ArrowUpRight, CheckCircle2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import { useAppStore } from '../store'
@@ -9,6 +9,12 @@ import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentIntera
 import { isNeedsYouState } from '../lib/attention-vocabulary'
 import { api } from '../lib/api'
 import type { SessionSnapshot } from '../../../shared/contracts'
+
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+
 
 type SubmittedInteraction = {
   hostId: string
@@ -289,7 +295,7 @@ export function AttentionRequestPanel({
       <aside ref={panelRef} className="attention-request-panel" aria-label="Attention request" tabIndex={-1} onKeyDown={handleKeyDown}>
         <header className="attention-request-panel__header">
           <div><span>{confirmed ? 'Session closed' : 'Needs you'}</span><strong>{confirmed ? failedClose.label : 'Session unavailable'}</strong></div>
-          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><X size={14} /></button>
+          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></button>
         </header>
         <div className="attention-request-panel__empty" role="status">{confirmed ? 'Core confirmed that this failed Session was closed. Your other work remains open.' : 'The Session is not currently available. Its close has not been confirmed. Return to Agents and try again.'}</div>
       </aside>
@@ -317,8 +323,8 @@ export function AttentionRequestPanel({
       <header className="attention-request-panel__header">
         <div><span>{failed ? failureTitle : request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small title={displayPath(session.workspacePath, session.hostId)}>{displayPath(session.workspacePath, session.hostId)}</small></div>
         <div className="attention-request-panel__actions">
-          <button type="button" className="small-button" onClick={() => selectSession(session.id)}><ArrowUpRight size={12} /> Open Session</button>
-          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><X size={14} /></button>
+          <button type="button" className="small-button" onClick={() => selectSession(session.id)}><ThemeActionOpenExternalIcon size={12} /> Open Session</button>
+          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></button>
         </div>
       </header>
       {actionError ? <div className="attention-request-panel__error" role="alert" aria-live="polite">{actionError}</div> : null}
@@ -340,7 +346,7 @@ export function AttentionRequestPanel({
         </>
       ) : caughtUp ? (
         <div className="attention-request-panel__empty" role="status" tabIndex={-1}>
-          <CheckCircle2 size={15} aria-hidden="true" /> <span>All caught up. No other Agent is waiting for you.</span>
+          <ThemeStatusCompletedIcon size={15} aria-hidden="true" /> <span>All caught up. No other Agent is waiting for you.</span>
         </div>
       ) : resolved ? (
         <div className="attention-request-panel__empty" role="status">No current request. This view follows the same Core facts as the Session.</div>
@@ -349,7 +355,7 @@ export function AttentionRequestPanel({
       ) : (
         <div className="attention-request-panel__empty" role="status">This Session needs attention, but Core has not exposed a typed request. Open the Session to inspect it.</div>
       )}
-      {caughtUp ? <button type="button" className="small-button attention-request-panel__next" onClick={close}><ArrowRight size={12} /> Return to Agents</button> : null}
+      {caughtUp ? <button type="button" className="small-button attention-request-panel__next" onClick={close}><ThemeNavigationForwardIcon size={12} /> Return to Agents</button> : null}
     </aside>
   )
 }

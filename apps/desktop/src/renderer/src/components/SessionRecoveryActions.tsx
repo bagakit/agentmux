@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowRight, Search, RotateCcw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -9,6 +9,11 @@ import { useScratchTopics } from '../hooks/useScratchTopics'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, recoveryMoteTargets,
   type RecoveryMode, type RecoverySource, type RecoveryActionResult } from '../lib/session-recovery-actions'
+
+const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+
 
 /** Explicit choices share the existing spatial/queue correlation across dialog and Renderer mounts. */
 export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
@@ -76,10 +81,10 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
   const canSubmit = existing || (destination === 'agent' ? Boolean(executorId && config?.executors[executorId]) : Boolean(target))
   return <div className="session-recovery-actions">
     <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
-      <RotateCcw size={12} /> {restoring ? workingLabel : restoreLabel}
+      <ThemeActionRotateResetIcon size={12} /> {restoring ? workingLabel : restoreLabel}
     </button>
-    {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ArrowRight size={12} /> Take over</button> : null}
-    <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><Search size={12} /> Analyze…</button>
+    {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
+    <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</button>
     <Dialog.Root open={mode !== null} onOpenChange={next => { if (!next) close() }}>
       <Dialog.Portal container={resolveOverlayContainer()}>
         <Dialog.Overlay className="dialog-scrim" />

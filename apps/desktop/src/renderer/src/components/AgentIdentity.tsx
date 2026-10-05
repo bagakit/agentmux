@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUpRight, ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { agentEvidenceStale } from '@agentmux/core/agent-status'
 import type { AgentAvatarAppearance, ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
@@ -6,6 +6,11 @@ import { describeAgentDisplayState } from '../../../shared/agent-state-presentat
 import { AgentAvatar } from './AgentAvatar'
 import { AgentStatusPromptActions } from './AgentStatusPromptActions'
 import { agentProviderLabel } from './AgentProviderIcon'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 type AgentSession = Extract<SessionSnapshot, { kind: 'agent' }>
 
@@ -35,7 +40,7 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, queue, inpu
   return <div ref={face} className="agent-state-face">
     <div className="agent-state-face__summary">
       <strong>{meaning.label}</strong>
-      {review && reviewReady ? <button type="button" className="small-button" aria-label="Back to Agent status" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(false) }}><ArrowLeft size={12} /><span>Back to Agent status</span></button>
+      {review && reviewReady ? <button type="button" className="small-button" aria-label="Back to Agent status" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(false) }}><ThemeNavigationBackIcon size={12} /><span>Back to Agent status</span></button>
         : <p>{queue ? 'Queue a message.' : inputAction}</p>}
     </div>
     <div className="agent-state-face__body">
@@ -43,7 +48,7 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, queue, inpu
         <AgentStatusPromptActions prompts={prompts} state={session.status.state} disabled={disabled} queue={queue}
           disabledReason={disabled ? inputAction : undefined} onSelect={(prompt) => { if (onSelect(prompt)) close(true) }} />
         {reviewReady ? <button type="button" className="agent-state-face__review small-button" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(true) }}>
-          <ArrowUpRight size={13} aria-hidden="true" /><span>Review result</span><ChevronRight size={13} aria-hidden="true" />
+          <ThemeActionOpenExternalIcon size={13} aria-hidden="true" /><span>Review result</span><ThemeNavigationDisclosureIcon size={13} aria-hidden="true" />
         </button> : null}
         <details className="agent-state-face__facts"><summary>State details</summary>
           <p>{meaning.description}</p>

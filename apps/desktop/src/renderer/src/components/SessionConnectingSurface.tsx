@@ -1,4 +1,4 @@
-import { Check, Copy, SquareDashed, TerminalSquare } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState, type ReactNode } from 'react'
 import type { AgentAvatarAppearance, AgentExecutorConfig, SessionHistoryReference } from '../../../shared/contracts'
 import type { PendingAgentLaunch } from '../lib/session-state'
@@ -7,6 +7,12 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentAvatar } from './AgentAvatar'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
+
+const ThemeObjectBoundaryIcon = semanticIconComponent('object.boundary')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeStatusCopiedIcon = semanticIconComponent('status.copied')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
 export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, actions, visible = true }: {
@@ -51,15 +57,15 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
       {surfaceKind === 'agent' ? <div className="session-connecting__executor">
         {executor
           ? <AgentAvatar providerId={executor.providerId} executorId={request?.executorId} label={executorLabel} appearance={appearance} size={18} />
-          : <SquareDashed size={18} aria-label="Unknown executor" />}
+          : <ThemeObjectBoundaryIcon size={18} aria-label="Unknown executor" />}
         <strong>{executorLabel}</strong>
-      </div> : <div className="session-connecting__executor"><TerminalSquare size={18} /><strong>Terminal</strong></div>}
+      </div> : <div className="session-connecting__executor"><ThemeObjectTerminalIcon size={18} /><strong>Terminal</strong></div>}
       {surfaceKind === 'agent' && phase === 'launch' ? <section className="session-connecting__prompt" aria-label="Initial prompt">
         <div className="session-connecting__prompt-heading">
           <span className="session-connecting__eyebrow">Initial prompt</span>
           {prompt ? <button type="button" className="session-connecting__copy" disabled={copying}
             onClick={() => { void copyPrompt() }} title="Copy the complete initial prompt" aria-label="Copy initial prompt">
-            {copied ? <Check size={13} /> : <Copy size={13} />}<span aria-live="polite">{copying ? 'Copying…' : copied ? 'Copied' : 'Copy'}</span>
+            {copied ? <ThemeStatusCopiedIcon size={13} /> : <ThemeActionCopyIcon size={13} />}<span aria-live="polite">{copying ? 'Copying…' : copied ? 'Copied' : 'Copy'}</span>
           </button> : null}
         </div>
         {prompt ? <pre>{prompt}</pre> : <p className="session-connecting__empty">{request

@@ -4,7 +4,7 @@ import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
-import { AlertTriangle, ArrowRight, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
 import { agentRegionExecution, useAppStore } from '../store'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
@@ -63,6 +63,14 @@ import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import type { ConversationRevealRequest, MailboxMessageNavigationResult } from '../lib/mailbox-message-navigation'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeStatusHostUnavailableIcon = semanticIconComponent('status.host-unavailable')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+
 
 const NO_TIMELINE_ITEMS: never[] = []
 const NO_PRESENTATIONS: readonly WorkbenchViewTarget[] = []
@@ -616,7 +624,7 @@ export function SessionPane({
     {recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver} restoring={refreshing}
       workingLabel="Reading…" restoreLabel="Check original" onRestore={() => void refreshUnobserved()} />
       : <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
-        <RefreshCw size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
+        <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
       </button>}
   </> : null
 
@@ -735,7 +743,7 @@ export function SessionPane({
           : 'Creation confirmed; process and input unconfirmed.',
         restore: 'Check again for this same Session and Timeline.'
       }} actions={!readOnly && session ? <button type="button" className="small-button" disabled={refreshing}
-        onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null} />
+        onClick={() => { void refresh() }}><ThemeActionRefreshIcon size={12} /> Check again</button> : null} />
     </div>
   )
   // Lifecycle, recovery and observation remain owned here. Each confirmed display
@@ -840,7 +848,7 @@ export function SessionPane({
             mode: 'The original Region and Session reference remain visible. Its current state is unconfirmed.',
             restore: 'Check again to read the same Session identity; no Agent will be started.' }
         }} actions={<button type="button" className="small-button" disabled={historyCatalogue.loading}
-          onClick={historyCatalogue.refresh}><RefreshCw size={12} /> Check again</button>} /> : null}
+          onClick={historyCatalogue.refresh}><ThemeActionRefreshIcon size={12} /> Check again</button>} /> : null}
         {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
@@ -883,7 +891,7 @@ export function SessionPane({
     restoreLabel={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'Re-read original' : continuityNotice?.remedy.kind === 'wait' ? 'Waiting for operation' : 'Restore original'}
     onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refresh(); else void recover() }} /> : (
     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-      <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
+      <ThemeActionRotateResetIcon size={12} /> {recovering ? 'Resuming…' : 'Resume'}
     </button>
   )
   const pendingRestoreDetail = pendingAgentRestore && startupDecision ? continuityNotice?.reason ?? (recoveryCandidate
@@ -1010,7 +1018,7 @@ export function SessionPane({
           {(disconnected || missing || exited) && !pendingAgentRestore ? (
             <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
-                {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
+                {refreshing || recovering ? <ThemeStatusLoadingIcon className="spin" size={16} /> : session.status.state === 'error' ? <ThemeStatusWarningIcon size={16} /> : disconnected || missing ? <ThemeStatusHostUnavailableIcon size={16} /> : <ThemeActionStopIcon size={16} />}
               </span>
               <div>
                 <strong>{recoveryTitle}</strong>
@@ -1026,12 +1034,12 @@ export function SessionPane({
                 ) : session.kind === 'terminal' ? (
                   disconnected ? (
                     <button type="button" className="small-button" disabled={refreshing} onClick={() => void refresh()}>
-                      <RefreshCw size={12} /> {refreshing ? 'Checking…' : 'Check again'}
+                      <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Checking…' : 'Check again'}
                     </button>
                   ) : (
                     // The PTY is gone for good — relaunch a fresh terminal in the same cwd.
                     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
-                      <RotateCcw size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
+                      <ThemeActionRotateResetIcon size={12} /> {recovering ? 'Restarting…' : 'Restart terminal'}
                     </button>
                   )
                 ) : agentRecoveryAction}

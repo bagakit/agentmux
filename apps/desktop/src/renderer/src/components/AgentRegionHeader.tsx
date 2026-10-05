@@ -1,5 +1,5 @@
 import { RegionCurrentDemand } from './RegionCurrentDemand'
-import { ArrowRight, History, MoreHorizontal, RotateCcw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -7,6 +7,12 @@ import { RegionMenuEntryView, useRegionMenuEntries } from './RegionContextMenu'
 import { HostBadge } from './HostBadge'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
 import { useAgentNativeSourceControls, nativeSourceLabel, type AgentNativeSourceReference } from './AgentNativeSourceControls'
+
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
+
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
 export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions }: {
@@ -68,7 +74,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
         aria-label={`More actions for ${name}${nativeSession && nativeSourceLabel(nativeSession) ? `; ${nativeSourceLabel(nativeSession)}` : ''}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
         onPointerDown={(event) => event.stopPropagation()}>
         {nativeSession && nativeSourceLabel(nativeSession) ? <span className="agent-region-header__source" data-native-source-marker="">{nativeSourceLabel(nativeSession)}</span> : null}
-        <MoreHorizontal size={14} />
+        <ThemeActionMoreIcon size={14} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
         data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={0} collisionPadding={8}
@@ -91,13 +97,13 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           handoffFocus.current = true
           onTakeOver()
         }}>
-          <ArrowRight size={14} /><span>Take over</span>
+          <ThemeNavigationForwardIcon size={14} /><span>Take over</span>
         </DropdownMenu.Item> : null}
         {onRefreshObservation ? <DropdownMenu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
-          <RotateCcw size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
+          <ThemeActionRotateResetIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
         </DropdownMenu.Item> : null}
         {onHistory ? <><DropdownMenu.Item className="tab-context-menu__item" onSelect={onHistory}>
-          <History size={14} /><span>Conversation history</span>
+          <ThemeObjectHistoryIcon size={14} /><span>Conversation history</span>
         </DropdownMenu.Item>{entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}</> : null}
         {entries.map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index}
           Item={DropdownMenu.Item} Separator={DropdownMenu.Separator} />)}

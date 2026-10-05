@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle, RefreshCw, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -7,6 +7,12 @@ import { focusTakeoverResult, inspectTakeover, takeOverSession, type TakeoverSou
 import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { AgentAvatar } from './AgentAvatar'
+
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 /** A local workface transition. The underlying Session and editor stay mounted. */
 export function SessionTakeoverSurface({ source, active, onClose }: {
@@ -129,23 +135,23 @@ export function SessionTakeoverSurface({ source, active, onClose }: {
     <div className="session-takeover__content">
       <div className="session-takeover__origin">
         <AgentAvatar executorId={source.executorId} providerId={sourceExecutor?.providerId} label={source.label} size={22} />
-        <span title={source.label}>{source.label}</span><ArrowRight size={14} aria-hidden="true" />
+        <span title={source.label}>{source.label}</span><ThemeNavigationForwardIcon size={14} aria-hidden="true" />
         <span className="session-takeover__destination">Next Agent</span>
       </div>
       <header className="session-takeover__heading">
         <div><h2>Keep the work moving.</h2><p>Choose an Agent to take over.</p></div>
-        <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><X size={16} /></button>
+        <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
       </header>
       <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed}
         onSelect={id => { void choose(id) }} />
       <div className="session-takeover__footer" aria-live="polite">
-        {busy ? <span><LoaderCircle size={13} className="spin" />{unconfirmed ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
+        {busy ? <span><ThemeStatusLoadingIcon size={13} className="spin" />{unconfirmed ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
           : <span>Context follows automatically. Your original session stays here.</span>}
         <button type="button" className="session-takeover__back" onClick={() => close()}>Back<span aria-hidden="true">Esc</span></button>
       </div>
       {issue ? <div className="session-takeover__issue" role="status">
         <strong>{unconfirmed ? 'Takeover is not confirmed' : 'Could not take over'}</strong><p>{issue}</p>
-        <button type="button" className="small-button" disabled={busy} onClick={() => { void check() }}><RefreshCw size={12} /> Check again</button>
+        <button type="button" className="small-button" disabled={busy} onClick={() => { void check() }}><ThemeActionRefreshIcon size={12} /> Check again</button>
       </div> : null}
     </div>
   </section>

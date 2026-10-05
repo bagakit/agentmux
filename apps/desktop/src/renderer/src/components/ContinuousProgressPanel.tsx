@@ -1,4 +1,10 @@
-import { Pause, Play, Square, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+
+const ThemeActionPauseIcon = semanticIconComponent('action.pause')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+
 
 export type ContinuousProgressPanelLoop = {
   loopId: string
@@ -28,9 +34,9 @@ export function ContinuousProgressPanel({ loop, onPause, onResume, onStop, onChe
     </dl>
     {loop.loopState !== 'stopped' ? <>
       <div className="continuous-progress-panel__actions">
-        {loop.loopState === 'active' ? <button type="button" aria-label="Pause continuous progress" disabled={disabled} onClick={onPause}><Pause size={13} aria-hidden="true" />Pause</button> : <button type="button" aria-label="Resume continuous progress" disabled={disabled} onClick={onResume}><Play size={13} aria-hidden="true" />Resume</button>}
-        <button type="button" aria-label="Check continuous progress now" disabled={disabled || loop.loopState !== 'active'} onClick={onCheck}><RefreshCw size={13} aria-hidden="true" />Check now</button>
-        <button type="button" aria-label="Stop continuous progress" disabled={disabled} onClick={onStop}><Square size={13} aria-hidden="true" />Stop loop</button>
+        {loop.loopState === 'active' ? <button type="button" aria-label="Pause continuous progress" disabled={disabled} onClick={onPause}><ThemeActionPauseIcon size={13} aria-hidden="true" />Pause</button> : <button type="button" aria-label="Resume continuous progress" disabled={disabled} onClick={onResume}><ThemeActionStartIcon size={13} aria-hidden="true" />Resume</button>}
+        <button type="button" aria-label="Check continuous progress now" disabled={disabled || loop.loopState !== 'active'} onClick={onCheck}><ThemeActionRefreshIcon size={13} aria-hidden="true" />Check now</button>
+        <button type="button" aria-label="Stop continuous progress" disabled={disabled} onClick={onStop}><ThemeActionStopIcon size={13} aria-hidden="true" />Stop loop</button>
       </div>
       <p className="continuous-progress-control__help">Stop loop ends automatic continuation. It does not stop the Agent.</p>
     </> : null}

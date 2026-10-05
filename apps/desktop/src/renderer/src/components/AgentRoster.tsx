@@ -1,7 +1,7 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { ChevronUp, ShieldAlert } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'
 import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
@@ -10,6 +10,10 @@ import { statusDotTier } from '../lib/attention-event'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { CONTEXT_PRESSURE_HINT } from '../lib/agent-usage'
+
+const ThemeStatusPermissionIcon = semanticIconComponent('status.permission')
+const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
+
 
 // The roster behind the attention bar's total.
 //
@@ -89,7 +93,7 @@ export function RosterRowView({
             {/* Absence hides: an Agent on Provider defaults shows nothing here rather than a guess. */}
             {scopeText ? (
               <small className="agent-roster__scope" {...(tier ? { 'data-tier': tier } : {})}>
-                {tier === 'danger' ? <ShieldAlert size={9} aria-hidden="true" /> : null}
+                {tier === 'danger' ? <ThemeStatusPermissionIcon size={9} aria-hidden="true" /> : null}
                 {scopeText}
               </small>
             ) : null}
@@ -172,7 +176,7 @@ export function AgentRoster({ total }: { total: number }) {
           <span className="status" aria-hidden="true"><span className="status__dot" /></span>
           <span className="agent-status-bar__count">{total}</span>
           <span className="agent-status-bar__label">{total === 1 ? 'agent' : 'agents'}</span>
-          <ChevronUp size={10} aria-hidden="true" />
+          <ThemeNavigationUpIcon size={10} aria-hidden="true" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -246,7 +250,7 @@ export function AgentTreePanel({ filter, heading, label, count }: {
           aria-label={label}
           title={label}
         >
-          <ChevronUp size={10} aria-hidden="true" />
+          <ThemeNavigationUpIcon size={10} aria-hidden="true" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

@@ -1,6 +1,6 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import type { ReactNode } from 'react'
-import { CheckCircle2, ExternalLink, FileDiff, Globe2, ListChecks, MessageCircle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
@@ -11,6 +11,14 @@ import { resolveWorkspaceRelativePath } from '@agentmux/client-ui/terminal-path-
 import { workspaceForSession } from '../lib/workbench-tabs'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { useAppStore } from '../store'
+
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeObjectCriteriaIcon = semanticIconComponent('object.criteria')
+const ThemeFileDiffIcon = semanticIconComponent('file.diff')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
+
 
 function resultTargets(items: readonly AgentTimelineItem[]): { diffPath: string | null; previewUrls: string[] } {
   let diffPath: string | null = null
@@ -96,17 +104,17 @@ export function SessionResultReviewContent({ sessionId, items, origin, controls,
   const summary = targetCount > 0 ? `${targetCount} review target${targetCount === 1 ? '' : 's'} available` : 'Review the work, then continue this Session.'
   return <div className="session-result-review__details">
     <div className="session-result-review__heading">
-      <div className="session-result-review__identity">{showStatus ? <CheckCircle2 size={15} aria-hidden="true" /> : null}<span><strong>{showStatus ? 'Turn ended' : 'Review targets'}</strong><small>{summary}</small></span></div>
+      <div className="session-result-review__identity">{showStatus ? <ThemeStatusCompletedIcon size={15} aria-hidden="true" /> : null}<span><strong>{showStatus ? 'Turn ended' : 'Review targets'}</strong><small>{summary}</small></span></div>
       {controls}
     </div>
         <div className="session-result-review__details-actions">
-          <button type="button" className="small-button" onClick={() => { setViewMode(sessionId, 'activity'); onNavigate?.() }}><ListChecks size={12} /> Activity</button>
+          <button type="button" className="small-button" onClick={() => { setViewMode(sessionId, 'activity'); onNavigate?.() }}><ThemeObjectCriteriaIcon size={12} /> Activity</button>
           {workspace && repository ? reviewableChanges.map(({ change, path }) => (
-            <button key={change.path} type="button" className="small-button" onClick={() => void openFileDiff(path, workspace.id).then(onNavigate).catch(reportError)}><FileDiff size={12} /> <span title={path}>{path}</span></button>
+            <button key={change.path} type="button" className="small-button" onClick={() => void openFileDiff(path, workspace.id).then(onNavigate).catch(reportError)}><ThemeFileDiffIcon size={12} /> <span title={path}>{path}</span></button>
           )) : null}
-          {workspace && uniqueTimelineDiffPath ? <button type="button" className="small-button" onClick={() => void openFileDiff(uniqueTimelineDiffPath, workspace.id).then(onNavigate).catch(reportError)}><FileDiff size={12} /> Review changes</button> : null}
-          {previewUrls.map((previewUrl) => <button key={previewUrl} type="button" className="small-button" onClick={() => void openHttpLink(origin, previewUrl, 'tab').then(onNavigate).catch(reportError)}><Globe2 size={12} /> <span title={previewUrl}>Preview</span> <ExternalLink size={11} /></button>)}
-          <button type="button" className="small-button" onClick={() => { selectSession(session.id); onNavigate?.() }}><MessageCircle size={12} /> Continue in Session</button>
+          {workspace && uniqueTimelineDiffPath ? <button type="button" className="small-button" onClick={() => void openFileDiff(uniqueTimelineDiffPath, workspace.id).then(onNavigate).catch(reportError)}><ThemeFileDiffIcon size={12} /> Review changes</button> : null}
+          {previewUrls.map((previewUrl) => <button key={previewUrl} type="button" className="small-button" onClick={() => void openHttpLink(origin, previewUrl, 'tab').then(onNavigate).catch(reportError)}><ThemeObjectBrowserIcon size={12} /> <span title={previewUrl}>Preview</span> <ThemeActionOpenExternalIcon size={11} /></button>)}
+          <button type="button" className="small-button" onClick={() => { selectSession(session.id); onNavigate?.() }}><ThemeObjectConversationIcon size={12} /> Continue in Session</button>
         </div>
         {reviewState === 'read-failed' ? <span className="session-result-review__hint">Could not read changes for this workspace: {git.error}</span> : null}
         {reviewState === 'not-a-git-repository' ? <span className="session-result-review__hint">This Session workspace is not a Git repository.</span> : null}
