@@ -19,7 +19,7 @@ import { canFormatFile } from '../lib/file-formats/format-support'
 import { cancelFileRegionFormat, formatFileRegion, type FileFormatResult } from '../lib/file-formats/format-file-region'
 
 const FileSourceEditor = lazy(loadFileSourceEditor)
-const GitDiffCanvas = lazy(async () => ({ default: (await import('./GitDiffCanvas')).GitDiffCanvas }))
+const GitDiffCanvas = lazy(async () => ({ default: (await import('../features/git/diff/GitDiffCanvas')).GitDiffCanvas }))
 
 // The failure state of a file surface. It stays hookless so it can be exercised without a Monaco
 // render context: the reveal action is the one output an unopenable file must still offer, and the

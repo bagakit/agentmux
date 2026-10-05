@@ -1,3 +1,4 @@
+import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest } from './components/SettingsNavigation'
@@ -513,6 +514,7 @@ function DesktopApp() {
   }
 
   return (
+    <GitHistoryProvider workspace={workspace}>
     <SettingsNavigation.Provider value={settingsNavigation}>
     <WindowSidebarLayoutContext.Provider value={windowSidebars}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
@@ -655,5 +657,6 @@ function DesktopApp() {
     </ExecutorIdentityContext.Provider>
     </WindowSidebarLayoutContext.Provider>
     </SettingsNavigation.Provider>
+    </GitHistoryProvider>
   )
 }

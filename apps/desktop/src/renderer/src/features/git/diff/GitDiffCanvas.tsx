@@ -1,12 +1,14 @@
-import '../monaco'
+import '../../../monaco'
 import { useEffect, useId, useRef } from 'react'
 import * as monaco from 'monaco-editor'
 import { AlertTriangle } from 'lucide-react'
-import type { EditorRegionDiffState } from '../store'
-import type { MonacoThemeId } from '../lib/monaco-theme'
-import { diffEditorSides, wordWrapOption } from '../lib/editor-diff'
-import { FullPageLoadingSurface } from './FullPageLoadingSurface'
-import { useEditorTypography } from '../hooks/useEditorTypography'
+import type { GitFileDiff } from '../../../../../shared/git-contracts'
+
+export type GitDiffViewState = { loading: boolean; diff: GitFileDiff | null; error: string | null }
+import type { MonacoThemeId } from '../../../lib/monaco-theme'
+import { diffEditorSides, wordWrapOption } from '../../../lib/editor-diff'
+import { FullPageLoadingSurface } from '../../../components/FullPageLoadingSurface'
+import { useEditorTypography } from '../../../hooks/useEditorTypography'
 
 // Shared readonly canvas for worktree and fixed-commit diffs. Main owns the old/new sides; Monaco
 // owns diff rendering. Binary or oversized blobs never masquerade as two empty text documents.
@@ -16,7 +18,7 @@ export function GitDiffCanvas({
   language,
   theme
 }: {
-  diff: EditorRegionDiffState | undefined
+  diff: GitDiffViewState | undefined
   wordWrap: boolean
   language: string
   theme: MonacoThemeId

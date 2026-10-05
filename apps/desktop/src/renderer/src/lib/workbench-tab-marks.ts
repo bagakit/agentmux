@@ -248,7 +248,7 @@ function markLabel(mark: WorkbenchTabMark): string {
     case 'file':
       return 'File'
     case 'git':
-      return 'Git history'
+      return 'Git'
     case 'git-diff':
       return 'Git diff'
     case 'launcher':

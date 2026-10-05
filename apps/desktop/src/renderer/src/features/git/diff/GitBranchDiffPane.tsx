@@ -1,10 +1,10 @@
 import { RefreshCw, WrapText } from 'lucide-react'
 import { useEffect } from 'react'
-import { useMonacoTheme } from '../hooks/useMonacoTheme'
-import { detectLanguage } from '../lib/language-detect'
-import type { GitDiffWorkbenchSurface } from '../lib/workbench-tabs'
-import { useAppStore } from '../store'
-import { EditorReleasedState } from './EditorReleasedState'
+import { useMonacoTheme } from '../../../hooks/useMonacoTheme'
+import { detectLanguage } from '../../../lib/language-detect'
+import type { GitDiffWorkbenchSurface } from '../../../lib/workbench-tabs'
+import { useAppStore } from '../../../store'
+import { EditorReleasedState } from '../../../components/EditorReleasedState'
 import { GitDiffCanvas } from './GitDiffCanvas'
 
 export function GitBranchDiffPane({ surface, released = false, visible = true }: {
@@ -27,7 +27,7 @@ export function GitBranchDiffPane({ surface, released = false, visible = true }:
   if (released) return <EditorReleasedState />
   const { file } = surface.comparison
   const commit = 'kind' in surface.comparison && surface.comparison.kind === 'commit' ? surface.comparison : null
-  const branch = !commit ? surface.comparison as import('../../../shared/git-contracts').GitBranchDiffDescriptor : null
+  const branch = !commit ? surface.comparison as import('../../../../../shared/git-contracts').GitBranchDiffDescriptor : null
   const baseLabel = commit ? (commit.snapshot.parentOid ? 'Parent' : 'Empty tree')
     : branch!.snapshot.mode === 'merge-base' ? 'Merge base' : branch!.snapshot.baseBranch
   const targetLabel = commit ? 'Commit' : branch!.snapshot.targetBranch
