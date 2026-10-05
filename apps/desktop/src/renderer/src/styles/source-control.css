@@ -18,7 +18,8 @@
 .source-control-actions { display: flex; align-items: center; gap: 1px; }
 .branches-panel--branches .branch-search { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: 0 var(--sp-3) var(--sp-2); }
 .branch-search__field { flex: 1; min-width: 0; height: 26px; display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-1); }
-.branch-search__field:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.branch-search__field:focus-within { border-color: var(--focus-line); }
+.branch-search__field .ui-input:focus-visible { outline: none; }
 .branch-search__field > svg { flex: 0 0 12px; }
 .branch-search__field input { flex: 1; min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-meta); }
 .branch-search__field input::-webkit-search-cancel-button { -webkit-appearance: none; }
@@ -92,7 +93,7 @@
 .branch-create-dialog__context strong { overflow: hidden; color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .branch-create-dialog label { display: grid; gap:var(--sp-2); padding:var(--sp-5) var(--sp-6) 0; color: var(--text-3); font-size: var(--fs-micro); }
 .branch-create-dialog input { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font: 11px/1.4 "SFMono-Regular", monospace; }
-.branch-create-dialog input:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.branch-create-dialog input:focus { border-color: var(--focus-line); }
 .branch-create-dialog form > p, .branches-inline-error { margin:0; color: var(--red-text); font-size: var(--fs-micro); line-height: 1.4; }
 .branch-create-dialog form > p { margin:var(--sp-4) var(--sp-6) 0; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); background: var(--red-bg); }
 .branch-create-dialog footer { display: flex; justify-content: flex-end; gap:var(--sp-3); margin-top:var(--sp-6); padding:0 var(--sp-6) var(--sp-5); }
