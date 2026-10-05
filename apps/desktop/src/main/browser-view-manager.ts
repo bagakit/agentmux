@@ -1,4 +1,4 @@
-import { readBrowserFavicon } from './browser-favicon.js'
+import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
@@ -282,7 +282,7 @@ export class BrowserViewManager {
     })
   }
   private readonly entries = new Map<string, BrowserEntry>()
-  private readonly faviconUrls = new WeakMap<WebContentsView, string[]>()
+  private readonly faviconUrls = new WeakMap<WebContentsView, { documentUrl: string; navigationId: string | undefined; urls: string[] }>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private readonly webAuthnSessions = new Map<Session, () => void>()
   private readonly presentationLeases = new Map<string, PresentationLease>()
@@ -2583,9 +2583,10 @@ export class BrowserViewManager {
       if (!this.owns(entry, view)) return
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
       this.applyViewport(entry, view)
+      void this.refreshFaviconAfterLoad(entry, view)
     })
     contents.on('did-start-navigation', (details) => {
-      if (details.isMainFrame && !details.isSameDocument) this.faviconUrls.delete(view)
+      if (details.isMainFrame && !details.isSameDocument && this.faviconUrls.get(view)?.documentUrl !== details.url) this.faviconUrls.delete(view)
       if (!details.isMainFrame || !this.owns(entry, view)) return
       let requestedUrl: string
       try {
@@ -2639,11 +2640,13 @@ export class BrowserViewManager {
     })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
+      const reported = this.faviconUrls.get(view)
+      if (reported) this.faviconUrls.set(view, { ...reported, documentUrl: url })
       entry.requestedUrl = url
       this.emit(entry)
     })
     contents.on('page-favicon-updated', (_event, urls) => {
-      this.faviconUrls.set(view, urls)
+      this.faviconUrls.set(view, { documentUrl: contents.getURL(), navigationId: this.owns(entry, view) ? entry.navigationId : undefined, urls })
       if (this.owns(entry, view)) this.updateFavicon(entry, view)
     })
     contents.on('page-title-updated', () => {
@@ -2862,9 +2865,29 @@ export class BrowserViewManager {
     if (!keepImage) entry.faviconDataUrl = undefined
   }
 
+  /** Chromium may omit an unchanged icon event on reload. Revalidate its earlier report in this document. */
+  private async refreshFaviconAfterLoad(entry: BrowserEntry, view: WebContentsView): Promise<void> {
+    const reported = this.faviconUrls.get(view), navigationId = entry.navigationId
+    if (!this.owns(entry, view) || !reported?.urls[0] || reported.documentUrl !== view.webContents.getURL() || reported.navigationId === navigationId) return
+    let url: string
+    try { url = new URL(reported.urls[0], reported.documentUrl).href } catch { return }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let confirmed = false
+    try {
+      confirmed = await Promise.race([
+        view.webContents.executeJavaScript(`Array.from(document.querySelectorAll('link[rel~="icon" i]')).some(link => link.href === ${JSON.stringify(url)})`),
+        new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), BROWSER_FAVICON_TIMEOUT_MS) })
+      ]) === true
+    } catch { /* Optional artwork remains generic when the current declaration cannot be observed. */ }
+    finally { if (timer) clearTimeout(timer) }
+    if (!this.owns(entry, view) || entry.navigationId !== navigationId || this.faviconUrls.get(view) !== reported || reported.documentUrl !== view.webContents.getURL()) return
+    if (!confirmed) { this.faviconUrls.delete(view); this.clearFavicon(entry); this.emit(entry); return }
+    this.updateFavicon(entry, view)
+  }
+
   private updateFavicon(entry: BrowserEntry, view: WebContentsView): void {
     if (!this.owns(entry, view)) return
-    const reported = this.faviconUrls.get(view)?.[0]
+    const reported = this.faviconUrls.get(view)?.urls[0]
     if (!reported) { this.clearFavicon(entry); this.emit(entry); return }
     let url: string
     try { url = new URL(reported, view.webContents.getURL()).href } catch { this.clearFavicon(entry); this.emit(entry); return }
