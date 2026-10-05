@@ -1,5 +1,5 @@
 /**
- * The renderer's semantic theme boundary. Values live in styles/tokens.css;
+ * The renderer's semantic theme boundary. Values come from the shared declarative theme catalog;
  * this module only gives consumers stable names and a typed var() helper.
  */
 export const APP_APPEARANCE_DATASET_KEY = 'appearance' as const
@@ -15,7 +15,7 @@ export const THEME_TOKENS = {
   textSubtle: '--text-3',
   line: '--line',
   lineSoft: '--line-soft',
-  success: '--green',
+  success: '--success',
   warning: '--amber',
   danger: '--red',
   focus: '--focus-line',

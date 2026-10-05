@@ -1,3 +1,4 @@
+import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
@@ -46,6 +47,8 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'toolkit.mobileConnection.statusBar') return value ?? DEFAULT_MOBILE_CONNECTION_PREFERENCES.statusBar
   if (path === 'toolkit.tools') return value ?? []
   if (path === 'copyPathsAsAbsolute' || path === 'browser.agentAutomation') return value ?? false
+  if (path === 'appearance.customThemes') return value ?? {}
+  if (path === 'appearance.themeId') return value ?? DEFAULT_THEME_ID
   if (path === 'appearance.appAppearance') return value ?? APP_APPEARANCE_DEFAULT
   if (path === 'appearance.terminalFontSize') return value ?? TERMINAL_FONT_SIZE_DEFAULT
   if (path === 'notifications.mode') return value ?? DEFAULT_NOTIFICATION_MODE_ID
@@ -71,6 +74,18 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
+    }
+    // A theme record is authored as one complete value; never synthesize variants or icon assets.
+    if (path === 'appearance.customThemes') {
+      const live = (actual ?? {}) as Record<string, unknown>, old = (expected ?? {}) as Record<string, unknown>, next = (requested ?? {}) as Record<string, unknown>
+      const result = { ...live }
+      for (const id of new Set([...Object.keys(old), ...Object.keys(next)])) {
+        if (configValuesEqual(old[id], next[id]) || configValuesEqual(live[id], next[id])) continue
+        if (!configValuesEqual(live[id], old[id])) throw new ConfigConflict(`${path}[${JSON.stringify(id)}]`)
+        if (!Object.hasOwn(next, id)) delete result[id]
+        else Object.defineProperty(result, id, { value: next[id], enumerable: true, configurable: true, writable: true })
+      }
+      return result
     }
     // An object identity is opaque (including dots in its directory); its authored choice is
     // one value. Merge unrelated identities, but never synthesize a face from concurrent parts.

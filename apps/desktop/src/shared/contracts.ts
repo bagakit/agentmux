@@ -359,9 +359,9 @@ export function clampTerminalFontSize(value: number): number {
 export const EDITOR_FONT_SIZE_MIN = 8
 export const EDITOR_FONT_SIZE_MAX = 32
 
-export const APP_APPEARANCE_IDS = ['dark', 'light', 'system'] as const
-export type AppAppearanceId = (typeof APP_APPEARANCE_IDS)[number]
-export const APP_APPEARANCE_DEFAULT: AppAppearanceId = 'dark'
+export { APP_APPEARANCE_IDS, APP_APPEARANCE_DEFAULT } from '@agentmux/client-ui/theme'
+import type { AppAppearanceId } from '@agentmux/client-ui/theme'
+export type { AppAppearanceId } from '@agentmux/client-ui/theme'
 
 /**
  * 用户对一个应用链接 scheme 记住的两档答案，唯一真源。
