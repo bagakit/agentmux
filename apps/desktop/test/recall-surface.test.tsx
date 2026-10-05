@@ -431,11 +431,15 @@ it('defaults only first Recall entry and keeps the current Notebook tree through
 it('closes the Notebook portal after a public surface switch and keeps later Survey input focused', async () => {
   await renderApp(); await dom.click('[aria-label="Survey: browse and explore"]'); await enterSurvey(); await openNotebookMenu()
   const original = useAppStore.getState(), tabs = original.tabs, bookId = original.recallNotebookId
+  const hiddenTriggerFocus = vi.spyOn(dom.container.querySelector<HTMLButtonElement>('[aria-label="Switch notebook"]')!, 'focus')
   const later = dom.container.querySelector<HTMLInputElement>('.global-survey-surface [aria-label="Search or enter a web address"]')!
   expect(later).not.toBeNull()
   await act(async () => {
     await original.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'notebook-menu-hide', operation: 'focus', target: { kind: 'surface', surface: 'survey' }, inputPolicy: 'preserve' }))
     flushSync(() => {})
+    expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(hiddenTriggerFocus).not.toHaveBeenCalled()
     later.focus(); await new Promise(resolve => setTimeout(resolve, 10))
   })
   expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
@@ -448,9 +452,13 @@ it('closes the Notebook portal after a public surface switch and keeps later Sur
 
 it('closes the Notebook portal when its sidebar collapses without restoring it or stealing later focus', async () => {
   await renderApp(); await enterSurvey(); await openNotebookMenu()
+  const hiddenTriggerFocus = vi.spyOn(dom.container.querySelector<HTMLButtonElement>('[aria-label="Switch notebook"]')!, 'focus')
   let later!: HTMLButtonElement
   await act(async () => {
     flushSync(() => useAppStore.getState().setRecallSidebarCollapsed(true))
+    expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(hiddenTriggerFocus).not.toHaveBeenCalled()
     later = dom.container.querySelector<HTMLButtonElement>('[aria-label="Show Recall items"]')!
     later.focus(); await new Promise(resolve => setTimeout(resolve, 10))
   })
