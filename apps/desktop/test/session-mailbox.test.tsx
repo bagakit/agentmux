@@ -10,6 +10,8 @@ import type { AgentSessionUserMessage, ContinuousProgressLoop } from '@agentmux/
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
+import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
+import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state'
 
 const dom = composerDOM()
 let disposeBootstrap: (() => void) | undefined
@@ -28,6 +30,88 @@ const unread = () => String(Boolean(trigger().querySelector('.composer-mailbox__
 const progressLoop = (status: 'active' | 'paused' = 'active'): ContinuousProgressLoop => ({
   loopId: 'mailbox-loop', hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: _hygiene_fixturePath("repo"),
   intervalMs: 60_000, prompt: 'Continue', nextCheckAt: 60_000, status
+})
+
+it('retries only the original Session Timeline from its notice and keeps the retained page until success', async () => {
+  const current = composerSession()
+  const retained = { agentSessionId: current.id, revision: 3, items: [] }
+  const observation = { run: current.control.run, code: 'READ_FAILED', message: 'History temporarily unavailable' }
+  const tab = createWorkbenchTab('timeline-retry-tab', { kind: 'agent', phase: 'attached', workspaceId: 'workspace-1',
+    sessionId: current.id, regionId: initialWorkbenchRegionId('timeline-retry-tab') })
+  useAppStore.setState({ sessions: [{ ...current, timelineObservation: observation }], timelines: { [current.id]: retained }, tabs: { [tab.id]: tab } })
+  const refreshed = { ...current, label: 'Refreshed current Agent' }
+  const readStatus = vi.spyOn(api.sessions, 'refresh').mockResolvedValue(refreshed)
+  await useAppStore.getState().refreshSession(current.id)
+  expect(readStatus).toHaveBeenCalledWith(current.control)
+  expect(useAppStore.getState().sessions[0]?.label).toBe(refreshed.label)
+  expect(useAppStore.getState().sessions[0]).toHaveProperty('timelineObservation', observation)
+  let complete!: (page: typeof retained) => void
+  const retry = vi.spyOn(api.sessions, 'timeline').mockImplementation(() => new Promise(resolve => { complete = resolve }))
+  await dom.render(<AgentSessionComposer sessionId={current.id} />)
+  await toggle('open'); await folder('system')
+  const row = [...mailbox().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Reading work history'))!
+  expect(row).toBeDefined()
+  await act(async () => row.click())
+  const action = [...mailbox().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry work history')!
+  expect(action).toBeDefined()
+  await act(async () => action.click())
+  expect(retry).toHaveBeenCalledWith(current.control)
+  expect(useAppStore.getState().timelines[current.id]).toBe(retained)
+  expect(useAppStore.getState().sessions[0]).toHaveProperty('timelineObservation', observation)
+  await act(async () => complete({ ...retained, revision: 4 }))
+  await vi.waitFor(() => expect(useAppStore.getState().sessions[0]).not.toHaveProperty('timelineObservation'))
+  expect(useAppStore.getState().timelines[current.id]?.revision).toBe(4)
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+it.each(['status', 'live'] as const)('moves Timeline observation ownership from Run A to verified Run B via %s without accepting A’s late recovery', async (source) => {
+  const first = composerSession()
+  const retained = { agentSessionId: first.id, revision: 3, items: [] }
+  const firstFailure = { run: first.control.run, code: 'A_HISTORY_FAILED', message: 'Run A history not observed' }
+  const second = { ...first, label: 'Verified Run B', control: { ...first.control, run: { runId: 'run-B' } } }
+  const secondFailure = { run: second.control.run, code: 'B_HISTORY_FAILED', message: 'Run B history not observed' }
+  const tab = createWorkbenchTab('timeline-run-change-tab', { kind: 'agent', phase: 'attached', workspaceId: 'workspace-1',
+    sessionId: first.id, regionId: initialWorkbenchRegionId('timeline-run-change-tab') })
+  useAppStore.setState({ sessions: [{ ...first, timelineObservation: firstFailure }],
+    timelines: { [first.id]: retained }, tabs: { [tab.id]: tab } })
+  let completeA!: (page: typeof retained) => void
+  const readTimeline = vi.spyOn(api.sessions, 'timeline')
+    .mockImplementationOnce(() => new Promise(resolve => { completeA = resolve }))
+    .mockResolvedValueOnce({ ...retained, revision: 5 })
+  const pendingA = useAppStore.getState().resyncTimeline(first.id, { observationOnly: true })
+  try {
+    expect(readTimeline).toHaveBeenNthCalledWith(1, first.control)
+    if (source === 'status') {
+      vi.spyOn(api.sessions, 'refresh').mockResolvedValue(second)
+      await useAppStore.getState().refreshSession(first.id)
+      expect(useAppStore.getState().sessions[0]?.label).toBe(second.label)
+    } else {
+      useAppStore.getState().applyEvent({ type: 'core', hostId: first.hostId, event: { type: 'agent-session', session: {
+        kind: 'agent', agentSessionId: first.id, hostId: first.hostId, providerId: first.providerId, executorId: first.executorId,
+        workspacePath: first.workspacePath, run: second.control.run, retiredRuns: [first.control.run], createdAt: first.createdAt,
+        updatedAt: Math.max(first.updatedAt, first.agentSessionUpdatedAt) + 1
+      } } })
+    }
+    expect(useAppStore.getState().sessions[0]?.control).toEqual(second.control)
+    expect(useAppStore.getState().sessions[0]).not.toHaveProperty('timelineObservation')
+    expect(useAppStore.getState().timelines[first.id]).toBe(retained)
+
+    // A new failed B observation is separate from A's request still in flight.
+    useAppStore.setState(state => reduceAgentMembershipSnapshot(state, {
+      sessions: [{ ...second, timelineObservation: secondFailure }], timelines: {}, recoveryCandidates: []
+    }, new Set()))
+    completeA({ ...retained, revision: 4 })
+    await pendingA
+    expect(useAppStore.getState().sessions[0]).toHaveProperty('timelineObservation', secondFailure)
+    await useAppStore.getState().resyncTimeline(first.id, { observationOnly: true })
+    expect(readTimeline).toHaveBeenNthCalledWith(2, second.control)
+    expect(useAppStore.getState().sessions[0]).not.toHaveProperty('timelineObservation')
+    expect(useAppStore.getState().timelines[first.id]?.revision).toBe(5)
+  } finally {
+    // Release the old request even when a mutation trips an earlier assertion.
+    completeA({ ...retained, revision: 4 })
+    await pendingA
+  }
 })
 
 it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i Inbox unread separately from Notices attention, Outbox pending and Progress', async (count) => {

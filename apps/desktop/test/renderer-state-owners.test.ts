@@ -12,7 +12,7 @@ import {
   type FileWorkbenchState,
   reconcileWorkbenchFileProjection
 } from '../src/renderer/src/lib/file-workbench-state.js'
-import { reduceAgentMembershipSnapshot, reduceRuntimeEvent, reduceTerminalMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
+import { reduceAgentMembershipSnapshot, reduceTimelineSnapshot, reduceRuntimeEvent, reduceTerminalMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   addWorkbenchRegion,
@@ -905,6 +905,36 @@ describe('运行时成员快照不拿一份空回答退役 Agent', () => {
   }
 
   const EMPTY = { sessions: [], timelines: {}, recoveryCandidates: [] }
+
+  it('accepts only an explicit matching Timeline observation failure, never a wrong or silently missing page', () => {
+    const { state } = seedAttachedAgent()
+    const faulted = { ...session, timelineObservation: { run: session.control.run, code: 'READ_FAILED', message: 'Not observed' } }
+    const snapshot = { sessions: [faulted], timelines: {}, recoveryCandidates: [] }
+    expect(reduceAgentMembershipSnapshot(state, snapshot, new Set()).sessions).toEqual([faulted])
+    expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot, sessions: [session] }, new Set())).toThrow('matching Timeline')
+    expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot,
+      sessions: [{ ...faulted, timelineObservation: { ...faulted.timelineObservation, run: { runId: 'another-run' } } }] }, new Set())).toThrow('matching Timeline')
+    expect(() => reduceAgentMembershipSnapshot(state, { ...snapshot,
+      timelines: { [session.id]: { agentSessionId: 'another-session', revision: 1, items: [] } } }, new Set())).toThrow('matching Timeline')
+  })
+
+  it('a targeted Timeline retry clears only its original Host, Session and Run diagnostic', () => {
+    const { state } = seedAttachedAgent()
+    if (session.kind !== 'agent') throw new Error('Agent fixture required')
+    const faulted = { ...session, timelineObservation: { run: session.control.run, code: 'READ_FAILED', message: 'Not observed' } }
+    const other = { ...faulted, id: 'session-2', control: { ...session.control, agentSessionId: 'session-2' } }
+    const seeded = { ...state, sessions: [faulted, other] }
+    const page = { agentSessionId: session.id, revision: 1, items: [timelineItem] }
+    for (const control of [undefined, { ...session.control, hostId: 'another-host' },
+      { ...session.control, run: { runId: 'another-run' } }, { ...session.control, agentSessionId: 'another-session' }]) {
+      const late = reduceTimelineSnapshot(seeded, page, session.id, control)
+      expect(late.sessions).toEqual(seeded.sessions)
+    }
+    const recovered = reduceTimelineSnapshot(seeded, page, session.id, session.control)
+    expect(recovered.sessions[0]).not.toHaveProperty('timelineObservation')
+    expect(recovered.sessions[1]).toBe(other)
+    expect(recovered.timelines[session.id]).toMatchObject(page)
+  })
 
   it('一份空快照不删仍在跑的 Agent Region', () => {
     // 空快照分不清「真的没有 session」与「Core 没就绪 / 根目录接错」。此前它被当作权威，于是一个

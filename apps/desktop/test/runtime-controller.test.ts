@@ -35,6 +35,11 @@ import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH, SC
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { composeAgentLaunchPrompt } from '@agentmux/core/agent-outbound-message'
 import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'
+import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
+import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices.js'
+import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { sessionSnapshotPayload } from '../src/main/session-snapshot-payload.js'
 
 const runtimeFixture = vi.hoisted(() => {
   const createdHosts: Array<{ id: string; dispose: ReturnType<typeof vi.fn> }> = []
@@ -308,6 +313,7 @@ import { ProcessResourceSampler, type ResourceSample } from '../src/main/process
 
 const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
+  async loadMetadata() { return [] },
   async loadRetiredRuns() { return [] },
   async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
   async confirmDurability() { throw new Error('Read-only Store fixture cannot confirm a write') },
@@ -2325,7 +2331,82 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.sessionTimeline).not.toHaveBeenCalled()
   })
 
-  it('rejects a Runtime snapshot whose Timeline belongs to another Session', async () => {
+  it('keeps same-Host membership, pages and exact Session notices when one Timeline read fails', async () => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const first = agentStatusFixture()
+    const subjects = ['agent-1', 'agent-2'].map((id, index) => ({
+      subjectId: `agent:local:${id}`, kind: 'agent' as const, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
+      providerId: first.session.providerId, executorId: first.session.executorId,
+      agentSession: { ...first.session, agentSessionId: id, run: { runId: `run-${index + 1}` } },
+      run: { ...first.run, agentSessionId: id, runId: `run-${index + 1}`, state: 'running' as const }
+    }))
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects })
+    const unreadable = new Set<string>()
+    let revision = 4
+    client.sessionTimeline.mockImplementation(async (id) => {
+      if (unreadable.has(id)) throw new AgentMuxError(`History source unavailable for ${id}`, 'HISTORY_READ_FAILED')
+      return { agentSessionId: id, revision, items: [{ id: `${id}-history`, agentSessionId: id,
+        kind: 'lifecycle' as const, status: 'complete' as const, source: 'user' as const,
+        createdAt: 1, updatedAt: 1, title: 'Retained work' }] }
+    })
+    const initial = await controller.snapshot(localConfig)
+    const tabs = Object.fromEntries(initial.sessions.map(session => [session.id, createWorkbenchTab(session.id, {
+      kind: 'agent', phase: 'attached', workspaceId: 'workspace-1', sessionId: session.id,
+      regionId: initialWorkbenchRegionId(session.id)
+    })]))
+    const state = { sessions: initial.sessions, timelines: initial.timelines, pendingAgentLaunches: {}, tabs,
+      layouts: { 'workspace-1': createWorkspaceLayout('group-1', Object.keys(tabs)) }, viewModes: {} }
+    unreadable.add('agent-1'); revision = 7
+    const snapshot = structuredClone(sessionSnapshotPayload(await controller.snapshot(localConfig), undefined))
+    expect(snapshot.sessions.map(session => [session.id, session.processState, session.status.state])).toEqual([
+      ['agent-1', 'running', 'running'], ['agent-2', 'running', 'running']
+    ])
+    expect(snapshot.runtimeEndpointWarnings).toEqual([])
+    expect(snapshot.timelines['agent-1']).toBeUndefined()
+    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+    expect(next.tabs).toBe(state.tabs)
+    expect(next.layouts).toBe(state.layouts)
+    expect(next.timelines['agent-1']).toBe(state.timelines['agent-1'])
+    expect(next.timelines['agent-2']?.revision).toBe(7)
+    expect(sessionServiceNotices(next.sessions[0])).toEqual([expect.objectContaining({
+      id: 'timeline-observation', occurrence: JSON.stringify(['local', 'agent-1', 'run-1']),
+      cause: JSON.stringify(['HISTORY_READ_FAILED', 'History source unavailable for agent-1']),
+      notice: expect.objectContaining({ kind: 'indeterminate' })
+    })])
+    expect(sessionServiceNotices(next.sessions[1])).toEqual([])
+
+    // A successful original read settles only its own failure, even while another fails.
+    unreadable.add('agent-2')
+    const bothFailed = reduceAgentMembershipSnapshot(next, await controller.snapshot(localConfig), new Set())
+    expect(bothFailed.sessions.flatMap(session => sessionServiceNotices(session))).toHaveLength(2)
+    unreadable.delete('agent-1'); revision = 8
+    const recovered = reduceAgentMembershipSnapshot(bothFailed, await controller.snapshot(localConfig), new Set())
+    expect(sessionServiceNotices(recovered.sessions[0])).toEqual([])
+    expect(sessionServiceNotices(recovered.sessions[1])).toEqual([expect.objectContaining({
+      occurrence: JSON.stringify(['local', 'agent-2', 'run-2'])
+    })])
+    expect(recovered.timelines['agent-1']?.revision).toBe(8)
+    expect(recovered.timelines['agent-2']).toBe(next.timelines['agent-2'])
+    expect(recovered.tabs).toBe(state.tabs)
+  })
+
+  it('keeps observed membership when a failed Timeline removal recheck is also unavailable', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const { session, run } = agentStatusFixture()
+    client.runtimeProjection.mockResolvedValueOnce({ hostId: 'local', subjects: [{
+      subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
+      providerId: session.providerId, executorId: session.executorId, agentSession: session, run
+    }] }).mockRejectedValueOnce(new Error('Membership recheck unavailable'))
+    client.sessionTimeline.mockRejectedValueOnce(new Error('History source unavailable'))
+    const snapshot = await controller.snapshot(localConfig)
+    expect(snapshot.sessions).toEqual([expect.objectContaining({ id: 'agent-1',
+      timelineObservation: { run: { runId: 'run-1' }, code: 'TIMELINE_OBSERVATION_FAILED', message: 'History source unavailable' } })])
+    expect(snapshot.timelines).toEqual({})
+    expect(snapshot.runtimeEndpointWarnings).toEqual([])
+  })
+
+  it('rejects another Session’s Timeline while preserving this exact observed Session', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const status = agentStatusFixture()
@@ -2345,9 +2426,11 @@ describe('RuntimeController configuration transaction', () => {
     client.sessionTimeline.mockResolvedValue({ agentSessionId: 'another-session', revision: 0, items: [] })
 
     const snapshot = await controller.snapshot(localConfig)
-    expect(snapshot.sessions).toEqual([])
-    expect(snapshot.runtimeEndpointWarnings).toEqual([expect.objectContaining({ hostId: 'local',
-      message: 'Runtime snapshot returned a Timeline for another Session: another-session' })])
+    expect(snapshot.sessions).toEqual([expect.objectContaining({ id: 'agent-1',
+      timelineObservation: { run: { runId: 'run-1' }, code: 'TIMELINE_IDENTITY_MISMATCH',
+        message: 'Runtime snapshot returned a Timeline for another Session: another-session' } })])
+    expect(snapshot.timelines).toEqual({})
+    expect(snapshot.runtimeEndpointWarnings).toEqual([])
   })
 
   it('reprojects membership when an Agent disappears before its Timeline can be read', async () => {
