@@ -35,6 +35,7 @@ export type SpatialControlPorts = {
   topics(): Promise<readonly ScratchTopicSnapshot[]>
   appearance?(catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[]): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>>
   agentPresentation?(): NonNullable<AgentMuxSpaceCatalog['agentPresentation']>
+  motePresentation?(catalog: AgentMuxSpaceCatalog, topics: readonly ScratchTopicSnapshot[]): NonNullable<AgentMuxSpaceCatalog['motePresentation']>
   surveyPresentation?(catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']>
   createResource(input: SpaceZoneResourceInput): Promise<SpaceZoneResourceResult>
   launch(input: AgentLaunchInput & { agentSessionId: string; createOperationId: string }): Promise<AgentLaunchResult>
@@ -174,6 +175,7 @@ export function selectSpatialCatalog(catalog: AgentMuxSpaceCatalog, target: Agen
   const selectedBindings = bindings.filter(binding => selectedZoneIds.has(binding.zoneId))
   const selectedSpaceIds = new Set(selectedBindings.map(binding => binding.spaceId))
   return {
+    ...(catalog.motePresentation ? { motePresentation: catalog.motePresentation.filter(value => target.spaceId ? value.spaceId === target.spaceId : selectedSpaceIds.has(value.spaceId)) } : {}),
     ...(catalog.agentPresentation ? { agentPresentation: catalog.agentPresentation.filter(value => catalog.regions.some(region => region.agentSessionId === value.agentSessionId && selectedIds.has(region.tabId))) } : {}),
     ...(catalog.appearance ? { appearance: catalog.appearance.filter(value => target.spaceId ? value.spaceId === target.spaceId : selectedSpaceIds.has(value.spaceId)) } : {}),
     spaces: catalog.spaces.filter(space => target.spaceId ? space.spaceId === target.spaceId : selectedSpaceIds.has(space.spaceId)),
@@ -462,6 +464,14 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     catalog = { ...selected,
       ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation() } : {}),
       ...(ports.surveyPresentation && request.operation === 'space.ls' && !Object.values(target ?? {}).some(Boolean) ? { survey: ports.surveyPresentation(selected) } : {}) }
+    if (ports.motePresentation) {
+      try { catalog.motePresentation = ports.motePresentation(selected, topics) }
+      catch (error) {
+        const message = `Mote preferences observation unavailable: ${error instanceof Error ? error.message : String(error)}. Original resources remain available; retry presentation.`
+        catalog.motePresentation = selected.spaces.filter(space => space.kind === 'mote').map(space => ({
+          spaceId: space.spaceId, content: null, quickMode: { status: 'unconfirmed', message }, conversation: null, issue: message }))
+      }
+    }
     if (ports.appearance) {
       try { catalog.appearance = await ports.appearance(selected, imageSpaceId, topics) }
       catch (error) {

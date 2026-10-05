@@ -11,6 +11,8 @@ import { createFocusProjectionSelector } from './focus-context'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
 import { moteExpression } from './mote-expression'
 import type { RendererAgentTimelineSnapshot } from './session-state'
+import { originalTopicAddress } from '../../../shared/space-addresses'
+import { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
 type State = Omit<Parameters<ReturnType<typeof createFocusProjectionSelector>>[0], 'timelines'> & { timelines: Record<string, RendererAgentTimelineSnapshot> } & { spaceObjectIcons: SpaceIconOverrides; spaceZoneBindings: SpaceZoneBindings }
 const originalFocus = createFocusProjectionSelector()
 /** Only read existing presentation owners. No alternate names, statuses, identities or image store. */
@@ -20,9 +22,33 @@ export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCa
     const original = sessions.get(row.id)
     const executorId = original?.kind === 'agent' ? original.executorId : undefined
     const avatar = executorId ? state.config?.executors[executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[executorId] : undefined
-    return { agentSessionId: row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
+    return { agentSessionId: original?.control.kind === 'agent' ? original.control.agentSessionId : row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
       detail: row.detail, group: row.bucket, state: row.state, providerId: row.providerId ?? '',
       recap: row.recap ? { text: row.recap.text, source: row.recap.source } : null, ...(avatar ? { avatar } : {}) }
+  })
+}
+
+/** Read the original saved preferences and their exact occurrence; no Mobile parser or preference store. */
+export function readMotePresentation(state: Parameters<typeof resolveMoteDefaultConversation>[0], catalog: AgentMuxSpaceCatalog,
+  topics: readonly ScratchTopicSnapshot[]): NonNullable<AgentMuxSpaceCatalog['motePresentation']> {
+  return catalog.spaces.filter(space => space.kind === 'mote').map(space => {
+    const workspace = state.config?.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID && value.hostId === space.hostId)
+    const matches = topics.filter(value => value.id === space.topicId)
+    const topic = matches.length === 1 ? matches[0] : undefined
+    const source = workspace && topic ? originalTopicAddress(workspace, topic, state.spaceZoneBindings) : undefined
+    const zone = source?.spaceId === space.spaceId ? catalog.zones.find(value => value.zoneId === source.zoneId) : undefined
+    const content = workspace && zone?.kind === 'home' && zone.hostId === workspace.hostId && zone.workspaceId === workspace.id &&
+      zone.directoryPath !== null && !zone.issue && catalog.bindings.some(value => value.spaceId === space.spaceId && value.zoneId === zone.zoneId)
+      ? { zoneId: zone.zoneId, hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } : null
+    const quickMode = source?.spaceId === space.spaceId && topic?.quickMode ? topic.quickMode
+      : { status: 'unconfirmed' as const, message: '原 MOTE.md 配置尚未确认；原对象与会话保留，可刷新或手动选择原会话。' }
+    const raw = quickMode.status === 'saved' ? quickMode.defaults.conversation : undefined
+    const resolved = workspace && topic && source?.spaceId === space.spaceId && raw
+      ? resolveMoteDefaultConversation(state, topic, workspace.id, moteDefaultCatalog(state, topic, raw)) : {}
+    const issues = [quickMode.status === 'unconfirmed' ? quickMode.message : undefined, resolved.issue,
+      !content ? '原 Mote 资料读取范围尚未确认；保存引用与健康会话保留，可刷新原目录。' : undefined, topic?.readError].filter(Boolean)
+    return { spaceId: space.spaceId, content, quickMode, conversation: resolved.conversation ?? null,
+      ...(issues.length ? { issue: [...new Set(issues)].join('\n') } : {}) }
   })
 }
 export async function readSpatialAppearance(state: State, catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[], readAvatar: (target: MoteAvatarTarget, choice: MoteAvatarRef) => Promise<MoteAvatarImage>): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>> {
@@ -36,7 +62,7 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
     const matching = target && scratch && topic ? state.sessions.filter(value => value.kind === 'agent' && value.hostId === scratch.hostId && (value.workspacePath === scratchTopicPhysicalPath(scratch, topic) || value.workspacePath === JSON.parse(target.key)[1])) : []
     const original = matching.length === 1 ? matching[0] : undefined
     const expression = moteExpression(original, 'static', original ? state.timelines[original.id]?.liveTool : undefined)
-    const motion = space.kind === 'mote' ? { expression, activities: matching.map(session => ({ agentSessionId: session.id, runId: session.control.run.runId, expression: moteExpression(session, 'static', state.timelines[session.id]?.liveTool) })) } : {}
+    const motion = space.kind === 'mote' ? { expression, activities: matching.map(session => ({ agentSessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id, runId: session.control.run.runId, expression: moteExpression(session, 'static', state.timelines[session.id]?.liveTool) })) } : {}
     if (typeof choice === 'string') return { spaceId: space.spaceId, glyph: choice, ...motion }
     if (choice?.kind === 'face') return { spaceId: space.spaceId, parts: { ...choice }, ...motion }
     if (choice?.kind === 'image') {

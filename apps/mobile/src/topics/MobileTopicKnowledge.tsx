@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledge, TopicKnowledgeItem, TopicKnowledgeSource, TopicKnowledgeWrite } from '@agentmux/core/control'
 import { AgentMarkdown, type OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -15,16 +15,24 @@ function sourceLabel(source: TopicKnowledgeSource): string {
 
 /** Mount per scope: a late read must never replace another Topic's reading or draft. */
 export function MobileTopicKnowledge(props: { rpc: TopicsRpc; topicId?: string; title: string; visible?: boolean;
-  openSource(source: TopicKnowledgeSource): void | Promise<void>; openHttpLink?: OpenHttpLink }) {
+  openSource(source: TopicKnowledgeSource): void | Promise<void>; openHttpLink?: OpenHttpLink; onBackChange?(back: (() => void) | null): void }) {
   return <KnowledgeScope key={props.topicId ?? 'all-topics'} {...props} />
 }
-function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, visible = true }: Parameters<typeof MobileTopicKnowledge>[0]) {
+function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackChange, visible = true }: Parameters<typeof MobileTopicKnowledge>[0]) {
   const [query, setQuery] = useState(''), [search, setSearch] = useState('')
   const [entries, setEntries] = useState<TopicKnowledgeItem[]>([]), [selected, setSelected] = useState<TopicKnowledge | null>(null)
   const [issue, setIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
   const [edit, setEdit] = useState<{ topicId: string; entry?: TopicKnowledge } | null>(null)
   const [editorVisible, setEditorVisible] = useState(false)
   const readIntent = useRef(0)
+  const backToReading = useCallback(() => setEditorVisible(false), [])
+  const backToList = useCallback(() => { readIntent.current += 1; setSelected(null) }, [])
+  const activeBack = editorVisible ? backToReading : selected ? backToList : null
+  useEffect(() => {
+    if (!visible || !onBackChange) return
+    onBackChange(activeBack)
+    return () => onBackChange(null)
+  }, [visible, onBackChange, activeBack])
   useEffect(() => {
     if (!visible || !topicId && !search) return
     let live = true
@@ -38,7 +46,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, visible
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [rpc, topicId, search, refresh, visible])
-  useEffect(() => () => { readIntent.current += 1 }, [])
+  useEffect(() => () => { readIntent.current += 1 }, [visible])
   async function read(entry: TopicKnowledgeItem) {
     const intent = ++readIntent.current
     try {
@@ -64,7 +72,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, visible
     </li>)}</ul>}
     {!selected && !entries.length && !loading && <p className="mobile-topics-empty">{!topicId && !search ? '输入关键词，搜索所有 Topic 的已保存知识。' : search ? '当前已确认结果没有匹配项。' : '此 Topic 暂无已确认知识条目。'}</p>}
     {selected && <article className="mobile-topic-reading">
-      <div className="mobile-topics-actions"><button onClick={() => { readIntent.current += 1; setSelected(null) }}>返回知识列表</button>
+      <div className="mobile-topics-actions"><button onClick={backToList}>返回知识列表</button>
         <button onClick={() => { if (!edit) setEdit({ topicId: selected.topicId, entry: selected }); setEditorVisible(true) }}>{edit ? '继续编辑草稿' : '编辑知识'}</button></div>
       <h2>{selected.title}</h2><small>{certaintyLabels[selected.certainty]} · {selected.form === 'reference' ? '来源引用' : '整理成果'}</small>
       {selected.scope && <p>{selected.scope}</p>}
@@ -72,7 +80,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, visible
       {selected.sources.length > 0 && <details open><summary>来源 · {selected.sources.length}</summary>{selected.sources.map((source, index) =>
         <button className="mobile-topic-source" key={index} onClick={() => { void Promise.resolve().then(() => openSource(source)).catch(error => setIssue(`原来源打开失败：${errorText(error)}。当前阅读保留。`)) }}>{sourceLabel(source)}</button>)}</details>}
     </article>}
-    {edit && <div hidden={!editorVisible}><MobileTopicKnowledgeEditor rpc={rpc} target={edit} onClose={() => setEditorVisible(false)} onSaved={entry => {
+    {edit && <div hidden={!editorVisible}><MobileTopicKnowledgeEditor rpc={rpc} target={edit} onClose={backToReading} onSaved={entry => {
       setSelected(entry); setEdit(null); setEditorVisible(false); setRefresh(value => value + 1)
     }} /></div>}
   </section>

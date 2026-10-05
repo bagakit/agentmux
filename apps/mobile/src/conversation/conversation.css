@@ -80,12 +80,16 @@
 .mobile-reading-action { align-self: center; padding: 4px 10px; border: 0; background: var(--surface-1); color: var(--text-muted); font-size: 11px; min-height: 44px; border-radius: 8px; }
 .mobile-reading-latest { position: sticky; top: 0; z-index: 1; }
 .mobile-send-status { min-width: 0; margin: 6px 6px 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.mobile-send-status__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-.mobile-send-status__summary > span { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
+.mobile-send-status__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; }
+.mobile-send-status__summary > span { flex: 1 1 100%; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.mobile-send-status__actions { display: flex; align-items: center; gap: 20px; }
 .mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
-.mobile-send-status p { margin: 0 0 6px; max-height: 120px; overflow: auto; overflow-wrap: anywhere; user-select: text; }
-.mobile-send-status details[open] { flex: 1 0 100%; min-width: 0; }
+.mobile-send-status p { margin: 0 0 6px; overflow-wrap: anywhere; user-select: text; }
+.mobile-send-status__diagnosis { min-width: 0; }
+.mobile-send-status__diagnosis[open] { max-height: min(32dvh, 240px); overflow: auto; overscroll-behavior: contain; }
+.mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 8px; margin: 0 0 8px; }
+.mobile-send-status__diagnosis dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .mobile-send-status summary { display: flex; align-items: center; }
 /* Attachments stay beside the original message, with one explicit transfer action. */
 .mobile-attachments:empty { display: none; }

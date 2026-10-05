@@ -91,6 +91,23 @@ export type AgentMuxAgentPresentation = {
   recap: { text: string; source: string } | null
   avatar?: { tint?: string; badge?: string }
 }
+/** Original Mote preferences observed by its client owner, never a Core preference store. */
+export type AgentMuxMoteConversationReference = {
+  hostId: string; sessionId: string
+  displayWorkspaceId: string; groupId: string; tabId: string; regionId: string
+}
+export type AgentMuxMotePresentation = {
+  spaceId: string
+  /** The Mote's own files scope, independent of its member Zones and execution cwd. */
+  content: { zoneId: string; hostId: string; workspaceId: string; workspacePath: string } | null
+  quickMode:
+    | { status: 'saved'; version: string; defaults: { executorId?: string; conversation?: AgentMuxMoteConversationReference; recovery?: 'startup' | 'on-open' } }
+    | { status: 'missing' }
+    | { status: 'unconfirmed'; message: string }
+  /** The original owner's confirmed occurrence; an unavailable one remains in quickMode. */
+  conversation: AgentMuxMoteConversationReference | null
+  issue?: string
+}
 /** Original Survey display preferences; missing topology does not retire these references. */
 export type AgentMuxSurveyPresentation = {
   items: { zoneId: string; name: string; issue?: string }[]
@@ -102,6 +119,7 @@ export type AgentMuxSurveyPresentation = {
   issue?: string
 }
 export type AgentMuxSpaceCatalog = {
+  motePresentation?: AgentMuxMotePresentation[]
   survey?: AgentMuxSurveyPresentation
   agentPresentation?: AgentMuxAgentPresentation[]
   appearance?: AgentMuxSpaceAppearance[]
