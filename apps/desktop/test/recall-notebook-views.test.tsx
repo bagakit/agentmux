@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { openNotebookPage } from '../src/renderer/src/lib/recall-notebooks'
 import { reconcileNotesStorageResources } from '../src/renderer/src/lib/notes-storage-reconciliation'
@@ -131,14 +132,14 @@ beforeEach(() => {
     surveySidebarWidth: 220, surveySidebarCollapsed: false,
     recallZoneSelection: null, recallSidebarWidth: 220, recallSidebarCollapsed: false, notebookRecoveries: [], recallNotebookId: null, recallNoteId: null, surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratchWorkspace, {...workspace,id:SCRATCH_WORKSPACE_ID,path:_hygiene_fixturePath("scratch"),name:'Topics'}] }, activeWorkspaceId: workspace.id,
     sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
-    agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
+    agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: _reshape_fixtureEpoch(0, 0, 1) }] }, pmo: { sessionId: null } },
     projectRailOpen: true, toolsOpen: true, workspaceTool: 'agents', demands: {}, browserAnnotationsByBrowserId: {},
     documents: { [key]: { path: file.path, content: 'Unsaved file', revision: 'disk' } }, dirtyDocuments: { [key]: true },
     error: null, lastError: null, errorDismissed: true, displacedAgentSessionIds: [], retainedSpatialFocus: null, regionCaretFocus: null })
   vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank') => ({ ...browser, id, url }))
   vi.spyOn(api.browser, 'navigate').mockImplementation(async (id, url) => ({ ...browser, id, url, navigationId: `navigation-${id}` }))
-  vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([{ id: 'default', label: 'Default', createdAt: 1, isDefault: true, source: null }])
+  vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([{ id: 'default', label: 'Default', createdAt: _reshape_fixtureEpoch(0, 0, 1), isDefault: true, source: null }])
   vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
   css = document.createElement('style')
@@ -271,7 +272,23 @@ it('switches real Notebook directory views and reopens the exact original dirty 
   const draft = useAppStore.getState().documents[documentKey(NOTES_WORKSPACE_ID, page.resource.path)]!, caret = originalEditor.state.selection.toJSON()
   const bytes = await readFile(join(notesWorkspace.path, page.resource.path), 'utf8'), reads = vi.mocked(api.files.read).mock.calls.length, writes = vi.mocked(api.files.write).mock.calls.length
   await directory()
-  expect(dom.container.querySelector('[aria-label="Tree view"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(dom.container.querySelector('[aria-label="Tree view"]')?.getAttribute('aria-selected')).toBe('true')
+  const picker = dom.container.querySelector<HTMLElement>('[aria-label="Notebook presentation"]')!
+  expect(picker.getAttribute('role')).toBe('tablist')
+  const tree = picker.querySelector<HTMLButtonElement>('[aria-label="Tree view"]')!
+  await act(async () => { tree.focus(); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('Cards view')
+  expect(picker.querySelector('[aria-label="Cards view"]')?.getAttribute('aria-selected'), 'Keyboard changes the actual Notebook presentation').toBe('true')
+  expect(picker.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })))
+  expect(document.activeElement).toBe(tree)
+  expect(tree.getAttribute('aria-selected')).toBe('true')
+  await openNotebookMenu()
+  const currentNotebook = document.querySelector('[aria-label="Choose notebook"] [role="menuitemradio"][aria-checked="true"]')
+  expect(currentNotebook?.getAttribute('aria-label'), 'Notebook selection is available to assistive technology').toBe('Switch to notebook: Research notebook')
+  await act(async () => currentNotebook!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull())
+  await vi.waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Switch notebook'))
   for (const view of ['Cards', 'Graph', 'Tree']) {
     await dom.click(`[aria-label="${view} view"]`)
     expect(useAppStore.getState().recallZoneSelection).toBe(selection)
@@ -368,7 +385,7 @@ it('keeps a later directory view when an earlier page write finishes', async () 
     const later = dom.container.querySelector<HTMLButtonElement>('[aria-label="Cards view"]')!
     await act(async () => later.focus())
     release(); await readyNoteRegion()
-    expect(dom.container.querySelector('[aria-label="Cards view"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.container.querySelector('[aria-label="Cards view"]')?.getAttribute('aria-selected')).toBe('true')
     expect(dom.container.querySelector('.recall-preserved-workbench')?.hasAttribute('hidden')).toBe(true)
     expect(document.activeElement).toBe(later)
     expect(savedNotes().at(-1)?.status).toBe('written'); intactOriginalWork()
