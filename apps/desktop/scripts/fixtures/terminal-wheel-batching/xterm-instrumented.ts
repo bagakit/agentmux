@@ -1,0 +1,33 @@
+// Constructor and pass-through write observations: parsing, encoding and viewport methods stay native.
+import { Terminal as EsmTerminal } from '@xterm/xterm/lib/xterm.mjs'
+import type { ITerminalOptions } from '@xterm/xterm'
+declare const __TERMINAL_WHEEL_UMD_URL__: string
+declare const __TERMINAL_WHEEL_SOURCE_URLS__: Record<string, string>
+let constructor = EsmTerminal as typeof import('@xterm/xterm').Terminal
+export async function installUmd(distribution: string): Promise<void> {
+  if (distribution === 'esm') { constructor = EsmTerminal; return }
+  if (distribution.startsWith('source')) { constructor = (await import(/* @vite-ignore */ __TERMINAL_WHEEL_SOURCE_URLS__[distribution])).Terminal; return }
+  if (distribution !== 'umd') throw new Error('Unknown distribution')
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = __TERMINAL_WHEEL_UMD_URL__
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('Published UMD did not load'))
+    document.head.append(script)
+  })
+  constructor = (window as unknown as { Terminal: typeof import('@xterm/xterm').Terminal }).Terminal
+  if (typeof constructor !== 'function') throw new Error('Public UMD Terminal missing')
+}
+export const Terminal = function (options?: ITerminalOptions) {
+  const terminal = new constructor(options)
+  const metrics = { writeCalls: 0, completedWrites: 0, inputBytes: 0 }
+  const write = terminal.write.bind(terminal)
+  terminal.write = (data, callback) => {
+    metrics.writeCalls++
+    metrics.inputBytes += typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength
+    write(data, () => { metrics.completedWrites++; callback?.() })
+  }
+  Object.defineProperty(terminal, 'remoteProofMetrics', { value: metrics })
+  ;(window as unknown as { terminals: import('@xterm/xterm').Terminal[] }).terminals.push(terminal)
+  return terminal
+} as unknown as typeof import('@xterm/xterm').Terminal

@@ -41,7 +41,7 @@ try {
     define:{__AGENTMUX_WEB_PREVIEW__:'false','process.env.NODE_ENV':'"production"',
       __TERMINAL_WHEEL_UMD_URL__:JSON.stringify(pathToFileURL(path.join(pkg,'lib/xterm.js')).href)},
     resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:path.join(fixture,'xterm-instrumented.ts')}]},
-    esbuild:{jsx:'automatic'},build:{target:'esnext',outDir:path.join(privateRoot,'renderer'),emptyOutDir:true,minify:false} })
+    worker:{format:'es'},esbuild:{jsx:'automatic'},build:{target:'esnext',outDir:path.join(privateRoot,'renderer'),emptyOutDir:true,minify:false} })
   const artifacts = []
   async function collect(directory) {
     for (const entry of await fs.readdir(directory,{withFileTypes:true})) {
@@ -53,7 +53,7 @@ try {
   await collect(path.join(privateRoot,'renderer')); assert.ok(artifacts.length>0)
   result.distributionArtifacts = await hashes(artifacts)
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  child = spawn(require('electron'),[path.join(fixture,'main.cjs'),path.join(privateRoot,'renderer/index.html'),privateRoot],
+  child = spawn(process.env.AGENTMUX_ELECTRON_BINARY ?? require('electron'),[path.join(fixture,'main.cjs'),path.join(privateRoot,'renderer/index.html'),privateRoot],
     {env,detached:true,stdio:['ignore','ignore','pipe']})
   result.pid = child.pid
   child.stderr.on('data',()=>{})
