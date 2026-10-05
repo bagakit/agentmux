@@ -10,6 +10,7 @@ import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_T
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'clientPerformanceDiagnostics',
+  'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'resolveAgentCreationSessionId',
   'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'

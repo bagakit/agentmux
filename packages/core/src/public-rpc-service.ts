@@ -314,7 +314,7 @@ export class AgentMuxRpcService {
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
-      await client.connect()
+      if (method !== 'settings.executors.discover' && method !== 'settings.executors.register') await client.connect()
       if (method === 'settings.executors.discover') {
         const query = parseHostSettingsParams('settings.executors.discover', params)
         const result = { routeHostId: query.hostId, ...await client.listHostExecutors({ refresh: query.refresh ?? true }) }
