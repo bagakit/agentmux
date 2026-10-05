@@ -1,8 +1,13 @@
-import { ArrowUpRight, FolderOpen, Layers3 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROJECT_RAIL_DENSITY_DEFAULT, PROJECT_RAIL_DENSITY_IDS, type ProjectRailDensity } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
+
+const ThemeLayoutScaleIcon = semanticIconComponent('layout.scale')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 const DENSITY_LABELS = { default: 'Comfortable', compact: 'Compact', dense: 'Dense' } as const
 export const projectRailDensityLabel = (value: ProjectRailDensity | undefined): string => DENSITY_LABELS[value ?? PROJECT_RAIL_DENSITY_DEFAULT]
@@ -19,8 +24,8 @@ export function SpaceSettingsPane({ density, onSave, onTopics, onProjects }: {
     submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
   }
   const destinations = [
-    { id: 'topics', label: 'Topics in Space', description: 'Open your workspace to manage topics and their content.', icon: Layers3, open: onTopics },
-    { id: 'projects', label: 'Projects in Environments', description: 'Manage registered folders and worktrees on each Host.', icon: FolderOpen, open: onProjects },
+    { id: 'topics', label: 'Topics in Space', description: 'Open your workspace to manage topics and their content.', icon: ThemeLayoutScaleIcon, open: onTopics },
+    { id: 'projects', label: 'Projects in Environments', description: 'Manage registered folders and worktrees on each Host.', icon: ThemeObjectFolderOpenIcon, open: onProjects },
   ]
   return <div className="settings-pane-stack">
     <section className="settings-group">
@@ -39,7 +44,7 @@ export function SpaceSettingsPane({ density, onSave, onTopics, onProjects }: {
       <header><span>Manage your work</span><small>Object settings</small></header>
       <div className="settings-workflows__destinations">{destinations.map(({ id, label, description, icon: Icon, open }) =>
         <button key={id} type="button" data-workflows-manage={id} onClick={open}>
-          <Icon size={17} aria-hidden="true" /><span><strong>{label}</strong><small>{description}</small></span><ArrowUpRight size={14} aria-hidden="true" />
+          <Icon size={17} aria-hidden="true" /><span><strong>{label}</strong><small>{description}</small></span><ThemeActionOpenExternalIcon size={14} aria-hidden="true" />
         </button>)}</div>
     </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />

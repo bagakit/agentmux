@@ -1,12 +1,15 @@
-import { Search } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../../../store'
 import { api } from '../../../lib/api'
 import { BrowserStartPageSettings } from '../BrowserStartPageSettings'
 import type { BrowserStartPageConfig } from '../../../../../shared/browser-start-page'
 import type { SettingsModule } from '../settings-catalog'
 
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+
+
 export const surveySettingsModule = {
-  id: 'survey', group: 'work', title: 'Survey', icon: Search,
+  id: 'survey', group: 'work', title: 'Survey', icon: ThemeActionSearchIcon,
   description: 'Personalize your browser start page and continue research.',
   keywords: 'work survey research browser browsing exploration start page title subtitle icon background history cards',
   savedSummary: config => config.browser.startPage?.title ?? 'AMUX - Survey',

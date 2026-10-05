@@ -1,12 +1,17 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import { Camera, UserRound, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '../../../../shared/user-profile'
 import { MoteAvatarCrop } from '../MoteAvatarCrop'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import './profile-settings.css'
+
+const ThemeObjectUserIcon = semanticIconComponent('object.user')
+const ThemeActionCaptureIcon = semanticIconComponent('action.capture')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+
 
 export function ProfileSettingsPane({ profile, onSave }: {
   profile: UserProfile | undefined
@@ -59,7 +64,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
   return <div className="settings-pane-stack settings-profile" aria-label="My Profile">
     <section className="settings-profile__identity">
       <div className="settings-profile__portrait" role="img" aria-label={value.displayName || 'Your avatar'}>
-        {value.avatar ? <img src={value.avatar} alt="" /> : <UserRound size={34} strokeWidth={1.5} aria-hidden="true" />}
+        {value.avatar ? <img src={value.avatar} alt="" /> : <ThemeObjectUserIcon size={34} strokeWidth={1.5} aria-hidden="true" />}
       </div>
       <div className="settings-profile__identity-text">
         <span className="settings-profile__eyebrow">Your place in AgentMux</span>
@@ -67,7 +72,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
         <TextInput id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
           placeholder="Your name" autoComplete="nickname" onChange={event => draft.setField('displayName', event.currentTarget.value)} />
         <div className="settings-profile__image-actions">
-          <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><Camera size={13} aria-hidden="true" /> Change photo</button>
+          <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
           {value.avatar && <button type="button" className="settings-profile__remove" onClick={() => draft.setField('avatar', '')}>Remove</button>}
         </div>
         <input ref={upload} hidden type="file" accept="image/png,image/jpeg" aria-label="Choose profile photo"
@@ -75,7 +80,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
       </div>
     </section>
     {source && <section className="settings-profile__crop" aria-label="Crop profile photo">
-      <header><strong>Make it yours</strong><button type="button" className="icon-button" aria-label="Cancel photo crop" onClick={() => { imageRequest.current++; setSource(null); photoButton.current?.focus() }}><X size={14} /></button></header>
+      <header><strong>Make it yours</strong><button type="button" className="icon-button" aria-label="Cancel photo crop" onClick={() => { imageRequest.current++; setSource(null); photoButton.current?.focus() }}><ThemeActionCancelIcon size={14} /></button></header>
       <MoteAvatarCrop key={source} source={source} canvasRef={canvas} disabled={false} onReady={() => setReady(true)} onError={setImageError} />
       <button type="button" className="small-button" disabled={!ready} onClick={useCrop}>Use this photo</button>
     </section>}

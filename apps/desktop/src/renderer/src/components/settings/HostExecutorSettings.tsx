@@ -1,6 +1,6 @@
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState } from 'react'
-import { Bot, Plus, RefreshCw, LoaderCircle, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
@@ -10,6 +10,13 @@ import { AgentAvatar } from '../AgentAvatar'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { ServiceWindowNotice } from '../ServiceWindowNotice'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionRegisterCommandIcon = semanticIconComponent('action.register-command')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+
 
 /** Read the executing Host's registry. Registration is an explicit complete configuration. */
 export function HostExecutorSettings({ config, active }: { config: AppConfig; active: boolean }) {
@@ -59,14 +66,14 @@ export function HostExecutorSettings({ config, active }: { config: AppConfig; ac
         {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select></label>
       <span className="settings-resource-count">{descriptors.length} configurations</span>
-      <button className="icon-button" aria-label="Refresh Host executors" disabled={checking} onClick={() => void refresh()}>{checking ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}</button>
-      <button className="small-button" disabled={saving || !host} onClick={() => setAdding(true)}><Plus size={13} />Register command</button>
+      <button className="icon-button" aria-label="Refresh Host executors" disabled={checking} onClick={() => void refresh()}>{checking ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeActionRefreshIcon size={14} />}</button>
+      <button className="small-button" disabled={saving || !host} onClick={() => setAdding(true)}><ThemeActionRegisterCommandIcon size={13} />Register command</button>
     </div>
     <p className="settings-group-note">Commands and launch configuration belong to {host?.label ?? hostId}. Custom wrappers need an explicit target command. Discovery does not install software.</p>
     {inventory?.state === 'error' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Host Executor discovery failed', mode: inventory.detail ?? 'Current Host inventory is unknown. The last configurations are retained.', restore: 'Refresh this Host after restoring its connection. Existing Sessions remain available.' } }} /> : null}
     {error ? <p role="alert" className="dialog-error">{error}</p> : null}
     {adding ? <section className="agent-settings-card">
-      <header className="agent-settings-card__header"><Bot size={18} /><strong>Register on {host?.label ?? hostId}</strong><button className="icon-button" aria-label="Cancel Host registration" disabled={saving} onClick={() => setAdding(false)}><X size={14} /></button></header>
+      <header className="agent-settings-card__header"><ThemeObjectAgentIcon size={18} /><strong>Register on {host?.label ?? hostId}</strong><button className="icon-button" aria-label="Cancel Host registration" disabled={saving} onClick={() => setAdding(false)}><ThemeActionCancelIcon size={14} /></button></header>
       <p className="settings-group-note">Enter this Host's configuration. Saved credentials stay on that Host and are never returned. Replacing an existing registered configuration uses its revision through the public register command.</p>
       <div className="agent-settings-fields">
         <label><span>Executor ID</span><TextInput aria-label="Host Executor ID" value={executorId} onChange={event => setExecutorId(event.target.value)} /></label>
@@ -88,7 +95,7 @@ export function HostExecutorSettings({ config, active }: { config: AppConfig; ac
       <div className="settings-resource-editor">{selectedExecutor ? <section className="agent-settings-card"><header className="agent-settings-card__header"><AgentAvatar executorId={selectedExecutor.executorId} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={22} /><strong>{selectedExecutor.label}</strong></header>
         <dl className="settings-executor-identity"><div><dt>Host</dt><dd>{host?.label ?? hostId}</dd></div><div><dt>Command</dt><dd><code>{selectedExecutor.command}</code></dd></div><div><dt>Resolved executable</dt><dd><code>{selectedExecutor.executable ?? 'Not confirmed'}</code></dd></div><div><dt>Source</dt><dd>{selectedExecutor.source === 'registered' ? 'Registered on this Host' : 'Provider default'}</dd></div></dl>
         {selectedExecutor.cause ? <p className="settings-group-note">{selectedExecutor.cause.message}</p> : null}
-      </section> : <div className="settings-resource-editor__empty"><Bot size={28} /><strong>{checking ? 'Reading Host configurations…' : inventory?.state === 'error' ? 'Host inventory is unknown' : 'Choose a Host Executor'}</strong><p>Inspect the command and availability supplied by this Host.</p></div>}</div>
+      </section> : <div className="settings-resource-editor__empty"><ThemeObjectAgentIcon size={28} /><strong>{checking ? 'Reading Host configurations…' : inventory?.state === 'error' ? 'Host inventory is unknown' : 'Choose a Host Executor'}</strong><p>Inspect the command and availability supplied by this Host.</p></div>}</div>
     </div>}
   </div>
 }

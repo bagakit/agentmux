@@ -1,6 +1,13 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { Check, ChevronRight, FolderOpen, Search, SlidersHorizontal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+
 
 export type HostConnectionPanel = 'connection' | 'projects'
 type HostRow = { id: string; name: string; detail: string; mark: ReactNode; status: ReactNode; projectCount: number }
@@ -39,7 +46,7 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
   }, [focusRequest, expanded, panel])
 
   return <aside className="settings-resource-library settings-host-library">
-    <label className="settings-resource-search"><Search size={14} aria-hidden="true" />
+    <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
       <TextInput ref={search} type="search" aria-label="Filter hosts" placeholder="Find an environment…" value={query} onChange={(event) => onQuery(event.target.value)} />
     </label>
     <div ref={list} className="settings-resource-library__list" aria-label="Environments">
@@ -49,7 +56,7 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
           setExpanded((current) => current[item.id] === open ? current : { ...current, [item.id]: open })
         }}>
         <summary className="settings-host-branch__summary" title={`${item.name} · ${item.id}`}>
-          <ChevronRight size={12} className="settings-host-branch__chevron" aria-hidden="true" />
+          <ThemeNavigationDisclosureIcon size={12} className="settings-host-branch__chevron" aria-hidden="true" />
           <span className="settings-resource-row__mark">{item.mark}</span>
           <span className="settings-resource-row__text"><strong>{item.name}</strong><small>{item.detail}</small></span>
           <span className="settings-resource-row__status">{item.status}</span>
@@ -60,10 +67,10 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
             return <button type="button" key={page} data-host-panel={page}
               {...(page === 'connection' ? { 'data-resource-row': item.id } : {})}
               aria-current={selected ? 'page' : undefined} className="settings-host-page" onClick={() => onSelect(item.id, page)}>
-              {page === 'connection' ? <SlidersHorizontal size={13} aria-hidden="true" /> : <FolderOpen size={13} aria-hidden="true" />}
+              {page === 'connection' ? <ThemeActionAdjustIcon size={13} aria-hidden="true" /> : <ThemeObjectFolderOpenIcon size={13} aria-hidden="true" />}
               <span>{page === 'connection' ? 'Connection' : 'Projects'}</span>
               {page === 'projects' ? <small>{item.projectCount}</small> : null}
-              {selected ? <Check size={12} aria-hidden="true" /> : null}
+              {selected ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
             </button>
           })}
         </div>

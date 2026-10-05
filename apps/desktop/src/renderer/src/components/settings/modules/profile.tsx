@@ -1,9 +1,12 @@
-import { UserRound } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveUserProfile, type UserProfile } from '../../../../../shared/user-profile'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { ProfileSettingsPane } from '../ProfileSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectUserIcon = semanticIconComponent('object.user')
+
 
 async function saveProfile(profile: UserProfile, expected: UserProfile): Promise<void> {
   const current = useAppStore.getState().config
@@ -13,7 +16,7 @@ async function saveProfile(profile: UserProfile, expected: UserProfile): Promise
 
 export const profileSettingsModule = {
   id: 'profile', group: 'preferences', title: 'My Profile',
-  description: 'Your photo, background, and how you work with agents.', icon: UserRound,
+  description: 'Your photo, background, and how you work with agents.', icon: ThemeObjectUserIcon,
   keywords: 'user human person avatar photo name about background collaboration identity profile context mote soul',
   savedSummary(config) {
     const profile = resolveUserProfile(config.profile)

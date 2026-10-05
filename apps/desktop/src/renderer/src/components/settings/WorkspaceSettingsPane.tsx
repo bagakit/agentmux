@@ -1,5 +1,5 @@
 import { usePathDisplay } from '../../hooks/usePathDisplay'
-import { FolderGit2, LoaderCircle, Play, Plus, RadioTower, Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
@@ -8,6 +8,15 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { hostExecutorInventoryMatches, executorsForHost } from '../../lib/executors'
 import { useAppStore } from '../../store'
 import { agentProviderLabel } from '../AgentProviderIcon'
+
+const ThemeActionCreateProjectIcon = semanticIconComponent('action.create-project')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
+
 
 export function WorkspaceSettingsPane({ config, onClose }: {
   config: AppConfig
@@ -87,27 +96,27 @@ export function WorkspaceSettingsPane({ config, onClose }: {
     <div className="settings-pane-stack">
       <div className="settings-pane-toolbar">
         <span className="settings-resource-count">{filter.trim() ? `${matchingWorkspaces.length} of ` : ''}{config.workspaces.length} {config.workspaces.length === 1 ? 'workspace' : 'workspaces'}</span>
-        {!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add project</button> : null}
+        {!adding ? <button className="small-button" onClick={() => setAdding(true)}><ThemeActionCreateProjectIcon size={13} /> Add project</button> : null}
       </div>
       <div className="settings-workspace-create" hidden={!adding}>
-        <div className="settings-workspace-create__header"><strong>Add project</strong><button className="icon-button" aria-label="Cancel adding project" onClick={() => setAdding(false)}><X size={15} /></button></div>
+        <div className="settings-workspace-create__header"><strong>Add project</strong><button className="icon-button" aria-label="Cancel adding project" onClick={() => setAdding(false)}><ThemeActionCancelIcon size={15} /></button></div>
       <section className="workspace-composer">
         <header><p>Choose a folder and a host. You can start an agent now or open the project on its own.</p></header>
         <div className="workspace-composer__fields workspace-composer__fields--project">
           <label className="workspace-composer__wide"><span>Project folder</span><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} placeholder="Project directory" /></label>
-          <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => { setHostId(event.target.value); setExecutorId('none') }}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><RadioTower size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
+          <label><span>Run on</span><select value={readyHosts.some((host) => host.id === hostId) ? hostId : ''} disabled={readyHosts.length === 0} onChange={(event) => { setHostId(event.target.value); setExecutorId('none') }}><option value="" disabled>{checkingHosts ? 'Checking hosts…' : 'No ready hosts'}</option>{readyHosts.map((host) => <option key={host.id} value={host.id}>{host.label}</option>)}</select><small>{readyHosts.find((host) => host.id === hostId)?.kind === 'ssh' ? <><ThemeObjectBroadcastIcon size={11} /> System SSH · Ready</> : readyHosts.some((host) => host.id === hostId) ? 'This Mac · Ready' : 'Open Hosts settings to fix unavailable machines.'}</small></label>
           <label><span>Name <em>optional</em></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Project name" /></label>
           <label className="workspace-composer__wide"><span>Agent</span><select value={executorId} onChange={(event) => setExecutorId(event.target.value)} ><option value="none">Open without an agent</option>{readyExecutors.map((executor) => <option key={executor.id} value={executor.id}>{executor.label} · {agentProviderLabel(executor.providerId)}</option>)}</select><small>{checking ? 'Detecting agents on this host…' : inventory?.state === 'error' ? 'Host check failed; known configurations are retained.' : `${readyExecutors.length} configurations on this host`}</small></label>
         </div>
         {error ? <div className="dialog-error">{error}</div> : null}
-        <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>
+        <footer><span>Branches and worktrees remain Git-owned and appear in the project navigator.</span><button className="primary-button" disabled={!projectPath.trim() || creating || !readyHosts.some((host) => host.id === hostId)} onClick={() => void create()}>{creating ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionStartIcon size={14} />}{creating ? 'Adding…' : 'Add project'}</button></footer>
       </section>
       </div>
       {config.workspaces.length > 0 ? <section className="settings-group">
-        <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Filter workspaces" placeholder="Find a workspace…" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
-        <div className="workspace-settings-list">{matchingWorkspaces.map((workspace) => <div key={workspace.id}><FolderGit2 size={14} /><span><strong>{workspace.name}</strong><small title={displayPath(workspace.path, workspace.hostId)}>{displayPath(workspace.path, workspace.hostId)}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
+        <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><input type="search" aria-label="Filter workspaces" placeholder="Find a workspace…" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
+        <div className="workspace-settings-list">{matchingWorkspaces.map((workspace) => <div key={workspace.id}><ThemeObjectRepositoryIcon size={14} /><span><strong>{workspace.name}</strong><small title={displayPath(workspace.path, workspace.hostId)}>{displayPath(workspace.path, workspace.hostId)}</small></span><em>{workspace.hostId}{workspace.branch ? ` · ${workspace.branch}` : ''}</em></div>)}</div>
       {matchingWorkspaces.length === 0 ? <p className="settings-resource-empty" role="status">No workspaces match “{filter}”.</p> : null}
-      </section> : <div className="settings-workspaces-empty"><p>Your projects will appear here.</p>{!adding ? <button className="small-button" onClick={() => setAdding(true)}><Plus size={13} /> Add your first project</button> : null}</div>}
+      </section> : <div className="settings-workspaces-empty"><p>Your projects will appear here.</p>{!adding ? <button className="small-button" onClick={() => setAdding(true)}><ThemeActionCreateProjectIcon size={13} /> Add your first project</button> : null}</div>}
     </div>
   )
 }

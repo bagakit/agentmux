@@ -1,19 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENT_AVATAR_BADGE_IDS, AGENT_AVATAR_BADGE_LABELS } from '../../../../shared/contracts'
 import { AgentAvatar } from '../AgentAvatar'
-import {
-  ArrowLeft,
-  Bot,
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
-  Trash2,
-  ShieldOff,
-  XCircle
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { quote } from 'shlex'
 import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatarBadge } from '../../../../shared/contracts'
@@ -31,6 +19,19 @@ import { ProviderCatalogPane } from './ProviderCatalogPane'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
+
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionCreateExecutorIcon = semanticIconComponent('action.create-executor')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeStatusUnrestrictedIcon = semanticIconComponent('status.unrestricted')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+
 
 const NO_DETECTIONS: ReturnType<typeof useAppStore.getState>['executorDetections'] = {}
 
@@ -68,10 +69,10 @@ function parseEnv(text: string): Record<string, string> {
 function statusCopy(state: ReturnType<typeof useAppStore.getState>['executorDetections'][string] | undefined) {
   const label = executorDetectionLabel(state)
   switch (state?.state) {
-    case 'ready': return { label, icon: <CheckCircle2 size={13} /> }
-    case 'checking': return { label, icon: <LoaderCircle className="spin" size={13} /> }
-    case 'error': return { label, icon: <AlertTriangle size={13} /> }
-    default: return { label, icon: <XCircle size={13} /> }
+    case 'ready': return { label, icon: <ThemeStatusCompletedIcon size={13} /> }
+    case 'checking': return { label, icon: <ThemeStatusLoadingIcon className="spin" size={13} /> }
+    case 'error': return { label, icon: <ThemeStatusWarningIcon size={13} /> }
+    default: return { label, icon: <ThemeStatusFailedIcon size={13} /> }
   }
 }
 
@@ -339,9 +340,9 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
         <button type="button" className="small-button settings-providers-toggle" aria-pressed={providersOpen} onClick={() => providersOpen ? closeProviders() : openProviders()}>Providers{providerCatalog.length ? <span>{providerCatalog.length}</span> : null}</button>
         {!providersOpen && <div className="settings-resource-check-tools">
             <span className="settings-group-note">Local availability</span>
-            <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}</button>
+            <button className="icon-button" aria-label="Refresh saved executor availability" title="Refresh saved commands" disabled={checking} onClick={() => void detectExecutors(hostId)}>{checking ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionRefreshIcon size={14} />}</button>
         </div>}
-        <button className="small-button" disabled={saving} onClick={() => addExecutor()}><Plus size={13} /> Add executor</button>
+        <button className="small-button" disabled={saving} onClick={() => addExecutor()}><ThemeActionCreateExecutorIcon size={13} /> Add executor</button>
       </div>
       {providersOpen ? <ProviderCatalogPane entries={providerCatalog} read={catalogRead} saving={saving}
         onRefresh={() => void refreshProviders()} onBack={closeProviders} onCreate={addExecutor} /> : <div className="settings-resource-split">
@@ -352,7 +353,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
             status: <span className={`settings-resource-row__check check-pill--${detection?.state ?? 'idle'}`} role="img" aria-label={statusCopy(detection).label} title={statusCopy(detection).label}>{statusCopy(detection).icon}<span>{statusCopy(detection).label}</span></span>
           }))} />
         <div ref={editor} className="settings-resource-editor">
-          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ArrowLeft size={14} /> All executors</button>
+          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All executors</button>
           <p className="settings-group-note">Global templates configure local Desktop launches. Host executors are read and registered separately. Save a changed command before refreshing.</p>
         {executors.filter(({ id }) => id === selectedId).map(({ id, draft, detection }) => {
           const status = statusCopy(detection)
@@ -378,7 +379,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                   <button type="button" className="small-button" aria-label={`Reset ${draft.label} avatar`} disabled={!avatar?.tint && !avatar?.badge} onClick={() => updateAvatar(id, {})}>Reset</button>
                 </div>
                 <details className="settings-launch-config" open={launchOpen[id] ?? false} onToggle={(event) => { const open = event.currentTarget.open; setLaunchOpen((current) => current[id] === open ? current : { ...current, [id]: open }) }}>
-                  <summary><span><strong>Launch configuration</strong><small>Command, arguments, and environment</small></span><ChevronDown size={14} /></summary>
+                  <summary><span><strong>Launch configuration</strong><small>Command, arguments, and environment</small></span><ThemeNavigationDownIcon size={14} /></summary>
                   <div className="settings-launch-config__fields">
                     <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration.</p>
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
@@ -386,16 +387,16 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                     <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable --effort high" rows={3} /></label>
                     <label><span>Environment <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
-                    {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ShieldOff size={13} /> Enable YOLO</button></div> : null}
+                    {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO</button></div> : null}
                   </div>
                 </details>
-                <div className="settings-executor-remove"><button type="button" className="small-button" disabled={saving} onClick={() => removeExecutor(id)}><Trash2 size={13} /> Delete executor</button></div>
+                <div className="settings-executor-remove"><button type="button" className="small-button" disabled={saving} onClick={() => removeExecutor(id)}><ThemeActionRemoveIcon size={13} /> Delete executor</button></div>
               </div>
             </section>
           )
         })}
-          {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><Bot size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : 'Your agent configurations'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Choose an executor to edit its identity and launch configuration.'}</p></div> : null}
-          {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ChevronDown size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ShieldOff size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
+          {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><ThemeObjectAgentIcon size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : 'Your agent configurations'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Choose an executor to edit its identity and launch configuration.'}</p></div> : null}
+          {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ThemeNavigationDownIcon size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
         </div>
       </div>}
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save executors" onSave={() => void saveDrafts(() => drafts)} />

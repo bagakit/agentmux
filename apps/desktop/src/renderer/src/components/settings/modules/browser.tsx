@@ -1,8 +1,11 @@
-import { Globe } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { BrowserSettingsPane } from '../BrowserSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+
 
 async function saveBrowser(agentAutomation: boolean, expected: boolean): Promise<void> {
   const current = useAppStore.getState().config
@@ -18,7 +21,7 @@ export const browserSettingsModule = {
   group: 'preferences',
   title: 'Browser',
   description: 'Choose how agents interact with your pages.',
-  icon: Globe,
+  icon: ThemeObjectBrowserIcon,
   keywords: 'browser agent automation drive page script run snapshot click permission enable disable',
   savedSummary: (config) => config.browser.agentAutomation === true ? 'Automation on' : 'Automation off',
   Pane({ config }) {

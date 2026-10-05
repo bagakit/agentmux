@@ -1,8 +1,11 @@
-import { ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsModule, SettingsNavGroup } from './settings-catalog'
 import bannerUrl from '../../../../../resources/settings-banner.png'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 /** Presentation only. The parent passes published configuration and the original section catalog. */
 export function SettingsOverviewPane<Module extends SettingsModule>({ config, groups, onOpen }: {
@@ -37,7 +40,7 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
                   <Icon size={16} aria-hidden="true" />
                   <span className="settings-overview__entry-label"><strong>{item.title}</strong></span>
                   <span className="settings-overview__summary">{item.savedSummary(config)}</span>
-                  <ChevronRight size={14} aria-hidden="true" />
+                  <ThemeNavigationDisclosureIcon size={14} aria-hidden="true" />
                 </button>
               })}
             </div>

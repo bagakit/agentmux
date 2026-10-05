@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpCircle, CheckCircle2, ChevronDown, Copy, Info, LoaderCircle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt } from '@agentmux/core'
 import type { SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeStatusInfoIcon = semanticIconComponent('status.info')
+const ThemeActionSubmitIcon = semanticIconComponent('action.submit')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 type State = {
   input?: SshHostConfig
@@ -131,25 +139,25 @@ export function HostUpgradePanel({ host, committed, active }: {
   }
   return <section className="host-upgrade" data-host-upgrade={host.id}>
     <div className="host-upgrade__heading">
-      <span className="host-upgrade__title">{busy ? <LoaderCircle size={14} className="spin" /> : receipt?.status === 'completed' ? <CheckCircle2 size={14} /> : check && !check.eligible || uncertain ? <Info size={14} /> : <ArrowUpCircle size={14} />}<strong role="status">{status}</strong></span>
+      <span className="host-upgrade__title">{busy ? <ThemeStatusLoadingIcon size={14} className="spin" /> : receipt?.status === 'completed' ? <ThemeStatusCompletedIcon size={14} /> : check && !check.eligible || uncertain ? <ThemeStatusInfoIcon size={14} /> : <ThemeActionSubmitIcon size={14} />}<strong role="status">{status}</strong></span>
     </div>
     <p className="field-hint host-upgrade__description">{description}</p>
     {runtimeBlocked ? <p className="host-upgrade__next-step">Copy the diagnostics for whoever maintains this host to arrange a supported runtime update. Recheck availability after that update is installed.</p> : null}
     <div className="host-upgrade__actions">
-      {runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><Copy size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
+      {runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><ThemeActionCopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
       <button type="button" data-upgrade-action className={check?.eligible && !needsRecheck && !busy ? 'primary-button' : 'small-button host-upgrade__recheck'} disabled={busy || !saved} onClick={() => void (uncertain ? inspect() : upgrade(!needsRecheck))}>
         {busy ? 'Working…' : uncertain ? 'Check original result' : needsRecheck ? 'Recheck availability' : 'Upgrade and reconnect'}
       </button>
     </div>
     {diagnostics ? <details className="host-upgrade__details">
-      <summary>Technical details <ChevronDown size={13} /></summary>
+      <summary>Technical details <ThemeNavigationDownIcon size={13} /></summary>
       <div className="host-upgrade__diagnostics">
         {detail ? <div><span className="host-upgrade__detail-label">Original diagnostic</span><p className="host-upgrade__diagnostic-message">{detail}</p></div> : null}
         <dl className="host-upgrade__facts">
           {check ? <><div><dt>App Core source</dt><dd><code>{coreSource}</code></dd></div><div><dt>Update digest</dt><dd><code>{check.candidate.digest}</code></dd></div><div><dt>Required Runtime protocol</dt><dd>{check.candidate.protocolVersion}</dd></div></> : null}
           {state.operationId ? <div><dt>Original operation</dt><dd><code>{state.operationId}</code>{receipt ? <span>{receipt.status} · {receipt.stage}</span> : null}</dd></div> : null}
         </dl>
-        {!runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><Copy size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
+        {!runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><ThemeActionCopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
       </div>
     </details> : null}
     {copy?.status === 'copied' ? <p className="host-upgrade__copy-feedback" role="status">{runtimeBlocked ? 'Diagnostics copied. Share them to resolve the update path.' : 'Diagnostics copied.'}</p> : copy?.status === 'failed' ? <p className="host-upgrade__copy-feedback host-upgrade__copy-feedback--error" role="alert">Could not copy diagnostics. Try again.{copy.error ? ` ${copy.error}` : ''}</p> : null}

@@ -1,10 +1,16 @@
 import { Textarea } from '@agentmux/client-ui/input'
-import { Copy, LoaderCircle, RefreshCw, Smartphone } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import { ConnectionLinkCode } from '../toolkit/ConnectionLinkCode'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
+
 
 type DeviceList = AgentMuxRpcResult<'device.ls'>
 const operationLabels: Readonly<Record<string, string>> = { submitAgentPrompt: 'Send message', writeAgent: 'Terminal input', pasteAgent: 'Paste input', respondAgentPermission: 'Respond to permission', answerAgentRequest: 'Answer request', resizeAgent: 'Resize terminal', signalAgent: 'Send signal', stopAgent: 'Stop Agent', resumeAgent: 'Resume Agent', createAgent: 'Create Agent', removeAgent: 'Remove Agent' }
@@ -58,7 +64,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       <p className="settings-group-note">{list ? `${devices.filter(device => device.online).length} online · ${devices.length} authorized` : 'Device status not yet confirmed'}</p>
   
       <div className="settings-pane-toolbar">
-        <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <LoaderCircle size={16} className="device-management__spinner" /> : <Copy size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
+        <button className="primary-button" disabled={busy} onClick={() => { void link() }}>{busy ? <ThemeStatusLoadingIcon size={16} className="device-management__spinner" /> : <ThemeActionCopyIcon size={16} />}{busy ? 'Working…' : 'Copy connection link'}</button>
       </div>
       {list && <p className="settings-group-note" role="status">{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Connection service is starting. Try again shortly.' : 'Connection service unavailable'}</p>}
       {list && list.mobileAccess.state !== 'connected' && <details><summary>Connection details</summary><p className="settings-group-note">{list.mobileAccess.message}</p></details>}
@@ -66,10 +72,10 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       {url && <><ConnectionLinkCode url={url} /><details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details></>}
     </div>
     <div className="device-management__devices">
-      <div className="settings-pane-toolbar"><h3>Connected devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <LoaderCircle size={16} className="device-management__spinner" /> : <RefreshCw size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
+      <div className="settings-pane-toolbar"><h3>Connected devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <ThemeStatusLoadingIcon size={16} className="device-management__spinner" /> : <ThemeActionRefreshIcon size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>
       {observedAt && <p className="device-management__updated">Last checked {new Date(observedAt).toLocaleTimeString()}</p>}
       {devices.map(device => <section className="host-settings-card" key={device.deviceId}>
-        <div className="settings-pane-toolbar"><Smartphone size={16} /><strong>{device.name}</strong><span>{device.online ? 'Online' : 'Offline'}</span>
+        <div className="settings-pane-toolbar"><ThemeObjectPhoneIcon size={16} /><strong>{device.name}</strong><span>{device.online ? 'Online' : 'Offline'}</span>
           <button className="small-button" disabled={busy} onClick={() => { void revoke(device.deviceId) }}>Revoke access</button></div>
         <><p className="settings-group-note">{device.lastSeenAt ? `Last active ${new Date(device.lastSeenAt).toLocaleString()}` : 'No recent activity'}</p>
           {device.operations?.slice(-10).reverse().map(operation => <p className="settings-group-note" key={operation.id}><time>{new Date(operation.at).toLocaleString()}</time> · {operationLabels[operation.method] ?? operation.method} · {operation.target} · {operation.result === 'confirmed' ? 'Submitted' : operation.result === 'failed' ? 'Failed' : 'Unconfirmed'}</p>)}</>

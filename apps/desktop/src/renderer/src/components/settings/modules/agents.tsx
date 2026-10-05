@@ -1,10 +1,13 @@
-import { Bot } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AgentExecutorConfig } from '../../../../../shared/contracts'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { AgentSettingsPane } from '../AgentSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+
 
 // Provider search terms follow the Core source of truth.
 const AGENT_PROVIDER_KEYWORDS = BUILT_IN_AGENT_PROVIDER_IDS.map((id) => id.toLowerCase()).join(' ')
@@ -20,7 +23,7 @@ export const agentsSettingsModule = {
   group: 'resources',
   title: 'Agents',
   description: 'Reusable executors for your next agent session.',
-  icon: Bot,
+  icon: ThemeObjectAgentIcon,
   keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider`,
   savedSummary(config) {
     const count = Object.keys(config.executors).length

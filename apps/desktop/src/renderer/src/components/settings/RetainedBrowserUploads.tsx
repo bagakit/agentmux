@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserRetainedUploads } from '../../../../shared/browser-upload'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+
 
 /** Original upload snapshots, retained without reconnecting or reading a page. */
 export function RetainedBrowserUploads() {
@@ -35,7 +38,7 @@ export function RetainedBrowserUploads() {
           } catch (error) { setNotice(presentError(error)) }
           finally { setBusy(null) }
         })()
-      }}><Trash2 size={13} /> Discard</button>
+      }}><ThemeActionRemoveIcon size={13} /> Discard</button>
     </li>)}</ul>
     {retained ? <p className="settings-group-note">Shared staging limit: {retained.selectionLimit} selections · {formatBytes(retained.byteLimit)}.</p> : null}
     {retained?.warning ? <p className="settings-group-note" role="status">{retained.warning}</p> : null}

@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { FolderOpen, GitBranch, LoaderCircle, Plus, Search } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { AppConfig } from '../../../../shared/contracts'
@@ -12,6 +12,13 @@ import { projectRailNavigation } from '../../lib/workspace-projects'
 import { useAppStore } from '../../store'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
 import './host-projects.css'
+
+const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+
 
 type Progress = { workspace?: WorkspaceRecord; stage: 'registered' | 'opened'; message: string; error?: string }
 
@@ -128,7 +135,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
     <header className="host-projects__heading">
       <div><strong>Projects</strong><small>{projects.length} {projects.length === 1 ? 'project' : 'projects'} on this environment</small></div>
       <button type="button" className="small-button" disabled={!host} onClick={() => setAdding(current => !current)}>
-        <Plus size={13} />{adding ? 'Close folder form' : 'Add folder'}
+        <ThemeActionCreateFolderIcon size={13} />{adding ? 'Close folder form' : 'Add folder'}
       </button>
     </header>
     {!host ? <p role="status" className="settings-group-note">Save this connection before registering a folder on it.</p>
@@ -155,7 +162,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <footer className="host-projects__actions">
         <button type="button" className="small-button" data-register-folder disabled={!host || !path.trim() || busy} onClick={() => void register(false)}>Register folder</button>
         <button type="submit" className="primary-button" data-open-folder disabled={!host || !path.trim() || busy}>
-          {busy ? <LoaderCircle size={13} className="spin" /> : <FolderOpen size={13} />}{executorId ? 'Open and start Agent' : 'Open folder'}
+          {busy ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeObjectFolderOpenIcon size={13} />}{executorId ? 'Open and start Agent' : 'Open folder'}
         </button>
       </footer>
     </form>
@@ -166,20 +173,20 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         onClick={() => void openRegistered(progress.workspace!)}>Open registered folder</button> : null}
     </div> : null}
     {projects.length > 0 ? <>
-      <label className="settings-resource-search"><Search size={14} aria-hidden="true" /><TextInput type="search" aria-label={`Find a project on ${host?.label ?? hostId}`}
+      <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label={`Find a project on ${host?.label ?? hostId}`}
         placeholder="Find a project or worktree…" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <div className="host-projects__list">{matches.map(project => <section key={project.id} className="host-projects__project" data-project-id={project.id}>
-        <header><FolderOpen size={15} aria-hidden="true" /><strong>{project.name}</strong>
+        <header><ThemeObjectFolderOpenIcon size={15} aria-hidden="true" /><strong>{project.name}</strong>
           <small>{project.workspaces.filter(workspace => workspace.kind === 'worktree').length} worktrees</small></header>
         <ul>{project.workspaces.map(workspace => <li key={workspace.id} data-registered-folder={workspace.id}>
-          {workspace.kind === 'worktree' ? <GitBranch size={14} aria-hidden="true" /> : <FolderOpen size={14} aria-hidden="true" />}
+          {workspace.kind === 'worktree' ? <ThemeObjectBranchIcon size={14} aria-hidden="true" /> : <ThemeObjectFolderOpenIcon size={14} aria-hidden="true" />}
           <div><strong>{workspace.name}</strong><small>{workspace.kind === 'worktree' ? `Worktree · ${workspace.branch ?? 'branch unconfirmed'}` : 'Folder'}</small>
             <code title={workspace.path}>{displayPath(workspace.path, workspace.hostId)}</code></div>
           <button type="button" className="small-button" disabled={busy} aria-label={`Open ${workspace.name}`} onClick={() => void openRegistered(workspace)}>Open</button>
         </li>)}</ul>
       </section>)}</div>
       {matches.length === 0 ? <p role="status" className="settings-resource-empty">No projects match “{query}”.</p> : null}
-    </> : <div className="settings-resource-editor__empty"><FolderOpen size={24} aria-hidden="true" /><strong>No projects yet</strong>
+    </> : <div className="settings-resource-editor__empty"><ThemeObjectFolderOpenIcon size={24} aria-hidden="true" /><strong>No projects yet</strong>
       <p>Add a folder on this environment. Branches and worktrees stay in the project’s Git tools.</p></div>}
   </section>
 })

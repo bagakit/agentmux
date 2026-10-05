@@ -1,13 +1,16 @@
-import { FolderGit2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WorkspaceSettingsPane } from '../WorkspaceSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
+
 
 export const workspacesSettingsModule = {
   id: 'workspaces',
   group: 'resources',
   title: 'Workspaces',
   description: 'Project folders and their worktrees.',
-  icon: FolderGit2,
+  icon: ThemeObjectRepositoryIcon,
   keywords: 'project folder repo branch worktree create run on agent',
   savedSummary: (config) => `${config.workspaces.length} ${config.workspaces.length === 1 ? 'workspace' : 'workspaces'}`,
   Pane({ config, onClose }) {

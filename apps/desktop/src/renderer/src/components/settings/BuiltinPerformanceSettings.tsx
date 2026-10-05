@@ -1,9 +1,13 @@
-import { Activity, LockKeyhole } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useId } from 'react'
 import { PERFORMANCE_STATUS_BAR_IDS, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
+
+const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
+const ThemeStatusLockedIcon = semanticIconComponent('status.locked')
+
 
 export function BuiltinPerformanceSettings({ performance, active, onSave }: {
   performance: PerformancePreferences
@@ -21,12 +25,12 @@ export function BuiltinPerformanceSettings({ performance, active, onSave }: {
   return <div className="settings-pane-stack toolkit-settings">
     <section className="toolkit-settings__tool" aria-label="Performance tool">
       <div className="toolkit-settings__identity">
-        <span className="toolkit-settings__icon"><Activity size={24} strokeWidth={1.5} /></span>
+        <span className="toolkit-settings__icon"><ThemeObjectPerformanceIcon size={24} strokeWidth={1.5} /></span>
         <div><span className="toolkit-settings__eyebrow">Built-in toolkit</span><h3>Performance</h3><p>A clear view of AgentMux and your agents’ resource use.</p></div>
       </div>
       <div className="toolkit-settings__preview" aria-label="Status bar preview">
         <span>Workspace · Settings</span><span className="toolkit-settings__preview-tool" data-enabled={draft.value.enabled}>
-          <Activity size={15} />{draft.value.statusBar === 'label' && <span>Performance</span>}
+          <ThemeObjectPerformanceIcon size={15} />{draft.value.statusBar === 'label' && <span>Performance</span>}
         </span>
       </div>
       <label className="toolkit-settings__toggle">
@@ -38,11 +42,11 @@ export function BuiltinPerformanceSettings({ performance, active, onSave }: {
           <LiquidSelectionSurface selected={draft.value.statusBar} active={active} targetAttribute="data-settings-target" />
           {PERFORMANCE_STATUS_BAR_IDS.map(value => <label key={value} data-settings-target={value} data-selected={draft.value.statusBar === value}>
             <input type="radio" name={`${id}-layout`} value={value} checked={draft.value.statusBar === value} onChange={() => draft.setField('statusBar', value)} />
-            <Activity size={16} />{value === 'icon' ? 'Icon' : 'Icon and name'}
+            <ThemeObjectPerformanceIcon size={16} />{value === 'icon' ? 'Icon' : 'Icon and name'}
           </label>)}
         </div>
       </fieldset>
-      <p className="toolkit-settings__locked"><LockKeyhole size={13} /><span>Official, read-only script. Uses the same public CLI queries available to you.</span></p>
+      <p className="toolkit-settings__locked"><ThemeStatusLockedIcon size={13} /><span>Official, read-only script. Uses the same public CLI queries available to you.</span></p>
     </section>
     <p className="settings-hint">Turning this off hides the entry and prevents new Performance observations. It does not stop your agents.</p>
     <SettingsSaveBar save={save} dirty={draft.dirty} label="Save toolkit" onSave={() => void submit()} />

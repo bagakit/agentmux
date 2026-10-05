@@ -1,9 +1,12 @@
-import { PanelsTopLeft } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ProjectRailDensity } from '../../../../../shared/contracts'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { SpaceSettingsPane, projectRailDensityLabel } from '../SpaceSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+
 
 async function saveDensity(projectRailDensity: ProjectRailDensity, expected: ProjectRailDensity): Promise<void> {
   const current = useAppStore.getState().config
@@ -12,7 +15,7 @@ async function saveDensity(projectRailDensity: ProjectRailDensity, expected: Pro
 }
 
 export const spaceSettingsModule = {
-  id: 'space', group: 'work', title: 'Space', icon: PanelsTopLeft,
+  id: 'space', group: 'work', title: 'Space', icon: ThemeObjectLauncherIcon,
   description: 'Project rail density, topics and projects.',
   keywords: 'work topic topics project projects density rail compact dense',
   savedSummary: config => `${projectRailDensityLabel(config.projectRailDensity)} project rail`,

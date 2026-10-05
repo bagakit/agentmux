@@ -1,10 +1,13 @@
-import { Bell } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTIFICATION_TIERS, resolveNotificationModeId, resolveNotificationSound } from '../../../../../shared/notification-presentation'
 import type { AppConfig } from '../../../../../shared/contracts'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { NotificationSettingsPane } from '../NotificationSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
+
 
 async function saveNotifications(notifications: NonNullable<AppConfig['notifications']>, expected: NonNullable<AppConfig['notifications']>): Promise<void> {
   const current = useAppStore.getState().config
@@ -17,7 +20,7 @@ export const notificationsSettingsModule = {
   group: 'preferences',
   title: 'Notifications',
   description: 'Choose when and how agents get your attention.',
-  icon: Bell,
+  icon: ThemeObjectNotificationsIcon,
   keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime',
   savedSummary(config) {
     const mode = resolveNotificationModeId(config)

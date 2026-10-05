@@ -1,10 +1,13 @@
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
-import { NotebookPen } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../../../store'
 import { api } from '../../../lib/api'
 import { resolveNotesPreferences, type NotesPreferences } from '../../../../../shared/notes-preferences'
 import { NotesSettingsPane } from '../NotesSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+
 
 async function saveNotes(value: Required<NotesPreferences>, expected: Required<NotesPreferences>): Promise<void> {
   const current = useAppStore.getState().config
@@ -13,7 +16,7 @@ async function saveNotes(value: Required<NotesPreferences>, expected: Required<N
 }
 
 export const notesSettingsModule = {
-  id: 'notes', group: 'work', title: 'Recall', icon: NotebookPen,
+  id: 'notes', group: 'work', title: 'Recall', icon: ThemeActionEditNoteIcon,
   description: 'A comfortable reading space for your notebooks and pages.',
   keywords: 'recall directory folder storage path work notes note notebook notebooks pages quick notes 随手记 knowledge reading font size width wide',
   savedSummary: config => { const saved = resolveNotesPreferences(config.notes); return `${saved.fontSize} px · ${saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}` },
