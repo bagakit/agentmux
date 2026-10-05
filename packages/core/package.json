@@ -177,7 +177,6 @@
   },
   "bin": {
     "amux": "./bin/amux",
-    "agentmux": "./bin/agentmux",
     "ctxmux": "./bin/ctxmux",
     "ctxmuxd": "./bin/ctxmuxd",
     "agentmux-runtime": "./bin/agentmux-runtime"

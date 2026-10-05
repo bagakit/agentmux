@@ -89,7 +89,7 @@ export function agentMuxRpcSshArguments(endpoint: Extract<AgentMuxRpcEndpoint, {
   const host = rpcString(endpoint.host, 'SSH Host')
   if (host.startsWith('-')) throw new AgentMuxError('Invalid SSH Host.', 'INVALID_CONTROL_REQUEST')
   const destination = endpoint.user ? `${rpcString(endpoint.user, 'SSH user')}@${host}` : host
-  const command = rpcString(endpoint.command ?? 'agentmux', 'Remote CLI command')
+  const command = rpcString(endpoint.command ?? 'amux', 'Remote CLI command')
   const args = ['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes']
   if (endpoint.port !== undefined) {
     if (!Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535) throw new AgentMuxError('Invalid SSH port.', 'INVALID_CONTROL_REQUEST')
@@ -268,7 +268,7 @@ class RpcClient implements AgentMuxRpcClient {
     let deadline: ReturnType<typeof setTimeout> | undefined
     const deviceRecovery = () => method === 'device.hello'
       ? "Check this device's connection state and ask a local user to inspect the original device facts before another explicit mutation. Never automatically replay a write."
-      : 'Read agentmux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
+      : 'Read amux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
     const armDeadline = () => {
       // Finite intents remain with their admitted owner until its receipt, an
       // explicit cancellation or transport failure. Only reader opening is timed.

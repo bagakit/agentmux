@@ -95,7 +95,7 @@ export function defaultAgentMuxHookPort(): number {
   return 40_000 + (digest.readUInt16BE(0) % 20_000)
 }
 
-export function resolveCoreBinPath(binaryName: 'agentmux' | 'agentmux-hook.js'): string {
+export function resolveCoreBinPath(binaryName: 'amux' | 'agentmux-hook.js'): string {
   const candidates: string[] = [
     fileURLToPath(new URL(`../bin/${binaryName}`, import.meta.url)),
     fileURLToPath(new URL(`./bin/${binaryName}`, import.meta.url)),

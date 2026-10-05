@@ -216,7 +216,7 @@ type NativeHistoryBinding = {
 type NativeHistoryObservationResource = { controller: AbortController; binding: NativeHistoryBinding | null }
 
 const PROVIDER_READ_MAX_CONCURRENT = 4
-const AGENTMUX_CLI_PATH = resolveCoreBinPath('agentmux')
+const AGENTMUX_CLI_PATH = resolveCoreBinPath('amux')
 
 export type AgentMuxAgentCreateInput = {
   agentSessionId?: string
