@@ -2668,3 +2668,26 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
     } finally { await f.close() }
   }, 30_000)
 })
+
+
+it('returns the reported favicon through actual Manager pageInfo dispatch and the real script runner', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'agentmux-favicon-operation-'))
+  const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+  createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
+  let manager: BrowserViewManager | undefined
+  try {
+    const created = await managerWithBrowser(new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.json'))))
+    manager = created.manager
+    created.contents.session.fetch = vi.fn().mockResolvedValue(new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    created.contents.emit('page-favicon-updated', ['https://example.invalid/real.svg'])
+    await vi.waitFor(() => expect(created.sentEvents().at(-1).browser.faviconDataUrl).toMatch(/^data:image\/svg\+xml;base64,/))
+    const report = await manager.runScript('b1', 'return await pageInfo()')
+    expect(report.outcome.kind).toBe('completed')
+    expect(report.result).toMatchObject({ url: 'https://example.invalid/', faviconDataUrl: created.sentEvents().at(-1).browser.faviconDataUrl })
+    expect(created.contents.debugger.isAttached()).toBe(false)
+  } finally {
+    manager?.close('b1')
+    createDispatch.mockReset()
+    await rm(directory, { recursive: true, force: true })
+  }
+}, 30_000)

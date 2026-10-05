@@ -1506,3 +1506,20 @@ it('uses a confirmed current Browser directly even when its original item has ot
   expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(0)
   expect(document.querySelector('.survey-recall-capture')!.textContent).toContain(pageB.url); healthy()
 })
+
+it('consumes the reported original Browser favicon through the real event reducer and keeps a generic fallback', async () => {
+  await renderApp(); await enterSurvey(); await dom.click('[aria-label="New webpage"]')
+  const selected = useAppStore.getState().surveyZoneSelection!, ref = selected.active!
+  const browser = useAppStore.getState().tabs[ref.tabId]!.regions[ref.regionId]!
+  if (browser.kind !== 'browser') throw new Error('Actual Browser creation required')
+  const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === selected.zoneId)!
+  const data = 'data:image/png;base64,iVBORw0KGgo='
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, faviconDataUrl: data } }))
+  expect(row.querySelector('img')?.getAttribute('src')).toBe(data)
+  const image = row.querySelector('img')!
+  await act(async () => image.dispatchEvent(new Event('error')))
+  expect(image.hidden).toBe(true); expect(row.querySelector('.survey-page-favicon svg')).not.toBeNull()
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, faviconDataUrl: undefined, navigationId: 'next-document' } }))
+  expect(row.querySelector('img')).toBeNull()
+  expect(useAppStore.getState().surveyZoneSelection).toBe(selected); healthy()
+})
