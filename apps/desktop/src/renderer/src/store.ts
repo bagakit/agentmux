@@ -1700,6 +1700,7 @@ async function enqueueFileSave(
   const initialSurface = fileSurface(initialTab, regionId)
   if (!initialSurface) return
   const key = documentKey(initialSurface.workspaceId, initialSurface.path)
+  const queuedLifetime = documentLifetime(key)
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
   const mutation = workspaceFileMutationTails.get(initialSurface.workspaceId) ?? Promise.resolve()
   const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => {
@@ -1708,6 +1709,13 @@ async function enqueueFileSave(
     const surface = fileSurface(tab, regionId)
     if (!surface) return
     const currentKey = documentKey(surface.workspaceId, surface.path)
+    // A stable Tab can outlive its file target. Never redirect a queued save to another resource or lifetime.
+    if (currentKey !== key || documentLifetime(key) !== queuedLifetime) {
+      state.reportError(Object.assign(new Error(
+        `The queued save for ${initialSurface.path} was cancelled because its file target changed. No write was sent; save the current file to continue.`
+      ), { code: 'WORKSPACE_FILE_SAVE_TARGET_CHANGED' }))
+      return
+    }
     const format = workspaceFilePreviewFormat(surface.path)
     if (format && !format.sourceEditable) return
     const document = state.documents[currentKey]
