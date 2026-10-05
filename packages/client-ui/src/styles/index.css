@@ -4,6 +4,7 @@
 @import './composer.css';
 @import './inline-rename-field.css';
 @import './conversation-message.css';
+@import './conversation-resource-text.css';
 @import './markdown.css';
 @import './conversation-image.css';
 @import './conversation-input-details.css';

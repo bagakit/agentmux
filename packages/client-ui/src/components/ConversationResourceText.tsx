@@ -10,7 +10,6 @@ import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationHistoryResourceReader, ConversationNativeResourceRecord } from './ConversationResourceImage.js'
-import '../styles/conversation-resource-text.css'
 
 export function ConversationResourceText({ part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
   openWorkspaceFile, readPastedImage, openHttpLink }: {
