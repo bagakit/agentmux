@@ -189,7 +189,8 @@ type PromptSubmissionDeps = {
   updateExactAgentSession: (
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
-    update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession
+    update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
+    futureIntentId?: string
   ) => Promise<AgentMuxStoredAgentSession>
 }
 
@@ -403,6 +404,11 @@ export class AgentPromptSubmissionCoordinator {
     assertSession?: (session: AgentMuxAgentSession) => void,
     transportQualification?: AgentPromptTransportQualification
   ): Promise<void> {
+    // Future admission reads and CAS only this intent, alongside the original Session/Run.
+    const updateSession: PromptSubmissionDeps['updateExactAgentSession'] = (id, expectedRun, update) =>
+      this.deps.updateExactAgentSession(id, expectedRun, update, expectedFutureIntent?.intentId)
+    const refreshSession = (id: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStoredAgentSession> =>
+      this.deps.registry.refresh(id, expectedRun, expectedFutureIntent?.intentId)
     if (promptBelongsToPreviousNativeSource(session, submissionId)) {
       // A known acknowledgement is a receipt-only retry. Never re-enter the old input plan.
       if (session.promptCompletionAdmission?.submissionId === submissionId && session.promptCompletionAdmission.acknowledged === true ||
@@ -567,7 +573,7 @@ export class AgentPromptSubmissionCoordinator {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       let uncertainTurn = false
-      const current = await this.deps.updateExactAgentSession(session.agentSessionId, session.run, (stored) => {
+      const current = await updateSession(session.agentSessionId, session.run, (stored) => {
         const admitted = stored.promptCompletionAdmission
         if (admitted && (admitted.operationId === operationId || admitted.submissionId === submissionId)) {
           if (admitted.operationId !== operationId ||
@@ -606,8 +612,8 @@ export class AgentPromptSubmissionCoordinator {
         accepted.run.acceptedInputBytes < admitted!.endByte) {
         throw new AgentMuxError('CtxMux prompt receipt does not match its frozen Input.', 'AGENT_PROMPT_SUBMISSION_RECEIPT_MISMATCH')
       }
-      await this.deps.registry.refresh(session.agentSessionId, session.run)
-      await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+      await refreshSession(session.agentSessionId, session.run)
+      await updateSession(session.agentSessionId, session.run, stored => {
         if (stored.promptCompletionAdmission?.operationId !== operationId) {
           throw new AgentMuxError('Prompt admission changed before receipt settlement.', 'STALE_AGENT_SESSION')
         }
@@ -806,7 +812,7 @@ export class AgentPromptSubmissionCoordinator {
               JSON.stringify([plan.prepare.refresh, transportEvidence.sourceId, resizeRevision]))
             const startByte = transportQualification && frameRefresh === undefined ? preparedInputByte(transportQualification) : run.acceptedInputBytes
             const endByte = startByte + Buffer.byteLength(plan.prepare.refresh)
-            const frozen = await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+            const frozen = await updateSession(session.agentSessionId, session.run, stored => {
               assertAdmission(stored)
               const next = claimInput(stored, operationId, startByte, endByte, false)
               return { ...next, promptCompletionAdmission: { ...next.promptCompletionAdmission!, frameRefresh: {
@@ -818,7 +824,7 @@ export class AgentPromptSubmissionCoordinator {
           }
           if (frameRefresh.notApplied) throw new AgentMuxError('The original refresh was not applied; its range cannot be reused.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
           if (!frameRefresh.acknowledged) {
-            const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+            const current = await refreshSession(session.agentSessionId, session.run)
             if (run.acceptedInputBytes === null || run.acceptedInputBytes < frameRefresh.inputByteRange.endByte) assertAdmission(current)
             inputAttempted = true
             const accepted = await this.applyInput(session, submissionId, {
@@ -832,7 +838,7 @@ export class AgentPromptSubmissionCoordinator {
             }
             run = accepted.run
             const frozen = frameRefresh
-            await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+            await updateSession(session.agentSessionId, session.run, stored => {
               if (stored.promptCompletionAdmission?.submissionId !== submissionId ||
                   stored.promptCompletionAdmission.frameRefresh?.operationId !== frozen.operationId) {
                 throw new AgentMuxError('Native refresh admission changed before settlement.', 'STALE_AGENT_SESSION')
@@ -857,7 +863,7 @@ export class AgentPromptSubmissionCoordinator {
           timeoutMessage: 'Native immediate input context is unconfirmed.',
           terminalMessage: 'Agent Run exited before native immediate preparation.', ...(renderSignal ? { signal: renderSignal } : {}) })
         const context = observation.context
-        const observed = await this.deps.registry.refresh(session.agentSessionId, session.run)
+        const observed = await refreshSession(session.agentSessionId, session.run)
         // A busy native turn must be identified by the Provider's authenticated hook,
         // not by the visible timer or a previous turn's completion.
         const nativeEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
@@ -1020,7 +1026,7 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     beginPromptPreparationPhase(transportQualification?.protocolInput, 'claim-entry')
-    let current = await this.deps.updateExactAgentSession(
+    let current = await updateSession(
       session.agentSessionId, session.run, claimPromptReadiness
     )
     let submission = current.terminalPromptSubmission
@@ -1042,7 +1048,7 @@ export class AgentPromptSubmissionCoordinator {
       phaseName: 'interrupt' | 'payload' | 'submit',
       data: string
     ): Promise<void> => {
-      const currentSession = await this.deps.registry.refresh(session.agentSessionId, session.run)
+      const currentSession = await refreshSession(session.agentSessionId, session.run)
       submission = currentSession.terminalPromptSubmission
       if (!submission) {
         throw new AgentMuxError(
@@ -1091,7 +1097,7 @@ export class AgentPromptSubmissionCoordinator {
       }
       acceptedInputBytes = accepted.run.acceptedInputBytes
       if (phaseName === 'interrupt') {
-        await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+        await updateSession(session.agentSessionId, session.run, stored => {
           const state = stored.terminalPromptSubmission
           if (!state?.prepare?.interrupt) throw new AgentMuxError('The original preparation phase disappeared.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
           assertSubmission(state)
@@ -1142,7 +1148,7 @@ export class AgentPromptSubmissionCoordinator {
         }
         return next
       }
-      current = await this.deps.updateExactAgentSession(
+      current = await updateSession(
         session.agentSessionId, session.run, acknowledgePhase
       )
       submission = current.terminalPromptSubmission
@@ -1183,7 +1189,7 @@ export class AgentPromptSubmissionCoordinator {
           const deadline = Date.now() + TERMINAL_PROMPT_RENDER_TIMEOUT_MS
           for (;;) {
             if (renderSignal?.aborted) throw agentMuxCancellationError('Immediate preparation observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED', renderSignal.reason)
-            const observedSession = await this.deps.registry.refresh(session.agentSessionId, session.run)
+            const observedSession = await refreshSession(session.agentSessionId, session.run)
             const evidence = await provider.readPromptExecutionEvidence({ ...nativeContext,
               ...(observedSession.nativeHandle ? { nativeHandle: observedSession.nativeHandle } : {}) })
             if (evidence && (evidence.sourceId !== prepared.nativeSourceId || evidence.nativeTurnId !== prepared.nativeTurnId)) {
@@ -1218,7 +1224,7 @@ export class AgentPromptSubmissionCoordinator {
             ...(prepared.context === 'interruptible' ? { requireFrameAfterBoundary: true } : {}),
             timeoutMessage: 'Native interruption or empty composer is unconfirmed.',
             terminalMessage: 'Agent Run exited before immediate input was prepared.', ...(renderSignal ? { signal: renderSignal } : {}) })
-        await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+        await updateSession(session.agentSessionId, session.run, stored => {
           const state = stored.terminalPromptSubmission
           if (!state?.prepare) throw new AgentMuxError('The original preparation phase disappeared.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
           assertSubmission(state)

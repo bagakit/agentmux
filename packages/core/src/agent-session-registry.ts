@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import {
-  loadAgentSessions,
+  loadAgentSessionMetadata,
+  agentSessionMetadata,
   AgentMuxSessionDurabilityError,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore,
@@ -104,7 +105,7 @@ export class AgentMuxAgentSessionRegistry {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
     assertCurrent?.()
     const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
-      loadAgentSessions(this.store),
+      loadAgentSessionMetadata(this.store),
       this.store.loadRetiredRuns(),
       this.store.loadRetiredAgentSessions()
     ])
@@ -346,7 +347,7 @@ export class AgentMuxAgentSessionRegistry {
         throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
       }
       this.assertAvailable(normalized)
-      await this.persist(normalized, () => this.store.compareAndSwap(previous ?? null, normalized, signal))
+      await this.persist(normalized, () => previous ? this.store.compareAndSwapMetadata(previous, agentSessionMetadata(normalized), signal) : this.store.compareAndSwap(null, normalized, signal))
       if (previous) this.forget(previous)
       this.remember(normalized)
       return this.get(normalized.agentSessionId)
@@ -357,7 +358,8 @@ export class AgentMuxAgentSessionRegistry {
     agentSessionId: string,
     expectedCurrentRun: AgentMuxRunRef,
     operation: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    futureIntentId?: string
   ): Promise<AgentMuxStoredAgentSession> {
     return await this.enqueue(agentSessionId, async (writeSignal) => {
       writeSignal.throwIfAborted()
@@ -368,7 +370,12 @@ export class AgentMuxAgentSessionRegistry {
           'STALE_AGENT_SESSION'
         )
       }
-      const normalized = normalizeStoredAgentSession(operation(structuredClone(previous)))
+      const future = futureIntentId === undefined ? undefined : await this.store.readFuturePromptIntent(agentSessionId, futureIntentId)
+      const current = { ...previous, ...(futureIntentId === undefined || !future ? {} : { futurePromptIntents: { [futureIntentId]: future } }) }
+      const normalized = normalizeStoredAgentSession(operation(structuredClone(current)))
+      if (normalized.futurePromptIntents && (futureIntentId === undefined || Object.keys(normalized.futurePromptIntents).some(id => id !== futureIntentId))) {
+        throw new AgentMuxError('A future-message update must name its exact intent.', 'INVALID_AGENT_SESSION_STORE')
+      }
       if (normalized.agentSessionId !== agentSessionId) {
         throw new AgentMuxError(
           'Agent Session update changed its identity.',
@@ -376,18 +383,19 @@ export class AgentMuxAgentSessionRegistry {
         )
       }
       this.assertAvailable(normalized)
-      await this.persist(normalized, () => this.store.compareAndSwap(previous, normalized, writeSignal))
+      await this.persist(agentSessionMetadata(normalized), () => this.store.compareAndSwapMetadata(previous, agentSessionMetadata(normalized), writeSignal,
+        futureIntentId === undefined ? undefined : { intentId: futureIntentId, expected: future ?? null, next: normalized.futurePromptIntents?.[futureIntentId] ?? null }))
       this.forget(previous)
       this.remember(normalized)
-      return this.get(agentSessionId)
+      return futureIntentId === undefined ? this.get(agentSessionId) : normalized
     }, signal)
   }
 
   /** Refresh one binding without replacing unrelated Sessions or writing an unchanged record. */
-  async refresh(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStoredAgentSession> {
+  async refresh(agentSessionId: string, expectedRun: AgentMuxRunRef, futureIntentId?: string): Promise<AgentMuxStoredAgentSession> {
     return await this.enqueue(agentSessionId, async () => {
       const previous = this.get(agentSessionId)
-      const current = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === agentSessionId)
+      const current = await this.store.readMetadata(agentSessionId)
       if (!current) {
         throw new AgentMuxError(
           'The current Session record could not be confirmed. Its Run is kept; refresh the Store before retrying this prompt.',
@@ -403,7 +411,9 @@ export class AgentMuxAgentSessionRegistry {
       if (!sameRun(current.run, expectedRun)) {
         throw new AgentMuxError('Agent Session changed before prompt Input.', 'STALE_AGENT_SESSION')
       }
-      return this.get(agentSessionId)
+      if (futureIntentId === undefined) return this.get(agentSessionId)
+      const future = await this.store.readFuturePromptIntent(agentSessionId, futureIntentId)
+      return { ...current, ...(future ? { futurePromptIntents: { [futureIntentId]: future } } : {}) }
     })
   }
 
@@ -413,7 +423,7 @@ export class AgentMuxAgentSessionRegistry {
       if (expectedCurrentRun && !sameRun(session.run, expectedCurrentRun)) {
         throw new AgentMuxError('Agent Session changed before deletion completed.', 'STALE_AGENT_SESSION')
       }
-      await this.store.compareAndSwap(session, null, signal)
+      await this.store.compareAndSwapMetadata(session, null, signal)
       this.forget(session)
       this.sessions.delete(agentSessionId)
     })
@@ -558,7 +568,7 @@ export class AgentMuxAgentSessionRegistry {
 
   private remember(session: AgentMuxStoredAgentSession): void {
     this.assertAvailable(session)
-    const copy = structuredClone(session)
+    const copy = structuredClone(agentSessionMetadata(session))
     this.sessions.set(copy.agentSessionId, copy)
     this.providerIdByRun.set(copy.run.runId, copy.agentSessionId)
     for (const retired of copy.retiredRuns) {
