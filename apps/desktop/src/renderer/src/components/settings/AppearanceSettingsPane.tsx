@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { Check, Monitor, Moon, Palette, SquareTerminal, Sun } from 'lucide-react'
 import { useId } from 'react'
@@ -98,7 +99,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
           <span><strong>Use App font size</strong></span>
         </label>
         <div className="terminal-font-size-control">
-          <input type="number" aria-label="Editor font size in pixels" min={EDITOR_FONT_SIZE_MIN} max={EDITOR_FONT_SIZE_MAX} step={1}
+          <TextInput type="number" aria-label="Editor font size in pixels" min={EDITOR_FONT_SIZE_MIN} max={EDITOR_FONT_SIZE_MAX} step={1}
             placeholder="App" disabled={inheritsEditorFont} value={inheritsEditorFont ? '' : editorFont.value}
             onChange={event => editorFont.setValue(event.target.value)} />
           <span className="terminal-font-size-control__unit">px</span>
@@ -120,7 +121,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
             value={fontSize}
             onChange={(event) => setFontSize(event.target.value)}
           />
-          <input
+          <TextInput
             type="number"
             aria-label="Terminal font size in pixels"
             min={TERMINAL_FONT_SIZE_MIN}
