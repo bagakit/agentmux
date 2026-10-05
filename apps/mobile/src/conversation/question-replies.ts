@@ -53,7 +53,7 @@ export async function replyMobileQuestion(client: AgentMuxHostedClient, sessionI
     return receipt
   } catch (error) {
     if (local.questions.get(key) === attempt) {
-      const next: MobileQuestionReplyAttempt = { ...attempt, phase: questionReplyFailurePhase(previous?.phase, dispatched, error), diagnostic: {
+      const next: MobileQuestionReplyAttempt = { ...attempt, phase: questionReplyFailurePhase(previous?.phase, dispatched), diagnostic: {
         code: typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'QUESTION_REPLY_UNCONFIRMED', message: errorMessage(error)
       } }
       // A Core fact may arrive before the RPC callback is lost. Read this client's
