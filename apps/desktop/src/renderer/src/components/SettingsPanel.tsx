@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { Check, ChevronDown, LayoutDashboard, Search, Settings2, X } from 'lucide-react'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -88,7 +89,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId, t
             ? <div className="settings-sidebar__brand"><Settings2 size={24} aria-hidden="true" /><span><strong>Settings</strong></span></div>
             : <div className="settings-sidebar__brand"><BrandIcon size={26} /><span><strong>AgentMux</strong><small>Settings</small></span></div>}
         </header>
-        <label className="settings-search"><Search size={14} /><input ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={clearSearch}><X size={12} /></button> : null}</label>
+        <label className="settings-search"><Search size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={clearSearch}><X size={12} /></button> : null}</label>
         <DropdownMenu.Root modal={false}>
           <DropdownMenu.Trigger asChild>
             <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ChevronDown size={13} /></button>
