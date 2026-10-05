@@ -24,12 +24,15 @@ export function WorkbenchTabStrip({
   activeTabId,
   visible,
   tabIds,
-  children
+  children,
+  trailingAction
 }: {
   activeTabId: string | null
   visible: boolean
   tabIds: readonly string[]
   children: ReactNode
+  /** A creation action after the original Tabs, within the same scroll/keyboard surface. */
+  trailingAction?: ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollState, setScrollState] = useState(EMPTY_SCROLL_STATE)
@@ -102,6 +105,7 @@ export function WorkbenchTabStrip({
         className="pane-tabbar__tabs"
       >
         {children}
+        {trailingAction}
       </div>
       {scrollState.hasOverflow ? (
         <>

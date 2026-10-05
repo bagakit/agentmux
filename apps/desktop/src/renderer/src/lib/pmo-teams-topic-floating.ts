@@ -5,7 +5,6 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } fro
 import { useAppStore } from '../store'
 import type { WorkbenchTab } from './workbench-tabs'
 import { projectWorkbenchProjection, sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection, workbenchProjectionSlotId } from './workbench-projection'
-import { tabGroupForTab } from './workbench-tabs'
 import { type WorkbenchViewTarget, type WorkbenchViewTargets } from './workbench-presentation'
 import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
@@ -36,7 +35,7 @@ export type PmoTeamsTopicFloatingState = {
   open: boolean
   preview: boolean
   targetTopicId?: string | undefined
-  /** null is an explicit empty Topic; a missing string remains an exact recovery target. */
+  /** null means no current selection; existing Topic members remain navigable. A missing string remains an exact recovery target. */
   targetTabId?: string | null | undefined
   /** Exact selected occurrence; null keeps an unconfirmed saved placement. */
   reference?: WorkbenchProjectionSelection | null | undefined
@@ -286,7 +285,7 @@ export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boo
 
 export function subscribePmoTeamsTopicFloatingState(listener: () => void): () => void {
   listeners.add(listener)
-  unsubscribeTabRemoved ??= subscribeWorkbenchTabRemoved(tab => {
+  unsubscribeTabRemoved ??= subscribeWorkbenchTabRemoved((tab, placement) => {
     const current = state
     if (!current || current.targetTabId !== tab.id || tab.workspaceId !== SCRATCH_WORKSPACE_ID ||
       current.targetTopicId && current.targetTopicId !== tab.topicId) return
@@ -294,10 +293,24 @@ export function subscribePmoTeamsTopicFloatingState(listener: () => void): () =>
     if (!topicId) return
     const committed = useAppStore.getState()
     if (committed.tabs[tab.id]) return
-    const nextTabId = pmoTeamsTopicFloatingTargetTabId({ ...current, targetTopicId: topicId, targetTabId: undefined }, committed.tabs,
-      committed.layouts[SCRATCH_WORKSPACE_ID], committed.agentFocus.pmo.sessionId)
-    const remaining = Object.values(committed.tabs).some(candidate => candidate.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topicId)
-    update({ targetTopicId: topicId, targetTabId: nextTabId ?? (remaining ? undefined : null) })
+    // Continue this display Group's committed choice, never the background's active Group.
+    const address = placement
+    const layout = committed.layouts[address.displayWorkspaceId]
+    const groups = layout && groupIds(layout.root).includes(address.groupId)
+      ? layout.groups.filter(group => group.id === address.groupId) : []
+    const group = groups.length === 1 ? groups[0] : undefined
+    const belongs = (id: string | null | undefined) => Boolean(id && committed.tabs[id]?.workspaceId === SCRATCH_WORKSPACE_ID && committed.tabs[id]?.topicId === topicId)
+    let nextTabId = group?.activeTabId && belongs(group.activeTabId) ? group.activeTabId : undefined
+    if (!nextTabId && group && address.displayWorkspaceId === placement.displayWorkspaceId && address.groupId === placement.groupId) {
+      const index = placement.tabOrder.indexOf(tab.id)
+      const adjacent = index < 0 ? [] : [...placement.tabOrder.slice(index + 1), ...placement.tabOrder.slice(0, index).reverse()]
+      nextTabId = adjacent.find(id => group.tabOrder.includes(id) && belongs(id))
+    }
+    const next = nextTabId ? committed.tabs[nextTabId] : undefined
+    const reference = next && group && group.tabOrder.includes(next.id) && next.regions[next.layout.activeRegionId]
+      ? { displayWorkspaceId: address.displayWorkspaceId, groupId: group.id, tabId: next.id, regionId: next.layout.activeRegionId } : undefined
+    // An unconfirmed continuation stays unselected, even if a single foreign Group remains.
+    update({ targetTopicId: topicId, targetTabId: reference?.tabId ?? null, reference })
   })
   return () => {
     listeners.delete(listener)
