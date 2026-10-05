@@ -143,4 +143,59 @@ describe('Browser operation writes only original related facts', () => {
     expect(journal.getPersistenceWarning()).toContain('Original Browser history is unreadable')
     expect(await readFile(path, 'utf8')).toBe(original)
   })
+
+  it('only clears a save failure after every affected operation has an exact ACK', async () => {
+    const f = await fixture([operation('failed'), operation('healthy')])
+    let fail = true
+    const journal = new BrowserOperationJournal({ load: () => f.store.load(), async save(changes) {
+      if (fail) { fail = false; throw new Error('Original failed operation remains pending') }
+      await f.store.save(changes)
+    } })
+    await journal.startStep('failed', { method: 'snapshot', label: 'Pending fact' })
+    expect(journal.getPersistenceWarning()).toContain('remains pending')
+    await journal.startStep('healthy', { method: 'snapshot', label: 'Unrelated healthy fact' })
+    expect(journal.getPersistenceWarning()).toContain('remains pending')
+    await journal.finishStep('failed', 1, { status: 'completed' })
+    expect(journal.getPersistenceWarning()).toBeUndefined()
+  })
+
+  it('an older late ACK does not clear a newer failed operation warning', async () => {
+    const f = await fixture([operation('older'), operation('failed')])
+    let call = 0, entered!: () => void, release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
+    const journal = new BrowserOperationJournal({ load: () => f.store.load(), async save(changes) {
+      if (++call === 1) { entered(); await held }
+      else if (call === 2) throw new Error('Newer operation save failed')
+      await f.store.save(changes)
+    } })
+    const first = journal.startStep('older', { method: 'snapshot', label: 'Delayed ACK' })
+    await started
+    await journal.startStep('failed', { method: 'snapshot', label: 'Newer pending fact' })
+    release(); await first
+    expect(journal.getPersistenceWarning()).toContain('Newer operation save failed')
+    await journal.finishStep('failed', 1, { status: 'completed' })
+    expect(journal.getPersistenceWarning()).toBeUndefined()
+  })
+
+  it('an obsolete failure cannot resurrect a warning after a newer snapshot was fully acknowledged', async () => {
+    const f = await fixture([operation('current')])
+    let first = true, entered!: () => void, release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
+    const journal = new BrowserOperationJournal({ load: () => f.store.load(), async save(changes) {
+      if (first) { first = false; entered(); await held; throw new Error('Obsolete snapshot failed') }
+      await f.store.save(changes)
+    } })
+    const pending = journal.startStep('current', { method: 'snapshot', label: 'First original fact' })
+    await started
+    await journal.finishStep('current', 1, { status: 'completed' })
+    release(); await pending
+    expect(journal.getPersistenceWarning()).toBeUndefined()
+  })
+
+  it('a live save ACK cannot claim the unknown original history was loaded', async () => {
+    const journal = new BrowserOperationJournal({ async load() { return null }, async save() {} })
+    await journal.start({ id: 'live', browserId: 'browser-live', operator: { id: 'person', name: 'Person' }, summary: 'Healthy live facts', url: 'https://example.invalid/' })
+    expect(journal.getPersistenceWarning()).toContain('history is unavailable')
+    expect(await journal.get('live')).toMatchObject({ id: 'live' })
+  })
 })
