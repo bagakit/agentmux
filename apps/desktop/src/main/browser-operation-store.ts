@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
+import { chmod, link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { durableWriteFile } from '@agentmux/core'
@@ -79,8 +79,9 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
       if (this.unavailable) throw new Error('Original Browser history is unreadable; restore its storage and reopen the original journal. Live Browser work remains available.')
       if (await this.header() === null) {
         if (this.existed) throw new Error('Original Browser journal is temporarily missing; restore its original file. Live Browser work remains available.')
-        await this.create()
+        await this.create(changes)
         this.existed = true
+        return
       }
       const database = this.database()
       try { this.write(database, changes) } finally { database.close() }
@@ -114,7 +115,23 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
     } catch (error) { database.close(); throw error }
   }
 
-  private async create(path = this.path): Promise<void> {
+  private async create(changes: BrowserOperationJournalChanges): Promise<void> {
+    const temporary = `${this.path}.${randomUUID()}.sqlite`
+    try {
+      await this.initialize(temporary)
+      const database = this.database(temporary)
+      try { this.write(database, changes) } finally { database.close() }
+      const file = await open(temporary, 'r')
+      try { await file.sync() } finally { await file.close() }
+      // Publish a complete first transaction exclusively. An interrupted private build is
+      // never the canonical history, and a concurrent creator's history is never replaced.
+      await link(temporary, this.path)
+      const directory = await open(dirname(this.path), 'r')
+      try { await directory.sync() } finally { await directory.close() }
+    } finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error }) }
+  }
+
+  private async initialize(path: string): Promise<void> {
     await mkdir(dirname(path), { recursive: true })
     const file = await open(path, 'wx', 0o600)
     await file.close()
@@ -130,8 +147,6 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
         CREATE TABLE events (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, body TEXT NOT NULL, writer TEXT NOT NULL, sequence INTEGER NOT NULL, revision INTEGER NOT NULL) STRICT;
         COMMIT;`)
     } finally { database.close() }
-    const directory = await open(dirname(path), 'r')
-    try { await directory.sync() } finally { await directory.close() }
   }
 
   private write(database: DatabaseSync, changes: BrowserOperationJournalChanges): void {
@@ -164,7 +179,7 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
     }
     const temporary = `${this.path}.${randomUUID()}.sqlite`
     try {
-      await this.create(temporary)
+      await this.initialize(temporary)
       const database = this.database(temporary)
       try {
         this.write(database, {
