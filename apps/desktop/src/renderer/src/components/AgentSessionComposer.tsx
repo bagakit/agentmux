@@ -298,6 +298,9 @@ export function AgentSessionComposer({
         {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
           await feedback.run(async () => { await archiveAgentSteer(sessionId, operationId, expectedText, archived) })
         } } : {})}
+        {...(!readOnly && session?.kind === 'agent' ? { onMoveQueuedToDraft: async (operationId: string, expectedText: string) => {
+          await feedback.run(async () => { await useAppStore.getState().moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, session.control.run.runId) })
+        } } : {})}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}

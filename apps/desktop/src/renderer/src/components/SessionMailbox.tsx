@@ -7,7 +7,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerPendingDelivery } from './ComposerPendingDelivery'
 import type { EditQueuedMessage } from './ComposerQueuedMessageEditor'
-import { ComposerOutbox, type ComposerQueuedMessage, type ArchiveQueuedMessage } from './ComposerOutbox'
+import { ComposerOutbox, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
 import { useAppStore } from '../store'
 import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
 import { useSessionUserMessages } from '../lib/session-user-messages'
@@ -113,7 +113,7 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
   children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
   pendingInteraction?: boolean
   onRevealMessage?: RevealMailboxMessage | undefined
@@ -126,6 +126,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   visible?: boolean
   control?: AgentSessionControl | undefined
   userMessages?: readonly AgentSessionUserMessage[] | undefined
+  onMoveQueuedToDraft?: MoveQueuedMessageToDraft | undefined
   onArchiveQueued?: ArchiveQueuedMessage | undefined
   onMoveQueued?: (id: string, direction: 'up' | 'down') => void
   onSendQueued?: (id: string) => void
@@ -413,7 +414,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
           {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} onCancelPreparation={onCancelQueuedPreparation} selectedId={selectedQueue?.id ?? null}
             onSelect={(key) => { focusAfter.current=null; setSelection({scope,folder:'outbox',key:`queue:${key}`}) }} reading={reading}
             {...(onArchiveQueued ? { onArchive: onArchiveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
-            {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
+            {...(onMoveQueuedToDraft ? { onMoveToDraft: onMoveQueuedToDraft } : {})} {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
           {!selectedMessage && archived.length ? <ComposerOutbox sessionId={mailboxSessionId} queued={archived} selectedId={selectedQueue?.id ?? null}
             onSelect={(key) => { focusAfter.current=null; setSelection({scope,folder:'outbox',key:`queue:${key}`}) }} reading={reading}
             {...(onArchiveQueued ? {onArchive:onArchiveQueued} : {})} {...(onCopyQueued ? {onCopy:onCopyQueued} : {})}
@@ -453,5 +454,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }

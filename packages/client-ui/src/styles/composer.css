@@ -372,6 +372,7 @@
 @media (forced-colors: active), (prefers-reduced-transparency: reduce) {
   .composer-pending__card { opacity: 1; background: var(--surface-2); backdrop-filter: none; }
 }
+.composer-pending__recover.composer-tool { width: auto; padding: 0 6px; color: var(--text-1); font: inherit; font-size: var(--fs-micro); }
 .composer-pending__more.composer-tool { width: auto; min-width: 24px; padding: 0 3px; font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-pending__more > span { position: relative; white-space: nowrap; }
 .composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: auto minmax(0, 1fr); padding: 7px; }

@@ -30,7 +30,8 @@ type DesktopControlTransport = {
 function controlError(error: AgentMuxControlError): Error & { code: AgentMuxControlErrorCode } {
   return Object.assign(new Error(error.message), {
     code: error.code,
-    ...(error.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: error.candidates } : {})
+    ...(error.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: error.candidates } : {}),
+    ...(error.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && error.controlFailure ? { controlFailure: error.controlFailure } : {})
   })
 }
 

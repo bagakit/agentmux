@@ -89,6 +89,7 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     notice: { kind: 'process-degraded', notice: {
       step: problem.status === 'restoring' && sendingId === problem.operationId
         ? 'Restoring the Agent before execution'
+        : problem.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED' ? 'The original send condition changed'
         : problem.errorCode === 'AGENT_PROMPT_PREPARATION_FAILED' ? 'Preparing this send did not complete'
         : problem.promptCondition !== null ? 'The original message delivery is still unconfirmed'
         : problem.awaitingExplicitSend ? 'The restored message waits for explicit Send'
@@ -96,7 +97,9 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       mode: errorIdentity(problem.error ?? (problem.status === 'restoring'
         ? 'Your message is kept while its Session is restored and the Run binding is saved.'
         : 'The bound Run is unavailable or changed. Its delivery result is unknown; it will not be replayed on another Run.')),
-      restore: problem.promptCondition !== null
+      restore: problem.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
+        ? 'This attempt wrote no input. Inspect the conversation, then move the original text to the draft to compose a new message; its previous delivery remains unconfirmed.'
+        : problem.promptCondition !== null
         ? 'Your original message and operation are kept. Inspect the original conversation and outbox before choosing Send; it will not be replayed automatically.'
         : 'Your message is kept. Open the outbox to inspect, send, copy or edit it.'
     } } })
