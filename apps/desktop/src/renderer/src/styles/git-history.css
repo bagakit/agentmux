@@ -3,6 +3,7 @@
 .git-history-controls { flex: 0 0 30px; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); }
 .git-history-controls select { flex: 1; min-width: 0; height: 24px; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-meta); text-overflow: ellipsis; }
 .git-history-controls .icon-button { flex: 0 0 24px; width: 24px; height: 24px; }
+.git-history-controls .git-history-open-repository { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--sp-1); height: 24px; white-space: nowrap; }
 .git-history-error { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .git-history-scroll { flex: 1; min-height: 0; overflow: auto; }
 .git-history-window { position: relative; min-width: 0; padding: 0 var(--sp-2); }
