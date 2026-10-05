@@ -205,6 +205,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'action.create-prompt': { label: 'Create Prompt', glyph: 'plus' },
   'object.package': { label: 'Package', glyph: 'package' },
   'action.add-argument': { label: 'Add Argument', glyph: 'plus' },
+  'action.remove-argument': { label: 'Remove argument', glyph: 'x' },
   'action.install-package': { label: 'Install Package', glyph: 'plus' },
   'action.create-tool': { label: 'Create Tool', glyph: 'plus' },
   'action.add-operation': { label: 'Add Operation', glyph: 'plus' },
