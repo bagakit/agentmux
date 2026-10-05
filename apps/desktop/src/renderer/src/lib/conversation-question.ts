@@ -1,7 +1,7 @@
 import { validateAgentPromptCondition, type AgentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import type { ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
-import { parseQuestionReplyAttempt, questionReplyFailurePhase, questionReplyKey, questionReplyReceiptMatches, questionReplyRecorded,
+import { parseQuestionReplyAttempt, questionReplyFailurePhase, questionReplyKey, questionReplyReceiptMatches, createQuestionReplyMatcher,
   questionReplyState, type ConversationQuestionTarget, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { AgentSessionControl } from '../../../shared/contracts'
@@ -55,12 +55,13 @@ export async function replyConversationQuestion(control: AgentSessionControl,
   }
 }
 export function observeConversationQuestionAnswers(control: AgentSessionControl, page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null, notApplied?: AgentPromptNotApplied): void {
+  const recorded = createQuestionReplyMatcher(control.agentSessionId, page, context)
   for (const [key, attempt] of Object.entries(useAppStore.getState().questionReplies?.[control.agentSessionId] ?? {})) {
     if (attempt?.phase === 'confirmed') continue
     try {
       parseQuestionReplyAttempt(attempt)
       if (key !== questionReplyKey(control.agentSessionId, attempt.input)) continue
-      if (attempt.hostId === control.hostId && questionReplyRecorded(control.agentSessionId, attempt, page, context)) {
+      if (attempt.hostId === control.hostId && recorded(attempt)) {
         void retainConversationQuestionReply(control.agentSessionId, key, { ...attempt, phase: 'confirmed', diagnostic: undefined }, attempt).catch(() => {})
       } else if (attempt.phase === 'unknown' && attempt.hostId === control.hostId &&
         notApplied?.submissionId === attempt.input.operationId && notApplied.run.runId === attempt.input.expectedRun.runId &&

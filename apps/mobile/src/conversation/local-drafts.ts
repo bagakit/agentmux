@@ -25,9 +25,40 @@ function restoredMessage(value: PromptAttempt['phase'], interaction = false): st
   return value === 'confirmed' ? '先前已由 Core 确认；当前连接另行核对。' : '原输入未发送或已被拒绝；草稿保留。'
 }
 
+/** Derived routing only; the original keyed Map remains the device intent owner. */
+class SessionQuestionReplies extends Map<string, MobileQuestionReplyAttempt> {
+  private readonly sessionKeys = new Map<string, Set<string>>()
+  private sessionId(key: string): string | undefined {
+    try { const parts: unknown = JSON.parse(key); return Array.isArray(parts) && typeof parts[0] === 'string' ? parts[0] : undefined }
+    catch { return undefined }
+  }
+  override set(key: string, attempt: MobileQuestionReplyAttempt): this {
+    const sessionId = this.sessionId(key)
+    if (sessionId !== undefined) {
+      let keys = this.sessionKeys.get(sessionId)
+      if (!keys) this.sessionKeys.set(sessionId, keys = new Set())
+      keys.add(key)
+    }
+    return super.set(key, attempt)
+  }
+  override delete(key: string): boolean {
+    const sessionId = this.sessionId(key), keys = sessionId === undefined ? undefined : this.sessionKeys.get(sessionId)
+    keys?.delete(key)
+    if (keys?.size === 0) this.sessionKeys.delete(sessionId!)
+    return super.delete(key)
+  }
+  override clear(): void { super.clear(); this.sessionKeys.clear() }
+  *forSession(sessionId: string): IterableIterator<[string, MobileQuestionReplyAttempt]> {
+    for (const key of this.sessionKeys.get(sessionId) ?? []) {
+      const attempt = this.get(key)
+      if (attempt) yield [key, attempt]
+    }
+  }
+}
+
 /** Device-owned drafts and original intent guards only. No credentials, message log or send queue. */
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
-  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new Map<string, ResponseAttempt>(), questions = new Map<string, MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
+  const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new Map<string, ResponseAttempt>(), questions = new SessionQuestionReplies(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
   const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
