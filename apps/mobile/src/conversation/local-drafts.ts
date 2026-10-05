@@ -131,6 +131,9 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     let operation: Promise<ConversationCommit>
     try { operation = owner.editConversation(edits, recordId) } catch (error) { operation = Promise.reject(error) }
     return operation.then(committed => {
+      if (committed.recordId !== expectedRecordId || owner.recordIdentity() !== expectedRecordId) {
+        throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原保存回执不能采用新的记录，原正文与操作仍保留。')
+      }
       const saved = committed.conversation
       state.conflicts = saved.conflicts ?? []
       // Do not erase edits made while saving. Replace a conflicted attempt object,
@@ -162,7 +165,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
         }
       }
       durableBaseline = saved
-      if (revision === saveRevision) { baseline = saved; recordId = committed.recordId }
+      if (revision === saveRevision) baseline = saved
       state.canSave = true
       state.recordChanged = false
       state.notice = state.conflicts.length ? '另一页面已更新同一条记录；原请求和两份正文均保留。请核对保全内容，不会自动重投。' : null
