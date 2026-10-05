@@ -11,7 +11,7 @@ This document describes the update mechanisms in the current source, not an inst
 
 ## Build and route selection
 
-The first update needs `pnpm package:mac:install` to install the frontend loader. Subsequent compatible UI work can use `pnpm update:local` or explicitly `pnpm update:renderer`. The latter rejects host/runtime changes. Both build before selecting or activating a release. Packaging requires a clean committed checkout; a separate worktree can preserve unfinished work in the development tree.
+The first update needs `pnpm package:mac:install` to install the frontend loader. Subsequent compatible UI work can use `pnpm update:local` or explicitly `pnpm update:renderer`. The latter rejects host/runtime changes. Both build before selecting or activating a release. Packaging requires a clean committed checkout; a separate worktree can preserve unfinished work in the development tree. LaunchServices smoke and installed GUI relaunch remove the caller's `ELECTRON_RUN_AS_NODE` from a copied environment; intentional Node-mode CLI, SDK and semantic Host launches retain their own mode.
 
 ## Signing identity
 
