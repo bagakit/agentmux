@@ -1,2 +1,2 @@
-#!/bin/sh
-exec "$(dirname "$0")/agentmux" "$@"
+#!/usr/bin/env node
+import '../dist/agentmux.js'
