@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState } from 'react'
 import { Copy, Link, FolderOpen, Unlink } from 'lucide-react'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
@@ -44,7 +45,7 @@ export function ExternalBrowserConnections() {
     </div>
     {!workspaceId ? <p className="settings-group-note">Choose a Workspace to connect an external tab.</p> : null}
     {pairing ? <div className="external-browser-connections__link">
-      <input type="password" aria-label="Private extension connection link" readOnly value={pairing.link} autoComplete="off" />
+      <TextInput type="password" aria-label="Private extension connection link" readOnly value={pairing.link} autoComplete="off" />
       <button className="small-button" disabled={busy} onClick={() => void perform(async () => { if (Date.now() >= pairing.expiresAt) { setPairing(null); setNotice('This connection link expired. Create another connection link.'); return } await api.ui.writeClipboardText(pairing.link); setNotice('Connection link copied. Paste it in the AgentMux extension.') })}><Copy size={13} /> Copy</button>
     </div> : null}
     {targets.length ? <ul className="external-browser-connections__targets">{targets.map(row => <li key={row.id}>
