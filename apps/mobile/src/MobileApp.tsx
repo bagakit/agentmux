@@ -26,7 +26,7 @@ import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWork
 import { MobileGoalWork } from './navigation/MobileGoalWork'
 import { MobileMoteProfile } from './navigation/MobileMoteProfile'
 import { useMobileBack } from './navigation/useMobileBack'
-import { retainObjectReference, type MobilePresentationRoute } from './recovery/presentation-route'
+import { retainObjectReference, type MobilePresentationRoute, type MobileGoalsContext } from './recovery/presentation-route'
 
 type Workface = Navigation
 
@@ -60,6 +60,10 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [secondary, setSecondary] = useState<'topics' | 'survey' | 'goals' | null>(initialPrimary === 'goals' || initialPrimary === 'topics' || initialPrimary === 'survey' ? initialPrimary : null)
   const [topicId, setTopicId] = useState<string | null>(null)
   const [source, setSource] = useState<TopicKnowledgeSource | null>(null)
+  const [goalsContext, setGoalsContext] = useState<MobileGoalsContext>(initial.current.presentation?.goals
+    ?? { goalId: null, mode: 'detail', discussion: null })
+  const updateGoalsContext = useCallback((context: MobileGoalsContext) => setGoalsContext(value =>
+    JSON.stringify(value) === JSON.stringify(context) ? value : context), [])
   const pageName = secondary === 'topics' ? 'Topics' : secondary === 'survey' ? 'Survey' : secondary === 'goals' ? 'Goals' : home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'
   const rpc = useCallback<NonNullable<AgentMuxHostedClient['forwardRpc']>>((method, params) => {
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，原工作面保留。'))
@@ -67,6 +71,11 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   }, [client])
   const [showSession, setShowSession] = useState(initial.current.presentation?.showSession ?? (initial.current.workface.selectedSessionId !== null && initial.current.workface.panel !== 'sessions'))
   const [showGoalWork, setShowGoalWork] = useState(initial.current.presentation?.showGoalWork ?? false)
+  const closeSession = () => {
+    setShowSession(false); setShowGoalWork(false)
+    if (secondary === 'goals' && goalsContext.discussion?.agentSessionId === workface.selectedSessionId)
+      setGoalsContext(value => ({ ...value, discussion: null }))
+  }
   const [objectIdentity, setObjectIdentity] = useState<MobileObjectIdentity | null>(initial.current.presentation?.identity ?? null)
   const [profileIdentity, setProfileIdentity] = useState<MobileObjectIdentity | null>(initial.current.presentation?.profile?.identity ?? null)
   const [profileSourcePath, setProfileSourcePath] = useState<string | null>(initial.current.presentation?.profile?.sourcePath ?? null)
@@ -122,7 +131,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     } else if (showSession) {
       if (showGoalWork) setShowGoalWork(false)
       else if (workface.panel === 'terminal') setWorkface(value => ({ ...value, panel: 'conversation' }))
-      else setShowSession(false)
+      else closeSession()
     } else if (source) setSource(null)
     else familyBack?.()
   })
@@ -156,6 +165,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     // whether its history remains readable; unknown/old-Run events cannot erase a saved workface.
   }), [client])
   const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork,
+    ...(initial.current.presentation?.goals || goalsContext.goalId !== null ? { goals: goalsContext } : {}),
     identity: retainObjectReference(objectIdentity), profile: sheet === 'identity' && profileIdentity
       ? { identity: retainObjectReference(profileIdentity)!, sourcePath: profileSourcePath } : null }
   const presentationBytes = JSON.stringify(presentation)
@@ -193,7 +203,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><MoreHorizontal size={20} /></button> : <span className="mobile-header-spacer" />}
     </header>
     {workspaceVisible && showSession && <div className="mobile-session-toolbar">
-      <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{pageName}</button>
+      <button className="mobile-text-button" onClick={closeSession}><ArrowLeft size={16} />{pageName}</button>
       <span>{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
       <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><Target size={18} /></button>
       {!objectIdentity?.mote && <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button>}
@@ -220,7 +230,8 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource source={source} rpc={rpc} onBack={() => setSource(null)} openHttpLink={openBrowserHttpLink}
             openScope={scope => { setSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
         </div>}
-        <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack} /></div>
+        <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
+          context={goalsContext} onContextChange={updateGoalsContext} copyText={platform.copyText} /></div>
       </>}
       <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>
         <MobileGoalWork client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && showSession && showGoalWork} />
@@ -246,7 +257,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
             <button className="mobile-menu-row" aria-current={secondary === 'survey' ? 'page' : undefined} onClick={() => { navigationRevision.current += 1; setSecondary('survey'); setShowSession(false); setSheet(null) }}><Compass size={20} /><span>Survey<small>研究与笔记</small></span></button>
           </nav>
           <div className="mobile-drawer-settings">
-          {showSession && <button className="mobile-menu-row" onClick={() => { setShowSession(false); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {pageName}</span></button>}
+          {showSession && <button className="mobile-menu-row" onClick={() => { closeSession(); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {pageName}</span></button>}
           <label className="mobile-home-select">默认主页<select aria-label="连接后的默认主页" value={defaultHome} onChange={event => {
             const value = event.target.value as MobilePrimaryWorkface
             try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
@@ -263,7 +274,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? '原 Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
           <button className="mobile-menu-row" onClick={() => { setShowGoalWork(value => !value); setSheet(null) }}><Target size={18} /><span>{showGoalWork ? '返回原对话' : '目标与结果'}</span></button>
           <button className="mobile-menu-row" onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })); setSheet(null) }}><SquareTerminal size={18} /><span>{workface.panel === 'terminal' ? '查看对话' : '查看终端'}</span></button>
-          <button className="mobile-menu-row" onClick={() => { setShowSession(false); setShowGoalWork(false); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {pageName}</span></button>
+          <button className="mobile-menu-row" onClick={() => { closeSession(); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {pageName}</span></button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
           <p>Mac：{location.origin} · {label}</p>

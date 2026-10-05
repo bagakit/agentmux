@@ -9,6 +9,8 @@ import { isLocalNetworkHost } from '@agentmux/relay/offer'
 import type { PromptAttempt, ResponseAttempt } from '../conversation/local-drafts'
 import { parseMobileFileUpload, type MobileFileUpload } from '../conversation/attachments'
 import { parsePresentationRoute, type MobilePresentationRoute } from './presentation-route'
+import { mobileGoalDraftKey, parseMobileGoalDraft, parseMobileGoalDrafts, parseMobileGoalDraftConflicts,
+  MobileGoalDraftInvalidError, type MobileGoalDraft, type MobileGoalDraftCommit } from './goal-drafts'
 
 export { DEVICE_WORKFACE_KEY } from './device-storage-lock'
 export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
@@ -54,7 +56,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[] }
+  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -155,6 +157,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'fileUploads')) keys.push('fileUploads')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'presentation')) keys.push('presentation')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'recordId')) keys.push('recordId')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'goalDrafts')) keys.push('goalDrafts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'goalDraftConflicts')) keys.push('goalDraftConflicts')
   const v = record(value, keys)
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
@@ -165,6 +169,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
     if (!origin(host.origin) || !id(host.hostId)) throw invalid()
   }
   parseDraftRecord(v.conversation)
+  if (v.goalDrafts !== undefined) parseMobileGoalDrafts(v.goalDrafts)
+  if (v.goalDraftConflicts !== undefined) parseMobileGoalDraftConflicts(v.goalDraftConflicts)
   if (Object.hasOwn(v, 'presentation')) parsePresentationRoute(v.presentation)
   if (v.fileUploads !== undefined) {
     if (!Array.isArray(v.fileUploads) || v.fileUploads.length > MAX_ENTRIES) throw invalid()
@@ -341,6 +347,29 @@ export class DeviceWorkfaceStore {
   updateConversation(conversation: DraftRecord): Promise<void> {
     const parsed = parseDraftRecord(conversation)
     return this.update(value => ({ ...value, conversation: parsed }))
+  }
+  /** One scoped Goal key, using the original record/lock and actual durable ack. */
+  editGoalDraft(expected: MobileGoalDraft | null, next: MobileGoalDraft, recordId: string | null): Promise<MobileGoalDraftCommit> {
+    const captured = parseMobileGoalDraft(next), previous = expected === null ? null : parseMobileGoalDraft(expected)
+    const key = mobileGoalDraftKey(captured.goalId, captured.scope)
+    if (previous && mobileGoalDraftKey(previous.goalId, previous.scope) !== key) throw new MobileGoalDraftInvalidError('目标草稿的原对象或 Host 不同；本次保存未发送，原正文保留。')
+    return this.update(value => {
+      const drafts = value.goalDrafts ?? [], current = drafts.find(item => mobileGoalDraftKey(item.goalId, item.scope) === key) ?? null
+      let result: DeviceWorkface
+      if (!sameValue(current, previous) && !sameValue(current, captured)) {
+        const conflicts = value.goalDraftConflicts ?? []
+        result = { ...value, goalDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
+      } else result = { ...value, goalDrafts: [...drafts.filter(item => mobileGoalDraftKey(item.goalId, item.scope) !== key), captured] }
+      // This is the same record budget, checked before the I/O boundary so a
+      // rejected oversized intent cannot be mistaken for a failed durable save.
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MobileGoalDraftInvalidError('当前设备工作面已超过原保存范围；本次请求未发送，原记录与本页草稿保留，请先保全内容。')
+      return result
+    }, recordId, committed => {
+      const draft = committed.goalDrafts?.find(item => mobileGoalDraftKey(item.goalId, item.scope) === key) ?? null
+      const applied = sameValue(draft, captured)
+      const conflict = applied ? null : committed.goalDraftConflicts?.find(item => sameValue(item, captured)) ?? null
+      return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
+    })
   }
   editConversation(edits: ConversationEdit[], recordId: string | null): Promise<ConversationCommit> {
     const captured = structuredClone(edits)
