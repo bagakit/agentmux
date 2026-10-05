@@ -1,3 +1,4 @@
+import { Textarea } from '@agentmux/client-ui/input'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeft, Code2, X } from 'lucide-react'
 import type { ToolkitDesktopApi, ToolkitScript } from '../../../../shared/toolkit'
@@ -21,7 +22,7 @@ export function PerformanceScript({ api, back, close }: { api: Pick<ToolkitDeskt
       <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><X size={14} /></button></header>
     <div className="performance-body performance-script">
       {script ? <><p className="performance-note">Performance observes resources through the public metrics API.</p>
-        <textarea readOnly spellCheck={false} aria-label="Official Performance script source" value={script.text} />
+        <Textarea readOnly spellCheck={false} aria-label="Official Performance script source" value={script.text} />
         <details className="performance-disclosure"><summary>Script identity</summary><dl className="performance-facts"><dt>Path</dt><dd>{script.path}</dd><dt>SHA-256</dt><dd>{script.sha256}</dd></dl></details></>
         : <p className="performance-state" data-tone={error ? 'warning' : 'neutral'}>{error ?? 'Loading the official script…'}</p>}
     </div>
