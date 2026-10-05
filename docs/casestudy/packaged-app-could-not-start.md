@@ -12,7 +12,9 @@ P0。用户无法进入安装包的工作面，原 Renderer 内没有可用恢�
 >
 > “还是 could not start”
 
-原安装包后来记录 `Interface did not load or respond`，属于 preload 失败后的界面就绪未确认。用户转来的 `ERR_ABORTED (-3)` 和配置路径 `${ISOLATED_FIXTURE_ROOT}/u/agentmux.config.json` 则来自本轮隔离实验的页面重载；该实验错误不能代替原包根因，原路径留在本机证据。安装修复候选时，现有代码签名证书未受信任，是独立安装阻断。
+原安装包后来记录 `Interface did not load or respond`，属于 preload 失败后的界面就绪未确认。用户转来的 `ERR_ABORTED (-3)` 和配置路径 `${ISOLATED_FIXTURE_ROOT}/u/agentmux.config.json` 则来自本轮隔离实验的页面重载；该实验错误不能代替原包根因，原路径留在本机证据。
+
+交付修复候选时还出现了独立的签名资格误判。用户完成既有证书的 codeSign 信任认证后，`security find-identity -v -p codesigning` 已列出原 SHA 的身份，并报告 `1 valid identities found`；该行附带 `(CSSMERR_TP_NOT_TRUSTED)`，旧预检正则因此漏选。原证书实际签名及严格 trusted-leaf 校验通过，不能继续把这次交付阻断解释为“用户尚未完成信任”。
 
 ## 影响面
 
@@ -22,7 +24,9 @@ STOPS：受影响包的 sandbox preload、Desktop API bridge、Renderer 挂载�
 
 ## 止血措施
 
-旧包内无带内恢复。可执行的止血是从已合入 main 的启动修复构建并按原安装 owner 安全替换 App；不删除配置或 Session、不关闭健康 Native。签名预检未通过时保留原包和修复候选，由用户授权既有证书的 codeSign 信任，再独立核对有效身份；不能把未安装候选说成用户已恢复。
+旧包内无带内恢复。可执行的止血是从已合入 main 的启动修复构建并按原安装 owner 安全替换 App；不删除配置或 Session、不关闭健康 Native。既有证书认证已完成，后续交付须消费修正后的有效身份解析及真实 staged-App 签名校验，保留原证书身份，不再重复要求用户认证。
+
+后续现场安装副本 `9587a54` 已显示工作面，原 Native 的进程出生身份未变；但该副本实际为 `Signature=adhoc`。这只证明该副本的界面可见，不能计作本轮证书签名交付，也不能推出全部 Session 已恢复；正常证书签名更新仍待完成。
 
 ## 引入时间线
 
@@ -40,6 +44,19 @@ git log -L 19,26:apps/desktop/electron.vite.config.ts --format='%H %s'
 - **引入提交** `c4a4e31e28edd29a413d8f694ebde4698bc748f0`，`refactor: unify product IDs with fixed-width Base58`：为统一身份校验，新增 `scratch-topic-identity.mjs` 对 `@agentmux/core/object-id` 的运行时导入，并经 scratch-topics 与 contracts 进入 preload。共享类型文件里有运行时值，导入不止发生在 Renderer。直到本次修复，该新模块的 pickaxe、逐行历史及 follow 历史均只显示 c4a4e31e；没有后续改过这两行却漏检的提交。
 - `369a4cc43150f53fc19e6669ea175df9c5ba09b1`，`fix(desktop): bundle sandbox preload and confirm renderer startup`：显式关闭 preload 自动外置，并使普通启动与 ready-file 分支消费同一个真实 Renderer-ready loader。
 
+签名次因另沿 `apps/desktop/scripts/macos-signing.mjs` 追溯：
+
+```sh
+git log -S 'configured signing identity is not uniquely available' --format='%H %s' -- apps/desktop/scripts/macos-signing.mjs
+git log -L 35,43:apps/desktop/scripts/macos-signing.mjs 4eba4a25f1ff0f1b8127dc31b3e265103064f184 --format='%H %s'
+git log -L 66,73:apps/desktop/scripts/macos-signing.mjs 4eba4a25f1ff0f1b8127dc31b3e265103064f184 --format='%H %s'
+git log --follow --format='%H %s' -- apps/desktop/scripts/macos-signing.mjs
+```
+
+`d2aa325003335b9aa1a2fe9ec5de9405e86b13cb`，`fix(packaging): preserve certificate-backed macos signing identity` 建立了 Developer ID 身份解析。`4eba4a25f1ff0f1b8127dc31b3e265103064f184`，`fix(desktop): preserve local macOS signing identity across updates` 将解析扩展到本地证书，沿用了要求名称后立即结束的正则，并新增只接受 `anchor H` 的默认 requirement 判断；这次为了保留本地签名身份的改动，反而没有验证 Apple 对该身份的真实输出。修复前两段逐行历史均只显示这两次提交，没有后续修改这两段却漏检的提交；文件 follow 历史中的 `2bd068b130c13dd5c7aee4854ca5032ce032b4fc`（`fix(packaging): preserve pinned runtime and signed helper identities`）修改的是签名 helper 与 Runtime 保全，未改这两段。
+
+`e428233c051b40a1897b96745be5ccdc725f531f`，`fix(desktop): qualify the original local signing identity`：修正本地有效身份解析及原证书默认 requirement 判断，在既有严格签名验证中确认 trusted leaf。该提交已合入 main；这份源码资格不提升为当前安装副本已使用原证书。
+
 ## 根因分析
 
 直接原因：`preload → contracts → scratch-topics → scratch-topic-identity → Core/object-id` 的共享值导入被外置为裸 `require('@agentmux/core/object-id')`。Electron sandbox preload 不能任意加载 Node 包，执行抛 `module not found`，bridge 未暴露；Renderer 随即抛 `AgentMux preload API is unavailable`。重新启用外置所得反例 preload SHA256 为 `66e46cc5ce83b3a93610562475620acd14c0ee7a5a3eb30b7be89b1f344fae60`，与原安装包字节完全相同。
@@ -47,6 +64,10 @@ git log -L 19,26:apps/desktop/electron.vite.config.ts --format='%H %s'
 根因：跨共享模块的重构只被当成身份校验变化，没有把运行时导入闭包放到实际宿主安全边界中验证。交付流程又用“页面导航成功／Main 留下 ready 文件”代替“原 preload、bridge 与 Renderer 挂载真正成功”。这两个判断共同让可构建但不可用的包获得启动资格。
 
 为什么没更早发现：`loadFile` 可以在 preload 错误时完成，Core 可连接也不能证明 UI 可用；原 CrashLog 仅捕获 Main 未处理异常及进程消失，preload 失败不必让 Renderer 进程消失，结果只留下较晚的就绪超时。已有[真实配置下启动验收](../design/behavior/session-recovery.md#启动配置错误与诊断)要求，但旧 smoke 没消费相同就绪回执，规则没有机械约束住该交付分支。
+
+签名次因的直接原因有两处：有效身份行的警告后缀被锚定正则漏掉；Apple 实际生成的默认 designated requirement 使用 `certificate leaf = H"<原证书哈希>"`，旧判断却只认 `anchor H"<原证书哈希>"`。原证书是 self-signed，两种形状都可绑定同一原证书，不能以文本形状不同判定签名身份改变。
+
+这部分的根因是交付资格把证书链诊断、代码签名信任及工具输出形状当成同一个判据。[Apple 的有效身份枚举实现](https://github.com/apple-oss-distributions/SecurityTool/blob/main/identity_find.c)可以同时打印证书链警告；证书单独执行 X.509 校验所得的 `AnchorTrusted=0`，也不等于真实签名的 [`certificate leaf trusted`](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/reqinterp.cpp) 不成立。先前用简化身份行和单一 requirement 文本作反例，没有经过原证书、真实 Mach-O 签名及实际 strict 校验，因而没发现这两处误拒。原证书本机反例才将这些事实分开；证书链诊断的具体原因仍未确定。
 
 ## 改进措施
 
@@ -62,6 +83,10 @@ git log -L 19,26:apps/desktop/electron.vite.config.ts --format='%H %s'
    - 是否足够 root：调查明确两种当前缺失的原启动异常形态；复用原 CrashLog 与查询入口，限定原窗口及加载 attempt。此观测切片须独立完成后才称已交付。
    - 能否彻底避免：只能更早定位和缓解，不能阻止 preload／导入错误本身。
    - 是否降低系统熵：新增一个小捕获 owner 和薄入口；不新增遥测、会话账本或通用诊断框架。更简的“只监听进程消失”已被本次活着但不可用的 Renderer 反证；“只看 console”无法保证原来源、范围与敏感内容边界。
+4. 修正原本地证书的身份解析与默认 requirement 判断，并在既有 staged-App 严格校验中确认 `certificate leaf trusted`。
+   - 是否足够 root：原交付入口只有一个本地证书资格 owner，覆盖本次已证明的两处误拒；Developer ID 与禁止 ad hoc 安装的分支保留，不把任意证书警告变成有效身份。
+   - 能否彻底避免：本可阻止本次有效警告行及合法原证书 requirement 的误拒；不保证任意 Keychain、证书链或系统信任故障都可交付。
+   - 是否降低系统熵：沿用原签名、校验和安装调用链，不新增生产签名见证或兼容身份；解析增加一种已证警告后缀，默认 requirement 接受两种精确原证书形状，原校验增加一个信任条件。更简的“忽略所有警告／删除签名校验”会放过未知后缀、混合重复身份、错证书或篡改产物，已由负例否定。
 
 ## 验证
 
@@ -75,8 +100,17 @@ env -u ELECTRON_RUN_AS_NODE node apps/desktop/scripts/verify-sandboxed-preload.m
 
 动作 3 尚未交付，预定验证命令是 `node apps/desktop/scripts/verify-workbench-startup-capture.mjs`；本文不提前声称该脚本存在或通过。须覆盖真实 preload／bootstrap import、原 sender／attempt、诊断写入失败后健康续用及既有 `system.crash-log.inspect/reveal`，按[测试策略](../testing/strategy.md#任务验收与假绿防护)核语义变异和非空生产调用者。
 
+动作 4 的签名修复候选已独立通过资格验证，命令从包含该修复的源码根执行：
+
+```sh
+PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false node apps/desktop/scripts/verify-macos-signing-qualification.mjs
+```
+
+54 项 focused 检查、4 项真实原证书 native 签名／校验检查通过；未知后缀、同 SHA 的混合重复行、错证书和篡改产物均有拒绝断言。恢复旧身份解析、换错叶证书 requirement、跳过严格校验的三个源码变异分别得到语义 RED；只有预期身份误拒、原生 requirement 拒绝及篡改漏拒算数，工具启动失败、超时或任意异常不算。Apple 实际生成原证书 leaf-hash requirement 的首轮失败也保留，没有改写成通过。真实生产链是 [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) 的预检 → 现有签名器 → staged-App strict／trusted-leaf 校验 → 发布及安装，失败停在安装前。此资格不证明用户 App 已安装、隐私授权连续性或全部 Session 恢复；产物仍非公证发行。
+
 ## 遗留
 
 - 观测补全未由启动修复提交交付，不把 source 修复、候选构建或签名请求当成它已通过。
-- 真实用户配置下的安装、启动与原工作面恢复单独核对；本轮隔离 GREEN 不替用户安装实例取得资格。
+- 现场 ad hoc 副本的工作面可见，但正常证书签名更新及真实用户配置下的原工作面、Session 恢复仍须各自确认；本轮隔离 GREEN 不替用户安装实例取得资格。
+- 后续 `app.inspect` 的 Recall 嵌套枚举遗漏，以及远程 Host 检查旧 endpoint 时的 `Invalid control endpoint publication observation`，是独立观测缺口；对应修复仍在验证，不能当作 preload 或签名资格修复已一并交付，也不能据观察失败判定健康 Agent 已死亡。
 - 先前共享容量故障后的部分原 Run／Provider 恢复身份仍未确认，归[原容量事故](all-sessions-unrecoverable-with-disk-space.md)，不靠本次启动修复批量重启或替换 Session。
