@@ -8,6 +8,11 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import { AgentMuxError } from '../src/errors.js'
+import { CodexPromptTransportUnconfirmedError } from '../src/providers/codex-prompt-execution-evidence.js'
+import { createCodexPromptTransportPreparation } from '../src/providers/codex-prompt-transport-preparation.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { AgentMuxInteractionRequest, AgentMuxStoredAgentSession } from '../src/types.js'
 
 const native = vi.hoisted(() => ({ path: '', device: 0n, inode: 0n, owners: [22] as number[], descriptor: '8',
@@ -21,17 +26,20 @@ vi.mock('../src/agent-native-process.js', async original => ({
     ? 'No single current native entry image was confirmed.' : 'Mapped pathname now identifies replacement bytes.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE') }
 }))
 const cleanup: Array<() => Promise<void>> = []
-afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
+afterEach(async () => { try { while (cleanup.length) await cleanup.pop()!() } finally { vi.unstubAllEnvs() } })
 
 async function fixture(image = 'removed') {
   const root = await mkdtemp(join(tmpdir(), 'amux-current-capability-')), path = join(root, 'native.jsonl')
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   // cli_version is deliberately unsupported creator metadata; it is not current capability evidence.
   await writeFile(path, JSON.stringify({ type: 'session_meta', payload: { id: 'native-session', cli_version: '0.1.0' } }) + '\n')
   const source = await stat(path, { bigint: true })
   Object.assign(native, { path, device: source.dev, inode: source.ino, owners: [22], descriptor: '8',
     rootBirth: 'root-birth', writerBirth: 'writer-birth', image, imageReads: 0, fileReads: 0, changedAfterRead: '' })
-  const provider = new AgentProviderRegistry().get('codex')
+  const provider = { ...new AgentProviderRegistry().get('codex') }
   const context = { processId: 11, args: [] as string[], workspacePath: root,
     nativeHandle: { kind: 'provider' as const, providerId: 'codex' as const, sessionId: 'native-session', transcriptPath: path },
     signal: new AbortController().signal }
@@ -45,8 +53,9 @@ async function publicMessage(image: string, fault?: string) {
     hostId: 'local', workspacePath: f.root, run: { runId: 'original-run' }, retiredRuns: [], hookBindingId: 'binding', hookToken: 'token',
     nativeHandle: f.context.nativeHandle, createdAt: 1, updatedAt: 1 }
   await store.compareAndSwap(null, stored)
-  const client = new AgentMuxClient({ store }), owner = client as any, screen = new AgentTerminalScreen(80, 24)
-  cleanup.push(async () => { screen.dispose(); await client.dispose() })
+  const client = new AgentMuxClient({ store, providers: [f.provider] }), owner = client as any, screen = new AgentTerminalScreen(80, 24)
+  const verifications: Promise<boolean>[] = []
+  cleanup.push(async () => { screen.dispose(); await client.dispose(); await Promise.allSettled(verifications) })
   let cursor = 0, pid = 11, geometry = 0
   const writes: string[] = [], attempts: string[] = []
   const draw = async (body = '') => {
@@ -73,19 +82,21 @@ async function publicMessage(image: string, fault?: string) {
   }
   owner.screenEvidence.generation = () => geometry
   owner.connected = true
-  const originalPrepare = owner.providers.get('codex').preparePromptExecutionTransport
-  owner.providers.get('codex').preparePromptExecutionTransport = async (...args: unknown[]) => {
-    const prepared = await originalPrepare(...args)
-    if (!prepared) return null
-    return { ...prepared, verifyCurrentTransport: async (context: Parameters<typeof prepared.verifyCurrentTransport>[0]) => {
-      const confirmed = await prepared.verifyCurrentTransport(context)
-      if (fault === 'final-writer') native.writerBirth = 'changed'
+  const originalVerify = owner.providers.get('codex').verifyPromptExecutionTransport
+  owner.providers.get('codex').verifyPromptExecutionTransport = (context: Parameters<typeof originalVerify>[0]) => {
+    const pending = (async () => {
+      if (fault === 'final-writer') native.changedAfterRead = 'writer-birth'
+      const confirmed = await originalVerify(context)
       if (fault === 'final-cursor') cursor++
       if (fault === 'final-pid') pid++
       if (fault === 'final-geometry') geometry++
       return confirmed
-    } }
+    })()
+    verifications.push(pending)
+    return pending
   }
+  if (fault === 'no-writer') native.owners = []
+  if (fault === 'multiple-writers') native.owners = [22, 33]
   const submitted = client.submitAgentPrompt({ agentSessionId: 'original', expectedRun: stored.run, afterSubmissionId: null,
     operationId: 'original-operation', prompt: 'ORIGINAL_BODY', execution: 'immediate', signal: AbortSignal.timeout(2_000) })
   return { f, client, store, submitted, writes, attempts }
@@ -112,8 +123,8 @@ describe('current source/writer capability without an executable pathname gate',
   it.each(['removed', 'replacement'])('runs the actual public message preparation and final pane with %s image pathname', async image => {
     const f = await publicMessage(image)
     await expect(f.submitted).resolves.toBeUndefined()
-    expect(f.writes).toEqual(['\x1b[I', 'ORIGINAL_BODY', '\r'])
-    expect(f.attempts).toEqual(f.writes); expect(native.imageReads).toBe(0); expect(native.fileReads).toBeGreaterThan(4)
+    expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+    expect(f.attempts).toEqual(f.writes); expect(native.imageReads).toBe(0); expect(native.fileReads).toBeGreaterThanOrEqual(2)
     const admission = (await loadAgentSessions(f.store))[0]!.promptCompletionAdmission!
     expect(admission.submissionId).toBe('original-operation'); expect(admission.acknowledged).toBe(true)
     expect(admission.intent?.prompt).toBe('ORIGINAL_BODY')
@@ -140,22 +151,79 @@ describe('current source/writer capability without an executable pathname gate',
     if (fault === 'source') await writeFile(f.path, JSON.stringify({ type: 'session_meta', payload: { id: 'other' } }) + '\n')
     const current = { ...f.context, ...(fault === 'handle' ? { nativeHandle: { ...f.context.nativeHandle, sessionId: 'other' } } : {}),
       ...(fault === 'remote' ? { args: ['--remote=private'] } : {}) }
-    expect(await prepared!.verifyCurrentTransport(current)).toBe(false)
+    if (fault === 'remote') await expect(prepared!.verifyCurrentTransport(current)).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED' })
+    else expect(await prepared!.verifyCurrentTransport(current)).toBe(false)
   })
-  it.each(['no-writer', 'multiple', 'remote', 'unknown-native', 'root-birth', 'writer-birth'])('rechecks the direct local transport %s fact', async fault => {
+  it.each([
+    ['no-writer', 'native-source-writer-missing'], ['multiple', 'native-source-writer-ambiguous'],
+    ['remote', 'unsupported-launch'], ['unknown-native', 'native-header-mismatch'],
+    ['root-birth', 'runtime-process-changed'], ['writer-birth', 'native-writer-process-changed']
+  ])('retains the direct local transport %s refusal', async (fault, reason) => {
     const f = await fixture()
     if (fault === 'no-writer') native.owners = []
     if (fault === 'multiple') native.owners = [22, 33]
     if (fault === 'root-birth' || fault === 'writer-birth') native.changedAfterRead = fault
     if (fault === 'unknown-native') await writeFile(f.path, JSON.stringify({ type: 'unknown-profile', payload: { id: 'native-session' } }) + '\n')
-    expect(await f.provider.verifyPromptExecutionTransport!({ ...f.context, ...(fault === 'remote' ? { args: ['--remote=private'] } : {}) })).toBe(false)
+    const error = await f.provider.verifyPromptExecutionTransport!({ ...f.context, ...(fault === 'remote' ? { args: ['--remote=private'] } : {}) })
+      .then(() => null, error => error as AgentMuxError)
+    expect(error).toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED', message: 'The native input transport is unconfirmed.', detail: expect.any(String) })
+    expect(JSON.parse(error!.detail!)).toMatchObject({ providerId: 'codex', reason, processId: 11, nativeSourceId: f.context.nativeSourceId })
+    expect(error!.detail).not.toContain('private')
     expect(native.imageReads).toBe(0)
   })
   it('refuses a native source changed during transport verification', async () => {
     const f = await fixture(), original = native.fileReads
     const birth = native.rootBirth
     // An exact source mismatch must not pass solely because its local writer exists.
-    expect(await f.provider.verifyPromptExecutionTransport!({ ...f.context, nativeSourceId: 'foreign-source' })).toBe(false)
+    await expect(f.provider.verifyPromptExecutionTransport!({ ...f.context, nativeSourceId: 'foreign-source' })).rejects.toMatchObject({
+      code: 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED', detail: expect.stringContaining('native-source-mismatch') })
     expect(native.fileReads).toBe(original); expect(native.rootBirth).toBe(birth)
   })
+  it('keeps the original startup observation wait after a transient verifier refusal', async () => {
+    const f = await fixture(); let attempts = 0
+    const prepare = createCodexPromptTransportPreparation(async context => {
+      attempts++
+      if (attempts === 1) throw new CodexPromptTransportUnconfirmedError(context, 'native-source-writer-missing', 0)
+      return await f.provider.verifyPromptExecutionTransport!(context)
+    })
+    const preparing = prepare({ ...f.context, signal: AbortSignal.timeout(2_000) })
+    await expect(preparing).resolves.toMatchObject({ nativeSourceId: f.context.nativeSourceId })
+    const prepared = await preparing
+    expect(attempts).toBe(2); expect(prepared?.nativeSourceId).toBe(f.context.nativeSourceId)
+    native.owners = []
+    expect(await prepared!.verifyCurrentTransport(f.context)).toBe(false)
+  })
+  it('does not swallow a different verifier error or its cancellation provenance', async () => {
+    const f = await fixture(), original = new AgentMuxError('Original observation cancelled.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED', 'original-cancellation')
+    const prepare = createCodexPromptTransportPreparation(async () => { throw original })
+    await expect(prepare({ ...f.context, signal: AbortSignal.timeout(2_000) })).rejects.toBe(original)
+  })
+  it.each([
+    ['no-writer', 'native-source-writer-missing', 0], ['multiple-writers', 'native-source-writer-ambiguous', 2]
+  ] as const)('preserves %s refusal through public submission, original delivery RPC and compiled CLI', async (fault, reason, ownerCount) => {
+    const f = await publicMessage('removed', fault)
+    const error = await f.submitted.then(() => null, error => error as AgentMuxError)
+    expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+    const cause = JSON.parse(error!.detail!)
+    expect(cause).toMatchObject({ detail: expect.any(String) })
+    const observation = JSON.parse(cause.detail)
+    expect(cause.code).toBe('AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+    expect(observation).toEqual({ providerId: 'codex', reason, processId: 11, nativeSourceId: f.f.context.nativeSourceId, ownerCount })
+    expect(f.attempts).toEqual([])
+    const original = await f.client.readDeliveryAttempt(error!.logId!)
+    expect(original.record).toMatchObject({ agentSessionId: 'original', expectedRunId: 'original-run', operationId: 'original-operation', afterSubmissionId: null,
+      error: { detail: error!.detail, controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } } })
+    expect((await loadAgentSessions(f.store))[0]!.run).toEqual({ runId: 'original-run' })
+    expect(JSON.stringify(original.record)).not.toContain('ORIGINAL_BODY')
+    const server = new AgentMuxControlServer({ socketPath: join(f.f.root, 'owner.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    try {
+      expect((await rpc.call('message.delivery.inspect', { logId: error!.logId!, hostId: 'local' })).record).toEqual(original.record)
+      const cli = await runCompiledObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'delivery', 'inspect', '--logid', error!.logId!, '--host-id', 'local'], objectCliEnvironment(f.f.root))
+      expect(cli.code, cli.stderr).toBe(0)
+      expect(JSON.parse(cli.stdout).result.record).toEqual(original.record)
+      expect(f.attempts).toEqual([])
+    } finally { rpc.dispose(); await server.stop() }
+  }, 20_000)
 })
