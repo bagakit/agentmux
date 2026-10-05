@@ -1,3 +1,4 @@
+import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
 import { hashRuntimeArtifact } from './update-identity.mjs'
 import { spawn } from 'node:child_process'
@@ -225,13 +226,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true })
   await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
   await writeFile(join(coreRuntime, 'release.json'), JSON.stringify({ sourceCommit: source.commit, sourceTree: source.tree }) + '\n')
-  await writeFile(join(coreRuntime, 'bin', 'agentmux'), [
-    '#!/bin/sh',
-    'set -eu',
-    'launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)',
-    'export ELECTRON_RUN_AS_NODE=1',
-    'exec "$launcher_dir/../../../../../../MacOS/AgentMux" "$launcher_dir/../dist/agentmux.js" "$@"'
-  ].join('\n') + '\n', { mode: 0o755 })
+  await writeEmbeddedCoreCli(join(coreRuntime, 'bin', 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
   const coreManifest = JSON.parse(await readFile(join(coreRoot, 'package.json'), 'utf8'))
   await writeFile(join(coreRuntime, 'package.json'), `${JSON.stringify({
     name: coreManifest.name,
@@ -278,12 +273,12 @@ export async function copyRuntimeApplication(appPath, source) {
   const outBin = join(appResources, 'out', 'bin')
   await mkdir(outBin, { recursive: true })
   await cp(join(coreRoot, 'bin'), outBin, { recursive: true })
-  await cp(join(coreRuntime, 'bin', 'agentmux'), join(outBin, 'agentmux'))
+  await writeEmbeddedCoreCli(join(outBin, 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
   await Promise.all([
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 0o755),
-    chmod(join(coreRuntime, 'bin', 'agentmux'), 0o755),
-    chmod(join(outBin, 'agentmux'), 0o755)
+    chmod(join(coreRuntime, 'bin', 'amux'), 0o755),
+    chmod(join(outBin, 'amux'), 0o755)
   ])
 }
 
@@ -426,7 +421,7 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source, signedWo
   const [cli, daemon, agentmux] = await Promise.all([
     run(join(binaryRoot, 'ctxmux'), ['--version'], { capture: true }),
     run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true }),
-    run(join(coreRuntime, 'bin', 'agentmux'), ['--version'], {
+    run(join(coreRuntime, 'bin', 'amux'), ['--version'], {
       capture: true,
       env: { PATH: '/usr/bin:/bin' }
     })
@@ -466,7 +461,8 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source, signedWo
     daemonIdentity.startsWith(daemonPrefix) && (daemonDelimiter === ',' || daemonDelimiter === ')'),
     'Packaged ctxmuxd identity is wrong.'
   )
-  assert(agentmux.stdout.trim() === 'agentmux 0.1.0', 'Packaged AgentMux CLI cannot use the embedded runtime.')
+  const coreVersion = JSON.parse(await readFile(join(coreRuntime, 'package.json'), 'utf8')).version
+  assert(agentmux.stdout.trim() === `amux ${coreVersion}`, 'Packaged AgentMux CLI cannot use the embedded runtime.')
 }
 
 async function scopedProcesses(appPath, previousOwners = []) {
