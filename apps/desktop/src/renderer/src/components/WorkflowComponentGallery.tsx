@@ -3,7 +3,7 @@ import { InlineRenameField } from '@agentmux/client-ui/components/InlineRenameFi
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { APP_APPEARANCE_IDS, type AppAppearanceId } from '../../../shared/contracts'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
-import { SemanticIcon } from './semantic-icons'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { WorkflowCard, WorkflowDock, WorkflowToolRow } from './workflow'
 import { ObservationSurfaceGallery } from './ObservationSurfaceGallery'
 import {
