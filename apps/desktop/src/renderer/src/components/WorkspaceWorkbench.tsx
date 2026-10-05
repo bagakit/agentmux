@@ -1179,10 +1179,10 @@ function PaneGroup({
     }
   }
 
-  const createTabAction = <button type="button" className={mote ? 'workbench-tab-create' : 'pane-action'}
+  const createTabAction = <button type="button" className="pane-action"
     disabled={projection?.placementConfirmed === false} onClick={() => onNewTab(group.id)}
     title={mote ? 'New discussion' : 'New tab'} aria-label={mote ? 'New discussion' : 'New Tab'}>
-    <Plus size={13} />{mote ? <span>New discussion</span> : null}
+    <Plus size={13} />
   </button>
   const tabNavigation = <SortableContext items={[...orderedTabIds]} strategy={horizontalListSortingStrategy}>
     <WorkbenchTabStrip visible={surfaceVisible} activeTabId={group.activeTabId} tabIds={orderedTabIds}
@@ -1568,8 +1568,8 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
     {groups.map(group => <header key={group.id} className="pane-tabbar pane-tabbar--root" data-workbench-group-id={group.id}>
       <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
         <WorkbenchTabStrip visible={visible} activeTabId={null} tabIds={group.tabOrder}
-          trailingAction={mote && onNewTab ? <button type="button" className="workbench-tab-create" aria-label="New discussion"
-            onClick={() => onNewTab(group.id)}><Plus size={13} /><span>New discussion</span></button> : undefined}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
+          trailingAction={mote && onNewTab ? <button type="button" className="pane-action" aria-label="New discussion" title="New discussion"
+            onClick={() => onNewTab(group.id)}><Plus size={13} /></button> : undefined}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
           workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} visible={visible} />] : [])}</WorkbenchTabStrip>
       </SortableContext>
       {layout?.activeGroupId === group.id ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
