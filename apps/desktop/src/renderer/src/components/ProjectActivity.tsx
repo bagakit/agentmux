@@ -1,6 +1,6 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentTimelineItem, AgentTimelineSnapshot, AppConfig, SessionSnapshot } from '../../../shared/contracts'
@@ -23,6 +23,9 @@ import { useAppStore } from '../store'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { AgentAvatar } from './AgentAvatar'
 import { SemanticIcon } from './semantic-icons'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 /** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
 const NO_TIMELINE: readonly AgentTimelineItem[] = []
@@ -128,11 +131,11 @@ export function ProjectActivity({
   const done = sessions.filter((session) => session.kind === 'agent' && session.status.state === 'done').length
   const needsYou = sessions.filter((session) => session.kind === 'agent' && categoryFor(session.status.state) === 'needs-you').length
   const metrics = [
-    { key: 'needs-you', count: needsYou, icon: 'message-queue' as const, label: 'Needs you' },
-    { key: 'error', count: error, icon: 'failed' as const, label: 'Error' },
-    { key: 'working', count: working, icon: 'working' as const, label: 'Working' },
-    { key: 'idle', count: idle, icon: 'running' as const, label: 'Idle' },
-    { key: 'done', count: done, icon: 'completed' as const, label: 'Completed' }
+    { key: 'needs-you', count: needsYou, icon: 'conversation.message-queue' as const, label: 'Needs you' },
+    { key: 'error', count: error, icon: 'status.failed' as const, label: 'Error' },
+    { key: 'working', count: working, icon: 'status.working' as const, label: 'Working' },
+    { key: 'idle', count: idle, icon: 'status.running' as const, label: 'Idle' },
+    { key: 'done', count: done, icon: 'status.completed' as const, label: 'Completed' }
   ].filter((metric) => metric.count > 0)
   const hasActivity = metrics.length > 0
   const attentionMetrics = metrics.filter((metric) => metric.key === 'needs-you' || metric.key === 'error')
@@ -213,7 +216,7 @@ export function ProjectActivity({
                 setExpandedGroups((current) => ({ ...current, [group.key]: !current[group.key] }))
               }}
             >
-              <ChevronRight size={14} aria-hidden="true" />
+              <ThemeNavigationDisclosureIcon size={14} aria-hidden="true" />
             </DropdownMenu.Item> : null}
           </div>
           {expanded ? <div className="project-activity-group__details">
@@ -235,7 +238,7 @@ export function ProjectActivity({
               )
               return <DropdownMenu.Item key={row.sessionId} className="tab-context-menu__item project-activity-menu__item"
                 data-attention={activity.attention ?? undefined}
-                onSelect={() => selectSession(row.sessionId)}><SemanticIcon name={activityGlyphFor(session.status.state)} size={13} /><span><strong>{agentNames[row.sessionId] ?? row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}<span className="project-activity-menu__meta">{project} · {row.providerId}</span></small></span></DropdownMenu.Item>
+                onSelect={() => selectSession(row.sessionId)}><SemanticIcon name={`status.${activityGlyphFor(session.status.state)}`} size={13} /><span><strong>{agentNames[row.sessionId] ?? row.label}</strong><small><span className="project-activity-menu__reason">{activity.reason}</span>{activity.meta ? <span className="project-activity-menu__meta">{activity.meta}</span> : null}<span className="project-activity-menu__meta">{project} · {row.providerId}</span></small></span></DropdownMenu.Item>
             })}
           </div> : null}
         </div>

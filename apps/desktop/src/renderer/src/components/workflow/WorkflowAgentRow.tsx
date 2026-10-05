@@ -1,9 +1,12 @@
 import { RecordedAgentRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { useId, useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SemanticIcon } from '../semantic-icons'
 import { WorkflowStatusGlyph, WorkflowStatusName } from './WorkflowStatusGlyph'
 import { workflowStatusLabel, type WorkflowAgent } from './types'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -76,7 +79,7 @@ function WorkflowSnapshotAgentRow({ agent, phaseLabel, compact, defaultExpanded 
             {agent.lastTool ? <span className="wf-m-tool">{agent.lastTool}</span> : null}
             {agent.duration ? <b>{agent.duration}</b> : null}
             {agent.tokens ? <b>{agent.tokens}</b> : null}
-            <ChevronRight className="wf-chev" size={12} aria-hidden="true" />
+            <ThemeNavigationDisclosureIcon className="wf-chev" size={12} aria-hidden="true" />
             <span className="wf-sr">{workflowStatusLabel(agent.status)}</span>
           </span>
         </button>

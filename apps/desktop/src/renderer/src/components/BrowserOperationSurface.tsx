@@ -1,17 +1,4 @@
-import {
-  CheckCircle2,
-  ChevronRight,
-  CircleAlert,
-  CircleX,
-  Hand,
-  History,
-  LoaderCircle,
-  Pause,
-  Play,
-  RotateCcw,
-  Square,
-  UserRound
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useId, useState } from 'react'
 import type {
   BrowserActivityState,
@@ -24,6 +11,20 @@ import type { BrowserScriptRunReport } from '../../../shared/contracts'
 import type { BrowserTaskAssetState } from '../../../shared/browser-task-assets'
 import { SemanticIcon } from './semantic-icons'
 import * as DropdownMenu from './HoverDropdownMenu'
+
+const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeObjectUserIcon = semanticIconComponent('object.user')
+const ThemeActionPanIcon = semanticIconComponent('action.pan')
+const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionPauseIcon = semanticIconComponent('action.pause')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
+
 
 /** One toolbar disclosure owns Browser operation state and its optional actions. */
 export function BrowserOperationStatus({
@@ -79,8 +80,8 @@ export function BrowserOperationStatus({
       <DropdownMenu.Root {...(onOpenChange ? { onOpenChange } : {})}>
         <DropdownMenu.Trigger asChild>
           <button type="button" className="browser-operation-status__trigger" aria-label={`Browser activity: ${description}`} title={description}>
-            {phase === 'idle' ? <History size={14} aria-hidden="true" />
-              : phase === 'unknown' ? <CircleAlert size={14} aria-hidden="true" /> : <PhaseGlyph phase={phase} />}
+            {phase === 'idle' ? <ThemeObjectHistoryIcon size={14} aria-hidden="true" />
+              : phase === 'unknown' ? <ThemeStatusWarningIcon size={14} aria-hidden="true" /> : <PhaseGlyph phase={phase} />}
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
@@ -90,11 +91,11 @@ export function BrowserOperationStatus({
               {target ? <small>{target}</small> : null}
             </DropdownMenu.Label>
             {taskRun && onOpenTaskRun ? <DropdownMenu.Item className="browser-menu__item" aria-label={`Review and continue task v${taskRun.version}`}
-              onSelect={() => onOpenTaskRun(taskRun.assetId, taskRun.version)}><UserRound size={13} aria-hidden="true" /><span>Review and continue v{taskRun.version}</span></DropdownMenu.Item> : null}
-            {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><Hand size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
-            {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><RotateCcw size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
-            {canStop && onStop ? <DropdownMenu.Item className="browser-menu__item" aria-label="Stop browser operation" onSelect={() => onStop()}><Square size={12} aria-hidden="true" /><span>Stop operation</span></DropdownMenu.Item> : null}
-            {onOpenTimeline ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open browser activity timeline" onSelect={() => onOpenTimeline()}><History size={13} aria-hidden="true" /><span>Activity</span></DropdownMenu.Item> : null}
+              onSelect={() => onOpenTaskRun(taskRun.assetId, taskRun.version)}><ThemeObjectUserIcon size={13} aria-hidden="true" /><span>Review and continue v{taskRun.version}</span></DropdownMenu.Item> : null}
+            {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><ThemeActionPanIcon size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
+            {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><ThemeActionRotateResetIcon size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
+            {canStop && onStop ? <DropdownMenu.Item className="browser-menu__item" aria-label="Stop browser operation" onSelect={() => onStop()}><ThemeActionStopIcon size={12} aria-hidden="true" /><span>Stop operation</span></DropdownMenu.Item> : null}
+            {onOpenTimeline ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open browser activity timeline" onSelect={() => onOpenTimeline()}><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><span>Activity</span></DropdownMenu.Item> : null}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -127,13 +128,13 @@ export function BrowserOperationTimeline({
   onReplay?: (operation: BrowserOperation) => void
 }) {
   if (!operation) {
-    return <div className="browser-rsi-timeline browser-rsi-timeline--empty" role="status"><History size={14} aria-hidden="true" /><span>No browser activity yet</span></div>
+    return <div className="browser-rsi-timeline browser-rsi-timeline--empty" role="status"><ThemeObjectHistoryIcon size={14} aria-hidden="true" /><span>No browser activity yet</span></div>
   }
   return (
     <section className="browser-rsi-timeline" data-operation-id={operation.id} aria-label={`Browser activity timeline for ${operation.operator.name}`}>
       <header className="browser-rsi-timeline__header">
-        <span><History size={14} aria-hidden="true" /><strong>Activity timeline</strong><small>{operation.steps.length} {operation.steps.length === 1 ? 'step' : 'steps'} · {phaseLabel(operation.phase)}</small></span>
-        {onReplay ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => onReplay(operation)}><Play size={12} aria-hidden="true" />Replay</button> : null}
+        <span><ThemeObjectHistoryIcon size={14} aria-hidden="true" /><strong>Activity timeline</strong><small>{operation.steps.length} {operation.steps.length === 1 ? 'step' : 'steps'} · {phaseLabel(operation.phase)}</small></span>
+        {onReplay ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => onReplay(operation)}><ThemeActionStartIcon size={12} aria-hidden="true" />Replay</button> : null}
       </header>
       {operation.warning || warning ? <BrowserOperationNotice message={(operation.warning ?? warning)!} className="browser-rsi-timeline__warning" /> : null}
       <ol className="browser-rsi-timeline__list">
@@ -154,7 +155,7 @@ function BrowserOperationNotice({ message, className }: { message: string; class
   const summary = message.split('\n')[0] ?? message
   const hasDetails = summary !== message
   return <div className={`${className} browser-rsi-notice`} role="status">
-    <span className="browser-rsi-notice__line"><CircleAlert size={12} aria-hidden="true" /><span>{summary}</span>
+    <span className="browser-rsi-notice__line"><ThemeStatusWarningIcon size={12} aria-hidden="true" /><span>{summary}</span>
       {hasDetails ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
         aria-label="Show browser warning details" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Details</button> : null}
     </span>
@@ -179,7 +180,7 @@ function BrowserStepRow({ step, selected, onSelectStep }: {
           {target ? <span className="browser-rsi-timeline__target">{target}</span> : null}
         </span>
         <span className="browser-rsi-timeline__status">{step.status}</span>
-        <ChevronRight className="browser-rsi-timeline__chevron" size={11} aria-hidden="true" />
+        <ThemeNavigationDisclosureIcon className="browser-rsi-timeline__chevron" size={11} aria-hidden="true" />
       </button>
       {open ? <div id={panelId} className="browser-rsi-timeline__step-detail">
         <span>{step.label !== step.method ? <code>{step.method}</code> : null}<time>{formatClock(step.startedAt)}</time></span>
@@ -214,13 +215,13 @@ export function BrowserOperationHistory({
   return (
     <section className="browser-rsi-history" aria-label="Browser operation history">
       <header className="browser-rsi-history__header">
-        <span><History size={13} aria-hidden="true" /><strong>Recent operations</strong><small>{loading ? 'Loading…' : `${operations.length} recorded`}</small></span>
+        <span><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><strong>Recent operations</strong><small>{loading ? 'Loading…' : `${operations.length} recorded`}</small></span>
         <span className="browser-rsi-history__actions">
           {error && onRetry ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={onRetry}>Retry</button> : null}
-          {onClose ? <button type="button" className="browser-rsi-icon-button" aria-label="Close browser activity timeline" title="Close activity timeline" onClick={onClose}>×</button> : null}
+          {onClose ? <button type="button" className="browser-rsi-icon-button" aria-label="Close browser activity timeline" title="Close activity timeline" onClick={onClose}><SemanticIcon name="action.close" size={12} /></button> : null}
         </span>
       </header>
-      {error ? <p className="browser-rsi-history__error" role="status"><CircleAlert size={12} aria-hidden="true" />{error}</p> : null}
+      {error ? <p className="browser-rsi-history__error" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{error}</p> : null}
       {!loading && !error && operations.length === 0 ? <p className="browser-rsi-history__empty">No recorded Browser operations yet.</p> : null}
       {operations.length > 0 ? (
         <ol className="browser-rsi-history__list">
@@ -270,8 +271,8 @@ export function BrowserReplayPreview({
   return (
     <section className="browser-rsi-replay" data-operation-id={plan.operationId} aria-label="Browser replay preview">
       <header className="browser-rsi-replay__header">
-        <span><RotateCcw size={14} aria-hidden="true" /><strong>Replay preview</strong><small>{plan.steps.length} {plan.steps.length === 1 ? 'semantic step' : 'semantic steps'}</small></span>
-        {onClose ? <button type="button" className="browser-rsi-icon-button" aria-label="Close replay preview" title="Close" onClick={onClose}>×</button> : null}
+        <span><ThemeActionRotateResetIcon size={14} aria-hidden="true" /><strong>Replay preview</strong><small>{plan.steps.length} {plan.steps.length === 1 ? 'semantic step' : 'semantic steps'}</small></span>
+        {onClose ? <button type="button" className="browser-rsi-icon-button" aria-label="Close replay preview" title="Close" onClick={onClose}><SemanticIcon name="action.close" size={12} /></button> : null}
       </header>
       <p className="browser-rsi-replay__origin"><code>{plan.url}</code>{blockedCount > 0 ? <span className="browser-rsi-replay__blocked">{blockedCount} needs review</span> : null}</p>
       <ol className="browser-rsi-replay__steps">
@@ -282,15 +283,15 @@ export function BrowserReplayPreview({
             <li key={`${sequence}-${step.method}`} className={step.blockedReason ? 'is-blocked' : undefined}>
               <span className="browser-rsi-replay__step-number">{sequence}</span>
               <span><strong>{label}</strong><small>{step.inputKey ? `Requires ${step.inputKey}` : step.blockedReason ?? step.method}</small></span>
-              {onStep ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet browser-rsi-replay__step-button" disabled={busy || Boolean(step.blockedReason)} aria-label={`Run replay step ${sequence}`} title={step.blockedReason ?? 'Run this step'} onClick={() => onStep(sequence)}><Play size={11} aria-hidden="true" />Run step</button> : null}
+              {onStep ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet browser-rsi-replay__step-button" disabled={busy || Boolean(step.blockedReason)} aria-label={`Run replay step ${sequence}`} title={step.blockedReason ?? 'Run this step'} onClick={() => onStep(sequence)}><ThemeActionStartIcon size={11} aria-hidden="true" />Run step</button> : null}
             </li>
           )
         })}
       </ol>
-      {outcome && outcome.kind !== 'completed' ? <p className={`browser-rsi-replay__outcome browser-rsi-replay__outcome--${outcome.kind}`} role="status"><CircleAlert size={12} aria-hidden="true" /><strong>{replayOutcomeLabel(outcome.kind)}</strong><span>{outcome.message}</span></p> : null}
+      {outcome && outcome.kind !== 'completed' ? <p className={`browser-rsi-replay__outcome browser-rsi-replay__outcome--${outcome.kind}`} role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" /><strong>{replayOutcomeLabel(outcome.kind)}</strong><span>{outcome.message}</span></p> : null}
       <footer className="browser-rsi-replay__actions">
-        {onPreview ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={onPreview}><LoaderCircle className={busy ? 'spin' : undefined} size={12} aria-hidden="true" />{busy ? 'Preparing…' : 'Preview page'}</button> : null}
-        {onRun ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={busy || blockedCount > 0} title={blockedCount > 0 ? 'Resolve blocked steps before running' : 'Run replay'} onClick={onRun}><Play size={12} aria-hidden="true" />Run replay</button> : null}
+        {onPreview ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={onPreview}><ThemeStatusLoadingIcon className={busy ? 'spin' : undefined} size={12} aria-hidden="true" />{busy ? 'Preparing…' : 'Preview page'}</button> : null}
+        {onRun ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={busy || blockedCount > 0} title={blockedCount > 0 ? 'Resolve blocked steps before running' : 'Run replay'} onClick={onRun}><ThemeActionStartIcon size={12} aria-hidden="true" />Run replay</button> : null}
       </footer>
     </section>
   )
@@ -335,18 +336,18 @@ function replayOutcomeLabel(kind: Exclude<BrowserScriptRunReport['outcome']['kin
 }
 
 function PhaseGlyph({ phase }: { phase: BrowserOperationPhase }) {
-  if (phase === 'running') return <SemanticIcon name="working" size={13} />
-  if (phase === 'preparing') return <LoaderCircle className="spin" size={13} aria-hidden="true" />
-  if (phase === 'waiting') return <Pause size={13} aria-hidden="true" />
-  if (phase === 'human') return <UserRound size={13} aria-hidden="true" />
-  if (phase === 'completed') return <CheckCircle2 size={13} aria-hidden="true" />
-  if (phase === 'failed') return <CircleX size={13} aria-hidden="true" />
-  return <CircleAlert size={13} aria-hidden="true" />
+  if (phase === 'running') return <SemanticIcon name="status.working" size={13} />
+  if (phase === 'preparing') return <ThemeStatusLoadingIcon className="spin" size={13} aria-hidden="true" />
+  if (phase === 'waiting') return <ThemeActionPauseIcon size={13} aria-hidden="true" />
+  if (phase === 'human') return <ThemeObjectUserIcon size={13} aria-hidden="true" />
+  if (phase === 'completed') return <ThemeStatusCompletedIcon size={13} aria-hidden="true" />
+  if (phase === 'failed') return <ThemeStatusFailedIcon size={13} aria-hidden="true" />
+  return <ThemeStatusWarningIcon size={13} aria-hidden="true" />
 }
 
 function StepGlyph({ status }: { status: BrowserOperationStep['status'] }) {
-  if (status === 'running') return <LoaderCircle className="spin" size={11} aria-hidden="true" />
-  if (status === 'completed') return <CheckCircle2 size={11} aria-hidden="true" />
-  if (status === 'failed') return <CircleX size={11} aria-hidden="true" />
-  return <Hand size={11} aria-hidden="true" />
+  if (status === 'running') return <ThemeStatusLoadingIcon className="spin" size={11} aria-hidden="true" />
+  if (status === 'completed') return <ThemeStatusCompletedIcon size={11} aria-hidden="true" />
+  if (status === 'failed') return <ThemeStatusFailedIcon size={11} aria-hidden="true" />
+  return <ThemeActionPanIcon size={11} aria-hidden="true" />
 }
