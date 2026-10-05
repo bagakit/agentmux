@@ -46,10 +46,24 @@ Issues contain `{code, message, recovery}` and may identify one exact `source`. 
 
 Add `expectedRevision: "sha256:<64 hex>"` to require one exact previously prepared version. The result is `{source, definition, payload, issues}`. `source` retains the locator plus `revision`, derived from the canonical definition and actual selected file bytes. A different revision is an explicit conflict. Image payloads contain the original native decoder's bounded PNG preview; 2D payloads contain the original face; GLB payloads contain the validated original bytes as `dataBase64`. The SDK's strict result decoder retains the requested locator/version.
 
-These readers share the same Main business owner with trusted Desktop IPC and the ordinary default Host forwarding path. They create no Mote, AgentSession or Run and publish no appearance. Saved-target read/save are not implemented by these source readers.
+These readers share the same Main business owner with trusted Desktop IPC and the ordinary default Host forwarding path. Source discovery and preview create no Mote, AgentSession or Run and publish no appearance.
+
+## Read and save one original Mote
+
+Discover the exact `{workspaceId, topicId, objectKey}` from `amux app snapshot --include motes`. Pass that tuple as `target` to `amux space mote avatar read --input target.json` or JSON-RPC `space.mote.avatar.read`. The result contains the original `choice`, an opaque `revision`, issues, and the saved bounded PNG when available. Series choices retain the exact source locator and content revision, definition, editor parameters and original image reference. Other authored choices remain readable, including records this editor cannot interpret.
+
+`amux space mote avatar save --input request.json` and JSON-RPC `space.mote.avatar.save` accept `{target, operationId, beforeRevision, source, definition, parameters, pngDataUrl}`. Use the revision from the original target read, the exact prepared source version and one UUID for this request. `pngDataUrl` is the caller's selected 256×256 PNG frame; Main validates and saves it through the original object-image owner. The service does not independently render or certify that those pixels depict the supplied GLB parameters. The original configuration owner publishes the choice and owns per-object publication revisions, so a later A→B→A edit still conflicts with an older baseline. Edits to other objects continue to merge.
+
+The result is `{state, operation?, issue?, current}`. `saved` requires the original configuration publication and its disk durability acknowledgement. `refused` means this request was rejected; the draft and current original appearance remain available. `unknown` retains the exact original request and operation while publication or acknowledgement cannot be confirmed. Source preparation, PNG creation, current-choice observation and confirmed publication are distinct facts.
+
+To inspect an uncertain save, read `{target, operationId}`. To retry it, resend the identical frozen request with the same UUID. Replacing the body under that UUID is refused. An operation journal records that request's history inside the original Mote directory; it is not another current-choice store. Once publication is uncertain or recorded, retry does not publish again. A historical confirmed receipt can coexist with a later `current.choice`; consumers retain that later choice.
+
+Missing or changed mods leave the saved PNG and parameters intact. The read's optional `source.state` is `available`, `unavailable` or `changed`; reopening the editor requires the exact saved source version. Discovery, read and save do not change the Mote's identity, workspace, SOUL, Session, Run, Tab or Region.
 
 ## Single-input resource boundaries
 
 Image processing retains the original 8 MiB input, 4096px side, 16MP decoded and 2 MiB preview boundaries. A selected GLB is at most 32 MiB; this protects parser/renderer memory and fits the original 64 MiB RPC frame after base64 encoding. Its embedded PNG/JPEG images retain the original per-image boundaries; both embedded-image decoding and native texture slots have a 16MP aggregate budget for that selected model. These are source preparation limits, not cumulative catalog limits. Discovery does not truncate valid collections by total entry count or a fixed scan deadline.
 
-The executable public types and strict codecs are [mote-avatar-series.ts](../../packages/core/src/mote-avatar-series.ts); actual source preparation belongs to [Main](../../apps/desktop/src/main/mote-avatar-series.ts).
+Save accepts a PNG of at most 512 KiB before base64 encoding. A single operation record has a 32 MiB read boundary; this is independent of the number of collections or earlier operations.
+
+The executable public types and strict codecs are [mote-avatar-series.ts](../../packages/core/src/mote-avatar-series.ts) and [mote-avatar-write.ts](../../packages/core/src/mote-avatar-write.ts). Actual source preparation belongs to [Main](../../apps/desktop/src/main/mote-avatar-series.ts); saved choices use the original owners through [the native writer](../../apps/desktop/src/main/mote-avatar-writer.ts).
