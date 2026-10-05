@@ -127,7 +127,7 @@ describe('Desktop Control IPC bridge', () => {
 /**
  * 等待预算是**一处**，两条到达路共用。
  *
- * 同一条 `amux agent.open` 有两条到达执行方的路，各有一个等待方：CLI→daemon 的 socket
+ * 同一条 `amux agent open` 有两条到达执行方的路，各有一个等待方：CLI→daemon 的 socket
  * （core 的 control-host），以及 Renderer 拥有屏幕时 main→Renderer 的这条 IPC 桥。此前两侧各手抄
  * `2_000` / `60_000`，而**「哪些操作算慢」在 core 是命名函数、在桥这边被内联展开成同样的四项析取**。
  * 后果：加一个慢操作（将来的 `open.file` 等磁盘、`arrange` 等布局落定）时，只改 core 那个函数的人
