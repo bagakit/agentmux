@@ -59,8 +59,12 @@ export function useLauncherResumePreviews(open: boolean, list: HTMLDivElement | 
       setPreviews(cache.current)
       inFlight.current += 1
       const publish = (preview: Preview) => {
-        if (generation.current !== owner || !current.current.open ||
-          !current.current.rows.some(candidate => launcherPreviewKey(candidate) === key)) return
+        if (generation.current !== owner || !current.current.open) return
+        if (!current.current.rows.some(candidate => launcherPreviewKey(candidate) === key)) {
+          const { [key]: _settled, ...remaining } = cache.current
+          cache.current = remaining; setPreviews(remaining)
+          return
+        }
         cache.current = { ...cache.current, [key]: preview }
         setPreviews(cache.current)
       }
