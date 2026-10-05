@@ -6415,6 +6415,10 @@ export class AgentMuxClient {
           void pending.then(() => this.nativeStatusSettlements.delete(pending))
         }
       })
+      if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) {
+        watch.observer.dispose()
+        return
+      }
       await watch.pending
     } catch (error) {
       unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_UNAVAILABLE', error instanceof Error ? error.message : 'Native status observation is unavailable.')
@@ -7514,7 +7518,6 @@ export class AgentMuxClient {
     }
     this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
 
-    await this.ensureNativeStatusObservation(next)
     if (nextTurnPhase === 'in-turn' && session.terminalPromptReadiness?.source === 'native-stop') {
       this.promptSubmission.cancelReadiness(session.agentSessionId)
     }
@@ -7526,6 +7529,14 @@ export class AgentMuxClient {
     ) {
       this.promptSubmission.observeReadiness(next, next.terminalPromptReadiness)
     }
+    // This receipt's required durable work and prompt handling have completed. Native
+    // status observation continues under its own owner; it cannot change this ACK.
+    void this.ensureNativeStatusObservation(next).catch(error => {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: next.agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_UNAVAILABLE',
+        message: `${error instanceof Error ? error.message : 'Native status observation is unavailable.'} The retained Session, Run and input remain available. Inspect the Session to retry observation.`,
+        evidence: { source: 'agentmux', run: { ...next.run }, observedAt: Date.now() } })
+    })
   }
 
   private async updateNativeHandle(
