@@ -82,13 +82,16 @@ afterEach(async () => {
   container?.remove(); useAppStore.setState(originalState, true)
   vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
-async function ingress(receiptId = 'question-1', questions: unknown[] = [{question: 'Choose the next action', options: [{label: 'First'}, {label: 'Second'}]}], toolName = 'AskUserQuestion', eventName = 'PreToolUse') {
+async function sendHook(receiptId: string, eventName: string, payload: Record<string, unknown>) {
   const status = await new Promise<number>((resolve, reject) => {
     const request = httpRequest(binding.endpoint.url, {method: 'POST', headers: {authorization: `Bearer ${binding.endpoint.token}`, 'content-type': 'application/json'}}, response => {response.resume(); response.on('end', () => resolve(response.statusCode!))})
     request.on('error', reject); request.setTimeout(5000, () => request.destroy(new Error('Private Hook timeout')))
-    request.end(JSON.stringify({receiptId, eventName, payload: {tool_name: toolName, tool_use_id: 'call-1', tool_input: {questions}}}))
+    request.end(JSON.stringify({receiptId, eventName, payload}))
   })
   expect(status).toBe(204)
+}
+async function ingress(receiptId = 'question-1', questions: unknown[] = [{question: 'Choose the next action', options: [{label: 'First'}, {label: 'Second'}]}], toolName = 'AskUserQuestion', eventName = 'PreToolUse', toolCallId = 'call-1') {
+  await sendHook(receiptId, eventName, {tool_name: toolName, tool_use_id: toolCallId, tool_input: {questions}})
   expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe(receiptId)
   expect(useAppStore.getState().sessions[0]?.kind).toBe('agent')
 }
@@ -150,7 +153,8 @@ it('unsupported multi-question shape reaches the original terminal instruction r
   await act(async () => ingress('unsupported-1', [{question: 'First question', options: ['One', 'Two']}, {question: 'Second question', options: ['Three', 'Four']}]))
   await mount()
   recordScene('unsupported')
-  expect(container.querySelector('[data-request-id="unsupported-1"]')?.textContent).toContain('Answer in terminal')
+  expect(container.querySelector('[data-request-id="unsupported-1"]')?.textContent).toContain('Agent question')
+  expect(container.querySelector('[data-request-id="unsupported-1"]')?.textContent).toContain('Open terminal')
   expect(container.querySelector('[data-request-id="unsupported-1"]')?.textContent).toContain('up to nine single-choice options')
   expect(container.querySelectorAll('.agent-interaction__options button')).toHaveLength(0)
   expect(nativeWrites).toEqual([])
@@ -226,10 +230,64 @@ it('native accepted permission keeps its actual title and tool input while requi
   expect(card.textContent).toContain(request.toolName)
   expect(card.querySelector('pre')?.textContent).toBe(request.toolInput)
   expect(card.textContent).toContain('Native input was accepted')
-  expect(card.textContent).toContain('Answer in terminal')
+  expect(card.textContent).toContain('Confirmation pending')
+  const details = card.querySelector('details')!
+  expect(details.open).toBe(false)
+  expect(details.contains(card.querySelector('pre'))).toBe(true)
   expect([...card.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['Open terminal'])
   expect(api.sessions.respondInteraction).not.toHaveBeenCalled()
   expect(nativeWrites).toEqual(['native answer'])
+})
+it.each([
+  ['permission', 'Edit', 'PermissionRequest', 'PostToolUse'],
+  ['permission', 'Edit', 'PermissionRequest', 'PostToolUseFailure'],
+  ['question', 'AskUserQuestion', 'PreToolUse', 'PostToolUse'],
+  ['question', 'AskUserQuestion', 'PreToolUse', 'PostToolUseFailure']
+] as const)('native terminal completion removes the exact %s card on %s/%s/%s', async (kind, toolName, requestEvent, completionEvent) => {
+  await act(async () => ingress('terminal-request', undefined, toolName, requestEvent))
+  await mount()
+  const composer = container.querySelector<HTMLTextAreaElement>('[aria-label="Original composer"]')!
+  const draft = useAppStore.getState().agentComposerDrafts[AGENT_ID]
+  const control = useAppStore.getState().sessions[0]!.control
+  await act(async () => client.writeAgent({agentSessionId:AGENT_ID, expectedRun:initialSession.control.run, data:'native answer', source:'user'}))
+  const card = container.querySelector('.agent-interaction--native')!
+  expect(card).not.toBeNull()
+  const buttons = [...card.querySelectorAll<HTMLButtonElement>('button')]
+  expect(buttons.map(button => button.textContent)).toEqual(['Open terminal'])
+  await act(async () => buttons[0]!.click())
+  expect(useAppStore.getState().viewModes[AGENT_ID]).toBe('terminal')
+  composer.focus()
+  await act(async () => sendHook('other-completion', completionEvent, {tool_name:toolName, tool_use_id:'other-call', error:'Private failed tool'}))
+  expect(container.querySelector('.agent-interaction')).toBe(card)
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.request.kind).toBe(kind)
+  await act(async () => sendHook('exact-completion', completionEvent, {tool_name:toolName, tool_use_id:'call-1', error:'Private failed tool'}))
+  expect(client.agentSession(AGENT_ID).pendingInteraction).toBeUndefined()
+  expect(container.querySelector('.agent-interaction')).toBeNull()
+  expect(container.querySelector('[aria-label="Original composer"]')).toBe(composer)
+  expect(document.activeElement).toBe(composer)
+  expect(useAppStore.getState().agentComposerDrafts[AGENT_ID]).toBe(draft)
+  expect(useAppStore.getState().sessions[0]!.control).toEqual(control)
+  expect(nativeWrites).toEqual(['native answer'])
+  expect(api.sessions.respondInteraction).not.toHaveBeenCalled()
+  await act(async () => ingress('new-request', undefined, toolName, requestEvent, 'new-call'))
+  await act(async () => sendHook('late-old-completion', completionEvent, {tool_name:toolName, tool_use_id:'call-1'}))
+  expect(container.querySelector('[data-request-id="new-request"]')).not.toBeNull()
+  expect(client.agentSession(AGENT_ID).pendingInteraction?.request.id).toBe('new-request')
+})
+it('native source context stays inside the original request disclosure', async () => {
+  await act(async () => ingress('source-context', [], 'Edit', 'PermissionRequest'))
+  await mount()
+  await act(async () => client.writeAgent({agentSessionId:AGENT_ID, expectedRun:initialSession.control.run, data:'native answer', source:'user'}))
+  await act(async () => useAppStore.setState({sessions:useAppStore.getState().sessions.map(session => ({...session,nativeSourceObservation:{state:'unknown' as const,run:initialSession.control.run,observedAt:Date.now(),reason:'current-main-unconfirmed'}}))}))
+  const card = container.querySelector('.agent-interaction--native')!
+  const details = card.querySelector('details')!
+  expect(details.open).toBe(false)
+  expect(details.textContent).toContain('This request belongs to the retained native source')
+  expect(container.querySelector('.agent-interaction-source__notice')).toBeNull()
+  await act(async () => {details.open = true})
+  expect(details.open).toBe(true)
+  expect(nativeWrites).toEqual(['native answer'])
+  expect(api.sessions.respondInteraction).not.toHaveBeenCalled()
 })
 it.each([
   ['Allow once', {outcome:'selected',optionId:'allow-once'}, '1'],
