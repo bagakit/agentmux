@@ -1,8 +1,12 @@
 import {useMemo, type ButtonHTMLAttributes} from 'react'
-import { CirclePlay, CircleAlert } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import {createFocusProjectionSelector, type FocusContext} from '../lib/focus-context'
+
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+
 
 export function focusNavigationSummary(contexts: readonly FocusContext[]) {
   let working = 0, requests = 0, errors = 0
@@ -29,7 +33,7 @@ export function FocusNavigationButton(props: ButtonHTMLAttributes<HTMLButtonElem
   const detail = `${summary.working} working, ${summary.requests} requests, ${summary.errors} failed`
   return <button {...props} className={`${props.className ?? ''} surface-navigation__focus`} aria-label={`${props['aria-label']}. ${detail}`} title={props['aria-describedby'] ? undefined : `${props.title ?? 'Focus'} · ${detail}`}>
     {props.children}
-    {summary.working > 0 ? <span className="focus-navigation__count" data-focus-count="working"><CirclePlay size={11} aria-hidden="true" />{summary.working}</span> : null}
-    {attention > 0 ? <span className={`focus-navigation__count focus-navigation__attention${summary.errors ? ' has-error' : ''}`} data-focus-count="attention"><CircleAlert size={11} aria-hidden="true" />{attention}</span> : null}
+    {summary.working > 0 ? <span className="focus-navigation__count" data-focus-count="working"><ThemeActionStartIcon size={11} aria-hidden="true" />{summary.working}</span> : null}
+    {attention > 0 ? <span className={`focus-navigation__count focus-navigation__attention${summary.errors ? ' has-error' : ''}`} data-focus-count="attention"><ThemeStatusWarningIcon size={11} aria-hidden="true" />{attention}</span> : null}
   </button>
 }

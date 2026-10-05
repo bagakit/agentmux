@@ -1,11 +1,15 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { memo, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Pencil } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { FocusContextMenu } from './FocusContextMenu'
 import { useFocusContextHover } from './FocusContextHover'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { AgentContextContent } from './AgentContextContent'
+
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 export const FocusContextRow = memo(function FocusContextRow({ context, selected, compact = false, onSelect }: { context: FocusContext; selected: boolean; compact?: boolean; onSelect(id: string): void }) {
   const [menuOpen, setMenuOpen] = useState(false), [draft, setDraft] = useState<string | null>(null)
@@ -32,7 +36,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
   const description = [context.detailIsRecap && context.recap ? null : context.detail, context.recap ? `${context.recap.source} (${context.recap.origin}) · ${context.recap.text}` : null].filter(Boolean).join('\n')
   const className = `focus-context${compact ? ' focus-context--compact' : ''}${selected ? ' is-selected' : ''}${menuOpen ? ' is-menu-open' : ''}`
   if (draft !== null) return <div className={`${className} focus-context--renaming`} data-session-id={context.id}>
-    <Pencil size={16} className="focus-context__rename-mark" aria-hidden="true" />
+    <ThemeActionEditIcon size={16} className="focus-context__rename-mark" aria-hidden="true" />
     <TextInput ref={input} className="focus-context__rename" aria-label={`Rename Agent ${context.name}`} value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={commitRename}
       onKeyDown={event => {
         event.stopPropagation()
@@ -43,7 +47,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
   </div>
   const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel} · ${description}`} aria-description={context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
     <AgentContextContent context={context} />
-    <ArrowUpRight className="focus-context__open" size={13} aria-hidden="true" />
+    <ThemeActionOpenExternalIcon className="focus-context__open" size={13} aria-hidden="true" />
   </button>
   return <>{context.kind === 'agent' ? <FocusContextMenu context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card}{hover.preview}</>
 })

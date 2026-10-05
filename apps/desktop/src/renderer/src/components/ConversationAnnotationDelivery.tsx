@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { Check, ChevronDown, Copy, LoaderCircle, Plus, Send } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
@@ -12,6 +12,15 @@ import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionSendIcon = semanticIconComponent('action.send')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+
 
 type NewRequest = Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>
 type Recipient = { kind: 'agent'; id: string } | { kind: 'new' }
@@ -116,8 +125,8 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
     <div className="conversation-annotation-delivery__row">
       <Menu.Root modal={false} open={active && recipientOpen} onOpenChange={setRecipientOpen}>
         <Menu.Trigger asChild><button type="button" className="conversation-annotation-delivery__target" aria-label="选择批注接收者" disabled={locked || !active}>
-          {current ? <RecipientAvatar recipient={current} /> : <Plus size={16} aria-hidden="true" />}
-          <span>{recipient.kind === 'new' ? '新建 Agent' : current?.name ?? recipient.id}{current?.current ? <small>当前</small> : null}</span><ChevronDown size={12} aria-hidden="true" />
+          {current ? <RecipientAvatar recipient={current} /> : <ThemeActionCreateAgentIcon size={16} aria-hidden="true" />}
+          <span>{recipient.kind === 'new' ? '新建 Agent' : current?.name ?? recipient.id}{current?.current ? <small>当前</small> : null}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" />
         </button></Menu.Trigger>
         <Menu.Portal container={resolveOverlayContainer()}><div className="window-overlay-host__entry" data-overlay-layer="dialog">
           <Menu.Content className="tab-context-menu conversation-annotation-delivery__menu" align="start" sideOffset={5} collisionPadding={8} aria-label="批注接收者">
@@ -132,12 +141,12 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
                   textValue={item.name} className="tab-context-menu__item conversation-annotation-delivery__option">
                   <span aria-hidden="true" inert><RecipientAvatar recipient={item} /></span>
                   <span title={item.id}><strong>{item.name}</strong><small>{item.current ? '当前 Agent' : item.metadata?.project?.name ?? item.metadata?.mote?.name ?? item.id}</small></span>
-                  <Menu.ItemIndicator><Check size={13} aria-hidden="true" /></Menu.ItemIndicator>
+                  <Menu.ItemIndicator><ThemeStatusSelectedIcon size={13} aria-hidden="true" /></Menu.ItemIndicator>
                 </Menu.RadioItem>)}
                 {group === 'project' ? <Menu.RadioItem value="new-agent" disabled={!workspace} textValue="新建 Agent"
                   className="tab-context-menu__item conversation-annotation-delivery__option" title={workspace ? `在 ${workspace.name} 的原执行目录新建` : '原执行项目尚未确认'}>
-                  <Plus size={18} aria-hidden="true" /><span><strong>新建 Agent</strong><small>{workspace?.name ?? '原执行项目未确认'}</small></span>
-                  <Menu.ItemIndicator><Check size={13} aria-hidden="true" /></Menu.ItemIndicator>
+                  <ThemeActionCreateIcon size={18} aria-hidden="true" /><span><strong>新建 Agent</strong><small>{workspace?.name ?? '原执行项目未确认'}</small></span>
+                  <Menu.ItemIndicator><ThemeStatusSelectedIcon size={13} aria-hidden="true" /></Menu.ItemIndicator>
                 </Menu.RadioItem> : null}
               </Menu.Group>)}
             </Menu.RadioGroup>
@@ -146,7 +155,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
       </Menu.Root>
       <button type="button" className="conversation-annotation-delivery__send" aria-label={request ? '检查原批注请求' : '发送批注'}
         disabled={!active || busy || !annotation.note.trim() || (recipient.kind === 'new' && !request && !executor)} onClick={() => void send()}>
-        {busy ? <LoaderCircle size={14} aria-hidden="true" /> : <Send size={14} aria-hidden="true" />}{request ? '检查原请求' : '发送'}
+        {busy ? <ThemeStatusLoadingIcon size={14} aria-hidden="true" /> : <ThemeActionSendIcon size={14} aria-hidden="true" />}{request ? '检查原请求' : '发送'}
       </button>
     </div>
     {recipient.kind === 'new' && active ? <AgentExecutorPicker presentation="field" label="新 Agent 配置" unsetLabel="选择 Agent 配置" executors={choices}
@@ -154,7 +163,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
     {request ? <div className="conversation-annotation-delivery__request" role="status"><span>创建待确认</span><code title={request.requestId}>{request.requestId}</code>
       <button type="button" className="icon-button" aria-label="复制批注请求 ID" title={copied ? '已复制' : '复制请求 ID'} onClick={() => {
         void copyTextToClipboard(request.requestId, error => onError(`复制失败：${error instanceof Error ? error.message : String(error)}`)).then(success => { if (mounted.current) setCopied(success) })
-      }}><Copy size={12} /></button>
+      }}><ThemeActionCopyIcon size={12} /></button>
     </div> : null}
   </div>
 }
