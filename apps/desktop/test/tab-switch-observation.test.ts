@@ -10,7 +10,7 @@ function fixture() {
   const frames = new Map<number, FrameRequestCallback>(), all = new Map<number, FrameRequestCallback>()
   const cancel = vi.fn((id: number) => { frames.delete(id) })
   const costs = createTabSwitchObservation(() => time, () => 1_000 + time, cb => { frames.set(++next, cb); all.set(next, cb); return next }, cancel)
-  return { costs, frames, all, cancel, advance(ms: number) { time += ms }, frame() { const [id, cb] = frames.entries().next().value!; frames.delete(id); cb(time) } }
+  return { costs, frames, all, cancel, advance(ms: number) { time += ms }, setTime(value: number) { time = value }, frame() { const [id, cb] = frames.entries().next().value!; frames.delete(id); cb(time) } }
 }
 
 it('observes an already ready retained Terminal without requiring a new attach or revealed transition', () => {
@@ -35,9 +35,11 @@ it('keeps missing placement unknown and separates local display from a later ope
   expect(f.costs.snapshot()[0]).toMatchObject({ inputDelayMs: null, placedMs: null, frameMs: null, inputReadyMs: null })
   expect(f.frames.size).toBe(0)
   f.advance(15_000); placed = true; f.costs.observe(target); f.frame(); f.frame()
-  expect(f.costs.snapshot()[0]).toMatchObject({ placedMs: 15_000, frameMs: 15_000, inputReadyMs: null, terminal: { acceptsInput: false, replaying: true } })
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', elapsedMs: 15_000, pendingStage: 'input-gate', placedMs: 15_000, frameMs: 15_000, inputReadyMs: null, terminal: { acceptsInput: false, replaying: true } })
   f.advance(2_000); facts = { ...ready }; f.costs.observe(target)
-  expect(f.costs.snapshot()[0]).toMatchObject({ inputReadyMs: 17_000, terminal: ready })
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'observed', elapsedMs: 17_000, pendingStage: null, inputReadyMs: 17_000, terminal: ready })
+  f.advance(5_000)
+  expect(f.costs.snapshot()[0]!.elapsedMs).toBe(17_000)
 })
 
 it('does not cross-complete quick switches, duplicate Groups or a covered retained host', () => {
@@ -85,14 +87,109 @@ it.each(['sessionId', 'runId'] as const)('keeps original facts when %s changes a
   expect(f.costs.snapshot()[0]!.terminal).toEqual(facts)
   f.costs.selected(target); f.frame(); f.frame()
   const before = f.costs.snapshot()[0]!
-  expect(before).toMatchObject({ state: 'observed', inputReadyMs: null })
+  expect(before).toMatchObject({ state: 'pending', pendingStage: 'input-gate', inputReadyMs: null })
   off(); f.advance(1000)
   const replacement = { ...ready, [field]: `replacement-${field}`, readySinceAt: 1100 }
   f.costs.registerTerminal(target, () => replacement)
-  expect(f.costs.snapshot()[0]).toEqual({ ...before, state: 'superseded' })
+  expect(f.costs.snapshot()[0]).toEqual({ ...before, state: 'superseded', pendingStage: null })
   f.costs.observe(target)
-  expect(f.costs.snapshot()[0]).toEqual({ ...before, state: 'superseded' })
+  expect(f.costs.snapshot()[0]).toEqual({ ...before, state: 'superseded', pendingStage: null })
   expect(f.frames.size).toBe(0)
+})
+
+it('exposes each pending phase and monotonic elapsed without reading owners or advancing frames in a snapshot', () => {
+  const f = fixture(); let placed = false, facts = { ...ready, visible: false, acceptsInput: false }
+  const placement = vi.fn(() => placed), terminal = vi.fn(() => facts)
+  f.costs.registerPlacement(target, placement); f.costs.registerTerminal(target, terminal)
+  f.costs.begin(target, 'terminal', 90)
+  expect(f.costs.snapshot()[0]).toMatchObject({ pendingStage: 'selection', elapsedMs: 0 })
+  f.advance(10); f.costs.selected(target)
+  expect(f.costs.snapshot()[0]).toMatchObject({ pendingStage: 'placement', elapsedMs: 10 })
+  placed = true; f.costs.observe(target)
+  expect(f.costs.snapshot()[0]!.pendingStage).toBe('terminal')
+  facts = { ...facts, visible: true }; f.costs.observe(target)
+  expect(f.costs.snapshot()[0]!.pendingStage).toBe('frame')
+  const calls = [placement.mock.calls.length, terminal.mock.calls.length], stages = f.costs.snapshot()[0]!
+  f.advance(15_000)
+  expect(f.costs.snapshot()[0]).toEqual({ ...stages, elapsedMs: 15_010 })
+  f.setTime(105)
+  expect(f.costs.snapshot()[0]!.elapsedMs).toBe(15_010)
+  expect([placement.mock.calls.length, terminal.mock.calls.length]).toEqual(calls)
+  expect(f.frames.size).toBe(1)
+  f.setTime(15_110); f.frame(); f.frame()
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', elapsedMs: 15_010 })
+})
+
+it('supersedes a gate wait after its local frame and freezes it against later observations', () => {
+  const f = fixture(); let facts = { ...ready, acceptsInput: false }
+  f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
+  f.costs.begin(target, 'terminal', 90); f.costs.selected(target); f.frame(); f.frame()
+  f.advance(15_000); f.costs.begin({ ...target, tabId: 'next' }, 'unknown', null)
+  const previous = f.costs.snapshot()[0]!
+  expect(previous).toMatchObject({ state: 'superseded', elapsedMs: 15_000, pendingStage: null, frameMs: 0, inputReadyMs: null })
+  f.advance(2_000); facts = ready; f.costs.observe(target)
+  expect(f.costs.snapshot()[0]).toEqual(previous)
+  expect(f.costs.snapshot()[1]).toMatchObject({ state: 'pending', pendingStage: 'selection', elapsedMs: 2_000 })
+})
+
+it.each(['placement', 'terminal'] as const)('freezes an incomplete observation when its last %s owner departs', kind => {
+  const f = fixture(), offPlacement = f.costs.registerPlacement(target, () => true)
+  const offTerminal = f.costs.registerTerminal(target, () => ({ ...ready, acceptsInput: false }))
+  f.costs.begin(target, 'terminal', 90); f.costs.selected(target); f.frame(); f.frame(); f.advance(1_000)
+  const off = kind === 'placement' ? offPlacement : offTerminal
+  off(); off()
+  const ended = f.costs.snapshot()[0]!
+  expect(ended).toMatchObject({ state: 'superseded', pendingStage: null, elapsedMs: 1_000, inputReadyMs: null })
+  f.advance(5_000)
+  f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => ready); f.costs.observe(target)
+  expect(f.costs.snapshot()[0]).toEqual(ended); expect(f.frames.size).toBe(0)
+})
+
+it.each(['placement', 'terminal'] as const)('removing a duplicate %s owner resumes without terminating the matching owner', kind => {
+  const f = fixture(), read = () => ({ ...ready, acceptsInput: false })
+  f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, read)
+  const duplicate = kind === 'placement' ? f.costs.registerPlacement(target, () => true) : f.costs.registerTerminal(target, () => read())
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target); f.advance(1_000)
+  expect(f.frames.size).toBe(0)
+  duplicate()
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'frame', elapsedMs: 1_000 })
+  f.frame(); f.frame()
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', frameMs: 1_000 })
+})
+
+it('observes authoritative readOnly after a frame without inventing input acceptance', () => {
+  const f = fixture(), facts = { ...ready, readOnly: true, acceptsInput: false }
+  f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target); f.advance(50); f.frame(); f.frame()
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'observed', pendingStage: null, elapsedMs: 50, inputReadyMs: null, terminal: facts })
+  f.advance(1_000); expect(f.costs.snapshot()[0]!.elapsedMs).toBe(50)
+})
+
+it('keeps unknown mode pending and Activity independent from ambiguous Terminal owners', () => {
+  const f = fixture(), read = vi.fn(() => ({ ...ready, readOnly: true }))
+  f.costs.registerTerminal(target, read); f.costs.registerTerminal(target, () => read())
+  f.costs.begin(target, 'unknown', null); f.costs.selected(target); f.advance(100)
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'terminal', elapsedMs: 100, terminal: null })
+  f.costs.begin(target, 'activity', null)
+  expect(f.costs.snapshot()[1]).toMatchObject({ state: 'pending', pendingStage: 'selection' })
+  f.advance(10); f.costs.selected(target); f.advance(100)
+  expect(f.costs.snapshot()[1]).toMatchObject({ state: 'observed', pendingStage: null, elapsedMs: 10, terminal: null, inputReadyMs: null })
+  expect(read).not.toHaveBeenCalled(); expect(f.frames.size).toBe(0)
+})
+
+it('does not settle from an earlier open gate or an ambiguous readOnly reader', () => {
+  const f = fixture(); let facts = ready
+  f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target)
+  facts = { ...ready, acceptsInput: false }; f.frame(); f.frame()
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', inputReadyMs: 0 })
+  const duplicate = f.costs.registerTerminal(target, () => ({ ...ready, readOnly: true }))
+  f.costs.observe(target)
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'terminal' })
+  duplicate()
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate' })
+  facts = ready; f.costs.observe(target)
+  expect(f.costs.snapshot()[0]).toMatchObject({ state: 'observed', pendingStage: null })
 })
 
 it('rejects a changed Run first observed by the second local-frame callback', () => {

@@ -1,4 +1,6 @@
 import { expect, it, vi } from 'vitest'
+import { createRendererPerformance } from '../../../apps/desktop/src/renderer/src/lib/renderer-performance'
+import { createTabSwitchObservation } from '../../../apps/desktop/src/renderer/src/lib/tab-switch-observation'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -23,6 +25,26 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
       hosts: [{ hostId: 'unavailable-host', data: null, unavailable: 'connected owner could not answer' }], omittedHosts: 0,
       storage: { location: 'main-user-home-volume', availableBytes: 0, totalBytes: 1000000 }, storageUnavailable: null,
       eventLoop: { resolutionMs: 20, generation: 3, count: 1, meanMs: 80, maxMs: 80 } } }
+  // Use actual production recorders, not a hand-authored public field fixture.
+  let time = 1000
+  const renderer = createRendererPerformance(() => time, () => 1000 + time)
+  time = 1070; renderer.sessionEvent('status', 1000)
+  for (let i = 0; i < 40; i++) renderer.terminalWrite(false, new Uint8Array(1), 1000)
+  const callbacks: FrameRequestCallback[] = []
+  const navigation = createTabSwitchObservation(() => time, () => 1000 + time,
+    callback => { callbacks.push(callback); return callbacks.length }, () => {})
+  const target = { presentationId: 'public-space', displayWorkspaceId: 'public-workspace', groupId: 'public-group', tabId: 'public-tab', regionId: 'public-region' }
+  navigation.registerPlacement(target, () => true)
+  navigation.registerTerminal(target, () => ({ sessionId: 'public-session', runId: 'public-run', readySinceAt: null,
+    visible: true, revealed: true, liveReady: false, acceptsInput: false, readOnly: false, replaying: true }))
+  navigation.begin(target, 'terminal', null); navigation.selected(target)
+  callbacks.shift()!(time); callbacks.shift()!(time); time += 1500
+  observation.renderer.data!.performance = { ...renderer.snapshot(), tabSwitches: navigation.snapshot(), tabSwitchesOmitted: navigation.omitted() }
+  const expectedRenderer = observation.renderer.data!.performance
+  expect(expectedRenderer.slowEventsOmitted['terminal-write']).toBe(34)
+  expect(expectedRenderer.slowEvents.some(event => event.kind === 'session-event')).toBe(true)
+  expect(expectedRenderer.timingEpochs.current.timings['terminal-write']).toEqual({ count: 40, totalMs: 2800, maxMs: 70 })
+  expect(expectedRenderer.tabSwitches[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', elapsedMs: 1500 })
   expect(parseToolkitSnapshot(toolkit)).toEqual(toolkit)
   const bad = structuredClone(observation); bad.diagnostics.data!.main.input.active = Array.from({ length: 65 }, () => recorder.snapshot().recent[0]!)
   expect(() => parseMetricsObservation(bad)).toThrow()
@@ -40,15 +62,18 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   try {
     const result = await client.call('system.metrics.get', {})
     expect(result.observation.diagnostics).toEqual(observation.diagnostics)
+    expect(result.observation.renderer.data!.performance).toEqual(expectedRenderer)
     const initial = new Promise<void>((resolve, reject) => {
       void client.subscribe('system.metrics.watch', {}, { onInitial(value) {
-        try { expect(value.observation.diagnostics).toEqual(observation.diagnostics); resolve() } catch (error) { reject(error) }
+        try { expect(value.observation.diagnostics).toEqual(observation.diagnostics); expect(value.observation.renderer.data!.performance).toEqual(expectedRenderer); resolve() } catch (error) { reject(error) }
       }, onEvent: () => {}, onEnd: error => { if (error) reject(error) } }).then(sub => sub.dispose(), reject)
     })
     await initial
     const cli = await runCompiledObjectCli(['--endpoint', 'unix://' + path, 'system', 'metrics', 'get'], objectCliEnvironment(directory))
     expect(cli.code).toBe(0); expect(cli.stderr).toBe('')
-    const text = JSON.stringify(JSON.parse(cli.stdout.trim()))
+    const parsedCli = JSON.parse(cli.stdout.trim())
+    expect(parsedCli.result.observation.renderer.data.performance).toEqual(expectedRenderer)
+    const text = JSON.stringify(parsedCli)
     for (const fact of ['native-input', 'one-logical-core', 'connected owner could not answer', 'main-user-home-volume']) expect(text).toContain(fact)
     expect(text).not.toContain('synthetic rejected input')
     expect(execute).not.toHaveBeenCalled(); expect(releases.mock.calls.length).toBeGreaterThanOrEqual(2)

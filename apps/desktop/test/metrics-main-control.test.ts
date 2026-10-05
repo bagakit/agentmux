@@ -115,8 +115,8 @@ async function registered() {
     runtimeResourceSnapshot: resourceReads, runtimeDiagnostics: diagnostics, runtimeIdentity: () => null,
     stopAgent: stop, writeAgentInput: input, attach: attach, resume: resume })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [
-    { id: 'local', executionHost: { kind: 'local' }, client: fakeClient('local') },
-    { id: 'remote', executionHost: { kind: 'ssh' }, client: fakeClient('remote') }
+    { id: 'local', executionHost: { id: 'local', kind: 'local' }, client: fakeClient('local') },
+    { id: 'remote', executionHost: { id: 'remote', kind: 'ssh' }, client: fakeClient('remote') }
   ] as any, removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   // Only connected public owner facts are injected; actual commit/publish/attach/sampler stay loaded.
   let rendererReads = 0, rendererRelease: (() => void) | undefined
@@ -145,7 +145,7 @@ async function registered() {
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
   const dispose = await registerIpc({ window: { id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
-    scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {} } as any })
+    scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {}, read: vi.fn(async () => { throw new Error('Unexpected file read in metrics fixture') }), listFiles: vi.fn(async () => { throw new Error('Unexpected file list in metrics fixture') }), write: vi.fn(async () => { throw new Error('Unexpected file write in metrics fixture') }) } as any })
   cleanup.push(dispose)
   const controlOptions = capturedControlOptions()
   expect(controlOptions?.metrics).toBeDefined()
