@@ -1302,11 +1302,21 @@ function hasAttachedSessionView(tabs: Readonly<Record<string, WorkbenchTab>>, se
   )))
 }
 
+/** A same-Run status read cannot settle its Timeline failure; a verified new Run does not inherit it. */
+function retainTimelineObservation(current: SessionSnapshot | undefined, incoming: SessionSnapshot): SessionSnapshot {
+  return current?.kind === 'agent' && incoming.kind === 'agent' &&
+    current.control.hostId === incoming.control.hostId && current.control.agentSessionId === incoming.control.agentSessionId &&
+    current.control.run.runId === incoming.control.run.runId &&
+    current.timelineObservation?.run.runId === incoming.control.run.runId && !incoming.timelineObservation
+    ? { ...incoming, timelineObservation: current.timelineObservation } : incoming
+}
+
 function projectRecoveredSession(
   state: AppState,
   previousSessionId: string,
   session: SessionSnapshot
 ): Pick<AppState, 'sessions' | 'tabs' | 'agentFocus'> {
+  session = retainTimelineObservation(state.sessions.find(item => item.id === previousSessionId), session)
   const tabs = session.id === previousSessionId ? state.tabs : { ...state.tabs }
   if (session.id !== previousSessionId) {
     for (const tab of Object.values(state.tabs)) {
@@ -9537,7 +9547,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const live = state.sessions.find((item) => item.id === sessionId)
           if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
             !live || !sessionOwnsControl(live, control) || !hasAttachedSessionView(state.tabs, sessionId)) return state
-          return { sessions: [...state.sessions.filter((item) => item.id !== session.id), session] }
+          const refreshed = retainTimelineObservation(live, session)
+          return { sessions: [...state.sessions.filter((item) => item.id !== session.id), refreshed] }
         })
         return session
       } catch (error) { get().reportError(error); throw error }
@@ -9817,7 +9828,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!current || current.control.hostId !== session.control.hostId) continue
             const pendingBefore = get().agentSteerQueues[sessionId]
             set((state) => {
-              const next = { ...state, ...reduceTimelineSnapshot(state, snapshot, sessionId) }
+              const next = { ...state, ...reduceTimelineSnapshot(state, snapshot, sessionId, session.control) }
               return reconcile ? reconcileDeliveredSteers(next, sessionId) : next
             })
             if (reconcile && get().agentSteerQueues[sessionId] !== pendingBefore && !agentSteerDrains.has(sessionId)) {

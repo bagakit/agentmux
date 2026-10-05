@@ -24,6 +24,15 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     } }
   })
   const identity = [session.hostId, session.id, session.control.run.runId]
+  if (session.timelineObservation) notices.push({ id: 'timeline-observation',
+    occurrence: JSON.stringify([session.hostId, session.id, session.timelineObservation.run.runId]),
+    cause: JSON.stringify([session.timelineObservation.code, session.timelineObservation.message]),
+    notice: { kind: 'indeterminate', notice: {
+      step: `Reading work history · ${session.timelineObservation.code}`,
+      mode: `${session.timelineObservation.message} The original Session, last readable history and available input controls are kept.`,
+      restore: 'Retry work history in this Session’s notice to read the original Session again. No message is replayed.'
+    } }
+  })
   // A connection gap can replace the display status, but cannot settle a retained native failure.
   // A subsequent current work/completion observation clears the notice with its absent failure.
   const failureStatus = session.status.failure ? session.status

@@ -415,7 +415,8 @@ export function reduceDetachedAgentLaunch(
 export function reduceTimelineSnapshot(
   state: SessionProjectionState,
   snapshot: AgentTimelineSnapshot,
-  sessionId = snapshot.agentSessionId
+  sessionId = snapshot.agentSessionId,
+  observedControl?: AgentSessionControl
 ): SessionProjectionState {
   if (!state.sessions.some((session) => session.kind === 'agent' && session.id === sessionId && session.control.agentSessionId === snapshot.agentSessionId)) return state
   const current = state.timelines[sessionId]
@@ -423,6 +424,13 @@ export function reduceTimelineSnapshot(
   const failures = pending?.projectionFailures?.filter(failure => failure.step !== 'timeline')
   return {
     ...state,
+    ...(observedControl ? { sessions: state.sessions.map(session => {
+      if (session.kind !== 'agent' || session.id !== sessionId || !session.timelineObservation ||
+        session.control.hostId !== observedControl.hostId || session.control.agentSessionId !== observedControl.agentSessionId ||
+        !sameRun(session.control.run, observedControl.run) || !sameRun(session.timelineObservation.run, observedControl.run)) return session
+      const { timelineObservation: _resolved, ...recovered } = session
+      return recovered
+    }) } : {}),
     ...(current && (snapshot.revision < current.revision || snapshot.revision === current.revision && !current.liveTool) ? {} : {
       timelines: { ...state.timelines, [sessionId]: { agentSessionId: snapshot.agentSessionId, revision: snapshot.revision, items: snapshot.items } }
     }),
@@ -557,6 +565,7 @@ export function reduceAgentMembershipSnapshot(
   const timelines = { ...projected.timelines }
   for (const session of canonicalAgents) {
     const incoming = snapshot.timelines[session.id]
+    if (!incoming && session.timelineObservation && sameRun(session.timelineObservation.run, session.control.run)) continue
     if (!incoming || incoming.agentSessionId !== session.id) {
       throw new Error(`Runtime snapshot is missing the matching Timeline for Agent Session: ${session.id}`)
     }
@@ -779,6 +788,7 @@ export function projectRuntimeEvent(
       terminalCapability: _terminalCapability,
       terminalPromptDelivery: _terminalPromptDelivery,
       terminalOutputChannel: _terminalOutputChannel,
+      timelineObservation,
       turnUsage: _turnUsage,
       nativeSessionId: _nativeSessionId,
       nativeHandle: _nativeHandle,
@@ -796,6 +806,7 @@ export function projectRuntimeEvent(
       providerId: core.session.providerId,
       ...projectNativeSourceFacts(core.session),
       nativeService: sameRun(item.control.run, core.session.run) ? item.nativeService ?? null : null,
+      ...(timelineObservation && sameRun(timelineObservation.run, core.session.run) ? { timelineObservation } : {}),
       ...(core.session.nativeHandle ? { nativeSessionId: core.session.nativeHandle.sessionId } : {}),
       hostId: core.session.hostId,
       workspacePath: core.session.workspacePath,
