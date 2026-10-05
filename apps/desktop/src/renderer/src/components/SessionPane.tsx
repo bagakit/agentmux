@@ -899,7 +899,7 @@ export function SessionPane({
       questionReplyDraft: target => questionDrafts?.[questionReplyKey(sessionId, target)],
       onQuestionDraftChange: (target, answers) => editConversationQuestionDraft(session.control, target, answers),
       questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target),
-      onQuestionAnswersObserved: (page, context) => observeConversationQuestionAnswers(session.control, page, context) } : {})
+      onQuestionAnswersObserved: (page, context) => observeConversationQuestionAnswers(session.control, page, context, session.promptInputNotApplied) } : {})
   }
   // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && activityShown) {

@@ -1,6 +1,6 @@
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentSessionHistoryPage } from '@agentmux/core'
-import { agentPromptCondition } from '@agentmux/core/prompt-condition'
+import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
+import { agentPromptCondition, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { parseQuestionReplyAttempt, questionReplyFailurePhase, questionReplyKey, questionReplyReceiptMatches, questionReplyRecorded,
   questionReplyState, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyAttempt, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
@@ -9,6 +9,13 @@ import type { createLocalDrafts } from './local-drafts'
 
 export type MobileQuestionReplyAttempt = QuestionReplyAttempt & { runtimeId: string | null; hostId: string }
 type Local = ReturnType<typeof createLocalDrafts>
+const notAppliedDiagnostic = { code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core 已确认原答复完全未应用；编辑草稿保留，可由你明确提交新答复。' }
+function originalReplyNotApplied(attempt: MobileQuestionReplyAttempt, sessionId: string, session?: AgentMuxAgentSession | null, runtimeId?: string | null): boolean {
+  const fact = session && agentPromptNotApplied(session)
+  return session?.agentSessionId === sessionId && session.hostId === attempt.hostId &&
+    attempt.runtimeId !== null && attempt.runtimeId === runtimeId && fact?.submissionId === attempt.input.operationId &&
+    fact.run.runId === attempt.input.expectedRun.runId
+}
 export function mobileQuestionReplyState(local: Local, sessionId: string, target: ConversationQuestionTarget): QuestionReplyState | undefined {
   const attempt = local.questions.get(questionReplyKey(sessionId, target))
   return attempt ? questionReplyState(attempt) : undefined
@@ -46,17 +53,30 @@ export async function replyMobileQuestion(client: AgentMuxHostedClient, sessionI
     return receipt
   } catch (error) {
     if (local.questions.get(key) === attempt) {
-      local.questions.set(key, { ...attempt, phase: questionReplyFailurePhase(previous?.phase, dispatched, error), diagnostic: {
+      const next: MobileQuestionReplyAttempt = { ...attempt, phase: questionReplyFailurePhase(previous?.phase, dispatched, error), diagnostic: {
         code: typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'QUESTION_REPLY_UNCONFIRMED', message: errorMessage(error)
-      } }); await local.save()
+      } }
+      // A Core fact may arrive before the RPC callback is lost. Read this client's
+      // existing cache for this intent; ordinary composer edits do not scan all device replies.
+      try {
+        if (next.phase === 'unknown' && originalReplyNotApplied(next, sessionId, client.agentSession(sessionId), client.runtimeOwnerIdentity?.()?.runtimeId)) {
+          next.phase = 'rejected'; next.diagnostic = notAppliedDiagnostic
+        }
+      } catch { /* An unavailable observation leaves the original unknown; it never guesses a refusal. */ }
+      local.questions.set(key, next); await local.save()
     }
     throw error
   } finally { changed() }
 }
-export async function observeMobileQuestionAnswers(local: Local, sessionId: string, page: AgentSessionHistoryPage): Promise<boolean> {
+export async function observeMobileQuestionAnswers(local: Local, sessionId: string, page: AgentSessionHistoryPage, session?: AgentMuxAgentSession | null, runtimeId?: string | null): Promise<boolean> {
   let changed = false
-  for (const [key, attempt] of local.questions) if (attempt.phase !== 'confirmed' && questionReplyRecorded(sessionId, attempt, page)) {
-    local.questions.set(key, { ...attempt, phase: 'confirmed', diagnostic: undefined }); changed = true
+  for (const [key, attempt] of local.questions) {
+    if (key !== questionReplyKey(sessionId, attempt.input) || attempt.phase === 'confirmed') continue
+    if (questionReplyRecorded(sessionId, attempt, page)) {
+      local.questions.set(key, { ...attempt, phase: 'confirmed', diagnostic: undefined }); changed = true
+    } else if (attempt.phase === 'unknown' && originalReplyNotApplied(attempt, sessionId, session, runtimeId)) {
+      local.questions.set(key, { ...attempt, phase: 'rejected', diagnostic: notAppliedDiagnostic }); changed = true
+    }
   }
   if (changed) await local.save()
   return changed
