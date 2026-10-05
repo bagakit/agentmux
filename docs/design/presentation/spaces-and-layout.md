@@ -137,7 +137,7 @@ Chat 使用原 Tab，既有 Group 沿原工作面分组；Thread 使用原 Agent
 
 ### Projects 层级与活动语言
 
-- 左侧菜单降低字重与重复装饰；全窗 Agent 状态由[Focus 唯一入口](focus-context.md#离线目录与导航)承载，数量只是辅助，不由单点加数字承担全部语义。状态栏资源与系统通知仍沿各自 owner，不重复 Agent 汇总。
+- 左侧菜单降低字重与重复装饰；全窗 Agent 状态由[Focus 唯一入口](focus-context.md#中断恢复与导航)承载，数量只是辅助，不由单点加数字承担全部语义。状态栏资源与系统通知仍沿各自 owner，不重复 Agent 汇总。
 - Branch 与 Topic 的 recap 使用同一紧凑摘要表面，放在工作线行的次级信息层，不抢主标题。
 - Projects 栏与主工作区之间保留一条可拖拽的窄分隔带；悬停和拖拽时提高边界对比度并显示 resize cursor，静止时保持低干扰。宽度变化即时反映在项目名称、层级缩进与状态槽的可用空间中，结束拖拽后只持久化一个最终宽度，不增加第二份布局状态。行为约束见[《Folder 与项目树》](../behavior/spaces-and-layout.md#folder-与项目树)。
 - 分组使用轻量目录集合图标和分类标签；项目使用自身图标或仓库图标，普通目录用文件夹。真实父子通过标题左缘差和分组权重表达层级，不画连接线，避免只靠文字亮度猜层级；具体层级差唯一见[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent，表现约束见[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)。
@@ -379,9 +379,9 @@ Provider 官方品牌色与自动说话人色的分工唯一见[《对话身份�
 
 ## 顶部与项目栏
 
-- 全窗 running／error 汇总唯一见[Focus 入口](focus-context.md#离线目录与导航)；局部 Activity 面板仍展示 Provider 图标、最近活动摘要与停止时长，信息密度优先，不重复完整会话正文。
+- 全窗 running／error 汇总唯一见[Focus 入口](focus-context.md#中断恢复与导航)；局部 Activity 面板仍展示 Provider 图标、最近活动摘要与停止时长，信息密度优先，不重复完整会话正文。
 
-- 左侧项目菜单使用较轻字重与明确的层级、状态和图标语义，降低装饰性重复信息。全窗 Agent 汇总沿[Focus 入口](focus-context.md#离线目录与导航)，Status Bar 不另放同义摘要；原非 Agent 控件保持。
+- 左侧项目菜单使用较轻字重与明确的层级、状态和图标语义，降低装饰性重复信息。全窗 Agent 汇总沿[Focus 入口](focus-context.md#中断恢复与导航)，Status Bar 不另放同义摘要；原非 Agent 控件保持。
 
 - **最左侧 Projects 栏支持拖拽调宽**。用户可从项目栏与主工作区的边界拖拽改变宽度，拖拽过程中项目内容即时适配，松开后保留最终宽度；边界提供可发现的 resize affordance、键盘焦点与可访问名称。调宽只影响 Projects 栏，不改变 Workspace Tools 或主工作区布局；收起和恢复沿用同一份宽度状态。
 
