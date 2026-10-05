@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowLeft, Code2, Folder, Play, Plus, Trash2, X } from 'lucide-react'
 import { lazy, Suspense, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
@@ -81,7 +82,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
           </label>)}
         </div></fieldset>
       </details>
-      <label className="toolkit-editor__name"><span>Name</span><input ref={nameInput} value={tool.name} onChange={event => onEdit({ name: event.target.value })} placeholder="Workspace summary" /></label>
+      <label className="toolkit-editor__name"><span>Name</span><TextInput ref={nameInput} value={tool.name} onChange={event => onEdit({ name: event.target.value })} placeholder="Workspace summary" /></label>
     </div>
     <details className="toolkit-editor__result-actions">
       <summary>Result actions <span>· {actions.length || 'optional'}</span></summary>
@@ -96,7 +97,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     </details>
     {actionId !== null ? <div className="toolkit-editor__action-heading">
       <button type="button" className="small-button" onClick={() => setActionId(null)}><ArrowLeft size={13} /> Main script</button>
-      {action ? <label><span>Action button label</span><input ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
+      {action ? <label><span>Action button label</span><TextInput ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
     </div> : null}
     <section className="toolkit-editor__script" aria-label={actionId === null ? 'JavaScript script' : 'Action JavaScript script'}>
       <header><span><Code2 size={13} /> {actionId === null ? 'Main script' : action?.label.trim() || 'Action script'}</span><span>JavaScript</span></header>
@@ -105,7 +106,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     <p className="settings-hint">{actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run this script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
     <details className="toolkit-editor__scope"><summary>Local execution scope</summary><p>Your script can read and write local files, environment variables and the network. It uses your current user account; it is not sandboxed.</p></details>
     <div className="toolkit-editor__fields">
-      <label><span><Folder size={13} /> Fixed working directory</span><input value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Choose an absolute local directory" /><small>Does not follow the current Agent or focused workspace.</small></label>
+      <label><span><Folder size={13} /> Fixed working directory</span><TextInput value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Choose an absolute local directory" /><small>Does not follow the current Agent or focused workspace.</small></label>
       <label className="toolkit-editor__toggle"><span><strong>Show in status bar</strong><small>Hide the entry and prevent new runs when off. An existing run keeps its captured version.</small></span><input type="checkbox" checked={tool.enabled} onChange={event => onEdit({ enabled: event.target.checked })} /></label>
       <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend><div className="toolkit-settings__choices">
         <LiquidSelectionSurface selected={tool.statusBar} active={active} targetAttribute="data-settings-target" />
@@ -116,7 +117,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       </div></fieldset>
       {actionId === null || action ? <details className="toolkit-editor__arguments"><summary>{actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
         <p className="settings-hint">Each argument is a separate value. No shell expansion or interpolation.</p>
-        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><input value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><X size={13} /></button></label>)}
+        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><X size={13} /></button></label>)}
         <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><Plus size={13} /> Add argument</button>
       </details> : null}
     </div>

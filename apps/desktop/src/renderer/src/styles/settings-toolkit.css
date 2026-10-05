@@ -72,7 +72,7 @@
 .toolkit-editor__name > span { color: var(--text-3); font-size: var(--fs-meta); }
 .toolkit-editor__name input { width: 100%; padding: var(--sp-2) var(--sp-3); margin-top: var(--sp-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text); font: 600 var(--fs-display)/1.4 var(--font-sans); transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease; }
 .toolkit-editor__name input:hover { border-color: var(--line); background: var(--surface-1); }
-.toolkit-editor__name input:focus { outline: none; border-color: var(--focus-line); background: var(--surface-1); }
+.toolkit-editor__name input:focus { border-color: var(--focus-line); background: var(--surface-1); }
 .toolkit-icon-picker { flex: none; }
 .toolkit-icon-picker summary { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--green); background: var(--surface-1); cursor: pointer; list-style: none; }
 .toolkit-icon-picker summary::-webkit-details-marker { display: none; }
