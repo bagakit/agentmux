@@ -1,5 +1,5 @@
 import { GoalContinuationControl } from './GoalContinuationControl'
-import { ArrowUpRight, Plus, Users } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
@@ -9,6 +9,11 @@ import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { GoalAgentFace, GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
+
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectTeamIcon = semanticIconComponent('object.team')
+const ThemeActionChooseAssigneeIcon = semanticIconComponent('action.choose-assignee')
+
 
 /** The full Agent directory and topology mount only in their explicit editors. */
 export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; onUpdate: GoalRelationSave }) {
@@ -34,10 +39,10 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     try { if (!await onUpdate({ assigneeSessionIds: [...new Set([...demand.assigneeSessionIds ?? [], id])], supervisorSessionId: id }, demand.updatedAt)) setIssue('Supervisor is not saved. The original selection and Agent remain available.') }
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ArrowUpRight size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
+  const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ThemeActionOpenExternalIcon size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
   return <section className="goal-collaboration" aria-label="Goal collaboration">
-    <div className="goals-section-heading"><h2><Users size={15} />Collaboration</h2><span className="goals-caption">Selection does not start execution</span></div>
-    <div className="goal-collaboration__line"><strong>Assignees</strong><div>{members(assignees, 'No assignees yet')}</div><button type="button" className="goals-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><Plus size={12} />Choose</button></div>
+    <div className="goals-section-heading"><h2><ThemeObjectTeamIcon size={15} />Collaboration</h2><span className="goals-caption">Selection does not start execution</span></div>
+    <div className="goal-collaboration__line"><strong>Assignees</strong><div>{members(assignees, 'No assignees yet')}</div><button type="button" className="goals-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Choose</button></div>
     <div className="goal-collaboration__line"><strong>Related</strong><div>{members(related, 'No related sessions')}</div><button type="button" className="goals-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Edit</button></div>
     <div className="goal-collaboration__line"><strong>Supervisor</strong><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div><button type="button" className="goals-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button></div>
     {!supervisor && recommended.length ? <div className="goal-collaboration__recommendations"><span className="goals-caption">Recommended</span>{recommended.map(row => <button key={row.id} type="button" className="goals-button" aria-label={`Assign ${row.name} as Supervisor`} title={row.id} onClick={() => void recommend(row.id)}><GoalAgentFace row={row} /><span>{row.name}</span><span className="goal-collaboration__assign">Assign</span></button>)}</div> : null}

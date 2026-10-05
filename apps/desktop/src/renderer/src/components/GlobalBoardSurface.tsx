@@ -1,6 +1,6 @@
 import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
 import { TextInput } from '@agentmux/client-ui/input'
-import { ArrowUpRight, Check, ChevronRight, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
@@ -18,6 +18,17 @@ import { GoalsCommonActions } from './GoalsCommonActions'
 import { SelectionField } from './SelectionField'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '../../../shared/goals-preferences'
+
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeObjectListIcon = semanticIconComponent('object.list')
+const ThemeLayoutColumns3Icon = semanticIconComponent('layout.columns-3')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
@@ -45,7 +56,7 @@ function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, o
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
     <span className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span></span>
-    {selected ? <Check className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ChevronRight className="goals-row__open" size={14} aria-hidden="true" />}
+    {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
   </div>
 }
 
@@ -138,10 +149,10 @@ export function GlobalBoardSurface() {
     <div className="goals-layout"><div className="goals-index">
       <GoalsCommonActions contextCompact={Boolean(selectedDemandId)} onReturnToCommon={() => setSelectedDemand(null)} />
       <header className="goals-toolbar">
-        <label className="goals-search"><Search size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
-        <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
-        <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <List size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <Columns3 size={14} />, ariaLabel: 'Board view' }]} />
-        <button ref={newGoalRef} type="button" className="goals-button goals-create" aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><CirclePlus size={14} /><span>New Goal<small id="goals-create-effect">Draft + discussion</small></span></button>
+        <label className="goals-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><ThemeActionClearIcon size={12} /></button> : null}</label>
+        <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
+        <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <ThemeObjectListIcon size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <ThemeLayoutColumns3Icon size={14} />, ariaLabel: 'Board view' }]} />
+        <button ref={newGoalRef} type="button" className="goals-button goals-create" aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} /><span>New Goal<small id="goals-create-effect">Draft + discussion</small></span></button>
       </header>
       {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">
         <label>Work status<SelectionField label="Filter work status" value={statusFilter} onValueChange={value => setStatusFilter(value as typeof statusFilter)} options={[{ value: 'all', label: showHistory ? 'All statuses' : 'All active' }, ...DEMAND_STATUS_IDS.map(value => ({ value, label: GOAL_STATUS_LABELS[value] }))]} /></label>
@@ -149,13 +160,13 @@ export function GlobalBoardSurface() {
         <label>Routing<SelectionField label="Filter routing" value={routingFilter} onValueChange={value => setRoutingFilter(value as typeof routingFilter)} options={[{ value: 'all', label: 'All routing' }, { value: 'unassigned', label: 'Needs routing' }, { value: 'assigned', label: 'Assigned' }]} /></label>
         <label>Assignee<SelectionField label="Filter assignee" value={assigneeFilter} onValueChange={setAssigneeFilter} options={[{ value: 'all', label: 'Any assignee' }, ...assigneeIds.map(value => ({ value, label: assigneeName(value) }))]} /></label>
       </div> : null}
-      {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<X size={11} /></button>)}</div> : null}
+      {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<ThemeActionClearIcon size={11} /></button>)}</div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>
         {creation.pending ? creation.phase === 'save' ? '正在保存目标…' : '目标已保存，正在准备专属讨论…' : creation.phase === 'save' ? creation.notSaved ? '已确认目标尚未保存。可以用同一个 ID 保存此目标。' : '目标保存结果尚未确认。重新读取同一个目标后再继续，不会重复创建。' : '目标已保存，专属讨论尚未确认。目标和已有工作面保留。'}
-        {creation.error ? <><span>{creation.error}</span><button type="button" className="goals-button goals-button--primary" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? '保存这个目标' : '重新读取目标' : '重试专属讨论'}<ArrowUpRight size={13} /></button></> : null}
+        {creation.error ? <><span>{creation.error}</span><button type="button" className="goals-button goals-button--primary" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? '保存这个目标' : '重新读取目标' : '重试专属讨论'}<ThemeActionOpenExternalIcon size={13} /></button></> : null}
       </div> : null}
       <div className={`goals-collection goals-collection--${view}`} role="region" aria-label="Global goals">
-        {filteredDemands.length === 0 ? <div className="goals-empty">{projectedDemands.length ? <><strong>No goals match this view.</strong><p>{query.trim() ? `No match for “${query.trim()}”${appliedFilters.length ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}</p>{query.trim() || appliedFilters.length ? <button type="button" className="goals-button" onClick={clearConditions}>Clear search & filters<ArrowUpRight size={13} /></button> : <button type="button" className="goals-button" onClick={() => setShowHistory(true)}>Show finished</button>}</> : creation?.phase === 'save' && !creation.notSaved ? null : <><strong>还没有目标</strong><p>常用操作直接开始对话，New Goal 创建待定义目标并打开专属讨论。</p></>}</div> : view === 'list' ? <div className="goals-list">{filteredDemands.map(renderRow)}</div> : <div className="goals-board" aria-label="Goals by work status">{visibleStatuses.filter((status) => columns[status].length > 0 || !['done', 'cancelled'].includes(status)).map((status) => <section className={`goals-board-column${columns[status].length ? '' : ' goals-board-column--empty'}`} key={status} data-status={status}><header><strong>{GOAL_STATUS_LABELS[status]}</strong><span>{columns[status].length}</span></header>{columns[status].map(renderRow)}{columns[status].length === 0 ? <p className="goals-board-column__empty">No goals</p> : null}</section>)}</div>}
+        {filteredDemands.length === 0 ? <div className="goals-empty">{projectedDemands.length ? <><strong>No goals match this view.</strong><p>{query.trim() ? `No match for “${query.trim()}”${appliedFilters.length ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}</p>{query.trim() || appliedFilters.length ? <button type="button" className="goals-button" onClick={clearConditions}>Clear search & filters<ThemeActionOpenExternalIcon size={13} /></button> : <button type="button" className="goals-button" onClick={() => setShowHistory(true)}>Show finished</button>}</> : creation?.phase === 'save' && !creation.notSaved ? null : <><strong>还没有目标</strong><p>常用操作直接开始对话，New Goal 创建待定义目标并打开专属讨论。</p></>}</div> : view === 'list' ? <div className="goals-list">{filteredDemands.map(renderRow)}</div> : <div className="goals-board" aria-label="Goals by work status">{visibleStatuses.filter((status) => columns[status].length > 0 || !['done', 'cancelled'].includes(status)).map((status) => <section className={`goals-board-column${columns[status].length ? '' : ' goals-board-column--empty'}`} key={status} data-status={status}><header><strong>{GOAL_STATUS_LABELS[status]}</strong><span>{columns[status].length}</span></header>{columns[status].map(renderRow)}{columns[status].length === 0 ? <p className="goals-board-column__empty">No goals</p> : null}</section>)}</div>}
       </div>
       <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals{view === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
     </div>

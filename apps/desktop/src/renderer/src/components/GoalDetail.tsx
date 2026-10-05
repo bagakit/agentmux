@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUpRight, MoreHorizontal, Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
@@ -9,6 +9,12 @@ import { ConfirmationDialog } from './ConfirmationDialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { GoalExecution } from './GoalExecution'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+
 
 export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, draft = {}, onDraftChange, onDraftSaved }: { draft?: Partial<Record<'title' | 'description', string>>; onDraftChange?: (field: 'title' | 'description', value: string) => void; onDraftSaved?: (field: 'title' | 'description', value: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' } | null; onRetryMote: () => void }) {
   const updateDemand = useAppStore((state) => state.updateDemand)
@@ -33,7 +39,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={(value) => { draftRef.current.description = value; onDraftChange?.('description', value); setDescription(value); setDescriptionDirty(true) }} onBlur={() => { if (descriptionDirty) void update({ description }) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   return <aside className="goals-detail" data-goal-detail-id={demand.id} aria-label={`Goal workspace for ${demand.title}`}>
-    <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ArrowLeft size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ArrowUpRight size={13} />{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}</button> : null}<Menu.Root modal={false}><Menu.Trigger asChild><button ref={actionsRef} type="button" className="goals-button goals-detail__menu" aria-label="Goal actions"><MoreHorizontal size={15} /></button></Menu.Trigger><Menu.Portal container={resolveOverlayContainer()}><div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} aria-label="Goal actions"><Menu.Item className="tab-context-menu__item goals-delete-action" onSelect={() => { actionsRef.current?.focus(); setDeleteRequested(true) }}><Trash2 size={13} />Delete goal</Menu.Item></Menu.Content></div></Menu.Portal></Menu.Root></header>
+    <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ThemeNavigationBackIcon size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ThemeActionOpenExternalIcon size={13} />{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}</button> : null}<Menu.Root modal={false}><Menu.Trigger asChild><button ref={actionsRef} type="button" className="goals-button goals-detail__menu" aria-label="Goal actions"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger><Menu.Portal container={resolveOverlayContainer()}><div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} aria-label="Goal actions"><Menu.Item className="tab-context-menu__item goals-delete-action" onSelect={() => { actionsRef.current?.focus(); setDeleteRequested(true) }}><ThemeActionRemoveIcon size={13} />Delete goal</Menu.Item></Menu.Content></div></Menu.Portal></Menu.Root></header>
     <article className="goals-document">
       <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
       <GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} />

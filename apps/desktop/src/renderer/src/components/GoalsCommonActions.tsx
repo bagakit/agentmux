@@ -1,5 +1,5 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, ChevronUp, GripVertical, Plus, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -21,6 +21,22 @@ import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useResourceDrafts } from './settings/use-resource-drafts'
 
+
+
+const ThemeActionDragIcon = semanticIconComponent('action.drag')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeActionMoveDownIcon = semanticIconComponent('action.move-down')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionMoveUpIcon = semanticIconComponent('action.move-up')
+const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
+const ThemeActionCreateShortcutIcon = semanticIconComponent('action.create-shortcut')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionAddShortcutIcon = semanticIconComponent('action.add-shortcut')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+
+
 const errorText = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
 const builtinArtwork = { understand: understandArtwork, ideas: ideasArtwork, next: nextArtwork }
 function RequestBody({ action }: { action: GoalsCommonAction }) {
@@ -40,11 +56,11 @@ function DirectoryRow({ action, selected, saving, index, count, dirty, onSelect,
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: action.key, disabled: saving })
   return <div ref={setNodeRef} className="goals-common__directory-row" style={{ transform: CSS.Transform.toString(transform), transition }} data-common-ref={action.key}>
-    <button type="button" className="goals-common__icon goals-common__drag" disabled={saving} aria-label={`拖动排序 ${action.label}`} {...attributes} {...listeners}><GripVertical size={14} /></button>
+    <button type="button" className="goals-common__icon goals-common__drag" disabled={saving} aria-label={`拖动排序 ${action.label}`} {...attributes} {...listeners}><ThemeActionDragIcon size={14} /></button>
     <button type="button" className="goals-common__directory-item" data-common-select={action.key} aria-pressed={selected} onClick={onSelect}>
-      <span>{action.label}{selected ? <Check size={12} /> : null}</span><small>{dirty ? '正文尚未保存' : action.ref.kind === 'builtin' ? action.conditional ? '有项目时显示' : '默认操作' : action.reason && !action.body ? '失效引用' : '指令库'}</small>
+      <span>{action.label}{selected ? <ThemeStatusSelectedIcon size={12} /> : null}</span><small>{dirty ? '正文尚未保存' : action.ref.kind === 'builtin' ? action.conditional ? '有项目时显示' : '默认操作' : action.reason && !action.body ? '失效引用' : '指令库'}</small>
     </button>
-    <span className="goals-common__row-tools"><button type="button" className="goals-common__icon" aria-label={`上移 ${action.label}`} disabled={saving || index === 0} onClick={() => onMove(index - 1)}><ArrowUp size={12} /></button><button type="button" className="goals-common__icon" aria-label={`下移 ${action.label}`} disabled={saving || index === count - 1} onClick={() => onMove(index + 1)}><ArrowDown size={12} /></button><button type="button" className="goals-common__icon" aria-label={`移出常用 ${action.label}`} disabled={saving} onClick={onRemove}><X size={12} /></button></span>
+    <span className="goals-common__row-tools"><button type="button" className="goals-common__icon" aria-label={`上移 ${action.label}`} disabled={saving || index === 0} onClick={() => onMove(index - 1)}><ThemeActionMoveUpIcon size={12} /></button><button type="button" className="goals-common__icon" aria-label={`下移 ${action.label}`} disabled={saving || index === count - 1} onClick={() => onMove(index + 1)}><ThemeActionMoveDownIcon size={12} /></button><button type="button" className="goals-common__icon" aria-label={`移出常用 ${action.label}`} disabled={saving} onClick={onRemove}><ThemeActionRemoveIcon size={12} /></button></span>
   </div>
 }
 
@@ -186,14 +202,14 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
     if (event.key === 'Escape' && !event.nativeEvent.isComposing && manage && !contextCompact) { event.stopPropagation(); closeManage() }
   }}>
     <div className="goals-common__column">
-      <header className="goals-common__heading"><h2>常用操作</h2>{contextCompact ? <button type="button" className="goals-common__text-button" onClick={() => { revealRequested.current = true; onReturnToCommon?.() }}>回到常用操作<ArrowUp size={12} /></button> : <div><button ref={manageButton} type="button" className="goals-common__text-button" aria-expanded={manage} onClick={() => { setManage(!manage); setView('library'); setSettingsRequested(false); focusRef.current = selectedKey ?? 'add' }}>{manage ? '完成' : '管理'}</button><button type="button" className="goals-common__text-button" disabled={saving} aria-label={directory.collapsed ? '展开常用操作' : '收起常用操作'} aria-expanded={!directory.collapsed} onClick={() => void saveDirectory(directory.items, !directory.collapsed)}>{directory.collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}</button></div>}</header>
+      <header className="goals-common__heading"><h2>常用操作</h2>{contextCompact ? <button type="button" className="goals-common__text-button" onClick={() => { revealRequested.current = true; onReturnToCommon?.() }}>回到常用操作<ThemeNavigationUpIcon size={12} /></button> : <div><button ref={manageButton} type="button" className="goals-common__text-button" aria-expanded={manage} onClick={() => { setManage(!manage); setView('library'); setSettingsRequested(false); focusRef.current = selectedKey ?? 'add' }}>{manage ? '完成' : '管理'}</button><button type="button" className="goals-common__text-button" disabled={saving} aria-label={directory.collapsed ? '展开常用操作' : '收起常用操作'} aria-expanded={!directory.collapsed} onClick={() => void saveDirectory(directory.items, !directory.collapsed)}>{directory.collapsed ? <ThemeNavigationDownIcon size={13} /> : <ThemeNavigationUpIcon size={13} />}</button></div>}</header>
       {contextCompact && compactFeedback ? <p className="goals-common__context-feedback" role="status">{compactFeedback}。原操作和草稿仍在。</p> : null}
       <div className="goals-common__content" hidden={contextCompact}>
       {manage ? <div className="goals-common__manager" data-view={view} aria-label="管理常用操作">
         <p className="goals-common__hint">排序或移出不会删除指令，也不会发起对话。</p>
         <div className="goals-common__manage-body">
           <div className="goals-common__library" ref={library}>
-            <div className="goals-common__manage-tools"><button ref={addButton} type="button" className="goals-common__text-button" disabled={saving} onClick={add}><Plus size={13} />新增操作</button><button type="button" className="goals-common__text-button" disabled={saving} onClick={() => setView('add')}>引用已有</button></div>
+            <div className="goals-common__manage-tools"><button ref={addButton} type="button" className="goals-common__text-button" disabled={saving} onClick={add}><ThemeActionCreateShortcutIcon size={13} />新增操作</button><button type="button" className="goals-common__text-button" disabled={saving} onClick={() => setView('add')}>引用已有</button></div>
             <div className="goals-common__directory" role="region" aria-label="常用操作目录" tabIndex={0}>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={event => { if (event.over) move(String(event.active.id), directory.items.findIndex(item => commonActionKey(item) === String(event.over!.id))) }}>
                 <SortableContext items={actions.map(action => action.key)} strategy={verticalListSortingStrategy}>
@@ -205,8 +221,8 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
             </div>
           </div>
           <div ref={editor} className="goals-common__editor">
-            <button type="button" className="goals-common__text-button goals-common__back" onClick={back}><ArrowLeft size={13} />返回目录</button>
-            {view === 'add' ? <section className="goals-common__available" aria-label="引用已有指令"><h3>添加到常用</h3><p className="goals-common__hint">正文继续保存在同一指令库。</p>{available.map(ref => { const action = resolveGoalsCommonAction(ref, config, project, primaryExecutorId, initialExecutor); return <button key={action.key} type="button" disabled={saving} onClick={() => void saveDirectory([...directory.items, ref], directory.collapsed, action.key)}><span>{action.label}</span><small>{action.body}</small><Plus size={13} /></button> })}{!available.length ? <p className="goals-common__hint">已有指令都在常用操作中了。</p> : null}</section> : prompt ? <section data-common-editor={prompt.id}>
+            <button type="button" className="goals-common__text-button goals-common__back" onClick={back}><ThemeNavigationBackIcon size={13} />返回目录</button>
+            {view === 'add' ? <section className="goals-common__available" aria-label="引用已有指令"><h3>添加到常用</h3><p className="goals-common__hint">正文继续保存在同一指令库。</p>{available.map(ref => { const action = resolveGoalsCommonAction(ref, config, project, primaryExecutorId, initialExecutor); return <button key={action.key} type="button" disabled={saving} onClick={() => void saveDirectory([...directory.items, ref], directory.collapsed, action.key)}><span>{action.label}</span><small>{action.body}</small><ThemeActionAddShortcutIcon size={13} /></button> })}{!available.length ? <p className="goals-common__hint">已有指令都在常用操作中了。</p> : null}</section> : prompt ? <section data-common-editor={prompt.id}>
               <label className="goals-common__body-label">想让 Agent 做什么？<ComposerTextarea value={prompt.body} onValueChange={body => resource.setValue(value => ({ ...value, [prompt.id]: { ...value[prompt.id]!, body } }))} rows={5} disabled={saving} placeholder="写下你会经常使用的一句指令…" /></label>
               <p className="goals-common__hint">{existing ? '编辑会同步更新这条指令在 Composer 和设置中的正文。' : '只需填写正文，名称和关键词会自动生成。'}</p>
               <div className="goals-common__preview"><small>保存后使用的完整请求</small><p>{prompt.body || '你的指令会显示在这里。'}</p><TargetFacts action={resolveGoalsCommonAction({ kind: 'prompt', id: prompt.id }, { ...config!, composerShortcuts: Object.values(resource.value) }, project, primaryExecutorId, initialExecutor)} /></div>
@@ -220,11 +236,11 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
         <div className="goals-entry__actions goals-common__reading" role="region" aria-label="阅读常用操作完整请求" tabIndex={0} aria-busy={pending}>
           {displayedActions.map(action => <button key={action.key} type="button" data-goals-entry-action={action.ref.id} data-common-action={action.key} disabled={pending || Boolean(action.reason) || !action.body} onClick={() => start(action)}>
             <img className="goals-common__art" src={action.ref.kind === 'builtin' ? builtinArtwork[action.ref.id] : customArtwork} alt="" aria-hidden="true" onError={event => { event.currentTarget.hidden = true }} />
-            <span className="goals-common__copy"><span className="goals-common__request-line"><RequestBody action={action} /><ArrowRight size={15} aria-hidden="true" /></span><TargetFacts action={action} /></span>
+            <span className="goals-common__copy"><span className="goals-common__request-line"><RequestBody action={action} /><ThemeNavigationForwardIcon size={15} aria-hidden="true" /></span><TargetFacts action={action} /></span>
           </button>)}
           {!displayedActions.length ? <p className="goals-common__empty">你的常用操作可以放在这里。<button type="button" className="goals-common__text-button" onClick={() => { setManage(true); setView('library'); focusRef.current = 'add' }}>添加操作</button></p> : null}
         </div>
-        {visibleActions.length > 3 ? <button type="button" className="goals-common__all goals-common__text-button" aria-expanded={expanded} onClick={() => { setExpanded(!expanded); const active = document.activeElement; queueMicrotask(() => (active as HTMLElement)?.focus()) }}>{expanded ? '收起更多' : `全部操作（${visibleActions.length}）`}{expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button> : null}
+        {visibleActions.length > 3 ? <button type="button" className="goals-common__all goals-common__text-button" aria-expanded={expanded} onClick={() => { setExpanded(!expanded); const active = document.activeElement; queueMicrotask(() => (active as HTMLElement)?.focus()) }}>{expanded ? '收起更多' : `全部操作（${visibleActions.length}）`}{expanded ? <ThemeNavigationUpIcon size={12} /> : <ThemeNavigationDownIcon size={12} />}</button> : null}
       </> : null}
       {pending ? <p className="goals-entry__preparing" role="status">正在准备对话…</p> : null}
       {saveError ? <p className="goals-service" role="alert">保存未完成，正文草稿已保留。<span>{saveError}</span></p> : null}

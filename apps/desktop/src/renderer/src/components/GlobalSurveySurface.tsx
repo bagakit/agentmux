@@ -4,7 +4,7 @@ import { surveyExplorationName } from '../lib/survey-exploration-name'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxSpaceCatalog, AgentMuxZoneFact, TopicKnowledgeSource } from '@agentmux/core/control'
-import { ArrowUpRight, Bot, CircleHelp, FileText, Globe2, PanelsTopLeft, PanelLeftClose, PanelLeftOpen, NotebookPen, LoaderCircle, Plus, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
@@ -37,6 +37,20 @@ import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { useLauncherState } from '../lib/launcher-state'
 import { directoryIdentity } from '../../../shared/space-addresses'
+
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeFileTextIcon = semanticIconComponent('file.text')
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
+const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
+const ThemeActionCreateBrowserIcon = semanticIconComponent('action.create-browser')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, viewTargets, onSelectReference }: {
   visible?: boolean
@@ -203,7 +217,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const unknown = labels.some(label => label.startsWith('Control unknown'))
     const operating = labels.some(label => label.startsWith('Agent operating'))
     // Normal manual control is availability, not activity; keep its facts in Details.
-    const Icon = unknown ? CircleHelp : operating && operators.size === 0 ? Bot : null
+    const Icon = unknown ? ThemeStatusUnknownIcon : operating && operators.size === 0 ? ThemeObjectAgentIcon : null
     return { summary: operators.size || Icon ? <span title={detail} aria-label={description}>
       <SelectorPresence agents={[...operators.values()]} />
       {Icon ? <Icon size={12} aria-hidden="true" /> : null}
@@ -214,10 +228,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   function itemGlyph(zone: AgentMuxZoneFact) {
     const surfaces = (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? workbenchSurfaces(tabs[id]!) : [])
     const browsers = surfaces.filter(surface => surface.kind === 'browser')
-    if (surfaces.length === 1 && browsers.length === 1 && browsers[0]!.faviconDataUrl) return <span className="survey-page-favicon" aria-hidden="true"><Globe2 size={16} /><img key={browsers[0]!.faviconDataUrl} src={browsers[0]!.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></span>
-    const Icon = surfaces.length && surfaces.every(surface => surface.kind === 'browser') ? Globe2
-      : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith('.note.json')) ? NotebookPen
-        : surfaces.length && surfaces.every(surface => surface.kind === 'file') ? FileText : PanelsTopLeft
+    if (surfaces.length === 1 && browsers.length === 1 && browsers[0]!.faviconDataUrl) return <span className="survey-page-favicon" aria-hidden="true"><ThemeObjectBrowserIcon size={16} /><img key={browsers[0]!.faviconDataUrl} src={browsers[0]!.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></span>
+    const Icon = surfaces.length && surfaces.every(surface => surface.kind === 'browser') ? ThemeObjectBrowserIcon
+      : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith('.note.json')) ? ThemeActionEditNoteIcon
+        : surfaces.length && surfaces.every(surface => surface.kind === 'file') ? ThemeFileTextIcon : ThemeObjectLauncherIcon
     return <Icon size={16} />
   }
 
@@ -360,7 +374,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
     <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
       <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
-        <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
+        <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
         <SurveyItemContextMenu returnFocus={() => contextOrigin.current} visible={visible && !controlsCoverPage} title={contextZone ? itemTitle(contextZone) : 'Exploration'}
@@ -376,7 +390,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }}>
         <div className="survey-page-list">
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
-            <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
+            <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>
             <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
           </div>)}
           {items.filter(zone => !((notebooks.some(book => book.workface?.zoneId === zone.zoneId) || pages.some(page => page.workface?.zoneId === zone.zoneId)) &&
@@ -391,10 +405,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       </aside>
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
         onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : newItemAgent(locationChoice.zoneId, reference)} /> : null}
-      <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><Plus size={16} /><span>New browser</span></button></div>
+      <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button></div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}
         {currentBrowser && currentBrowser.url !== 'about:blank' && currentPanel ? <button type="button" className="survey-tab-view" aria-label="Save to Recall" title="Save this finding to Recall" onClick={saveToRecall}>
-          <ArrowUpRight size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
+          <ThemeActionOpenExternalIcon size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
         </button> : null}
       </div>
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
@@ -414,7 +428,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           onChooseHistory={value => { setQuery(value); browserInput.current?.submit(value) }}>
           <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
             <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onHistoryChange={() => setHistoryRevision(value => value + 1)} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
-            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
+            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <ThemeStatusLoadingIcon className="spin" size={16} /> : <ThemeActionOpenExternalIcon size={16} />}</button></form>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
         </BrowserStartPage> : <>
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
             This work surface is outside the Survey list. Its content and selection are kept. Start an independent research from the page’s Research in Survey action.
@@ -425,7 +439,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         </>}
       </div>
       {workspace && (toolsVisited || toolsOpen) ? <aside ref={managementRef} id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>
-        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><X size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={visible && toolsOpen} />
+        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><ThemeActionCloseIcon size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={visible && toolsOpen} />
       </aside> : null}
     </div>
     <SurveyRecallCapture target={visible && !controlsCoverPage ? recallCapture : null} onClose={() => setRecallCapture(null)} />
