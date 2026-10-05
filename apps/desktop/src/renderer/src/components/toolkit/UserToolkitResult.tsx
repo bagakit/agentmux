@@ -61,12 +61,13 @@ export function UserToolkitResult({ definition, active, close, official = false,
   const display = snapshot?.display
   const showDisplay = Boolean(snapshot?.definition.display || display)
   const lane = showDisplay ? display : snapshot
-  const execution = showDisplay ? display?.admission ?? (display?.latestConfirmed?.state === 'succeeded' ? display.latestConfirmed : display?.lastSucceeded ?? display?.latestConfirmed) : lane?.admission ?? lane?.latestConfirmed
+  const retainedDisplay = display?.latestConfirmed?.state === 'succeeded' ? display.latestConfirmed : display?.lastSucceeded
+  const execution = showDisplay ? retainedDisplay ?? display?.admission ?? display?.latestConfirmed : lane?.admission ?? lane?.latestConfirmed
   const unknown = reading.error || lane?.state === 'unknown'
   const ordinaryUnknown = snapshot?.state === 'unknown'
   const [evaluating, setEvaluating] = useState(false)
   const displayRunning = display?.state === 'pending' || display?.state === 'running' || display?.state === 'stopping'
-  const canEvaluate = Boolean(snapshot?.definition.display && snapshot.definition.enabled && !reading.sourceReason && !displayRunning && !evaluating)
+  const canEvaluate = Boolean((display?.admission || snapshot?.definition.display && snapshot.definition.enabled && !reading.sourceReason) && !displayRunning && !evaluating)
   async function evaluate() {
     if (!canEvaluate) return
     setEvaluating(true); setOperationError('')
@@ -168,9 +169,9 @@ export function UserToolkitResult({ definition, active, close, official = false,
     <div className="performance-body toolkit-result">
       {scriptOpen ? <><button type="button" className="small-button" onClick={() => setScriptOpen(false)}><ArrowLeft size={13} /> Back to result</button><p className="settings-hint">{execution ? `Captured ${showDisplay ? 'display' : execution.action ? 'action' : 'entry'} script for this execution. ${capturedDefinition?.package ? 'Local package files are captured; external files and the environment remain live.' : 'Imports, local files and environment are not frozen.'}` : 'Current entry script · read only'}</p><Textarea className="toolkit-result__script" aria-label="Read-only toolkit script" value={capturedScript ?? ''} readOnly /><p className="settings-hint">Arguments · {capturedArgs?.length ? JSON.stringify(capturedArgs) : 'None'}</p></> : <>
         {reading.error ? <p className="toolkit-result__notice" role="status">{reading.error} The last confirmed facts are kept. Check status before starting again.</p> : null}
-        {reading.sourceReason ? <p className="toolkit-result__notice" role="status">Package source unavailable: {reading.sourceReason} The retained execution can still be stopped.</p> : null}
+        {reading.sourceReason ? <p className="toolkit-result__notice" role="status">Package source unavailable: {reading.sourceReason} Captured requests and confirmed results are kept.</p> : null}
         {lane?.reason ? <p className="toolkit-result__notice" role="status">{lane.reason}</p> : null}
-        {!showDisplay && snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="settings-hint">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
+        {lane?.state === 'unknown' && lane.admission?.run === null ? <p className="settings-hint">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
         {changed ? <p className="toolkit-result__notice" role="status">Configuration changed since this execution. Its captured script and directory remain available.</p> : null}
         {showDisplay ? <p className="toolkit-result__origin">Evaluated when displayed · Refresh to check again</p> : execution?.action ? <p className="toolkit-result__origin">Action · {capturedAction?.label ?? 'Captured action unavailable'}</p> : null}
         {document ? <section className="toolkit-result__document"><h3>{document.summary}</h3>{document.notice && <p className="settings-hint">{document.notice}</p>}<dl>{document.items.map((item, index) => <div key={index}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>{document.agentCards ? <ToolkitAgentCards cards={document.agentCards} active={active && !scriptOpen} /> : null}{document.links.map((link, index) => <ToolkitResultLink key={index} label={link.label} url={link.url} disabled={Boolean(!showDisplay && copyOnRun && primaryActionId && (!canRun || busy || connecting))} copy={url => { if (!showDisplay && copyOnRun && primaryActionId) { void primary(); return } setOperationError(''); setCopyNotice(''); void api.ui.writeClipboardText(url).then(() => setCopyNotice('Link copied.'), cause => setOperationError(presentError(cause))) }} />)}</section> : execution?.text ? <Output executionId={execution.executionId} text={execution.text} /> : <p className="toolkit-result__empty">{lane?.state === 'succeeded' ? 'Finished · No output' : lane?.admission ? 'No confirmed terminal text yet.' : showDisplay ? 'Preparing the declared display script…' : official ? 'Generate a link, then open it on your phone. Connect both devices to the same Wi-Fi.' : 'Run your saved script when you choose. Hovering only reads its result.'}</p>}
@@ -190,7 +191,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
       {operationError ? <p className="toolkit-result__notice" role="alert">{operationError}</p> : null}
     </div>
     <footer className="performance-actions toolkit-result__actions">
-      {showDisplay ? <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><RefreshCw size={13} className={displayRunning || evaluating ? 'toolkit-result__spinner' : undefined} /> Refresh display</button> : null}
+      {showDisplay ? <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><RefreshCw size={13} className={displayRunning || evaluating ? 'toolkit-result__spinner' : undefined} /> {display?.admission ? 'Continue display request' : 'Refresh display'}</button> : null}
       <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <RefreshCw size={13} className="toolkit-result__spinner" /> : <Play size={13} />} {connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</button>
       {primaryActionId ? <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void operate('run')}><RefreshCw size={13} /> {entryLabel ?? 'Run saved tool'}</button> : null}
       {snapshot?.admission ? <button type="button" className="small-button" disabled={!canStop || busy} onClick={() => void operate('stop')}><Square size={12} /> Stop</button> : null}
