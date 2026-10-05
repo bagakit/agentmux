@@ -1,5 +1,5 @@
 import './mobile-lan-crypto.setup'
-import { act } from 'react'
+import { act, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDeviceWorkface, emptyDeviceWorkface } from '../src/recovery/device-workface'
@@ -14,6 +14,7 @@ afterEach(async () => { for (const view of mounts.splice(0)) { await act(async (
 const original: AgentMuxRpcGoal = {
   id: 'goal-original', title: '原目标', description: '原用户意图', status: 'done', priority: 'high', projectId: 'project-original', projectName: '原项目',
   sessionIds: ['session-exact'], createdAt: 1, updatedAt: 2, source: 'session', activityLog: ['原活动'],
+  assigneeSessionIds: ['session-exact'], supervisorSessionId: 'session-exact', participations: [],
   alignment: { summary: '当前提案', criteria: [{ id: 'criterion-original', text: '真实成功标准' }, { id: 'missing', text: '未核对标准' }], openQuestions: ['重要未决问题'], revision: 3, confirmedAt: null },
   grounding: { alignmentRevision: 2, summary: '原结果报告', checks: [{ criterionId: 'criterion-original', outcome: 'unknown', evidence: ['src/result.ts:42'], note: '尚未查证' }], submissionId: 'report-original', acceptedAt: null }
 }
@@ -24,20 +25,26 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
     if (method === 'space.ls') return { catalog: { agentPresentation: [{ agentSessionId: 'session-exact', name: '原 Agent 名称', project: '原 Agent 项目', recap: { text: '原 recap', source: '原来源' }, state: 'working', detail: '原 detail', providerId: 'codex', group: 'working' }] } }
     if (method === 'goal.inspect') return { goal: goals.find(goal => goal.id === params.goalId) ?? null }
     if (method === 'goal.decisions') return { goalId: params.goalId, decisions: [{ input: '原决策', candidates: [{ projectId: 'project-original', reason: '原理由' }], selectedProjectId: 'project-original', risk: 'low', confirmation: 'user', recordedAt: 1, wikiVersion: null, sourceSessionId: null }] }
-    if (method === 'goal.link-session') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, sessionIds: [...goal.sessionIds, params.sessionId] } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId } } }
-    if (method === 'goal.link-project') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, projectId: params.projectId } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, projectId: params.projectId } } }
-    if (method === 'app.snapshot') return { projects: [{ projectId: 'project-original', name: '原项目' }], executors: [{ executorId: 'executor-real', label: '原执行者', providerId: 'codex', availability: 'available' }], unavailable: [] }
-    if (method === 'goal.assign' || method === 'goal.handoff') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, assigneeExecutorId: params.assigneeExecutorId, ...(params.sessionId ? { sessionIds: [...new Set([...goal.sessionIds, params.sessionId])] } : {}) } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? null, startRequested: false } } }
-    if (method === 'goal.start') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, status: 'in_progress' as const } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? goals.find(goal => goal.id === params.goalId)!.sessionIds[0] ?? null } } }
+    if (method === 'goal.link-session') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, updatedAt: goal.updatedAt + 1, sessionIds: [...goal.sessionIds, params.sessionId] } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId } } }
+    if (method === 'goal.link-project') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, updatedAt: goal.updatedAt + 1, projectId: params.projectId } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, projectId: params.projectId } } }
+    if (method === 'app.snapshot') return { projects: [{ projectId: 'project-original', name: '原项目' }], sessions: [{ session: { agentSessionId: 'session-exact', providerId: 'codex' } }], unavailable: [] }
+    if (method === 'goal.assign' || method === 'goal.handoff') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, assigneeSessionIds: params.assigneeSessionIds, supervisorSessionId: params.supervisorSessionId, updatedAt: goal.updatedAt + 1, sessionIds: [...new Set([...goal.sessionIds, ...params.assigneeSessionIds, ...(params.sessionId ? [params.sessionId] : [])])] } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? null, startRequested: false } } }
+    if (method === 'goal.start') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, updatedAt: goal.updatedAt + 1, status: 'in_progress' as const } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? goals.find(goal => goal.id === params.goalId)!.assigneeSessionIds[0] ?? null } } }
     if (method === 'goal.delete') { const goal = goals.find(goal => goal.id === params.goalId)!; goals = goals.filter(goal => goal.id !== params.goalId); return { goal, receipt: { goalId: params.goalId, deletedAt: 4 } } }
     if (method === 'goal.create') { const goal = { ...original, id: params.goalId, title: params.title, description: params.description, status: params.status, sessionIds: [], projectId: params.projectId ?? null, projectName: params.projectId ? '原项目' : null, alignment: undefined, grounding: undefined }; goals.push(goal); return { goal, receipt: { goalId: goal.id, createdAt: 3 } } }
     if (method === 'goal.discuss') return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, mode: params.mode, operationId: params.operationId, tabId: 'original-goal-tab', agentSessionId: 'session-exact' } }
-    if (method === 'goal.update') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, ...params.patch } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, updatedAt: 3 } } }
+    if (method === 'goal.update') {
+      const previous = goals.find(goal => goal.id === params.goalId)!
+      if (params.expectedUpdatedAt !== undefined && params.expectedUpdatedAt !== previous.updatedAt) throw new Error('Goal version conflict')
+      const goal = { ...previous, ...params.patch, updatedAt: previous.updatedAt + 1 }
+      goals = goals.map(value => value.id === goal.id ? goal : value)
+      return { goal, receipt: { goalId: goal.id, updatedAt: goal.updatedAt } }
+    }
     throw new Error(`Unexpected RPC ${method}`)
   })
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
-  const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', availability: 'connected' }) } as any
+  const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process', availability: 'connected' }) } as any
   const render = async (visible = true, connected = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} connected={connected} visible={visible} openSession={openSession} {...(onBackChange ? { onBackChange } : {})} />)) }
   await render()
   const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => button.textContent === text && !button.closest('[hidden]')); expect(button).toBeDefined(); await act(async () => button!.click()) }
@@ -47,6 +54,51 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
 }
 
 describe('Mobile Goals original owner slice', () => {
+  it('registers the original Goal edit Back before the first parent layout observation', async () => {
+    const element = document.createElement('div'); document.body.append(element)
+    const root = createRoot(element); mounts.push({ root, element })
+    let back: (() => void) | null = null
+    const observations: boolean[] = []
+    function Probe() { useLayoutEffect(() => { observations.push(back !== null) }, []); return null }
+    await act(async () => root.render(<><MobileGoalsSurface client={null} connected={false} visible initialContext={{ goalId: 'original-goal', mode: 'edit', discussion: null }} onBackChange={value => { back = value }} /><Probe /></>))
+    expect(observations).toEqual([true])
+    expect(element.querySelector('textarea')).not.toBeNull()
+    await act(async () => back!())
+    expect(element.querySelector('textarea')).toBeNull()
+    expect(element.querySelector('[aria-label="目标详情"]')?.textContent).toContain('当前目标尚未读回')
+  })
+  it('does not apply a late same-SID B presentation to the original A Goal after the same client rebinds Runtime and owner instance', async () => {
+    const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
+    let release!: (value: unknown) => void
+    view.forwardRpc.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    await view.click('刷新关联会话')
+    view.client.runtimeOwnerIdentity = () => ({ runtimeId: 'other-runtime', ownerInstanceId: 'other-process', availability: 'connected' })
+    await act(async () => release({ catalog: { agentPresentation: [{ agentSessionId: 'session-exact', name: 'B的同SID名称', project: 'B项目', state: 'working', providerId: 'codex' }] } }))
+    const progress = view.element.querySelector('[aria-label="目标协作与输入记录"]')!
+    expect(progress.textContent).toContain('负责人：原 Agent 名称')
+    expect(progress.textContent).not.toContain('B的同SID名称')
+    expect(progress.textContent).not.toContain('B项目')
+    await view.click('打开关联会话')
+    expect(view.openSession).not.toHaveBeenCalled()
+    expect(progress.textContent).toContain('未将同名 Session 当作原会话')
+  })
+  it('uses original public roles/names and all typed dispatch stages without inferring current execution from activity or the last record', async () => {
+    const dispatch = { agentSessionId: 'session-exact', hostId: 'original-execution-host', runId: 'original-run', execution: 'finite' as const, prompt: '原请求正文', preparedAt: 10 }
+    const goal = { ...original, activityLog: ['开始执行的旧活动'], dispatches: [
+      { ...dispatch, operationId: 'prepared-original', stage: 'prepared' as const },
+      { ...dispatch, operationId: 'submitted-original', stage: 'submitted' as const, submittedAt: 11 },
+      { ...dispatch, operationId: 'confirmed-original', stage: 'confirmed' as const, submittedAt: 11, receipt: { kind: 'core-prompt' as const, itemId: 'prompt:confirmed-original', createdAt: 12 } },
+      { ...dispatch, operationId: 'unknown-original', stage: 'unknown' as const, submittedAt: 11, issue: '原回执未查明' }
+    ] }
+    const view = await mount([goal]); await view.click('原目标原项目 · 已完成原用户意图')
+    const progress = view.element.querySelector('[aria-label="目标协作与输入记录"]')!
+    expect(progress.textContent).toContain('负责人：原 Agent 名称')
+    expect(progress.textContent).toContain('Supervisor：原 Agent 名称')
+    for (const text of ['4 条原输入记录 · 1 条已确认', '已准备，尚未提交', '已提交，确认未到', '原输入已确认', '原输入回执未知', '不推断唯一当前执行', '输入确认不代表工作完成或结果接受']) expect(progress.textContent).toContain(text)
+    for (const value of goal.dispatches) expect(progress.textContent).toContain(value.operationId)
+    expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'space.ls')).toHaveLength(1)
+    expect(view.forwardRpc.mock.calls.some(([method]) => ['goal.start', 'goal.update'].includes(method))).toBe(false)
+  })
   it('reports stable visible edit → detail → list back handlers and keeps drafts in retained Goal details', async () => {
     const back = vi.fn(), view = await mount([original, { ...original, id: 'second', title: '第二目标' }], back)
     expect(back).toHaveBeenLastCalledWith(null)
@@ -101,10 +153,10 @@ describe('Mobile Goals original owner slice', () => {
   it('updates only the exact original Goal through RPC and does not turn done into acknowledgement', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
     await view.change('工作状态', 'blocked')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: 'goal-original', patch: { status: 'blocked' }, operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: 'goal-original', patch: { status: 'blocked' }, expectedUpdatedAt: 2, operationId: expect.any(String) })
     expect(view.element.textContent).toContain('目标尚未确认'); expect(view.element.textContent).toContain('结果尚未接受')
     await view.change('优先级', 'urgent')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: 'goal-original', patch: { priority: 'urgent' }, operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: 'goal-original', patch: { priority: 'urgent' }, expectedUpdatedAt: 3, operationId: expect.any(String) })
     await view.click('返回目标列表'); expect(view.element.textContent).toContain('原项目 · 受阻')
   })
   it('retains the goal, exact Session and edit form through failed reads, disconnected hints and hide/show', async () => {
@@ -125,7 +177,7 @@ describe('Mobile Goals original owner slice', () => {
     await act(async () => { const textarea = view.element.querySelector('article textarea')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '待保存正文'); textarea.dispatchEvent(new Event('input', { bubbles: true })) })
     await act(async () => view.element.querySelector('article form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(view.element.textContent).toContain('保存回执未确认'); expect(view.element.querySelector('article textarea')?.value).toBe('待保存正文')
-    await view.click('读取当前目标')
+    await view.click('读取当前目标核对')
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')).toHaveLength(1)
     expect(view.element.querySelector('article textarea')).not.toBeNull()
   })
@@ -146,7 +198,7 @@ describe('Mobile Goals original owner slice', () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '未保存的真实草稿')
       textarea.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await view.click('编辑目标正文'); await view.click('编辑目标正文')
+    await view.click('返回目标正文'); await view.click('编辑目标正文')
     expect(view.element.querySelector('article textarea')?.value).toBe('未保存的真实草稿')
     await view.change('优先级', 'urgent')
     expect(view.element.querySelector('article textarea')).not.toBeNull()
@@ -158,6 +210,7 @@ describe('Mobile Goals original owner slice', () => {
     const back = [...view.element.querySelectorAll('button')].find(button => button.textContent === '返回目标列表' && !button.closest('[hidden]'))!
     await act(async () => back.click())
     await view.click('原目标原项目 · 已完成原用户意图')
+    await view.click('编辑目标正文')
     const shown = view.element.querySelector('[aria-label="目标详情"]')!
     expect(shown.querySelector('textarea')?.value).toBe('未保存的真实草稿'); expect(shown.textContent).toContain('unknown original write')
   })
@@ -229,8 +282,10 @@ describe('Mobile Goals original owner slice', () => {
     await view.text(view.element.querySelector('article textarea')!, '只有原意修改')
     await act(async () => { await view.forwardRpc('goal.update', { goalId: original.id, patch: { title: '远端新标题' } }) })
     await view.click('读取当前目标')
+    await view.click('采用已读新版本；下次保存当前草稿将覆盖该版本')
     await act(async () => view.element.querySelector('article form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: original.id, patch: { description: '只有原意修改' }, operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: original.id, patch: { description: '只有原意修改' }, expectedUpdatedAt: 3, operationId: expect.any(String) })
+    await view.click('返回目标正文')
     expect(view.element.querySelector('h2')?.textContent).toBe('远端新标题')
   })
   it('reads the public maximum without hiding its partial-directory boundary and opens an exact Goal beyond that page', async () => {
@@ -251,7 +306,8 @@ describe('Mobile Goals original owner slice', () => {
     await view.click('读取当前目标')
     await view.text(view.element.querySelector('article textarea')!, '之后只修改原意')
     await act(async () => view.element.querySelector('article form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-    expect(view.forwardRpc).toHaveBeenLastCalledWith('goal.update', { goalId: original.id, patch: { description: '之后只修改原意' }, operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenLastCalledWith('goal.update', { goalId: original.id, patch: { description: '之后只修改原意' }, expectedUpdatedAt: 4, operationId: expect.any(String) })
+    await view.click('返回目标正文')
     expect(view.element.querySelector('h2')?.textContent).toBe('后来的远端标题')
   })
   it('preserves unknown link operation and exact input through another goal and hide/show', async () => {
@@ -272,25 +328,29 @@ describe('Mobile Goals original owner slice', () => {
     const input = view.element.querySelector('[aria-label="关联 Session ID"]') as HTMLInputElement
     await view.text(input, 'new-session-exact')
     let resolve!: (value: any) => void
-    view.forwardRpc.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const actual = view.forwardRpc.getMockImplementation()!
+    let older: unknown
+    view.forwardRpc.mockImplementationOnce(async (method, params) => { older = await actual(method, params); return new Promise(done => { resolve = done }) })
     await act(async () => input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    // Consume the real newer link version before a distinct explicit CAS write.
+    await view.click('读取当前目标')
     await view.change('优先级', 'urgent')
-    await act(async () => resolve({ goal: { ...original, sessionIds: [...original.sessionIds, 'new-session-exact'] }, receipt: { goalId: original.id, sessionId: 'new-session-exact' } }))
+    await act(async () => resolve(older))
     expect(view.element.querySelector<HTMLSelectElement>('[aria-label="优先级"]')?.value).toBe('urgent')
     expect(view.element.textContent).toContain('new-session-exact')
   })
-  it('assigns the original executor without starting, starts only explicitly and records actual handoff links', async () => {
+  it('assigns exact public responsible Sessions without starting, starts only explicitly and records actual handoff links', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
-    const executor = view.element.querySelector('[aria-label="分配 Executor ID"]') as HTMLInputElement
-    await view.text(executor, 'executor-real'); await view.click('保存执行者分配')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.assign', { goalId: original.id, assigneeExecutorId: 'executor-real', start: false, operationId: expect.any(String) })
+    const assignees = view.element.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement
+    await view.text(assignees, 'session-exact, session-explicit'); await view.click('保存负责人分配')
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.assign', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 2, start: false, operationId: expect.any(String) })
     expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
     await view.text(view.element.querySelector('[aria-label="执行 Session ID"]') as HTMLInputElement, 'session-explicit')
     await view.click('开始执行此目标')
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.start', { goalId: original.id, sessionId: 'session-explicit', operationId: expect.any(String) })
     expect(view.element.querySelector<HTMLSelectElement>('[aria-label="工作状态"]')?.value).toBe('in_progress')
     await view.click('保存交接关系')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.handoff', { goalId: original.id, assigneeExecutorId: 'executor-real', sessionId: 'session-explicit', operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.handoff', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 4, sessionId: 'session-explicit', operationId: expect.any(String) })
     expect(view.element.textContent).toContain('未自动发送新任务')
   })
   it('requires the explicit deletion step and keeps the original Goal on an unknown deletion receipt', async () => {
@@ -333,13 +393,14 @@ describe('Mobile Goals original owner slice', () => {
     const view = await mount([original, { ...original, id: 'second', title: '第二目标' }]); await view.click('原目标原项目 · 已完成原用户意图')
     const input = view.element.querySelector('[aria-label="执行 Session ID"]') as HTMLInputElement
     await view.text(input, 'original-request-session')
-    await view.text(view.element.querySelector('[aria-label="分配 Executor ID"]') as HTMLInputElement, 'original-request-executor')
+    await view.text(view.element.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement, 'original-request-session')
+    await view.text(view.element.querySelector('[aria-label="Supervisor Session ID"]') as HTMLInputElement, 'original-request-session')
     view.forwardRpc.mockRejectedValueOnce(new Error('handoff receipt lost')); await view.click('保存交接关系')
     const operationId = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.handoff')![1].operationId
     await view.text(input, 'later-input-session')
     await view.click('返回目标列表'); await view.click('第二目标原项目 · 已完成原用户意图'); await view.click('返回目标列表'); await view.click('原目标原项目 · 已完成原用户意图')
     await view.render(false); await view.render(true)
-    expect(view.element.textContent).toContain('original-request-session'); expect(view.element.textContent).toContain('original-request-executor'); expect(view.element.textContent).toContain(operationId)
+    expect(view.element.textContent).toContain('original-request-session'); expect(view.element.textContent).toContain(operationId)
     expect(view.element.querySelector<HTMLInputElement>('[aria-label="执行 Session ID"]')?.value).toBe('later-input-session')
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.handoff')).toHaveLength(1)
   })

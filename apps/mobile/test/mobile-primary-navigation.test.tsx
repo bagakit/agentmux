@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
+import { freezeMobileGoalUpdateRequest } from '../src/recovery/goal-drafts'
 import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
 const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
 vi.mock('../src/platform/native/device', async importOriginal => ({ ...await importOriginal<Record<string, unknown>>(),
@@ -43,6 +44,59 @@ afterEach(async () => {
 })
 
 describe('actual phone primary workfaces', () => {
+  it('cold restores original Goal edit refs/body/unknown without reseeding and keeps the same editor through all five workfaces', async () => {
+    const f = originalClient()
+    const owner = getDeviceWorkface()
+    const scope = { origin: location.origin, runtimeId: 'original-goal-runtime', deviceHostId: null }
+    const request = freezeMobileGoalUpdateRequest({ goalId: 'original-goal', operationId: 'original-unknown-save', expectedUpdatedAt: 7, patch: { description: '原未知保存正文' } })
+    await owner.updatePresentation({ selectedSessionId: null, hostUrl: '', panel: 'conversation' }, { primary: 'goals', showSession: false, showGoalWork: false, identity: null, profile: null,
+      goals: { goalId: 'original-goal', mode: 'edit', discussion: null } })
+    await owner.editGoalDraft(null, { goalId: 'original-goal', scope, title: '原目标', description: '离线仍可编辑的完整草稿', baseline: { title: '原目标', description: '原意', updatedAt: 7 },
+      operations: [{ request, ownerInstanceId: 'original-process', phase: 'sending', issue: null }] }, owner.recordIdentity())
+    const originalRecordId = owner.recordIdentity()
+    const view = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原Host离线' }} platform={createBrowserPlatform()} />)
+    const input = view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')!
+    expect(input.value).toBe('离线仍可编辑的完整草稿')
+    expect(view.element.textContent).toContain('原保存回执未确认')
+    await view.render(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    for (const label of order) { await click(button(nav(view.element), label)); expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(input) }
+    await click(button(nav(view.element), 'Goals'))
+    expect(input.closest('[hidden]')).toBeNull()
+    expect(owner.recordIdentity()).toBe(originalRecordId)
+    expect(owner.snapshot().record.goalDrafts![0]!.operations[0]!.request).toEqual(request)
+    expect(f.client.forwardRpc!.mock.calls.some(([method]: [string]) => ['goal.update', 'goal.start'].includes(method))).toBe(false)
+    await act(async () => mounted.find(value => value.element === view.element)!.root.unmount())
+    mounted.splice(mounted.findIndex(value => value.element === view.element), 1); view.element.remove()
+    // No replaceBackup or new draft writes between real React process mounts.
+    const restored = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原Host离线' }} platform={createBrowserPlatform()} />)
+    expect(restored.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')?.value).toBe(input.value)
+    expect(owner.recordIdentity()).toBe(originalRecordId)
+    expect(owner.snapshot().record.presentation!.goals).toEqual({ goalId: 'original-goal', mode: 'edit', discussion: null })
+  })
+
+  it('toolbar return from the original Goal Agent discussion restores its exact Goal and body rather than a residual Tab zone', async () => {
+    const f = originalClient(), original = f.client.forwardRpc!
+    const goal = { id: 'original-goal', title: '原Goal', description: '原目标正文', status: 'backlog', priority: 'normal', sessionIds: ['session-original'], assigneeSessionIds: ['session-original'], supervisorSessionId: 'session-original', participations: [], activityLog: [], source: 'session', createdAt: 1, updatedAt: 7 }
+    f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-process', availability: 'connected' })
+    f.client.forwardRpc = vi.fn(async (method, params) => {
+      if (method === 'goal.ls') return { goals: [goal] }
+      if (method === 'goal.inspect') return { goal, goalContinuations: [] }
+      if (method === 'goal.decisions') return { goalId: goal.id, decisions: [] }
+      if (method === 'goal.discuss') return { goal, receipt: { goalId: goal.id, tabId: 'original-tab', agentSessionId: 'session-original', mode: params.mode, operationId: params.operationId } }
+      return original(method, params)
+    }) as any
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    await click(button(nav(view.element), 'Goals')); await click(view.element.querySelector('.mobile-goals-list button')!)
+    await click(button(view.element, '打开目标原讨论'))
+    expect(view.element.querySelector('.mobile-session-toolbar')).not.toBeNull()
+    expect(getDeviceWorkface().snapshot().record.presentation!.goals!.discussion).toEqual({ goalId: goal.id, tabId: 'original-tab', agentSessionId: 'session-original' })
+    await click(view.element.querySelector('.mobile-session-toolbar button')!)
+    expect(view.element.querySelector('.mobile-session-toolbar')).toBeNull()
+    const article = view.element.querySelector('[aria-label="目标详情"]')!
+    expect(article.closest('[hidden]')).toBeNull(); expect(article.textContent).toContain('原目标正文')
+    expect(getDeviceWorkface().snapshot().record.presentation!.goals).toEqual({ goalId: goal.id, mode: 'detail', discussion: null })
+    expect(f.submit).not.toHaveBeenCalled()
+  })
   it('directly opens all five original surfaces in order and keeps auxiliary work in the actual menu', async () => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
