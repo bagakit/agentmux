@@ -455,8 +455,15 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'demand.list') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
-  if (source.operation === 'demand.show' || source.operation === 'demand.decision-log') {
+  if (source.operation === 'demand.show' || source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST') }
+  }
+  if (source.operation === 'demand.activity.append') {
+    if (typeof source.kind !== 'string' || !source.kind.trim() || source.kind === 'name-change' || typeof source.message !== 'string' || !source.message.trim())
+      throw new AgentMuxError('Activity needs its original kind and non-empty message; name changes belong to the title owner.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      kind: text(source.kind, 'Activity kind', 'INVALID_CONTROL_REQUEST'), message: text(source.message, 'Activity message', 'INVALID_CONTROL_REQUEST') }
   }
   if (source.operation === 'demand.link-session') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }
@@ -858,6 +865,8 @@ function parseDemand(value: unknown): AgentMuxDemand {
     ...(source.activityLog === undefined ? {} : { activityLog: Array.isArray(source.activityLog)
       ? source.activityLog.map(item => text(item, 'Control Goal activity', 'CONTROL_PROTOCOL_ERROR'))
       : (() => { throw new AgentMuxError('Control Goal activity is invalid.', 'CONTROL_PROTOCOL_ERROR') })() }),
+    ...(source.activities === undefined ? {} : { activities: Array.isArray(source.activities) ? source.activities.map(parseControlDemandActivity)
+      : (() => { throw new AgentMuxError('Control Goal activities are invalid.', 'CONTROL_PROTOCOL_ERROR') })() }),
     ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Control demand planned start timestamp is invalid.') }),
     ...(source.targetAt === undefined ? {} : { targetAt: source.targetAt === null ? null : finiteNumber(source.targetAt, 'Control demand target timestamp is invalid.') }),
     ...(source.parentDemandId === undefined ? {} : { parentDemandId: source.parentDemandId === null ? null : id(source.parentDemandId, 'Control parent Demand is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
@@ -868,6 +877,17 @@ function parseDemand(value: unknown): AgentMuxDemand {
     updatedAt: finiteNumber(source.updatedAt, 'Control demand updated timestamp is invalid.'),
     source: source.source === 'default-topic' || source.source === 'session' ? source.source : (() => { throw new AgentMuxError('Control demand source is invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   }
+}
+export function parseControlDemandActivity(value: unknown): import('./control.js').AgentMuxDemandActivity {
+  const source = object(value, 'Goal activity is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const createdAt = finiteNumber(source.createdAt, 'Goal activity timestamp is invalid.')
+  if (!Number.isSafeInteger(createdAt) || createdAt <= 0) throw new AgentMuxError('Goal activity timestamp is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (typeof source.kind !== 'string' || !source.kind.trim()) throw new AgentMuxError('Activity kind is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return { id: id(source.id, 'Activity ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), kind: text(source.kind, 'Activity kind', 'CONTROL_PROTOCOL_ERROR'),
+    message: text(source.message, 'Activity message', 'CONTROL_PROTOCOL_ERROR'), createdAt,
+    actorId: source.actorId === null ? null : id(source.actorId, 'Activity author is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+    ...(source.operationId === undefined ? {} : { operationId: id(source.operationId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
+    ...(source.nameChangeId === undefined ? {} : { nameChangeId: id(source.nameChangeId, 'Activity name change is invalid.', 'CONTROL_PROTOCOL_ERROR') }) }
 }
 function parseDemandDecisions(value: unknown): AgentMuxDemandDecision[] {
   if (!Array.isArray(value)) throw new AgentMuxError('Control demand decisions are invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -1228,6 +1248,24 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'demand.continuation-action') {
     if (result.diskDurability !== 'confirmed') throw new AgentMuxError('Continuation mutation durability is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Goal id is invalid.', 'CONTROL_PROTOCOL_ERROR'), continuation: parseGoalContinuationLoop(result.continuation), diskDurability: 'confirmed' } }
+  }
+  if (operation === 'demand.activity.append') {
+    const receipt = object(result.receipt, 'Activity receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (receipt.diskDurability !== 'confirmed' || typeof receipt.replayed !== 'boolean') throw new AgentMuxError('Activity commit is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand: parseDemand(result.demand), activity: parseControlDemandActivity(result.activity),
+      receipt: { demandId: id(receipt.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), requestId: id(receipt.requestId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+        activityId: id(receipt.activityId, 'Activity ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), diskDurability: 'confirmed', replayed: receipt.replayed } } }
+  }
+  if (operation === 'demand.activity.inspect') {
+    if (result.diskDurability !== 'confirmed') throw new AgentMuxError('Activity observation is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: {
+      demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), requestId: id(result.requestId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      activity: result.activity === null ? null : parseControlDemandActivity(result.activity), diskDurability: 'confirmed' } }
+  }
+  if (operation === 'demand.activity.read') {
+    if (result.diskDurability !== 'confirmed' || !Array.isArray(result.activities)) throw new AgentMuxError('Activity read is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: {
+      demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), activities: result.activities.map(parseControlDemandActivity), diskDurability: 'confirmed' } }
   }
   if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
   if (operation === 'browser.targets') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: parseBrowserTargetsResult(result) }

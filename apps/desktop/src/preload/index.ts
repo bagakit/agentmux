@@ -257,7 +257,9 @@ const api: AgentMuxPreloadApi = {
     delete: (id) => ipcRenderer.invoke('demands:delete', id),
     linkSession: (id, sessionId) => ipcRenderer.invoke('demands:linkSession', id, sessionId),
     unlinkSession: (id, sessionId) => ipcRenderer.invoke('demands:unlinkSession', id, sessionId),
-    activity: (id, input) => ipcRenderer.invoke('demands:activity', id, input),
+    activity: (id, input, controlRequestId) => ipcRenderer.invoke('demands:activity', id, input, controlRequestId),
+    inspectActivity: (id, operationId) => ipcRenderer.invoke('demands:inspectActivity', id, operationId),
+    readActivities: (id) => ipcRenderer.invoke('demands:readActivities', id),
     decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
   },
   ui: {

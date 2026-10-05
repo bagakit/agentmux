@@ -364,6 +364,7 @@ export const AGENTMUX_DEMAND_STATUSES = ['backlog', 'todo', 'in_progress', 'in_r
 export type AgentMuxDemandStatus = typeof AGENTMUX_DEMAND_STATUSES[number]
 export const AGENTMUX_DEMAND_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
 export type AgentMuxDemandPriority = typeof AGENTMUX_DEMAND_PRIORITIES[number]
+export type AgentMuxDemandActivity = Omit<import('@agentmux/demand').DemandActivity, 'nameChange'>
 export type AgentMuxDemand = {
   id: string
   title: string
@@ -379,6 +380,7 @@ export type AgentMuxDemand = {
   parentDemandId?: string | null
   phaseIndex?: number | null
   activityLog?: string[]
+  activities?: AgentMuxDemandActivity[]
   sessionIds: string[]
   contentRefs?: DemandContentReference[]
   createdAt: number
@@ -454,6 +456,13 @@ export type AgentMuxControlDemandDeleteRequest = RequestBase & {
 export type AgentMuxControlDemandLinkSessionRequest = RequestBase & { operation: 'demand.link-session'; demandId: string; sessionId: string }
 export type AgentMuxControlDemandLinkProjectRequest = RequestBase & { operation: 'demand.link-project'; demandId: string; projectId: string }
 export type AgentMuxControlDemandDecisionLogRequest = RequestBase & { operation: 'demand.decision-log'; demandId: string }
+export type AgentMuxControlDemandActivityAppendRequest = RequestBase & {
+  operation: 'demand.activity.append'; demandId: string; kind: string; message: string
+}
+export type AgentMuxControlDemandActivityInspectRequest = RequestBase & {
+  operation: 'demand.activity.inspect'; demandId: string
+}
+export type AgentMuxControlDemandActivityReadRequest = RequestBase & { operation: 'demand.activity.read'; demandId: string }
 /**
  * 在一个已经开着的 Browser 上跑一段 Agent 写的程序。
  *
@@ -620,6 +629,9 @@ export type AgentMuxControlRequest =
   | AgentMuxControlGoalDiscussRequest
   | AgentMuxControlGoalConfirmRequest
   | AgentMuxControlGoalAcceptRequest
+  | AgentMuxControlDemandActivityAppendRequest
+  | AgentMuxControlDemandActivityInspectRequest
+  | AgentMuxControlDemandActivityReadRequest
   | AgentMuxControlDemandAssignRequest
   | AgentMuxControlDemandStartRequest
   | AgentMuxControlDemandContinuationActionRequest
@@ -735,6 +747,9 @@ export type AgentMuxControlResult =
   | { operation: 'demand.link-session'; demand: AgentMuxDemand; receipt: { demandId: string; sessionId: string } }
   | { operation: 'demand.link-project'; demand: AgentMuxDemand; receipt: { demandId: string; projectId: string } }
   | { operation: 'demand.decision-log'; demandId: string; decisions: AgentMuxDemandDecision[] }
+  | { operation: 'demand.activity.append'; demand: AgentMuxDemand; activity: AgentMuxDemandActivity; receipt: { demandId: string; requestId: string; activityId: string; diskDurability: 'confirmed'; replayed: boolean } }
+  | { operation: 'demand.activity.inspect'; demandId: string; requestId: string; activity: AgentMuxDemandActivity | null; diskDurability: 'confirmed' }
+  | { operation: 'demand.activity.read'; demandId: string; activities: AgentMuxDemandActivity[]; diskDurability: 'confirmed' }
   // result 是程序的返回值（任意 JSON 值，也可能没有）；logs 是它 console 出来的每一行，**失败时照样有**
   // ——程序炸掉之前打的那几行，往往正是 Agent 需要的。outcome 说清这是四类结局里的哪一类。
   | {
@@ -1035,6 +1050,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.link-session': 'short'
   , 'demand.link-project': 'short'
   , 'demand.decision-log': 'short'
+  , 'demand.activity.append': 'short'
+  , 'demand.activity.inspect': 'short'
+  , 'demand.activity.read': 'short'
 }
 
 /** 这个操作要不要走长预算。取值来自 {@link OPERATION_BUDGET}，那张表是唯一的分档出处。 */

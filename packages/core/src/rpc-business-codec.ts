@@ -41,6 +41,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     throw new AgentMuxError('RPC business parameters cannot contain an internal Control envelope.', 'INVALID_CONTROL_REQUEST')
   }
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
+  if ((method === 'goal.activity.append' || method === 'goal.activity.inspect') && typeof source.operationId !== 'string') {
+    throw new AgentMuxError('Goal activity append/check requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
+  }
   if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect') && typeof source.operationId !== 'string') {
     throw new AgentMuxError('Core maintenance requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
   }
@@ -148,6 +151,18 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== (actual.demand as Record<string, unknown>)?.id ||
           request.demandId !== undefined && (actual.demand as Record<string, unknown>)?.id !== request.demandId) fail()
       break
+    case 'demand.activity.append': {
+      const activity = actual.activity as import('./control.js').AgentMuxDemandActivity
+      const receipt = actual.receipt as Record<string, unknown>
+      const demand = actual.demand as import('./control.js').AgentMuxDemand
+      if (demand.id !== request.demandId || receipt.demandId !== request.demandId || receipt.requestId !== request.requestId || receipt.activityId !== activity.id ||
+          activity.operationId !== request.requestId || activity.kind !== request.kind || activity.message !== request.message ||
+          !demand.activities?.some(saved => isDeepStrictEqual(saved, activity))) fail()
+      break
+    }
+    case 'demand.activity.inspect':
+      if (actual.demandId !== request.demandId || actual.requestId !== request.requestId || actual.activity && (actual.activity as Record<string, unknown>).operationId !== request.requestId) fail()
+      break
     case 'message.pending.ls': case 'message.pending.edit': case 'message.pending.send': case 'message.pending.stop':
     case 'message.pending.archive': case 'message.pending.restore':
       if (actual.agentSessionId !== request.agentSessionId) fail()
@@ -249,7 +264,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break
     case 'demand.discuss': case 'demand.confirm': case 'demand.accept':
-    case 'demand.continuation-action': case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
+    case 'demand.activity.read': case 'demand.continuation-action': case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
     case 'demand.delete': case 'demand.link-session': case 'demand.link-project': case 'demand.decision-log':
       if (actual.demand && (actual.demand as Record<string, unknown>).id !== request.demandId ||
         actual.demandId !== undefined && actual.demandId !== request.demandId ||

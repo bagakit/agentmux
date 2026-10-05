@@ -1627,7 +1627,9 @@ export type AgentMuxDesktopApi = {
     delete(id: string): Promise<import('@agentmux/demand').DemandReceipt>
     linkSession(id: string, sessionId: string): Promise<import('@agentmux/demand').DemandReceipt>
     unlinkSession(id: string, sessionId: string): Promise<import('@agentmux/demand').DemandReceipt>
-    activity(id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
+    activity(id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
+    inspectActivity(id: string, operationId: string): Promise<import('@agentmux/demand').DemandActivityInspection>
+    readActivities(id: string): Promise<import('@agentmux/demand').DemandActivityRead>
     decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
   }
   ui: {

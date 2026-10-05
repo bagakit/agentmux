@@ -28,7 +28,7 @@ import type { AgentCatalogEntry, AgentSessionHistoryDescriptor } from '@agentmux
 import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
 import { applyAppLinkForget } from '../../../shared/browser-settings'
 import { resolveBrowserAddress } from '../../../shared/browser-address'
-import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
+import type { Demand, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
@@ -430,7 +430,9 @@ const mockApi: AgentMuxDesktopApi = {
     delete: async (id) => { const demand = mockDemands.get(id) ?? { id, title: 'Demand', description: '', status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], activities: [], decisions: [], createdAt: Date.now(), updatedAt: Date.now() }; mockDemands.delete(id); return { schema: 'agentmux.demand-receipt.v1', operation: 'remove', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) } },
     linkSession: async (id, sessionId) => mockApi.demands.update(id, { description: `${id}:${sessionId}` }),
     unlinkSession: async (id) => mockApi.demands.update(id, {}),
-    activity: async (id, input: Omit<DemandActivity, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.message }),
+    activity: async () => { throw new Error('Activity append requires the original Desktop Demand owner.') },
+    inspectActivity: async () => { throw new Error('Activity inspection requires the original Desktop Demand owner.') },
+    readActivities: async () => { throw new Error('Activity reading requires the original Desktop Demand owner.') },
     decision: async (id, input: Omit<DemandDecision, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.decision })
   },
   workspaces: {

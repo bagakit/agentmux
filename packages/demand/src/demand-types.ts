@@ -58,6 +58,8 @@ export type DemandActivity = {
   message: string
   createdAt: number
   actorId: string | null
+  /** Original business operation, separate from the transport request ID. */
+  operationId?: string
   nameChangeId?: string
   /** Read projection of the snapshot's history owner; never a second persisted record. */
   nameChange?: DemandNameChangeRecord
@@ -139,6 +141,14 @@ export type DemandReceipt = {
   /** The existing operation was observed again; no update was reapplied. */
   replayed?: true
 }
+
+export type DemandActivityInspection = {
+  demandId: string
+  operationId: string
+  activity: DemandActivity | null
+  diskDurability: 'confirmed'
+}
+export type DemandActivityRead = { demandId: string; activities: DemandActivity[]; diskDurability: 'confirmed' }
 
 export type DemandNameChangePage = {
   revision: number

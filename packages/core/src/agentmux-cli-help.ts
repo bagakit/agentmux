@@ -256,7 +256,11 @@ presentation and actual caret eligibility are separate facts. Never stop a healt
 an observation or handshake. Reader cancellation only detaches that reader.
 
 goal activity reads the original Goal activity owner. Goal IDs and saved content retain their
-original durable identity. Topic, Mote, SOUL and Wiki come from real filesystem owners; an
+original durable identity. goal activity append requires --kind, --message and an original
+--operation-id; the authenticated caller supplies the author. Keep that operation ID and use
+goal activity inspect after an unknown response. Same operation and payload reads the same
+activity; changed content or author conflicts. Neither append nor inspect sends Agent input.
+Topic, Mote, SOUL and Wiki come from real filesystem owners; an
 unavailable source stays explicit unknown and cannot be replaced by guessed material.
 mote playbook pmo is a read-only working manual. It launches nothing, sends nothing,
 registers no role and changes no SOUL/Wiki/user profile.
