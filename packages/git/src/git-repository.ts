@@ -722,9 +722,9 @@ export class GitRepository {
     return { kind: 'ready', snapshot, commits, nextCursor: parsed.length > limit ? { snapshot, offset: offset + commits.length } : null }
   }
 
-  private async observedRefs(host: GitCommandRunner, repoPath: string): Promise<GitHistoryRef[]> {
+  private async observedRefs(host: GitCommandRunner, repoPath: string, commitOid?: string): Promise<GitHistoryRef[]> {
       const enumerated = await this.comparisonGit(host, repoPath,
-        ['for-each-ref', `--count=${MAX_HISTORY_REFS + 1}`, '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)',
+        ['for-each-ref', `--count=${MAX_HISTORY_REFS + 1}`, ...(commitOid ? [`--points-at=${commitOid}`] : []), '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)',
           'refs/heads', 'refs/remotes', 'refs/tags'], 'Could not read history references')
       const records = enumerated.stdout.split('\n').filter(Boolean)
       if (records.length > MAX_HISTORY_REFS) throw new Error('History has too many references; the complete reference snapshot exceeds the 2000-ref limit')
@@ -748,7 +748,7 @@ export class GitRepository {
         const exists = await host.run('git', ['-C', repoPath, 'show-ref', '--verify', '--quiet', name], GIT_RUN_OPTIONS)
         if (exists.exitCode !== 1 || exists.stderr.trim()) throw gitFailureError(head, 'History HEAD is unreadable')
       }
-    return refs
+    return commitOid ? refs.filter(ref => ref.oid === commitOid) : refs
   }
 
   private historyRoots(refs: GitHistoryRef[], selectedRef: string | null): string[] {
@@ -838,10 +838,18 @@ export class GitRepository {
       ? ['diff-tree', '--root', '--no-commit-id', '-r', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', `-l${MAX_COMPARISON_FILES}`, oid, '--']
       : ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', `-l${MAX_COMPARISON_FILES}`, parentOid, oid, '--']
     const changes = await this.comparisonGit(host, repoPath, args, 'Could not read the commit files')
-    const refs = (await this.observedRefs(host, repoPath)).filter(ref => ref.oid === oid)
+    const warnings = changes.stderr.trim() ? [scrubGitCredentials(changes.stderr.trim())] : []
+    let refs: GitHistoryRef[] = []
+    try { refs = await this.observedRefs(host, repoPath, oid) }
+    catch (error) {
+      // Decorations are observations, not prerequisites for the fixed commit's readable content.
+      // Keep their unknown state explicit rather than reporting an authoritative empty reference set.
+      warnings.push('Commit references unavailable. Reload this fixed commit to retry: ' +
+        scrubGitCredentials(error instanceof Error ? error.message : String(error)))
+    }
     return { kind: 'ready', snapshot: { hostId: workspace.hostId, repoPath, commitOid: oid, parentOid },
       commit: { ...metadata, refs }, entries: parseBranchChanges(changes.stdout),
-      warnings: changes.stderr.trim() ? [scrubGitCredentials(changes.stderr.trim())] : [] }
+      warnings }
   }
 
   /** Read only the selected commit and parent blobs; never re-resolve a branch or read the worktree. */
