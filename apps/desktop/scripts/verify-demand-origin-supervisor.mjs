@@ -34,7 +34,7 @@ const mutations = [
   { id: 'original-loop-preservation', file: main, before: "allowSupervisorDefault: !loops.some(loop => loop.status !== 'stopped')", after: 'allowSupervisorDefault: true' },
   { id: 'confirmed-input-source', file: main, before: 'await confirmedPmoSource(goalPmo, original, operationId)', after: 'void original' },
   { id: 'queue-source-context', file: store, before: 'retryMessage.goalPmo)', after: 'undefined)' },
-  { id: 'original-core-session-binding', file: store, before: 'await api.sessions.resolveCreationSessionId(workspace.hostId, createOperationId)', after: 'mintAgentSessionId()' },
+  { id: 'original-core-session-binding', file: store, before: 'await api.sessions.resolveCreationSessionId(workspace.hostId, createOperationId)', after: 'mintObjectId()' },
   { id: 'durable-creation-reference', file: 'apps/desktop/src/renderer/src/lib/goals-direct-pmo.ts', before: 'creationOperationId: request?.creationOperationId ?? current.creationOperationId', after: 'creationOperationId: undefined' },
   { id: 'confirmed-input-source-reference', file: 'apps/desktop/src/renderer/src/lib/steer-queue-delivery.ts', before: 'entry.goalPmo?.creationOperationId !== undefined ||', after: '' },
   { id: 'confirmed-source-readonly-retry', file: store, before: 'entry.goalPmo?.creationOperationId !== undefined && confirmedSteerDelivery(state.timelines[sessionId], session.control, entry.operationId)', after: 'false' }
