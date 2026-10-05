@@ -52,7 +52,9 @@ describe('Main Settings owner', () => {
   ])('rejects %s=%s without changing disk, Runtime or public facts', async (key, value, code) => {
     const f = await configOwnerFixture()
     const before = await f.bytes()
-    await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key, value }, f.owner)).rejects.toMatchObject({ code })
+    await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key, value }, f.owner)).rejects.toMatchObject({
+      code, message: expect.stringContaining('Run amux settings inspect')
+    })
     expect(await f.bytes()).toBe(before)
     expect(f.publish).not.toHaveBeenCalled()
     expect(f.runtime.prepare).not.toHaveBeenCalled()
@@ -74,7 +76,9 @@ describe('Main Settings owner', () => {
 
   it('rejects unknown read targets honestly instead of returning an empty success', async () => {
     const { owner } = await configOwnerFixture()
-    await expect(executeSettingsControl({ ...envelope, operation: 'settings.get', target: 'browser.appLinkSchemes' }, owner)).rejects.toMatchObject({ code: 'UNSUPPORTED_SETTING' })
+    await expect(executeSettingsControl({ ...envelope, operation: 'settings.get', target: 'browser.appLinkSchemes' }, owner)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_SETTING', message: expect.stringContaining('Run amux settings inspect')
+    })
   })
 
   it('does not persist or publish effective default values when the optional fields are absent', async () => {
