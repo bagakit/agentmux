@@ -181,6 +181,10 @@
     "./object-id": {
       "types": "./dist/object-id.d.ts",
       "import": "./dist/object-id.js"
+    },
+    "./toolkit-result-channel": {
+      "types": "./dist/toolkit-result-channel.d.ts",
+      "import": "./dist/toolkit-result-channel.js"
     }
   },
   "bin": {
