@@ -4,7 +4,7 @@ import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { CalendarScheduleControl } from './CalendarScheduleControl'
 
@@ -101,16 +101,16 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
     {!loop ? <form onSubmit={event => { event.preventDefault(); void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
       <section className="continuous-progress-control__group" aria-label="Continuation settings">
         <h4>Continuation settings</h4>
-        <label className="continuous-progress-control__interval">Check every (minutes)<input type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
+        <label className="continuous-progress-control__interval">Check every (minutes)<TextInput type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
         <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={setPrompt} /></label>
       </section>
       <section className="continuous-progress-control__group" aria-label="Optional task source">
         <h4>Optional task source</h4>
         <label><input type="checkbox" checked={bindSource} onChange={event => setBindSource(event.target.checked)} />Bind a read-only Feature Tracker source</label>
         {bindSource ? <div className="continuous-progress-control__source-fields">
-          <label>Tracker root<input aria-label="Tracker root" value={sourceRoot} onChange={event => setSourceRoot(event.target.value)} /></label>
-          <label>Feature ID<input aria-label="Feature ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
-          <label>Public Tracker script<input aria-label="Public Tracker script" value={readerPath} onChange={event => setReaderPath(event.target.value)} /></label>
+          <label>Tracker root<TextInput aria-label="Tracker root" value={sourceRoot} onChange={event => setSourceRoot(event.target.value)} /></label>
+          <label>Feature ID<TextInput aria-label="Feature ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
+          <label>Public Tracker script<TextInput aria-label="Public Tracker script" value={readerPath} onChange={event => setReaderPath(event.target.value)} /></label>
         </div> : <p className="continuous-progress-control__help">Periodic continuation only. This loop is not bound to a business task source.</p>}
       </section>
         <button type="submit" className="small-button" disabled={busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
