@@ -108,7 +108,7 @@ export function launcherNativeResumeRows(input: {
     if (managed.has(key) || rows.has(key)) continue
     const candidate: LauncherNativeCandidate = { native, hostId: catalog.hostId, providerId: handle.providerId, capabilities: catalog.capabilities,
       executorId: native.managed?.executorId ?? catalog.executorId, workspacePath: native.source.workspacePath, nativeSessionId: handle.sessionId,
-      label: native.title || `${input.config?.executors[catalog.executorId]?.label ?? catalog.executorId} · ${handle.sessionId}`,
+      label: native.title || 'Untitled conversation',
       createdAt: native.createdAt ?? native.updatedAt, updatedAt: native.updatedAt }
     const workspace = input.config?.workspaces.find(item => workspaceOwnsSessionPath(item, candidate, input.topics))
     rows.set(key, { candidate, name: candidate.label, workspace,
