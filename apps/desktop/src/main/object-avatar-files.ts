@@ -1,5 +1,5 @@
-import { constants, lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { constants, link, lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { AVATAR_OUTPUT_MAX_BYTES, isObjectAvatarRef, type ObjectAvatarRef } from '../shared/object-avatars.js'
 
@@ -52,20 +52,28 @@ export async function saveObjectAvatarFile(original: string, png: Buffer): Promi
   if (!png.length || png.length > AVATAR_OUTPUT_MAX_BYTES) throw new Error('Save a bounded avatar crop.')
   const ref: ObjectAvatarRef = { kind: 'image', fileName: createHash('sha256').update(png).digest('hex') + '.png' }
   const directory = await avatarDirectory(original, true), path = join(directory, ref.fileName)
-  let handle
-  try { handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    await readObjectAvatarFile(original, ref)
-    // A prior save may have reached disk without its parent-sync acknowledgement.
-    const saved = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-    try { await saved.sync() } finally { await saved.close() }
-    await syncDirectory(directory); await syncDirectory(join(original, '.agentmux')); await syncDirectory(original)
-    return ref
+  const temporaryPath = join(directory, ref.fileName + '.' + randomUUID() + '.tmp')
+  const handle = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+  try {
+    try { await handle.writeFile(png); await handle.sync() }
+    finally { await handle.close() }
+    // Publish complete acknowledged bytes without replacing an existing immutable image.
+    try { await link(temporaryPath, path) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      await readObjectAvatarFile(original, ref)
+      // A prior save may have reached disk without its parent-sync acknowledgement.
+      const saved = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+      try { await saved.sync() } finally { await saved.close() }
+    }
+  } catch (error) {
+    // Another saver may already have acknowledged the formal hash path. It is never ours to delete.
+    await unlink(temporaryPath).catch((cleanupError: NodeJS.ErrnoException) => {
+      if (cleanupError.code !== 'ENOENT') throw new AggregateError([error, cleanupError], 'Avatar write and its temporary-file cleanup both failed.')
+    })
+    throw error
   }
-  try { await handle.writeFile(png); await handle.sync() }
-  catch (error) { await unlink(path).catch(() => {}); throw error }
-  finally { await handle.close() }
+  await unlink(temporaryPath)
   // Keep completed bytes if a durability observation fails; retry can inspect the exact hash.
   await syncDirectory(directory); await syncDirectory(join(original, '.agentmux')); await syncDirectory(original)
   return ref
