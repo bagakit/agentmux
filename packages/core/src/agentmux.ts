@@ -110,15 +110,15 @@ async function main(): Promise<number> {
   if (!args.length || args[0] === '--help' || args[0] === '-h') {
     const path = args.slice(1).join('.')
     const help = path ? agentMuxCommandHelp(path) : AGENTMUX_CLI_HELP
-    if (!help) throw new AgentMuxError('Unknown command. Run agentmux --help.', 'INVALID_CLI_ARGUMENT')
+    if (!help) throw new AgentMuxError('Unknown command. Run amux --help.', 'INVALID_CLI_ARGUMENT')
     process.stdout.write(help + '\n'); return 0
   }
   if (args.length === 1 && args[0] === '--skill') { process.stdout.write(AGENTMUX_CLI_SKILL + '\n'); return 0 }
-  if (args.length === 1 && (args[0] === '--version' || args[0] === '-V')) { process.stdout.write(`agentmux ${packageManifest.version}\n`); return 0 }
+  if (args.length === 1 && (args[0] === '--version' || args[0] === '-V')) { process.stdout.write(`amux ${packageManifest.version}\n`); return 0 }
   const match = agentMuxCliMatch(args)
   if (!match && (args.at(-1) === '--help' || args.at(-1) === '-h')) {
     const help = agentMuxCommandHelp(args.slice(0, -1).join('.'))
-    if (!help) throw new AgentMuxError('Unknown command. Run agentmux --help.', 'INVALID_CLI_ARGUMENT')
+    if (!help) throw new AgentMuxError('Unknown command. Run amux --help.', 'INVALID_CLI_ARGUMENT')
     process.stdout.write(help + '\n'); return 0
   }
   if (match && agentMuxCliRequestsHelp(match.command, match.tail)) {
