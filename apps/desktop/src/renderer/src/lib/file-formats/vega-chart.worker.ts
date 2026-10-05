@@ -13,6 +13,7 @@ let view: Vega.View | undefined, bindings: ChartBinding[] = [], rendering = fals
 let nextResource = 0, tooltip = ''
 const activeItems: Record<'mouse' | 'pointer', Item> = { mouse: null, pointer: null }
 let containerWidth = 1, containerHeight = 1
+let responsiveWidth = false, responsiveHeight = false
 // Vega-Lite's responsive specs use this official expression function. The real
 // ResizeObserver supplies the measured preview surface across the Worker boundary.
 Vega.expressionFunction('containerSize', () => [containerWidth, containerHeight])
@@ -111,7 +112,8 @@ function chartEvent(packet: ChartEvent, previous?: Item): Record<string, unknown
 async function handle(request: Exclude<ChartRequest, { action: 'resource' }>) {
   if (disposed) return
   if (request.action === 'start') {
-    const runtime = compileVegaRuntime(request.content, request.mode)
+    const compiled = compileVegaRuntime(request.content, request.mode), runtime = compiled.runtime
+    responsiveWidth = compiled.responsiveWidth; responsiveHeight = compiled.responsiveHeight
     bindings = (runtime.bindings ?? []).map((binding: any) => {
       if (binding.element || !['range', 'select', 'radio', 'checkbox', 'number', 'text', 'color', 'date'].includes(binding.input)) throw new Error('This chart binding is unavailable in an isolated preview. Source was kept.')
       return { ...binding, value: null }
@@ -142,7 +144,9 @@ async function handle(request: Exclude<ChartRequest, { action: 'resource' }>) {
     await render()
   } else if (request.action === 'resize' && view) {
     containerWidth = Math.max(1, request.width); containerHeight = Math.max(1, request.height ?? containerHeight)
-    view.width(containerWidth).resize()
+    if (responsiveWidth) view.width(containerWidth)
+    if (responsiveHeight) view.height(containerHeight)
+    view.resize()
     await (view as ChartView).runAsync(null, () => {
       for (const stream of streams) if (stream.source === 'container' && stream.type === 'resize') stream.stream.receive(chartEvent({ source: 'container', type: 'resize', x: 0, y: 0 }))
     })
