@@ -1195,6 +1195,8 @@ export async function registerIpc(args: {
       args.environmentWarning, app.getPath('home'))
   })
   handle('sessions:nativeSessions', async (input: import('../shared/contracts.js').NativeAgentSessionsInput) => args.runtime.nativeAgentSessions(input, config))
+  handle('sessions:nativeHistoryPage', async (input: import('../shared/contracts.js').NativeAgentHistoryInput) => args.runtime.nativeAgentHistory(input, config))
+  handle('sessions:nativeHistoryResource', async (input: import('../shared/contracts.js').NativeAgentHistoryResourceInput) => args.runtime.nativeAgentHistoryResource(input, config))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
     try {
       if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
@@ -1774,6 +1776,8 @@ export async function registerIpc(args: {
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,
       ...(params.workspacePath === undefined ? {} : { workspacePath: params.workspacePath }) }, config),
+    nativeAgentHistory: (params, context) => args.runtime.nativeAgentHistory(params, config, context?.signal),
+    nativeAgentHistoryResource: (params, context) => args.runtime.nativeAgentHistoryResource(params, config, context?.signal),
     ...(rpcHttp ? { http: rpcHttp } : {}),
     metrics,
     toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal, options) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal, options),

@@ -35,7 +35,7 @@ export function launcherTimelineRecap(timeline: AgentTimelineSnapshot | undefine
   return null
 }
 
-export function launcherNativeRecap(page: AgentSessionHistoryPage): LauncherRecap | null {
+export function launcherNativeRecap(page: Pick<AgentSessionHistoryPage, 'items'>): LauncherRecap | null {
   for (const kind of ['assistant-message', 'user-message'] as const) {
     for (let index = page.items.length - 1; index >= 0; index -= 1) {
       const item = page.items[index]!

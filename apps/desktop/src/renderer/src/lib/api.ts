@@ -874,6 +874,8 @@ const mockApi: AgentMuxDesktopApi = {
     nativeSessions: async input => ({ hostId: input.hostId, executorId: input.executorId,
       providerId: mockConfig.executors[input.executorId]?.providerId ?? 'codex',
       availability: 'unsupported', capabilities: mockStructuredCapabilities, sessions: [], issues: [] }),
+    nativeHistoryPage: async () => { throw new Error('Saved Provider conversation details require the connected desktop Host. The source and Resume remain available.') },
+    nativeHistoryResource: async () => { throw new Error('Recorded conversation content requires the connected desktop Host. The original source is retained.') },
     observeStorage: async (control) => ({
       run: control.run,
       runtime: { hostId: control.hostId, instanceId: 'preview-runtime', processId: null, buildIdentity: 'web-preview', protocolVersion: 22 },
