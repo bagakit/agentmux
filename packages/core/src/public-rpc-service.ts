@@ -537,14 +537,8 @@ export class AgentMuxRpcService {
     }
     let result: unknown
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
-      if ((method === 'toolkit.run' || method === 'toolkit.action') &&
-          (context.caller !== undefined || context.transport !== 'unix' || context.principal?.kind !== 'user')) {
-        const listed = this.ports.forwardControl
-          ? await this.ports.forwardControl('toolkit.ls', {}, context)
-          : await this.toolkit(rpcControlRequest('toolkit.ls', {}), context.signal)
-        if ('tools' in listed && listed.tools.some(tool => tool.toolId === p.toolId && tool.kind === 'script' && tool.readonly)) {
-          throw new AgentMuxError('Official script tools require an explicit local-user invocation. Existing Agents and results remain available.', 'CONTROL_PERMISSION_DENIED')
-        }
+      if (method === 'toolkit.run' || method === 'toolkit.action' || method === 'toolkit.evaluate') {
+        await this.assertToolkitExecutionAuthority(p.toolId, context)
       }
       if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
       let body = p
@@ -602,7 +596,7 @@ export class AgentMuxRpcService {
         const snapshot = current.snapshot.kind === 'package-unavailable' ? current.snapshot.retained : current.snapshot
         body = { ...body, operationId: baseline.requestId, input: method === 'toolkit.run' && current.snapshot.kind === 'script'
           ? { invocationId: baseline.requestId, expectedRevision: current.snapshot.definition.revision,
-            expectedLatestExecutionId: current.snapshot.admission?.executionId ?? current.snapshot.latestConfirmed?.executionId ?? null }
+            expectedLatestExecutionId: snapshot?.admission?.executionId ?? snapshot?.latestConfirmed?.executionId ?? null }
           : { executionId: snapshot?.admission?.executionId ?? null } }
       }
       const internalCaller: AgentMuxControlCaller | undefined = caller
@@ -1011,6 +1005,15 @@ export class AgentMuxRpcService {
     return result as AgentMuxRpcResult<M>
   }
 
+  private async assertToolkitExecutionAuthority(toolId: unknown, context: AgentMuxRpcCallContext): Promise<void> {
+    if (context.caller === undefined && context.transport === 'unix' && context.principal?.kind === 'user') return
+    const listed = this.ports.forwardControl
+      ? await this.ports.forwardControl('toolkit.ls', {}, context)
+      : await this.toolkit(rpcControlRequest('toolkit.ls', {}), context.signal)
+    if ('tools' in listed && listed.tools.some(tool => tool.toolId === toolId && tool.kind === 'script' && tool.readonly)) {
+      throw new AgentMuxError('Official script tools require an explicit local-user invocation. Existing Agents and results remain available.', 'CONTROL_PERMISSION_DENIED')
+    }
+  }
   private async toolkit(request: AgentMuxControlRequest, signal?: AbortSignal, context?: AgentMuxNameContext) {
     if (!this.ports.toolkit) throw new AgentMuxError('Toolkit owner is unavailable.', 'TOOLKIT_UNSUPPORTED')
     const { isToolkitRequest, parseToolkitResult, assertToolkitResultTarget } = await import('./toolkit.js')
@@ -1256,6 +1259,11 @@ export class AgentMuxRpcService {
     }
     await this.assertRuntimeFence(context)
     const caller = await this.authenticated(context)
+    const toolkitRequest = method === 'toolkit.watch' ? rpcControlRequest(method, params) : null
+    if (toolkitRequest?.operation === 'toolkit.watch' && toolkitRequest.evaluateOnDisplay === true) {
+      // Opting into execution keeps the original official-script boundary before any forwarding.
+      await this.assertToolkitExecutionAuthority(toolkitRequest.toolId, context)
+    }
     let outputOwner: Awaited<ReturnType<AgentMuxRpcService['owner']>> | undefined, forwardOutput = false
     if (method === 'agent.output') {
       rpcRecord(params, NATIVE_FIELDS['agent.output'])
@@ -1322,12 +1330,13 @@ export class AgentMuxRpcService {
         const sub = await this.ports.subscribeBrowserOperation(request, event => emit({ type: 'progress', data: event }))
         initial = { runOperation: sub.runOperation, gap: sub.gap }; cleanup = () => sub.dispose()
       } else if (method === 'toolkit.watch') {
-        const request = rpcControlRequest(method, params)
+        const request = toolkitRequest!
         if (request.operation !== 'toolkit.watch' || !this.ports.toolkit) throw new AgentMuxError('Toolkit subscriptions are unavailable.', 'TOOLKIT_UNSUPPORTED')
         const sub = await this.ports.toolkit.subscribe(request.toolId, data => emit({ type: 'snapshot', data }),
           error => emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }), controller.signal,
           { ...(request.captureFailure ? { captureFailure: true as const } : {}),
-            ...(request.includeFailureEvidence ? { includeFailureEvidence: true as const } : {}) })
+            ...(request.includeFailureEvidence ? { includeFailureEvidence: true as const } : {}),
+            ...(request.evaluateOnDisplay === undefined ? {} : { evaluateOnDisplay: request.evaluateOnDisplay }) })
         initial = { toolId: request.toolId }; cleanup = () => sub.dispose()
       } else {
         rpcRecord(params, [])

@@ -556,15 +556,16 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [
       { kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
-      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar })),
+      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.display ? { display: true } : {}) })),
       ...await Promise.all(toolkitTools(this.args.config.current).map(async tool => {
         if (!('kind' in tool)) return { kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: false as const,
-          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }
+          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, ...(tool.display ? { display: true } : {}) }
         const base = { kind: 'package' as const, toolId: tool.id, readonly: false as const, configRevision: tool.revision,
           path: tool.packagePath, enabled: tool.enabled, statusBar: tool.statusBar }
         try {
           const metadata = await readToolkitPackageMetadata(tool)
-          return { ...base, availability: 'available' as const, name: metadata.manifest.name, icon: metadata.icon, reason: metadata.warning }
+          return { ...base, availability: 'available' as const, name: metadata.manifest.name, icon: metadata.icon, reason: metadata.warning,
+            ...(metadata.manifest.display ? { display: true } : {}) }
         } catch (error) {
           return { ...base, availability: 'unavailable' as const, name: null, icon: null,
             reason: String(error instanceof Error ? error.message : error).slice(0, 512) || 'Package metadata is unavailable.' }
@@ -578,6 +579,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }
     if (request.operation === 'toolkit.script') return { operation: request.operation, script: bundledToolkitScript(this.args.launch(), request.toolId) ?? await this.custom.script(request.toolId) }
     if (request.operation === 'toolkit.run') return { operation: request.operation, snapshot: await this.custom.run(request.toolId, request.input, signal) }
+    if (request.operation === 'toolkit.evaluate') return { operation: request.operation, snapshot: await this.custom.evaluate(request.toolId, request.input, signal) }
     if (request.operation === 'toolkit.action') return { operation: request.operation, snapshot: await this.custom.action(request.toolId, request.actionId, request.input, signal) }
     if (request.operation === 'toolkit.stop') {
       if (request.executionId === undefined) throw new AgentMuxError('Stop requires a captured execution identity.', 'INVALID_CONTROL_REQUEST')
@@ -585,9 +587,9 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     }
     throw new AgentMuxError('Watch requires the subscription port.', 'INVALID_CONTROL_REQUEST')
   }
-  async subscribe(toolId: string, snapshot: (value: ToolkitSnapshot) => void, end: (error?: Error) => void, signal: AbortSignal, options?: { captureFailure?: true; includeFailureEvidence?: true }) {
+  async subscribe(toolId: string, snapshot: (value: ToolkitSnapshot) => void, end: (error?: Error) => void, signal: AbortSignal, options?: { captureFailure?: true; includeFailureEvidence?: true; evaluateOnDisplay?: boolean }) {
     return toolId === 'performance' ? await this.performance.subscribe('performance', snapshot, end, signal, options)
-      : await this.custom.subscribe(toolId, snapshot, end, signal)
+      : await this.custom.subscribe(toolId, snapshot, end, signal, options)
   }
   async dispose(): Promise<void> { await Promise.all([this.performance.dispose(), this.custom.dispose()]) }
 }

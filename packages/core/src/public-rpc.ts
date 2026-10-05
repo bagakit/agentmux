@@ -71,7 +71,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'system.crash-log.reveal': 'diagnostics.crash-log.reveal',
   'system.metrics.get': 'metrics.get', 'system.metrics.watch': 'metrics.watch',
   'toolkit.ls': 'toolkit.list', 'toolkit.inspect': 'toolkit.get', 'toolkit.script': 'toolkit.script',
-  'toolkit.run': 'toolkit.run', 'toolkit.stop': 'toolkit.stop', 'toolkit.watch': 'toolkit.watch',
+  'toolkit.run': 'toolkit.run', 'toolkit.evaluate': 'toolkit.evaluate', 'toolkit.stop': 'toolkit.stop', 'toolkit.watch': 'toolkit.watch',
   'toolkit.create': 'toolkit.add', 'toolkit.update': 'toolkit.update',
   'toolkit.delete': 'toolkit.remove', 'toolkit.action': 'toolkit.action'
 } as const satisfies Record<string, AgentMuxControlRequest['operation']>
@@ -107,7 +107,7 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   : M extends 'settings.executors.inspect' ? { id: string }
   : M extends `settings.${'executors' | 'prompts'}.update` ? { id: string; input: unknown }
   : M extends `settings.${'executors' | 'prompts'}.delete` ? { id: string; input?: unknown }
-  : M extends 'toolkit.update' | 'toolkit.delete' | 'toolkit.run' | 'toolkit.stop'
+  : M extends 'toolkit.update' | 'toolkit.delete' | 'toolkit.run' | 'toolkit.stop' | 'toolkit.evaluate'
     ? { toolId: string; input?: unknown }
   : M extends 'toolkit.create' ? { toolId: string; value: unknown }
   : M extends `settings.${'executors' | 'prompts'}.create` ? { id: string; value: unknown }

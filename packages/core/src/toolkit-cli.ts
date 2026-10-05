@@ -27,19 +27,21 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
     parseToolkitPackageFields(value, false, 'INVALID_CLI_ARGUMENT', true)
     return { method: 'toolkit.create', params: { toolId, value } }
   }
-  if (toolId === 'performance' && (action === 'inspect' || action === 'watch') && args.length > 2) {
-    const flags = args.slice(2), allowed = action === 'watch' ? ['--capture-failure', '--failure-evidence'] : ['--failure-evidence']
-    if (new Set(flags).size !== flags.length || flags.some(flag => !allowed.includes(flag))) invalid('Use distinct Performance capture/read flags.')
+  if ((action === 'watch' || toolId === 'performance' && action === 'inspect') && args.length > 2) {
+    const flags = args.slice(2), allowed = action === 'watch'
+      ? ['--evaluate', ...(toolId === 'performance' ? ['--capture-failure', '--failure-evidence'] : [])] : ['--failure-evidence']
+    if (new Set(flags).size !== flags.length || flags.some(flag => !allowed.includes(flag))) invalid('Use distinct Toolkit evaluation or supported Performance capture/read flags.')
     return { method: `toolkit.${action}`, params: { toolId,
+      ...(flags.includes('--evaluate') ? { evaluateOnDisplay: true } : {}),
       ...(flags.includes('--capture-failure') ? { captureFailure: true } : {}),
       ...(flags.includes('--failure-evidence') ? { includeFailureEvidence: true } : {}) } }
   }
   const method = `toolkit.${action}`
-  if (['inspect', 'script', 'watch', 'run', 'stop', 'delete'].includes(action ?? '') && args.length === 2) return { method, params: { toolId } }
+  if (['inspect', 'script', 'watch', 'run', 'evaluate', 'stop', 'delete'].includes(action ?? '') && args.length === 2) return { method, params: { toolId } }
   if (action === 'action' && args.length === 5 && args[2]?.length && args[3] === '--input') {
     return { method, params: { toolId, actionId: args[2], input: await readControlJsonInput(args[4]!, 'Toolkit') } }
   }
-  if (!['create', 'update', 'delete', 'run', 'stop'].includes(action ?? '') || args.length !== 4 || args[2] !== '--input') invalid('Use an exact Toolkit action and --input <file|->.')
+  if (!['create', 'update', 'delete', 'run', 'evaluate', 'stop'].includes(action ?? '') || args.length !== 4 || args[2] !== '--input') invalid('Use an exact Toolkit action and --input <file|->.')
   const value = await readControlJsonInput(args[3]!, 'Toolkit')
   if (action === 'create') return { method, params: { toolId, value } }
   return { method, params: { toolId, input: value } }

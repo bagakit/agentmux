@@ -77,6 +77,7 @@ export async function captureToolkitPackage(record: ToolkitPackageConfiguration)
   if (!manifestBytes || manifestBytes.length > 32 * 1024) fail('Package needs a bounded manifest.json.')
   const manifest = parseToolkitPackageManifest(JSON.parse(decoder.decode(manifestBytes)))
   const entry = entryPath(manifest.entry), actionEntries = (manifest.actions ?? []).map(action => ({ id: action.id, entry: entryPath(action.entry) }))
+  const displayEntry = manifest.display ? entryPath(manifest.display.entry) : undefined
   function script(path: string) {
     const bytes = files.get(path)
     if (!bytes || bytes.length > 32 * 1024) fail('Package entry is absent or exceeds the script budget.')
@@ -88,7 +89,8 @@ export async function captureToolkitPackage(record: ToolkitPackageConfiguration)
     name: manifest.name, icon: icon.icon, enabled: record.enabled, statusBar: record.statusBar,
     workspacePath: record.workspacePath, script: script(entry), args: record.args,
     actions: (manifest.actions ?? []).map((action, i) => ({ id: action.id, label: action.label, script: script(actionEntries[i]!.entry), args: action.args ?? [] })),
-    package: { path: record.packagePath, configRevision: record.revision, contentSHA256, entry, actionEntries } })
+    ...(displayEntry ? { display: { script: script(displayEntry), args: manifest.display!.args } } : {}),
+    package: { path: record.packagePath, configRevision: record.revision, contentSHA256, entry, actionEntries, ...(displayEntry ? { displayEntry } : {}) } })
   return { definition, files, manifest, warning: icon.warning }
 }
 /** An owned, per-admission copy. It survives process restart and any live package edits. */
