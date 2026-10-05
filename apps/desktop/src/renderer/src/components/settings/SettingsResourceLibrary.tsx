@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { Check, Search } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -30,7 +31,7 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   return (
     <aside className="settings-resource-library">
       <label className="settings-resource-search"><Search size={14} aria-hidden="true" />
-        <input ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
+        <TextInput ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
       </label>
       <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label}>
         {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selectedId === item.id}
