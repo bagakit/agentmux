@@ -12,6 +12,7 @@ import { parseDiagnosticEvidenceResult } from '../src/diagnostic-evidence-codec.
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
+const consumerReceiptPath = process.env.AGENTMUX_DIAGNOSTIC_EVIDENCE_RECEIPT
 const close: Array<() => Promise<void>> = []
 afterEach(async () => { for (const fn of close.splice(0).reverse()) await fn(); vi.restoreAllMocks() })
 async function directory() { const root = await mkdtemp(join(sep, 'tmp', 'amx-evidence-')); close.push(() => rm(root, { recursive: true, force: true })); return root }
@@ -118,7 +119,7 @@ describe('original domain owners → typed public RPC → compiled CLI', () => {
       missingEvidence: [{ source: 'native-recorder-first-failure', availability: 'not-exposed' }] })
     for (const secret of ['private-error-text', 'private-stack', 'private-prompt', 'private-digest']) expect(JSON.stringify(evidence)).not.toContain(secret)
     const raw = await rpc.call('system.diagnostics.inspect', { target, includeRaw: true })
-    expect(raw.reads[0]?.data?.original).toEqual(saved.record); expect(raw.reads[1]?.data?.original?.error.message).toBe(failure.message)
+    expect(raw.reads[0]?.data?.original).toEqual(saved.record); const rawCore = raw.reads[1]?.data; expect(rawCore?.kind === 'delivery' ? rawCore.original?.error.message : null).toBe(failure.message)
     expect(() => parseDiagnosticEvidenceResult(raw, { target })).toThrow()
     const cli = await runCompiledObjectCli(['--endpoint', `unix://${socketPath}`, 'system', 'diagnostics', 'inspect', '--domain', 'delivery.client', '--host-id', 'local', '--logid', report.logId], objectCliEnvironment(root))
     expect(cli.code, cli.stderr).toBe(0)
@@ -134,7 +135,10 @@ describe('original domain owners → typed public RPC → compiled CLI', () => {
     expect((await rpc.call('system.diagnostics.inspect', { target: { ...target, logId: conflict.logId } })).relations[0]?.verification).toBe('conflict')
     const native = await rpc.call('system.diagnostics.inspect', { target: { domain: 'native-recorder-failure', hostId: 'local', agentSessionId: 'recipient', runId: 'run-recipient' } })
     expect(native.reads[0]).toMatchObject({ availability: 'not-exposed', recordRef: null, data: null })
-    if (process.env.AGENTMUX_DIAGNOSTIC_EVIDENCE_RECEIPT) await writeFile(process.env.AGENTMUX_DIAGNOSTIC_EVIDENCE_RECEIPT, JSON.stringify({ evidence, raw, discovery, native, cli }, null, 2))
+    if (consumerReceiptPath) {
+      await writeFile(consumerReceiptPath, JSON.stringify({ evidence, raw, discovery, native, cli }, null, 2))
+      expect(JSON.parse(await readFile(consumerReceiptPath, 'utf8')).cli.code).toBe(0)
+    }
   }, 20_000)
   it('keeps readable history when namespace metadata is corrupt; explicit authority is never relaxed', async () => {
     const root = await directory(), store = await journal(root), record = original()
@@ -165,6 +169,16 @@ describe('original domain owners → typed public RPC → compiled CLI', () => {
     expect((await service.call('system.diagnostics.inspect', { target: { domain: 'delivery.client', hostId: 'local', logId: record.logId } })).reads[0]).toMatchObject({
       completeness: 'partial', raw: { truncated: true }, data: { stage: 'queue-preparation', original: null },
     })
+  })
+  it('keeps safe Delivery facts when the explicitly requested original exceeds this query budget', async () => {
+    const store = await journal(await directory()), record = original(); record.error.message = 's'.repeat(8192)
+    await store.record(record)
+    const service = new AgentMuxRpcService({ coreClients: () => [], deliveryAttempts: { hostId: 'local', store } }); close.push(() => service.dispose())
+    const params = { target: { domain: 'delivery.client' as const, hostId: 'local', logId: record.logId }, includeRaw: true, budget: { maxBytes: 4096 } }
+    const result = await service.call('system.diagnostics.inspect', params)
+    expect(result.reads[0]).toMatchObject({ availability: 'found', data: { error: { code: 'EIO' }, original: null }, raw: { returned: 'withheld', retention: 'retained' }, issue: { code: 'DIAGNOSTIC_EVIDENCE_QUERY_BUDGET' } })
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(4096)
+    expect(() => parseDiagnosticEvidenceResult(result, params)).not.toThrow()
   })
   it('isolates unavailable Core, malformed requests and other-Host reads without removing healthy Agent capability', async () => {
     const root = await directory(), store = await journal(root), record = { ...original(), coreLogId: newDeliveryLogId() }
