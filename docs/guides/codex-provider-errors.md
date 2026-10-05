@@ -1,6 +1,6 @@
 # Codex Provider 错误资料与适配范围
 
-本文帮助核对 Codex 原生错误和 AgentMux 的适配范围，依据 [OpenAI 官方 Error codes](https://developers.openai.com/api/docs/guides/error-codes)、Codex 当前原生合同与本仓库实现。官方资料描述 API、WebSocket 和 Python SDK 的错误，不证明当前 Codex CLI 会暴露所有字段；通用产品约束只见[《模型请求失败与工作结果》](../design/behavior/agent-capabilities-and-messaging.md#模型请求失败与工作结果)，Focus 的结果资格见[《项目归属、状态与离线目录》](../design/behavior/focus-context.md#项目归属状态与离线目录)。
+本文帮助核对 Codex 原生错误和 AgentMux 的适配范围，依据 [OpenAI 官方 Error codes](https://developers.openai.com/api/docs/guides/error-codes)、Codex 当前原生合同与本仓库实现。官方资料描述 API、WebSocket 和 Python SDK 的错误，不证明当前 Codex CLI 会暴露所有字段；通用产品约束只见[《模型请求失败与工作结果》](../design/behavior/agent-capabilities-and-messaging.md#模型请求失败与工作结果)，Focus 的结果资格见[《项目归属、任务状态与恢复》](../design/behavior/focus-context.md#项目归属任务状态与恢复)。
 
 ## 官方说明的核对范围
 

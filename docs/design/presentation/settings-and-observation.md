@@ -79,7 +79,7 @@
 Surface、文字与状态 token 的唯一基础规则见[《主题与样式 SSOT 规范》](shared-rules.md#主题与样式-ssot-规范)，Settings 的两层内容与侧栏选中预算见[《密度预算》](shared-rules.md#密度预算)。本页不另定义 S0–S3 用途表。
 
 ## 紧凑状态与输入工具行
-- 全窗 running／error 摘要沿[Focus 唯一入口](focus-context.md#离线目录与导航)使用紧凑状态图形与计数，状态栏不再重复 Agent 汇总；局部 Activity 与非 Agent 的资源、系统通知保持各自入口。
+- 全窗 running／error 摘要沿[Focus 唯一入口](focus-context.md#中断恢复与导航)使用紧凑状态图形与计数，状态栏不再重复 Agent 汇总；局部 Activity 与非 Agent 的资源、系统通知保持各自入口。
 - Activity 菜单减少行高和留白，在有限宽度内优先 provider、活动摘要、idle 时长。
 - Composer 展开/收起按钮属于底部工具行的第一个控件，与其他快捷操作共享基线和间距。
 - 一键 YOLO 使用单个低噪声的语义按钮，和 Executor 的其他启动设置放在同一层级；当前权限姿态仍以启动参数和 Provider 回执为准。
@@ -107,7 +107,7 @@ Surface、文字与状态 token 的唯一基础规则见[《主题与样式 SSOT
 
 ## Status Bar 与 Activity 密度
 
-- Agent 注意力摘要使用[Focus 入口](focus-context.md#离线目录与导航)的共享状态图形与短计数，数字仅作辅助；状态栏不再重复 Agents／Needs you／Error。
+- Agent 注意力摘要使用[Focus 入口](focus-context.md#中断恢复与导航)的共享状态图形与短计数，数字仅作辅助；状态栏不再重复 Agents／Needs you／Error。
 - Activity 展开项只占用承载新增信息的高度；没有新增信息就不提供展开控件。
 
 ## Activity Agent 明细与 Agents 单入口
@@ -148,7 +148,7 @@ CPU/Memory 面板复用 Activity 行的紧凑列表语言：一行一个 Agent�
 
 ## 全局通知与底部状态入口
 
-- 跨会话 Agent 汇总只在[Focus 入口](focus-context.md#离线目录与导航)出现；运行数与待处理数沿该处原紧凑预算，类别及明细按需读取，不另设底部三组展开按钮。共享图标居中，hover、键盘焦点和展开态清楚，不能露出浏览器默认按钮的灰底、边框或 padding。聚合、请求顺序与准确 Session 定位归[跨会话注意力 owner](../behavior/settings-and-observation.md#跨会话注意力与系统通知)。
+- 跨会话 Agent 汇总只在[Focus 入口](focus-context.md#中断恢复与导航)出现；运行数与待处理数沿该处原紧凑预算，类别及明细按需读取，不另设底部三组展开按钮。共享图标居中，hover、键盘焦点和展开态清楚，不能露出浏览器默认按钮的灰底、边框或 padding。聚合、请求顺序与准确 Session 定位归[跨会话注意力 owner](../behavior/settings-and-observation.md#跨会话注意力与系统通知)。
 - 全局系统通知收起为固定紧凑入口，未读标记只在该入口上；展开内容沿用系统通知的语言与密度。收起、已读和问题解决的行为约束见[《全局通知与底部状态入口》](../behavior/settings-and-observation.md#全局通知与底部状态入口)。
 
 ## 图标与打断按钮复查
