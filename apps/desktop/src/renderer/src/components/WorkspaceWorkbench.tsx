@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
-import { Pin } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { motePinnedTab, moteTabOrder, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
@@ -25,13 +25,6 @@ import {
   useSortable
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import {
-  GripVertical,
-  Plus,
-  Square,
-  SquareTerminal,
-  X
-} from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -112,6 +105,15 @@ import {
 } from '../lib/surface-memory-budget-coordinator'
 import { DESKTOP_SESSION_ATTRIBUTE } from '../../../shared/desktop-actions'
 
+const ThemeStatusDirtyIcon = semanticIconComponent('status.dirty')
+const ThemeActionDragIcon = semanticIconComponent('action.drag')
+const ThemeActionPinIcon = semanticIconComponent('action.pin')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionCreateTabIcon = semanticIconComponent('action.create-tab')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+const ThemeActionCreateDiscussionIcon = semanticIconComponent('action.create-discussion')
+
+
 const GitWorkbenchPane = lazy(async () => {
   const module = await import('../features/git/GitWorkbenchPane')
   return { default: module.GitWorkbenchPane }
@@ -139,7 +141,7 @@ function DragPreview({ tab }: { tab: WorkbenchTab }) {
   const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata)
   return (
     <div className="tab-drag-preview">
-      <GripVertical size={12} />
+      <ThemeActionDragIcon size={12} />
       <span>{label}</span>
     </div>
   )
@@ -473,7 +475,7 @@ function SortableWorkbenchTab({
           ) : (
             <span className="workbench-tab__label">{displayName}</span>
           )}
-          {dirty ? <i className="workbench-tab__dirty" aria-label="Unsaved" /> : null}
+          {dirty ? <ThemeStatusDirtyIcon size={6} className="workbench-tab__dirty" role="img" aria-hidden="false" aria-label="Unsaved" /> : null}
           <span
             role="button"
             tabIndex={0}
@@ -486,7 +488,7 @@ function SortableWorkbenchTab({
               if (event.key === 'Enter' || event.key === ' ') void requestClose(event as never)
             }}
           >
-            {motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? <Pin size={11} aria-label="Default conversation" /> : <X size={11} />}
+            {motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? <ThemeActionPinIcon size={11} aria-label="Default conversation" /> : <ThemeActionCloseIcon size={11} />}
           </span>
         </button>
       </WorkbenchTabContextMenu>
@@ -923,7 +925,7 @@ function WorkbenchRegionContent({
             requestRegionClose()
           }}
         >
-          <X size={12} />
+          <ThemeActionCloseIcon size={12} />
         </button>
       ) : null}
 
@@ -1069,7 +1071,7 @@ function EmptyWorkbench({ onCreate, visible }: { onCreate(): void; visible: bool
     heading={mote ? 'What’s on your mind?' : 'A fresh space to work'}
     description={mote ? 'A question, an idea, or your next task.' : 'Open a new Tab to get started.'}
     action={<button type="button" className="primary-button" aria-label={mote ? 'New discussion' : 'New Tab'}
-      onClick={onCreate}><Plus size={15} />{mote ? 'New discussion' : 'New Tab'}</button>} />
+      onClick={onCreate}><ThemeActionCreateTabIcon size={15} />{mote ? 'New discussion' : 'New Tab'}</button>} />
 }
 
 function PaneGroup({
@@ -1182,7 +1184,7 @@ function PaneGroup({
   const createTabAction = <button type="button" className="pane-action"
     disabled={projection?.placementConfirmed === false} onClick={() => onNewTab(group.id)}
     title={mote ? 'New discussion' : 'New tab'} aria-label={mote ? 'New discussion' : 'New Tab'}>
-    <Plus size={13} />
+    <ThemeActionCreateTabIcon size={13} />
   </button>
   const tabNavigation = <SortableContext items={[...orderedTabIds]} strategy={horizontalListSortingStrategy}>
     <WorkbenchTabStrip visible={surfaceVisible} activeTabId={group.activeTabId} tabIds={orderedTabIds}
@@ -1215,7 +1217,7 @@ function PaneGroup({
               aria-label={`Stop Run ${activeRuntimeSession.label}`}
               onClick={() => setPendingStopSessionId(activeRuntimeSession.id)}
             >
-              <Square size={12} />
+              <ThemeActionStopIcon size={12} />
             </button>
           ) : null}
           <PaneSplitMenu
@@ -1569,7 +1571,7 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
       <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
         <WorkbenchTabStrip visible={visible} activeTabId={null} tabIds={group.tabOrder}
           trailingAction={mote && onNewTab ? <button type="button" className="pane-action" aria-label="New discussion" title="New discussion"
-            onClick={() => onNewTab(group.id)}><Plus size={13} /></button> : undefined}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
+            onClick={() => onNewTab(group.id)}><ThemeActionCreateDiscussionIcon size={13} /></button> : undefined}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
           workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} visible={visible} />] : [])}</WorkbenchTabStrip>
       </SortableContext>
       {layout?.activeGroupId === group.id ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
