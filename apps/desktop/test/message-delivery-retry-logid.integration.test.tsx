@@ -135,7 +135,8 @@ it('shows failure reason once with one live diagnostic status after both Core an
   await act(async () => { await reportMessageDeliveryDiagnostics() })
   await showMailbox()
   expect(original().error).toBe('Actual preparation refusal [AGENT_PROMPT_PREPARATION_FAILED]\noriginal preparation stage')
-  expect(row().textContent?.split(firstId).length).toBe(2)
+  expect(row().querySelectorAll('.delivery-log')).toHaveLength(1)
+  expect(row().querySelector('.delivery-log')?.textContent?.split(firstId).length).toBe(2)
   expect(row().textContent).not.toContain('等待上传')
   expect(row().textContent).toContain('日志已保存到原 Host')
   expect(action(row(), 'Send queued message immediately').disabled).toBe(false)
@@ -151,7 +152,8 @@ it('shows failure reason once with one live diagnostic status after both Core an
   const drainId = original().logId!
   expect(drainId).not.toBe(firstId)
   expect(original().error).toBe('Actual preparation refusal [AGENT_PROMPT_PREPARATION_FAILED]\noriginal preparation stage')
-  expect(row().textContent?.split(drainId).length).toBe(2)
+  expect(row().querySelectorAll('.delivery-log')).toHaveLength(1)
+  expect(row().querySelector('.delivery-log')?.textContent?.split(drainId).length).toBe(2)
   expect(row().textContent).not.toContain('等待上传')
 
   const refused = entry(originalOp, { runId: 'old-run', promptCondition: {
@@ -164,7 +166,8 @@ it('shows failure reason once with one live diagnostic status after both Core an
   await act(async () => { await reportMessageDeliveryDiagnostics() })
   expect(original().error).not.toContain('logid:')
   expect(original().error).not.toContain('等待上传')
-  expect(row().textContent?.split(secondId).length).toBe(2)
+  expect(row().querySelectorAll('.delivery-log')).toHaveLength(1)
+  expect(row().querySelector('.delivery-log')?.textContent?.split(secondId).length).toBe(2)
   expect(row().textContent).not.toContain('等待上传')
   expect(row().textContent).toContain('日志已保存到原 Host')
   expect(action(row(), 'Send queued message immediately').disabled).toBe(false)
@@ -207,7 +210,7 @@ it('retries through the actual card then Mailbox with one original request, pres
   expect(submit).toHaveBeenCalledTimes(3)
   const calls = submit.mock.calls
   for (const call of calls) expect(call).toEqual([composerSession().control, body, originalOp, condition,
-    { allowUncertainTurn: true, execution: 'immediate' }, true, undefined, 'message-tool', undefined])
+    { allowUncertainTurn: true, execution: 'immediate' }, true, undefined, 'message-tool', undefined, undefined, undefined])
   expect(inspectReported(firstId).record).toEqual(first.record)
   expect(inspectReported(secondId).record).toEqual(second.record)
   expect(messageDeliveryDiagnostics.get(firstId)?.record).toEqual(first.record)
@@ -310,8 +313,8 @@ it('shows actual copy failure before success and keeps an old unknown operation 
   expect(original().promptCondition).toEqual(condition)
   expect(original().execution).toBe('immediate')
   await showMailbox()
-  expect(row().textContent).toContain('本次准备未完成')
-  expect(row().textContent).toContain('此前是否已提交仍待核实')
+  expect(row().textContent).toContain('发送结果待核实')
+  expect(row().textContent).toContain('此前是否已输入仍待核实')
   const logId = original().logId!
   await click(action(row(), '复制 logid'))
   expect(action(row(), '复制失败，重试')).toBeDefined()
