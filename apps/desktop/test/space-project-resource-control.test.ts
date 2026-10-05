@@ -67,7 +67,16 @@ describe('Project resources are independent of Space placement', () => {
   })
   it('rejects an unknown Project before probing or changing a resource', async () => {
     const owner = ports()
-    await expect(createSpaceZoneResource({ spaceId, resource: { kind: 'directory', projectId: 'unknown', path: _hygiene_fixturePath("new-dir") } }, owner)).rejects.toMatchObject({ code: 'SPACE_RESOURCE_PROJECT_UNKNOWN' })
+    await expect(createSpaceZoneResource({ spaceId, resource: { kind: 'directory', projectId: 'unknown', path: _hygiene_fixturePath("new-dir") } }, owner)).rejects.toMatchObject({
+      code: 'SPACE_RESOURCE_PROJECT_UNKNOWN', message: 'The exact resource Project is unknown. Discover it with amux app snapshot.'
+    })
+    expect(owner.host).not.toHaveBeenCalled(); expect(owner.register).not.toHaveBeenCalled(); expect(owner.createForBranch).not.toHaveBeenCalled()
+  })
+  it('offers public amux discovery for an unknown Space before changing resources', async () => {
+    const owner = ports()
+    await expect(createSpaceZoneResource({ spaceId: 'unknown', resource: { kind: 'directory', projectId, path: _hygiene_fixturePath("new-dir") } }, owner)).rejects.toMatchObject({
+      code: 'UNKNOWN_SPACE', message: 'Space is not known. Run amux space ls.'
+    })
     expect(owner.host).not.toHaveBeenCalled(); expect(owner.register).not.toHaveBeenCalled(); expect(owner.createForBranch).not.toHaveBeenCalled()
   })
   it('uses the unique repository root, and requires an exact choice when only multiple worktrees remain', () => {

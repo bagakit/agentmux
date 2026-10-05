@@ -118,6 +118,7 @@ describe('public Desktop spatial Control owner', () => {
       destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("other")), zoneId: ambiguous.issues[0]!.candidates![0]!.zoneId }, focus: false })
     if (conflicting.operation !== 'agent.open') throw new Error('Wrong operation')
     expect(conflicting.issues[0]?.code).toBe('SPACE_PARENT_MISMATCH')
+    expect(conflicting.issues[0]?.recovery).toBe('Use amux space ls, then choose the exact Space/Zone/Tab/Region.')
     expect(launchAgent).not.toHaveBeenCalled()
   })
 
