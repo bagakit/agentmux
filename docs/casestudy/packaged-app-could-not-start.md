@@ -98,7 +98,7 @@ env -u ELECTRON_RUN_AS_NODE node apps/desktop/scripts/verify-sandboxed-preload.m
 
 实际 production-config 构建、真实 sandbox Electron 与完整 Renderer 得到 GREEN：bridge 可用、工作面已挂载、一个真实 ready token、原 toolkit observer 可创建并释放。受控恢复读取一直 pending，仍须可确认已挂载界面。恢复外置的 compiled 反例独立得到语义 RED：原模块错误、bridge 缺失、root 空、没有 ready token；编译失败或外层超时不算此 RED。验证提取实际 Main loader 与 ready consumer，生产调用者是 Main 普通 RendererUpdates 与 ready-file 分支；脚本同时冻结所消费源码。另有 18 项加载接线检查通过，不能以这些文本检查替代真实执行。
 
-动作 3 尚未交付，预定验证命令是 `node apps/desktop/scripts/verify-workbench-startup-capture.mjs`；本文不提前声称该脚本存在或通过。须覆盖真实 preload／bootstrap import、原 sender／attempt、诊断写入失败后健康续用及既有 `system.crash-log.inspect/reveal`，按[测试策略](../testing/strategy.md#任务验收与假绿防护)核语义变异和非空生产调用者。
+动作 3 的源码资格已独立核验，复现命令是 `node apps/desktop/scripts/verify-workbench-startup-capture.mjs`。真实 sandbox Electron 验证原 preload 失败、早期 bootstrap import 失败、健康 Ready／IPC 及诊断 sink 失败；原始资格包含 4 项实际 sandbox 检查、37 项聚焦检查、4 个编译生产语义反例和 11 个定义文件外生产调用者。独立评审另发现同一路径上的旧文档错误可能污染新启动尝试；补上单个准确 `renderer-update` token 归属后，8 项聚焦检查通过，移除该生产校验的新增变异触发原断言失败。原 loader 与未变承载代码的证据被明确复用，未把旧二进制冒充新源码；此资格仍不替实际用户安装实例背书。
 
 动作 4 的签名修复候选已独立通过资格验证，命令从包含该修复的源码根执行：
 
@@ -110,7 +110,7 @@ PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false node apps/desktop/scripts/verify-macos-
 
 ## 遗留
 
-- 观测补全未由启动修复提交交付，不把 source 修复、候选构建或签名请求当成它已通过。
+- 原启动修复、首因观测和签名资格是不同切片；实际交付须核包含这些修复的 main、编译内容及正在运行的安装实例，不能用一次 source 或签名请求代签。
 - 现场 ad hoc 副本的工作面可见，但正常证书签名更新及真实用户配置下的原工作面、Session 恢复仍须各自确认；本轮隔离 GREEN 不替用户安装实例取得资格。
-- 后续 `app.inspect` 的 Recall 嵌套枚举遗漏，以及远程 Host 检查旧 endpoint 时的 `Invalid control endpoint publication observation`，是独立观测缺口；对应修复仍在验证，不能当作 preload 或签名资格修复已一并交付，也不能据观察失败判定健康 Agent 已死亡。
+- 后续 `app.inspect` 的 Recall 嵌套枚举遗漏，以及远程 Host 检查旧 endpoint 时的 `Invalid control endpoint publication observation`，是独立观测缺口。`bbc905ed` 增加 publication 字段后，SSH 旧接口诊断未同步其严格解码；Recall 已有生产投影却漏更新嵌套枚举。`95ce66c2` 修复两处消费者，11 项实际 SSH stdio 与 7 项原 Store／IPC／Main 检查通过；3 个生产编译变异触发对应语义断言，当前协议、错误目标拒绝及原工作面保留。安装实例是否已消费这些修复仍须核对，不能据观察失败判定健康 Agent 已死亡。
 - 先前共享容量故障后的部分原 Run／Provider 恢复身份仍未确认，归[原容量事故](all-sessions-unrecoverable-with-disk-space.md)，不靠本次启动修复批量重启或替换 Session。
