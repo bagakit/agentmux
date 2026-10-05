@@ -8,16 +8,15 @@ import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './
 import { defaultTab, defaultAgent, neighborTab, neighborAgent, customTab, savedMoteKey } from './fixtures/mote-workface'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { directoryIdentity, topicSpatialAddress } from '../src/shared/space-addresses'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 
 let app: MoteAppFixture
 beforeEach(() => { app = createMoteApp() })
 afterEach(async () => { await app.dispose() })
 const reference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: defaultTab.id, regionId: 'default-region' }
 function saved() { return JSON.parse(localStorage.getItem(savedMoteKey)!) }
-function choice(label: string) {
-  const button = [...app.panel().querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)
-  expect(button).not.toBeUndefined(); return button!
-}
 
 it('mounted Mote and public observation keep their exact Region while Work selects a sibling of the same Tab', async () => {
   const mixed = addWorkbenchRegion(defaultTab, reference.regionId, 'right', { kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID,
@@ -67,18 +66,26 @@ it('an explicit cross-context handoff captures its exact Region once and keeps a
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
 
-it('an unsaved Mote with several discussions asks for a local choice and then ignores Work and semantic focus ordering', async () => {
+it('an unsaved Mote retains original discussions until an exact handoff and then ignores Work and semantic focus ordering', async () => {
   localStorage.removeItem(savedMoteKey)
+  useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', customTab.id)
+  useAppStore.setState({ recentMoteAgents: {} })
+  const original = useAppStore.getState()
   await app.mount()
   await act(async () => requestPmoTeamsTopicFloatingOpen())
   await settleMoteApp()
   expect(app.panel().dataset.moteTargetTab).toBeUndefined()
-  expect(app.panel().textContent).toContain('Choose a discussion to continue')
+  expect(useAppStore.getState().tabs).toBe(original.tabs)
+  expect(useAppStore.getState().layouts).toBe(original.layouts)
+  expect([defaultTab.id, neighborTab.id].every(id => Object.hasOwn(useAppStore.getState().tabs, id))).toBe(true)
   expect(saved().targetTabId).toBeUndefined()
-  await moteClick(choice(neighborTab.name!))
+  const selected = { ...reference, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
+  await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: neighborTab.id, reference: selected }))
+  await settleMoteApp()
   expect(app.panel().dataset.moteTargetTab).toBe(neighborTab.id)
   expect(app.panel().dataset.moteTargetSession).toBe(neighborAgent.id)
   expect(saved().targetTabId).toBe(neighborTab.id)
+  expect(saved().reference).toEqual(selected)
   await act(async () => useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id))
   await settleMoteApp()
   expect(useAppStore.getState().agentFocus.pmo.sessionId).toBe(defaultAgent.id)
@@ -86,7 +93,8 @@ it('an unsaved Mote with several discussions asks for a local choice and then ig
   const laterWork = useAppStore.getState().workbenchSpaceSelection
   await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Close Mote"]')!)
   expect(useAppStore.getState().workbenchSpaceSelection).toBe(laterWork)
-  await act(async () => requestPmoTeamsTopicFloatingOpen())
+  // A new unqualified opening follows the confirmed recent Agent. This operation keeps its exact target.
+  await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: neighborTab.id, reference: selected }))
   await settleMoteApp()
   expect(app.panel().dataset.moteTargetTab).toBe(neighborTab.id)
   expect(saved().targetTabId).toBe(neighborTab.id)
@@ -140,6 +148,34 @@ it.each([false, true])('an unknown Region keeps both healthy Regions of its conf
   expect(useAppStore.getState().tabs[split.id]!.layout.activeRegionId).toBe(before.tabs[split.id]!.layout.activeRegionId)
   expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
+
+it('mounted Mote keeps both original healthy Regions of a parent shared by two Spaces without selecting a replacement Region', async () => {
+  const split = addWorkbenchRegion(defaultTab, reference.regionId, 'right', { kind: 'agent', phase: 'attached',
+    workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'shared-space-peer', sessionId: neighborAgent.id })
+  const state = useAppStore.getState(), topic = moteTopics.find(topic => topic.id === PMO_TEAMS_TOPIC_ID)!
+  const address = topicSpatialAddress(state.config, topic)!
+  const project = state.config!.workspaces.find(workspace => workspace.id === 'project')!
+  const secondSpace = directoryIdentity(project.hostId, project.path)
+  useAppStore.setState({ tabs: { ...state.tabs, [split.id]: split }, mainSurface: 'board',
+    viewModes: { [defaultAgent.id]: 'activity', [neighborAgent.id]: 'activity' },
+    spaceZoneBindings: { ...state.spaceZoneBindings, [address.zoneId]: { ...address, workspaceId: scratchWorkspace.id,
+      topicId: topic.id, contentKind: 'mote', relations: { [secondSpace]: true } } } })
+  const catalog = spatialCatalog(useAppStore.getState(), moteTopics)
+  expect(catalog.locations.filter(location => location.tabId === split.id && location.regionId === reference.regionId)).toHaveLength(2)
+  const unknown = { ...reference, regionId: 'original-shared-region-unconfirmed' }
+  localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID,
+    targetTabId: split.id, reference: unknown }))
+  const before = useAppStore.getState()
+  await app.mount(); await app.remount()
+  const editors = [...app.panel().querySelectorAll<HTMLElement>('[data-workbench-region-id] [role="textbox"]')]
+  expect(editors).toHaveLength(2)
+  expect(editors.map(editor => editor.closest<HTMLElement>('[data-workbench-region-id]')!.dataset.workbenchRegionId).sort())
+    .toEqual([reference.regionId, 'shared-space-peer'].sort())
+  expect(saved().reference).toEqual(unknown); expect(app.panel().dataset.moteTargetRegion).toBeUndefined()
+  expect(app.panel().dataset.moteTargetSession).toBeUndefined(); expect(app.panel().querySelectorAll('.workbench-region--active')).toHaveLength(0)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
 
 it('Open in Space hands the exact local reference to the public owner once and closes only after its receipt', async () => {
