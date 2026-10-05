@@ -1,4 +1,4 @@
-import { NotebookText } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
 import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
@@ -9,6 +9,9 @@ import { TopicFilesTool } from './TopicFilesTool'
 import { MoteFilesTool } from './MoteFilesTool'
 import { ProjectFilesTool, ProjectSourceControl } from './ProjectFilesTool'
 import type { WorkspaceFileActions } from './WorkspaceFilesFrame'
+
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+
 
 /** Select the original domain; common layout and business observations stay separate. */
 export function WorkspaceFilesTool(props: WorkspaceFileActions & {
@@ -24,7 +27,7 @@ export function WorkspaceFilesTool(props: WorkspaceFileActions & {
       if (!target) throw new Error('Choose a file, page or discussion to collect its reference in a knowledge topic.')
       setCapture(target)
     } catch (error) { useAppStore.getState().reportError(error) }
-  }}><NotebookText size={13} /></button>
+  }}><ThemeObjectNotebookIcon size={13} /></button>
   return <ProjectSourceControl workspace={workspace} visible={visible && !isScratch && !mote}>{projectContent => <>
     {capture ? <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} /> : null}
     {mote ? <MoteFilesTool {...props} scope={mote} /> : isScratch || selectedTopicId ?

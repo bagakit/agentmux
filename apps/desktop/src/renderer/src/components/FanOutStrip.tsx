@@ -1,4 +1,4 @@
-import { GitCompareArrows } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import {
   fanOutGroups,
@@ -9,6 +9,9 @@ import {
   type FanOutLane
 } from '../lib/fanout-group'
 import { statusDotTier } from '../lib/attention-event'
+
+const ThemeGitCompareIcon = semanticIconComponent('git.compare')
+
 
 // The bake-off strip above the Board.
 //
@@ -113,7 +116,7 @@ function GroupRow({
   return (
     <div className="fanout-group" data-stem={group.stem}>
       <div className="fanout-group__identity">
-        <GitCompareArrows size={12} aria-hidden="true" />
+        <ThemeGitCompareIcon size={12} aria-hidden="true" />
         <strong>{group.stem}</strong>
         {/* One honest line: how many lanes, how many finished, how many want you. */}
         <small>

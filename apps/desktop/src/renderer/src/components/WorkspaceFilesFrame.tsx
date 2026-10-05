@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, RadioTower } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState, type ComponentProps, type ReactNode } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import type { WorkspaceRecord } from '../../../shared/contracts'
@@ -6,6 +6,11 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { resolveExplorerCollapsed, type ContentSlotPresentation } from '../lib/surface-tool-dock'
 import { useAppStore } from '../store'
 import { FileExplorer } from './FileExplorer'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+
 
 export type WorkspaceFileActions = {
   workspace: WorkspaceRecord
@@ -32,11 +37,11 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
       <button type="button" className={`workspace-tool-context__toggle${directoryFirst ? ' workspace-tool-context__toggle--label' : ''}`} aria-expanded={!collapsed}
         aria-label={collapsed ? 'Show file tree' : 'Hide file tree'} title={collapsed ? 'Show file tree' : 'Hide file tree'}
         onClick={() => setExplorerCollapsed(workspace.id, !collapsed)}>
-        {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        {collapsed ? <ThemeNavigationDisclosureIcon size={13} /> : <ThemeNavigationDownIcon size={13} />}
         {directoryFirst ? <strong>{title}</strong> : null}
       </button>
       <span title={displayPath(contextPath, workspace.hostId)}>{!directoryFirst ? <strong>{title}</strong> : null}{subtitle ? <small>{subtitle}</small> : null}</span>
-      {workspace.hostId !== 'local' ? <em><RadioTower size={11} /> {workspace.hostId}</em> : null}
+      {workspace.hostId !== 'local' ? <em><ThemeObjectBroadcastIcon size={11} /> {workspace.hostId}</em> : null}
       <div className="workspace-tool-context__actions">{actions}<div ref={setToolbarTarget} /></div>
     </div>
   const content = <Panel key="content" defaultSize={100 - presentation.fileTreeDefaultSize} minSize={directoryFirst ? 55 : 20}>{children}</Panel>

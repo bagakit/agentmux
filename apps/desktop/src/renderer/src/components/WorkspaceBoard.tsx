@@ -3,24 +3,7 @@ import { hostIdentityProjection } from '../lib/region-execution-host'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentAvatar } from './AgentAvatar'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
-import {
-  Activity,
-  AlertTriangle,
-  ArrowUpRight,
-  BellRing,
-  CheckCircle2,
-  GitBranch,
-  Inbox,
-  LoaderCircle,
-  MessageSquarePlus,
-  NotebookText,
-  RefreshCw,
-  Search,
-  SquareTerminal,
-  Unlink,
-  X,
-  type LucideIcon
-} from 'lucide-react'
+import { semanticIconComponent, type SemanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -45,17 +28,35 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { FanOutStrip } from './FanOutStrip'
 import { StatusDot } from './StatusDot'
 
+const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
+const ThemeObjectActivityIcon = semanticIconComponent('object.activity')
+const ThemeStatusNotificationIcon = semanticIconComponent('status.notification')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeActionUnlinkIcon = semanticIconComponent('action.unlink')
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeActionResetFiltersIcon = semanticIconComponent('action.reset-filters')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionCreateConversationIcon = semanticIconComponent('action.create-conversation')
+
+
 // 列的**措辞**取自 BOARD_COLUMN_DESCRIPTIONS——它跟归类映射放在一起，因为它是关于那个映射的断言。
 // 这里手抄过一份，于是 needs-you 长期写着 "Waiting or blocked"，而那一列其实还收着 disconnected 与 error。
 const COLUMN_META: Record<ProjectBoardColumn, {
   label: string
   description: string
-  icon: LucideIcon
+  icon: SemanticIconComponent
 }> = {
-  inbox: { label: 'Inbox', description: BOARD_COLUMN_DESCRIPTIONS.inbox, icon: Inbox },
-  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: Activity },
-  'needs-you': { label: 'Needs You', description: BOARD_COLUMN_DESCRIPTIONS['needs-you'], icon: BellRing },
-  done: { label: 'Done', description: BOARD_COLUMN_DESCRIPTIONS.done, icon: CheckCircle2 }
+  inbox: { label: 'Inbox', description: BOARD_COLUMN_DESCRIPTIONS.inbox, icon: ThemeObjectInboxIcon },
+  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: ThemeObjectActivityIcon },
+  'needs-you': { label: 'Needs You', description: BOARD_COLUMN_DESCRIPTIONS['needs-you'], icon: ThemeStatusNotificationIcon },
+  done: { label: 'Done', description: BOARD_COLUMN_DESCRIPTIONS.done, icon: ThemeStatusCompletedIcon }
 }
 
 /**
@@ -66,28 +67,28 @@ const COLUMN_META: Record<ProjectBoardColumn, {
  */
 const ROW_KIND_META: Record<BoardRow['kind'], {
   cornerLabel: string
-  cornerIcon: LucideIcon
-  rowIcon: LucideIcon
+  cornerIcon: SemanticIconComponent
+  rowIcon: SemanticIconComponent
   /** 行没有落地路径时的图标（Topic 恒有目录，因此只对 Branch 生效）。 */
-  unboundIcon: LucideIcon
+  unboundIcon: SemanticIconComponent
   title: string
   subtitle: string
   emptyPathLabel: string
 }> = {
   branch: {
     cornerLabel: 'Branch / Worktree',
-    cornerIcon: GitBranch,
-    rowIcon: GitBranch,
-    unboundIcon: Unlink,
+    cornerIcon: ThemeObjectBranchIcon,
+    rowIcon: ThemeObjectBranchIcon,
+    unboundIcon: ThemeActionUnlinkIcon,
     title: 'Branch × status',
     subtitle: 'Branches run vertically. Agent progress moves horizontally within the same row.',
     emptyPathLabel: 'No worktree'
   },
   topic: {
     cornerLabel: 'Topic',
-    cornerIcon: NotebookText,
-    rowIcon: NotebookText,
-    unboundIcon: NotebookText,
+    cornerIcon: ThemeObjectNotebookIcon,
+    rowIcon: ThemeObjectNotebookIcon,
+    unboundIcon: ThemeObjectNotebookIcon,
     title: 'Topic × status',
     subtitle: 'Topics run vertically. Agent progress moves horizontally within the same row.',
     emptyPathLabel: 'No directory'
@@ -111,7 +112,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
       <span className="board-run-card__status" {...(observationTitle ? { title: observationTitle } : {})}><>{session.kind === 'agent' ? <AgentAvatar sessionId={session.id} executorId={session.executorId} providerId={session.providerId} label={session.label} state={session.status.state} detail={session.status.detail} /> : <StatusDot status={session.status} />}</></span>
       <span className="board-run-card__identity">
         <strong>{session.label}</strong>
-        <small>{session.providerId ? <>{agentProviderLabel(session.providerId)}</> : <><SquareTerminal size={11} /> terminal</>}</small>
+        <small>{session.providerId ? <>{agentProviderLabel(session.providerId)}</> : <><ThemeObjectTerminalIcon size={11} /> terminal</>}</small>
       </span>
       <span className="board-run-card__meta">
         <em>{session.status.state}</em>
@@ -119,7 +120,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
         <time>{formatRelativeAge(Date.now() - session.updatedAt, ' ago')}</time>
       </span>
       {session.status.detail ? <span className="board-run-card__detail">{session.status.detail}</span> : null}
-      <ArrowUpRight size={12} />
+      <ThemeActionOpenExternalIcon size={12} />
     </button>
   )
 }
@@ -188,7 +189,7 @@ export function WorkspaceBoard() {
     return (
       <section className="board board--empty">
         <div className="board-state">
-          <GitBranch size={22} />
+          <ThemeObjectBranchIcon size={22} />
           <strong>No project selected</strong>
           <span>Add or select a Project before opening its Branch board.</span>
         </div>
@@ -207,7 +208,7 @@ export function WorkspaceBoard() {
   if (snapshot?.kind === 'not-a-git-repository') {
     return (
       <section className="board board--empty">
-        <div className="board-state"><GitBranch size={22} /><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
+        <div className="board-state"><ThemeObjectBranchIcon size={22} /><strong>Not a Git repository</strong><span>This workspace is not linked to a Git repository.</span></div>
       </section>
     )
   }
@@ -242,7 +243,7 @@ export function WorkspaceBoard() {
       </header>
 
       <div className="board-toolbar board-toolbar--matrix">
-        <label className="board-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === 'topic' ? 'Search topics, summaries, providers, or run details' : 'Search branches, paths, providers, or run details'} />{query ? <button title="Clear search" onClick={() => setQuery('')}><X size={11} /></button> : null}</label>
+        <label className="board-search"><ThemeActionSearchIcon size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === 'topic' ? 'Search topics, summaries, providers, or run details' : 'Search branches, paths, providers, or run details'} />{query ? <button title="Clear search" onClick={() => setQuery('')}><ThemeActionClearIcon size={11} /></button> : null}</label>
         <label><span>Status</span><select aria-label="Filter by board status" value={column} onChange={(event) => setColumn(event.target.value as ProjectBoardColumn | 'all')}><option value="all">All statuses</option>{PROJECT_BOARD_COLUMNS.map((id) => <option value={id} key={id}>{COLUMN_META[id].label}</option>)}</select></label>
         {/* Binding 只对 Branch 是个真问题——Topic 恒有目录，给它一个永远只有一个答案的筛选器
             是在制造噪音。 */}
@@ -251,7 +252,7 @@ export function WorkspaceBoard() {
         ) : null}
         <HostBadge context="Host" className="board-host-scope" host={hostIdentityProjection(hostId, hosts?.find(host => host.id === hostId))} />
         <span className="board-filter-count">{filteredRows.length} / {rows.length}</span>
-        {hasFilters ? <button className="small-button" onClick={clearFilters}><X size={11} /> Reset</button> : kind === 'branch' ? <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />} Refresh</button> : null}
+        {hasFilters ? <button className="small-button" onClick={clearFilters}><ThemeActionResetFiltersIcon size={11} /> Reset</button> : kind === 'branch' ? <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />} Refresh</button> : null}
       </div>
 
       {/* Which branches are racing on the same prompt. Absent when there is no fan-out to compare. */}
@@ -265,11 +266,11 @@ export function WorkspaceBoard() {
         />
       ) : null}
 
-      {boardError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {boardError}</div> : null}
-      {actionError ? <div className="board-inline-warning"><AlertTriangle size={13} /> {actionError}</div> : null}
+      {boardError ? <div className="board-inline-warning"><ThemeStatusWarningIcon size={13} /> {boardError}</div> : null}
+      {actionError ? <div className="board-inline-warning"><ThemeStatusWarningIcon size={13} /> {actionError}</div> : null}
 
       {filteredRows.length === 0 ? (
-        <div className="board-no-results"><Search size={18} /><strong>{hasFilters ? `No matching ${kind === 'topic' ? 'topics' : 'branches'}` : kind === 'topic' ? 'No Topics yet' : 'No local branches'}</strong><span>{hasFilters ? 'Change or reset the board filters.' : kind === 'topic' ? 'Create a Topic from the Topics panel, then it appears as a row here.' : 'Create a branch with Git, then refresh the board.'}</span>{hasFilters ? <button className="small-button" onClick={clearFilters}>Clear filters</button> : null}</div>
+        <div className="board-no-results"><ThemeActionSearchIcon size={18} /><strong>{hasFilters ? `No matching ${kind === 'topic' ? 'topics' : 'branches'}` : kind === 'topic' ? 'No Topics yet' : 'No local branches'}</strong><span>{hasFilters ? 'Change or reset the board filters.' : kind === 'topic' ? 'Create a Topic from the Topics panel, then it appears as a row here.' : 'Create a branch with Git, then refresh the board.'}</span>{hasFilters ? <button className="small-button" onClick={clearFilters}>Clear filters</button> : null}</div>
       ) : (
         <div className="board-matrix-scroll">
           <div className="board-matrix" role="grid" aria-label={`${meta.cornerLabel} by status board`}>
@@ -312,13 +313,13 @@ export function WorkspaceBoard() {
                       {row.kind === 'branch' && row.branch.isCurrent ? <em>Current</em> : null}
                       <small>{row.sessions.length} run{row.sessions.length === 1 ? '' : 's'}</small>
                     </span>
-                    <button className="icon-button" type="button" title={row.kind === 'topic' ? 'Open Topic' : row.workspace ? 'Open workspace' : row.branch.worktreePath ? 'Open worktree' : 'Open Branches'} onClick={(event) => { event.stopPropagation(); void openRow(row) }}><ArrowUpRight size={12} /></button>
+                    <button className="icon-button" type="button" title={row.kind === 'topic' ? 'Open Topic' : row.workspace ? 'Open workspace' : row.branch.worktreePath ? 'Open worktree' : 'Open Branches'} onClick={(event) => { event.stopPropagation(); void openRow(row) }}><ThemeActionOpenExternalIcon size={12} /></button>
                   </header>
                   {PROJECT_BOARD_COLUMNS.map((id) => (
                     <div className={`board-cell board-cell--${id}`} role="gridcell" data-board-column={id} key={id}>
                       {id === 'inbox' ? (
                         <button className={`board-discussion-card ${row.path ? '' : 'board-discussion-card--unbound'}`} type="button" onClick={() => setDiscussionRow(row)}>
-                          <span>{row.path ? <MessageSquarePlus size={15} /> : <Unlink size={15} />}</span>
+                          <span>{row.path ? <ThemeActionCreateConversationIcon size={15} /> : <ThemeActionUnlinkIcon size={15} />}</span>
                           <strong>{row.path ? 'Start discussion' : 'Worktree required'}</strong>
                           <small>{row.path ? `Launch an Agent on ${row.name}` : 'Create a worktree before launching an Agent'}</small>
                         </button>

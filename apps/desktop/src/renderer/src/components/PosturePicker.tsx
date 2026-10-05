@@ -1,6 +1,10 @@
 import * as DropdownMenu from './HoverDropdownMenu'
-import { Check, ShieldCheck } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentPostureControl } from '@agentmux/core'
+
+const ThemeStatusAuthorizedIcon = semanticIconComponent('status.authorized')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+
 
 /**
  * Renders the DESCRIBE half of a Provider's sealed posture control as a compact composer affordance. The
@@ -36,7 +40,7 @@ export function PosturePicker({
           title={`Set ${control.label.toLowerCase()} for this session`}
           aria-label={control.label}
         >
-          <ShieldCheck size={14} /> <span className="composer-tool__label">{control.label}</span>
+          <ThemeStatusAuthorizedIcon size={14} /> <span className="composer-tool__label">{control.label}</span>
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -57,7 +61,7 @@ export function PosturePicker({
               title={mode.description ?? mode.label}
               onSelect={() => onSet(mode.id)}
             >
-              <Check size={14} className="posture-menu__mark" />
+              <ThemeStatusSelectedIcon size={14} className="posture-menu__mark" />
               <span className="posture-menu__label">
                 <strong>{mode.label}</strong>
                 {mode.description ? <small>{mode.description}</small> : null}

@@ -1,6 +1,6 @@
 import { RetainedDocumentDraftNotice } from './RetainedDocumentDraftNotice'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, Check, Code, Eye, FolderOpen, GitCompare, Map, MoreHorizontal, RefreshCw, Save, WrapText } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -17,6 +17,19 @@ import type { FileEditorViewState } from './FileSourceEditor'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { canFormatFile } from '../lib/file-formats/format-support'
 import { cancelFileRegionFormat, formatFileRegion, type FileFormatResult } from '../lib/file-formats/format-file-region'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
+const ThemeActionRevealIcon = semanticIconComponent('action.reveal')
+const ThemeActionSaveIcon = semanticIconComponent('action.save')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeActionWrapTextIcon = semanticIconComponent('action.wrap-text')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectMapIcon = semanticIconComponent('object.map')
+const ThemeGitCompareIcon = semanticIconComponent('git.compare')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+
 
 const FileSourceEditor = lazy(loadFileSourceEditor)
 const GitDiffCanvas = lazy(async () => ({ default: (await import('../features/git/diff/GitDiffCanvas')).GitDiffCanvas }))
@@ -40,10 +53,10 @@ export function EditorUnavailableState({
     <section className="pane-state pane-state--error">
       <strong>{message ? 'File could not be read' : 'File is no longer available'}</strong>
       <span>{message ?? 'Refresh the explorer and open it again.'}</span>
-      {onRetry ? <button className="small-button" onClick={onRetry}><RefreshCw size={13} /> Retry</button> : null}
+      {onRetry ? <button className="small-button" onClick={onRetry}><ThemeActionRefreshIcon size={13} /> Retry</button> : null}
       {canReveal ? (
         <button className="small-button" onClick={onReveal}>
-          <FolderOpen size={13} /> {revealInFileManagerLabel()}
+          <ThemeObjectFolderOpenIcon size={13} /> {revealInFileManagerLabel()}
         </button>
       ) : null}
     </section>
@@ -172,21 +185,21 @@ export function EditorPane({
       <header className="editor-header">
         <FilePathLabel path={document.path} />
         <div className="editor-header__actions">
-          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <Code size={13} /> : <Eye size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
-          {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><RefreshCw size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
-            : conflict ? <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
-              : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>
-                : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">Retry</span></button>
+          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionRevealIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
+          {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
+            : conflict ? <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
+              : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>
+                : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">Retry</span></button>
                 : saving ? <span className="editor-header__status" role="status" aria-label="Saving file">Saving…</span>
-                  : dirty ? <button className="small-button" title="Save file" aria-label="Save file" onClick={() => void save(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">Save</span></button>
+                  : dirty ? <button className="small-button" title="Save file" aria-label="Save file" onClick={() => void save(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">Save</span></button>
                     : <span className="editor-header__status" role="status" aria-label="File saved">Saved</span>}
-          <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
+          <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><ThemeActionMoreIcon size={14} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
-              {regionMode === 'edit' && canFormatFile(document.path) ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={formatDraft}><Code size={13} /><span>{formatResult?.status === 'formatting' ? 'Cancel formatting' : 'Format document'}</span></DropdownMenu.Item> : null}
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-              {regionMode === 'edit' ? <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={minimap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleMinimap()}><Map size={13} /><span>Minimap</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem> : null}
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-              {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} />Reload from disk</DropdownMenu.Item> : null}
+              {regionMode === 'edit' && canFormatFile(document.path) ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={formatDraft}><ThemeObjectSourceCodeIcon size={13} /><span>{formatResult?.status === 'formatting' ? 'Cancel formatting' : 'Format document'}</span></DropdownMenu.Item> : null}
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><ThemeActionWrapTextIcon size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              {regionMode === 'edit' ? <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={minimap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleMinimap()}><ThemeObjectMapIcon size={13} /><span>Minimap</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem> : null}
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><ThemeGitCompareIcon size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} />Reload from disk</DropdownMenu.Item> : null}
               {extraActions ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{extraActions}</> : null}
             </DropdownMenu.Content></DropdownMenu.Portal>
           </DropdownMenu.Root>
@@ -197,7 +210,7 @@ export function EditorPane({
         <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
         {issue ? (
           <div className={`editor-file-notice editor-file-notice--${issue.kind}`} role="alert">
-            <AlertTriangle size={13} />
+            <ThemeStatusWarningIcon size={13} />
             <span>
               {issue.kind === 'changed'
                 ? 'File changed on disk. Your draft is preserved.'

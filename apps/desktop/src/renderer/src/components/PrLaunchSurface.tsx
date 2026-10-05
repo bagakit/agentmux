@@ -1,7 +1,12 @@
-import { GitPullRequestArrow, LoaderCircle, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FormEvent, ReactElement } from 'react'
 import type { PrLaunchPlan } from '../lib/pr-launch'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
+
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeGitPullRequestIcon = semanticIconComponent('git.pull-request')
+
 
 export type PrLaunchSurfaceProps = {
   /** The one plan from the one readiness read, or null when nothing has been asked for yet. */
@@ -95,7 +100,7 @@ export function PrLaunchSurface({
               aria-label="Cancel pull request"
               onClick={onDismiss}
             >
-              <X size={12} />
+              <ThemeActionCancelIcon size={12} />
             </button>
           </header>
           {/*
@@ -131,7 +136,7 @@ export function PrLaunchSurface({
             className="primary-button pr-form__submit"
             disabled={submitting || !title.trim()}
           >
-            {submitting ? <LoaderCircle className="spin" size={12} /> : <GitPullRequestArrow size={13} />}
+            {submitting ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitPullRequestIcon size={13} />}
             {submitting ? 'Opening…' : 'Open pull request'}
           </button>
         </form>

@@ -1,11 +1,15 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
-import { FolderOpen, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** Registration uses the selected original Host; it never starts an Agent. */
 export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; label: string; onClose(): void }) {
@@ -28,8 +32,8 @@ export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; l
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface project-group-dialog" aria-busy={busy}
         onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
-        <header className="confirmation-dialog__heading"><FolderOpen size={15} /><Dialog.Title className="confirmation-dialog__title">Open Folder · {label}</Dialog.Title>
-          <Dialog.Close className="icon-button" disabled={busy} aria-label="Close folder editor"><X size={14} /></Dialog.Close></header>
+        <header className="confirmation-dialog__heading"><ThemeObjectFolderOpenIcon size={15} /><Dialog.Title className="confirmation-dialog__title">Open Folder · {label}</Dialog.Title>
+          <Dialog.Close className="icon-button" disabled={busy} aria-label="Close folder editor"><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">Open a directory on {label}.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void open() }}>
           <label className="project-group-dialog__name">Folder path<TextInput autoFocus value={path} disabled={busy} onChange={event => setPath(event.target.value)} placeholder="Project directory" /></label>

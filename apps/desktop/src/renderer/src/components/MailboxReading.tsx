@@ -1,6 +1,9 @@
 import type { MouseEvent, ReactNode } from 'react'
-import { Inbox } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+
+const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
+
 
 /** The list only reads a bounded original prefix. Full content belongs to the selected record. */
 export function mailboxPreview(text: string | undefined) {
@@ -29,5 +32,5 @@ export function MailboxRecordRow({ recordKey, label, text, metadata, avatar, onO
 }
 
 export function MailboxEmpty({ title, hint }: { title: string; hint?: string }) {
-  return <div className="composer-mailbox__empty"><Inbox size={22} aria-hidden="true" /><strong>{title}</strong>{hint ? <p>{hint}</p> : null}</div>
+  return <div className="composer-mailbox__empty"><ThemeObjectInboxIcon size={22} aria-hidden="true" /><strong>{title}</strong>{hint ? <p>{hint}</p> : null}</div>
 }
