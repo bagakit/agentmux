@@ -20,6 +20,9 @@ export async function installUmd(distribution: string): Promise<void> {
 }
 export const Terminal = function (options?: ITerminalOptions) {
   const terminal = new constructor(options)
+  const observed = window as unknown as { inputEvents: { channel: string; bytes: number[] }[] }
+  terminal.onData(data => observed.inputEvents.push({ channel: 'onData', bytes: Array.from(new TextEncoder().encode(data)) }))
+  terminal.onBinary(data => observed.inputEvents.push({ channel: 'onBinary', bytes: Array.from(data, ch => ch.charCodeAt(0) & 0xff) }))
   const metrics = { writeCalls: 0, completedWrites: 0, inputBytes: 0 }
   const write = terminal.write.bind(terminal)
   terminal.write = (data, callback) => {

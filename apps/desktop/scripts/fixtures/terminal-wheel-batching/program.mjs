@@ -18,7 +18,7 @@ const configure = () => {
   }
   if (options.mode === 'alternate-keys') output += '\x1b[?1007h'
   output += options.applicationCursor ? '\x1b[?1h' : '\x1b[?1l'
-  output += paint(); process.stdout.write(output); save()
+  output += '\x1b[?25l' + paint(); process.stdout.write(output); save()
 }
 fs.watch(path.join(root, 'program-config.json'), () => { try { configure() } catch {} })
 configure()

@@ -19,7 +19,7 @@ const fixture = path.join(desktop, 'scripts/fixtures/terminal-wheel-batching')
 const receiptPath = path.join(root, '.tmp/terminal-wheel-batching-last.json')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amwb-'))
 const pkg = path.dirname(require.resolve('@xterm/xterm/package.json'))
-const mutations = ['source-unbatch', 'source-drop-report', 'source-coordinate-drift', 'source-legacy-reencoding', 'source-cross-event']
+const mutations = ['source-unbatch', 'source-drop-report', 'source-coordinate-drift', 'source-legacy-reencoding', 'source-cross-event', 'source-restore-damping', 'source-retain-reversal']
 const critical = [
   path.join(root, 'patches/@xterm__xterm@6.1.0-beta.303.patch'), path.join(root, 'pnpm-lock.yaml'),
   ...['package.json', 'src/browser/services/MouseService.ts', 'src/browser/scrollable/mouseEvent.ts',
@@ -28,7 +28,7 @@ const critical = [
   path.join(root,'packages/client-ui/src/terminal/input.ts'), path.join(desktop, 'src/preload/index.ts'), path.join(desktop, 'src/main/ipc.ts'), path.join(desktop, 'src/main/runtime-controller.ts'),
   ...['client.ts', 'ctxmux-run-adapter.ts', 'ctxmux-artifact-contract.json'].map(name => path.join(root, 'packages/core/src', name)),
   ...['client.js', 'ctxmux-run-adapter.js', 'ctxmux-artifact-manifest.json'].map(name => path.join(root, 'packages/core/dist', name)),
-  ...['entry.tsx', 'xterm-instrumented.ts', 'index.html', 'main.cjs', 'preload.cjs', 'program.mjs', 'source-mutations.mjs'].map(name => path.join(fixture, name)), fileURLToPath(import.meta.url)
+  ...['entry.tsx', 'xterm-instrumented.ts', 'index.html', 'main.cjs', 'preload.cjs', 'program.mjs', 'source-mutations.mjs', 'distance-cases.cjs'].map(name => path.join(fixture, name)), fileURLToPath(import.meta.url)
 ]
 const hashes = async files => Object.fromEntries(await Promise.all(files.map(async file => [file,
   createHash('sha256').update(await fs.readFile(file)).digest('hex')])))
@@ -78,7 +78,7 @@ try {
   // remain separate Native consumers; the source build does not replace either published distribution.
   const sourceUrls = {}, mouse = path.join(pkg, 'src/browser/services/MouseService.ts')
   const mouseSource = await fs.readFile(mouse, 'utf8')
-  for (const variant of ['source', ...mutations]) {
+  for (const variant of ['source', 'source-old-distance', ...mutations]) {
     const out = path.join(privateRoot, `${variant}.mjs`)
     await compileSource({ entryPoints: [path.join(pkg, 'src/browser/public/Terminal.ts')], outfile: out,
       bundle: true, platform: 'browser', format: 'esm', target: 'esnext', logLevel: 'silent',
@@ -98,11 +98,27 @@ try {
   result.reference = await native('baseline', 'source-unbatch')
   assert.equal(result.reference.exit.code, 0, result.reference.browser.failure)
   assert.equal(result.reference.browser.passed, true)
-  assert.equal(result.reference.browser.cases.length, 22)
-  result.candidate = await native('candidate', 'candidate')
-  assert.equal(result.candidate.exit.code, 0, result.candidate.browser.failure)
-  assert.equal(result.candidate.browser.passed, true)
-  assert.equal(result.candidate.browser.cases.length, 66)
+  assert.equal(result.reference.browser.cases.length, 28)
+  result.candidate = { distributions: [], browser: { passed: true, cases: [] } }
+  for (const distribution of ['esm', 'umd', 'source']) {
+    const evidence = await native('candidate', distribution)
+    assert.equal(evidence.exit.code, 0, evidence.browser.failure)
+    assert.equal(evidence.browser.passed, true)
+    assert.equal(evidence.browser.cases.length, 28)
+    result.candidate.distributions.push({ distribution, ...evidence })
+    result.candidate.browser.cases.push(...evidence.browser.cases)
+  }
+  assert.equal(result.candidate.browser.cases.length, 84)
+  result.oldDistance = await native('old-distance', 'source-old-distance')
+  assert.equal(result.oldDistance.exit.code, 0, result.oldDistance.browser.failure)
+  assert.equal(result.oldDistance.browser.passed, true)
+  assert.equal(result.oldDistance.browser.cases.length, 6)
+  const oldTiny = result.oldDistance.browser.cases.find(item => item.name === 'pixel-tiny-distance')
+  const newTiny = result.candidate.browser.cases.find(item => item.name === 'pixel-tiny-distance')
+  assert.equal(oldTiny.native.program.reports, 0); assert.equal(oldTiny.native.program.top, 500)
+  assert.equal(oldTiny.pixels.initial.sha256, oldTiny.pixels.final.sha256)
+  assert.ok(newTiny.native.program.reports > 0)
+  assert.notEqual(newTiny.pixels.initial.sha256, newTiny.pixels.final.sha256)
   const original = new Map(result.reference.browser.cases.map(item => [item.name, item]))
   for (const item of result.candidate.browser.cases) {
     const baseline = original.get(item.name); assert.ok(baseline)
@@ -120,7 +136,7 @@ try {
     assert.match(evidence.browser.failure, /AssertionError/, 'Compile/startup failure is not a behavioral mutation RED')
     result.mutations.push({ mutation, ...evidence })
   }
-  assert.equal(result.mutations.length, 5)
+  assert.equal(result.mutations.length, 7)
   result.sourceAndPackageAfter = await hashes(critical)
   assert.deepEqual(result.sourceAndPackageAfter, result.sourceAndPackageBefore, 'Proof may not silently alter production or dependency inputs')
   result.passed = true

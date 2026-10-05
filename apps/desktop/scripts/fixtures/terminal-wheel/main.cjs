@@ -67,12 +67,12 @@ function verify(c, before, after) {
   if (!gated) {
     const distance = Math.abs(c.delta) * (c.events ?? 1) * before.scrollSensitivity * (c.ctrl ? before.fastScrollSensitivity : 1)
     expected = Math.trunc(c.unit === 1 ? distance : c.unit === 2 ? distance * before.rows :
-      distance / before.cellHeight * (Math.abs(c.delta) < 50 ? 0.3 : 1))
+      distance / before.cellHeight)
   }
   assert.ok(Number.isInteger(expected) && (gated || expected > 0))
   assert.equal(after.program.reports, expected, 'Computed integer wheel distance must reach the actual bridge')
   const events = c.events ?? 1
-  const perEvent = expected ? Math.abs(c.delta) * before.scrollSensitivity * (c.ctrl ? before.fastScrollSensitivity : 1) * (c.unit === 2 ? before.rows : c.unit === 1 ? 1 : (Math.abs(c.delta) < 50 ? 0.3 : 1) / before.cellHeight) : 0
+  const perEvent = expected ? Math.abs(c.delta) * before.scrollSensitivity * (c.ctrl ? before.fastScrollSensitivity : 1) * (c.unit === 2 ? before.rows : c.unit === 1 ? 1 : 1 / before.cellHeight) : 0
   const inputEvents = Array.from({length:events},(_,i)=>Math.trunc(perEvent*(i+1)) > Math.trunc(perEvent*i)).filter(Boolean).length
   assert.equal(after.writes.length, inputEvents, 'Each admitted wheel owns one complete report chunk')
   assert.equal(after.program.top, 500 + (c.delta > 0 ? -3 : 3) * expected)
@@ -114,13 +114,15 @@ const cases = [
 ]
 app.whenReady().then(async () => {
   try {
-    win = new BrowserWindow({width:1560,height:580,show:false,webPreferences:{nodeIntegration:false,contextIsolation:true}})
-    await win.loadFile(html); win.showInactive()
+    win = new BrowserWindow({width:1560,height:580,show:false,webPreferences:{nodeIntegration:false,contextIsolation:true,offscreen:true,backgroundThrottling:false}})
+    await win.loadFile(html); win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {enabled:true})
     for (let i = 0; i < 100 && !await win.webContents.executeJavaScript('window.ready===true'); i++) await delay(30)
     assert.equal(await win.webContents.executeJavaScript('window.ready===true'), true)
     for (const distribution of ['esm','umd']) {
       await win.webContents.executeJavaScript(`setDistribution(${JSON.stringify(distribution)})`)
       for (const c of cases) {
+        fs.writeFileSync(path.join(privateRoot,'progress.json'),JSON.stringify({distribution,case:c.name,completed:result.cases.length,at:Date.now()}))
         const before = await mount(c); await wheel(c, before); const after = await info()
         result.cases.push({distribution,...c,before,after})
         verify(c,before,after)

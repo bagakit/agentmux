@@ -58,7 +58,7 @@ try {
   result.pid = child.pid
   child.stderr.on('data',()=>{})
   const exited = new Promise((resolve,reject) => { child.once('error',reject); child.once('exit',(code,signal)=>resolve({code,signal})) })
-  result.exit = await Promise.race([exited,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Private wheel browser deadline exceeded')),35000)})])
+  result.exit = await Promise.race([exited,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Private wheel browser deadline exceeded')),(32 * 4000 + 10000))})])
   clearTimeout(timer)
   result.browser = JSON.parse(await fs.readFile(path.join(privateRoot,'browser.json'),'utf8'))
   assert.equal(result.exit.code,0,result.browser.failure)
