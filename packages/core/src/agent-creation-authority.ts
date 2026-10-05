@@ -3,9 +3,9 @@ import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/pro
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
-import { parseAgentMuxCreationAdmission, parseAgentMuxCreationOrigin, parseAgentMuxCreationTrust,
+import { parseAgentMuxCreationAdmission, parseAgentMuxCreationOrigin, parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput,
   type AgentMuxCreationAdmission, type AgentMuxCreationAuthorityIdentity, type AgentMuxCreationOrigin,
-  type AgentMuxCreationSource, type AgentMuxCreationTarget, type AgentMuxCreationTrust, type AgentMuxCreationUserPrincipal } from './agent-creation-admission.js'
+  type AgentMuxCreationSource, type AgentMuxCreationTarget, type AgentMuxCreationTrust, type AgentMuxCreationTrustInput, type AgentMuxCreationUserPrincipal } from './agent-creation-admission.js'
 
 const hash = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
 const failure = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
@@ -110,9 +110,14 @@ export class AgentMuxCreationAuthority {
       return failure('The original Agent creation source pin cannot be verified. Its file was retained.', 'AGENT_CREATION_TRUST_INVALID')
     }
   }
-  async trust(input: { sourceRuntimeId: string; publicKey: string }, principal: AgentMuxCreationUserPrincipal): Promise<AgentMuxCreationTrust> {
+  async trust(input: AgentMuxCreationTrustInput, principal: AgentMuxCreationUserPrincipal): Promise<AgentMuxCreationTrust> {
     if (!principal || principal.kind !== 'user') failure('Only the authenticated user can pin an Agent creation source.', 'AGENT_CREATION_TRUST_PERMISSION_REQUIRED')
+    input = parseAgentMuxCreationTrustInput(input)
     const pub = publicKey(input.publicKey)
+    const target = await this.identity()
+    if (input.targetRuntimeId !== target.runtimeId || input.targetKeyFingerprint !== target.fingerprint) {
+      failure('The target identity changed since approval. Review its current identity before trusting a source.', 'AGENT_CREATION_TARGET_MISMATCH')
+    }
     const requested = parseAgentMuxCreationTrust({ sourceRuntimeId: input.sourceRuntimeId, publicKey: pub.encoded,
       fingerprint: pub.fingerprint, targetRuntimeId: this.runtimeId, registeredAt: Date.now(), registeredBy: principal })
     const path = this.trustPath(requested.sourceRuntimeId)

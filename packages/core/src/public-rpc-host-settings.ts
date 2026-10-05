@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
 import type { AgentMuxCreationTrust, AgentMuxCreationAuthorityIdentity } from './agent-creation-admission.js'
-import { parseAgentMuxCreationTrust } from './agent-creation-admission.js'
+import { parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput, type AgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import type { AgentMuxHostExecutorInventory, AgentMuxHostExecutorConfiguration, AgentMuxHostExecutorConfigureInput, AgentMuxHostExecutorDescriptor } from './executor-contract.js'
 import { isAgentMuxExecutorAvailability } from './control.js'
 
@@ -16,7 +16,7 @@ export type HostSettingsParameterMap = {
   'settings.executors.discover': { hostId: string; refresh?: boolean }
   'settings.executors.register': { hostId: string; executorId: string; input: Omit<AgentMuxHostExecutorConfigureInput, 'executorId'> }
   'settings.hosts.trusted-sources': { hostId: string }
-  'settings.hosts.trust-source': { hostId: string; input: { sourceRuntimeId: string; publicKey: string } }
+  'settings.hosts.trust-source': { hostId: string; input: AgentMuxCreationTrustInput }
 }
 export type HostSettingsResultMap = {
   'settings.executors.discover': AgentMuxHostExecutorInventory & { routeHostId: string }
@@ -44,9 +44,7 @@ export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M,
   const p = rpcRecord(value, method === 'settings.hosts.trust-source' ? ['hostId', 'input'] : ['hostId'])
   const hostId = rpcString(p.hostId, 'Route Host ID')
   if (method === 'settings.hosts.trusted-sources') return { hostId } as HostSettingsParameterMap[M]
-  const input = rpcRecord(p.input, ['sourceRuntimeId', 'publicKey'])
-  return { hostId, input: { sourceRuntimeId: rpcString(input.sourceRuntimeId, 'Source Runtime ID'),
-    publicKey: rpcString(input.publicKey, 'Source public key') } } as HostSettingsParameterMap[M]
+  return { hostId, input: parseAgentMuxCreationTrustInput(p.input) } as HostSettingsParameterMap[M]
 }
 export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M, value: unknown,
   input: HostSettingsParameterMap[M]): HostSettingsResultMap[M] {
@@ -95,6 +93,7 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
     return { routeHostId: input.hostId, authority, sources } as HostSettingsResultMap[M]
   }
   const actual = source(p.source), expected = (input as HostSettingsParameterMap['settings.hosts.trust-source']).input
+  if (authority.runtimeId !== expected.targetRuntimeId || authority.fingerprint !== expected.targetKeyFingerprint) fail()
   if (actual.sourceRuntimeId !== expected.sourceRuntimeId || actual.publicKey !== expected.publicKey) fail()
   return { routeHostId: input.hostId, authority, source: actual } as HostSettingsResultMap[M]
 }

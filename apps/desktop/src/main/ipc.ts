@@ -159,6 +159,7 @@ import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
+import { readHostCreationTrust, approveHostCreationTrust } from './settings-host-creation-trust.js'
 import { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
 import { RemoteCoreUpgradeManager, type RemoteCoreUpgradeExpected } from '@agentmux/core'
 import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from './settings-executor-refresh-control.js'
@@ -533,9 +534,25 @@ export async function registerIpc(args: {
     return scope
   }
 
+  // The original Unix transport supplies the local user principal after the
+  // original trusted Renderer check; the request cannot assert human provenance.
+  const callUserRpc = async <M extends import('@agentmux/core').AgentMuxRpcMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>) => {
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
+    try { return await client.call(method, input) }
+    finally { await client.dispose() }
+  }
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
+  const creationTrustPorts = { savedHost: (id: string) => config.hosts.find(host => host.id === id), call: callUserRpc }
+  handleWithEvent('hosts:creationTrust', async (event, input: HostConfig) => {
+    requireTrustedSender('hosts:creationTrust', event)
+    return readHostCreationTrust(input, creationTrustPorts)
+  })
+  handleWithEvent('hosts:trustCreationSource', async (event, input: HostConfig, expected: import('../shared/contracts.js').HostCreationTrustSnapshot) => {
+    requireTrustedSender('hosts:trustCreationSource', event)
+    return approveHostCreationTrust(input, expected, creationTrustPorts)
+  })
   handle('hosts:upgradeCheck', async (input: HostConfig) => await hostUpgrades.check(input))
   handle('hosts:upgrade', async (input: HostConfig, expected: RemoteCoreUpgradeExpected, operationId: string) => await hostUpgrades.upgrade(input, expected, operationId))
   handle('hosts:upgradeInspect', async (input: HostConfig, operationId: string) => await hostUpgrades.inspect(input, operationId))
@@ -1238,36 +1255,29 @@ export async function registerIpc(args: {
   })
   const progressTargetMatches = (loop: ContinuousProgressTarget, target: ContinuousProgressTarget): boolean =>
     loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
-  // The original Unix transport supplies the local user principal after the
-  // original trusted Renderer check; the request cannot assert human provenance.
-  const callSchedule = async <M extends import('@agentmux/core').ScheduleMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>) => {
-    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
-    try { return await client.call(method, input) }
-    finally { await client.dispose() }
-  }
   handleWithEvent('schedule:list', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => {
     requireTrustedSender('schedule:list', event)
-    return callSchedule('schedule.list', input)
+    return callUserRpc('schedule.list', input)
   })
   handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => {
     requireTrustedSender('schedule:inspect', event)
-    return callSchedule('schedule.inspect', input)
+    return callUserRpc('schedule.inspect', input)
   })
   handleWithEvent('schedule:create', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => {
     requireTrustedSender('schedule:create', event)
-    return callSchedule('schedule.create', input)
+    return callUserRpc('schedule.create', input)
   })
   handleWithEvent('schedule:pause', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => {
     requireTrustedSender('schedule:pause', event)
-    return callSchedule('schedule.pause', input)
+    return callUserRpc('schedule.pause', input)
   })
   handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => {
     requireTrustedSender('schedule:resume', event)
-    return callSchedule('schedule.resume', input)
+    return callUserRpc('schedule.resume', input)
   })
   handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
     requireTrustedSender('schedule:cancel', event)
-    return callSchedule('schedule.cancel', input)
+    return callUserRpc('schedule.cancel', input)
   })
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
     requireTrustedSender('continuousProgress:list', event)

@@ -462,7 +462,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.hosts.ls', '', 'List actual configured Hosts.'),
   settings('settings.hosts.test', '<id>|--input <file|->', 'Test an exact saved Host or a complete draft.', 1),
   settings('settings.hosts.trusted-sources', '--host <id>', 'Read this Host creation authority and explicitly trusted source keys.'),
-  settings('settings.hosts.trust-source', '--host <id> --input <file|->', 'Trust one explicit source Runtime key; requires a transport-approved user.'),
+  settings('settings.hosts.trust-source', '--host <id> --input <file|->', 'Trust one source key; input requires sourceRuntimeId, publicKey, targetRuntimeId and targetKeyFingerprint. Requires a transport-approved user.'),
   settings('settings.hosts.upgrade-check', '<id>|--input <file|->', 'Check the original SSH Core and exact offline update candidate without changing it.', 1),
   settings('settings.hosts.upgrade', '<id> --input <file|->', 'Upgrade the checked original Core, carrying expected and operationId.', 1),
   settings('settings.hosts.upgrade-inspect', '<id> --operation-id ID', 'Inspect the original Core update without replaying it.', 1),

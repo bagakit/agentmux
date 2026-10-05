@@ -29,6 +29,8 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  * 让本表的键随那个常量一起变。
  */
 export const PRIVILEGED_SENDER_LABELS = {
+  'hosts:creationTrust': 'creation source identity',
+  'hosts:trustCreationSource': 'creation source approval',
   'files:createPublic': 'original file creation',
   'files:readPublic': 'original file read',
   'files:openHtmlPreview': 'HTML file preview',

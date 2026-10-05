@@ -401,6 +401,8 @@ const mockApi: AgentMuxDesktopApi = {
   },
   hosts: { check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }),
+    creationTrust: async () => { throw new Error('Source trust requires the original desktop and target Host. This preview cannot read authorization.') },
+    trustCreationSource: async () => { throw new Error('Source trust requires explicit approval in the original desktop. This preview cannot grant authorization.') },
     upgradeCheck: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
     upgrade: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
     upgradeInspect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') }
