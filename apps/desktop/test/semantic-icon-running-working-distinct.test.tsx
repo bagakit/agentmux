@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { SemanticIcon } from '../src/renderer/src/components/semantic-icons/index.js'
+import { iconShapes } from '@agentmux/client-ui/icons'
 import { allStyles } from './helpers/styles.js'
 
 // ---------------------------------------------------------------------------
@@ -20,7 +21,7 @@ import { allStyles } from './helpers/styles.js'
 // ---------------------------------------------------------------------------
 
 function markup(name: 'running' | 'working'): string {
-  return renderToStaticMarkup(createElement(SemanticIcon, { name, size: 13 }))
+  return renderToStaticMarkup(createElement(SemanticIcon, { name: `status.${name}`, size: 13 }))
 }
 
 describe('running 与 working 在字形与动势上都可分', () => {
@@ -29,17 +30,18 @@ describe('running 与 working 在字形与动势上都可分', () => {
 
   it('自检：两个字形都真的渲染出来了（否则下面在空串上比对，恒真）', () => {
     // lucide 的 glyph class 是字形身份的证据。两者都在场，才谈得上"它们不同"。
-    expect(running).toContain('lucide-radio')
-    expect(working).toContain('lucide-activity')
+    expect(running).toContain('agentmux-icon-status.running')
+    expect(working).toContain('agentmux-icon-status.working')
     // 反向：running 不是 Activity，working 不是 Radio——字形没被换成同一个。
-    expect(running).not.toContain('lucide-activity')
-    expect(working).not.toContain('lucide-radio')
+    expect(running).not.toContain('agentmux-icon-status.working')
+    expect(working).not.toContain('agentmux-icon-status.running')
   })
 
   it('字形轴：两者的 SVG 结构不同——静屏截图也分得开', () => {
     // 剥掉 class 属性只比结构，证明差异来自不同的 glyph（不同 path），不是仅仅 class 名不一样。
     const strip = (s: string) => s.replace(/class="[^"]*"/g, '')
     expect(strip(running)).not.toBe(strip(working))
+    expect(iconShapes('status.running')).not.toEqual(iconShapes('status.working'))
   })
 
   it('动势轴：working 的 HTML carrier 保留 SVG props，running 不创建动画载体', () => {
