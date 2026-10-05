@@ -280,7 +280,7 @@ describe('Session and Launcher lifecycle ownership', () => {
     } finally { dispose() }
   })
 
-  it('stops a late successful launch without recreating its closed Tab', async () => {
+  it('keeps a late successful launch discoverable without recreating its closed Tab', async () => {
     const launcher = launcherFixture()
     const pending = deferred<SessionSnapshot>()
     vi.spyOn(api.sessions, 'launchTerminal').mockImplementation(async () => await pending.promise)
@@ -304,7 +304,8 @@ describe('Session and Launcher lifecycle ownership', () => {
     pending.resolve(resolved)
     await launch
 
-    expect(stop).toHaveBeenCalledWith(resolved.control)
+    expect(stop).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toContainEqual(resolved)
     expect(useAppStore.getState().tabs[launcher.id]).toBeUndefined()
   })
 
