@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 // @vitest-environment happy-dom
@@ -135,11 +136,13 @@ async function registered() {
     destroyed = false; loading = false
     isDestroyed() { return this.destroyed }
     isLoadingMainFrame() { return this.loading }
+    getOSProcessId() { return 300 }
     send(channel: string, value: unknown) {
       if (channel === CONTROL_REQUEST_CHANNEL) { rendererReads++; fixture.rendererRequest?.(value) }
       if (channel === CONTROL_CANCEL_CHANNEL) fixture.rendererCancel?.(value)
     }
   }()
+  vi.spyOn(api, 'readRendererMemory').mockImplementation(() => rendererMemoryFixture(300))
   const disposeRenderer = await useAppStore.getState().initialize()
   useAppStore.setState({ config, agentComposerDrafts: { 'healthy-session': 'preserved input' } })
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
@@ -337,7 +340,7 @@ describe('same sampler source age and bounded observations', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(read).toHaveBeenCalledOnce(); expect(renderer).toHaveBeenCalledOnce()
     off(); const offNext = sampler.subscribe(v => next.push(v))
-    resolveTable('100 1 64 3'); resolveRenderer({ observedAt: 900, data: { window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
+    resolveTable('100 1 64 3'); resolveRenderer({ observedAt: 900, data: { ...rendererMemoryFixture(300), window: { windowId: 7, webContentsId: 919, generation: 0 }, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(first).toEqual([]); expect(next).toEqual([])
     expect(renderer).toHaveBeenCalledTimes(2)
@@ -347,14 +350,14 @@ describe('same sampler source age and bounded observations', () => {
     let request: any, window = { windowId: 7, webContentsId: 919, generation: 0 }
     const cancellation = vi.fn()
     const bridge = new DesktopControlIpcBridge({ isAvailable: () => true, sendRequest: value => { request = value }, sendCancellation: cancellation })
-    const reading = observeRendererResources(bridge, () => window, new AbortController().signal)
+    const reading = observeRendererResources(bridge, () => window, new AbortController().signal, () => 300)
     expect(request.operation).toBe('metrics.renderer')
     window = { ...window, generation: 1 }
     bridge.accept({ requestId: request.requestId, ok: true, result: { operation: 'metrics.renderer', window: request.window,
-      observedAt: 1000, counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
+      observedAt: 1000, ...rendererMemoryFixture(300), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() } })
     await expect(reading).rejects.toMatchObject({ code: 'CONTROL_OWNER_LOST' })
     const controller = new AbortController()
-    const cancelled = observeRendererResources(bridge, () => window, controller.signal)
+    const cancelled = observeRendererResources(bridge, () => window, controller.signal, () => 300)
     controller.abort()
     await expect(cancelled).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
     expect(cancellation).toHaveBeenCalledOnce()

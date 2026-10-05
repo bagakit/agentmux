@@ -1,4 +1,5 @@
 import { fixtureEpoch } from './helpers/fixture-values.js'
+import { rendererMemoryFixture } from './helpers/toolkit-metrics.js'
 import { describe, expect, it } from 'vitest'
 import {
   parseMetricsObservation, parseMetricsRendererResult,
@@ -20,7 +21,7 @@ const decoders = [
       units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
       diagnostics: pending, process: pending, app: pending, runtime: pending, main: pending,
       renderer: { state: 'available', observedAt: 2, lastSuccessAt: 2, reason: null,
-        data: { window, counts, performance } } }).renderer.data!.performance
+        data: { window, ...rendererMemoryFixture(), counts, performance } } }).renderer.data!.performance
   } }
 ]
 function switchFixture(): RendererTabSwitchCost {
