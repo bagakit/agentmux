@@ -50,6 +50,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'schedule:resume': 'Agent arrangement',
   'schedule:cancel': 'Agent arrangement',
   'topics:call': 'Topic content',
+  'moteAvatars:list': 'avatar sources',
+  'moteAvatars:preview': 'avatar source preparation',
   'spaceObjects:appearance': 'object image appearance',
   'spaceObjects:previewAvatar': 'object image preview',
   'spaceObjects:saveAvatar': 'object image save',

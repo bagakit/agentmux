@@ -1,4 +1,7 @@
 import { themeObservation } from './theme-observation.js'
+import { MoteAvatarSeriesOwner } from './mote-avatar-series.js'
+import { MoteAvatarControl } from './mote-avatar-control.js'
+import type { MoteAvatarSeriesParameterMap } from '@agentmux/core/mote-avatar-series'
 import { readInputObservation } from '@agentmux/core/control'
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
@@ -997,6 +1000,16 @@ export async function registerIpc(args: {
     requireTrustedSender('notebook:apply', event)
     return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
   })
+  const moteAvatarSources = new MoteAvatarSeriesOwner({ userRoot: join(homedir(), '.agentmux', 'avatars'), builtinRoot: join(app.getAppPath(), 'resources', 'avatar-series') })
+  const moteAvatars = new MoteAvatarControl(moteAvatarSources)
+  handleWithEvent('moteAvatars:list', async event => {
+    requireTrustedSender('moteAvatars:list', event)
+    return moteAvatars.call('space.mote.avatar.list', {})
+  })
+  handleWithEvent('moteAvatars:preview', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.preview']) => {
+    requireTrustedSender('moteAvatars:preview', event)
+    return moteAvatars.call('space.mote.avatar.preview', params)
+  })
   const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID),
     new TopicSearchHistoryOwner(join(app.getPath('userData'), 'topic-search-history.json')))
   topicKnowledge.setFileReadPort(publicFiles)
@@ -1774,6 +1787,7 @@ export async function registerIpc(args: {
     git: new GitPublicControl({ config: () => config, git }),
     fileUploads: new FileUploadOwner(join(homedir(), '.agentmux', 'attachments')),
     topics: topicKnowledge,
+    moteAvatars,
 
     schedules: args.progressLoops,
     notebookStore,

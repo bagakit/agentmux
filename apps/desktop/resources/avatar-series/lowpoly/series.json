@@ -1,0 +1,30 @@
+{
+  "schema": "agentmux.avatar-series.v1",
+  "title": "Low poly",
+  "entries": [
+    {
+      "id": "wolf",
+      "title": "Wolf",
+      "definition": {
+        "kind": "image",
+        "file": "lowpoly-wolf.png"
+      }
+    },
+    {
+      "id": "owl",
+      "title": "Owl",
+      "definition": {
+        "kind": "image",
+        "file": "lowpoly-owl.png"
+      }
+    },
+    {
+      "id": "panther",
+      "title": "Panther",
+      "definition": {
+        "kind": "image",
+        "file": "lowpoly-panther.png"
+      }
+    }
+  ]
+}

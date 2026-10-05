@@ -1,0 +1,75 @@
+{
+  "schema": "agentmux.avatar-series.v1",
+  "title": "Geometry \u00b7 3D study",
+  "entries": [
+    {
+      "id": "expressive",
+      "title": "Expressive \u00b7 CC0 study",
+      "definition": {
+        "kind": "glb",
+        "file": "RobotExpressive.glb",
+        "materials": [
+          {
+            "index": 0,
+            "role": "shell"
+          },
+          {
+            "index": 1,
+            "role": "shell"
+          },
+          {
+            "index": 2,
+            "role": "graphic"
+          }
+        ],
+        "morphs": [
+          {
+            "id": "a",
+            "label": "Anger",
+            "meshIndex": 2,
+            "targetIndex": 0
+          },
+          {
+            "id": "b",
+            "label": "Surprise",
+            "meshIndex": 2,
+            "targetIndex": 1
+          },
+          {
+            "id": "c",
+            "label": "Thought",
+            "meshIndex": 2,
+            "targetIndex": 2
+          }
+        ],
+        "framing": {
+          "nodeIndex": 13
+        }
+      }
+    },
+    {
+      "id": "quiet",
+      "title": "Quiet \u00b7 2D",
+      "definition": {
+        "kind": "face2d",
+        "face": {
+          "kind": "face",
+          "shape": "soft",
+          "palette": "slate",
+          "eyes": "calm",
+          "brows": "straight",
+          "mouth": "small",
+          "accessory": "none"
+        }
+      }
+    },
+    {
+      "id": "owl",
+      "title": "Owl \u00b7 image",
+      "definition": {
+        "kind": "image",
+        "file": "owl.png"
+      }
+    }
+  ]
+}
