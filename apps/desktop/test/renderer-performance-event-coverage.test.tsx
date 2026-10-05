@@ -1,3 +1,4 @@
+import { terminalWriteContextFixture } from '../../../packages/core/test/helpers/renderer-performance'
 import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
@@ -37,14 +38,14 @@ it('keeps rare observer categories under an actual hidden-write flood with exact
   mono = 120
   observer.emit('longtask', [{ startTime: 1, duration: 80 }])
   observer.emit('event', [{ startTime: 2, processingStart: 72, duration: 90 }])
-  for (let i = 0; i < 1000; i++) costs.terminalWrite(false, new Uint8Array(1), 10)
+  for (let i = 0; i < 1000; i++) costs.terminalWrite(false, new Uint8Array(1), 10, terminalWriteContextFixture())
   const snap = parseRendererPerformanceSnapshot(costs.snapshot())
   expect(snap.slowEvents.filter(event => event.kind === 'long-task')).toHaveLength(1)
   expect(snap.slowEvents.filter(event => event.kind === 'input-delay')).toHaveLength(1)
-  expect(snap.slowEvents.filter(event => event.kind === 'terminal-write')).toHaveLength(6)
-  expect(snap.slowEventsOmitted['terminal-write']).toBe(994)
+  expect(snap.slowEvents.filter(event => event.kind === 'terminal-write')).toHaveLength(5)
+  expect(snap.slowEventsOmitted['terminal-write']).toBe(995)
   expect(snap.slowEventsOmitted['long-task']).toBe(0)
-  expect(snap.slowEvents.length).toBe(8)
+  expect(snap.slowEvents.length).toBe(7)
   expect(snap.timingEpochs.current.timings['terminal-write']).toEqual({ count: 1000, totalMs: 110_000, maxMs: 110 })
   observer.off()
 })
@@ -56,19 +57,39 @@ it('retains at most six of each of five categories and globally orders ids indep
   for (let i = 0; i < 12; i++) {
     wall -= 10
     costs.sessionEvent('private prompt body', 1)
-    costs.terminalWrite(false, 'private terminal body', 1)
+    costs.terminalWrite(false, 'private terminal body', 1, terminalWriteContextFixture())
     observer.emit('longtask', [{ startTime: 1, duration: 80 }])
     observer.emit('event', [{ startTime: 1, processingStart: 81, duration: 90 }])
     costs.terminalInteraction('wheel-dispatch', 80, 20)
   }
   const snap = costs.snapshot()
-  expect(snap.slowEvents).toHaveLength(30)
+  expect(snap.slowEvents).toHaveLength(25)
   for (const kind of kinds) {
-    expect(snap.slowEvents.filter(event => event.kind === kind)).toHaveLength(6)
-    expect(snap.slowEventsOmitted[kind]).toBe(6)
+    expect(snap.slowEvents.filter(event => event.kind === kind)).toHaveLength(5)
+    expect(snap.slowEventsOmitted[kind]).toBe(7)
   }
-  expect(snap.slowEvents.map(event => event.id)).toEqual(Array.from({ length: 30 }, (_, i) => i + 31))
+  expect(snap.slowEvents.map(event => event.id)).toEqual([1, 2, 3, 4, 5, ...Array.from({ length: 20 }, (_, i) => i + 41)])
   expect(JSON.stringify(snap)).not.toContain('private')
+  mono = 10100
+  for (let i = 0; i < 12; i++) {
+    wall -= 10
+    costs.sessionEvent('private prompt body', 10001)
+    costs.terminalWrite(false, 'private terminal body', 10001, terminalWriteContextFixture())
+    observer.emit('longtask', [{ startTime: 10001, duration: 80 }])
+    observer.emit('event', [{ startTime: 10001, processingStart: 10081, duration: 90 }])
+    costs.terminalInteraction('wheel-dispatch', 80, 10020)
+  }
+  const twoEpochs = parseRendererPerformanceSnapshot(costs.snapshot())
+  expect(twoEpochs.slowEvents).toHaveLength(30)
+  expect(new Set(twoEpochs.slowEvents.map(event => event.id)).size).toBe(30)
+  for (const kind of kinds) {
+    const records = twoEpochs.slowEvents.filter(event => event.kind === kind)
+    expect(records).toHaveLength(6)
+    expect(records.filter(event => event.retainedAs.includes('latest'))).toHaveLength(4)
+    expect(records.filter(event => event.retainedAs.includes('current-peak'))).toHaveLength(1)
+    expect(records.filter(event => event.retainedAs.includes('previous-peak'))).toHaveLength(1)
+    expect(twoEpochs.slowEventsOmitted[kind]).toBe(18)
+  }
   observer.off()
 })
 
@@ -77,7 +98,7 @@ it('records all five timing categories below the slow threshold without creating
   const costs = createRendererPerformance(() => mono), observer = observed(costs)
   mono = 40
   costs.sessionEvent('status', 35)
-  costs.terminalWrite(true, new Uint8Array(1), 34)
+  costs.terminalWrite(true, new Uint8Array(1), 34, terminalWriteContextFixture())
   costs.terminalInteraction('keydown-dispatch', 7, 33)
   observer.emit('longtask', [{ startTime: 10, duration: 20 }])
   observer.emit('event', [{ startTime: 10, processingStart: 18, duration: 24 }])
@@ -136,6 +157,8 @@ it('attributes delayed native entries to occurrence epochs and explicitly counts
   expect(snap.timingEpochs.late['long-task']).toBe(1)
   expect(snap.timingEpochs.unknown['long-task']).toBe(1)
   expect(snap.slowEvents.map(event => [event.occurredAtMonoMs, event.deliveredAtMonoMs])).toEqual([[12_000, 25_000], [1000, 25_000], [null, 25_000]])
+  expect(snap.slowEvents.map(event => event.retainedAs)).toEqual([['latest', 'previous-peak'], ['latest'], ['latest']])
+  expect(snap.slowEvents.every(event => event.terminal === null)).toBe(true)
   observer.off()
 })
 
@@ -174,8 +197,8 @@ it('preserves occurrence start versus delivery for asynchronous writes without i
   let mono = 0
   const costs = createRendererPerformance(() => mono)
   mono = 130
-  costs.terminalWrite(false, new Uint8Array(1), 10)
-  costs.terminalWrite(false, new Uint8Array(1), 20)
+  costs.terminalWrite(false, new Uint8Array(1), 10, terminalWriteContextFixture())
+  costs.terminalWrite(false, new Uint8Array(1), 20, terminalWriteContextFixture())
   const snap = costs.snapshot()
   expect(snap.terminalWrites.hidden.totalMs).toBe(230)
   expect(snap.slowEvents.map(event => [event.occurredAtMonoMs, event.deliveredAtMonoMs])).toEqual([[10, 130], [20, 130]])
@@ -226,6 +249,7 @@ it('executes the actual Store metrics.renderer callback and strict result parser
   const invoke = new Function('readContinuousProgressInput', 'get', 'readRendererResourceOwnerCounts', 'rendererPerformance', 'api', expression + ';return invoke')(
     () => { throw new Error('wrong branch') }, () => { throw new Error('wrong branch') }, () => counts, rendererPerformance, { readRendererMemory: () => rendererMemoryFixture() })
   rendererPerformance.sessionEvent('must-not-leak', rendererPerformance.start())
+  rendererPerformance.terminalWrite(false, 'must-not-leak', rendererPerformance.start() - 80, terminalWriteContextFixture())
   const request = { operation: 'metrics.renderer', window: { windowId: 1, webContentsId: 1, generation: 1 } }
   let response: unknown
   expect(() => {
@@ -244,6 +268,7 @@ it('executes the actual Store metrics.renderer callback and strict result parser
   expect(result.performance.timingEpochs.current.timings['session-event'].count).toBeGreaterThan(0)
   expect(result.performance.timingEpochs.basis).toBe('monotonic-occurrence-start')
   expect(Object.keys(result.performance.slowEventsOmitted)).toHaveLength(5)
+  expect(result.performance.slowEvents.some(event => event.terminal?.runId === 'fixture-run' && event.terminal.cause === 'history')).toBe(true)
   expect(JSON.stringify(result.performance)).not.toContain('must-not-leak')
 })
 

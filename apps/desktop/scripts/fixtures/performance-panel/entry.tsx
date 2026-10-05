@@ -43,13 +43,13 @@ while (useAppStore.getState().loading || !useAppStore.getState().config) await n
 const state = useAppStore.getState(), session = state.sessions.find(s => s.id === 'session-codex')!
 if (!session) throw Error('原 preview Session 非空正控缺失')
 const workspace = state.config!.workspaces.find(workspace => workspace.path === session.workspacePath) ?? state.config!.workspaces[0]!
-if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons' || setup.phase === 'attribution' || setup.phase === 'agent-cards') {
+if (setup.phase === 'control' || setup.phase === 'placement' || setup.phase === 'buttons' || setup.phase === 'attribution' || setup.phase === 'agent-cards' || setup.phase === 'epoch-peak') {
   const tab = createWorkbenchTab('performance-original-tab', { regionId: 'performance-original-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('performance-original-group', [tab.id]) },
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
     viewModes: { [session.id]: 'terminal' }, agentComposerDrafts: { [session.id]: 'Original unsent draft remains exact.' } })
 }
-const snapshot = structuredClone(setup.phase === 'attribution' ? performanceAttributionSnapshots.fresh : performanceSnapshot)
+const snapshot = structuredClone(setup.phase === 'epoch-peak' ? performanceAttributionSnapshots.waiting : setup.phase === 'attribution' ? performanceAttributionSnapshots.fresh : performanceSnapshot)
 snapshot.observation!.process.data![0] = { ...snapshot.observation!.process.data![0]!, hostId: session.hostId, runId: session.control.run.runId }
 // Same public document references as the adjusted controlled process sample.
 const firstCard = snapshot.document?.agentCards?.items[0]
@@ -73,7 +73,7 @@ w.performanceScene = {
   ready: true, phase: setup.phase, snapshot, writes, attachments, events, surface, mainSurface: () => useAppStore.getState().mainSurface,
   publish: (next: typeof snapshot) => bridge.publish(next),
   publishAttribution: (state: keyof typeof performanceAttributionSnapshots) => {
-    if (setup.phase !== 'attribution' || !Object.hasOwn(performanceAttributionSnapshots, state)) throw Error('Explicit attribution scene required')
+    if (!['attribution','epoch-peak'].includes(setup.phase) || !Object.hasOwn(performanceAttributionSnapshots, state)) throw Error('Explicit attribution scene required')
     return bridge.publish(structuredClone(performanceAttributionSnapshots[state]))
   },
   theme: async (appearance: 'light' | 'dark') => { const current = await api.config.get(); return api.config.save({ ...current, appearance: { ...current.appearance, appAppearance: appearance } }, current) },

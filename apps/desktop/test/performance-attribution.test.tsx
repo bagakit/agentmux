@@ -121,3 +121,25 @@ it('actual App Toolkit API stream feeds the heatmap and pause releases only its 
     expect(run).not.toHaveBeenCalled();expect(stop).not.toHaveBeenCalled()
   } finally {await act(async () => root.unmount());root = createRoot(container);useAppStore.setState(initial,true);vi.restoreAllMocks()}
 })
+
+
+it('expanded Work and wait consumes only the selected epoch peak and its exact context while refresh preserves focus', async () => {
+  await render(samples.waiting); await openRenderer()
+  const work = node<HTMLDetailsElement>('[data-performance-work]'); work.open = true
+  expect(node('[data-performance-peak="terminal-write"]').textContent).toContain('No retained slow event')
+  await act(async () => node<HTMLButtonElement>('[data-performance-period=previous]').click())
+  const peak = node('[data-performance-peak="terminal-write"]')
+  expect(peak.textContent).toContain('Peak #')
+  expect(peak.textContent).toContain('520.0 ms')
+  expect(peak.textContent).toContain('history · 7 string-code-units')
+  expect(peak.textContent).toContain('Host local · Session preparation-session')
+  expect(peak.textContent).toContain('Run preparation-run · Region preparation-region · instance 1')
+  expect(node('[data-performance-peak="session-event"]').textContent).toContain('Renderer-wide · terminal owner unknown')
+  const button = node<HTMLButtonElement>('[data-performance-period=previous]'); button.focus()
+  node('.performance-body').scrollTop = 90
+  await render(samples.waiting, true)
+  expect(work.open).toBe(true); expect(document.activeElement).toBe(button)
+  expect(node('.performance-body').scrollTop).toBe(90)
+  expect(node('[data-performance-peak="terminal-write"]').textContent).toBe(peak.textContent)
+  expect(node('[data-timing-kind="terminal-write"]').getAttribute('style') ?? '').not.toContain('--heat-intensity')
+})

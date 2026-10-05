@@ -6,9 +6,9 @@ import type { ToolkitMetricsSnapshot } from '../../../src/shared/toolkit'
 const at = Date.now()
 const available = <T,>(data: T, observedAt = at) => ({ data, observedAt, lastSuccessAt: observedAt, state: 'available' as const, reason: null })
 const runs = Array.from({ length: 8 }, (_, i) => ({ runId: `preparation-run-${i + 1}`, hostId: 'local', rootPid: 3101 + i,
-  processCount: i === 7 ? null : 3, cpuPercent: i === 7 ? null : [27.6, 9.2, 4.3, 1.4, 0.2, 0, 0.1][i],
-  rssKib: i === 7 ? null : [1359872, 524288, 421888, 331776, 221184, 151552, 90112][i],
-  rootRssKib: i === 7 ? null : 28672, descendantsRssKib: i === 7 ? null : [1331200, 495616, 393216, 303104, 192512, 122880, 61440][i], descendantProcessCount: i === 7 ? null : 2 }))
+  processCount: i === 7 ? null : 3, cpuPercent: i === 7 ? null : [27.6, 9.2, 4.3, 1.4, 0.2, 0, 0.1][i]!,
+  rssKib: i === 7 ? null : [1359872, 524288, 421888, 331776, 221184, 151552, 90112][i]!,
+  rootRssKib: i === 7 ? null : 28672, descendantsRssKib: i === 7 ? null : [1331200, 495616, 393216, 303104, 192512, 122880, 61440][i]!, descendantProcessCount: i === 7 ? null : 2 }))
 const observation: MetricsObservation = {
   schema: 'agentmux.metrics.v1', observedAt: at, scope: { kind: 'unix-host', hostId: 'local', hostname: 'local-mac', mainPid: 1234 },
   window: { windowId: 1, webContentsId: 1, generation: 1 }, units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
@@ -49,7 +49,7 @@ function attributionSnapshot() {
   let mono = 1500
   const recorder = createRendererPerformance(() => mono, () => at)
   mono = 2500; recorder.sessionEvent('fixture', mono - 123)
-  mono = 3500; recorder.terminalWrite(false, 'fixture', mono - 520)
+  mono = 3500; recorder.terminalWrite(false, 'fixture', mono - 520, { hostId: 'local', sessionId: 'preparation-session', runId: 'preparation-run', regionId: 'preparation-region', instanceId: recorder.allocateTerminalInstance(), cause: 'history' })
   mono = 4500; recorder.terminalInteraction('write-request', 80, 4200)
   mono = 12500; observation.renderer.data!.performance = recorder.snapshot()
   return result
