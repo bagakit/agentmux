@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { installGitHistoryViewport } from './helpers/git-history-viewport'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -8,8 +9,8 @@ import type { WorkspaceRecord } from '../src/shared/contracts'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: (select: (state: unknown) => unknown) => select({ config: {}, openGitWorkbench: vi.fn() }) }))
-import { useGitHistory } from '../src/renderer/src/hooks/useGitHistory'
-import { GitHistoryPanel } from '../src/renderer/src/components/GitHistoryPanel'
+import { useGitHistory } from '../src/renderer/src/features/git/history/useGitHistory'
+import { GitHistoryPanel } from '../src/renderer/src/features/git/history/GitHistoryPanel'
 
 const workspace: WorkspaceRecord = { id: 'autoload', hostId: 'local', path: _hygiene_fixturePath("repo"), name: 'Private history', kind: 'folder' }
 const oid = (n: number) => n.toString(16).padStart(40, '0')
@@ -39,6 +40,7 @@ class ResizeProbe {
   constructor(readonly callback: ResizeObserverCallback) { ResizeProbe.all.push(this) }
   observe(target: Element) { this.targets.add(target) }
   disconnect() { this.disconnected = true }
+  unobserve(target: Element) { this.targets.delete(target); if (!this.targets.size) this.disconnected = true }
   fire() { this.callback([], this as unknown as ResizeObserver) }
 }
 let root: Root, element: HTMLDivElement
@@ -48,7 +50,7 @@ let viewport: number, contentHeight: number | null
 const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
 function Owner({ visible, target }: { visible: boolean; target: WorkspaceRecord }) {
   controls = useGitHistory(target, visible)
-  return <GitHistoryPanel workspace={target} history={controls} />
+  return <GitHistoryPanel workspace={target} history={controls} onSelectCommit={() => {}} />
 }
 async function render(visible = true, target = workspace) { await act(async () => root.render(<Owner visible={visible} target={target} />)) }
 function rows() { return [...element.querySelectorAll<HTMLElement>('[data-history-oid]')].map(row => row.dataset.historyOid) }
@@ -66,12 +68,13 @@ async function visibility(hidden: boolean) {
 async function select(value: string) { await act(async () => { const picker = element.querySelector<HTMLSelectElement>('select')!; picker.value = value; picker.dispatchEvent(new Event('change', { bubbles: true })) }) }
 
 beforeEach(() => {
+  installGitHistoryViewport()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   viewport = 300; contentHeight = 1500
   IntersectionProbe.all = []; ResizeProbe.all = []
   vi.stubGlobal('IntersectionObserver', IntersectionProbe); vi.stubGlobal('ResizeObserver', ResizeProbe)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => viewport)
-  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => contentHeight ?? rows().length * 24 + 20)
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => contentHeight ?? (controls?.result?.kind === 'ready' ? controls.result.commits.length : 0) * 24 + 20)
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
   bridge = vi.fn(); Object.assign(window, { agentmux: { git: { history: bridge } } })
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
@@ -107,7 +110,7 @@ it('automatically fills short first pages without scrolling or clicking and stop
     .mockResolvedValueOnce(page(Array.from({ length: 22 }, (_, index) => index + 5), 26))
   await render(); expect(rows()).toHaveLength(2)
   await enterAhead(); expect(rows()).toHaveLength(4); expect(bridge).toHaveBeenCalledTimes(2)
-  await enterAhead(); expect(rows()).toHaveLength(26); expect(bridge).toHaveBeenCalledTimes(3)
+  await enterAhead(); expect(rows()).toHaveLength(21); expect(controls.result?.kind === 'ready' && controls.result.commits).toHaveLength(26); expect(bridge).toHaveBeenCalledTimes(3)
   expect(view().scrollTop).toBe(0); await enterAhead(); expect(bridge).toHaveBeenCalledTimes(3)
   expect(bridge.mock.calls.slice(1).map(call => call[1].cursor.offset)).toEqual([2, 4])
 })
