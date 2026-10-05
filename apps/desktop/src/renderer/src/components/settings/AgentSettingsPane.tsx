@@ -19,7 +19,7 @@ import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatar
 import { executorDetectionKey, useAppStore } from '../../store'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { withYoloArgs, parseExecutorArgs } from '../../lib/executors'
 export { parseExecutorArgs } from '../../lib/executors'
 import { HostExecutorSettings } from './HostExecutorSettings'
@@ -367,7 +367,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
               </header>
               <div className="agent-settings-fields">
                 {detection?.detail ? <p className="settings-inline-error">{detection.detail}</p> : null}
-                <label><span>Name</span><input data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
+                <label><span>Name</span><TextInput data-executor-name value={draft.label} onChange={(event) => update(id, { label: event.target.value })} /></label>
                 {Object.hasOwn(resource.expected, id) ? <dl className="settings-executor-identity"><div><dt>Provider</dt><dd>{agentProviderLabel(draft.providerId)}</dd></div><div><dt>Executor ID</dt><dd><code>{id}</code></dd></div></dl> :
                   <label><span>Provider</span><select data-executor-provider disabled={saving} value={draft.providerId} onChange={(event) => chooseProvider(id, event.target.value)}>{providerCatalog.map((provider) => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>}
                 <div className="agent-avatar-settings__row">
@@ -381,7 +381,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                   <div className="settings-launch-config__fields">
                     <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration.</p>
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
-                    <label><span>Command</span><input value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
+                    <label><span>Command</span><TextInput value={draft.command} onChange={(event) => update(id, { command: event.target.value })} /></label>
                     <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder="--model fable --effort high" rows={3} /></label>
                     <label><span>Environment <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
