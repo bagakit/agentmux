@@ -91,7 +91,7 @@ import {
   terminalRevealDecision,
   terminalRevealServiceOutcome
 } from '../lib/terminal-reveal'
-import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
+import { agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from '../lib/service-window-notice'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { TerminalServiceNotices } from './TerminalServiceNotices'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -1753,6 +1753,7 @@ export function TerminalView({
   ))
   const sessionObservationNotice = serviceNoticeToRender(classifyServiceNotice(nativeSessionServiceOutcome(session))) ??
     (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null)
+  const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session)))
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}. This read does not determine current Run availability or input delivery. Your Session, history and draft are kept.`,
@@ -1897,10 +1898,11 @@ export function TerminalView({
               sessionObservation: JSON.stringify([session.kind === 'agent' ? session.terminalCapability?.reason : null,
                 session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
                 session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session)]),
+              hookIngress: session.kind === 'agent' ? JSON.stringify([session.hookIngressObservation?.phase, session.hookIngressObservation?.code, session.hookIngressObservation?.message]) : '',
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
             }}
-            attachment={attachmentNotice} sessionObservation={sessionObservationNotice}
+            attachment={attachmentNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice}
             refreshingObservation={refreshingObservation}
             onRefreshObservation={() => void refreshObservationRef.current?.()}
             historyNotice={historyNotice}

@@ -784,7 +784,7 @@ export class AgentMuxClient {
     const pending = await this.registry.claimCreate(input.agentSessionId, agentLifecycleOperationIdentity('create', input.agentSessionId, input.createOperationId), intentDigest)
     if (pending) {
       const session = await this.completePreparedCreate(pending, await this.kernel.list())
-      return { session: cloneSession(session), creation: session.creation!, promptConfirmed: false }
+      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
     }
     const { config, descriptor } = await this.hostExecutorOwner.resolve(input.executorId)
     if (descriptor.configRevision !== input.executorRevision) throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
@@ -834,6 +834,8 @@ export class AgentMuxClient {
   // Only pending snapshot readers retain removals. No durable terminal registry or completed-Run set.
   private readonly pendingRunSnapshots = new Map<string | null, Set<Set<string>>>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
+  private readonly hookRestorations = new Map<string, Promise<void>>()
+  private readonly hookIngressObservations = new Map<string, NonNullable<AgentMuxAgentSession['hookIngressObservation']>>()
   private readonly pendingLifecycleBindings = new Map<string, AgentHookBinding>()
   private readonly executingReopens = new Set<string>()
   private readonly reopenSettlements = new Map<string, Promise<void>>()
@@ -933,7 +935,7 @@ export class AgentMuxClient {
         code: error.code,
         message: 'The original Session is readable, but its durable save is unconfirmed. The Agent and input are kept. Refresh this Session to retry the durable save.',
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
-      else this.publisher.publish({ type: 'agent-session', session: cloneSession(session) })
+      else this.publisher.publish({ type: 'agent-session', session: this.projectSession(session) })
     })
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
@@ -986,12 +988,12 @@ export class AgentMuxClient {
           }
           const next = await this.persistPendingInteraction(observedRequest)
           this.publisher.publishInteraction(observedRequest)
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
         },
         onInteractionSettled: async (request) => {
           const session = this.requireAgentSession(request.agentSessionId)
           const next = await this.clearPendingInteraction(session, request.id)
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
         }
       }
     )
@@ -1541,7 +1543,7 @@ export class AgentMuxClient {
         updatedAt: Math.max(canonical.updatedAt, degraded.observedAt)
       }
     }
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
   }
 
   /**
@@ -1567,7 +1569,7 @@ export class AgentMuxClient {
         return { ...cleared, updatedAt: Math.max(cleared.updatedAt, Date.now()) }
       }
     )
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next),
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(next),
       ...(observationOrigin ? { observationOrigin } : {}) })
   }
 
@@ -1606,6 +1608,7 @@ export class AgentMuxClient {
           : undefined
       )
       const agentSession = this.registry.findByRun(runRef(run.runId))
+      this.releaseEndedRunHook(runRef(run.runId), agentSession)
       if (agentSession) this.invalidateEndedRunReadiness(agentSession, runRef(run.runId))
     }
   }
@@ -1636,7 +1639,7 @@ export class AgentMuxClient {
         return { ...next, updatedAt: Math.max(next.updatedAt, Date.now()) }
       }
     ).then((next) => {
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
     }).catch((error: unknown) => {
       // The Session may have been retired/resumed between the process event and this cleanup. That
       // is already the desired outcome; do not turn the successful terminal event into another error.
@@ -1705,12 +1708,14 @@ export class AgentMuxClient {
         'History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
     await Promise.allSettled([...this.reopenSettlements.values()])
+    await Promise.allSettled(this.hookRestorations.values())
     await this.hookServer.stop()
     this.disconnect()
     await Promise.all(this.nativeStatusSettlements)
     await this.registry.releaseReopenOwner()
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
     this.hookBindings.clear()
+    this.hookIngressObservations.clear()
     this.pendingLifecycleBindings.clear()
     await this.acp.dispose()
     this.publisher.dispose()
@@ -1789,7 +1794,7 @@ export class AgentMuxClient {
   }
 
   agentSessions(): AgentMuxAgentSession[] {
-    return this.registry.listPublic()
+    return this.registry.list().map(session => this.projectSession(session))
   }
 
   /** Current durable identities, without replacing the active registry or probing Runs. */
@@ -1798,7 +1803,7 @@ export class AgentMuxClient {
     // A prepared creation can have an actual started Run before its commit is acknowledged.
     // Expose that real projection as explicitly unconfirmed; durable identities always take precedence.
     return [...durable, ...this.registry.list().filter(session => session.creation?.persistence === 'unconfirmed' &&
-      !durable.some(current => current.agentSessionId === session.agentSessionId))].map(cloneSession)
+      !durable.some(current => current.agentSessionId === session.agentSessionId))].map(session => this.projectSession(session))
   }
 
   /** Exact creation facts; only a genuinely started, unconfirmed projection may supplement the Store. */
@@ -1852,14 +1857,14 @@ export class AgentMuxClient {
     this.requireConnected()
     const pending = await this.registry.claimCreate(agentSessionId, correlation.operationId, correlation.preparedCreation.creation.intentDigest)
     if (!pending) throw new AgentMuxError('The original creation changed while inspecting. Read the same operation again without replaying.', 'AGENT_CREATION_UNCONFIRMED')
-    return cloneSession(await this.completePreparedCreate(pending, await this.kernel.list()))
+    return this.projectSession(await this.completePreparedCreate(pending, await this.kernel.list()))
   }
 
   /** Durable capability validation for ingress; a long-lived client cannot cache authorization. */
   async authorizeRetainedAgentCaller(capability: string, callerAgentSessionId: string): Promise<AgentMuxAgentSession> {
     const current = await this.currentStoredAgentSession(callerAgentSessionId)
     this.resolveMessageAuthor(capability, callerAgentSessionId, current)
-    return cloneSession(current)
+    return this.projectSession(current)
   }
 
   /** The durable message owner shared by SDK delivery and public service ingress. */
@@ -1868,7 +1873,7 @@ export class AgentMuxClient {
   }
 
   agentSession(agentSessionId: string): AgentMuxAgentSession {
-    return cloneSession(this.registry.get(agentSessionId))
+    return this.projectSession(this.registry.get(agentSessionId))
   }
 
   /** Read one exact durable Session binding without starting, attaching or stopping its Run. */
@@ -1877,7 +1882,16 @@ export class AgentMuxClient {
     const session = await this.registry.refresh(agentSessionId, expectedRun)
     this.hookNativeWitnesses.delete(session.run.runId)
     this.queueNativeIdentityCapture(session)
-    return cloneSession(session)
+    const hookObservation = this.hookIngressObservations.get(agentSessionId)
+    if (hookObservation && sameRun(hookObservation.run, expectedRun)) {
+      try {
+        const run = await this.kernel.status(expectedRun.runId)
+        this.assertAgentRun(session, run)
+        if (run.state.type === 'running') await this.restoreHookBinding(session)
+        else this.backfillEndedRuns([run])
+      } catch (error) { this.observeHookRestoreFailure(session, 'binding', error) }
+    }
+    return this.projectSession(session)
   }
 
   private retainUnconfirmedLifecycle(error: unknown, expected: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
@@ -1943,7 +1957,7 @@ export class AgentMuxClient {
               attempt.then(resolve, reject).finally(() => controller.signal.removeEventListener('abort', abort))
               if (controller.signal.aborted) abort()
             })
-            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
             return
           } catch (error) {
             failure = error
@@ -1990,7 +2004,7 @@ export class AgentMuxClient {
         !sameNativeHandle(previous.nativeHandle, input.candidateNativeHandle) || previous.candidateObservedAt !== input.expectedObservationAt) {
         throw new AgentMuxError('This confirmation operation belongs to another native transition.', 'AGENT_NATIVE_CONFIRMATION_CONFLICT')
       }
-      return { session: cloneSession(current), confirmation: structuredClone(previous), persisted: true,
+      return { session: this.projectSession(current), confirmation: structuredClone(previous), persisted: true,
         current: current.nativeConfirmation?.operationId === previous.operationId && sameRun(current.run, previous.run) && sameNativeHandle(current.nativeHandle, previous.nativeHandle) }
     }
     const reconciled = reconcile(requested)
@@ -2068,9 +2082,9 @@ export class AgentMuxClient {
       this.hookNativeWitnesses.delete(current.run.runId)
       this.hookTurnPhases.delete(current.run.runId)
       releaseSubagentRoster(current.run.runId)
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
       await this.ensureNativeStatusObservation(next)
-      return { session: cloneSession(next), confirmation: structuredClone(next.nativeConfirmation!), persisted: true, current: true }
+      return { session: this.projectSession(next), confirmation: structuredClone(next.nativeConfirmation!), persisted: true, current: true }
     }, { kind: 'semantic', bytes: null })
   }
 
@@ -2263,7 +2277,7 @@ export class AgentMuxClient {
               }
               return { ...value, observedNativeHandle: handle!, updatedAt: Math.max(value.updatedAt, Date.now()) }
             }, signal)
-            this.publisher.publish({ type: 'agent-session', session: cloneSession(observed) })
+            this.publisher.publish({ type: 'agent-session', session: this.projectSession(observed) })
             throw new AgentMuxError(
               'The confirmed current source differs from the explicit semantic resume target. The target and retained records were kept; this refresh did not change the conversation.',
               'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
@@ -2297,7 +2311,7 @@ export class AgentMuxClient {
               delete next.nativeSourceObservation
               return next
             }, signal)
-            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
             if (protectsDifferentTarget(next)) throw new AgentMuxError(
               'The confirmed current source differs from the explicit semantic resume target. The target and retained records were kept; this refresh did not change the conversation.',
               'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
@@ -2344,7 +2358,7 @@ export class AgentMuxClient {
               delete result.observedNativeHandle
               return result
             }, signal)
-            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
           } catch (saveError) {
             const saveCode = saveError && typeof saveError === 'object' && 'code' in saveError ? String(saveError.code) : ''
             if (saveCode === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' || saveCode === 'STALE_AGENT_SESSION') throw saveError
@@ -2703,7 +2717,7 @@ export class AgentMuxClient {
   }
 
   resolveAgentSession(lookup: AgentMuxAgentSessionLookup): AgentMuxAgentSession {
-    return cloneSession(this.registry.resolve(lookup))
+    return this.projectSession(this.registry.resolve(lookup))
   }
 
   runtimeIdentity(): AgentMuxRuntimeIdentity {
@@ -2833,7 +2847,7 @@ export class AgentMuxClient {
     const runs = await this.listRuns()
     return {
       hostId: 'local',
-      subjects: projectAgentMuxRuntimeSubjects('local', runs, this.registry.list().map(cloneSession))
+      subjects: projectAgentMuxRuntimeSubjects('local', runs, this.registry.list().map(session => this.projectSession(session)))
     }
   }
 
@@ -2867,7 +2881,7 @@ export class AgentMuxClient {
     const [subject] = projectAgentMuxRuntimeSubjects(
       'local',
       [run],
-      agentSession ? [cloneSession(agentSession)] : [],
+      agentSession ? [this.projectSession(agentSession)] : [],
       [{
         subjectId,
         target: target.kind === 'agent-session'
@@ -2887,7 +2901,7 @@ export class AgentMuxClient {
     const run = await this.requireCurrentAgentRun(session, sessions)
     if (run.state.type === 'running') {
       await this.ensureNativeStatusObservation(session)
-      session = cloneSession(this.requireAgentSession(agentSessionId))
+      session = this.projectSession(this.requireAgentSession(agentSessionId))
     }
     const projectedRun = this.projectRun(run, session)
     const capabilities = { ...this.providers.get(session.providerId).catalog.capabilities }
@@ -3106,7 +3120,7 @@ export class AgentMuxClient {
   async authorizeAgentCaller(capability: string, callerAgentSessionId: string): Promise<AgentMuxAgentSession> {
     const caller = await this.currentStoredAgentSession(callerAgentSessionId)
     this.resolveMessageAuthor(capability, callerAgentSessionId, caller)
-    return cloneSession(caller)
+    return this.projectSession(caller)
   }
 
   /** Bind every persisted A2A identity fact to the authoritative live Session/Run before append. */
@@ -3381,7 +3395,7 @@ export class AgentMuxClient {
       const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest!)
       if (pending) {
         const session = await this.completePreparedCreate(pending, await this.kernel.list())
-        return { session: cloneSession(session), creation: session.creation!, promptConfirmed: false }
+        return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
       }
       if (forkSource) assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
     }
@@ -3411,7 +3425,7 @@ export class AgentMuxClient {
         }
         const promptConfirmed = existing.creation.initialPrompt === 'confirmed'
         await this.recordInitialMessageDelivery(existing, initialEnvelope, promptConfirmed, false)
-        return { session: cloneSession(existing), promptConfirmed, creation: existing.creation }
+        return { session: this.projectSession(existing), promptConfirmed, creation: existing.creation }
       }
     }
     const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt
@@ -3604,13 +3618,13 @@ export class AgentMuxClient {
             } catch (observationError) {
               readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
               this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
-              return { session: cloneSession(readySession), promptConfirmed: false, creation: readySession.creation! }
+              return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
             }
           } else {
             preservePreparedCreation = !persisted
             readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
             this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
-            return { session: cloneSession(readySession), promptConfirmed: false, creation: readySession.creation! }
+            return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
           }
         } else {
         const rollbackErrors: unknown[] = [error]
@@ -3638,7 +3652,7 @@ export class AgentMuxClient {
       this.hookBindings.set(run.runId, hookBinding)
       this.runPids.set(run.runId, run.pid)
       this.queueNativeIdentityCapture(readySession, input)
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(readySession) })
       this.publisher.publishRunState(this.projectRun(run, readySession), agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
@@ -3684,7 +3698,7 @@ export class AgentMuxClient {
       try {
         readySession = await this.updateExactAgentSession(agentSessionId, session.run,
           current => ({ ...current, creation, updatedAt: Date.now() }))
-        this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
+        this.publisher.publish({ type: 'agent-session', session: this.projectSession(readySession) })
       } catch {
         try { this.publisher.publish({ type: 'agent-error', agentSessionId,
           code: 'AGENT_CREATION_RECEIPT_UNCONFIRMED',
@@ -3692,7 +3706,7 @@ export class AgentMuxClient {
           evidence: { source: 'user', observedAt: Date.now(), run: session.run } }) } catch { /* Run remains usable. */ }
       }
       if (initialEnvelope) await this.recordInitialMessageDelivery(readySession, initialEnvelope, promptConfirmed)
-      return { session: cloneSession(readySession), promptConfirmed, creation }
+      return { session: this.projectSession(readySession), promptConfirmed, creation }
     } finally {
       if (hookBinding && !preservePreparedCreation && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       if (!preservePreparedCreation) {
@@ -3715,7 +3729,7 @@ export class AgentMuxClient {
         creation: { ...current.creation!, failure }, updatedAt: Math.max(current.updatedAt + 1, next.updatedAt) })) }
       catch { /* The actual Run and the returned observation remain available despite this save failure. */ }
     }
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
     this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_CREATION_UNCONFIRMED',
       message: `Agent started on Run ${session.run.runId}; ${step} is unconfirmed. Keep this Run and inspect the same creation operation. ${failure.message}`,
       evidence: { source: 'agentmux', observedAt: Date.now(), run: session.run } })
@@ -3755,7 +3769,7 @@ export class AgentMuxClient {
       this.pendingLifecycleBindings.delete(reservation.operationId)
     } catch (error) { ready = await this.retainCreationFailure(ready, 'hook-bind', error, false) }
     this.runPids.set(run.runId, run.pid)
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(ready) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(ready) })
     this.publisher.publishRunState(this.projectRun(run, ready), ready.agentSessionId)
     return ready
   }
@@ -3823,7 +3837,7 @@ export class AgentMuxClient {
     const { session, attached } = await this.attachAgentRun(agentSessionId, afterByte, undefined, view)
     this.publisher.publishRunState(this.projectRun(attached.run, session), agentSessionId)
     return {
-      session: cloneSession(session),
+      session: this.projectSession(session),
       attachment: {
         ...attached,
         run: this.projectRun(attached.run, session),
@@ -3857,7 +3871,7 @@ export class AgentMuxClient {
         if (closed) return
         if (event.type === 'data') {
           publishedThroughByte = event.endByte
-          publisher.publishRunEvent(event, cloneSession(session))
+          publisher.publishRunEvent(event, this.projectSession(session))
         }
         else if (event.type === 'exit') publisher.publish({
           type: 'process-state', agentSessionId, run: session.run, state: event.state.type,
@@ -3878,7 +3892,7 @@ export class AgentMuxClient {
       if (this.requireAgentSession(agentSessionId).run.runId !== session.run.runId) throw new AgentMuxError(
         'Agent Session changed while the output reader was being established.', 'STALE_AGENT_SESSION_BINDING')
       this.assertAgentRun(session, observation.run)
-      return { session: cloneSession(session), attachment: { ...observation,
+      return { session: this.projectSession(session), attachment: { ...observation,
         run: this.projectRun(observation.run, session) }, close }
     } catch (error) { await close(); throw error }
   }
@@ -4020,11 +4034,11 @@ export class AgentMuxClient {
         }
         await this.registry.load('local')
         await this.restoreReopenObservation(canonical, run, operationId)
-        return cloneSession(this.registry.get(canonical.agentSessionId))
+        return this.projectSession(this.registry.get(canonical.agentSessionId))
       }
       const reservation = await this.registry.claimReopen(input.agentSessionId, operationId, input.expectedRetiredAt)
       if (!reservation) throw this.reopenUnconfirmed('The original continue result has not been confirmed.')
-      return cloneSession(await this.completePreparedReopen(reservation, await this.kernel.list()))
+      return this.projectSession(await this.completePreparedReopen(reservation, await this.kernel.list()))
     } catch (error) {
       if (error instanceof AgentMuxError && error.controlFailure) throw error
       throw this.reopenUnconfirmed(error instanceof Error ? error.message : String(error))
@@ -4079,7 +4093,7 @@ export class AgentMuxClient {
         evidence: { source: 'agentmux', observedAt: Date.now() } })
     }
     this.runPids.set(run.runId, run.pid)
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(this.registry.get(session.agentSessionId)) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(this.registry.get(session.agentSessionId)) })
     this.publisher.publishRunState(this.projectRun(run, this.registry.get(session.agentSessionId)), session.agentSessionId)
   }
 
@@ -4178,6 +4192,7 @@ export class AgentMuxClient {
       await this.requireHookIngressOwner()
       await this.hookBindings.get(current.run.runId)?.close()
       this.hookBindings.delete(current.run.runId)
+      this.settleHookRestore(current)
       hookBinding = this.hookServer.createBinding(
         current.agentSessionId,
         current.providerId,
@@ -4370,7 +4385,7 @@ export class AgentMuxClient {
               delete restored.nativePromptPredecessor
               return restored
             })
-            this.publisher.publish({ type: 'agent-session', session: cloneSession(restored) })
+            this.publisher.publish({ type: 'agent-session', session: this.projectSession(restored) })
             if (oldRun) this.publisher.publishRunState(this.projectRun(oldRun, restored), restored.agentSessionId)
             abandonedRun = null
           } catch (cleanupError) {
@@ -4387,7 +4402,7 @@ export class AgentMuxClient {
       this.runPids.delete(current.run.runId)
       this.runPids.set(run.runId, run.pid)
       this.queueNativeIdentityCapture(readySession, input)
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(readySession) })
       this.publisher.publishRunState(this.projectRun(run, readySession), readySession.agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
@@ -4396,7 +4411,7 @@ export class AgentMuxClient {
       )
       await this.recordPromptMessageAfterSideEffect(readySession, lifecycleOperationId, 'Resume prompt', message,
         promptConfirmed ? 'complete' : 'failed')
-      return cloneSession(readySession)
+      return this.projectSession(readySession)
     } catch (error) {
       operationError = error
       if (reopening && !preserveUnconfirmedRun && !persisted && (!launchAttempted || abandonedRun)) {
@@ -4493,7 +4508,7 @@ export class AgentMuxClient {
       hostId: current?.hostId ?? retirement?.hostId ?? 'local',
       expectedRun: input.expectedRun,
       observedAt: Date.now(),
-      session: current ? cloneSession(current) : null,
+      session: current ? this.projectSession(current) : null,
       retirement: retirement ? structuredClone(retirement) : null,
       run,
       catalog,
@@ -5214,6 +5229,7 @@ export class AgentMuxClient {
       else if (run) await this.releaseRunAttachment(session.run)
       await this.hookBindings.get(session.run.runId)?.close()
       this.hookBindings.delete(session.run.runId)
+      this.settleHookRestore(session)
       const cleanup = await Promise.allSettled([
         this.acp.unbind(agentSessionId),
         this.registry.commitLifecycle(reservation, null)
@@ -5298,14 +5314,14 @@ export class AgentMuxClient {
       if (pending.request.evidence.source === 'acp') {
         if (!this.acp.hasPendingPermission(session.agentSessionId, pending.request.id)) {
           const settled = await this.clearPendingInteraction(session, pending.request.id)
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(settled) })
         }
         continue
       }
       if (pending.response?.acknowledged) {
         if (agentInteractionResponseSettled(pending)) {
           const settled = await this.clearPendingInteraction(session, pending.request.id)
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(settled) })
         }
         continue
       }
@@ -5384,7 +5400,7 @@ export class AgentMuxClient {
           acceptedInputBytes === response.inputByteRange.startByte
         ) {
           const settled = await this.clearPendingInteraction(session, pending.request.id)
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(settled) })
           continue
         }
         if (error instanceof AgentMuxError && error.detail === 'unknown') {
@@ -5426,35 +5442,79 @@ export class AgentMuxClient {
     }
   }
 
-  private async restoreHookBindings(runs: readonly CtxmuxAdapterRun[]): Promise<void> {
-    const runsById = new Map(runs.map((run) => [run.runId, run]))
-    for (const session of this.registry.list()) {
-      if (!runsById.has(session.run.runId) || this.hookBindings.has(session.run.runId)) continue
-      const binding = this.hookServer.createBinding(
-        session.agentSessionId,
-        session.providerId,
-        session.hookBindingId,
-        session.hookToken
-      )
+  /** Public projections overlay live Core observations without writing them to the Session store. */
+  private projectSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
+    const projected = cloneSession(session)
+    const observation = this.hookIngressObservations.get(session.agentSessionId)
+    if (observation && sameRun(observation.run, session.run)) projected.hookIngressObservation = structuredClone(observation)
+    return projected
+  }
+
+  private observeHookRestoreFailure(session: AgentMuxStoredAgentSession, phase: 'listen' | 'binding', error: unknown): void {
+    const current = this.registry.findByRun(session.run)
+    if (!current || current.agentSessionId !== session.agentSessionId || this.endedRuns.has(session.run.runId)) return
+    const code = error instanceof AgentMuxError ? error.code : (error as NodeJS.ErrnoException)?.code ?? 'HOOK_INGRESS_RESTORE_FAILED'
+    this.hookIngressObservations.set(session.agentSessionId, { run: { ...session.run }, phase, code,
+      message: `Native Hook observation could not restore its ${phase === 'listen' ? 'local listener' : 'original Run binding'}. ${error instanceof Error ? error.message : String(error)}`,
+      observedAt: Date.now() })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(current) })
+  }
+
+  private settleHookRestore(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run'>): void {
+    const observation = this.hookIngressObservations.get(session.agentSessionId)
+    if (!observation || !sameRun(observation.run, session.run)) return
+    this.hookIngressObservations.delete(session.agentSessionId)
+    const current = this.registry.findByRun(session.run)
+    if (current?.agentSessionId === session.agentSessionId) this.publisher.publish({ type: 'agent-session', session: this.projectSession(current) })
+  }
+
+  /** Both native exit events and reconnected terminal facts release the same exact Hook owner. */
+  private releaseEndedRunHook(run: AgentMuxRunRef, session?: AgentMuxStoredAgentSession): void {
+    const binding = this.hookBindings.get(run.runId)
+    this.hookBindings.delete(run.runId)
+    if (binding) void binding.close().catch(error => this.publisher.publish({ type: 'agent-error',
+      ...(session ? { agentSessionId: session.agentSessionId } : {}), code: 'HOOK_BINDING_RELEASE_UNCONFIRMED',
+      message: `The original Run ended, but draining its Hook binding is unconfirmed. ${error instanceof Error ? error.message : String(error)}`,
+      evidence: { source: 'agentmux', run: { ...run }, observedAt: Date.now() } }))
+    if (session) this.settleHookRestore(session)
+  }
+
+  /** One in-flight binding restoration per exact Run; no independent reconnect or input owner. */
+  private restoreHookBinding(session: AgentMuxStoredAgentSession): Promise<void> {
+    if (this.reopensDisposed) return Promise.resolve()
+    const pending = this.hookRestorations.get(session.run.runId)
+    if (pending) return pending
+    const restoring = (async () => {
+      try { await this.hookServer.start() }
+      catch (error) { this.observeHookRestoreFailure(session, 'listen', error); return }
+      if (this.hookBindings.has(session.run.runId)) { this.settleHookRestore(session); return }
+      let binding: AgentHookBinding | undefined
       try {
+        binding = this.hookServer.createBinding(session.agentSessionId, session.providerId, session.hookBindingId, session.hookToken)
         await binding.bindRun(session.run.runId)
+        const current = this.registry.findByRun(session.run)
+        if (!current || current.agentSessionId !== session.agentSessionId || this.endedRuns.has(session.run.runId)) {
+          await binding.close()
+          return
+        }
         this.hookBindings.set(session.run.runId, binding)
+        this.settleHookRestore(session)
       } catch (error) {
-        await binding.close()
-        throw error
+        this.observeHookRestoreFailure(session, 'binding', error)
+        try { await binding?.close() }
+        catch (releaseError) { this.observeHookRestoreFailure(session, 'binding', releaseError) }
       }
-    }
+    })().finally(() => { if (this.hookRestorations.get(session.run.runId) === restoring) this.hookRestorations.delete(session.run.runId) })
+    this.hookRestorations.set(session.run.runId, restoring)
+    return restoring
   }
 
   private async tryRestoreHookIngress(runs: readonly CtxmuxAdapterRun[]): Promise<void> {
-    if (this.registry.list().length === 0) return
-    try {
-      await this.hookServer.start()
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') return
-      throw error
+    const live = new Set(runs.filter(run => run.state.type === 'running').map(run => run.runId))
+    for (const [id, observation] of this.hookIngressObservations) {
+      if (this.registry.findByRun(observation.run)?.agentSessionId !== id) this.hookIngressObservations.delete(id)
     }
-    await this.restoreHookBindings(runs)
+    await Promise.all(this.registry.list().filter(session => live.has(session.run.runId)).map(session => this.restoreHookBinding(session)))
   }
 
   private async requireHookIngressOwner(): Promise<void> {
@@ -5650,7 +5710,7 @@ export class AgentMuxClient {
       }
       // The session event is the Core-owned projection seam consumed by Desktop. Do not surface this
       // as an ordinary agent-error: the Agent is still healthy and must not be painted as failed.
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
       return next
     }
   }
@@ -5728,7 +5788,7 @@ export class AgentMuxClient {
       }
     )
     if (next !== requestedSession) {
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
     }
     return next
   }
@@ -6315,7 +6375,7 @@ export class AgentMuxClient {
               } }, { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt })
             }
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
-            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
             this.publisher.publish({ type: 'agent-status', agentSessionId: next.agentSessionId,
               state: observation.state, ...(status.detail ? { detail: status.detail } : {}),
               ...(status.failure ? { failure: structuredClone(status.failure) } : {}),
@@ -6361,7 +6421,7 @@ export class AgentMuxClient {
     if (next.activityCommit?.latest.createdAt === status.observedAt && !next.activityCommit.latestCommitted) {
       await this.flushAgentActivity(next)
     }
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
     return next
   }
 
@@ -6605,7 +6665,7 @@ export class AgentMuxClient {
       )
       if (current.pendingInteraction?.request.id !== request.id) {
         this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
-        this.publisher.publish({ type: 'agent-session', session: cloneSession(current) })
+        this.publisher.publish({ type: 'agent-session', session: this.projectSession(current) })
         return
       }
       state = current.pendingInteraction?.response
@@ -6623,7 +6683,7 @@ export class AgentMuxClient {
     this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
     const settled = current.pendingInteraction && agentInteractionResponseSettled(current.pendingInteraction)
       ? await this.clearPendingInteraction(current, request.id) : current
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(settled) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(settled) })
   }
 
   private async writeAgentInput(
@@ -6703,7 +6763,7 @@ export class AgentMuxClient {
               ...pending, nativeInput: { operationId, delivery, observedAt: native?.observedAt ?? Date.now() }
             }, updatedAt: Date.now() }
           })
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
         } catch (error) {
           this.publisher.publish({ type: 'agent-error', code: 'AGENT_NATIVE_INPUT_PERSIST_FAILED',
             message: `Native input state could not be saved for Agent ${session.agentSessionId} (Run ${session.run.runId}). The terminal remains available; whether the saved request is still pending cannot be confirmed across restart. ${error instanceof Error ? error.message : String(error)}`,
@@ -6751,7 +6811,7 @@ export class AgentMuxClient {
               ...invalidated, updatedAt: Math.max(current.updatedAt, Date.now())
             }
           })
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+          this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
         } catch (error) {
           // Ctxmux already accepted the bytes. A failed state write must not turn this ACK into
           // an input failure, clear the real cursor, or cause the caller to send those bytes again.
@@ -7082,7 +7142,7 @@ export class AgentMuxClient {
         throw error
       }
       // Persisted source facts precede their diagnostic so clients can present the exact owner.
-      this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+      this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
       if (witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'Native Hook identity could not be confirmed from this Run. The Run and input remain available; Refresh the native Session observation to retry.',
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: next.nativeSourceObservation!.observedAt } })
@@ -7424,7 +7484,7 @@ export class AgentMuxClient {
       }
       this.publisher.publishInteraction(request)
     }
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
 
     await this.ensureNativeStatusObservation(next)
     if (nextTurnPhase === 'in-turn' && session.terminalPromptReadiness?.source === 'native-stop') {
@@ -7450,7 +7510,7 @@ export class AgentMuxClient {
       session.run,
       (current) => ({ ...current, nativeHandle: handle, updatedAt: Date.now() })
     )
-    this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+    this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
 
     await this.ensureNativeStatusObservation(next)
   }
@@ -7600,6 +7660,7 @@ export class AgentMuxClient {
     // 拒收（见 acceptHookEvent），以及 snapshot 重投影时还能说出「它为什么没了」。必须记在分类**之后**：
     // 意图已经在上一行被读走并删掉，事后再没有第二次机会算出这个答案。
     this.endedRuns.set(event.runId, exitReason)
+    this.releaseEndedRunHook(runRef(event.runId), agentSession)
     if (agentSession) {
       const watch = this.nativeStatusWatches.get(agentSession.agentSessionId)
       if (watch && JSON.parse(watch.key)[0] === event.runId) {

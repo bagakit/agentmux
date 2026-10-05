@@ -794,6 +794,7 @@ export function projectRuntimeEvent(
       nativeHandle: _nativeHandle,
       observedNativeHandle: _observedNativeHandle,
       nativeSourceObservation: _nativeSourceObservation,
+      hookIngressObservation: _hookIngressObservation,
       nativeConfirmation: _nativeConfirmation,
       ...current
     } = item
@@ -805,6 +806,9 @@ export function projectRuntimeEvent(
       ...current,
       providerId: core.session.providerId,
       ...projectNativeSourceFacts(core.session),
+      ...(core.session.hookIngressObservation
+        ? { hookIngressObservation: structuredClone(core.session.hookIngressObservation) }
+        : {}),
       nativeService: sameRun(item.control.run, core.session.run) ? item.nativeService ?? null : null,
       ...(timelineObservation && sameRun(timelineObservation.run, core.session.run) ? { timelineObservation } : {}),
       ...(core.session.nativeHandle ? { nativeSessionId: core.session.nativeHandle.sessionId } : {}),
