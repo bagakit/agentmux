@@ -19,17 +19,25 @@ export default defineConfig({
       const before = code
       const mutation = process.env.AGENTMUX_CONVERSATION_ANNOTATION_MUTATION
       const changes: Record<string, { file: string; from: string; to: string }> = {
-        'selection-focus': { file: 'ConversationAnnotationNote.tsx', from: 'focusRequested.current = null\n      setEdit({ target', to: 'focusRequested.current = { origin: document.activeElement }\n      setEdit({ target' },
-        'retain-empty-selection': { file: 'ConversationAnnotationNote.tsx', from: 'if (!note.trim()) { setEdit(null); setError(null) }', to: 'if (false) { setEdit(null); setError(null) }' },
+        'auto-editor': { file: 'ConversationAnnotationNote.tsx', from: 'setOpened(false); setCopied(false);', to: 'setEdit({ key: crypto.randomUUID(), target, sessionId: sourceSessionId }); setOpened(true); setSelection(null); setCopied(false);' },
+        'copy-note': { file: 'ConversationAnnotationNote.tsx', from: 'platform.copyText(original.target.quote,', to: "platform.copyText('wrong selection'," },
+        'retarget-draft': { file: 'ConversationAnnotationNote.tsx', from: 'if (edit && note.trim() && !sameTarget(edit, selection))', to: 'if (false && edit && note.trim() && !sameTarget(edit, selection))' },
         'close-discards': { file: 'ConversationAnnotationNote.tsx', from: 'onClick={close}><X', to: 'onClick={discard}><X' },
-        'truncate-passage': { file: 'ConversationAnnotationNote.tsx', from: 'aria-label="Selected passage">{edit.target.quote}</blockquote>', to: 'aria-label="Selected passage">{edit.target.quote.slice(0, 12)}</blockquote>' },
-        'failure-clears-note': { file: 'ConversationAnnotationNote.tsx', from: 'setError(`无法将批注加入回复草稿：', to: "setNote(''); setError(`无法将批注加入回复草稿：" },
+        'clear-failure': { file: 'ConversationAnnotationNote.tsx', from: 'catch (failure) { setError(`无法将批注', to: "catch (failure) { setNote(''); setError(`无法将批注" },
         'wrong-range': { file: 'ConversationAnnotationNote.tsx', from: 'left: rect.left, top: rect.bottom - 1', to: 'left: 0, top: rect.bottom - 1' },
-        'empty-range': { file: 'ConversationAnnotationNote.tsx', from: 'Array.from(target.range.getClientRects())', to: '([] as DOMRect[])' },
-        'drop-id': { file: 'SessionPane.tsx', from: 'Regarding message ${JSON.stringify(annotation.messageId)}:', to: 'Regarding this message:' }
+        'wrong-recipient': { file: 'ConversationAnnotationDelivery.tsx', from: '.send(recipient.id, formatConversationAnnotation', to: '.send(sessionId, formatConversationAnnotation' },
+        'retain-hidden-menu': { file: 'ConversationAnnotationDelivery.tsx', from: 'open={active && recipientOpen} onOpenChange={setRecipientOpen}', to: 'open={recipientOpen || !active} onOpenChange={setRecipientOpen}' },
+        'retain-hidden-executor-menu': { file: 'ConversationAnnotationDelivery.tsx', from: "{recipient.kind === 'new' && active ? <AgentExecutorPicker", to: "{recipient.kind === 'new' ? <AgentExecutorPicker" },
+        'wrong-execution': { file: 'conversation-annotation-delivery.ts', from: 'executionWorkspaceId: workspace.id, prompt:', to: 'executionWorkspaceId: origin.workspaceId, prompt:' },
+        'missing-source': { file: 'conversation-annotation-delivery.ts', from: 'Source Agent Session: ${JSON.stringify(sourceSessionId)}\\nRegarding message', to: 'Regarding message' },
+        'accept-unknown': { file: 'ConversationAnnotationDelivery.tsx', from: "if (!report.agent || report.agent.initialPrompt !== 'confirmed' || report.agent.creationPersistence === 'unconfirmed' || report.agent.creationFailure)", to: 'if (false)' },
+        'inspect-wrong-request': { file: 'ConversationAnnotationDelivery.tsx', from: 'target: { requestId: request.requestId }', to: "target: { requestId: 'another-operation' }" },
+        'block-confirmed-partial': { file: 'ConversationAnnotationDelivery.tsx', from: "if (!report.agent || report.agent.initialPrompt !== 'confirmed' || report.agent.creationPersistence === 'unconfirmed' || report.agent.creationFailure)", to: "if (report.outcome !== 'opened' || !report.agent || report.agent.initialPrompt !== 'confirmed' || report.agent.creationPersistence === 'unconfirmed' || report.agent.creationFailure)" }
       }
       const change = mutation ? changes[mutation] : undefined
-      if (change && file === `${root}/apps/desktop/src/renderer/src/components/${change.file}`) {
+      if (mutation && !Object.hasOwn(changes, mutation)) throw new Error(`Unknown annotation mutation ${mutation}`)
+      // Mutation gates also require a changed loaded row and a nonempty AssertionRED report.
+      if (change && file.endsWith(`/${change.file}`)) {
         if (before.split(change.from).length !== 2) throw new Error(`Missing unique annotation mutation ${mutation}`)
         code = before.replace(change.from, change.to)
       }
@@ -54,5 +62,5 @@ export default defineConfig({
       appendFileSync(`${log}.compiled.jsonl`, `${JSON.stringify({ path: relative(root, file), sha256: createHash('sha256').update(code).digest('hex'), bytes: Buffer.byteLength(code), output })}\n`)
     }
   }],
-  test: { ...original.test, include: ['apps/desktop/test/conversation-annotation-following-note.integration.test.tsx'], passWithNoTests: false, fileParallelism: false }
+  test: { ...original.test, include: ['apps/desktop/test/conversation-annotation-following-note.integration.test.tsx', 'apps/desktop/test/conversation-annotation-delivery.test.tsx'], passWithNoTests: false, fileParallelism: false }
 })
