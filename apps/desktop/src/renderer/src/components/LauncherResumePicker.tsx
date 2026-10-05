@@ -40,7 +40,8 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   const nativeOperations = useRef<Record<string, { request: AgentLaunchInput; source: import('@agentmux/core').AgentNativeSessionCandidate; capabilities: import('@agentmux/core').AgentCapabilities; attempted: boolean }>>({})
   const presentationOwner = useRef(0)
   const settings = useContext(SettingsNavigation)
-  const [scope, setScope] = useState<'project' | 'global'>('project')
+  const [preferredScope, setScope] = useState<'project' | 'global'>('project')
+  const scope = workspace ? preferredScope : 'global'
   const [query, setQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [reads, setReads] = useState<Record<string, RecapRead>>({})
@@ -326,9 +327,9 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         </header>
         <div className="launcher-resume__controls">
           <div className="launcher-resume__scope" aria-label="Session scope">
-            <button type="button" aria-pressed={scope === 'project'} onClick={() => changeScope('project')}>
+            {workspace ? <button type="button" aria-pressed={scope === 'project'} onClick={() => changeScope('project')}>
               This project <span>{projectCount}</span>
-            </button>
+            </button> : null}
             <button type="button" aria-pressed={scope === 'global'} onClick={() => changeScope('global')}>
               All projects <span>{rows.length}</span>
             </button>
@@ -360,12 +361,12 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(event.key === 'ArrowDown' ? 1 : -1); searchRef.current?.focus() }
                 }}>
                 <span className="launcher-resume__row-head"><AgentAvatar label={row.name} providerId={candidate.providerId} size={18} />
-                  <strong>{row.name}</strong>{active ? <Check size={12} aria-hidden="true" /> : null}</span>
-                <span className={`launcher-resume__row-recap${row.recap ? '' : ' launcher-resume__row-recap--unknown'}`}>
-                  {row.recap?.text ?? 'No recap available'}</span>
-                <span className="launcher-resume__row-meta"><span>{row.executorName} · {row.projectName}</span>
+                  <strong>{row.name}</strong>{active ? <Check size={12} aria-hidden="true" /> : null}
                   <time dateTime={new Date(candidate.updatedAt).toISOString()} title={new Date(candidate.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</time></span>
-                <span className="launcher-resume__row-identity"><span>{row.hostName}</span><code title={identity}>#{idLabels.get(identity)}</code><span>{row.stateLabel}</span></span>
+                {row.recap ? <span className="launcher-resume__row-recap">{row.recap.text}</span> : null}
+                <span className="launcher-resume__row-meta"><span title={`${row.executorName} · ${row.projectName} · ${row.hostName}`}>
+                  {row.executorName}{scope === 'global' ? ` · ${row.projectName} · ${row.hostName}` : ''}</span>
+                  <code title={identity}>#{idLabels.get(identity)}</code><span className="launcher-resume__row-state">{row.stateLabel}</span></span>
               </button>
             })}
             {!filtered.length ? <div className="launcher-resume__empty"><FolderOpen size={23} aria-hidden="true" />
