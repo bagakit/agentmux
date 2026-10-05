@@ -11,6 +11,7 @@ import type { ToolkitToolIdentity } from './use-toolkit-packages'
 import { ToolkitResultLink } from './ToolkitResultLink'
 import { ToolkitAgentCards } from './ToolkitAgentCards'
 import { useToolkitScriptObservation } from './use-toolkit-script-observation'
+import { continueToolkitRequest, CONTINUE_TOOLKIT_NOTICE } from './continue-toolkit-request'
 
 const stateLabel = { idle: 'Not run yet', disabled: 'Hidden · new runs disabled', pending: 'Starting saved version', running: 'Running saved version', stopping: 'Stopping this execution', unknown: 'Execution unconfirmed', succeeded: 'Finished', failed: 'Failed', stopped: 'Stopped' } as const
 function resultDocument(text: string) {
@@ -62,6 +63,13 @@ export function UserToolkitResult({ definition, active, close, official = false,
   const changed = execution && snapshot && execution.definition.revision !== snapshot.definition.revision
   const canRun = snapshot && !snapshot.admission && !unknown && !reading.sourceReason && !reading.pending && definition.enabled && snapshot.definition.enabled
   const canStop = snapshot?.admission?.run !== null && snapshot?.admission !== null && snapshot?.admission !== undefined
+  async function continueOriginal() {
+    if (!snapshot?.admission || busy) return
+    setBusy(true); setOperationError('')
+    try { await continueToolkitRequest(api.toolkit, definition.id, snapshot.admission); await reading.check() }
+    catch (cause) { setOperationError(presentError(cause)) }
+    finally { setBusy(false) }
+  }
   async function operate(operation: 'run' | 'stop') {
     if (!snapshot || busy) return
     setBusy(true); setOperationError(''); setCopyNotice('')
@@ -148,6 +156,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
         {reading.error ? <p className="toolkit-result__notice" role="status">{reading.error} The last confirmed facts are kept. Check status before starting again.</p> : null}
         {reading.sourceReason ? <p className="toolkit-result__notice" role="status">Package source unavailable: {reading.sourceReason} The retained execution can still be stopped.</p> : null}
         {snapshot?.reason ? <p className="toolkit-result__notice" role="status">{snapshot.reason}</p> : null}
+        {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="settings-hint">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
         {changed ? <p className="toolkit-result__notice" role="status">Configuration changed since this execution. Its captured script and directory remain available.</p> : null}
         {execution?.action ? <p className="toolkit-result__origin">Action · {capturedAction?.label ?? 'Captured action unavailable'}</p> : null}
         {document ? <section className="toolkit-result__document"><h3>{document.summary}</h3>{document.notice && <p className="settings-hint">{document.notice}</p>}<dl>{document.items.map((item, index) => <div key={index}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>{document.agentCards ? <ToolkitAgentCards cards={document.agentCards} active={active && !scriptOpen} /> : null}{document.links.map((link, index) => <ToolkitResultLink key={index} label={link.label} url={link.url} disabled={Boolean(copyOnRun && primaryActionId && (!canRun || busy || connecting))} copy={url => { if (copyOnRun && primaryActionId) { void primary(); return } setOperationError(''); setCopyNotice(''); void api.ui.writeClipboardText(url).then(() => setCopyNotice('Link copied.'), cause => setOperationError(presentError(cause))) }} />)}</section> : execution?.text ? <Output executionId={execution.executionId} text={execution.text} /> : <p className="toolkit-result__empty">{snapshot?.state === 'succeeded' ? 'Finished · No output' : snapshot?.admission ? 'No confirmed terminal text yet.' : official ? 'Generate a link, then open it on your phone. Connect both devices to the same Wi-Fi.' : 'Run your saved script when you choose. Hovering only reads its result.'}</p>}
@@ -162,6 +171,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
       <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <RefreshCw size={13} className="toolkit-result__spinner" /> : <Play size={13} />} {connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</button>
       {primaryActionId ? <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void operate('run')}><RefreshCw size={13} /> {entryLabel ?? 'Run saved tool'}</button> : null}
       {snapshot?.admission ? <button type="button" className="small-button" disabled={!canStop || busy} onClick={() => void operate('stop')}><Square size={12} /> Stop</button> : null}
+      {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}><Play size={13} /> Continue original request</button> : null}
       {unknown || reading.sourceReason ? <button type="button" className="small-button" disabled={reading.pending || busy} onClick={() => void reading.check()}><RefreshCw size={13} /> Check status</button> : null}
       {capturedScript && !scriptOpen ? <button type="button" className="small-button" onClick={() => setScriptOpen(true)}><Code2 size={13} /> Script</button> : null}
       <button type="button" className="small-button" onClick={() => { close(); navigation.openToolkit(definition.id) }}><Settings2 size={13} /> Configure</button>

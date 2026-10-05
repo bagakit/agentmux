@@ -94,11 +94,15 @@ Run captures the definition/result baseline once in the service and admits one e
 Full input can pin invocationId, expectedRevision and expectedLatestExecutionId. Stop input
 pins executionId (null means no active execution). After an unknown receipt inspect the
 original identity; do not retry automatically. Closing watch releases only its reader.
+To explicitly continue an admission without a Run ID, use run/action --input with its
+original invocationId and complete captured parameters. This reuses its execution and
+native creation key: a retained Run is returned rather than started twice. If that Run
+is no longer retained, the original script may run now. Inspect/watch never do this.
 
 Saved actions have id, label, JavaScript ESM script and args, sharing the tool's fixed cwd.
 At most 16 actions share the definition budget. Action input pins invocationId,
 expectedRevision, sourceExecutionId and expectedAdmissionExecutionId (null if idle).
-Changed package files, targets or newer results reject stale actions. Retained invocation replays its facts;
+New actions against changed package files, targets or newer results are refused. Confirmed invocations return their facts;
 output cannot define actions. Scripts use the local user's files/environment/network;
 this capability does not provide a sandbox, secret storage, scheduling or remote execution.
 

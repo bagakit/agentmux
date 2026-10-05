@@ -10,7 +10,7 @@ import type { ConfigOwner } from './config-owner.js'
 import { findToolkitTool, toolkitTools } from './toolkit-config.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 import type { ToolkitReceiptStore } from './toolkit-receipt-store.js'
-import { captureToolkitPackage, writeToolkitPackageSnapshot, removeToolkitPackageSnapshot, type CapturedToolkitPackage } from './toolkit-package.js'
+import { captureToolkitPackage, readToolkitPackageSnapshot, writeToolkitPackageSnapshot, removeToolkitPackageSnapshot, type CapturedToolkitPackage } from './toolkit-package.js'
 
 type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null
@@ -179,12 +179,30 @@ export class CustomToolkitOwner {
     const repeated = await this.args.config.inspect(current => {
       const record = this.configurationFrom(current, id)
       const fact = tool.admission?.invocationId === input.invocationId ? tool.admission : tool.latest?.invocationId === input.invocationId ? tool.latest : null
-      if (fact && ('kind' in record ? fact.definition.package?.configRevision : fact.definition.revision) !== record.revision) {
+      if (fact && fact !== tool.admission && ('kind' in record ? fact.definition.package?.configRevision : fact.definition.revision) !== record.revision) {
         throw new AgentMuxError('Invocation belongs to a previous tool configuration.', 'CONFIG_CONFLICT')
       }
       return this.repeat(tool, input, action)
     })
-    if (repeated) return this.current(tool)
+    if (repeated) {
+      // Only an explicit repeat of the complete original request can continue a
+      // creation whose reply was lost. Passive get/watch never dispatch create.
+      if (!tool.error && tool.admission?.invocationId === input.invocationId && tool.admission.run === null && !this.closed) {
+        if (tool.live?.starting) await tool.live.starting
+        else if (tool.admission.state === 'unknown') {
+          const retained = this.execution(tool, tool.admission)
+          tool.live = retained; retained.replayText = ''
+          retained.admission.state = 'pending'; retained.admission.reason = 'Continuing the original request.'
+          retained.starting = Promise.resolve().then(async () => {
+            try { await this.save(tool); await this.start(retained, true) }
+            catch (error) { this.unknown(retained, error) }
+          }).finally(() => { retained.starting = null })
+          this.publish(tool)
+          await retained.starting
+        }
+      }
+      return this.current(tool)
+    }
     // Filesystem work is outside the configuration commit queue.
     const resolved = await this.resolve(tool)
     let execution: Execution | null = null
@@ -228,23 +246,33 @@ export class CustomToolkitOwner {
     await admitted.starting
     return this.current(tool)
   }
-  private async start(execution: Execution): Promise<void> {
+  private async start(execution: Execution, retained = false): Promise<void> {
     try {
       execution.port = await this.args.openRunPort()
-      if (this.closed) { await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null); return }
+      if (this.closed) {
+        if (retained) this.unknown(execution, 'Owner closed before the original request could be confirmed.')
+        else await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null)
+        return
+      }
       const definition = execution.admission.definition
       const program = execution.admission.action ? this.savedAction(definition, execution.admission.action.id) : definition
       let args = ['--input-type=module', '--eval', program.script, '--', ...program.args]
       if (definition.package) {
-        if (!execution.capture || !this.args.snapshotRoot) throw new AgentMuxError('Package snapshot owner is unavailable.', 'TOOLKIT_PACKAGE_UNAVAILABLE')
-        const directory = await writeToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, execution.capture)
+        if (!this.args.snapshotRoot) throw new AgentMuxError('Package snapshot owner is unavailable.', 'TOOLKIT_PACKAGE_UNAVAILABLE')
+        const directory = retained
+          ? await readToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, definition)
+          : await writeToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, execution.capture!)
         const entry = execution.admission.action
           ? definition.package.actionEntries.find(entry => entry.id === execution.admission.action!.id)!.entry
           : definition.package.entry
         args = [join(directory, entry), ...program.args]
         execution.capture = null
       }
-      if (this.closed) { await this.confirm(execution, "stopped", "Owner closed before the script started.", null); return }
+      if (this.closed) {
+        if (retained) this.unknown(execution, 'Owner closed before the original request could be confirmed.')
+        else await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null)
+        return
+      }
       // A failed create may still have admitted a Run; only confirmed outcomes permit cleanup.
       execution.creating = true
       const run = await execution.port.create({ createOperationId: execution.admission.executionId,
@@ -259,7 +287,7 @@ export class CustomToolkitOwner {
       else if (this.closed || execution.stopRequested || execution.failure) await this.stop(execution.tool.id, execution.admission.executionId)
       else { execution.admission.state = 'running'; this.publish(execution.tool) }
     } catch (error) {
-      if (execution.creating || execution.admission.run) this.unknown(execution, error)
+      if (retained || execution.creating || execution.admission.run) this.unknown(execution, error)
       else await this.confirm(execution, 'failed', 'Tool preparation failed: ' + message(error), null)
     }
   }

@@ -123,6 +123,22 @@ function snapshotDirectory(root: string, executionId: string): string {
   if (dirname(directory) !== base) fail('Snapshot directory escapes its owner.')
   return directory
 }
+/** Continue only the captured files, even if the editable package has changed. */
+export async function readToolkitPackageSnapshot(root: string, executionId: string, definition: ToolkitToolDefinition): Promise<string> {
+  const directory = snapshotDirectory(root, executionId), captured = definition.package!
+  const stat = await lstat(directory)
+  if (!stat.isDirectory() || stat.isSymbolicLink()) fail('Original package snapshot is unavailable; execution remains unconfirmed.')
+  const marker = await bytesAt(join(directory, 'owner.json'), 1024)
+  const owner = JSON.parse(decoder.decode(marker.bytes))
+  if (owner?.schema !== 'agentmux.toolkit.snapshot.v1' || owner.executionId !== executionId || owner.contentSHA256 !== captured.contentSHA256) {
+    fail('Original package snapshot identity is unconfirmed; retaining the execution.')
+  }
+  const files = join(directory, 'files')
+  const snapshot = await captureToolkitPackage({ kind: 'package', id: definition.id, revision: captured.configRevision,
+    packagePath: files, enabled: definition.enabled, statusBar: definition.statusBar, workspacePath: definition.workspacePath, args: definition.args })
+  if (snapshot.definition.package?.contentSHA256 !== captured.contentSHA256) fail('Original package snapshot changed; execution remains unconfirmed.')
+  return files
+}
 /** The receipt owner calls this only after terminal result and exact Run cleanup are durable. */
 export async function removeToolkitPackageSnapshot(root: string, executionId: string, contentSHA256?: string): Promise<void> {
   const directory = snapshotDirectory(root, executionId)
