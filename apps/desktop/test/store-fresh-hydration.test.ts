@@ -42,3 +42,14 @@ it('keeps canonical avatar configuration authoritative while retaining an existi
   await store.persist.rehydrate(); expect(store.persist.hasHydrated()).toBe(true)
   expect(store.getState().mainSurface).toBe('survey'); expect(store.getState().launcherNameDrafts).toEqual({ original: 'My original title' }); expect(store.getState().spaceObjectIcons).toEqual({})
 })
+
+it('keeps an unreadable original record and its write fence instead of treating it as first launch', async () => {
+  const unreadable = '{unreadable original workspace record'
+  backing.set(key, unreadable)
+  dispose = await store.getState().initialize()
+  expect(store.persist.hasHydrated()).toBe(false)
+  expect(store.getState().error).toContain('Saved workspace state could not be restored')
+  store.getState().setRecallSidebarCollapsed(true)
+  await vi.advanceTimersByTimeAsync(400)
+  expect(backing.get(key)).toBe(unreadable)
+})
