@@ -61,6 +61,55 @@ function descriptor(result: ReturnType<typeof ready>, path: string): GitCommitDi
 }
 
 describe('neutral immutable commit reading through actual private Git', () => {
+  it('reads the selected commit without enumerating thousands of unrelated references', async () => {
+    const f = await fixture()
+    await writeFile(join(f.path, 'selected.txt'), 'selected body\n')
+    const oid = await f.commit('Selected subject\n\nComplete selected message')
+    await f.git('tag', '-a', 'selected', oid, '-m', 'Selected annotated tag')
+    await f.git('commit', '--allow-empty', '-m', 'Unrelated head')
+    const other = await f.git('rev-parse', 'HEAD')
+    const updates = Array.from({ length: 2001 }, (_, i) => `create refs/tags/unrelated-${i} ${other}`).join('\n') + '\n'
+    const updated = await runner.run('git', ['-C', f.path, 'update-ref', '--stdin'], { input: updates })
+    expect(updated.exitCode).toBe(0)
+    const calls: string[][] = []
+    const observed: GitCommandRunner = { run(command, args, options) {
+      calls.push([...args])
+      return runner.run(command, args, options)
+    } }
+    const repo = new GitRepository({ hostId: 'private-host', path: f.path }, observed, readLocalWorktreeFile)
+    const selected = ready(await repo.commitDetails({ oid }))
+    expect(selected.commit.message).toBe('Selected subject\n\nComplete selected message\n')
+    expect(selected.commit.refs.map(ref => ref.name)).toEqual(['refs/tags/selected'])
+    expect(selected.entries.map(entry => entry.path)).toEqual(['selected.txt'])
+    expect(selected.warnings).toEqual([])
+    expect(calls.find(args => args.includes('for-each-ref'))).toContain(`--points-at=${oid}`)
+    expect((await repo.commitDiff(descriptor(selected, 'selected.txt'))).new).toMatchObject({ text: 'selected body\n' })
+  }, 20_000)
+
+  it('keeps fixed content readable with explicit unknown decorations and retries the same commit', async () => {
+    const f = await fixture()
+    await writeFile(join(f.path, 'selected.txt'), 'selected body\n')
+    const oid = await f.commit('Full selected message')
+    let unavailable = true
+    const observed: GitCommandRunner = { run(command, args, options) {
+      return unavailable && args.includes('for-each-ref')
+        ? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'offline https://secret@host.invalid/repo' })
+        : runner.run(command, args, options)
+    } }
+    const repo = new GitRepository({ hostId: 'private-host', path: f.path }, observed, readLocalWorktreeFile)
+    const selected = ready(await repo.commitDetails({ oid }))
+    expect(selected.commit.message).toBe('Full selected message\n')
+    expect(selected.entries.map(entry => entry.path)).toEqual(['selected.txt'])
+    expect(selected.warnings.join('\n')).toContain('Commit references unavailable. Reload this fixed commit to retry:')
+    expect(selected.warnings.join('\n')).not.toContain('secret')
+    expect((await repo.commitDiff(descriptor(selected, 'selected.txt'))).new).toMatchObject({ text: 'selected body\n' })
+    unavailable = false
+    const recovered = ready(await repo.commitDetails({ oid }))
+    expect(recovered.snapshot).toEqual(selected.snapshot)
+    expect(recovered.commit.refs.map(ref => ref.name).sort()).toEqual(['HEAD', 'refs/heads/main'])
+    expect(recovered.warnings).toEqual([])
+  })
+
   it('reads full root message, observed refs and literal paths, and keeps fixed blobs after HEAD/worktree move', async () => {
     const f = await fixture()
     const path = '中文 [literal] "line\nbreak.txt'

@@ -66,6 +66,19 @@ it('reads full message/all parents and opens a rename via actual workbench/store
   expect(api.files.read).not.toHaveBeenCalled(); expect(api.files.observe).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
 })
 
+it('keeps commit content and fixed diff actions available beside unknown references, then reloads the same selection', async () => {
+  const unknown = details()
+  unknown.warnings = ['Commit references unavailable. Reload this fixed commit to retry: observation unavailable']
+  commitDetails.mockResolvedValueOnce(unknown)
+  await mount()
+  await vi.waitFor(() => expect(element.querySelector('.git-workbench__warning')?.textContent).toContain('Commit references unavailable'))
+  expect(element.querySelector('.git-workbench__message')?.textContent).toBe(unknown.commit.message)
+  expect(element.querySelector('[aria-label="Open diff for new.ts"]')).not.toBeNull()
+  await click('[aria-label="Reload commit details"]')
+  await vi.waitFor(() => expect(element.querySelector('.git-workbench__warning')).toBeNull())
+  expect(commitDetails.mock.calls).toEqual([['repo', { oid: 'a'.repeat(40), parentOid: 'b'.repeat(40) }], ['repo', { oid: 'a'.repeat(40), parentOid: 'b'.repeat(40) }]])
+})
+
 it('selects a specific merge parent and rereads files against that fixed parent', async () => {
   await mount(); await vi.waitFor(() => expect(element.querySelector('select[aria-label="Comparison parent"]')).not.toBeNull())
   const select = element.querySelector<HTMLSelectElement>('select[aria-label="Comparison parent"]')!
