@@ -1,5 +1,5 @@
 import { createInputPerformanceRecorder, readInputObservation } from '@agentmux/core/control'
-import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererTerminalCost, RendererWorkTiming } from '@agentmux/core/control'
+import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSlowEvent, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
 import { tabSwitchObservation } from './tab-switch-observation'
 
 const timing = (): RendererWorkTiming => ({ count: 0, totalMs: 0, maxMs: 0 })
@@ -26,11 +26,13 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
   const recordingSinceMonoMs = now()
   let currentEpoch = epoch(Math.floor(recordingSinceMonoMs / 10_000) * 10_000)
   let previousEpoch: ReturnType<typeof epoch> | null = null
-  const late = kindCounts(), unknown = kindCounts(), slowEventsOmitted = kindCounts()
+  const late = kindCounts(), unknown = kindCounts(), slowEventCounts = kindCounts()
+  const peaks = (): Record<TimingKind, RendererSlowEvent | null> => ({ 'session-event': null, 'terminal-write': null, 'long-task': null, 'input-delay': null, 'terminal-interaction': null })
+  let currentPeaks = peaks(), previousPeaks = peaks()
   const slowByKind: Record<TimingKind, RendererPerformanceSnapshot['slowEvents']> = {
     'session-event': [], 'terminal-write': [], 'long-task': [], 'input-delay': [], 'terminal-interaction': []
   }
-  let eventSerial = 0
+  let eventSerial = 0, terminalSerial = 0
   const consumers = { composer: { visible: consumer(), hidden: consumer() }, sessionPane: { visible: consumer(), hidden: consumer() } }
   const overlay: RendererPerformanceSnapshot['overlay'] = {
     triggers: { initial: 0, demand: 0, mutation: 0, resize: 0, scroll: 0, toggle: 0, font: 0, collect: 0 },
@@ -50,10 +52,12 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
   function rotate(deliveredAtMonoMs: number): void {
     const startMonoMs = Math.floor(deliveredAtMonoMs / 10_000) * 10_000
     if (startMonoMs <= currentEpoch.startMonoMs) return
+    previousPeaks = startMonoMs === currentEpoch.endMonoMs ? currentPeaks : peaks()
+    currentPeaks = peaks()
     previousEpoch = startMonoMs === currentEpoch.endMonoMs ? currentEpoch : epoch(startMonoMs - 10_000)
     currentEpoch = epoch(startMonoMs)
   }
-  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number): void {
+  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number, terminal: RendererSlowEvent['terminal'] = null): void {
     rotate(deliveredAtMonoMs)
     const occurredAtMonoMs = occurrence !== null && Number.isFinite(occurrence) && occurrence >= recordingSinceMonoMs && occurrence <= deliveredAtMonoMs ? occurrence : null
     if (occurredAtMonoMs === null) unknown[kind]++
@@ -62,8 +66,14 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     else late[kind]++
     if (durationMs < 50) return
     const records = slowByKind[kind]
-    if (records.length === 6) { records.shift(); slowEventsOmitted[kind]++ }
-    records.push({ id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs })
+    const event: RendererSlowEvent = { id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs, retainedAs: [], terminal }
+    slowEventCounts[kind]++
+    if (records.length === 4) records.shift()
+    records.push(event)
+    const bucket = occurredAtMonoMs === null ? null : occurredAtMonoMs >= currentEpoch.startMonoMs ? currentPeaks
+      : previousEpoch && occurredAtMonoMs >= previousEpoch.startMonoMs ? previousPeaks : null
+    // Strictly greater preserves the first delivery id when durations tie.
+    if (bucket && (!bucket[kind] || durationMs > bucket[kind]!.durationMs)) bucket[kind] = event
   }
   return {
     check(kind: keyof typeof consumers, visible: boolean, changed: boolean) {
@@ -72,6 +82,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     },
     commit(kind: keyof typeof consumers, visible: boolean) { consumers[kind][visible ? 'visible' : 'hidden'].commits++ },
     start: now,
+    allocateTerminalInstance: () => ++terminalSerial,
     beginInputRequest(kind: keyof typeof inputRequests, start: number, target: { hostId: string; sessionId: string | null; runId: string }) {
       const cost = inputRequests[kind]
       cost.started++; cost.pending++
@@ -112,12 +123,13 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
       const delivered = now(), elapsed = Math.max(0, delivered - start)
       add(sessionEvents, elapsed); record('session-event', 'session-event', elapsed, start, delivered)
     },
-    terminalWrite(visible: boolean, data: string | Uint8Array, start: number) {
+    terminalWrite(visible: boolean, data: string | Uint8Array, start: number, context: RendererTerminalWriteContext) {
       const delivered = now(), elapsed = Math.max(0, delivered - start)
       add(terminalWrites[visible ? 'visible' : 'hidden'], elapsed)
       if (typeof data === 'string') terminalWrites.stringCodeUnits += data.length
       else terminalWrites.bytes += data.byteLength
-      record('terminal-write', visible ? 'visible' : 'hidden', elapsed, start, delivered)
+      record('terminal-write', visible ? 'visible' : 'hidden', elapsed, start, delivered, { ...context,
+        payload: { unit: typeof data === 'string' ? 'string-code-units' : 'bytes', length: typeof data === 'string' ? data.length : data.byteLength } })
     },
     registerTerminal(read: () => RendererTerminalCost) {
       terminals.add(read)
@@ -193,6 +205,14 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         try { current.push(read()) } catch { unavailableTerminals++ }
       }
       // All returned objects are detached facts; consumers cannot mutate the recorder.
+      const slowEvents = timingKinds.flatMap(kind => {
+        const latest = slowByKind[kind], retained = [...latest]
+        for (const peak of [currentPeaks[kind], previousPeaks[kind]]) if (peak && !retained.includes(peak)) retained.push(peak)
+        return retained.map(event => ({ ...event,
+          retainedAs: [...(latest.includes(event) ? ['latest' as const] : []), ...(currentPeaks[kind] === event ? ['current-peak' as const] : []), ...(previousPeaks[kind] === event ? ['previous-peak' as const] : [])],
+          terminal: event.terminal && { ...event.terminal, payload: { ...event.terminal.payload } }
+        }))
+      }).sort((a, b) => a.id - b.id)
       const value: RendererPerformanceSnapshot = {
         startedAt, observedAt: wall(), recording: 'bounded-lifetime', selectorTiming: 'counts-only', writeTiming: 'parser-callback-wall',
         consumers: { composer: { visible: { ...consumers.composer.visible }, hidden: { ...consumers.composer.hidden } },
@@ -203,8 +223,8 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         sessionEvents: { ...sessionEvents }, terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
         inputDelay: { ...inputDelay, timing: { ...inputDelay.timing } },
         longTasks: { ...longTasks, timing: { ...longTasks.timing } }, terminals: current, omittedTerminals: terminals.size - attempted, unavailableTerminals,
-        slowEvents: timingKinds.flatMap(kind => slowByKind[kind].map(event => ({ ...event }))).sort((a, b) => a.id - b.id),
-        slowEventsOmitted: { ...slowEventsOmitted },
+        slowEvents,
+        slowEventsOmitted: Object.fromEntries(timingKinds.map(kind => [kind, slowEventCounts[kind] - slowEvents.filter(event => event.kind === kind).length])) as Record<TimingKind, number>,
         timingEpochs: { durationMs: 10_000, basis: 'monotonic-occurrence-start', recordingSinceMonoMs, observedMonoMs: start,
           current: copyEpoch(currentEpoch), previous: previousEpoch && copyEpoch(previousEpoch), late: { ...late }, unknown: { ...unknown } },
         tabSwitches: tabSwitchObservation.snapshot(), tabSwitchesOmitted: tabSwitchObservation.omitted(),

@@ -162,11 +162,26 @@ const timingKinds = ['session-event', 'terminal-write', 'long-task', 'input-dela
 const timingKind: Parser = v => { if (!timingKinds.includes(v as typeof timingKinds[number])) invalid() }
 const timingKindRecord = (parse: Parser): Parser => record(Object.fromEntries(timingKinds.map(kind => [kind, parse])))
 const timingEpochParser = record({ startMonoMs: number, endMonoMs: number, timings: timingKindRecord(timingParser) })
+const retentionFlags = ['latest', 'current-peak', 'previous-peak'] as const
+const retentionParser: Parser = value => {
+  boundedArray(3, v => { if (!retentionFlags.includes(v as typeof retentionFlags[number])) invalid() })(value)
+  if ((value as unknown[]).length === 0 || new Set(value as unknown[]).size !== (value as unknown[]).length) invalid()
+}
 const slowEventParser = record({ id: count, kind: timingKind, detail: text, observedAt: number, durationMs: number,
-  occurredAtMonoMs: nullable(number), deliveredAtMonoMs: number })
+  occurredAtMonoMs: nullable(number), deliveredAtMonoMs: number, retainedAs: retentionParser,
+  terminal: nullable(record({ hostId: identity, sessionId: identity, runId: identity, regionId: nullable(identity), instanceId: count,
+    cause: v => { if (!['live', 'history', 'checkpoint'].includes(v as string)) invalid() },
+    payload: record({ unit: v => { if (!['bytes', 'string-code-units'].includes(v as string)) invalid() }, length: count }) })) })
 const slowEventsParser: Parser = value => {
   boundedArray(30, slowEventParser)(value)
-  for (const kind of timingKinds) if ((value as {kind: string}[]).filter(event => event.kind === kind).length > 6) invalid()
+  const events = value as RendererPerformanceSnapshot['slowEvents']
+  if (new Set(events.map(event => event.id)).size !== events.length) invalid()
+  for (const kind of timingKinds) {
+    const records = events.filter(event => event.kind === kind)
+    if (records.length > 6) invalid()
+    for (const flag of retentionFlags) if (records.filter(event => event.retainedAs.includes(flag)).length > (flag === 'latest' ? 4 : 1)) invalid()
+  }
+  for (const event of events) if ((event.kind === 'terminal-write') !== (event.terminal !== null)) invalid()
 }
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),

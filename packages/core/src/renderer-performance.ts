@@ -72,6 +72,13 @@ export type RendererSlowEvent = {
   id: number; kind: RendererTimingKind; detail: string; observedAt: number; durationMs: number
   /** Local Renderer Performance API timebase, never comparable across processes. */
   occurredAtMonoMs: number | null; deliveredAtMonoMs: number
+  retainedAs: Array<'latest' | 'current-peak' | 'previous-peak'>
+  terminal: (RendererTerminalWriteContext & { payload: { unit: 'bytes' | 'string-code-units'; length: number } }) | null
+}
+/** Captured when a parser write begins, never inferred from focus or completion state. */
+export type RendererTerminalWriteContext = {
+  hostId: string; sessionId: string; runId: string; regionId: string | null; instanceId: number
+  cause: 'live' | 'history' | 'checkpoint'
 }
 export type RendererPerformanceSnapshot = {
   startedAt: number; observedAt: number
@@ -88,7 +95,7 @@ export type RendererPerformanceSnapshot = {
   /** At most 16 recent exact-occurrence observations. Missing stages stay null. */
   tabSwitches: RendererTabSwitchCost[]
   tabSwitchesOmitted: number
-  /** Latest six per kind, ordered by delivery id; <=30 detached records. */
+  /** Latest four and current/previous epoch peaks per kind, deduplicated by id; <=30 detached records. */
   slowEvents: RendererSlowEvent[]
   slowEventsOmitted: Record<RendererTimingKind, number>
   timingEpochs: RendererTimingEpochs
