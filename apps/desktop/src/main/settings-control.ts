@@ -17,7 +17,7 @@ export async function executeSettingsControl(
     const directory = notes && (request.target === undefined || request.target === '' || request.target === 'notes' || request.target === 'notes.directory') ? { key: 'notes.directory', kind: 'string' as const, value: (await notes.inspect()).directory, default: defaultNotesDirectory() } : null
     if (request.target === 'notes.directory' && directory) return { operation: request.operation, entries: [directory], partial: true }
     const selected = request.target === undefined || request.target === '' ? settings :
-      request.target === 'profile' || request.target === 'focus' || request.target === 'notes' || request.target === 'goals' || request.target === 'goalsCommonActions' || request.target === 'appearance' || request.target === 'notifications' || request.target === 'browser' || request.target === 'browser.toolbar' || request.target === 'toolkit' || request.target === 'toolkit.performance'
+      request.target === 'profile' || request.target === 'focus' || request.target === 'notes' || request.target === 'goals' || request.target === 'goalsCommonActions' || request.target === 'appearance' || request.target === 'notifications' || request.target === 'browser' || request.target === 'browser.toolbar' || request.target === 'browser.startPage' || request.target === 'toolkit' || request.target === 'toolkit.performance'
       ? settings.filter((setting) => setting.key.startsWith(`${request.target}.`))
       : settings.filter((setting) => setting.key === request.target)
     if (!selected.length) throw unsupported(request.target ?? '')

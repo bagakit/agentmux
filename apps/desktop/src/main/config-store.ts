@@ -37,6 +37,7 @@ import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_
 import { FOCUS_RECENT_ACTIVITY_HOURS } from '../shared/focus-preferences.js'
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
 import { GOALS_VIEW_IDS } from '../shared/goals-preferences.js'
+import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage } from '../shared/browser-start-page.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
@@ -155,6 +156,13 @@ const appearanceSchema = z.object({
     .transform((value) => (value === undefined ? undefined : clampTerminalFontSize(value)))
 }).strict()
 const browserSchema = z.object({
+  startPage: z.object({
+    title: z.string().refine(value => validBrowserStartPageText(value, BROWSER_START_PAGE_TITLE_LIMIT)).optional(),
+    subtitle: z.string().refine(value => validBrowserStartPageText(value, BROWSER_START_PAGE_SUBTITLE_LIMIT)).optional(),
+    icon: z.string().refine(validBrowserStartPageImage).optional(),
+    backgroundImage: z.string().refine(validBrowserStartPageImage).optional(),
+    showHistory: z.boolean().optional()
+  }).strict().optional(),
   /**
    * Agent 驱动页面的总授权位。默认关。
    *

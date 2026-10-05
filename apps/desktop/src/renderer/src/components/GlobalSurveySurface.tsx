@@ -18,7 +18,8 @@ import { useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
-import { SurveyStartBrand } from './SurveyStartBrand'
+import { BrowserStartPage } from './BrowserStartPage'
+import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { resolveWorkbenchZone } from '../lib/workbench-projection'
@@ -53,6 +54,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const config = useAppStore(state => state.config)
   const browserInput = useRef<BrowserAddressInputHandle>(null)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
+  const [historyRevision, setHistoryRevision] = useState(0)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
   const explorationNames = useAppStore(state => state.surveyExplorationNames)
@@ -407,11 +409,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
-        {!selection ? <div className="survey-start" aria-label="New browser tab"><SurveyStartBrand />
-          <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
-            <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
+        {!selection ? <BrowserStartPage config={resolveBrowserStartPage(config?.browser.startPage)} visible={visible && !controlsCoverPage} historyRevision={historyRevision}
+          historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null}
+          onChooseHistory={value => { setQuery(value); browserInput.current?.submit(value) }}>
+          <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
+            <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onHistoryChange={() => setHistoryRevision(value => value + 1)} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
             <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
-        </div> : <>
+        </BrowserStartPage> : <>
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
             This work surface is outside the Survey list. Its content and selection are kept. Start an independent research from the page’s Research in Survey action.
           </div> : null}

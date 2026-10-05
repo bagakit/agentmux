@@ -51,7 +51,8 @@ import {
 import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
-import { SurveyStartBrand } from './SurveyStartBrand'
+import { BrowserStartPage } from './BrowserStartPage'
+import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
@@ -217,6 +218,7 @@ function BrowserPaneContent({
   onPresentationInputSelected,
   onRegionSplit,
   regionSplitSurface,
+  startPage,
   onRegionClose
 }: {
   tab: BrowserWorkbenchSurface
@@ -225,6 +227,7 @@ function BrowserPaneContent({
   /** Original Region actions; these never create or dispose the page directly. */
   onRegionSplit?: ((direction: SplitDirection) => void) | undefined
   regionSplitSurface?: WorkbenchViewTarget['surface'] | undefined
+  startPage?: BrowserStartPageConfig | undefined
   onRegionClose?: (() => void) | undefined
   presentations?: readonly WorkbenchBrowserPresentation[] | undefined
   renderPresentationFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
@@ -283,6 +286,7 @@ function BrowserPaneContent({
   const addressDraftEdited = useRef(addressDraft.current.edited)
   const addressBrowser = useRef(tab.browserId)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
+  const [historyRevision, setHistoryRevision] = useState(0)
   const [savedBookmark, setSavedBookmark] = useState<{
     browserId: string
     navigationId: BrowserSnapshot['navigationId']
@@ -885,13 +889,15 @@ function BrowserPaneContent({
     onClick={event => { event.stopPropagation(); onRegionClose() }}
   ><X size={12} /></button> : null
 
+  const defaultPresentationVisible = visible
   const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
     const key = presentation?.occurrence.presentationId ?? tab.browserId
     let addressInput = addressInputs.current.get(key)
     if (!addressInput) { addressInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(key, addressInput) }
-    const visible = presentation?.visible ?? true
+    const visible = presentation?.visible ?? defaultPresentationVisible
     const regionSurface = presentation?.target.surface ?? regionSplitSurface
     const inSurvey = regionSurface === 'survey'
+    const startPageConfig = presentation ? presentation.target.browserStartPage : startPage
     const regionSplitAllowed = regionSurface !== undefined && regionSurface !== 'survey'
     const regionSplitItems = regionSplitAllowed && onRegionSplit ? <>
       <DropdownMenu.Label className="browser-menu__label">New region</DropdownMenu.Label>
@@ -989,14 +995,17 @@ function BrowserPaneContent({
             })}><RefreshCw size={12} /> Retry</button>
           </div>
         ) : tab.url === 'about:blank' ? (
-          inSurvey ? <div className="survey-start browser-empty"><SurveyStartBrand />
-            <form className="survey-start-input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
+          startPageConfig ? <BrowserStartPage config={startPageConfig} visible={visible} historyRevision={historyRevision}
+            historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
+            onChooseHistory={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); addressInput.current?.submit(value) }}>
+            <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
               <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
+                onHistoryChange={() => setHistoryRevision(value => value + 1)}
                 historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
               <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
             </form>
-          </div> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
+          </BrowserStartPage> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
         ) : __AGENTMUX_WEB_PREVIEW__ ? (
           <div className="browser-preview"><Globe2 size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
         ) : null}
@@ -1027,9 +1036,10 @@ function BrowserPaneContent({
           onClick={() => { if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId)) }}>
           {tab.loading || busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
         </button>
-        {inSurvey && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
+        {startPageConfig && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
           <Globe2 size={13} />
           <BrowserAddressInput
+            onHistoryChange={() => setHistoryRevision(value => value + 1)}
             ref={addressInput} aria-label="Browser address" value={address} placeholder="Search or enter an address"
             historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
             onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}

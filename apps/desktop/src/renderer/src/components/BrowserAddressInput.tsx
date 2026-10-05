@@ -8,20 +8,21 @@ import { composerCompositionHandlers, composerRenderValue, type ComposerComposit
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
-export type BrowserAddressInputHandle = { submit(): void }
+export type BrowserAddressInputHandle = { submit(text?: string): void }
 type Props = Omit<ComponentPropsWithoutRef<typeof TextInput>, 'value' | 'onChange' | 'onSubmit' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'> & {
   value: string
   onValueChange(value: string): void
   onSubmit(value: string): void
   onHistoryNotice(notice: string | null): void
   onDeferredHistoryFailure(notice: string): void
+  onHistoryChange?(): void
   historyTarget: BrowserInputHistoryTarget | null
   submitDisabled?: boolean
   ref?: Ref<BrowserAddressInputHandle>
 }
 
 /** One human-input consumer; navigation, Profile and durable history remain Main-owned. */
-export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryNotice, onDeferredHistoryFailure, historyTarget, submitDisabled = false, ref, onFocus, onBlur, onKeyDown, onContextMenu, onClick, ...props }: Props) {
+export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryNotice, onDeferredHistoryFailure, onHistoryChange, historyTarget, submitDisabled = false, ref, onFocus, onBlur, onKeyDown, onContextMenu, onClick, ...props }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const request = useRef(0)
@@ -66,6 +67,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     if (target) {
       // Capture this human submission before navigation/creation; never read a later draft.
       void Promise.resolve().then(() => api.browser.recordInputHistory(target, text)).then(result => {
+        if (targetKey.current === key && result.outcome === 'recorded') onHistoryChange?.()
         if (!live(key, token)) return
         setLoadedHistory({ key, snapshot: result })
         setNotice(result.outcome === 'url-userinfo' ? 'An address containing login information was not saved to input history.' : null)
@@ -77,7 +79,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     } else setNotice('Input history cannot be saved until its Workspace and Profile are confirmed. Browsing continues.')
     onSubmit(text)
   }
-  useImperativeHandle(ref, () => ({ submit }), [value, currentTarget, props.disabled, submitDisabled, historyTarget, onSubmit, onDeferredHistoryFailure])
+  useImperativeHandle(ref, () => ({ submit }), [value, currentTarget, props.disabled, submitDisabled, historyTarget, onSubmit, onDeferredHistoryFailure, onHistoryChange])
 
   useEffect(() => {
     ++request.current; setLoadedHistory(null); setOpen(false); setFiltering(false); setSelected(-1); setLoading(false); setNotice(null)
@@ -108,6 +110,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     if (!target || !snapshot) return
     try {
       const result = text === undefined ? await api.browser.clearInputHistory(target, snapshot.scope) : await api.browser.removeInputHistory(target, snapshot.scope, text)
+      if (targetKey.current === key) onHistoryChange?.()
       if (live(key, token)) { setLoadedHistory({ key, snapshot: result }); setSelected(-1); setNotice(null) }
     } catch (error) {
       if (live(key, token)) setNotice(`Input history could not be deleted: ${presentError(error)}. Your input and saved history are kept; retry here.`)

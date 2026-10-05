@@ -5,6 +5,7 @@ import { resolveUserProfile, type UserProfile } from './user-profile'
 import { resolveFocusRecentActivityHours, resolveFocusLinkDestination } from './focus-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
+import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
@@ -18,6 +19,8 @@ export function configValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 function effective(path: string, value: unknown): unknown {
+  if (path === 'browser.startPage') return resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined)
+  if (path.startsWith('browser.startPage.')) return value ?? resolveBrowserStartPage()[path.slice('browser.startPage.'.length) as keyof BrowserStartPageConfig]
   if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
   if (path === 'focus') return value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }
   if (path === 'focus.recentActivityHours') return resolveFocusRecentActivityHours(value)
@@ -63,7 +66,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'notes' || path === 'goals') {
+    if (path === 'notes' || path === 'goals' || path === 'browser.startPage') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
