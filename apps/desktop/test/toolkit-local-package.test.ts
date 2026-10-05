@@ -9,7 +9,7 @@ import { parseToolkitSnapshot } from '@agentmux/core/control'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store'
 import { ConfigOwner } from '../src/main/config-owner'
 import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner'
-import { captureToolkitPackage, writeToolkitPackageSnapshot, removeToolkitPackageSnapshot } from '../src/main/toolkit-package'
+import { captureToolkitPackage, readToolkitPackageSnapshot, writeToolkitPackageSnapshot, removeToolkitPackageSnapshot } from '../src/main/toolkit-package'
 import { executeToolkitConfig, prepareToolkitConfig } from '../src/main/toolkit-config'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
@@ -136,5 +136,19 @@ describe('local package configuration and admission', () => {
     await expect(captureToolkitPackage(f.record)).rejects.toMatchObject({ code: 'TOOLKIT_PACKAGE_UNAVAILABLE' })
     await rm(join(f.source, 'link.mjs')); await writeFile(join(f.source, 'large'), Buffer.alloc(1024 * 1024))
     await expect(captureToolkitPackage(f.record)).rejects.toMatchObject({ code: 'TOOLKIT_PACKAGE_UNAVAILABLE' })
+  })
+})
+
+
+describe('original unbound Toolkit package snapshot', () => {
+  it('reuses original captured files after source edits and rejects a tampered or absent snapshot', async () => {
+    const f = await localPackage(), captured = await captureToolkitPackage(f.record), snapshots = join(f.root, 'original-snapshots')
+    const path = await writeToolkitPackageSnapshot(snapshots, 'original', captured)
+    await writeFile(join(f.source, 'helper.mjs'), "export const value = 'CHANGED_SOURCE'")
+    expect(await readToolkitPackageSnapshot(snapshots, 'original', captured.definition)).toBe(path)
+    expect(await readFile(join(path, 'helper.mjs'), 'utf8')).toContain('CAPTURED_A')
+    await writeFile(join(path, 'helper.mjs'), "export const value = 'TAMPERED_SNAPSHOT'")
+    await expect(readToolkitPackageSnapshot(snapshots, 'original', captured.definition)).rejects.toThrow('snapshot changed')
+    await expect(readToolkitPackageSnapshot(snapshots, 'missing', captured.definition)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
