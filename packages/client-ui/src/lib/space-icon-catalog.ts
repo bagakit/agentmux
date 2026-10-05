@@ -3,8 +3,8 @@ import {
   Folder, Gem, Layers, Library, Lightbulb, NotebookText, Package, Puzzle,
   Rocket, Shapes, SquareTerminal, Wrench
 } from 'lucide-react'
-import type { SpaceIconId } from './space-icon-ids'
-export type { SpaceIconId } from './space-icon-ids'
+import type { SpaceIconId } from './space-icon-ids.js'
+export type { SpaceIconId } from './space-icon-ids.js'
 export const SPACE_ICON_CATALOG = {
   bot: { label: 'Agent', Icon: Bot },
   book: { label: 'Book', Icon: BookOpen },
