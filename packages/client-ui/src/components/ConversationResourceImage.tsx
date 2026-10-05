@@ -1,8 +1,9 @@
 import { useCallback } from 'react'
-import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult } from '@agentmux/core'
+import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceRequest } from '@agentmux/core'
+import type { SessionHistoryResourceReader } from '@agentmux/core/session-history-content'
 import { ConversationImage } from './ConversationImage.js'
 
-export type ConversationHistoryResourceReader = (input: AgentSessionHistoryResourceRequest) => Promise<AgentSessionHistoryResourceReadResult>
+export type ConversationHistoryResourceReader = SessionHistoryResourceReader
 export type ConversationNativeResourceRecord = Pick<AgentSessionHistoryResourceRequest, 'source' | 'recordId' | 'turnId'>
 
 /** The existing image face reads an exact original resource, not a path supplied by the viewer. */

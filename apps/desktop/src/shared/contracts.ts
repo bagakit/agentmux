@@ -876,6 +876,10 @@ export type AgentLaunchInput = {
 
 export type NativeAgentSessionsInput = Pick<AgentMuxRpcParams<'agent.native.ls'>, 'hostId' | 'executorId' | 'workspacePath'>
 export type NativeAgentSessionsResult = AgentMuxRpcResult<'agent.native.ls'>
+export type NativeAgentHistoryInput = AgentMuxRpcParams<'agent.native.history'>
+export type NativeAgentHistoryResult = AgentMuxRpcResult<'agent.native.history'>
+export type NativeAgentHistoryResourceInput = AgentMuxRpcParams<'agent.native.history.resource'>
+export type NativeAgentHistoryResourceResult = AgentMuxRpcResult<'agent.native.history.resource'>
 
 export type TerminalLaunchInput = {
   hostId: string
@@ -1757,6 +1761,8 @@ export type AgentMuxDesktopApi = {
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
     nativeSessions(input: NativeAgentSessionsInput): Promise<NativeAgentSessionsResult>
+    nativeHistoryPage(input: NativeAgentHistoryInput): Promise<NativeAgentHistoryResult>
+    nativeHistoryResource(input: NativeAgentHistoryResourceInput): Promise<NativeAgentHistoryResourceResult>
     observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
     launchAgent(input: AgentLaunchInput, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>

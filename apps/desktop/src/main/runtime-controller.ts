@@ -62,6 +62,10 @@ import type {
   AgentLaunchInput,
   NativeAgentSessionsInput,
   NativeAgentSessionsResult,
+  NativeAgentHistoryInput,
+  NativeAgentHistoryResult,
+  NativeAgentHistoryResourceInput,
+  NativeAgentHistoryResourceResult,
   AgentSessionControl,
   AgentSessionRecoveryCandidate,
   AgentSessionNameMetadata,
@@ -1021,6 +1025,51 @@ export class RuntimeController {
     if (!executor) throw new AgentMuxError(`Missing Executor on the selected Host: ${input.executorId}`, 'EXECUTOR_UNKNOWN')
     return { hostId: input.hostId, executorId: input.executorId,
       ...await client.listNativeAgentSessions({ providerId: executor.providerId, env: executor.env, ...workspace }) }
+  }
+
+  /** Reads an exact discovered source; browsing never adopts a Session or starts its Run. */
+  async nativeAgentHistory(input: NativeAgentHistoryInput, config: AppConfig, signal?: AbortSignal): Promise<NativeAgentHistoryResult> {
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['hostId', 'executorId', 'source', 'cursor', 'limit'].includes(key)) ||
+      typeof input.hostId !== 'string' || !input.hostId || typeof input.executorId !== 'string' || !input.executorId) {
+      throw new AgentMuxError('Reading a saved conversation requires its exact Host, Executor and discovered source.', 'INVALID_CONTROL_REQUEST')
+    }
+    const source = parseAgentNativeResumeSource(input.source)
+    const host = config.hosts.find(host => host.id === input.hostId)
+    if (!host) throw new AgentMuxError('The selected conversation Host is unknown.', 'UNKNOWN_HOST')
+    const client = this.hosts.get(input.hostId)?.client
+    if (!client) throw new AgentMuxError('The conversation Host is unavailable. The saved source and existing Agents are retained.', 'RUNTIME_UNAVAILABLE')
+    const options = { source, ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }), ...(signal ? { signal } : {}) }
+    if (host.kind === 'ssh') return { hostId: input.hostId, executorId: input.executorId, nativeSource: source,
+      ...await client.readHostNativeAgentHistory({ executorId: input.executorId, ...options }) }
+    const executor = Object.hasOwn(config.executors, input.executorId) ? config.executors[input.executorId] : undefined
+    if (!executor || executor.providerId !== source.nativeHandle.providerId) {
+      throw new AgentMuxError('The selected Executor does not own this conversation Provider.', 'EXECUTOR_UNKNOWN')
+    }
+    return { hostId: input.hostId, executorId: input.executorId, nativeSource: source,
+      ...await client.readNativeAgentHistory({ ...options, commandOverride: executor.command, args: executor.args, env: executor.env }) }
+  }
+
+  async nativeAgentHistoryResource(input: NativeAgentHistoryResourceInput, config: AppConfig, signal?: AbortSignal): Promise<NativeAgentHistoryResourceResult> {
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['hostId', 'executorId', 'nativeSource', 'source', 'recordId', 'partIndex', 'expectedReference', 'turnId', 'offsetBytes', 'maxBytes'].includes(key)) ||
+      typeof input.hostId !== 'string' || !input.hostId || typeof input.executorId !== 'string' || !input.executorId) {
+      throw new AgentMuxError('Reading recorded content requires its exact conversation and original part reference.', 'INVALID_CONTROL_REQUEST')
+    }
+    const nativeSource = parseAgentNativeResumeSource(input.nativeSource)
+    const host = config.hosts.find(host => host.id === input.hostId)
+    if (!host) throw new AgentMuxError('The selected conversation Host is unknown.', 'UNKNOWN_HOST')
+    const client = this.hosts.get(input.hostId)?.client
+    if (!client) throw new AgentMuxError('The conversation Host is unavailable. Original content and Agents are retained.', 'RUNTIME_UNAVAILABLE')
+    const { hostId: _hostId, executorId: _executorId, ...request } = input
+    const options = { ...request, nativeSource, ...(signal ? { signal } : {}) }
+    if (host.kind === 'ssh') return { hostId: input.hostId, executorId: input.executorId, nativeSource,
+      ...await client.readHostNativeAgentHistoryResource({ executorId: input.executorId, ...options }) }
+    const executor = Object.hasOwn(config.executors, input.executorId) ? config.executors[input.executorId] : undefined
+    if (!executor || executor.providerId !== nativeSource.nativeHandle.providerId) {
+      throw new AgentMuxError('The selected Executor does not own this conversation Provider.', 'EXECUTOR_UNKNOWN')
+    }
+    return { hostId: input.hostId, executorId: input.executorId, nativeSource,
+      ...await client.readNativeAgentHistoryResource({ ...options, commandOverride: executor.command, args: executor.args, env: executor.env }) }
   }
 
   async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
