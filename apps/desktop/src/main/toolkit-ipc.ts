@@ -22,14 +22,16 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
   }
   handle('toolkit:list', () => execute({ operation: 'toolkit.list' }))
   for (const operation of ['get', 'script'] as const) handle('toolkit:' + operation, (_event, toolId: unknown) => execute({ operation: 'toolkit.' + operation, toolId }))
-  handle('toolkit:run', (_event, toolId: unknown, input: unknown) => execute({ operation: 'toolkit.run', toolId, ...(input === undefined ? {} : { input }) }))
+  for (const operation of ['run', 'evaluate'] as const) handle('toolkit:' + operation, (_event, toolId: unknown, input: unknown) => execute({ operation: 'toolkit.' + operation, toolId, ...(input === undefined ? {} : { input }) }))
   handle('toolkit:action', (_event, toolId: unknown, actionId: unknown, input: unknown) => execute({ operation: 'toolkit.action', toolId, actionId, input }))
   handle('toolkit:stop', (_event, toolId: unknown, executionId: unknown) => execute({ operation: 'toolkit.stop', toolId, ...(executionId === undefined ? {} : { executionId }) }))
   handle('toolkit:add', (_event, toolId: unknown, value: unknown) => execute({ operation: 'toolkit.add', toolId, value }))
   handle('toolkit:update', (_event, toolId: unknown, changes: unknown, expected: unknown) => execute({ operation: 'toolkit.update', toolId, changes, ...(expected === undefined ? {} : { expected }) }))
   handle('toolkit:remove', (_event, toolId: unknown, expected: unknown) => execute({ operation: 'toolkit.remove', toolId, ...(expected === undefined ? {} : { expected }) }))
-  handle('toolkit:observe', async (event, rawToolId: unknown, rawId: unknown) => {
-    const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'toolkit.watch', toolId: rawToolId }) as Extract<ToolkitRequest, { operation: 'toolkit.get' | 'toolkit.script' | 'toolkit.watch' }>
+  handle('toolkit:observe', async (event, rawToolId: unknown, rawId: unknown, rawOptions: unknown) => {
+    const options = rawOptions === undefined ? {} : rawOptions
+    if (typeof options !== 'object' || options === null || Array.isArray(options) || Object.keys(options).some(key => key !== 'evaluateOnDisplay')) throw new AgentMuxError('Toolkit display observation options are invalid.', 'INVALID_CONTROL_REQUEST')
+    const request = parseToolkitRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'toolkit.watch', toolId: rawToolId, ...options }) as Extract<ToolkitRequest, { operation: 'toolkit.watch' }>
     const id = validId(rawId), sender = event.sender, key = sender.id + ':' + id
     if (consumers.has(key)) throw new AgentMuxError('Toolkit consumer identity is already active.', 'INVALID_CONTROL_REQUEST')
     const controller = new AbortController()
@@ -58,7 +60,7 @@ export function registerToolkitIpc(port: AgentMuxToolkitPort,
         try {
           if (!closed && !sender.isDestroyed()) sender.send(TOOLKIT_ENDED_CHANNEL, { id, reason: error?.message ?? 'owner-ended' })
         } finally { close() }
-      }, controller.signal)
+      }, controller.signal, request.evaluateOnDisplay === undefined ? undefined : { evaluateOnDisplay: request.evaluateOnDisplay })
       if (closed || controller.signal.aborted) value.dispose()
       else subscription = value
       return { id }

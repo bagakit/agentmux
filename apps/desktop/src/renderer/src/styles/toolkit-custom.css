@@ -52,3 +52,5 @@
 @media (prefers-reduced-motion: reduce) { .toolkit-result__spinner { animation: none; } }
 
 .toolkit-result__url { display: block; box-sizing: border-box; width: 100%; resize: vertical; }
+
+.toolkit-result__previous > summary { color:var(--amber-text); }

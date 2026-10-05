@@ -3,7 +3,7 @@ import type { ToolkitDesktopApi, ToolkitScriptSnapshot, ToolkitSnapshot } from '
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 /** Selected, visible reading only. Closing releases this reader and never calls stop. */
-export function useToolkitScriptObservation(api: Pick<ToolkitDesktopApi, 'get' | 'observe'>, toolId: string, active: boolean) {
+export function useToolkitScriptObservation(api: Pick<ToolkitDesktopApi, 'get' | 'observe'>, toolId: string, active: boolean, evaluateOnDisplay = false) {
   const [reading, setReading] = useState<{ toolId: string; snapshot: ToolkitScriptSnapshot | null; sourceReason: string }>({ toolId, snapshot: null, sourceReason: '' })
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
@@ -27,11 +27,11 @@ export function useToolkitScriptObservation(api: Pick<ToolkitDesktopApi, 'get' |
       }, reason => {
         if (generation !== epoch.current) return
         ended = true; setPending(false); setError(reason || 'The result could not be confirmed.'); lease?.dispose()
-      })
+      }, evaluateOnDisplay ? { evaluateOnDisplay: true } : undefined)
       if (ended) lease.dispose()
     } catch (cause) { setPending(false); setError(presentError(cause)) }
     return () => { ++epoch.current; lease?.dispose() }
-  }, [api, toolId, active])
+  }, [api, toolId, active, evaluateOnDisplay])
   async function check() {
     const generation = epoch.current
     setPending(true)

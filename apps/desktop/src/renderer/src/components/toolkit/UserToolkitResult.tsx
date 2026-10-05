@@ -40,7 +40,7 @@ function ExecutionDirectory({ path, hostId }: { path: string; hostId: string }) 
 export function UserToolkitResult({ definition, active, close, official = false, runLabel, copyOnRun = false, primaryActionId, entryLabel }: { definition: ToolkitToolIdentity; active: boolean; close(): void; official?: boolean; runLabel?: string; copyOnRun?: boolean; primaryActionId?: string; entryLabel?: string }) {
   const [connecting, setConnecting] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
-  const reading = useToolkitScriptObservation(api.toolkit, definition.id, active && !scriptOpen)
+  const reading = useToolkitScriptObservation(api.toolkit, definition.id, active && !scriptOpen, true)
   const { snapshot } = reading
   const name = snapshot?.definition.name ?? definition.name, icon = snapshot?.definition.icon ?? definition.icon
   const navigation = useContext(SettingsNavigation)!
@@ -58,10 +58,24 @@ export function UserToolkitResult({ definition, active, close, official = false,
     if (link) void api.ui.writeClipboardText(link.url).then(() => setCopyNotice('Link copied. Open it in your phone browser.'), () => setCopyNotice('Link ready. Use Copy link below.')).finally(() => setConnecting(false))
     else { setConnecting(false); setOperationError('The tool finished without a connection link.') }
   }, [snapshot?.latestConfirmed])
-  const execution = snapshot?.admission ?? snapshot?.latestConfirmed
-  const unknown = reading.error || snapshot?.state === 'unknown'
+  const display = snapshot?.display
+  const showDisplay = Boolean(snapshot?.definition.display || display)
+  const lane = showDisplay ? display : snapshot
+  const execution = showDisplay ? display?.admission ?? (display?.latestConfirmed?.state === 'succeeded' ? display.latestConfirmed : display?.lastSucceeded ?? display?.latestConfirmed) : lane?.admission ?? lane?.latestConfirmed
+  const unknown = reading.error || lane?.state === 'unknown'
+  const ordinaryUnknown = snapshot?.state === 'unknown'
+  const [evaluating, setEvaluating] = useState(false)
+  const displayRunning = display?.state === 'pending' || display?.state === 'running' || display?.state === 'stopping'
+  const canEvaluate = Boolean(snapshot?.definition.display && snapshot.definition.enabled && !reading.sourceReason && !displayRunning && !evaluating)
+  async function evaluate() {
+    if (!canEvaluate) return
+    setEvaluating(true); setOperationError('')
+    try { await api.toolkit.evaluate(definition.id); await reading.check() }
+    catch (cause) { setOperationError(presentError(cause)); await reading.check() }
+    finally { setEvaluating(false) }
+  }
   const changed = execution && snapshot && execution.definition.revision !== snapshot.definition.revision
-  const canRun = snapshot && !snapshot.admission && !unknown && !reading.sourceReason && !reading.pending && definition.enabled && snapshot.definition.enabled
+  const canRun = snapshot && !snapshot.admission && !ordinaryUnknown && !reading.error && !reading.sourceReason && !reading.pending && definition.enabled && snapshot.definition.enabled
   const canStop = snapshot?.admission?.run !== null && snapshot?.admission !== null && snapshot?.admission !== undefined
   async function continueOriginal() {
     if (!snapshot?.admission || busy) return
@@ -142,37 +156,46 @@ export function UserToolkitResult({ definition, active, close, official = false,
   }
   const capturedDefinition = execution?.definition ?? snapshot?.definition
   const capturedAction = execution?.action ? capturedDefinition?.actions?.find(item => item.id === execution.action!.id) : undefined
-  const capturedScript = execution?.action ? capturedAction?.script : capturedDefinition?.script
-  const capturedArgs = execution?.action ? capturedAction?.args : capturedDefinition?.args
+  const capturedScript = showDisplay ? capturedDefinition?.display?.script : execution?.action ? capturedAction?.script : capturedDefinition?.script
+  const capturedArgs = showDisplay ? capturedDefinition?.display?.args : execution?.action ? capturedAction?.args : capturedDefinition?.args
   const source = snapshot?.latestConfirmed
   const document = useMemo(() => execution?.text ? resultDocument(execution.text) : null, [execution?.text])
   return <>
     <header className="performance-header"><div className="performance-title"><ToolkitIcon icon={icon} size={17} /><div className="toolkit-result__identity"><small>{official ? 'Official toolkit' : 'Custom tool'}</small><h2>{name}</h2></div></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label={`Close ${name}`} onClick={close}><X size={14} /></button></header>
-    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : snapshot?.state ?? 'idle'}><i />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : snapshot ? stateLabel[snapshot.state] : 'Result not loaded'}</span>
+    <div className="performance-observation"><span className="performance-status" data-state={unknown ? 'unknown' : lane?.state ?? 'idle'}><i />{reading.error ? 'Result unconfirmed' : reading.pending && !snapshot ? 'Reading result…' : lane ? showDisplay && lane.state === 'succeeded' ? 'Display checked' : stateLabel[lane.state] : showDisplay ? 'Preparing display…' : 'Result not loaded'}</span>
       {execution ? <time dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
     </div>
     <div className="performance-body toolkit-result">
-      {scriptOpen ? <><button type="button" className="small-button" onClick={() => setScriptOpen(false)}><ArrowLeft size={13} /> Back to result</button><p className="settings-hint">{execution ? `Captured ${execution.action ? 'action' : 'entry'} script for this execution. ${capturedDefinition?.package ? 'Local package files are captured; external files and the environment remain live.' : 'Imports, local files and environment are not frozen.'}` : 'Current entry script · read only'}</p><Textarea className="toolkit-result__script" aria-label="Read-only toolkit script" value={capturedScript ?? ''} readOnly /><p className="settings-hint">Arguments · {capturedArgs?.length ? JSON.stringify(capturedArgs) : 'None'}</p></> : <>
+      {scriptOpen ? <><button type="button" className="small-button" onClick={() => setScriptOpen(false)}><ArrowLeft size={13} /> Back to result</button><p className="settings-hint">{execution ? `Captured ${showDisplay ? 'display' : execution.action ? 'action' : 'entry'} script for this execution. ${capturedDefinition?.package ? 'Local package files are captured; external files and the environment remain live.' : 'Imports, local files and environment are not frozen.'}` : 'Current entry script · read only'}</p><Textarea className="toolkit-result__script" aria-label="Read-only toolkit script" value={capturedScript ?? ''} readOnly /><p className="settings-hint">Arguments · {capturedArgs?.length ? JSON.stringify(capturedArgs) : 'None'}</p></> : <>
         {reading.error ? <p className="toolkit-result__notice" role="status">{reading.error} The last confirmed facts are kept. Check status before starting again.</p> : null}
         {reading.sourceReason ? <p className="toolkit-result__notice" role="status">Package source unavailable: {reading.sourceReason} The retained execution can still be stopped.</p> : null}
-        {snapshot?.reason ? <p className="toolkit-result__notice" role="status">{snapshot.reason}</p> : null}
-        {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="settings-hint">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
+        {lane?.reason ? <p className="toolkit-result__notice" role="status">{lane.reason}</p> : null}
+        {!showDisplay && snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="settings-hint">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
         {changed ? <p className="toolkit-result__notice" role="status">Configuration changed since this execution. Its captured script and directory remain available.</p> : null}
-        {execution?.action ? <p className="toolkit-result__origin">Action · {capturedAction?.label ?? 'Captured action unavailable'}</p> : null}
-        {document ? <section className="toolkit-result__document"><h3>{document.summary}</h3>{document.notice && <p className="settings-hint">{document.notice}</p>}<dl>{document.items.map((item, index) => <div key={index}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>{document.agentCards ? <ToolkitAgentCards cards={document.agentCards} active={active && !scriptOpen} /> : null}{document.links.map((link, index) => <ToolkitResultLink key={index} label={link.label} url={link.url} disabled={Boolean(copyOnRun && primaryActionId && (!canRun || busy || connecting))} copy={url => { if (copyOnRun && primaryActionId) { void primary(); return } setOperationError(''); setCopyNotice(''); void api.ui.writeClipboardText(url).then(() => setCopyNotice('Link copied.'), cause => setOperationError(presentError(cause))) }} />)}</section> : execution?.text ? <Output executionId={execution.executionId} text={execution.text} /> : <p className="toolkit-result__empty">{snapshot?.state === 'succeeded' ? 'Finished · No output' : snapshot?.admission ? 'No confirmed terminal text yet.' : official ? 'Generate a link, then open it on your phone. Connect both devices to the same Wi-Fi.' : 'Run your saved script when you choose. Hovering only reads its result.'}</p>}
+        {showDisplay ? <p className="toolkit-result__origin">Evaluated when displayed · Refresh to check again</p> : execution?.action ? <p className="toolkit-result__origin">Action · {capturedAction?.label ?? 'Captured action unavailable'}</p> : null}
+        {document ? <section className="toolkit-result__document"><h3>{document.summary}</h3>{document.notice && <p className="settings-hint">{document.notice}</p>}<dl>{document.items.map((item, index) => <div key={index}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>{document.agentCards ? <ToolkitAgentCards cards={document.agentCards} active={active && !scriptOpen} /> : null}{document.links.map((link, index) => <ToolkitResultLink key={index} label={link.label} url={link.url} disabled={Boolean(!showDisplay && copyOnRun && primaryActionId && (!canRun || busy || connecting))} copy={url => { if (!showDisplay && copyOnRun && primaryActionId) { void primary(); return } setOperationError(''); setCopyNotice(''); void api.ui.writeClipboardText(url).then(() => setCopyNotice('Link copied.'), cause => setOperationError(presentError(cause))) }} />)}</section> : execution?.text ? <Output executionId={execution.executionId} text={execution.text} /> : <p className="toolkit-result__empty">{lane?.state === 'succeeded' ? 'Finished · No output' : lane?.admission ? 'No confirmed terminal text yet.' : showDisplay ? 'Preparing the declared display script…' : official ? 'Generate a link, then open it on your phone. Connect both devices to the same Wi-Fi.' : 'Run your saved script when you choose. Hovering only reads its result.'}</p>}
         {source?.definition.actions?.some(action => action.id !== primaryActionId) ? <section className="toolkit-result__configured-actions" aria-label="Actions for the confirmed result"><header><span>Result actions</span><small>Saved with this result</small></header><div>{source.definition.actions.filter(action => action.id !== primaryActionId).map(action => <button type="button" className="small-button" key={action.id} data-toolkit-action={action.id} disabled={!canRun || busy || connecting} onClick={() => void runAction(action, source)}><Play size={12} /><span>{action.label}</span></button>)}</div></section> : null}
         {execution ? <details className="toolkit-result__details"><summary>Execution details</summary><dl><dt>Directory</dt><ExecutionDirectory path={execution.target.workspacePath} hostId={execution.run?.hostId ?? 'local'} /><dt>Execution</dt><dd>{execution.executionId}</dd><dt>Configuration</dt><dd>{execution.definition.revision}</dd><dt>Started</dt><dd>{new Date(execution.startedAt).toLocaleString()}</dd>{'endedAt' in execution ? <><dt>Ended</dt><dd>{new Date(execution.endedAt).toLocaleString()}</dd><dt>Exit code</dt><dd>{execution.exitCode ?? 'Unconfirmed'}</dd></> : null}<dt>Output</dt><dd>Bounded terminal text · combined stream</dd></dl></details> : null}
-        {snapshot?.admission && snapshot.latestConfirmed ? <details className="toolkit-result__details"><summary>Previous confirmed result</summary><p>{new Date(snapshot.latestConfirmed.endedAt).toLocaleString()} · {stateLabel[snapshot.latestConfirmed.state]}</p><Output executionId={snapshot.latestConfirmed.executionId} text={snapshot.latestConfirmed.text} /></details> : null}
+        {!showDisplay && snapshot?.admission && snapshot.latestConfirmed ? <details className="toolkit-result__details"><summary>Previous confirmed result</summary><p>{new Date(snapshot.latestConfirmed.endedAt).toLocaleString()} · {stateLabel[snapshot.latestConfirmed.state]}</p><Output executionId={snapshot.latestConfirmed.executionId} text={snapshot.latestConfirmed.text} /></details> : null}
       </>}
+      {showDisplay && (snapshot?.admission || ordinaryUnknown || snapshot?.state === 'failed') ? <details className="toolkit-result__details toolkit-result__previous" data-toolkit-previous-request>
+        <summary>{ordinaryUnknown ? 'Previous request is unconfirmed' : snapshot?.admission ? 'Previous request is in progress' : 'Previous request failed'}</summary>
+        <p>This earlier run or action keeps its own record. Display evaluation does not confirm or replace it.</p>
+        {snapshot?.reason ? <p className="toolkit-result__notice">{snapshot.reason}</p> : null}
+        {snapshot?.admission ? <p>Execution · {snapshot.admission.executionId}</p> : null}
+        {ordinaryUnknown && snapshot?.admission?.run === null ? <p className="settings-hint">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
+        {snapshot?.latestConfirmed ? <Output executionId={snapshot.latestConfirmed.executionId} text={snapshot.latestConfirmed.text} /> : null}
+      </details> : null}
       {copyNotice ? <p className="settings-hint" role="status">{copyNotice}</p> : null}
       {operationError ? <p className="toolkit-result__notice" role="alert">{operationError}</p> : null}
     </div>
     <footer className="performance-actions toolkit-result__actions">
+      {showDisplay ? <button type="button" className="small-button" disabled={!canEvaluate} onClick={() => void evaluate()}><RefreshCw size={13} className={displayRunning || evaluating ? 'toolkit-result__spinner' : undefined} /> Refresh display</button> : null}
       <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void primary()}>{connecting ? <RefreshCw size={13} className="toolkit-result__spinner" /> : <Play size={13} />} {connecting ? 'Generating & copying…' : runLabel ?? 'Run saved tool'}</button>
       {primaryActionId ? <button type="button" className="small-button" disabled={!canRun || busy || connecting} onClick={() => void operate('run')}><RefreshCw size={13} /> {entryLabel ?? 'Run saved tool'}</button> : null}
       {snapshot?.admission ? <button type="button" className="small-button" disabled={!canStop || busy} onClick={() => void operate('stop')}><Square size={12} /> Stop</button> : null}
       {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}><Play size={13} /> Continue original request</button> : null}
-      {unknown || reading.sourceReason ? <button type="button" className="small-button" disabled={reading.pending || busy} onClick={() => void reading.check()}><RefreshCw size={13} /> Check status</button> : null}
+      {unknown || ordinaryUnknown || reading.sourceReason ? <button type="button" className="small-button" disabled={reading.pending || busy} onClick={() => void reading.check()}><RefreshCw size={13} /> Check status</button> : null}
       {capturedScript && !scriptOpen ? <button type="button" className="small-button" onClick={() => setScriptOpen(true)}><Code2 size={13} /> Script</button> : null}
       <button type="button" className="small-button" onClick={() => { close(); navigation.openToolkit(definition.id) }}><Settings2 size={13} /> Configure</button>
     </footer>

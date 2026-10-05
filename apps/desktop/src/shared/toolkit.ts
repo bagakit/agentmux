@@ -12,7 +12,8 @@ export interface ToolkitDesktopApi {
   update(toolId: string, changes: ToolkitConfigurationChanges, expected?: ToolkitConfigurationChanges): Promise<{ definition: ToolkitToolConfiguration; changed: boolean }>
   remove(toolId: string, expected?: ToolkitConfigurationFields): Promise<{ toolId: string; removed: true }>
   run(toolId: string, input?: ToolkitRunInput): Promise<ToolkitSnapshot>
+  evaluate(toolId: string, input?: ToolkitRunInput): Promise<ToolkitSnapshot>
   action(toolId: string, actionId: string, input: ToolkitActionInput): Promise<ToolkitSnapshot>
   stop(toolId: string, executionId?: string | null): Promise<ToolkitSnapshot>
-  observe(toolId: string, onSnapshot: (value: ToolkitSnapshot) => void, onEnd?: (reason: string) => void): { dispose(): void }
+  observe(toolId: string, onSnapshot: (value: ToolkitSnapshot) => void, onEnd?: (reason: string) => void, options?: { evaluateOnDisplay?: boolean }): { dispose(): void }
 }

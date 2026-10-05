@@ -485,12 +485,13 @@ const api: AgentMuxPreloadApi = {
     get: async (toolId) => (await ipcRenderer.invoke('toolkit:get', toolId)).snapshot,
     script: async (toolId) => (await ipcRenderer.invoke('toolkit:script', toolId)).script,
     run: async (toolId, input) => (await ipcRenderer.invoke('toolkit:run', toolId, input)).snapshot,
+    evaluate: async (toolId, input) => (await ipcRenderer.invoke('toolkit:evaluate', toolId, input)).snapshot,
     action: async (toolId, actionId, input) => (await ipcRenderer.invoke('toolkit:action', toolId, actionId, input)).snapshot,
     stop: async (toolId, executionId) => (await ipcRenderer.invoke('toolkit:stop', toolId, executionId)).snapshot,
     add: async (toolId, value) => ipcRenderer.invoke('toolkit:add', toolId, value),
     update: async (toolId, changes, expected) => ipcRenderer.invoke('toolkit:update', toolId, changes, expected),
     remove: async (toolId, expected) => ipcRenderer.invoke('toolkit:remove', toolId, expected),
-    observe(toolId, onSnapshot, onEnd) {
+    observe(toolId, onSnapshot, onEnd, options) {
       const id = globalThis.crypto.randomUUID()
       let closed = false
       const snapshot = (_event: Electron.IpcRendererEvent, value: any) => {
@@ -504,7 +505,7 @@ const api: AgentMuxPreloadApi = {
         void ipcRenderer.invoke('toolkit:release', id).catch(() => {})
       }
       ipcRenderer.on(TOOLKIT_CHANGED_CHANNEL, snapshot); ipcRenderer.on(TOOLKIT_ENDED_CHANNEL, end)
-      void ipcRenderer.invoke('toolkit:observe', toolId, id).catch(error => {
+      void ipcRenderer.invoke('toolkit:observe', toolId, id, options).catch(error => {
         if (!closed) { dispose(); onEnd?.(String(error instanceof Error ? error.message : error)) }
       })
       return { dispose }

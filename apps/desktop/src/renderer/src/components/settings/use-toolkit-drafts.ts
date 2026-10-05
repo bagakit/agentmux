@@ -3,12 +3,12 @@ import type { ToolkitToolConfiguration, ToolkitInlineToolConfiguration, ToolkitP
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { configValuesEqual } from '../../../../shared/config-edit'
 
-const inlineFields = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions'] as const
+const inlineFields = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display'] as const
 const packageFields = ['kind', 'packagePath', 'enabled', 'statusBar', 'workspacePath', 'args'] as const
 const fieldsFor = (value: ToolkitConfigurationFields) => 'kind' in value ? packageFields : inlineFields
 const fieldValue = (value: ToolkitConfigurationFields, key: string): unknown => Object.getOwnPropertyDescriptor(value, key)?.value
 function assignField(value: ToolkitConfigurationFields, key: string, source: ToolkitConfigurationFields) {
-  if (key === 'actions' && !Object.hasOwn(source, key)) Reflect.deleteProperty(value, key)
+  if ((key === 'actions' || key === 'display') && !Object.hasOwn(source, key)) Reflect.deleteProperty(value, key)
   else Object.assign(value, { [key]: fieldValue(source, key) })
 }
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -21,7 +21,7 @@ export function isPackageDraft(entry: ToolkitDraft): entry is ToolkitDraft<Toolk
 export function isInlineDraft(entry: ToolkitDraft): entry is ToolkitDraft<ToolkitToolFields, ToolkitInlineToolConfiguration> { return !('kind' in entry.value) }
 export function toolkitFields(tool: ToolkitConfigurationFields): ToolkitConfigurationFields {
   if ('kind' in tool) return { kind: 'package', packagePath: tool.packagePath, enabled: tool.enabled, statusBar: tool.statusBar, workspacePath: tool.workspacePath, args: [...tool.args] }
-  return { name: tool.name, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, workspacePath: tool.workspacePath, script: tool.script, args: [...tool.args], ...(tool.actions ? { actions: tool.actions.map(action => ({ ...action, args: [...action.args] })) } : {}) }
+  return { name: tool.name, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar, workspacePath: tool.workspacePath, script: tool.script, args: [...tool.args], ...(tool.display ? { display: { ...tool.display, args: [...tool.display.args] } } : Object.hasOwn(tool, 'display') ? { display: null } : {}), ...(tool.actions ? { actions: tool.actions.map(action => ({ ...action, args: [...action.args] })) } : {}) }
 }
 export function toolkitDraftDirty(entry: ToolkitDraft): boolean {
   return entry.expected === null || fieldsFor(entry.value).some(key => !configValuesEqual(fieldValue(entry.value, key), fieldValue(entry.expected!, key)))
@@ -101,7 +101,7 @@ export function useToolkitDrafts(saved: readonly ToolkitToolConfiguration[]) {
     return saveFor(id).run(async () => {
       const changes: ToolkitConfigurationChanges = {}, expected: ToolkitConfigurationChanges = {}
       if (captured.expected) for (const key of fieldsFor(submitted)) if (!configValuesEqual(fieldValue(submitted, key), fieldValue(captured.expected, key))) {
-        Object.assign(changes, { [key]: fieldValue(submitted, key) }); Object.assign(expected, { [key]: key === 'actions' ? fieldValue(captured.expected, key) ?? [] : fieldValue(captured.expected, key) })
+        Object.assign(changes, { [key]: fieldValue(submitted, key) }); Object.assign(expected, { [key]: key === 'actions' ? fieldValue(captured.expected, key) ?? [] : key === 'display' ? fieldValue(captured.expected, key) ?? null : fieldValue(captured.expected, key) })
       }
       const accepted = captured.expected ? await writer.update(id, changes, expected) : await writer.add(id, submitted)
       setEntries(current => {
