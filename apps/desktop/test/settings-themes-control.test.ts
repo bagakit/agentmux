@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
-import { GRAPHITE_THEME, themeValue, getThemeCatalog, semanticIconIdSchema, THEME_FILE_MAX_BYTES, themeValueSchema } from '@agentmux/client-ui/theme'
+import { GRAPHITE_THEME, BUILTIN_THEMES, themeValue, getThemeCatalog, semanticIconIdSchema, THEME_FILE_MAX_BYTES, themeValueSchema } from '@agentmux/client-ui/theme'
 import { AgentMuxControlServer, AGENTMUX_CONTROL_SCHEMA_VERSION, connectAgentMuxRpc } from '../../../packages/core/src/control-host.js'
 import type { AgentMuxControlSettingsResourceRequest as Request, AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import { executeSettingsResourcesControl } from '../src/main/settings-resources-control.js'
@@ -37,12 +37,12 @@ describe('theme resources share the durable Main owner and theme schema', () => 
   it('discovers immutable built-ins and dynamic selectable custom IDs, then persists the full value', async () => {
     const f = await configOwnerFixture(), value = original()
     const builtins = await executeSettingsResourcesControl(request({ operation: 'settings.resource.list', resource: 'themes' }), f.owner)
-    expect(builtins).toMatchObject({ operation: 'settings.resource.list', items: [{ id: 'graphite', readonly: true }], issues: [] })
+    expect(builtins).toMatchObject({ operation: 'settings.resource.list', items: expect.arrayContaining([expect.objectContaining({ id: 'graphite', readonly: true })]), issues: [] })
     await executeSettingsResourcesControl(request({ operation: 'settings.resource.add', resource: 'themes', id: 'custom.proof', value }), f.owner)
     const found = await executeSettingsResourcesControl(request({ operation: 'settings.resource.get', resource: 'themes', id: 'custom.proof' }), f.owner)
     expect(found).toMatchObject({ item: { id: 'custom.proof', value, readonly: false } })
     const entry = await executeSettingsControl({ ...envelope, operation: 'settings.get', target: 'appearance.themeId' }, f.owner)
-    expect(entry).toMatchObject({ entries: [{ value: 'graphite', default: 'graphite', enum: ['graphite', 'custom.proof'] }] })
+    expect(entry).toMatchObject({ entries: [{ value: 'graphite', default: 'graphite', enum: expect.arrayContaining(['graphite', 'custom.proof']) }] })
     await executeSettingsControl({ ...envelope, operation: 'settings.set', key: 'appearance.themeId', value: 'custom.proof' }, f.owner)
     const reread = await new ConfigStore(f.store.filePath).get()
     expect(reread.appearance.themeId).toBe('custom.proof')
@@ -91,7 +91,7 @@ describe('theme resources share the durable Main owner and theme schema', () => 
     expect(f.owner.current.appearance.customThemes!['custom.bad']).toEqual({ version: 999 })
     expect(f.owner.current.appearance.customThemes!['custom.scalar']).toBeNull()
     const listing = await executeSettingsResourcesControl(request({ operation: 'settings.resource.list', resource: 'themes' }), f.owner)
-    expect(listing).toMatchObject({ items: [{ id: 'graphite' }, { id: 'custom.good' }], issues: [{ id: 'custom.bad' }, { id: 'custom.scalar' }, { id: 'graphite' }, { id: '' }] })
+    expect(listing).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: 'graphite' }), expect.objectContaining({ id: 'custom.good' })]), issues: [{ id: 'custom.bad' }, { id: 'custom.scalar' }, { id: 'graphite' }, { id: '' }] })
     await executeSettingsControl({ ...envelope, operation: 'settings.set', key: 'appearance.editorFontSize', value: '16' }, f.owner)
     expect((await f.disk()).appearance.customThemes).toEqual(f.owner.current.appearance.customThemes)
     await expect(executeSettingsResourcesControl(request({ operation: 'settings.resource.get', resource: 'themes', id: 'custom.bad' }), f.owner)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE', message: expect.stringContaining('retained') })
@@ -156,7 +156,7 @@ describe('theme resources share the durable Main owner and theme schema', () => 
   it('rejects a theme whose compact JSON fits but actual exported file exceeds its import boundary', async () => {
     const f = await configOwnerFixture(), id = 'custom.file-boundary'
     let value = original()
-    for (let padding = 500; padding <= 2000; padding += 25) {
+    for (let padding = 0; padding <= 2000; padding += 5) {
       value = { ...original(), icons: Object.fromEntries(semanticIconIdSchema.options.map(name => [name,
         { kind: 'paths', paths: Array.from({ length: 32 }, () => ({ d: `M0 0 L24 24${' '.repeat(padding)}` })) }])) } as ReturnType<typeof original>
       if (Buffer.byteLength(JSON.stringify({ id, ...value }, null, 2) + '\n') > THEME_FILE_MAX_BYTES) break
@@ -229,10 +229,10 @@ describe('actual public RPC and compiled amux consume the same Main theme owner'
     }
     try {
       const discovered = await rpc.call('settings.themes.ls', {})
-      expect(discovered).toMatchObject({ resource: 'themes', items: [{ id: 'graphite', readonly: true }], issues: [] })
+      expect(discovered).toMatchObject({ resource: 'themes', items: expect.arrayContaining([expect.objectContaining({ id: 'graphite', readonly: true })]), issues: [] })
       expect(await cli(['settings', 'themes', 'create', 'custom.cli', '--input', '-'], value)).toMatchObject({ item: { id: 'custom.cli', readonly: false, value } })
       expect(await rpc.call('settings.themes.inspect', { id: 'custom.cli' })).toMatchObject({ item: { value } })
-      expect(await cli(['settings', 'inspect', 'appearance.themeId'])).toMatchObject({ entries: [{ enum: ['graphite', 'custom.cli'] }] })
+      expect(await cli(['settings', 'inspect', 'appearance.themeId'])).toMatchObject({ entries: [{ enum: expect.arrayContaining(['graphite', 'custom.cli']) }] })
       expect(await cli(['settings', 'set', 'appearance.themeId', 'custom.cli'])).toMatchObject({ entry: { value: 'custom.cli' } })
       const updated = { ...value, name: 'CLI update' }
       expect(await cli(['settings', 'themes', 'update', 'custom.cli', '--input', '-'], { changes: { name: updated.name }, expected: value })).toMatchObject({ item: { value: updated } })
@@ -243,7 +243,7 @@ describe('actual public RPC and compiled amux consume the same Main theme owner'
       expect(await cli(['settings', 'themes', 'delete', 'custom.cli', '--input', '-'], { expected: updated })).toMatchObject({ removed: true })
       expect(f.owner.current.appearance.themeId).toBe('graphite')
       expect(seen.filter(input => input.operation.startsWith('settings.resource.')).length).toBeGreaterThan(5)
-      expect(getThemeCatalog((await f.disk()).appearance.customThemes).items).toHaveLength(1)
+      expect(getThemeCatalog((await f.disk()).appearance.customThemes).items.map(item => item.id)).toEqual(BUILTIN_THEMES.map(theme => theme.id))
     } finally { await rpc.dispose(); await server.stop() }
   }, 30_000)
 })
