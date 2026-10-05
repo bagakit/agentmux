@@ -2077,7 +2077,7 @@ export class AgentMuxClient {
   }
 
   private async historyDescriptor(agentSessionId: string): Promise<AgentSessionHistoryDescriptor> {
-    const descriptor = (await this.sessionHistorySources()).find(entry => entry.agentSessionId === agentSessionId)
+    const descriptor = await this.store.readHistorySource(agentSessionId)
     if (!descriptor) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
     return descriptor
   }
