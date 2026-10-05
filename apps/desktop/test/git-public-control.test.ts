@@ -24,7 +24,7 @@ async function git(...args: string[]) {
 }
 async function cli(args: string[]) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:AGENTMUX_|CTXMUX_)/u.test(key)))
-  const program = process.env.AGENTMUX_TEST_GIT_CLI ?? resolve('packages/core/bin/agentmux')
+  const program = process.env.AGENTMUX_TEST_GIT_CLI ?? resolve('packages/core/bin/amux')
   try {
     const result = await exec(process.execPath, [program, '--endpoint', 'unix:' + socket, ...args], { env, timeout: 15_000, maxBuffer: 4 * 1024 * 1024 })
     return { code: 0, body: JSON.parse(result.stdout), stderr: result.stderr }
@@ -136,9 +136,9 @@ describe('public CLI to Desktop Git owner to neutral Git on a real private repos
   }, 60_000)
 
   it('prints the actual compiled command and skill discovery without needing a Git request', async () => {
-    const program = process.env.AGENTMUX_TEST_GIT_CLI ?? resolve('packages/core/bin/agentmux')
+    const program = process.env.AGENTMUX_TEST_GIT_CLI ?? resolve('packages/core/bin/amux')
     const objectHelp = await exec(process.execPath, [program, '--help', 'git'], { timeout: 15_000 })
-    for (const action of ['history', 'commit', 'diff', 'open']) expect(objectHelp.stdout).toContain('agentmux git ' + action)
+    for (const action of ['history', 'commit', 'diff', 'open']) expect(objectHelp.stdout).toContain('amux git ' + action)
     const diffHelp = await exec(process.execPath, [program, '--help', 'git', 'diff'], { timeout: 15_000 })
     expect(diffHelp.stdout).toContain('--input FILE|-'); expect(diffHelp.stdout).toContain('Keep both rename paths')
     const skill = await exec(process.execPath, [program, '--skill'], { timeout: 15_000 })
