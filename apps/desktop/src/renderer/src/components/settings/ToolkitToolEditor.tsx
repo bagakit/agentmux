@@ -14,6 +14,7 @@ import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './u
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionStartIcon = semanticIconComponent('action.start')
 const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAddOperationIcon = semanticIconComponent('action.add-operation')
 const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
@@ -141,7 +142,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     {runFeedback ? <p className="settings-hint" role="status">{runFeedback}</p> : null}
     {operationError ? <p className="settings-inline-error" role="alert">{operationError}</p> : null}
     <footer className="toolkit-editor__footer">
-      <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionRemoveIcon size={13} /> Cancel new tool</>}</button>
+      <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
       <SettingsSaveBar save={save} dirty={dirty} disabled={invalid || entry.missing} label="Save tool" onSave={onSave} />
     </footer>
     <ConfirmationDialog open={confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />
