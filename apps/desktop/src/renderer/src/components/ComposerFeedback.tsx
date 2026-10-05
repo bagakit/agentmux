@@ -35,7 +35,7 @@ export function useComposerFeedback(scope: string) {
   return { failure: failure?.generation === generation ? failure : null, isCurrent, report, run, dismiss: () => setFailure(null) }
 }
 
-export function ComposerFeedback({ failure, onDismiss }: { failure: Failure | null; onDismiss(): void }) {
+export function ComposerFeedback({ failure, onDismiss, compact = false }: { failure: Failure | null; onDismiss(): void; compact?: boolean }) {
   const logId = failure ? describeError(failure.error).logId : undefined
   const [log, setLog] = useState(() => logId ? messageDeliveryDiagnostics.get(logId) : undefined)
   useEffect(() => {
@@ -43,7 +43,7 @@ export function ComposerFeedback({ failure, onDismiss }: { failure: Failure | nu
     update()
     return messageDeliveryDiagnostics.subscribe(update)
   }, [logId])
-  return failure ? <div className="composer-feedback"><MessageDeliveryFailure error={failure.error} context="tool"
+  return failure ? <div className="composer-feedback"><MessageDeliveryFailure compact={compact} error={failure.error} context="tool"
     logId={logId} log={log?.record.logId === logId ? log : undefined} copyText={async text => {
       let issue: unknown
       const copied = await copyTextToClipboard(text, error => { issue = error })

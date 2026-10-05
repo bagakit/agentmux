@@ -93,7 +93,7 @@ function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMessage; 
     update()
     return messageDeliveryDiagnostics.subscribe(update)
   }, [logId])
-  return <MessageDeliveryFailure error={entry.error ?? '投递没有确认完成。'} errorCode={entry.errorCode}
+  return <MessageDeliveryFailure compact error={entry.error ?? '投递没有确认完成。'} errorCode={entry.errorCode}
     logId={logId} log={log?.record.logId === logId ? log : undefined} inputUnconfirmed={entry.unconfirmed}
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }

@@ -204,7 +204,7 @@
 .composer__mailbox { position: relative; display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .composer__mailbox:hover { background: var(--surface-3); }
 .composer__mailbox:focus-visible { outline: 1px solid var(--focus-line); }
-.composer-mailbox { position: fixed; position-anchor: --composer-mailbox; position-area: top span-left; position-try-fallbacks: flip-inline; margin: 0 0 var(--sp-2); width: min(380px, 90vw); max-height: min(480px, 70vh); overflow: hidden; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
+.composer-mailbox { position: fixed; position-anchor: --composer-mailbox; position-area: top span-left; position-try-fallbacks: flip-inline; margin: 0 0 var(--sp-2); width: min(380px, 90vw, anchor-size(--composer-mailbox width)); max-height: min(480px, 70vh); overflow: hidden; padding: var(--sp-3); border: 0; border-radius: var(--radius); color: var(--text-2); background: var(--surface-2); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
 .composer-mailbox h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); }
 .composer-notice { display: flex; align-items: start; gap: var(--sp-2); padding: var(--sp-3); overflow-wrap: anywhere; }
 .composer-notice__body { flex: 1; min-width: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-micro); color: var(--text-3); }
@@ -313,6 +313,8 @@
 .composer-pending[hidden] { display: none; }
 .composer-pending[data-positioned='true'] { visibility: visible; }
 .composer-pending__cards { position: relative; display: grid; max-height: 180px; min-height: 0; margin: 0; padding: 6px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
+.composer-pending__notice { min-width: 0; margin-bottom: 3px; }
+.composer-pending__notice:last-child { margin-bottom: 0; }
 /* Only layout reads card bounds; native scroll changes two shared values. The
    projection stays behind the common right-bottom pivot, inside the scrollport. */
 .composer-pending__card {
@@ -362,7 +364,7 @@
   .composer-pending__card {
     --queue-distance: max(0px, calc(var(--queue-offset-x, 0px) - var(--queue-pointer-x, -500px)), calc(var(--queue-pointer-x, -500px) - var(--queue-offset-x, 0px) - var(--queue-card-width, 360px)), calc(var(--queue-offset-y, 0px) - var(--queue-scroll-y, 0px) - var(--queue-pointer-y, -500px)), calc(var(--queue-pointer-y, -500px) - var(--queue-offset-y, 0px) + var(--queue-scroll-y, 0px) - var(--queue-card-height, 28px)));
     --queue-material: clamp(72%, calc(94% - max(0px, calc(var(--queue-distance) - 64px)) / 220px * 22%), 94%);
-    opacity: clamp(.42, calc(1 - max(0px, calc(var(--queue-distance) - 64px)) / 220px), 1);
+    /* Distance changes the glass, while status and operation text keep their ink. */
   }
   .composer-pending__card:has(:focus-visible), .composer-pending__card[data-editing='true'] { --queue-material: 94%; opacity: 1; }
 }
@@ -391,3 +393,11 @@
 .composer-outbox__actions { margin-top: 0; }
 .composer-outbox [data-archived="true"] .composer-mailbox__row { color: var(--text-2); }
 .composer-pending__retry { min-width: 0; margin: 5px 0; color: var(--text-2); font: var(--fs-meta, 12px)/1.45 var(--font-ui, sans-serif); overflow-wrap: anywhere; }
+.composer-pending__card[data-explained='true'] { height: auto; min-height: 28px; grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+.composer-pending__card[data-explained='true'] > .composer-pending__state { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 5px; min-width: 0; }
+.composer-pending__reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-pending__card[data-explained='true'] > .composer-pending__actions { grid-column: 2; grid-row: 1; }
+.composer-pending__card[data-explained='true'] > .composer-pending__preview { grid-column: 1 / -1; grid-row: 2; }
+.composer-pending__card:has(.composer-pending__retry) > .composer-pending__preview { grid-column: 1; }
+.composer-pending__card > .composer-pending__retry { grid-column: 2; grid-row: 2; display: flex; align-items: center; margin: 0; }
+.composer-pending__retry > .composer-tool { flex: 0 0 auto; width: auto; min-height: 24px; height: auto; padding: 0 6px; font: inherit; }

@@ -42,6 +42,7 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   // Short authored messages remain useful. A serialized diagnostic stays in full in the report.
   const readable = presented.message.length <= 180 && !/[\n\r{}]/u.test(presented.message) && !/^\s*\[/u.test(presented.message)
   return { kind: noInput ? 'failed' : 'unknown', title: input.context === 'tool' ? '操作未完成' : '发送未完成',
+    compactCause: readable ? presented.message : undefined,
     state: readable ? presented.message : '未能确认这次操作的结果，完整原因保留在技术详情中。',
     action: input.context === 'tool' ? '草稿已保留，可以重试此操作。' : noInput ? '原消息已保留，可以重试。' : '输入结果未知，请先核对原对话与投递记录。' }
 }

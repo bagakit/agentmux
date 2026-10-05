@@ -1,6 +1,6 @@
 import { ArrowUp, Check, CircleHelp, Clock3, Copy, LoaderCircle, TriangleAlert, X } from 'lucide-react'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { queuedMessageState, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
@@ -8,7 +8,7 @@ import { WindowOverlayPortal } from './WindowOverlayHost'
 import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../lib/terminal-view-observation'
 
 /** Original queue facts, viewed by operation identity; this surface owns no delivery state. */
-export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, onMore }: {
+export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, onMore, notice }: {
   queued: readonly ComposerQueuedMessage[]
   pendingInteraction: boolean
   anchorRef: RefObject<HTMLButtonElement | null>
@@ -21,6 +21,8 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   sendImmediately?: boolean
   suppressed?: boolean
   onMore: (id: string) => void
+  /** Existing notice owner supplies presentation only, never queue or delivery state. */
+  notice?: ReactNode
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -99,7 +101,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     resize.observe(list)
     for (const card of list.children) resize.observe(card)
     return () => { list.removeEventListener('scroll', updateScrollPivot); resize.disconnect() }
-  }, [queued, currentIndex, editingId, suppressed])
+  }, [queued, currentIndex, editingId, suppressed, Boolean(notice)])
 
   useLayoutEffect(() => {
     const revealId = editingId ?? selectedId ?? active?.id
@@ -110,7 +112,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
 
   useEffect(() => {
     const anchor = anchorRef.current, floating = surfaceRef.current
-    if (suppressed || !queued.length || !anchor?.isConnected || !floating) return
+    if (suppressed || (!queued.length && !notice) || !anchor?.isConnected || !floating) return
     const composer = anchor.closest<HTMLElement>('.composer')
     const region = anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? anchor.closest<HTMLElement>('.agent-surface') ?? composer
     if (!composer || !region) return
@@ -233,7 +235,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       disposed = true; stop(); resize.disconnect(); cursorObserver.disconnect(); terminalObserver.disconnect(); interactionObserver.disconnect()
       stopInputGeometry(); cancelAnimationFrame(geometryFrame)
     }
-  }, [anchorRef, queued.length, suppressed])
+  }, [anchorRef, queued.length, suppressed, Boolean(notice)])
 
   useLayoutEffect(() => {
     const floating = surfaceRef.current
@@ -272,7 +274,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
 
   useLayoutEffect(() => { if (!suppressed && editingId) surfaceRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus() }, [suppressed, editingId])
 
-  if (!queued.length || !selected) return null
+  if (!selected && !notice) return null
   const select = (id: string) => { if (editingId) return; setSelectedId(id) }
   const move = (index: number) => {
     const entry = queued[Math.max(0, Math.min(queued.length - 1, index))]
@@ -282,8 +284,8 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     node?.focus(); node?.scrollIntoView({ block: 'nearest' })
   }
   return <WindowOverlayPortal>
-    <section ref={surfaceRef} className="composer-pending" aria-label="待发消息" hidden={suppressed} data-state={suppressed ? 'closed' : 'open'}
-      data-operation-id={selected.id} data-count={queued.length}
+    <section ref={surfaceRef} className="composer-pending" aria-label={selected ? '待发消息' : 'Message Tool 提醒'} hidden={suppressed} data-state={suppressed ? 'closed' : 'open'}
+      data-operation-id={selected?.id} data-count={queued.length}
       onPointerLeave={() => setHoveredId(null)}
       onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSelectedId(null) }}
       onKeyDown={event => {
@@ -296,6 +298,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       }}>
 
         <ol ref={listRef} className="composer-pending__cards" aria-label="逐条待发消息">
+          {!suppressed && notice ? <li className="composer-pending__notice">{notice}</li> : null}
           {queued.map((entry, index) => {
             const state = queuedMessageState(entry, pendingInteraction)
             const immediate = entry.immediateSend ?? sendImmediately
@@ -303,22 +306,24 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
             const canSend = !conditionChanged && entry.id !== editingId && !state.busy && Boolean(onSend)
             const Icon = state.busy ? LoaderCircle : entry.unconfirmed ? CircleHelp : !entry.deliverable || entry.error || entry.status === 'failed' ? TriangleAlert : Clock3
             const editing = entry.id === editingId && Boolean(onEdit)
+            const explained = !editing && Boolean(entry.preparationWait || entry.unconfirmed || entry.error || entry.status === 'failed' || !entry.deliverable || pendingInteraction)
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
             return <li key={entry.id} className="composer-pending__card" data-operation-id={entry.id}
-              data-queue-index={index} style={{ '--queue-depth': Math.min(4, Math.abs(index - currentIndex)) } as CSSProperties} data-selected={entry.id === selected.id} data-busy={state.busy} data-editing={editing}
+              data-queue-index={index} style={{ '--queue-depth': Math.min(4, Math.abs(index - currentIndex)) } as CSSProperties} data-selected={entry.id === selected?.id} data-busy={state.busy} data-editing={editing} data-explained={explained}
               tabIndex={0} aria-label={'待发 ' + (index + 1) + ': ' + entry.text}
               onPointerMove={event => { if (!editingId && event.pointerType !== 'touch' && entry.id !== hoveredId) setHoveredId(entry.id) }}
               onPointerLeave={() => setHoveredId(current => current === entry.id ? null : current)} onFocus={() => select(entry.id)}>
-              <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} aria-hidden="true" /><span className="composer-pending__sr-only">{state.label}</span></span>
+              <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} aria-hidden="true" /><span className={explained ? 'composer-pending__reason' : 'composer-pending__sr-only'}>{state.label}</span></span>
               {editing && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => {
                 setEditingId(null)
                 if (surfaceRef.current?.contains(document.activeElement)) listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus()
               }} /> : <button type="button" className="composer-pending__preview" aria-label="编辑这条待发消息" disabled={!entry.editable || !onEdit || Boolean(editingId)}
                 onClick={() => { setSelectedId(entry.id); setEditingId(entry.id); setCopyResult(null) }}>{entry.text.replace(/\s+/g, ' ').trim()}</button>}
-              {entry.preparationWait ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
+              {entry.preparationWait ? <p className="composer-pending__retry" role="status"><span className="composer-pending__sr-only">{state.label}</span>
+                {entry.preparationWait.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
+              </p> : null}
               <div className="composer-pending__actions">
-                {entry.preparationWait?.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
-                {entry.id === selected.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><X size={12} aria-hidden="true" /></button> : null}
+                {entry.id === selected?.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><X size={12} aria-hidden="true" /></button> : null}
                 {conditionChanged && onMoveToDraft ? <button type="button" className="composer-tool composer-pending__recover" disabled={Boolean(editingId) || state.busy} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={() => { void onMoveToDraft(entry.id, entry.text) }}>移至草稿</button> : null}
                 {!conditionChanged ? <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
                   disabled={!canSend} onClick={() => onSend?.(entry.id)}><ArrowUp size={14} aria-hidden="true" /></button> : null}
