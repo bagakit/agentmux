@@ -15,7 +15,9 @@ function validateEndpoint(value: unknown, socketPath?: string): void {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const result = value as Record<string, unknown>
     const endpoint = result.endpoint as Record<string, unknown> | undefined
-    if (Object.keys(result).sort().join(',') === 'endpoint,framing,protocol' &&
+    const shape = Object.keys(result).sort().join(',')
+    if ((shape === 'endpoint,framing,protocol' ||
+         shape === 'connection,endpoint,framing,protocol' && result.connection === 'responded') &&
         result.protocol === 'jsonrpc-2.0' && result.framing === 'json-lines' &&
         endpoint && typeof endpoint === 'object' && !Array.isArray(endpoint) &&
         Object.keys(endpoint).sort().join(',') === 'path,transport' && endpoint.transport === 'unix' &&
@@ -23,8 +25,8 @@ function validateEndpoint(value: unknown, socketPath?: string): void {
         (socketPath === undefined || endpoint.path === socketPath)) {
       // The current validator checks every other field. This synthetic receipt is
       // diagnostic only: the original response is always refused below.
-      parseRpcNativeResult('system.endpoint', { ...result, connection: 'responded' }, {})
-      throw new AgentMuxError('The remote Core uses an older endpoint interface without a confirmed connection receipt. Update this service in its connection settings.',
+      parseRpcNativeResult('system.endpoint', { ...result, connection: 'responded', publication: null }, {})
+      throw new AgentMuxError('The remote Core uses an older endpoint interface without current publication facts. Update this service in its connection settings.',
         'REMOTE_CORE_UPGRADE_REQUIRED')
     }
   }
