@@ -29,7 +29,7 @@ await mkdir(evidenceRoot, { recursive: true })
 const evidence = await mkdtemp(join(evidenceRoot, 'run-'))
 const scratch = join(evidence, 'source')
 const core = join(scratch, 'packages/core')
-const cli = 'packages/core/bin/agentmux'
+const cli = 'packages/core/bin/amux'
 const receipt = { schema: 'agentmux.run-storage-observation-source-mutations.v1', passed: false,
   sourceBefore: Object.fromEntries([...original].map(([file, bytes]) => [file, digest(bytes)])),
   productionTest: test, compiledCli: cli, runtimeControl: [], sourceTreeWrites: 0, cases: [] }

@@ -9,7 +9,7 @@ import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { startPackedPublicControl, exercisePackedPublicControl, rawControlReceipt } from './fixtures/packed-public-rpc.mjs'
 
 const exec = promisify(execFile)
-const bin = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const bin = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 

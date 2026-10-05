@@ -65,7 +65,7 @@ async function worker(root) {
     // This wrapper only configures the standard OpenSSH process used by the public transport.
     await writeFile(join(root, 'bin/ssh'), '#!/bin/sh\nexec /usr/bin/ssh -F ' + quote(join(root, 'ssh-client.conf')) + ' "$@"\n', { mode: 0o700 })
     await writeFile(join(root, 'remote-cli'), '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' +
-      quote(join(base, 'packages/core/bin/agentmux')) + ' "$@"\n', { mode: 0o700 })
+      quote(join(base, 'packages/core/bin/amux')) + ' "$@"\n', { mode: 0o700 })
     process.env.PATH = join(root, 'bin') + ':' + process.env.PATH
     let sshStderr = ''
     sshd = spawn('/usr/sbin/sshd', ['-D', '-e', '-f', sshConfig], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] })

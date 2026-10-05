@@ -13,7 +13,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxControlSettingsResourceKind } from '../src/control.js'
 import { AgentMuxError } from '../src/errors.js'
 
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'resource-proof' }
 const initial = { label: 'Original', parts: ['one'], attributes: { color: 'quiet' } }
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)

@@ -70,7 +70,7 @@ const nativeContext = session => ({ processId: undefined, args, workspacePath: s
 const screenReady = async session => client.screenEvidence.wait(session, 0, false,
   screen => provider.inspectPromptExecution(screen.snapshot()) === 'idle', { timeoutMs: 20_000, timeoutMessage: 'private native idle composer', terminalMessage: 'private exit', requireCompleteFrame: true })
 const cli = async (session, body, execution, operation) => {
-  const argv = [fileURLToPath(new URL('../../bin/agentmux', import.meta.url)), '--endpoint', 'unix://' + server.path, 'agent', 'send', '--to-session', session.agentSessionId, '--text', body, '--execution', execution, '--operation-id', operation]
+  const argv = [fileURLToPath(new URL('../../bin/amux', import.meta.url)), '--endpoint', 'unix://' + server.path, 'agent', 'send', '--to-session', session.agentSessionId, '--text', body, '--execution', execution, '--operation-id', operation]
   try { const result = await execute(process.execPath, argv, { env: process.env, timeout: 50_000, maxBuffer: 1024 * 1024 }); return { code: 0, ...result, result: JSON.parse(result.stdout).result } }
   catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr } }
 }

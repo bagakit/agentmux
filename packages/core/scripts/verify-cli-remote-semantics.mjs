@@ -12,7 +12,7 @@ const files = dir => readdirSync(dir, { recursive: true, withFileTypes: true }).
 const testPaths = ['cli-remote-semantics.test.ts', 'agentmux-cli-help.test.ts', 'agent-context.test.ts',
   'public-rpc-ssh-channel.test.ts', 'public-rpc-transports.test.ts', 'helpers/public-rpc-owner.ts', 'helpers/object-cli-rpc.ts', 'fixtures/native-history-session.ts']
 const paths = [...files(join(root, 'packages/core/src')), ...testPaths.map(p => join(root, 'packages/core/test', p)),
-  ...['packages/core/bin/agentmux', 'packages/core/package.json', 'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs',
+  ...['packages/core/bin/amux', 'packages/core/package.json', 'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs',
     'packages/core/tsconfig.json', 'packages/core/tsconfig.build.json', 'tsconfig.base.json',
     'packages/core/scripts/verify-cli-remote-semantics.mjs'].map(p => join(root, p))]
 const inputs = Object.fromEntries(paths.map(p => [relative(root, p), sha(readFileSync(p))]))

@@ -1164,7 +1164,7 @@ describe('Grok native whole-user-query reading projection', () => {
       expect(entry.kind).toBe('item')
       if (entry.kind !== 'item' || !('contentParts' in entry.item)) throw new Error('Expected original native item')
       expect(entry.item.contentParts).toEqual([{ kind: 'text', text: raw, readingRange: { start: 13, end: raw.length - 14 } }])
-      const cli = process.env.AGENTMUX_GROK_QUERY_CLI ?? join(import.meta.dirname, '../../bin/agentmux')
+      const cli = process.env.AGENTMUX_GROK_QUERY_CLI ?? join(import.meta.dirname, '../../bin/amux')
       const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
         const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_')))
         const child = spawn(process.execPath, [cli, '--endpoint', `unix:${socket}`, 'agent', 'history', '--host', 'local',

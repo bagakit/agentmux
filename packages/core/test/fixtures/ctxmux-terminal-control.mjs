@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
 
 const emoji = Buffer.from('😀')
-const agentMuxVersion = execFileSync('agentmux', ['--version'], { encoding: 'utf8' }).trim()
+const agentMuxVersion = execFileSync('amux', ['--version'], { encoding: 'utf8' }).trim()
 
 process.stdout.write(`terminal-env:${process.env.TERM}:${process.env.COLORTERM}:${process.env.NO_COLOR === undefined ? 'color-enabled' : 'no-color'}\n`)
-process.stdout.write(`agentmux-env:${process.env.AGENTMUX_ENV}:${process.env.AGENTMUX_CLI?.endsWith('/bin/agentmux')}:${agentMuxVersion}\n`)
+process.stdout.write(`agentmux-env:${process.env.AGENTMUX_ENV}:${process.env.AGENTMUX_CLI?.endsWith('/bin/amux')}:${agentMuxVersion}\n`)
 process.stdout.write(`current-env:${process.env.AGENTMUX_TEST_CURRENT_ENV}:${process.env.AGENTMUX_TEST_EXPLICIT_ENV}\n`)
 process.stdout.write('prefix:')
 process.stdout.write(emoji.subarray(0, 2))

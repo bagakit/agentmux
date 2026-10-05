@@ -19,7 +19,7 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentMuxRunInputData } from '../src/types.js'
 
 const execute = promisify(execFile)
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 
 type Inner = {
   connected: boolean
