@@ -1184,6 +1184,14 @@ function confirmedFocusReference(state: Pick<AppState, 'tabs' | 'layouts'>, sess
 // In-flight filesystem reads share the original snapshot owner. No identity registry is stored.
 const scratchTopicReads = new Map<string, { scope: string; promise: Promise<void> }>()
 
+// Only an active opening is shared. A replacement Launcher is a new intent, even
+// at the same address; another Region never waits for this presentation flight.
+const terminalOpeningCalls = new Map<string, {
+  surface: WorkbenchSurface | undefined
+  pendingSurface?: WorkbenchSurface | undefined
+  promise: Promise<void>
+}>()
+
 function emptyRuntimeSnapshot(): RuntimeSnapshot {
   return {
     sessions: [],
@@ -2338,7 +2346,7 @@ type WarmTerminal = {
   /** Retained until its original creation is confirmed; absent on an already known Run. */
   creation?: WarmTerminalCreation
   /** One explicit opening owns the retained slot until its original receipt settles. */
-  claimingLauncherId?: string
+  claimToken?: object
 }
 
 export function warmTerminalKey(hostId: string, workspacePath: string): string {
@@ -8380,7 +8388,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const held = get().warmTerminal
     if (!workspace || !held || held.key !== warmTerminalKey(workspace.hostId, workspace.path)) return null
     const creation = held.creation
-    if (held.claimingLauncherId || held.session || !creation?.issue || creation.inFlight) return await held.ready
+    if (held.session || !creation?.issue || creation.inFlight) return await held.ready
     if (hostRestored && creation.hostRecoveryAttempted) return null
     // This operation may already have created a Run. Confirm its original exact request;
     // replacing the UUID or reconstructing its parameters would be another creation.
@@ -8407,168 +8415,177 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     return session
   },
-  async promoteWarmTerminal(tabGroupId, launcher) {
-    const state = get()
-    const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
-    const launcherSurface = launcherTab && launcher
-      ? launcherTab.regions[launcher.regionId]
-      : undefined
-    if (launcher && launcherSurface?.kind !== 'launcher') {
-      throw new Error('Launcher Region is no longer available')
+  promoteWarmTerminal(tabGroupId, launcher) {
+    const initial = get()
+    const surface = launcher ? initial.tabs[launcher.tabId]?.regions[launcher.regionId] : undefined
+    const openingKey = JSON.stringify([tabGroupId, launcher?.tabId, launcher?.regionId, launcher ? null : initial.activeWorkspaceId])
+    const existing = terminalOpeningCalls.get(openingKey)
+    if (existing && (!launcher || surface !== undefined && (surface === existing.surface || surface === existing.pendingSurface))) return existing.promise
+    const flight: { surface: WorkbenchSurface | undefined; pendingSurface?: WorkbenchSurface | undefined; promise: Promise<void> } = {
+      surface, promise: Promise.resolve()
     }
-    if (launcherTab && !workbenchViewCloseAllowsView(state.closingWorkbenchViews, launcherTab.id)) {
-      throw new Error('The View is closing')
-    }
-    const workspaceId = resolveLauncherWorkspaceId({
-      launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined,
-      launcherTabWorkspaceId: launcherTab?.workspaceId,
-      activeWorkspaceId: state.activeWorkspaceId
-    })
-    const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
-    if (!workspace) throw new Error('Select a workspace first')
-    const key = warmTerminalKey(workspace.hostId, workspace.path)
-    if (state.warmTerminal?.key !== key) {
-      await get().launchTerminal(tabGroupId, launcher)
-      return
-    }
-    let held = state.warmTerminal
-    if (held.claimingLauncherId) throw new Error('This reusable shell is already opening in another Region. Its original request is retained; check it again after that opening settles.')
-    if (held.creation?.issue) {
-      const ownerLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
-      const confirmed = await get().retryWarmTerminal(workspace.id, ownerLauncherId)
-      if (!confirmed) {
-        const issue = get().warmTerminal?.creation?.issue ?? held.creation.issue
-        throw Object.assign(new Error(issue.message), issue)
+    const open = async () => {
+      const state = get()
+      const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
+      const launcherSurface = launcherTab && launcher
+        ? launcherTab.regions[launcher.regionId]
+        : undefined
+      if (launcher && launcherSurface?.kind !== 'launcher') {
+        throw new Error('Launcher Region is no longer available')
       }
-      const live = get().warmTerminal
-      if (!live || live.key !== key || live.session?.id !== confirmed.id) return
-      if (live.claimingLauncherId) throw new Error('This reusable shell is already opening. Check its original request after that opening settles.')
-      held = live
-      // A late confirmation belongs to the original Launcher, never a replacement View.
-      if (launcher && (get().tabs[launcher.tabId]?.regions[launcher.regionId] !== launcherSurface ||
-        !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launcher.tabId))) return
-    }
-    // Reserve the exact Launcher and retain the warm slot until its original receipt settles.
-    // Another preview cannot erase that request, and only one opening may claim the same Run.
-    const pendingSurface: TerminalWorkbenchSurface | undefined = launcherTab && launcher ? {
-      regionId: launcher.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id,
-      sessionId: held.session?.id ?? crypto.randomUUID()
-    } : undefined
-    const claimingLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
-    set((current) => ({ warmTerminal: { ...held, claimingLauncherId }, ...(pendingSurface && launcherTab ? {
-      tabs: { ...current.tabs, [launcherTab.id]: replaceWorkbenchRegion(launcherTab, pendingSurface.regionId, pendingSurface) }
-    } : {}) }))
-    const session = await held.ready
-    set((current) => {
-      const available = current.warmTerminal
-      if (!available || available.ready !== held.ready || available.claimingLauncherId !== claimingLauncherId) return current
-      const { claimingLauncherId: _claim, ...retained } = available
-      return { warmTerminal: session ? null : retained }
-    })
-    if (!session) {
-      if (pendingSurface && launcherTab && launcherSurface) {
-        let restored = false
-        set((current) => {
-          const live = current.tabs[launcherTab.id]
-          if (!live || !ownsSessionLaunch(live.regions[pendingSurface.regionId], 'terminal', pendingSurface.sessionId)) return current
-          restored = true
-          return { tabs: { ...current.tabs, [live.id]: replaceWorkbenchRegion(live, pendingSurface.regionId, launcherSurface) } }
-        })
-        if (!restored) return
+      if (launcherTab && !workbenchViewCloseAllowsView(state.closingWorkbenchViews, launcherTab.id)) {
+        throw new Error('The View is closing')
       }
-      // The original request may have been accepted before its reply failed. Keep
-      // this exact creation available for Check again, including its typed failure.
-      set((current) => ({ warmTerminal: current.warmTerminal ?? held }))
-      const issue = held.creation?.issue ?? sessionLaunchFailure(new Error('The original shell creation is unconfirmed. Check this same request again.'))
-      throw Object.assign(new Error(issue.message), issue)
-    }
-    if (!launcherTab && !get().layouts[workspace.id]) {
-      if (await stopTerminalSession(session)) {
-        set((current) => ({
-          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
-            current.unclaimedTerminalSessionIds,
-            session.id
-          )
-        }))
+      const workspaceId = resolveLauncherWorkspaceId({
+        launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined,
+        launcherTabWorkspaceId: launcherTab?.workspaceId,
+        activeWorkspaceId: state.activeWorkspaceId
+      })
+      const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
+      if (!workspace) throw new Error('Select a workspace first')
+      const key = warmTerminalKey(workspace.hostId, workspace.path)
+      const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
+      const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
+      if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Terminal display position is unavailable')
+      if (state.warmTerminal?.key !== key || state.warmTerminal.claimToken) {
+        // Cache contention changes only whether this opening reuses a candidate.
+        const opening = get().launchTerminal(tabGroupId, launcher)
+        if (launcher) flight.pendingSurface = get().tabs[launcher.tabId]?.regions[launcher.regionId]
+        await opening
+        return
       }
-      throw new Error('Workspace layout is unavailable')
-    }
-    const inheritedTopicId = launcherTab
-      ? undefined
-      : inheritedTopicIdForNewTab(workspace.id, get().layouts[workspace.id], state.tabs, tabGroupId)
-    const targetTab = launcherTab ?? newLauncherTab(workspace.id, inheritedTopicId)
-    const tabId = targetTab.id
-    const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
-    const surface: TerminalWorkbenchSurface = {
-      regionId,
-      kind: 'terminal',
-      phase: 'attached',
-      workspaceId: workspace.id,
-      sessionId: session.id
-    }
-    let bound = false
-    let sessionOwnedByClose = false
-    let placementFailed = false
-    set((current) => {
-      if (!workbenchViewCloseAllowsSession(current.closingWorkbenchViews, session.id)) {
-        sessionOwnedByClose = true
-        return current
-      }
-      if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return current
-      let baseTab = targetTab
-      if (launcher) {
-        const live = current.tabs[tabId]
-        if (!live || (pendingSurface
-          ? !ownsSessionLaunch(live.regions[regionId], 'terminal', pendingSurface.sessionId)
-          : live.regions[regionId]?.kind !== 'launcher')) return current
-        baseTab = live
-      }
-      const nextTabs = { ...current.tabs, [tabId]: replaceWorkbenchRegion(baseTab, regionId, surface) }
-      const nextSessions = [...current.sessions.filter((item) => item.id !== session.id), session]
-      const nextUnclaimedIds = forgetUnclaimedTerminalSession(
-        current.unclaimedTerminalSessionIds,
-        session.id
-      )
-      if (launcher) {
-        bound = true
-        return {
-          tabs: nextTabs,
-          sessions: nextSessions,
-          unclaimedTerminalSessionIds: nextUnclaimedIds
+      let held = state.warmTerminal
+      const claimToken = {}
+      set({ warmTerminal: { ...held, claimToken } })
+      try {
+        if (held.creation?.issue) {
+          const ownerLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
+          const confirmed = await get().retryWarmTerminal(workspace.id, ownerLauncherId)
+          if (!confirmed) {
+            const issue = get().warmTerminal?.creation?.issue ?? held.creation.issue
+            throw Object.assign(new Error(issue.message), issue)
+          }
+          const live = get().warmTerminal
+          if (!live || live.key !== key || live.session?.id !== confirmed.id || live.claimToken !== claimToken) return
+          held = live
+          // A late confirmation belongs to the original Launcher, never a replacement View.
+          if (launcher && (get().tabs[launcher.tabId]?.regions[launcher.regionId] !== launcherSurface ||
+            !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launcher.tabId))) return
         }
-      }
-      const layout = current.layouts[workspace.id]
-      if (!layout) return current
-      // 挂不上就不 bound：下面的 `!bound` 路径会把已从槽里取出的 PTY 停掉，不泄漏进程。
-      // 但要与「Tab 正在关闭」那种静默放弃分开——落点不在场是用户点了按钮却什么都没发生，
-      // 必须响亮（原先用 addTab 的静默回落会留下一条永不显示的孤儿 Tab）。
-      const nextLayout = addTabPlacement(layout, tabGroupId, tabId)
-      if (!nextLayout) {
-        placementFailed = true
-        return current
-      }
-      bound = true
-      return {
-        tabs: nextTabs,
-        layouts: { ...current.layouts, [workspace.id]: nextLayout },
-        sessions: nextSessions,
-        unclaimedTerminalSessionIds: nextUnclaimedIds
-      }
-    })
-    if (!bound) {
-      if (sessionOwnedByClose) return
-      if (await stopTerminalSession(session)) {
-        set((current) => ({
-          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
+        // Reserve the exact Launcher and retain the warm slot until its original receipt settles.
+        // Another preview cannot erase that request, and only one opening may claim the same Run.
+        const pendingSurface: TerminalWorkbenchSurface | undefined = launcherTab && launcher ? {
+          regionId: launcher.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id,
+          sessionId: held.session?.id ?? crypto.randomUUID()
+        } : undefined
+        flight.pendingSurface = pendingSurface
+        set((current) => ({ ...(pendingSurface && launcherTab ? {
+          tabs: { ...current.tabs, [launcherTab.id]: replaceWorkbenchRegion(launcherTab, pendingSurface.regionId, pendingSurface) }
+        } : {}) }))
+        const session = await held.ready
+        if (!session) {
+          if (pendingSurface && launcherTab && launcherSurface) {
+            let restored = false
+            set((current) => {
+              const live = current.tabs[launcherTab.id]
+              if (!live || !ownsSessionLaunch(live.regions[pendingSurface.regionId], 'terminal', pendingSurface.sessionId)) return current
+              restored = true
+              return { tabs: { ...current.tabs, [live.id]: replaceWorkbenchRegion(live, pendingSurface.regionId, launcherSurface) } }
+            })
+            if (!restored) return
+          }
+          // The original request may have been accepted before its reply failed. Keep
+          // this exact creation available for Check again, including its typed failure.
+          const issue = held.creation?.issue ?? sessionLaunchFailure(new Error('The original shell creation is unconfirmed. Check this same request again.'))
+          throw Object.assign(new Error(issue.message), issue)
+        }
+        if (!launcherTab && !get().layouts[workspace.id]) throw new Error('Workspace layout is unavailable')
+        const inheritedTopicId = launcherTab
+          ? undefined
+          : inheritedTopicIdForNewTab(workspace.id, get().layouts[workspace.id], state.tabs, tabGroupId)
+        const targetTab = launcherTab ?? newLauncherTab(workspace.id, inheritedTopicId)
+        const tabId = targetTab.id
+        const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
+        const surface: TerminalWorkbenchSurface = {
+          regionId,
+          kind: 'terminal',
+          phase: 'attached',
+          workspaceId: workspace.id,
+          sessionId: session.id
+        }
+        let bound = false
+        let sessionOwnedByClose = false
+        let placementFailed = false
+        set((current) => {
+          if (!workbenchViewCloseAllowsSession(current.closingWorkbenchViews, session.id)) {
+            sessionOwnedByClose = true
+            return current
+          }
+          if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return current
+          let baseTab = targetTab
+          if (launcher) {
+            const live = current.tabs[tabId]
+            if (!live || (pendingSurface
+              ? !ownsSessionLaunch(live.regions[regionId], 'terminal', pendingSurface.sessionId)
+              : live.regions[regionId]?.kind !== 'launcher')) return current
+            baseTab = live
+          }
+          const nextTabs = { ...current.tabs, [tabId]: replaceWorkbenchRegion(baseTab, regionId, surface) }
+          const nextSessions = [...current.sessions.filter((item) => item.id !== session.id), session]
+          const nextUnclaimedIds = forgetUnclaimedTerminalSession(
             current.unclaimedTerminalSessionIds,
             session.id
           )
-        }))
+          if (launcher) {
+            bound = true
+            return {
+              warmTerminal: current.warmTerminal?.claimToken === claimToken ? null : current.warmTerminal,
+              tabs: nextTabs,
+              sessions: nextSessions,
+              unclaimedTerminalSessionIds: nextUnclaimedIds
+            }
+          }
+          const layout = current.layouts[workspace.id]
+          if (!layout) return current
+          // The cache still owns the original shell if its display position vanished.
+          const nextLayout = addTabPlacement(layout, tabGroupId, tabId)
+          if (!nextLayout) {
+            placementFailed = true
+            return current
+          }
+          bound = true
+          return {
+            warmTerminal: current.warmTerminal?.claimToken === claimToken ? null : current.warmTerminal,
+            tabs: nextTabs,
+            layouts: { ...current.layouts, [workspace.id]: nextLayout },
+            sessions: nextSessions,
+            unclaimedTerminalSessionIds: nextUnclaimedIds
+          }
+        })
+        if (!bound) {
+          if (sessionOwnedByClose) return
+          // Closing/replacing a presentation is not permission to stop this candidate.
+          if (placementFailed) throw new Error('The Tab Group is no longer available')
+          return
+        }
+        void get().refreshSession(session.id)
+      } finally {
+        set((current) => {
+          if (current.warmTerminal?.claimToken !== claimToken) return current
+          const { claimToken: _claim, ...retained } = current.warmTerminal
+          return { warmTerminal: retained }
+        })
       }
-      if (placementFailed) throw new Error('The Tab Group is no longer available')
-      return
     }
-    void get().refreshSession(session.id)
+    let resolveOpening!: () => void
+    let rejectOpening!: (error: unknown) => void
+    flight.promise = new Promise<void>((resolve, reject) => { resolveOpening = resolve; rejectOpening = reject })
+    const release = () => {
+      if (terminalOpeningCalls.get(openingKey) === flight) terminalOpeningCalls.delete(openingKey)
+    }
+    terminalOpeningCalls.set(openingKey, flight)
+    void open().then(() => { release(); resolveOpening() }, error => { release(); rejectOpening(error) })
+    return flight.promise
   },
   async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId) {
     const state = get()
