@@ -26,6 +26,11 @@ if (process.argv.includes('--prompt-preparation-stage')) {
   process.exit(await runPendingEditRestart(process.argv.slice(2), 'prompt-preparation-stage'))
 }
 
+if (process.argv.includes('--demand-collaboration') && !process.env.AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT) {
+  const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
+  process.exit(await runPendingEditRestart(process.argv.slice(2), 'demand-collaboration'))
+}
+
 // Resolve legacy proof dependencies only after the isolated build dispatch.
 const { AgentMuxSpatialStateStore } = await import('../../../packages/core/dist/spatial-state.js')
 const { regionIds } = await import('../../../packages/core/dist/spatial-layout.js')
@@ -34,6 +39,9 @@ const { connectAgentMuxRpc } = await import('../../../packages/core/dist/public-
 const { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace, readRecoverySpatialState } = await import('./goals-alignment-restart-proof.mjs')
 const { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } = await import('./workbench-swap-restart-proof.mjs')
 const { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns, proveOriginalRunOutput } = await import('./goals-entry-restart-proof.mjs')
+
+const demandCollaborationProof = process.argv.includes('--demand-collaboration')
+const collaboration = demandCollaborationProof ? await import('./demand-collaboration-restart-proof.mjs') : null
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
 // source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
@@ -45,7 +53,7 @@ const require = createRequire(import.meta.url)
 const exec = promisify(execFile)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
-const knownFlags = new Set(['--pending-edit', '--message-context', '--goals-entry', '--goals-direct-pmo', '--goals-alignment', '--close-region', '--identity-menu', '--swap-names', '--hold-for-watchdog'])
+const knownFlags = new Set(['--pending-edit', '--message-context', '--goals-entry', '--goals-direct-pmo', '--demand-collaboration', '--goals-alignment', '--close-region', '--identity-menu', '--swap-names', '--hold-for-watchdog'])
 for (const argument of process.argv.slice(2)) assert.ok(knownFlags.has(argument) || argument.startsWith('--probe-root=') || argument.startsWith('--receipt-path='), `Unknown workbench restart mode or option: ${argument}`)
 const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?.slice('--probe-root='.length)
 const receiptPath = process.argv.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
@@ -59,7 +67,7 @@ const pendingEditProof = process.argv.includes('--pending-edit')
 const revisedPendingText = 'Private revised second pending intent\n  Retained full text and spacing'
 const messagePrompt = { id: 'private-status-context', keyword: 'statuscontext', label: 'Private message context', body: 'Configured private instruction\n  Exact retained spacing', states: ['running', 'working'], providerId: 'codex' }
 const goalsEntryProof = process.argv.includes('--goals-entry')
-const goalsDirectPmoProof = process.argv.includes('--goals-direct-pmo')
+const goalsDirectPmoProof = process.argv.includes('--goals-direct-pmo') || demandCollaborationProof
 assert.ok(!(goalsEntryProof && goalsDirectPmoProof), 'Goals entry and direct Goal PMO are separate explicit modes')
 const goalsCtaProof = goalsEntryProof || goalsDirectPmoProof
 const ordinaryRecoveryProof = messageContextProof || goalsDirectPmoProof
@@ -70,7 +78,7 @@ const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNT
   AGENTMUX_SPATIAL_STATE_STORE: join(runtimeDirectory, 'state', 'spatial-state.json'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const children = new Set()
-const deadline = Date.now() + (goalsDirectPmoProof ? 240_000 : 110_000)
+const deadline = Date.now() + (demandCollaborationProof ? 540_000 : goalsDirectPmoProof ? 240_000 : 110_000)
 const tabId = 'crash-tab', agentRegionId = 'crash-agent', fileRegionId = 'crash-file'
 const workspaceId = 'crash-workspace', groupId = 'crash-group', scratchGroupId = 'crash-scratch-group'
 const oldDraft = 'Old durable draft', newDraft = 'New unsent draft must survive active Agent events and sudden process exit'
@@ -87,7 +95,7 @@ const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
-let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic
+let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic, demandObservationCdp
 let pressureProducer, pressureFinal, pressureQualification, maximumPressureGap
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
@@ -137,7 +145,10 @@ async function connectCdp(url) {
 async function launch(label) {
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, 'Ordinary private launches must not inherit seed controls: ' + name)
   const readyFile = join(root, `ready-${label}.json`)
-  const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
+  // The full App's original manifest owns app.getAppPath() and its resources.
+  // Direct legacy index.js launch gives a different root and is kept for old modes.
+  if (demandCollaborationProof) assert.equal(JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8')).main, './out/main/index.js')
+  const child = spawn(require('electron'), [demandCollaborationProof ? desktopRoot : join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
@@ -152,12 +163,13 @@ async function launch(label) {
   const target = await waitFor(`${label} renderer`, async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.call('Runtime.enable')
+  if (demandCollaborationProof) demandObservationCdp = cdp
   // Only the private fixture gets focus emulation: an occluded native window otherwise pauses
   // requestAnimationFrame and turns hydration/input verification into a visibility timeout.
   await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   try {
   if (goalsCtaProof && label === 'second') {
-    goalsEntryRestored = await restoreGoalsEntryBeforeSpace({ cdp, fixture: goalsEntryFixture, activateButton, waitFor,
+    goalsEntryRestored = await (collaboration?.restoreDemandCollaborationBeforeSpace ?? restoreGoalsEntryBeforeSpace)({ cdp, fixture: goalsEntryFixture, activateButton, waitFor,
       focusOriginal })
   }
   if (goalsAlignmentProof && label === 'second') {
@@ -198,7 +210,10 @@ async function seedWorkbench(seed, graph) {
   const spatial = await new AgentMuxSpatialStateStore().commit({ expectedRevision: 0, graph })
 
   const reportPath = join(root, 'seed-report.json')
-  const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
+  // The full App's original manifest owns app.getAppPath() and its resources.
+  // Direct legacy index.js launch gives a different root and is kept for old modes.
+  if (demandCollaborationProof) assert.equal(JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8')).main, './out/main/index.js')
+  const child = spawn(require('electron'), [demandCollaborationProof ? desktopRoot : join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...fixtureEnvironment,
       AGENTMUX_DESKTOP_RECOVERY_REPORT: reportPath, AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed),
       AGENTMUX_DESKTOP_READY_FILE: join(root, 'seed-ready.json'), AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1' }
@@ -357,7 +372,7 @@ try {
   // Core injects new private Session/Hook/capability facts only at the actual Run launch boundary.
   for (const name of inheritedCallerNames) delete process.env[name]
   const rendererIdentity = await compiledRendererIdentity()
-  const pendingEditBuild = pendingEditProof ? JSON.parse(await readFile(process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT, 'utf8')) : null
+  const pendingEditBuild = pendingEditProof || demandCollaborationProof ? JSON.parse(await readFile(demandCollaborationProof ? process.env.AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT : process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT, 'utf8')) : null
   if (pendingEditBuild) {
     assert.equal(pendingEditBuild.privateRoot, repositoryRoot)
     assert.equal(pendingEditBuild.compiled['apps/desktop/out/main/index.js'], hash(await readFile(join(desktopRoot, 'out/main/index.js'))))
@@ -372,7 +387,7 @@ try {
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
   await mkdir(topicsPath, { recursive: true })
   await mkdir(codexHome, { recursive: true, mode: 0o700 })
-  if (goalsCtaProof) goalsEntryFixture = await createGoalsEntryFixture({ root, userData, topicsPath, desktopRoot, directGoal: goalsDirectPmoProof, receiptPath })
+  if (goalsCtaProof) goalsEntryFixture = await (collaboration?.createDemandCollaborationFixture ?? createGoalsEntryFixture)({ root, userData, topicsPath, desktopRoot, directGoal: goalsDirectPmoProof, receiptPath })
   const executable = join(workspacePath, 'private-cat.sh'), bindingPath = join(root, 'private-hook-binding.json')
   // Generated identifiers/URL/token contain only the Core-defined safe ASCII alphabet. Never print
   // the binding or put it in argv; it belongs to this one temporary private Run only.
@@ -402,7 +417,7 @@ try {
   await waitFor('private inherited Hook binding', async () => { try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); return value.agentSessionId === session.agentSessionId ? value : null } catch { return null } })
   await writeFile(join(workspacePath, 'split.txt'), 'Other Region stays present\n')
   await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private crash fixture' }],
-    executors: { probe: { label: 'Private cat', providerId: 'codex', command: goalsEntryFixture?.executable ?? executable, args: [], env: { CODEX_HOME: codexHome }, injectAgentMuxGuide: false } },
+    executors: { probe: { label: 'Private cat', providerId: 'codex', command: goalsEntryFixture?.executable ?? executable, args: [], env: { CODEX_HOME: codexHome, ...(demandCollaborationProof ? { HOME: goalsEntryFixture.nativeHome, AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1', AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: goalsEntryFixture.nativeRecords } : {}) }, injectAgentMuxGuide: false } },
     workspaces: [{ id: '__scratch__', name: 'Private Topics', hostId: 'local', path: topicsPath, kind: 'folder' },
       { id: workspaceId, name: 'Crash fixture', hostId: 'local', path: workspacePath, kind: 'folder' }],
     ...(messageContextProof ? { composerShortcuts: [messagePrompt] } : {}),
@@ -428,7 +443,10 @@ try {
   if (swapNameProof) swapFixture = seedSwapRegions(seed, { session, peers: swapPeers, tabId, agentRegionId, fileRegionId, workspaceId, identityName, tabs: seedWorkbenchData.tabs })
   if (goalsAlignmentProof) goalsFixture = await createGoalsRestartFixture({ root, userData, workspaceId, session })
   const adapter = await loadSeedSpatialAdapter()
-  const graph = adapter({ config: JSON.parse(await readFile(join(userData, 'agentmux.config.json'), 'utf8')), sessions: [], ...seedWorkbenchData, spaceZoneBindings: {}, spatialRequests: {} }, [])
+  // Only the new mode binds baseline topology to the original Core create result.
+  // No inferred display Host, synthetic status or new Goal/role receipt is seeded.
+  const baselineSessions = demandCollaborationProof ? [{ id: session.agentSessionId, kind: 'agent', hostId: session.hostId, workspacePath: session.workspacePath, providerId: session.providerId, executorId: session.executorId, control: { kind: 'agent', hostId: session.hostId, agentSessionId: session.agentSessionId, run: session.run } }] : []
+  const graph = adapter({ config: JSON.parse(await readFile(join(userData, 'agentmux.config.json'), 'utf8')), sessions: baselineSessions, ...seedWorkbenchData, spaceZoneBindings: {}, spatialRequests: {} }, [])
   await seedWorkbench(seed, graph)
   const first = await launch('first')
   await delay(600) // Establish the pre-edit hydrated baseline, never flush a post-edit value.
@@ -443,9 +461,10 @@ try {
   if(identityMenuProof) assert.deepEqual(before.identity,{name:identityName,stored:identityName,more:1})
   assert.equal(before.draft, oldDraft); assert.equal(before.splitPercent, 70)
   assert.deepEqual(before.queued.map(entry => entry.operationId), ['private-queue-first', 'private-queue-unknown', 'private-queue-last'])
-  assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
+  if (!demandCollaborationProof) assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
+  else assert.ok(before.queued.every(entry => entry.errorCode === undefined || entry.errorCode === 'AGENT_EXECUTION_NOT_REQUESTED'), 'The current queue has no known failed input; original input cursors independently prohibit automatic replay')
   let queueBeforeMove = before.queued
-  if (pendingEditProof) {
+  if (pendingEditProof || demandCollaborationProof) {
     // The old seed predates the attached Run/home projection. Two real native
     // resize actions return to the original 70% layout and let production publish
     // its current graph before the edit proof. No fixture commit or flush occurs.
@@ -483,6 +502,7 @@ try {
       assert.deepEqual(await runProcessIdentity(originalRun.pid), ownedRunProcess)
       return core
     })
+    if (pendingEditProof) {
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
     try {
       pendingEditBefore = await rpc.call('message.pending.ls', { agentSessionId: session.agentSessionId })
@@ -504,6 +524,7 @@ try {
         JSON.stringify((await surface(first.cdp)).queued) === JSON.stringify(queueBeforeMove))
       assert.equal((await surface(first.cdp)).editorText, before.editorText, 'Public pending edit preserves the independent bottom composer draft')
     } finally { await rpc.dispose() }
+    }
   }
   await first.cdp.evaluate(`(() => {
     window.__crashProof = { hooks: [], writes: [], unloads: [] }
@@ -513,6 +534,7 @@ try {
       return original.call(this, name, value)
     }
     window.agentmux.sessions.onEvent(event => {
+      if (${demandCollaborationProof} && event.event.type === 'agent-session' && event.event.session.agentSessionId === ${JSON.stringify(session.agentSessionId)} && event.event.session.nativeSourceObservation?.state === 'unknown' && event.event.session.nativeSourceObservation?.reason === 'native-witness-unavailable' && event.event.session.run.runId === ${JSON.stringify(session.run.runId)}) window.__crashProof.hooks.push({ at: Date.now(), observedAt: event.event.session.nativeSourceObservation.observedAt, observation: 'native-source-unknown', runId: event.event.session.run.runId })
       if (event.event.type === 'agent-status' && event.event.agentSessionId === ${JSON.stringify(session.agentSessionId)} && event.event.evidence.source === 'native-hook')
         window.__crashProof.hooks.push({ at: Date.now(), observedAt: event.event.evidence.observedAt })
     })
@@ -557,7 +579,7 @@ setInterval(tick,100);
       pressureProducer.completedRequests++; pressureProducer.launchedRequests = Math.max(pressureProducer.launchedRequests, post.launchedRequests)
       pressureProducer.skippedTicks = Math.max(pressureProducer.skippedTicks, post.skippedTicks); pressureProducer.inFlightAfterLastCompletion = post.inFlight }
   } })
-  await waitFor('real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
+  await waitFor(demandCollaborationProof ? 'real unknown native-source observation preserves the original cat Run in Renderer' : 'real native-hook status reaches Renderer', () => first.cdp.evaluate('window.__crashProof.hooks.length >= 2'))
   if (messageContextProof) messageBefore = await readMessageContext(first.cdp)
   // Keyboard activation exercises actual native popover and React buttons without changing Agent
   // MRU focus through an unrelated pointer event. It does not grant permission to send old intent.
@@ -575,22 +597,28 @@ setInterval(tick,100);
   ])
   const readLast = "Array.from(document.querySelectorAll('.composer-outbox li')).find(row => row.querySelector('.composer-mailbox__preview')?.textContent === 'Private last pending intent')?.querySelector('.composer-mailbox__row')"
   await activateButton(first.cdp, readLast)
-  const selectedLastDetail = pendingEditProof
+  const selectedLastDetail = demandCollaborationProof
+    ? "document.querySelector('.composer-outbox__inline[data-record-key=\"queue:private-queue-last\"] [data-message-id=\"queue:private-queue-last\"] .log-turn__body')?.textContent.trim() === 'Private last pending intent'"
+    : pendingEditProof
     ? "document.querySelector('.composer-outbox[data-record-key=\"queue:private-queue-last\"] [data-message-id=\"queue:private-queue-last\"] .log-turn__body')?.textContent.trim() === 'Private last pending intent'"
     : "document.querySelector('.composer-outbox .composer-mailbox__full-text')?.textContent === 'Private last pending intent'"
   await waitFor('selected original queue detail', () => first.cdp.evaluate(selectedLastDetail))
-  const moveLastUp = pendingEditProof
+  const moveLastUp = pendingEditProof || demandCollaborationProof
     ? "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.getAttribute('aria-label') === 'Move up')"
     : "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.textContent === 'Move up')"
   await activateButton(first.cdp, moveLastUp)
   await activateButton(first.cdp, moveLastUp)
-  await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
+  if (!demandCollaborationProof) await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
   const expectedQueue = [queueBeforeMove[2], queueBeforeMove[0], queueBeforeMove[1]]
   await waitFor('actual outbox reordered', async () => (await surface(first.cdp)).outbox.map(row => row.text).join('|') === expectedQueue.map(entry => entry.text).join('|'))
   await activateButton(first.cdp, "document.querySelector('.composer-mailbox button[aria-label=\"Close mailbox\"]')")
   await waitFor('mailbox closed', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length === 0"))
   // Focus the already-active Agent editor without a pointer event that would change its MRU time.
   await first.cdp.evaluate(`(() => { const e = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]'); e.focus(); const s = getSelection(); s.selectAllChildren(e); return true })()`)
+  if (demandCollaborationProof) {
+    await first.cdp.evaluate(`(async () => { const e = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]');e.focus();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));e.focus();getSelection().selectAllChildren(e);return true })()` )
+    await waitFor('actual original composer owns input focus after mailbox close', () => first.cdp.evaluate(`document.activeElement === document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')`))
+  }
   await first.cdp.call('Input.insertText', { text: newDraft })
   await waitFor('actual composer changed', async () => (await surface(first.cdp)).editorText === newDraft)
   // Existing react-resizable-panels defaults a native ArrowLeft to -10 percentage points.
@@ -687,8 +715,8 @@ setInterval(tick,100);
   }
   const editedSpatial = await waitFor('Core confirms the exact original edited topology and resources', async () => {
     const value = await readRecoverySpatialState(first.cdp)
-    if (pendingEditProof) surfaceDiagnostic = { stage: 'pending-edit-topology', actual: value, expected: expectedWorkbench }
-    const exact = pendingEditProof ? isDeepStrictEqual(value.graph, expectedWorkbench.graph)
+    if (pendingEditProof || demandCollaborationProof) surfaceDiagnostic = { stage: demandCollaborationProof ? 'demand-original-topology' : 'pending-edit-topology', actual: value, expected: expectedWorkbench }
+    const exact = pendingEditProof || demandCollaborationProof ? isDeepStrictEqual(value.graph, expectedWorkbench.graph)
       : JSON.stringify(value.graph) === JSON.stringify(expectedWorkbench.graph)
     return exact ? value : null
   })
@@ -707,7 +735,7 @@ setInterval(tick,100);
     lastEditAt = Date.now()
   }
   if (goalsCtaProof) {
-    const entry = await clickGoalsEntryInActualUI({ cdp: first.cdp, fixture: goalsEntryFixture, activateButton, waitFor,
+    const entry = await (collaboration?.clickDemandCollaborationInActualUI ?? clickGoalsEntryInActualUI)({ cdp: first.cdp, fixture: goalsEntryFixture, activateButton, waitFor,
       expectedOriginalWorkbench: expectedWorkbench, expectedOriginalFocus: before.focus })
     expectedWorkbench = entry.workbench
     await assertPrivateRunOutsideElectronGroup(first.child.pid, goalsEntryFixture.normal.process.pid)
@@ -767,24 +795,35 @@ setInterval(tick,100);
   children.delete(producer)
   if (goalsCtaProof) {
     client = await connectLocalAgentMux({ store })
-    await readGoalsEntryNativeBaseline({ client, fixture: goalsEntryFixture })
+    await (collaboration?.readDemandCollaborationNativeBaseline ?? readGoalsEntryNativeBaseline)({ client, fixture: goalsEntryFixture })
     await client.dispose(); client = null
   }
   const second = await launch('second')
   const restoredExpectedWorkbench = goalsCtaProof ? goalsEntryFixture.expectedWorkbench : expectedWorkbench
   const restoredExpectedFocus = goalsCtaProof ? goalsEntryFixture.expectedFocus : swapNameProof ? immediatelyBeforeCrash.focus : before.focus
   if (goalsCtaProof) await assertPrivateRunOutsideElectronGroup(second.child.pid, goalsEntryFixture.retry.process.pid)
-  assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
+  if (!demandCollaborationProof) assert.deepEqual(second.origin, first.origin, 'Both real processes must use the exact same browser storage origin')
+  else {
+    assert.equal(second.origin.origin, first.origin.origin, 'Original browser storage origin remains exact')
+    for (const observed of [first.origin, second.origin]) {
+      const address = new URL(observed.url)
+      assert.deepEqual([...address.searchParams.keys()], ['renderer-update'], 'Only the original Main renderer handshake nonce may differ')
+      assert.match(address.searchParams.get('renderer-update'), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+      address.searchParams.delete('renderer-update')
+      assert.equal(address.href, pathToFileURL(join(desktopRoot, 'out/renderer/index.html')).href, 'Same exact private compiled Renderer file, with no other query or fragment')
+    }
+  }
   const restored = await surface(second.cdp)
   if (goalsCtaProof) surfaceDiagnostic = { stage: 'after-explicit-retry-and-original-focus', regions: restored.regions,
     activeRegions: restored.activeRegions, regionVisibility: restored.regionVisibility }
   result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: pendingEditBuild?.sourceCommit ?? (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
     regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null, goalsEntry: goalsEntryProof ? goalsEntryRestored : null,
-    goalsDirectPmo: goalsDirectPmoProof ? goalsEntryRestored : null,
+    goalsDirectPmo: goalsDirectPmoProof && !demandCollaborationProof ? goalsEntryRestored : null,
+    demandCollaboration: demandCollaborationProof ? goalsEntryRestored : null,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof || pendingEditProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ...(demandCollaborationProof ? { applicationEntry: desktopRoot, originalManifestMain: './out/main/index.js', manifestSha256: hash(await readFile(join(desktopRoot, 'package.json'))), storageOrigins: [first.origin, second.origin] } : {}), ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof || pendingEditProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: maximumPressureGap, successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
@@ -795,8 +834,8 @@ setInterval(tick,100);
       exactAgentFocusRestored: JSON.stringify(restored.focus) === JSON.stringify(restoredExpectedFocus), visibleRegions: restored.regions, activeRegions: restored.activeRegions,
       regionVisibility: restored.regionVisibility,
       exactMovedQueueRestored: JSON.stringify(restored.queued) === JSON.stringify(expectedQueue), queuedDigest: hash(JSON.stringify(restored.queued)) },
-    limitations: ['Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
-      ordinaryRecoveryProof ? 'Ordinary scoped recovery; no fixture/manual post-edit storage flush, unload or quit before SIGKILL. The live producer pressure is observed separately in pressureQualification; recovery passed does not certify uninterrupted stress.'
+    limitations: [demandCollaborationProof ? 'Complete private product App; actual Core test-fixture CLI emits native records for new PMOs. The retained cat Run has an honest unknown native-source observation. No user history/native CLI/configuration is touched.' : 'Private synthetic Agent/PTY and ordinary UserPromptSubmit hook ingress only; no user history, native CLI or production app touched.',
+      demandCollaborationProof ? 'Ordinary scoped recovery under real unknown-source observations; no fixture-issued post-edit storage flush, unload or quit before SIGKILL. Actual product navigation/save-triggered flush requests are retained. Producer cadence qualification does not certify native working or native history.' : ordinaryRecoveryProof ? 'Ordinary scoped recovery; no fixture/manual post-edit storage flush, unload or quit before SIGKILL. The live producer pressure is observed separately in pressureQualification; recovery passed does not certify uninterrupted stress.'
         : 'No fixture/manual post-edit storage flush, unload, quit or quiet-event interval before SIGKILL; actual production write-triggered platform requests remain active.',
       'Historical queue admission times are synthetic seeded facts; actual first-admission clock behavior is separately bound by the owning source test.',
       'Renderer status counts observe public IPC arrival; actual Store consumption and projection bounds are verified by the owning behavioral suite.',
@@ -863,7 +902,7 @@ setInterval(tick,100);
     result.swapNames = { passed: true, fixture: swapFixture, before: swapBefore, after, selection: swapSelection, entries }
   }
   if (goalsDirectPmoProof) {
-    result.goalsDirectPmo.originalOutputAfterRestart = await proveOriginalRunOutput({ cdp: second.cdp, session, baseline: goalsEntryFixture.originalOutput,
+    (demandCollaborationProof ? result.demandCollaboration : result.goalsDirectPmo).originalOutputAfterRestart = await proveOriginalRunOutput({ cdp: second.cdp, session, baseline: goalsEntryFixture.originalOutput,
       waitFor, marker: 'private-original-output-after-goal-restart' })
   }
   second.cdp.close(); process.kill(-second.child.pid, 'SIGKILL')
@@ -871,11 +910,11 @@ setInterval(tick,100);
   client = await connectLocalAgentMux({ store })
   const run = (await client.listRuns()).find(value => value.runId === session.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, originalRun.pid)
-  assert.equal(run.acceptedInputBytes, goalsDirectPmoProof ? result.goalsDirectPmo.originalOutputAfterRestart.acceptedInputBytes : originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write unrequested input to this private Run')
+  assert.equal(run.acceptedInputBytes, goalsDirectPmoProof ? (demandCollaborationProof ? result.demandCollaboration : result.goalsDirectPmo).originalOutputAfterRestart.acceptedInputBytes : originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write unrequested input to this private Run')
   if (pendingEditProof) result.pendingEdit.originalRun = { ...ownedRunProcess, inputBefore: originalRun.acceptedInputBytes, inputAfter: run.acceptedInputBytes }
   if (goalsCtaProof) {
-    const entryResult = goalsDirectPmoProof ? result.goalsDirectPmo : result.goalsEntry
-    await finishGoalsEntryNativeProof({ client, fixture: goalsEntryFixture, result: entryResult })
+    const entryResult = demandCollaborationProof ? result.demandCollaboration : goalsDirectPmoProof ? result.goalsDirectPmo : result.goalsEntry
+    await (collaboration?.finishDemandCollaborationNativeProof ?? finishGoalsEntryNativeProof)({ client, fixture: goalsEntryFixture, result: entryResult })
     assert.deepEqual(await runProcessIdentity(originalRun.pid), ownedRunProcess, 'The original healthy Run retains its exact process birth')
     entryResult.originalRun = { ...ownedRunProcess, inputBefore: originalRun.acceptedInputBytes, inputAfter: run.acceptedInputBytes }
   }
@@ -894,6 +933,14 @@ setInterval(tick,100);
   result.sameRunStillRunning = true; result.sameRunPid = true; result.privateInputAccepted = true
 } catch (error) {
   failure = error
+  if (demandCollaborationProof && demandObservationCdp && goalsEntryFixture) {
+    try {
+      const observed = await demandObservationCdp.evaluate(`({text:document.body.innerText.slice(0,8000),active:document.activeElement?.outerHTML.slice(0,1000),editor:[...document.querySelectorAll('[role="textbox"]')].map(e=>({label:e.getAttribute('aria-label'),text:e.innerText,value:e.value,editable:e.contentEditable,html:e.outerHTML.slice(0,3000)})),hooks:window.__crashProof?.hooks.slice(-4),state:JSON.parse(localStorage.getItem('agentmux-workbench-v1'))?.state})`)
+      const diagnostic = join(goalsEntryFixture.rawDirectory, 'failed-actual-ui.json'); await writeFile(diagnostic, JSON.stringify(observed, null, 2), {mode:0o600});
+      const screenshot = await demandObservationCdp.call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false}); const frame = join(goalsEntryFixture.rawDirectory,'failed-actual-ui.png'); await writeFile(frame,Buffer.from(screenshot.data,'base64'));
+      surfaceDiagnostic = {...surfaceDiagnostic,failureObservation:{stage:'demand-collaboration-actual-failure',diagnostic,frame}};
+    } catch (diagnosticError) { surfaceDiagnostic = {stage:'demand-collaboration-failure-observation-unavailable',reason:diagnosticError.message} }
+  }
 } finally {
   if (holdForWatchdog) await writeFile(join(root, 'inner-finally-reached'), 'Node finally ran\n')
   const cleanupErrors = []
@@ -921,7 +968,15 @@ setInterval(tick,100);
   })
   await attempt(async () => {
     if (swapNameProof) cleanup.swapPeerRuns = await cleanupSwapPeers(root, swapPeers)
-    await stopProbeProcesses(process.pid + 1_000_000_000, root)
+    if (!demandCollaborationProof) await stopProbeProcesses(process.pid + 1_000_000_000, root)
+    else {
+      // macOS can briefly report ?E after SIGKILL. Retry the original identity-checked
+      // observation; no unfamiliar state authorizes signalling or counts as absence.
+      for (let observation = 0; ; observation++) {
+        try { await stopProbeProcesses(process.pid + 1_000_000_000, root); break }
+        catch (error) { if (observation >= 10 || !error.message.includes('Private process state could not be observed')) throw error; await delay(50) }
+      }
+    }
     assert.deepEqual(await listProbeProcesses(process.pid + 1_000_000_000, root), [])
     const remainingRun = ownedRunProcess && await runProcessIdentity(ownedRunProcess.pid)
     assert.ok(!remainingRun || remainingRun.born !== ownedRunProcess.born, 'The exact private Agent process must also be reaped')
@@ -934,7 +989,7 @@ setInterval(tick,100);
 }
 const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
   goalsDirectPmoAttempt: goalsDirectPmoProof && goalsEntryFixture ? { sourceBefore: goalsEntryFixture.sourceBefore,
-    observationScope: { mode: 'ordinary-recovery', stepBudgetMs: 45_000, totalBudgetMs: 240_000, stressClaimed: false },
+    observationScope: { mode: demandCollaborationProof ? 'demand-collaboration-ordinary-recovery' : 'ordinary-recovery', stepBudgetMs: 45_000, totalBudgetMs: demandCollaborationProof ? 540_000 : 240_000, stressClaimed: false, ...(demandCollaborationProof ? { originalProducerObservation: 'native-source-unknown-with-retained-cat-Run' } : {}) },
     originalOutputBeforeRestart: goalsEntryFixture.originalOutput ?? null,
     normal: goalsEntryFixture.normal ?? null, failedGoal: goalsEntryFixture.failedGoal ?? null,
     failedMapping: goalsEntryFixture.failed ?? null, preparationFailure: goalsEntryFixture.preparationFailure ?? null } : null,
@@ -952,8 +1007,8 @@ try {
 }
 // The new mode's exact receipt already lives at receiptPath. Avoid duplicating
 // its complete private build/source closure in task runner stdout.
-process.stdout.write(`${JSON.stringify(pendingEditProof
-  ? { schema: receipt.schema, mode: '--pending-edit', passed: receipt.passed, receiptPath,
+process.stdout.write(`${JSON.stringify(pendingEditProof || demandCollaborationProof
+  ? { schema: receipt.schema, mode: demandCollaborationProof ? '--demand-collaboration' : '--pending-edit', passed: receipt.passed, receiptPath,
       sourceCommit: receipt.sourceCommit, failure: receipt.failure, cleanup: receipt.cleanup }
   : receipt)}\n`)
 if (failure) { process.stderr.write(`${failure.stack}\n`); process.exitCode = 1 }
