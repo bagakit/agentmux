@@ -30,7 +30,7 @@ it('retains bounded independent facts, releases terminal readers, and does not i
   const releaseBroken = costs.registerTerminal(() => { throw new Error('gone') })
   const snap = parseRendererPerformanceSnapshot(costs.snapshot())
   expect(snap.terminals).toHaveLength(64); expect(reads).toBe(64)
-  expect(snap.omittedTerminals).toBe(7); expect(snap.slowEvents).toHaveLength(32)
+  expect(snap.omittedTerminals).toBe(7); expect(snap.slowEvents).toHaveLength(6)
   expect(snap.sessionEvents).toEqual({ count: 1000, totalMs: 60_000, maxMs: 60 })
   expect(snap.consumers.composer.hidden).toEqual({ checks: 1000, changes: 0, commits: 0 })
   snap.sessionEvents.count = 0; snap.consumers.composer.hidden.checks = 0

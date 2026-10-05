@@ -19,6 +19,7 @@ export function deepMetricsSnapshot(): ToolkitMetricsSnapshot {
       lastEvent: { kind: 'keydown', observedAt: 1000, delayMs: 2, visible: true, liveReady: true,
         acceptsInput: true, readOnly: false, buffer: 'normal', mouseTrackingMode: 'none' } } }]
   performance.tabSwitches = [{ id: 1, target: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region', presentationId: 'presentation' },
+    elapsedMs: 1, pendingStage: null,
     handlerAt: 1, inputDelayMs: 2, selectedMs: 1, placedMs: 1, terminalMs: 1, inputReadyMs: 1, frameMs: 1,
     state: 'observed', mode: 'terminal', terminal: { sessionId: 'session', runId: 'run', readySinceAt: 1,
       visible: true, revealed: true, liveReady: true, acceptsInput: true, readOnly: false, replaying: false } }]

@@ -20,7 +20,7 @@ it('records actual top Tab selection and retained host placement at the exact oc
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const original = useAppStore.getState(), home = document.createElement('div'); document.body.append(home)
   const root = createRoot(home), sourceConfig = await api.config.get(), snapshot = await api.sessions.snapshot()
-  const config = { ...sourceConfig, hosts: [{ id: 'local', kind: 'local' as const, label: 'Local' }],
+  const config = { ...sourceConfig, hosts: [{ id: 'local' as const, kind: 'local' as const, label: 'Local' }],
     workspaces: [{ id: 'workspace-demo', hostId: 'local', kind: 'folder' as const, name: 'Project', path: _hygiene_fixturePath("repo") }] }
   const tabs = Object.fromEntries([['a', 'session-codex'], ['b', 'session-claude']].map(([id, sessionId]) => [id,
     createWorkbenchTab(id!, { regionId: `${id}:region`, kind: 'agent', phase: 'attached', workspaceId: 'workspace-demo', sessionId: sessionId! })]))
@@ -35,7 +35,7 @@ it('records actual top Tab selection and retained host placement at the exact oc
     await act(async () => (home.querySelector('button[data-workbench-tab-id="b"]') as HTMLButtonElement).click())
     const record = rendererPerformance.snapshot().tabSwitches.at(-1)!
     expect(useAppStore.getState().layouts['workspace-demo']!.groups[0]!.activeTabId).toBe('b')
-    expect(record).toMatchObject({ mode: 'terminal', state: 'pending', target: { presentationId: 'space', displayWorkspaceId: 'workspace-demo', groupId: 'left', tabId: 'b', regionId: 'b:region' } })
+    expect(record).toMatchObject({ mode: 'terminal', state: 'pending', pendingStage: 'terminal', target: { presentationId: 'space', displayWorkspaceId: 'workspace-demo', groupId: 'left', tabId: 'b', regionId: 'b:region' } })
     expect(record.selectedMs).not.toBeNull(); expect(record.placedMs).not.toBeNull()
     // This fixture intentionally has no native Terminal; host placement alone must not claim a frame or input readiness.
     expect(record.terminalMs).toBeNull(); expect(record.frameMs).toBeNull(); expect(record.inputReadyMs).toBeNull()
@@ -43,7 +43,7 @@ it('records actual top Tab selection and retained host placement at the exact oc
     await act(async () => (home.querySelector('button[data-workbench-tab-id="a"]') as HTMLButtonElement).click())
     expect(tabSwitchObservation.snapshot().at(-1)).toMatchObject({ mode: 'activity', state: 'observed', terminalMs: null, inputReadyMs: null })
     expect(tabSwitchObservation.snapshot().at(-2)!.state).toBe('superseded')
-    const mixed = addWorkbenchRegion(tabs.b!, 'b:region', 'horizontal', {
+    const mixed = addWorkbenchRegion(tabs.b!, 'b:region', 'right', {
       kind: 'terminal', phase: 'attached', regionId: 'raw:region', workspaceId: 'workspace-demo', sessionId: 'raw'
     })
     expect(mixed.titleRegionId).toBe('b:region'); expect(mixed.layout.activeRegionId).toBe('raw:region')

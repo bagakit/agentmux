@@ -25,6 +25,7 @@ const decoders = [
 ]
 function switchFixture(): RendererTabSwitchCost {
   return { id: 1, target: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region', presentationId: 'space' },
+    elapsedMs: 35, pendingStage: null,
     handlerAt: fixtureEpoch(1, 42496, 882), inputDelayMs: 12.5, selectedMs: 1, placedMs: 3, terminalMs: 4, inputReadyMs: 35, frameMs: 21.5,
     state: 'observed', mode: 'terminal', terminal: { sessionId: 'session', runId: 'run', readySinceAt: fixtureEpoch(1, 38117, 446),
       visible: true, revealed: true, liveReady: true, acceptsInput: true, readOnly: false, replaying: false } }
@@ -47,6 +48,7 @@ describe.each(decoders)('$name tab-switch records', ({ parse }) => {
     const record = switchFixture()
     const tabSwitches: RendererTabSwitchCost[] = [
       { ...record, state: 'pending', mode: 'unknown', terminal: null,
+        pendingStage: 'selection',
         inputDelayMs: null, selectedMs: null, placedMs: null, terminalMs: null, inputReadyMs: null, frameMs: null },
       { ...record, id: 2, state: 'superseded', mode: 'activity', terminal: null, terminalMs: null, inputReadyMs: null, frameMs: null },
       { ...record, id: 3, state: 'observed', mode: 'other', terminal: null, terminalMs: null, inputReadyMs: null },
@@ -67,7 +69,7 @@ describe.each(decoders)('$name tab-switch records', ({ parse }) => {
   })
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('rejects invalid timestamp or elapsed duration %s', invalid => {
-    for (const field of ['handlerAt', 'inputDelayMs', 'selectedMs', 'placedMs', 'terminalMs', 'inputReadyMs', 'frameMs'] as const) {
+    for (const field of ['elapsedMs', 'handlerAt', 'inputDelayMs', 'selectedMs', 'placedMs', 'terminalMs', 'inputReadyMs', 'frameMs'] as const) {
       expect(() => parse({ ...performanceFixture(), tabSwitches: [{ ...switchFixture(), [field]: invalid }] })).toThrow()
     }
     expect(() => parse({ ...performanceFixture(), tabSwitches: [{ ...switchFixture(),
@@ -78,6 +80,7 @@ describe.each(decoders)('$name tab-switch records', ({ parse }) => {
     const record = switchFixture()
     const invalidRecords = [
       { ...record, id: 1.5 }, { ...record, id: Number.MAX_SAFE_INTEGER + 1 },
+      { ...record, pendingStage: 'paint' }, without(record, 'pendingStage'), without(record, 'elapsedMs'),
       { ...record, state: 'complete' }, { ...record, mode: 'tui' },
       { ...record, target: without(record.target, 'presentationId') },
       { ...record, target: { ...record.target, presentationId: ' ' } },

@@ -1,0 +1,60 @@
+import { provePerformanceOwner } from './performance-owner-proof.mjs'
+
+const owner = 'apps/desktop/src/renderer/src/lib/tab-switch-observation.ts'
+const focused = ['apps/desktop/test/tab-switch-observation.test.ts']
+const codec = ['packages/core/test/renderer-tab-switch-codec.test.ts']
+provePerformanceOwner({ name: 'terminal-navigation-pending', owners: [owner,
+  'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',
+  'apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx',
+  'apps/desktop/src/renderer/src/components/TerminalView.tsx',
+  'apps/desktop/src/renderer/src/lib/renderer-performance.ts', 'packages/core/src/metrics.ts'],
+  tests: [...focused, 'apps/desktop/test/tab-switch-mounted.test.tsx',
+    'apps/desktop/test/tab-switch-mote-presentation.test.tsx', 'apps/desktop/test/tab-switch-projection-target.test.ts',
+    'apps/desktop/test/tab-switch-placement-lifetime.test.tsx',
+    'apps/desktop/test/terminal-webgl-visibility.test.tsx', ...codec,
+    'apps/desktop/test/metrics-main-control.test.ts', 'packages/core/test/toolkit-metrics-json.test.ts',
+    'packages/core/test/performance-public-diagnostics.test.ts'], minimumTests: 74,
+  mutantTests: focused, mutants: [
+    ['frame-settles-closed-gate', owner, "if (current.acceptsInput || current.readOnly) finish('observed')", "finish('observed')"],
+    ['gate-opening-does-not-complete', owner,
+      "if (record.frameMs !== null && placed && facts?.visible && facts.revealed && (facts.acceptsInput || facts.readOnly)) { finish('observed'); return }",
+      'if (record.frameMs !== null) return'],
+    ['snapshot-elapsed-lost', owner, 'if (active) elapsed()', 'if (false) elapsed()'],
+    ['elapsed-can-go-backwards', owner, 'Math.max(active!.record.elapsedMs, 0, now() - active!.start)', 'Math.max(0, now() - active!.start)'],
+    ['next-click-keeps-incomplete', owner, "finish('superseded'); cancel()", 'cancel()'],
+    ['last-owner-leaks-pending', owner, "if (owners.size === 0) finish('superseded')", "if (false) finish('superseded')",
+      [...focused, 'apps/desktop/test/tab-switch-placement-lifetime.test.tsx']],
+    ['duplicate-dispose-ends-pending', owner, "if (owners.size === 0) finish('superseded')", "if (owners.size >= 0) finish('superseded')"],
+    ['read-only-waits-for-input', owner, "if (current.acceptsInput || current.readOnly) finish('observed')", "if (current.acceptsInput) finish('observed')"],
+    ['ambiguous-owner-signs', owner, 'if (matches?.size !== 1) return undefined', 'if (!matches?.size) return undefined'],
+    ['historic-open-gate-signs-current', owner,
+      'placed && facts?.visible && facts.revealed && (facts.acceptsInput || facts.readOnly)',
+      'placed && facts?.visible && facts.revealed && (record.inputReadyMs !== null || facts.readOnly)'],
+    ['replacement-run-signs', owner, "finish('superseded'); return false", 'return true'],
+    ['button-observer-disconnected', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',
+      'tabSwitchObservation.begin(switchTarget, mode, event.nativeEvent.timeStamp)', 'void event.nativeEvent.timeStamp',
+      ['apps/desktop/test/tab-switch-mounted.test.tsx']],
+    ['placement-observer-disconnected', 'apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx',
+      "if (!switchTarget || (kind === 'region') !== (projection?.entity.kind === 'region')) return", 'if (switchTarget) return',
+      ['apps/desktop/test/tab-switch-mounted.test.tsx']],
+    ['placement-facts-change-disposes-owner', 'apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx',
+      '[switchTarget, kind, projection?.entity.kind, host]', '[switchTarget, kind, projection?.entity.kind, host, visible, targetId, homeId]',
+      ['apps/desktop/test/tab-switch-placement-lifetime.test.tsx']],
+    ['placement-address-replacement-keeps-old-owner', 'apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx',
+      '[switchTarget, kind, projection?.entity.kind, host]', '[kind, projection?.entity.kind, host]',
+      ['apps/desktop/test/tab-switch-placement-lifetime.test.tsx']],
+    ['terminal-observer-disconnected', 'apps/desktop/src/renderer/src/components/TerminalView.tsx',
+      '() => switchReaderRef.current?.() ?? null', '() => null', ['apps/desktop/test/terminal-webgl-visibility.test.tsx']],
+    ['public-elapsed-unchecked', 'packages/core/src/metrics.ts', 'elapsedMs: number, pendingStage:', 'elapsedMs: () => {}, pendingStage:', codec],
+    ['public-pending-stage-unchecked', 'packages/core/src/metrics.ts',
+      "if (!['selection', 'placement', 'terminal', 'frame', 'input-gate'].includes(v as string)) invalid()", 'if (false) invalid()', codec]
+  ], callers: [
+    ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'tabSwitchObservation.begin(switchTarget, mode, event.nativeEvent.timeStamp)'],
+    ['apps/desktop/src/renderer/src/components/StableWorkbenchView.tsx', 'tabSwitchObservation.registerPlacement(switchTarget'],
+    ['apps/desktop/src/renderer/src/components/TerminalView.tsx', 'tabSwitchObservation.registerTerminal(switchTarget'],
+    ['apps/desktop/src/renderer/src/lib/renderer-performance.ts', 'tabSwitches: tabSwitchObservation.snapshot()'],
+    ['apps/desktop/src/main/resource-usage-control.ts', 'performance: result.performance'],
+    ['packages/core/src/public-rpc-client.ts', 'parseMetricsObservation(p.observation)'],
+    ['packages/core/src/agentmux.ts', 'const result = await client.call(method, invocation.params']
+  ]
+})
