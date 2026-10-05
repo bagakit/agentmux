@@ -33,7 +33,7 @@ async function inspect() { await moteClick(details().querySelector<HTMLButtonEle
 
 describe('Profile inspection consumes the original public File domain', () => {
   it('does not present the original working guide as an idea', async () => {
-    vi.mocked(api.files.readDirectory).mockResolvedValue([path, rootPath + '/AGENTS.md'].map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false })))
+    vi.mocked(api.files.readDirectory).mockResolvedValue([path, rootPath + '/AGENTS.md', rootPath + '/MEMORY.md'].map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false })))
     await app.mount()
     await moteClick(details().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')!)
     expect([...details().querySelectorAll('.mote-details__note')].map(node => node.textContent)).toHaveLength(1)
