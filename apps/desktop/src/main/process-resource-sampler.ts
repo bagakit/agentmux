@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { app } from 'electron'
 import { cpus } from 'node:os'
 import type { AppUsageProcess } from '@agentmux/core/control'
-import type { MetricsRenderer, PerformanceDiagnostics } from '@agentmux/core/control'
+import type { MetricsRenderer, MetricsWindow, PerformanceDiagnostics } from '@agentmux/core/control'
 import {
   USAGE_SAMPLE_INTERVAL_MS,
   aggregateUsage,
@@ -42,6 +42,7 @@ export type ProcessResourceObservationSources = {
   observeDiagnostics?(signal: AbortSignal): Promise<Omit<PerformanceDiagnostics, 'eventLoop'>>
   processOwners(): { rendererPids: readonly number[]; browserPids: readonly number[] }
   mainOwners(): MainResourceOwnerCounts
+  rendererWindow?(): MetricsWindow | null
   observeRenderer?(signal: AbortSignal): Promise<{ observedAt: number; data: MetricsRenderer }>
 }
 
@@ -49,7 +50,7 @@ export type ResourceSample = UsageSnapshot & {
   diagnostics: { observedAt: number | null; data: PerformanceDiagnostics | null; unavailable: string | null }
   processObservedAt: number | null; appObservedAt: number | null; runtimeObservedAt: number | null
   mainObservedAt: number | null; mainUnavailable: string | null
-  renderer: { observedAt: number | null; data: MetricsRenderer | null; unavailable: string | null }
+  renderer: { observedAt: number | null; data: MetricsRenderer | null; unavailable: string | null; unavailableWindow: MetricsWindow | null }
 }
 
 function readProcessTable(): Promise<string> {
@@ -74,7 +75,7 @@ export class ProcessResourceSampler {
   private inFlight: Promise<void> | null = null
   private latest: ResourceSample | null = null
   private runtimeObservedAt: number | null = null
-  private renderer: ResourceSample['renderer'] = { observedAt: null, data: null, unavailable: null }
+  private renderer: ResourceSample['renderer'] = { observedAt: null, data: null, unavailable: null, unavailableWindow: null }
   private diagnostics: ResourceSample['diagnostics'] = { observedAt: null, data: null, unavailable: null }
   private diagnosticsInFlight: Promise<void> | null = null
   private diagnosticsController: AbortController | null = null
@@ -174,7 +175,7 @@ export class ProcessResourceSampler {
     this.runtime = null
     this.runtimeUnavailable = null
     this.runtimeObservedAt = null
-    this.renderer = { observedAt: null, data: null, unavailable: null }
+    this.renderer = { observedAt: null, data: null, unavailable: null, unavailableWindow: null }
     this.rendererController?.abort()
     this.appSamples.clear()
     this.appCpuCounters.clear()
@@ -438,14 +439,17 @@ export class ProcessResourceSampler {
     this.rendererController = controller
     const sources = this.observationSources
     this.rendererInFlight = Promise.resolve().then(async () => {
+      let attemptedWindow: MetricsWindow | null = null
       try {
+        const window = sources?.rendererWindow?.()
+        attemptedWindow = window ? { ...window } : null
         if (!sources?.observeRenderer) throw new Error('Renderer resource observation is not connected')
         const reading = await sources.observeRenderer(controller.signal)
         if (generation !== this.generation || controller.signal.aborted) return
-        this.renderer = { ...reading, unavailable: null }
+        this.renderer = { ...reading, unavailable: null, unavailableWindow: null }
       } catch (error) {
         if (generation !== this.generation || controller.signal.aborted) return
-        this.renderer = { ...this.renderer, unavailable: error instanceof Error ? error.message : String(error) }
+        this.renderer = { ...this.renderer, unavailable: error instanceof Error ? error.message : String(error), unavailableWindow: attemptedWindow }
       }
       if (this.latest) { this.latest = { ...this.latest, renderer: this.renderer }; this.notify() }
     }).finally(() => {
