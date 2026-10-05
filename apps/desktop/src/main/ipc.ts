@@ -903,7 +903,7 @@ export async function registerIpc(args: {
   handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string) => {
     const requesterAsSupervisor = resolveGoalsPreferences(config.goals).requesterAsSupervisor
     const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
-      request => admittedDemandCreateMatches(request, input))
+      request => request.operation === 'demand.create' && admittedDemandCreateMatches(request, input))
     const participation = await admittedDemandParticipation(admitted.context, 'create', config, args.scratchTopics)
     return demands.create(input, { context: admitted.context, operationId: admitted.operationId,
       creationOrigin: { requesterAsSupervisor }, ...(participation ? { participation } : {}) })
@@ -928,7 +928,7 @@ export async function registerIpc(args: {
   })
   handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number) => {
     const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
-      request => admittedDemandUpdateMatches(request, id, patch, expectedUpdatedAt))
+      request => (request.operation === 'demand.update' || request.operation === 'demand.assign' || request.operation === 'demand.handoff') && admittedDemandUpdateMatches(request, id, patch, expectedUpdatedAt))
     const requirements = patch.description !== undefined || patch.alignment !== undefined
     const participation = requirements ? await admittedDemandParticipation(admitted.context, 'requirements', config, args.scratchTopics) : undefined
     return await demands.update(id, patch, { context: admitted.context, operationId: admitted.operationId, ...(participation ? { participation } : {}), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
