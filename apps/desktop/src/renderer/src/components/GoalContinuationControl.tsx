@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ContinuousProgressLoop } from '@agentmux/core'
@@ -113,7 +114,7 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh, a
     </div>)}
     {!currentLoops.some(loop => loop.status !== 'stopped') && observedGoal === demand.id ? <form onSubmit={event => { event.preventDefault(); start() }}>
       <label>Executing Agent<SelectionField label="Goal continuation Agent" value={selected} onValueChange={value => { setSelected(value); attempt.current = undefined }} options={[{ value: '', label: 'Choose an associated Agent…' }, ...Object.entries(linked).map(([id, label]) => ({ value: id, label }))]} /></label>
-      <label>Check every<input aria-label="Goal continuation minutes" type="number" min="1" value={minutes} onChange={event => { setMinutes(event.target.value); attempt.current = undefined }} /> minutes</label>
+      <label>Check every<TextInput aria-label="Goal continuation minutes" type="number" min="1" value={minutes} onChange={event => { setMinutes(event.target.value); attempt.current = undefined }} /> minutes</label>
       <button type="submit" className="goals-button" disabled={busy || Boolean(mutation.current) || demand.alignment?.confirmedAt == null || !Object.hasOwn(linked, selected) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
       {demand.alignment?.confirmedAt == null ? <p className="goals-service">Confirm this Goal’s scope before enabling automatic work.</p> : null}
     </form> : null}
