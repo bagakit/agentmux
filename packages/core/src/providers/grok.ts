@@ -7,6 +7,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { observeGrokSessionHistory, readGrokSessionHistoryPage } from './grok-native-history.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -42,11 +43,28 @@ export const GROK_HOOKS: AgentNativeHookSpecification = {
   // 配置写 PascalCase `PreToolUse`，负载报 snake_case 值（`pre_tool_use`）藏在 `hookEventName` 里。
   // 声明的是投递侧那个键——子进程读的就是它（见文件头「两个面」的说明）。
   eventNameSource: { kind: 'payload', payloadKey: 'hookEventName' },
+  // subagentType establishes child scope, not unique identity. Each child uses its own native session.
+  resolveSubject(payload, context) {
+    const nativeId = normalizeNativeSessionId(payload.sessionId)
+    const child = typeof payload.subagentType === 'string' && payload.subagentType.trim().length > 0
+    if (child && nativeId && context.nativeHandle?.sessionId === nativeId)
+      return { kind: 'unknown', basis: 'provider-protocol', reason: 'conflicting-child-session', nativeSessionId: nativeId }
+    if (child) return nativeId
+      ? { kind: 'child', basis: 'provider-protocol', reason: 'grok-child-session', nativeSessionId: nativeId }
+      : { kind: 'unknown', basis: 'provider-protocol', reason: 'child-native-identity-unconfirmed' }
+    if (!nativeId) return { kind: 'unknown', basis: 'provider-protocol', reason: 'native-session-identity-unconfirmed' }
+    const main = context.nativeHandle
+    if (nativeId && main && (main.kind !== 'provider' || main.providerId !== 'grok' || main.sessionId !== nativeId))
+      return { kind: 'foreign', basis: 'provider-protocol', reason: 'native-session-mismatch', nativeSessionId: nativeId }
+    return { kind: 'main', basis: 'provider-protocol', reason: 'run-bound-protocol', ...(nativeId ? { nativeSessionId: nativeId } : {}) }
+  },
   rules: [
     // grok 的 ask_user_question 被自动放行，于是它在**等用户回答时**照旧发 pre_tool_use。
     { events: ['pre_tool_use'], toolNames: ['ask_user_question', 'askuserquestion'], state: 'waiting' },
-    // 三种收尾都算 done：正常完成、API 错误、以及被取消/中断。少任何一条都会卡在 working。
-    { events: ['stop', 'stop_failure', 'stop_cancelled'], state: 'done' },
+    // The stop gate can continue; observation-only failure/cancellation are actual non-success ends.
+    { events: ['stop', 'subagent_stop'], state: 'unknown', lifecycleEvent: null },
+    { events: ['stop_failure'], state: 'error', lifecycleEvent: 'turn-end' },
+    { events: ['stop_cancelled'], state: 'unknown', lifecycleEvent: 'turn-end' },
     {
       events: [
         'session_start', 'user_prompt_submit', 'pre_tool_use', 'post_tool_use',
@@ -57,9 +75,9 @@ export const GROK_HOOKS: AgentNativeHookSpecification = {
   ],
   subagentTracking: {
     startEvents: ['subagent_start'],
-    stopEvents: ['subagent_stop'],
-    mainStopEvents: ['stop', 'stop_failure', 'stop_cancelled'],
-    idKeys: ['subagentType', 'subagent_type', 'agentId', 'agent_id']
+    stopEvents: [],
+    mainStopEvents: ['stop_failure', 'stop_cancelled'],
+    idKeys: ['sessionId']
   },
   // grok 的负载键一律 camelCase：`sessionId`，不是 Claude 的 `session_id`。它不报 transcript 路径，
   // 故不声明 transcriptPathKeys——resume 靠 session id。

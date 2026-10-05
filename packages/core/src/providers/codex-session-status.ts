@@ -14,6 +14,7 @@ function status(evidence: AgentPromptExecutionEvidence | null, context: AgentPro
   return { recordId: evidence.id, nativeTurnId: evidence.nativeTurnId,
     ...(evidence.nativeOrdinal === undefined ? {} : { sequence: evidence.nativeOrdinal }),
     state: evidence.state === 'working' ? 'working' : evidence.endReason === 'failed' ? 'error' : evidence.endReason === 'completed' ? 'done' : 'unknown',
+    ...(evidence.endReason ? { endReason: evidence.endReason } : {}),
     ...(evidence.observedAt === undefined ? {} : { nativeObservedAt: evidence.observedAt }),
     ...(evidence.failure ? { failure: evidence.failure } : {}) }
 }

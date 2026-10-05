@@ -38,14 +38,7 @@ export type AgentNativeHookStateRule = {
   lifecycleEvent?: AgentHookLifecycleEvent | null
 }
 
-/**
- * 子代理在途记账的 SSOT 声明——每个 Provider 声明自己的事件名，normalizer 据此按会话记「有几个
- * 子代理还活着」。只有归零时主 Agent 的收尾事件才算真正 done。
- *
- * 为什么需要：主 Agent 报收尾（Claude/Codex 的 `Stop`）时，子代理可能还在干活。此前 `Stop` 被照单
- * 全收判成 `done`，于是界面提前翻成完成、误报完成通知，而工作还在继续。这里把主收尾压住，直到子代理
- * 全部结束。
- */
+/** Provider protocol facts for the one existing per-Run child roster. Pre-veto callbacks are not ends. */
 export type AgentNativeSubagentTracking = {
   /** 子代理开始事件（roster 加一）。 */
   startEvents: readonly string[]
@@ -53,7 +46,7 @@ export type AgentNativeSubagentTracking = {
   stopEvents: readonly string[]
   /** 主 Agent 的收尾事件——roster 非空时压成 `working`，为空时才放行 rules 给出的 `done`。 */
   mainStopEvents: readonly string[]
-  /** 顶层子主体 id 键，普通工具事件也可携带；同时关联子代理 start/stop。取第一个能读出的。 */
+  /** 唯一原生子主体 ID 键；名称与类型不能充当身份。缺失保持未确认。 */
   idKeys?: readonly string[]
 }
 
@@ -131,12 +124,12 @@ export type { AgentHookEventNameSource }
  * 用 Set 而不是裸计数器，重复的 start/stop 天然幂等。`mainStopPending` 记「主 Agent 已请求收尾但被子
  * 代理压住」——好让最后一个子代理结束时能收敛到 `done`，而不是永远卡在 working。
  *
- * 只按 id 记账，不为「不带 id 的 Provider」留降级计数：当前内建 Provider（claude/codex）的子代理事件
- * 都带 `agent_id`，真出现无 id 的 Provider 再按其真实形状设计，别预支一个够不到测试、还会和 id 记账混
- * 算的抽象。
+ * 缺唯一 ID 只保留一个未确认事实，不按名称、类型或事件计数猜人数。子回调不能消除它；
+ * 原主 Native 结果或 Runtime 终局释放同一份 roster，未知不伪造成功或永久 working。
  */
 type SubagentRoster = {
   live: Set<string>
+  unidentified: boolean
   mainStopPending: boolean
 }
 
@@ -163,7 +156,18 @@ export function releaseSubagentRoster(runId: string): boolean {
 }
 
 function subagentRosterAlive(roster: SubagentRoster): boolean {
-  return roster.live.size > 0
+  return roster.live.size > 0 || roster.unidentified
+}
+
+/** Share the existing parent/child aggregate across Hook and exact native main-end facts. */
+export function observeSubagentMainEnd(runId: string, state: AgentSemanticState): AgentSemanticState {
+  const roster = subagentRosters.get(runId)
+  if (state === 'done' && roster && subagentRosterAlive(roster)) {
+    roster.mainStopPending = true
+    return roster.unidentified ? 'unknown' : 'working'
+  }
+  subagentRosters.delete(runId)
+  return state
 }
 
 function subagentId(
@@ -210,12 +214,10 @@ function applySubagentTracking(
     if (roster) roster.mainStopPending = false
   }
   if (tracking.startEvents.includes(eventName)) {
-    // An absent id cannot create a roster entry that no later stop can settle.
-    if (id) {
-      const roster = subagentRosters.get(key) ?? { live: new Set<string>(), mainStopPending: false }
-      roster.live.add(id)
-      subagentRosters.set(key, roster)
-    }
+    const roster = subagentRosters.get(key) ?? { live: new Set<string>(), unidentified: false, mainStopPending: false }
+    if (id) roster.live.add(id)
+    else roster.unidentified = true
+    subagentRosters.set(key, roster)
     return observation
   }
   if (tracking.stopEvents.includes(eventName)) {
@@ -228,16 +230,9 @@ function applySubagentTracking(
     return pending ? { semanticState: 'done', lifecycleEvent: 'turn-end' } : observation
   }
   if (tracking.mainStopEvents.includes(eventName) && observation.lifecycleEvent === 'turn-end') {
-    const roster = subagentRosters.get(key)
-    if (observation.semanticState === 'done' && roster && subagentRosterAlive(roster)) {
-      // 聚合成功仍等待子任务；真实主轮结束保留，不能收回手动开始下一轮的资格。
-      roster.mainStopPending = true
-      return { semanticState: 'working', lifecycleEvent: observation.lifecycleEvent }
-    }
-    // 没有在途子代理：清掉可能残留的空条目，放行 rules 给出的收尾状态。
-    subagentRosters.delete(key)
-    return observation
+    return { ...observation, semanticState: observeSubagentMainEnd(key, observation.semanticState) }
   }
+
   // An authoritative non-success main end must not later become a roster's successful completion.
   if (observation.lifecycleEvent === 'turn-end') subagentRosters.delete(key)
   return observation
