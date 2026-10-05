@@ -1,4 +1,4 @@
-import { themeIdSchema, themeValueSchema, BUILTIN_THEME_IDS, themeValue, type ThemeDocument, type ThemeValue, type ThemeMode, type AppAppearanceId } from './schema.js'
+import { themeIdSchema, themeValueSchema, serializeThemeFile, BUILTIN_THEME_IDS, themeValue, type ThemeDocument, type ThemeValue, type ThemeMode, type AppAppearanceId } from './schema.js'
 
 export const DEFAULT_THEME_ID = 'graphite' as const
 export const GRAPHITE_THEME: ThemeDocument = {
@@ -29,14 +29,22 @@ export type ThemeCatalogItem = { id: string; value: ThemeValue; readonly: boolea
 export type ThemeIssue = { id: string; message: string }
 export function isBuiltinThemeId(id: string): boolean { return (BUILTIN_THEME_IDS as readonly string[]).includes(id) }
 
+/** Availability includes the same canonical exchange boundary used by authored saves. */
+function availableThemeValue(id: string, raw: unknown): { success: true; data: ThemeValue } | { success: false; message: string } {
+  const parsed = themeValueSchema.safeParse(raw)
+  if (!parsed.success) return { success: false, message: 'This saved theme is unavailable or unsupported. Its original data is retained; import a valid copy or explicitly remove this record.' }
+  try { serializeThemeFile({ id, ...parsed.data }); return { success: true, data: parsed.data } }
+  catch (cause) { return { success: false, message: `${cause instanceof Error ? cause.message : String(cause)} Its original saved data is retained.` } }
+}
+
 /** Bad saved records remain with their owner; one bad record cannot reset other preferences. */
 export function getThemeCatalog(customThemes: Record<string, unknown> = {}): { items: ThemeCatalogItem[]; issues: ThemeIssue[] } {
   const items: ThemeCatalogItem[] = BUILTIN_THEMES.map(document => ({ id: document.id, value: themeValue(document), readonly: true }))
   const issues: ThemeIssue[] = []
   for (const [id, raw] of Object.entries(customThemes)) {
-    const parsed = themeValueSchema.safeParse(raw)
+    const parsed = availableThemeValue(id, raw)
     if (!themeIdSchema.safeParse(id).success || !id.startsWith('custom.') || !parsed.success) {
-      issues.push({ id, message: 'This saved theme is unavailable or unsupported. Its original data is retained; import a valid copy or explicitly remove this record.' })
+      issues.push({ id, message: parsed.success ? 'This saved theme identity is unsupported. Its original data is retained.' : parsed.message })
       continue
     }
     items.push({ id, value: parsed.data, readonly: false })
@@ -50,11 +58,15 @@ export function resolveThemeDocument(document: ThemeDocument, appearance: AppApp
   return { id: document.id, value, mode, variant: value.variants[mode], issues: [] as ThemeIssue[] }
 }
 export function resolveTheme(selection: ThemeSelection = {}, prefersDark = true) {
-  const catalog = getThemeCatalog(selection.customThemes)
   const requestedId = selection.themeId ?? DEFAULT_THEME_ID
-  const item = catalog.items.find(theme => theme.id === requestedId) ?? catalog.items[0]!
-  const resolved = resolveThemeDocument({ id: item.id, ...item.value }, selection.appAppearance, prefersDark)
-  return { ...resolved, issues: requestedId === item.id ? catalog.issues : [...catalog.issues,
-    { id: requestedId, message: 'Selected theme is unavailable. Graphite remains usable; choose or import a valid theme in Appearance.' }] }
+  const builtin = BUILTIN_THEMES.find(theme => theme.id === requestedId)
+  if (builtin) return resolveThemeDocument(builtin, selection.appAppearance, prefersDark)
+  // The runtime needs only the selected record. Settings owns directory-wide diagnostics.
+  const customId = requestedId.startsWith('custom.') && themeIdSchema.safeParse(requestedId).success
+  const parsed = customId ? availableThemeValue(requestedId, selection.customThemes?.[requestedId]) : undefined
+  if (parsed?.success) return resolveThemeDocument({ id: requestedId, ...parsed.data }, selection.appAppearance, prefersDark)
+  return { ...resolveThemeDocument(GRAPHITE_THEME, selection.appAppearance, prefersDark), issues: [
+    { id: requestedId, message: `${parsed && !parsed.success ? parsed.message : 'Selected theme is unavailable. Its original data is retained.'} Graphite remains usable; choose or import a valid theme in Appearance.` }
+  ] }
 }
 export type ResolvedTheme = ReturnType<typeof resolveTheme>

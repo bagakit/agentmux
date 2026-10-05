@@ -61,6 +61,8 @@ export function parseThemeFile(text: string): ThemeDocument {
   try { value = JSON.parse(text) } catch { throw new Error('Theme file is not valid JSON. Saved themes are unchanged.') }
   const parsed = themeDocumentSchema.safeParse(value)
   if (!parsed.success) throw new Error(`Unsupported or invalid theme: ${parsed.error.issues.map(issue => `${issue.path.join('.') || 'file'}: ${issue.message}`).join('; ')}`)
+  // A compact upload must also fit the canonical file we promise to export.
+  serializeThemeFile(parsed.data)
   return parsed.data
 }
 export function serializeThemeFile(theme: ThemeDocument): string {
