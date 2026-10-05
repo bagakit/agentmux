@@ -610,6 +610,8 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   let verificationStage = 'launch-request'
   const verificationDeadline = Date.now() + 20_000
   try {
+    const guiEnvironment = { ...process.env }
+    delete guiEnvironment.ELECTRON_RUN_AS_NODE
     await run('open', ['-n', '--stdout', stdoutPath, '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
       '--env', 'AGENTMUX_DISABLE_CRASH_REPORTER=1',
@@ -617,7 +619,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       '--env', `AGENTMUX_STATE_DIRECTORY=${join(runtimeRoot, 'state')}`,
       '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
       '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1', canonicalAppPath
-    ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
+    ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()), env: guiEnvironment })
     verificationStage = 'ready-receipt'
     let sawProcess = false
     const isAppAlive = async () => {
