@@ -97,7 +97,7 @@ Core 持有 Provider、AgentSession、语义恢复及持久空间身份／关系
 
 ### 公开名称与接口来源
 
-公开 GUI 单项为 Goal，Desktop RPC／CLI 使用现有 `goal.*`／`agentmux goal`；底层类型、文件和包保留 Demand 身份及领域名，独立文件工具是 `agentmux-demand`。这些是不同入口对同一领域事实的访问，不按改名重发身份，也不为旧 `task.*` 建同义兼容层。准确语法、参数、权限与回执只见[公共能力来源](../../specs/public-capabilities.md#cli-与服务的当前来源)、[公共 CLI parser](../../../packages/core/src/agentmux-cli-commands.ts)和[Demand CLI](../../../packages/demand/src/cli.ts)，本页不另手抄命令词典。
+公开 GUI 单项为 Goal，Desktop RPC／CLI 使用现有 `goal.*`／`amux goal`；底层类型、文件和包保留 Demand 身份及领域名，独立文件工具是 `agentmux-demand`。这些是不同入口对同一领域事实的访问，不按改名重发身份，也不为旧 `task.*` 建同义兼容层。准确语法、参数、权限与回执只见[公共能力来源](../../specs/public-capabilities.md#cli-与服务的当前来源)、[公共 CLI parser](../../../packages/core/src/agentmux-cli-commands.ts)和[Demand CLI](../../../packages/demand/src/cli.ts)，本页不另手抄命令词典。
 
 ## Demand 的完整业务闭环
 
