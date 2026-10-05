@@ -116,8 +116,11 @@ function inspectCodexPromptPane(screen: AgentTerminalScreenSnapshot, strategy: N
         /\b(?:esc|escape|f\d+) to (?:interrupt|cancel)\)/iu.test(status) &&
         !/\b(?:review|compact(?:ing)?|hook)\b/iu.test(status) &&
         (preview || cursor.row - currentRow === (nativeTip ? 4 : 3))) return 'interruptible'
+    // Completed child names are output, not a current control state. This only
+    // excludes their contents from the veto; the composer/footer guards still hold.
+    const completed = /^• Completed `.+`$/u.test(status)
     if (preview || nativeTip || hint.startsWith('tab to queue') ||
-        /to interrupt|pending|queued|↳|approval|question|hook|review|compact(?:ing)?|^\d+[.)] /iu.test(status)) return 'unavailable'
+        !completed && /to interrupt|pending|queued|↳|approval|question|hook|review|compact(?:ing)?|^\d+[.)] /iu.test(status)) return 'unavailable'
     return 'idle'
   }
   let statusRow = cursor.row - 1
