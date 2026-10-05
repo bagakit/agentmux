@@ -103,6 +103,16 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | xterm theme（终端外观 `ITheme`） | Renderer，源自 shared palette | [terminal-theme.ts](../../apps/desktop/src/renderer/src/lib/terminal-theme.ts)、shared palette |
 | App chrome（产品外框视觉） | Desktop 应用外框（与终端外观分离） | 同一 theme 文件的边界说明 |
 
+Desktop 的 `RuntimeController.snapshot` 分别读取 Runtime membership 与 Session Timeline。
+单个 Timeline 无法读取时，已确认的同 Host 成员与 Run 事实仍发布；失败只附在原
+`SessionSnapshot.timelineObservation`，携带该 Session 的 Run 与具体原因。Renderer 成员对齐
+保留该 Session 的最后可读页，`sessionServiceNotices` 沿原 Session 的本地与全局服务窗说明
+重读动作，不将整个 Host 置为不可用，也不将缺页补成成功的空记录。恢复后，完整快照的
+对应 Timeline 成功或原 Host／Session／Run 的显式 Timeline 重读只收口该观察失败；别的
+Session、Run 或连接恢复不能代签。状态读取已明确切换到新 Run 时，不再投影旧 Run 的
+观察诊断；旧页仍归 durable Session 保留，旧 Run 迟到的读取不能清除新 Run 的失败。
+Timeline 返回不同 Session 的身份冲突仍明确拒绝。
+
 Provider-specific executable probe、session id、native resume argv、semantic replay、
 working/waiting/done、Permission、Hook 和 A2A 不进入 ctxmux。Provider-native Resume 由
 AgentMux 物化通用 `RunSpec` 后交给 ctxmux；Level B provenance 不足时失败关闭，不能自动改成
