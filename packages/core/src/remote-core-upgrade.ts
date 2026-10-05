@@ -305,7 +305,7 @@ export class RemoteCoreUpgradeManager {
       const stage = await this.program<{ releaseDirectory: string; remoteCommand: string; digest: string }>(input, observed.launch.node, ['-e', STAGE_CORE], {
         stateDirectory: observed.launch.stateDirectory, node: observed.launch.node, digest: artifact.digest, operationId,
         archive: (await readFile(artifact.archivePath)).toString('base64'), archiveDigest: artifact.archiveDigest, files: artifact.files })
-      if (stage.digest !== artifact.digest || stage.releaseDirectory !== join(observed.launch.stateDirectory, 'core-releases', artifact.digest) || stage.remoteCommand !== join(stage.releaseDirectory, 'bin', 'agentmux-public')) {
+      if (stage.digest !== artifact.digest || stage.releaseDirectory !== join(observed.launch.stateDirectory, 'core-releases', artifact.digest) || stage.remoteCommand !== join(stage.releaseDirectory, 'launcher', 'amux')) {
         throw new AgentMuxError('The staging receipt belongs to another artifact.', 'CONTROL_PROTOCOL_ERROR')
       }
       value.releaseDirectory = stage.releaseDirectory; value.receipt.remoteCommand = stage.remoteCommand

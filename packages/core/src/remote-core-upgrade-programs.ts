@@ -95,7 +95,8 @@ for(const f of p.files){const target=path.join(root,f.path);if(hash(fs.readFileS
 if(Number(process.versions.node.split('.')[0])<24)throw Error('The original Node executable is older than the candidate requires');
 cp.execFileSync(p.node,['--input-type=module','--eval','await import('+JSON.stringify(require('node:url').pathToFileURL(path.join(root,'dist','headless-runtime.js')).href)+')'],{timeout:30000});
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
-const command=path.join(root,'bin','agentmux-public');fs.writeFileSync(command,'#!/bin/sh\nexec '+quote(p.node)+' '+quote(path.join(root,'dist','agentmux.js'))+' "$@"\n',{mode:0o755});
+const launcher=path.join(root,'launcher');fs.mkdirSync(launcher,{recursive:true,mode:0o700});
+const command=path.join(launcher,'amux');fs.writeFileSync(command,'#!/bin/sh\nexec '+quote(p.node)+' '+quote(path.join(root,'dist','agentmux.js'))+' "$@"\n',{mode:0o755});
 console.log(JSON.stringify({releaseDirectory:root,remoteCommand:command,digest:p.digest}));
 `
 
