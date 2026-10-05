@@ -89,7 +89,7 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | --- | --- | --- |
 | PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | [ctxmux-run-adapter.ts](../../packages/core/src/ctxmux-run-adapter.ts)，`decodeChunk` / `emitRunEvent` |
 | Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | 同一 adapter 的 `start` / `stop` / `interrupt` / `resize` |
-| Control transaction | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | [ipc.ts](../../apps/desktop/src/main/ipc.ts)、[control-host.ts](../../packages/core/src/control-host.ts) |
+| Desktop 工作面控制事务 | Desktop Main 将公共业务服务的工作面请求委托给 Renderer；公共 RPC 与无 UI 的语义服务仍归 Core | [ipc.ts](../../apps/desktop/src/main/ipc.ts)、[系统公共接入边界](system-ownership.md#当前接入边界) |
 | Tab/Region 持久布局与绑定 | Core Spatial owner；Renderer reducer 消费原图并投影屏幕 | [空间状态机制](spatial-state.md)、[store.ts](../../apps/desktop/src/renderer/src/store.ts)、[Layout 代数入口](../../packages/layout/README.md) |
 | Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
 | Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | [terminal-viewport-sync.ts](../../apps/desktop/src/renderer/src/lib/terminal-viewport-sync.ts)、TerminalView、RuntimeController |
@@ -133,10 +133,13 @@ Renderer 不保存第二份 Run 状态，也不建立 Stop ledger、重试 tail 
 
 Viewport Resize 是 retained Attachment 的能力，不是只凭 `SessionControl` 就能调用的命令。
 Renderer 只在 Attach 成功后用 Desktop 发出的 `attachmentId` 提交尺寸；Main 从 lease 解析权威
-exact Run，并让 Resize、Detach 与 Stop 进入同一个 per-Run Attachment 串行器。先进入的 Resize
-完成后 Stop 才能开始；Stop 先进入时会撤销 lease，之后到达的 Resize 因 capability 已失效而结束，
-不会触达 ctxmux。Agent resize 与 stop 的 Core API 同时要求 `agentSessionId + expectedRun`，旧 View
-不能在 provider-native Resume 后控制同一 Agent Session 的新 Run。
+exact Run，Attach、Resize 与 Detach 由同一 per-Run Attachment 串行器协调。
+[`RuntimeController.stopSession`](../../apps/desktop/src/main/runtime-controller.ts) 不进入该队列：
+决定停止时立即撤销原 lease，再通过 Core 停止精确 Run。前一次 Stop 未回执不会挡住再次停止；
+迟到或排队中的 Resize 因 capability 已失效而结束，不会触达 ctxmux。行为要求见
+[Session 关闭与重试合同](../design/behavior/session-recovery.md#sessionrun-与-view)。
+Agent resize 与 stop 的 Core API 同时要求 `agentSessionId + expectedRun`，旧 View 不能在
+provider-native Resume 后控制同一 Agent Session 的新 Run。
 
 ## 3. 本地 Shell 与 Run 环境
 
