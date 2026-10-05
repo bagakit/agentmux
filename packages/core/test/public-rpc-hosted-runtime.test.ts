@@ -136,9 +136,10 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
   })
   it('uses the same approved device over different POSTs while isolating foreign consumers and preserving original Core input fences', async () => {
     const f = await hostedFixture(), consumerId = 'same-original-consumer'
+    const approvedDevices = new Set(['device-A', 'device-B'])
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
       http: { host: '127.0.0.1', port: 0, authorize: request => {
-        const id = request.headers.get('cookie'); return id ? { principal: { kind: 'device', id } } : null
+        const id = request.headers.get('cookie'); return id && approvedDevices.has(id) ? { principal: { kind: 'device', id } } : null
       } } })
     const controller = new AbortController()
     cleanups.push(() => controller.abort())
@@ -164,26 +165,39 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
       { agentSessionId: 'source-agent' }, { agentSessionId: 'recipient-agent' }
     ] } })
     let requestId = 2
+    const request = (id: string, method: string, params: unknown) => fetch(h.url(), { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: id },
+      body: JSON.stringify({ jsonrpc: '2.0', id: requestId++, method, params }) })
     const post = async (id: string, method: string, params: unknown) => {
-      const response = await fetch(h.url(), { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: id },
-        body: JSON.stringify({ jsonrpc: '2.0', id: requestId++, method, params }) })
+      const response = await request(id, method, params)
+      expect(response.status).toBe(200)
       return await response.json() as Record<string, any>
     }
     expect(await post('device-B', 'runtime.release-consumer', { fence: f.fence, consumerId })).toMatchObject({ result: { released: false } })
     const data = Uint8Array.from([0xe4, 0xb8, 0xad, 0, 0xff])
     const input = invocation({ method: 'writeAgent', args: [{ agentSessionId: 'recipient-agent',
       expectedRun: { runId: 'run-recipient-agent' }, data, source: 'user' }] })
-    expect(await post('device-B', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })).toMatchObject({ error: { data: { code: 'CONTROL_UNAVAILABLE' } } })
+    // Each approved device owns its input authority; A's observation is no prerequisite for B.
+    const independent = await post('device-B', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })
+    expect(decodeHostedValue(independent.result.value)).toEqual({ runId: 'run-recipient-agent',
+      appliedByteRange: { startByte: 0, endByte: data.length }, acceptedThroughByte: data.length })
     const ack = await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })
     expect(decodeHostedValue(ack.result.value)).toEqual({ runId: 'run-recipient-agent',
       appliedByteRange: { startByte: 0, endByte: data.length }, acceptedThroughByte: data.length })
-    expect(f.inputs).toEqual([{ runId: 'run-recipient-agent', data: [...data] }])
+    expect(f.inputs).toEqual(Array.from({ length: 2 }, () => ({ runId: 'run-recipient-agent', data: [...data] })))
     const stale = invocation({ method: 'writeAgent', args: [{ agentSessionId: 'recipient-agent',
       expectedRun: { runId: 'foreign-run' }, data, source: 'user' }] })
     expect(await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: stale })).toMatchObject({ error: { data: { code: 'STALE_AGENT_SESSION' } } })
-    expect(f.inputs).toHaveLength(1)
+    expect(f.inputs).toHaveLength(2)
     expect(await post('device-A', 'runtime.release-consumer', { fence: f.fence, consumerId })).toMatchObject({ result: { released: true } })
-    expect(await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })).toMatchObject({ error: { data: { code: 'CONTROL_UNAVAILABLE' } } })
+    const afterRelease = await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })
+    expect(decodeHostedValue(afterRelease.result.value)).toEqual({ runId: 'run-recipient-agent',
+      appliedByteRange: { startByte: 0, endByte: data.length }, acceptedThroughByte: data.length })
+    expect(f.inputs).toHaveLength(3)
+    approvedDevices.delete('device-A')
+    const denied = await request('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })
+    expect(denied.status).toBe(401)
+    expect(f.inputs).toHaveLength(3)
     expect(f.inner.kernel.stop).not.toHaveBeenCalled()
     expect(f.client.agentSession('recipient-agent').run).toEqual({ runId: 'run-recipient-agent' })
   })
@@ -307,19 +321,21 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     await vi.waitFor(() => expect(observedSignal!.aborted).toBe(true))
     expect(f.inputs).toEqual([]); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   })
-  it('forwards managed caller and signal once before GUI message orchestration and preserves its actual business errors', async () => {
-    const f = await hostedFixture(), sent: unknown[] = []
+  it('forwards managed caller and signal once to the GUI spatial owner and preserves its actual business errors', async () => {
+    const f = await hostedFixture(), requests: unknown[] = []
+    const region = { kind: 'agent' as const, tabId: 'desktop-tab', regionId: 'desktop-region', workspaceId: 'desktop-workspace',
+      agentSessionId: 'source-agent', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 },
+      neighbors: { left: { kind: 'none' as const }, right: { kind: 'none' as const }, up: { kind: 'none' as const }, down: { kind: 'none' as const } } }
     const gui = await endpoint({ coreClients: f.coreClients, execute: async request => {
-      if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [{ agentSessionId: 'recipient-agent',
-        promptCondition: { expectedRun: { runId: 'run-recipient-agent' }, afterSubmissionId: null }, projectId: null, projectName: null,
-        workspacePath: f.root, providerId: 'codex', executorId: 'codex', processState: 'running', status: 'idle', updatedAt: 1 }] }
-      if (request.operation === 'send') { sent.push(request); return { operation: request.operation, agentSessionId: 'recipient-agent' } }
+      requests.push(request)
+      if (request.operation === 'inspect.region') return { operation: request.operation, region }
+      if (request.operation === 'space.inspect') return { operation: request.operation, catalog }
       if (request.operation === 'space.ls') throw Object.assign(new AgentMuxError('Original GUI target refused.', 'SPACE_TARGET_INVALID', 'not_applied'), {
         details: { refusedBy: 'original-gui' }, candidates: [{ zoneId: 'actual-candidate' }] })
       throw new AgentMuxError('The GUI business owner is temporarily unavailable.', 'CONTROL_UNAVAILABLE', 'unknown')
     } })
-    const contexts: unknown[] = [], execute = vi.fn(async () => { throw new Error('Host must not enter its Desktop business port') })
-    const host = await endpoint({ coreClients: f.coreClients, execute, forwardControl: async (method, params, context) => {
+    const contexts: unknown[] = []
+    const host = await endpoint({ coreClients: f.coreClients, execute: undefined, forwardControl: async (method, params, context) => {
       contexts.push({ caller: context.caller, signal: context.signal instanceof AbortSignal })
       const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: gui.path },
         ...(context.caller ? { credentials: context.caller } : {}) })
@@ -327,21 +343,25 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
       finally { await client.dispose() }
     } })
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: host.path }, credentials: f.credentials }); cleanups.push(() => client.dispose())
-    const params = { target: { kind: 'agent-session' as const, agentSessionId: 'recipient-agent' }, operationId: 'forwarded-original-send', text: 'One original message' }
-    const result = await client.call('agent.send', params)
-    expect(result.delivery.state).toBe('delivered'); expect(result.envelope.senderSessionId).toBe('source-agent')
-    expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ caller: f.credentials, message: { operationId: params.operationId } })
-    expect(contexts).toEqual([{ caller: f.credentials, signal: true }]); expect(execute).not.toHaveBeenCalled()
+    const observedSpace = client.call('space.inspect', { target: { regionId: 'self' } })
+    await expect(observedSpace).resolves.toMatchObject({ catalog, presentation: { region } })
+    const result = await observedSpace
+    expect(result.catalog).toEqual(catalog); expect(result.presentation!.region).toEqual(region)
+    expect(requests).toEqual([
+      expect.objectContaining({ operation: 'inspect.region', caller: f.credentials, target: { kind: 'self' } }),
+      expect.objectContaining({ operation: 'space.inspect', target: { regionId: region.regionId } })
+    ])
+    expect(contexts).toEqual([{ caller: f.credentials, signal: true }])
     await expect(client.call('space.ls', { target: {} })).rejects.toMatchObject({ code: 'SPACE_TARGET_INVALID', detail: 'not_applied',
       details: { refusedBy: 'original-gui' }, candidates: [{ zoneId: 'actual-candidate' }] })
     await expect(client.call('goal.activity', {})).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE', detail: 'unknown' })
-    expect(execute).not.toHaveBeenCalled()
     const observed = f.client.agentSession('source-agent')
     const bad = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: host.path }, credentials: { ...f.credentials, capability: 'invalid-capability' } })
     cleanups.push(() => bad.dispose())
     const before = contexts.length
     await expect(bad.call('space.ls', { target: {} })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     expect(contexts).toHaveLength(before); expect(f.client.agentSession('source-agent')).toEqual(observed); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    expect(f.inputs).toEqual([])
   })
   it("keeps a remote caller's original Core facts and the actual Desktop-owned self view", async () => {
     const f = await hostedFixture()
