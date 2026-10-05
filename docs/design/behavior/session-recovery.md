@@ -135,6 +135,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - 远端 endpoint 首次可信连接所得的语义 Runtime 持久身份与原 Session 引用一并保留，独立于可改的 Host 名称、SSH 连接配置、服务进程代次和 ctxmux 身份；请求始终区分原语义 owner 与当前服务代次。重启或重连遇到不同语义 owner 时保原绑定与工作面，明确身份未确认/不匹配，不能据另一个 owner 的 `unknown Session` 删除旧投影或静默换绑。最后观察是带来源的缓存，不是授权或当前权威事实；只有目标的完整成功读取才能更新对应集合。
 - 完整交付包含真实 Linux Headless 服务、真实 Provider 的输入输出/权限/语义恢复及客户端与服务重启后的自动续接。原 Tab、Tab Group、Region、焦点与 split 先恢复，续接仍归原 Session；终端连续阅读、可信续接、Gap 与成本只沿《Terminal 连续向上阅读历史》及既有终端续接合同，不因远端 framing、响应预算或断网裁掉可用历史或复制 byte 真值。
 - 连接已有服务不暗中安装、部署、升级、重启或停止远端 owner；部署管理须有显式操作与准确回执。浏览器／手机远程控制沿[公共控制合同](public-control.md#手机版-relay-连接)，不成为连接与管理既有 Runtime 的隐式前提；无关 Goal／PMO 域也不能成为前置条件。
+- 远端 Core 的维护升级资格由维护 owner 核对原服务、Native、持久命名空间与固定候选；新版普通客户端握手尚不兼容旧服务，不能覆写已确认的维护资格。已完成升级的命令绑定仍须准确，升级后的普通连接沿原操作独立确认，未知不重放升级。业务回执保留其原 `operationId`，不与内部 Control 请求或 JSON-RPC 关联身份混换。
 
 ## 恢复时机与明确操作
 
