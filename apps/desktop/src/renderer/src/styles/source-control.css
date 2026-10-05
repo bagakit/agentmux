@@ -153,7 +153,7 @@
 .pr-form__hint { margin:0; padding:var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); color: var(--amber); background: var(--amber-bg); font-size: var(--fs-micro); line-height: 1.4; }
 .pr-form__title, .pr-form__body { width: 100%; padding:var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: 0; color: var(--text); background: var(--bg); font-family: inherit; font-size: var(--fs-meta); line-height: 1.45; }
 .pr-form__body { resize: none; }
-.pr-form__title:focus, .pr-form__body:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.pr-form__title:focus, .pr-form__body:focus { border-color: var(--focus-line); }
 .pr-form__title:disabled, .pr-form__body:disabled { opacity: .55; }
 .pr-form__submit { justify-content: center; padding:var(--sp-3) var(--sp-4); }
 
