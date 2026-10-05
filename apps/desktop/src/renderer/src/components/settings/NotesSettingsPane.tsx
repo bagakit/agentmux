@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useId, useState } from 'react'
 import { NOTE_CONTENT_WIDTHS, NOTE_FONT_SIZE_MIN, NOTE_FONT_SIZE_MAX, resolveNotesPreferences, validNoteFontSize, type NotesPreferences } from '../../../../shared/notes-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -35,8 +36,8 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
   }
   return <div className="settings-pane-stack">
     <section className="settings-group"><header><span>Storage</span><small>{storage?.directory ?? 'Reading the saved directory…'}</small></header>
-      <label className="settings-reading-size"><span><strong>Notes directory</strong><small>Move your notebook directory and stored notes together.</small></span>
-        <input aria-label="Notes directory" value={directory} disabled={moving || !!intent} onChange={event => setDirectory(event.target.value)} /></label>
+      <label className="settings-reading-size settings-notes-directory"><span><strong>Notes directory</strong><small>Move your notebook directory and stored notes together.</small></span>
+        <TextInput aria-label="Notes directory" value={directory} disabled={moving || !!intent} onChange={event => setDirectory(event.target.value)} /></label>
       <div className="settings-workflows__inline-action"><button type="button" className="small-button" disabled={!storage || moving || (!intent && directory.trim() === storage.directory)} onClick={() => void moveDirectory()}>{moving ? 'Moving…' : intent ? 'Retry original move' : 'Move notes'}</button></div>
       <button type="button" className="small-button" disabled={moving} onClick={() => { void useAppStore.getState().refreshNotesStorage().then(() => api.notesStorage.inspect()).then(value => { setStorage(value); setDirectoryIssue(null); if (!directory) setDirectory(value.directory) }).catch(error => setDirectoryIssue(String(error))) }}>Refresh directory</button>
       {directoryIssue && <p role="alert" className="settings-workflows__note">{directoryIssue}</p>}
@@ -45,7 +46,7 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
       <header><span>Reading</span><small>Saved: {saved.fontSize} px · {saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}</small></header>
       <div className="settings-reading-size">
         <label htmlFor={fontId}><strong>Body text size</strong><small>Applies to Notes and embedded note text.</small></label>
-        <div><input id={fontId} type="text" inputMode="numeric" aria-label="Notes body text size" value={draft.value.fontSize}
+        <div><TextInput id={fontId} type="text" inputMode="numeric" aria-label="Notes body text size" value={draft.value.fontSize}
           onChange={event => draft.setField('fontSize', event.target.value)} aria-invalid={!valid} /><span>px</span></div>
       </div>
       <input className="settings-reading-slider" type="range" min={NOTE_FONT_SIZE_MIN} max={NOTE_FONT_SIZE_MAX} step={1}
