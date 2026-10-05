@@ -59,25 +59,25 @@ async function rejectsOriginal(promise: Promise<unknown>, message?: string) {
 }
 const renderPanel = (f: ReturnType<typeof goalFixture>, overrides: { connected?: boolean; visible?: boolean; agentSessionId?: string } = {}) =>
   <MobileGoalWork client={f.client} agentSessionId={overrides.agentSessionId ?? 'session-original'} connected={overrides.connected ?? true} visible={overrides.visible ?? true} />
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('connected Goal original identity and business operations', () => {
-  it('retains the optional intent in the original record through conversation/navigation edits and a new owner', () => {
+  it('retains the optional intent in the original record through conversation/navigation edits and a new owner', async () => {
     const f = goalFixture(), op = operation(f), owner = getDeviceWorkface()
-    owner.selectGoal(goalWorkTarget(f.client, owner, 'session-original', goal.id)); owner.retainGoalOperation(op)
-    owner.updateConversation({ version: 1, drafts: [['original-draft', '继续输入']], attempts: [], responses: [] })
-    owner.updateNavigation({ selectedSessionId: 'other', hostUrl: '', panel: 'terminal' })
+    await owner.selectGoal(goalWorkTarget(f.client, owner, 'session-original', goal.id)); await owner.retainGoalOperation(op)
+    await owner.updateConversation({ version: 1, drafts: [['original-draft', '继续输入']], attempts: [], responses: [] })
+    await owner.updateNavigation({ selectedSessionId: 'other', hostUrl: '', panel: 'terminal' })
     const restored = new DeviceWorkfaceStore(() => localStorage).snapshot().record
     expect(restored.goalWork).toEqual({ selection: goalWorkTarget(f.client, owner, 'session-original', goal.id), pending: [op] })
     expect(restored.conversation.drafts).toEqual([['original-draft', '继续输入']]); expect(restored.selectedSessionId).toBe('other')
     expect(owner.parseBackup(owner.exportBackup())).toEqual(restored)
   })
-  it('accepts original six-field v1 bytes and rejects unknown, duplicate or changed same OP without covering existing bytes', () => {
+  it('accepts original six-field v1 bytes and rejects unknown, duplicate or changed same OP without covering existing bytes', async () => {
     expect(parseDeviceWorkface(emptyDeviceWorkface())).toEqual(emptyDeviceWorkface())
     expect(Object.keys(emptyDeviceWorkface())).toHaveLength(6)
     const f = goalFixture(), owner = getDeviceWorkface(), op = operation(f)
-    owner.retainGoalOperation(op); const before = localStorage.getItem('agentmux-mobile-workface-v1')
+    await owner.retainGoalOperation(op); const before = localStorage.getItem('agentmux-mobile-workface-v1')
     expect(() => owner.retainGoalOperation({ ...op, goalId: 'foreign' })).toThrow('内容不同')
     expect(localStorage.getItem('agentmux-mobile-workface-v1')).toBe(before)
     expect(() => parseDeviceWorkface({ ...emptyDeviceWorkface(), goalWork: { selection: null, pending: [op, op] } })).toThrow()
@@ -90,28 +90,28 @@ describe('connected Goal original identity and business operations', () => {
   })
   it('preserves old OP across Host process identity and refuses a changed durable Runtime or relay Host', async () => {
     const f = goalFixture(), owner = getDeviceWorkface(), op = operation(f)
-    owner.retainGoalOperation(op); f.identity('original-runtime', 'new-process')
+    await owner.retainGoalOperation(op); f.identity('original-runtime', 'new-process')
     await sendGoalOperation(f.client, owner, op, () => true)
     expect(f.calls.find(call => call.method === 'goal.start')?.params.operationId).toBe(op.operationId)
     f.identity('another-runtime'); f.calls.length = 0
     await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '另一个')
     expect(f.calls).toEqual([])
-    f.identity('original-runtime'); owner.confirmHost({ origin: location.origin, hostId: 'relay-server' })
+    f.identity('original-runtime'); await owner.confirmHost({ origin: location.origin, hostId: 'relay-server' })
     await sendGoalOperation(f.client, owner, op, () => true)
-    const known = { ...op, deviceHostId: 'relay-server' }; owner.retainGoalOperation(known)
-    owner.replaceBackup({ ...owner.snapshot().record, host: { origin: location.origin, hostId: 'different-relay' } })
+    const known = { ...op, deviceHostId: 'relay-server' }; await owner.retainGoalOperation(known)
+    await owner.replaceBackup({ ...owner.snapshot().record, host: { origin: location.origin, hostId: 'different-relay' } })
     await rejectsOriginal(sendGoalOperation(f.client, owner, known, () => true), '另一个')
   })
-  it('keeps later intent and other pending operations when an old receipt confirms', () => {
+  it('keeps later intent and other pending operations when an old receipt confirms', async () => {
     const f = goalFixture(), owner = getDeviceWorkface(), old = operation(f), later = { ...old, operationId: 'later-original-operation', goalId: 'later-goal' }
-    owner.retainGoalOperation(old); owner.retainGoalOperation(later); owner.selectGoal(goalWorkTarget(f.client, owner, 'session-original', later.goalId))
-    owner.confirmGoalOperation(old)
+    await owner.retainGoalOperation(old); await owner.retainGoalOperation(later); await owner.selectGoal(goalWorkTarget(f.client, owner, 'session-original', later.goalId))
+    await owner.confirmGoalOperation(old)
     expect(owner.snapshot().record.goalWork?.pending).toEqual([later]); expect(owner.snapshot().record.goalWork?.selection?.goalId).toBe('later-goal')
-    owner.confirmGoalOperation({ ...later, goalId: 'foreign' }); expect(owner.snapshot().record.goalWork?.pending).toEqual([later])
+    await owner.confirmGoalOperation({ ...later, goalId: 'foreign' }); expect(owner.snapshot().record.goalWork?.pending).toEqual([later])
   })
-  it('keeps the same pending intent when another actual Device owner tries a new operation for the same target', () => {
+  it('keeps the same pending intent when another actual Device owner tries a new operation for the same target', async () => {
     const f = goalFixture(), owner = getDeviceWorkface(), old = operation(f)
-    owner.retainGoalOperation(old)
+    await owner.retainGoalOperation(old)
     const otherWindow = new DeviceWorkfaceStore(() => localStorage)
     expect(() => otherWindow.retainGoalOperation({ ...old, operationId: 'second-window-new-operation' })).toThrow('已有待确认操作')
     expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalWork?.pending).toEqual([old])
@@ -130,7 +130,7 @@ describe('connected Goal original identity and business operations', () => {
   })
   it('keeps an unknown start pending and reuses its exact business OP on explicit retry', async () => {
     const f = goalFixture(), op = operation(f), owner = getDeviceWorkface()
-    owner.retainGoalOperation(op)
+    await owner.retainGoalOperation(op)
     const original = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await original(method, params); if (method === 'goal.start') { f.state.loops[0]!.initialDelivery!.state = 'unknown'; result.continuation.initialDelivery.state = 'unknown' } return result })
     await sendGoalOperation(f.client, owner, op, () => true)
@@ -141,14 +141,14 @@ describe('connected Goal original identity and business operations', () => {
     expect(owner.snapshot().record.goalWork?.pending).toEqual([])
   })
   it('rejects foreign Session or wrong operation receipts and preserves the original intent', async () => {
-    const f = goalFixture(), op = operation(f), owner = getDeviceWorkface(); owner.retainGoalOperation(op)
+    const f = goalFixture(), op = operation(f), owner = getDeviceWorkface(); await owner.retainGoalOperation(op)
     const original = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await original(method, params); if (method === 'goal.start') result.continuation.agentSessionId = 'other'; return result })
     await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '其他执行会话')
     expect(owner.snapshot().record.goalWork?.pending).toEqual([op])
   })
   it('reconciles a lost mutation ACK with the original OP/revision after re-open, never replacing it with resume', async () => {
-    const f = goalFixture([loop()]), owner = getDeviceWorkface(), op = operation(f, 'action'); owner.retainGoalOperation(op)
+    const f = goalFixture([loop()]), owner = getDeviceWorkface(), op = operation(f, 'action'); await owner.retainGoalOperation(op)
     const original = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await original(method, params); if (method === 'goal.continuation-action') throw new Error('lost original ACK'); return result })
     await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), 'lost original ACK')
@@ -161,7 +161,7 @@ describe('connected Goal original identity and business operations', () => {
   })
   it('refuses an unrelated newer loop revision rather than adopting another action receipt', async () => {
     const current = { ...loop(), revision: 2, lastMutation: { operationId: 'other-operation', action: 'pause' as const, expectedRevision: 1 } }
-    const f = goalFixture([current]), owner = getDeviceWorkface(), op = operation(f, 'action'); owner.retainGoalOperation(op)
+    const f = goalFixture([current]), owner = getDeviceWorkface(), op = operation(f, 'action'); await owner.retainGoalOperation(op)
     await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '版本已变化')
     expect(f.calls.some(call => call.method === 'goal.continuation-action')).toBe(false)
     expect(owner.snapshot().record.goalWork?.pending).toEqual([op])
@@ -195,7 +195,7 @@ describe('connected Goal original identity and business operations', () => {
     expect(f.calls.some(call => call.method === 'goal.start')).toBe(false)
     expect(view.element.textContent).toContain('device quota')
   })
-  it('enforces bounded intent records while preserving unrelated original drafts and pending bytes', () => {
+  it('enforces bounded intent records while preserving unrelated original drafts and pending bytes', async () => {
     const f = goalFixture(), op = operation(f)
     const valid = { ...emptyDeviceWorkface(), goalWork: { selection: null, pending: Array.from({ length: 256 }, (_, i) => ({ ...op, operationId: 'original-' + i })) } }
     expect(parseDeviceWorkface(valid).goalWork?.pending).toHaveLength(256)
@@ -235,8 +235,8 @@ describe('actual mobile Goal panel consumer', () => {
   })
   it('allows the saved absent Relay ID to use the same confirmed Runtime and keeps the known-host pending visible', async () => {
     const f = goalFixture(), owner = getDeviceWorkface()
-    owner.selectGoal(goalWorkTarget(f.client, owner, 'session-original', goal.id))
-    owner.confirmHost({ origin: location.origin, hostId: 'confirmed-original-relay' })
+    await owner.selectGoal(goalWorkTarget(f.client, owner, 'session-original', goal.id))
+    await owner.confirmHost({ origin: location.origin, hostId: 'confirmed-original-relay' })
     const original = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await original(method, params); if (method === 'goal.start') throw new Error('original receipt unknown'); return result })
     const view = await mount(renderPanel(f))

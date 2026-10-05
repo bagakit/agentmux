@@ -27,7 +27,7 @@ function pickFiles(files: unknown[]) {
 async function settled(phase: MobileFileUpload['phase']) {
   await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe(phase)) })
 }
-beforeEach(async () => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()); root = await mkdtemp(join(tmpdir(), 'amx-mobile-file-')) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()); root = await mkdtemp(join(tmpdir(), 'amx-mobile-file-')) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; for (const dispose of disposers.splice(0)) await dispose(); await rm(root, { recursive: true, force: true }); nativeDevicePorts.filePicker = originalFilePicker; vi.restoreAllMocks(); vi.unstubAllEnvs() })
 function insertionSpy() {
   const added: string[] = []

@@ -17,24 +17,25 @@ function original(): DeviceWorkface {
       attempts: [[key, { operationId: 'intent-original', runId: 'run-original', draft: '原草稿', phase: 'sending' as const }]],
       responses: [] } }
 }
+function domain(value: DeviceWorkface): Omit<DeviceWorkface, 'recordId'> { const { recordId: _, ...rest } = value; return rest }
 function storage(seed?: string) {
   let raw: string | null = seed ?? null
   const getItem = vi.fn(() => raw), setItem = vi.fn((key: string, bytes: string) => { expect(key).toBe(DEVICE_WORKFACE_KEY); raw = bytes })
   return { getItem, setItem, raw: () => raw }
 }
-beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   document.body.replaceChildren(); vi.restoreAllMocks()
 })
 describe('one durable mobile workface owner', () => {
-  it('exports and restores original display/source references alongside original input guards without persisting live catalog or image facts', () => {
+  it('exports and restores original display/source references alongside original input guards without persisting live catalog or image facts', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk)
     const identity = retainObjectReference({ name: '原 Mote', project: '原项目', context: { spaceId: 'mote', zoneId: 'home', workspaceId: 'scratch', displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' },
       mote: { spaceId: 'mote', contentReference: { zoneId: 'home', hostId: 'host-original', workspaceId: 'scratch', workspacePath: fixturePath("original/scratch") },
         appearance: { spaceId: 'mote', image: { dataUrl: 'unrelated-avatar-bytes', revision: 'image' } } } })!
     const route = { primary: 'mote' as const, showSession: true, showGoalWork: false, identity, profile: { identity, sourcePath: 'BEHAVIOR.md' } }
-    owner.updatePresentation(original(), route)
+    await owner.updatePresentation(original(), route)
     const restored = new DeviceWorkfaceStore(() => disk).snapshot().record
     expect(restored).toEqual({ ...original(), presentation: route })
     expect(owner.parseBackup(owner.exportBackup())).toEqual(restored)
@@ -46,17 +47,17 @@ describe('one durable mobile workface owner', () => {
       { ...route, identity: { ...identity, mote: { ...identity.mote, nativeRun: 'invented-runtime' } } }
     ]) expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...original(), presentation: malformed } }))).toThrow()
     expect(disk.raw()).toBe(raw)
-    owner.updateConversation(original().conversation)
+    await owner.updateConversation(original().conversation)
     expect(new DeviceWorkfaceStore(() => disk).snapshot().record.presentation).toEqual(route)
   })
-  it('atomically preserves navigation, Host identity, draft and the original unknown guard across a new owner', () => {
+  it('atomically preserves navigation, Host identity, draft and the original unknown guard across a new owner', async () => {
     const disk = storage(), owner = new DeviceWorkfaceStore(() => disk)
-    owner.updateNavigation({ selectedSessionId: 'session-original', hostUrl: 'https://192.168.1.20:4321', panel: 'terminal' })
-    owner.confirmHost({ origin: 'https://192.168.1.20:4321', hostId: 'host-original' })
+    await owner.updateNavigation({ selectedSessionId: 'session-original', hostUrl: 'https://192.168.1.20:4321', panel: 'terminal' })
+    await owner.confirmHost({ origin: 'https://192.168.1.20:4321', hostId: 'host-original' })
     const drafts = createLocalDrafts(() => disk)
     drafts.drafts.set(key, '原草稿')
     drafts.attempts.set(key, { operationId: 'intent-original', runId: 'run-original', draft: '原草稿', phase: 'sending', message: 'pending' })
-    drafts.save()
+    await drafts.save()
     expect(drafts.notice).toBeNull()
     const restored = new DeviceWorkfaceStore(() => disk).snapshot()
     expect(restored.issue).toBeNull()
@@ -65,25 +66,25 @@ describe('one durable mobile workface owner', () => {
       draft: '原草稿', phase: 'unknown', message: '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。' })
     expect(disk.setItem.mock.calls.map(call => call[0])).toEqual([DEVICE_WORKFACE_KEY, DEVICE_WORKFACE_KEY, DEVICE_WORKFACE_KEY])
   })
-  it('retains durable bytes on a failed write and exports the current temporary workface for preservation', () => {
+  it('retains durable bytes on a failed write and exports the current temporary workface for preservation', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
     disk.setItem.mockImplementationOnce(() => { throw new Error('quota') })
-    expect(() => owner.updateNavigation({ selectedSessionId: 'session-original', hostUrl: original().hostUrl, panel: 'terminal' })).toThrow('quota')
+    await expect(owner.updateNavigation({ selectedSessionId: 'session-original', hostUrl: original().hostUrl, panel: 'terminal' })).rejects.toThrow('quota')
     expect(disk.raw()).toBe(before)
     expect(owner.snapshot().record.panel).toBe('terminal')
     const exported = owner.parseBackup(owner.exportBackup())
     expect(exported).toEqual({ ...original(), panel: 'terminal' })
   })
-  it('preserves unreadable original bytes and stages temporary drafts until the explicit full-record recovery', () => {
+  it('preserves unreadable original bytes and stages temporary drafts until the explicit full-record recovery', async () => {
     const disk = storage('{original-unreadable'), owner = getDeviceWorkface(() => disk), drafts = createLocalDrafts(() => disk)
     expect(owner.snapshot().issue).toContain('原记录尚未覆盖')
-    drafts.drafts.set(key, '坏记录旁继续编辑的草稿'); drafts.save()
+    drafts.drafts.set(key, '坏记录旁继续编辑的草稿'); await drafts.save()
     expect(disk.raw()).toBe('{original-unreadable'); expect(disk.setItem).not.toHaveBeenCalled()
-    owner.replaceUnreadableWithCurrent({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
+    await owner.replaceUnreadableWithCurrent({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
     expect(new DeviceWorkfaceStore(() => disk).snapshot().record.conversation.drafts).toEqual([[key, '坏记录旁继续编辑的草稿']])
     expect(disk.setItem).toHaveBeenCalledOnce()
   })
-  it('rejects incomplete, duplicate and secret-bearing imports before any write or adoption', () => {
+  it('rejects incomplete, duplicate and secret-bearing imports before any write or adoption', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
     const invalid = [
       { schema: 'agentmux.mobile-workface.v1', workface: { ...original(), host: { ...original().host, credential: 'never-import' } } },
@@ -94,45 +95,45 @@ describe('one durable mobile workface owner', () => {
     for (const input of invalid) expect(() => owner.parseBackup(JSON.stringify(input))).toThrow()
     expect(disk.raw()).toBe(before); expect(owner.snapshot().record).toEqual(original()); expect(disk.setItem).not.toHaveBeenCalled()
   })
-  it('adopts a complete import only after the single durable write succeeds', () => {
+  it('adopts a complete import only after the single durable write succeeds', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
     const imported = { ...emptyDeviceWorkface(), selectedSessionId: 'imported-session', panel: 'terminal' as const }
     disk.setItem.mockImplementationOnce(() => { throw new Error('device storage unavailable') })
-    expect(() => owner.replaceBackup(imported)).toThrow('device storage unavailable')
+    await expect(owner.replaceBackup(imported)).rejects.toThrow('device storage unavailable')
     expect(disk.raw()).toBe(before); expect(owner.snapshot().record).toEqual(original())
-    owner.replaceBackup(imported)
-    expect(new DeviceWorkfaceStore(() => disk).snapshot().record).toEqual(imported)
+    await owner.replaceBackup(imported)
+    expect(domain(new DeviceWorkfaceStore(() => disk).snapshot().record)).toEqual(imported)
     expect(disk.setItem).toHaveBeenCalledTimes(2)
   })
-  it('rejects another Host and accepts the original Host at a changed address without erasing input', () => {
+  it('rejects another Host and accepts the original Host at a changed address without erasing input', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
     expect(() => owner.confirmHost({ origin: original().hostUrl, hostId: 'replacement-host' })).toThrow('原 Host 身份不同')
     expect(owner.snapshot().record).toEqual(original()); expect(disk.raw()).toBe(before); expect(disk.setItem).not.toHaveBeenCalled()
-    owner.confirmHost({ origin: 'https://192.168.1.21:4321', hostId: 'host-original' })
+    await owner.confirmHost({ origin: 'https://192.168.1.21:4321', hostId: 'host-original' })
     expect(owner.snapshot().record).toEqual({ ...original(), host: { origin: 'https://192.168.1.21:4321', hostId: 'host-original' } })
   })
   it('restores the actual app offline after a preserved-file import and never resends the original unknown input', async () => {
     const owner = getDeviceWorkface(), backup = owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: original() }))
-    localStorage.clear(); owner.replaceBackup(backup)
+    localStorage.clear(); await owner.replaceBackup(backup)
     const f = fixture(), view = await mount(<MobileApp client={f.client} connection={{ state: 'disconnected', message: '原 Mac 尚未核实' }} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(editor(view.element).textContent).toBe('原草稿')
     expect(view.element.textContent).toContain('重启后的原输入回执未知')
     expect(button(view.element, 'Send').disabled).toBe(false); expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
-    expect(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!)).toEqual(original())
+    expect(domain(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!))).toEqual(original())
   })
   it('exports from the actual recovery action without including an authorization secret', async () => {
-    getDeviceWorkface().replaceBackup(original() as ReturnType<DeviceWorkfaceStore['snapshot']>['record'])
+    await getDeviceWorkface().replaceBackup(original() as ReturnType<DeviceWorkfaceStore['snapshot']>['record'])
     const exportFile = vi.fn().mockResolvedValue(undefined), restored = vi.fn()
     const view = await mount(<MobileRecoveryPanel exportFile={exportFile} onRestored={restored} />)
     await click(button(view.element, '导出工作面文件'))
     expect(exportFile).toHaveBeenCalledOnce()
     const [name, bytes] = exportFile.mock.calls[0]!
     expect(name).toBe('agentmux-workface.json')
-    expect(getDeviceWorkface().parseBackup(bytes)).toEqual(original())
+    expect(domain(getDeviceWorkface().parseBackup(bytes))).toEqual(original())
     expect(view.element.textContent).toContain('请确认文件已保留'); expect(restored).not.toHaveBeenCalled()
     expect(Object.keys(JSON.parse(bytes))).toEqual(['schema', 'workface'])
-    expect(Object.keys(JSON.parse(bytes).workface)).toEqual(['version', 'selectedSessionId', 'hostUrl', 'panel', 'host', 'conversation'])
+    expect(Object.keys(JSON.parse(bytes).workface)).toEqual(['version', 'selectedSessionId', 'hostUrl', 'panel', 'host', 'conversation', 'recordId'])
   })
   it('validates the actual file selection and adopts it only through the explicit recovery action', async () => {
     const owner = getDeviceWorkface(), before = localStorage.getItem(DEVICE_WORKFACE_KEY), restored = vi.fn()
@@ -147,7 +148,7 @@ describe('one durable mobile workface owner', () => {
     expect(view.element.textContent).toContain('尚未替换当前工作面')
     expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); expect(restored).not.toHaveBeenCalled()
     await click(button(view.element, '恢复这份工作面'))
-    expect(owner.snapshot().record).toEqual(original()); expect(restored).toHaveBeenCalledOnce()
+    expect(domain(owner.snapshot().record)).toEqual(original()); expect(restored).toHaveBeenCalledOnce()
   })
   it('connects the recovery controls to the actual app connection dialog', async () => {
     const overlay = document.createElement('div'); document.body.appendChild(overlay)
@@ -172,22 +173,22 @@ describe('one durable mobile workface owner', () => {
     expect(getDeviceWorkface().parseBackup(getDeviceWorkface().exportBackup()).selectedSessionId).toBe('session-original')
     expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe('{keep-original-bytes')
   })
-  it('retains staged drafts when a failed initial read recovers to an empty durable store', () => {
+  it('retains staged drafts when a failed initial read recovers to an empty durable store', async () => {
     const disk = storage(), access = () => disk
     disk.getItem.mockImplementation(() => { throw new Error('storage blocked') })
     const owner = getDeviceWorkface(access), drafts = createLocalDrafts(access)
-    drafts.drafts.set(key, '读取失败旁编辑'); drafts.save()
+    drafts.drafts.set(key, '读取失败旁编辑'); await drafts.save()
     disk.getItem.mockImplementation(() => null)
     expect(owner.snapshot().record.conversation.drafts).toEqual([[key, '读取失败旁编辑']])
     expect(owner.parseBackup(owner.exportBackup()).conversation.drafts).toEqual([[key, '读取失败旁编辑']])
     expect(owner.snapshot().issue).toContain('当前临时工作面仍保留')
     expect(disk.setItem).not.toHaveBeenCalled()
   })
-  it('reuses the same owner while the storage accessor itself is unavailable and after it becomes readable', () => {
+  it('reuses the same owner while the storage accessor itself is unavailable and after it becomes readable', async () => {
     const disk = storage(); let blocked = true
     const access = () => { if (blocked) throw new Error('device storage denied'); return disk }
     const drafts = createLocalDrafts(access), owner = getDeviceWorkface(access)
-    drafts.drafts.set(key, '系统存储不可读时的草稿'); drafts.save()
+    drafts.drafts.set(key, '系统存储不可读时的草稿'); await drafts.save()
     expect(getDeviceWorkface(access)).toBe(owner)
     expect(owner.parseBackup(getDeviceWorkface(access).exportBackup()).conversation.drafts).toEqual([[key, '系统存储不可读时的草稿']])
     blocked = false
@@ -195,19 +196,19 @@ describe('one durable mobile workface owner', () => {
     expect(owner.snapshot().record.conversation.drafts).toEqual([[key, '系统存储不可读时的草稿']])
     expect(disk.raw()).toBeNull(); expect(disk.setItem).not.toHaveBeenCalled()
   })
-  it('hydrates the same temporary draft and unknown guard when a production reader is recreated during a storage issue', () => {
+  it('hydrates the same temporary draft and unknown guard when a production reader is recreated during a storage issue', async () => {
     const disk = storage(), access = () => disk
     disk.getItem.mockImplementation(() => { throw new Error('storage unavailable') })
     const first = createLocalDrafts(access)
     first.drafts.set(key, '临时原草稿')
     first.attempts.set(key, { operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown', message: 'unknown' })
-    first.save()
+    await first.save()
     const next = createLocalDrafts(access)
     expect(next.canSave).toBe(false); expect(next.notice).toContain('未确认输入仍保留')
     expect(next.drafts.get(key)).toBe('临时原草稿')
     expect(next.attempts.get(key)).toEqual({ operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown',
       message: '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。' })
-    next.drafts.set(key, '继续编辑的草稿'); next.save()
+    next.drafts.set(key, '继续编辑的草稿'); await next.save()
     expect(getDeviceWorkface(access).snapshot().record.conversation.attempts).toEqual([[key, {
       operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown' }]])
     expect(disk.setItem).not.toHaveBeenCalled(); expect(disk.raw()).toBeNull()
