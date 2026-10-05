@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { installGitHistoryViewport } from './helpers/git-history-viewport'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -48,6 +49,7 @@ async function render(visible = true, value = workspace) { await dom.render(<Sur
 async function open() { await render(); await dom.click('[data-surface-mode="history"]'); expect(rows().length).toBeGreaterThan(0) }
 async function retry() { const button = dom.container.querySelector<HTMLButtonElement>('.git-history-error button') ?? dom.container.querySelector<HTMLButtonElement>('.git-history-footer button'); expect(button).not.toBeNull(); await act(async () => button!.click()) }
 beforeEach(() => {
+  installGitHistoryViewport()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   positioning.pending = null
   history = vi.fn(); Object.defineProperty(window, 'agentmux', { configurable: true, value: { git: { history } } })

@@ -1,6 +1,7 @@
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { installGitHistoryViewport } from './helpers/git-history-viewport'
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act, createElement, Profiler, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -11,8 +12,12 @@ const fixture = vi.hoisted(() => ({
   state: { localHome: _hygiene_fixturePath("Users/private"), config: { copyPathsAsAbsolute: false, hosts: [{ id: 'local', kind: 'local' }] }, openGitWorkbench: vi.fn() }
 }))
 vi.mock('../src/renderer/src/store.js', () => ({ useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state) }))
-import { GitHistoryPanel } from '../src/renderer/src/components/GitHistoryPanel.js'
-import { useGitHistory } from '../src/renderer/src/hooks/useGitHistory.js'
+import { GitHistoryPanel, type GitHistoryViewportState } from '../src/renderer/src/features/git/history/GitHistoryPanel.js'
+import { useGitHistory } from '../src/renderer/src/features/git/history/useGitHistory.js'
+vi.mock('../src/renderer/src/lib/conversation-avatar-color.js', async original => {
+  const actual = await original<typeof import('../src/renderer/src/lib/conversation-avatar-color.js')>()
+  return { ...actual, speakerColorHue: vi.fn(actual.speakerColorHue) }
+})
 import { speakerColorHue } from '../src/renderer/src/lib/conversation-avatar-color.js'
 
 const oid = (digit: string) => digit.repeat(40)
@@ -34,8 +39,10 @@ function deferred<T>() {
 let host: HTMLDivElement, root: Root
 let stylesheet: HTMLStyleElement
 let history: ReturnType<typeof vi.fn>
+let controls: ReturnType<typeof useGitHistory>
 const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
 beforeEach(() => {
+  installGitHistoryViewport()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   stylesheet = document.createElement('style')
@@ -53,11 +60,12 @@ afterEach(async () => {
   Object.defineProperty(window, 'agentmux', { configurable: true, value: undefined })
   if (originalVisibility) Object.defineProperty(document, 'visibilityState', originalVisibility)
   else Reflect.deleteProperty(document, 'visibilityState')
-  vi.unstubAllGlobals()
+  vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 function HistoryOwner({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
   const history = useGitHistory(workspace, visible)
-  return createElement(GitHistoryPanel, { workspace, history })
+  controls = history
+  return createElement(GitHistoryPanel, { workspace, history, onSelectCommit: snapshot => fixture.state.openGitWorkbench(workspace.id, snapshot) })
 }
 async function render(visible = true, value = workspace) { await act(async () => { root.render(createElement(HistoryOwner, { workspace: value, visible })) }) }
 async function click(label: string) {
@@ -378,5 +386,105 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     await act(async () => canceled.resolve(page([commit(e, 'Canceled initial', [])])))
     await render(true); expect(rows()).toEqual([a]); expect(history).toHaveBeenCalledTimes(2)
     await click('Load more'); expect(rows()).toEqual([a]); expect(host.textContent).toContain('repeated an already loaded commit')
+  })
+})
+
+
+describe('History viewport work and controlled boundary', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(300)
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function () {
+      return Number.parseFloat(this.querySelector<HTMLElement>('.git-history-window')?.style.height || '0') + 32
+    })
+  })
+  const chain = (count: number) => {
+    const ids = [a, ...Array.from({ length: count - 1 }, (_, index) => (index + 1).toString(16).padStart(40, '0'))]
+    return ids.map((id, index) => commit(id, `Commit ${index}`, ids[index + 1] ? [ids[index + 1]!] : []))
+  }
+  const scroll = () => host.querySelector<HTMLDivElement>('.git-history-scroll')!
+  async function move(top: number) { await act(async () => { scroll().scrollTo({ top }) }) }
+
+  it.each([100, 1000, 3330])('bounds real row and SVG generation at %i loaded commits and isolates hover without reads', async count => {
+    history.mockResolvedValue(page(chain(count)))
+    const durations: number[] = []
+    await act(async () => root.render(createElement(Profiler, { id: 'production-history', onRender: (_id, _phase, duration) => durations.push(duration),
+      children: createElement(HistoryOwner, { workspace, visible: true }) })))
+    expect(rows()).toHaveLength(21) // 13 viewport rows + eight trailing overscan rows.
+    expect(host.querySelectorAll('[data-history-graph-row]')).toHaveLength(21)
+    const paths = host.querySelectorAll('.git-history-graph svg path').length
+    expect(paths).toBe(41)
+    const elements = host.querySelectorAll('*').length
+    const oldRows = [...host.querySelectorAll('[data-history-oid]')]
+    vi.mocked(speakerColorHue).mockClear()
+    await act(async () => (oldRows[0] as HTMLElement).focus())
+    expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(a)
+    expect(history).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(speakerColorHue)).not.toHaveBeenCalled() // Actual row/SVG generation would call this for each guided path.
+    expect([...host.querySelectorAll('[data-history-oid]')]).toEqual(oldRows)
+    console.info(JSON.stringify({ historyViewport: count, viewportHeight: 300, rows: rows().length, paths, elements,
+      reactCommitMs: durations.map(value => Number(value.toFixed(3))) }))
+    await move(1200)
+    expect(rows()).toHaveLength(29) // 13 viewport + eight at either side.
+    expect(host.querySelectorAll('[data-history-graph-row]')).toHaveLength(29)
+    expect(rows()[0]).toBe(chain(count)[42]!.oid)
+    expect(document.querySelector('[data-history-detail-oid]')).toBeNull()
+  })
+
+  it('keeps the three read callbacks stable across owner rerenders and preserves the pinned read window', async () => {
+    history.mockResolvedValue(page(chain(100)))
+    await render()
+    const before = controls
+    await render(); await render(false); await render(true)
+    expect(controls.loadMore).toBe(before.loadMore)
+    expect(controls.refresh).toBe(before.refresh)
+    expect(controls.selectReference).toBe(before.selectReference)
+    expect(controls.result).toBe(before.result)
+    expect(history).toHaveBeenCalledTimes(1)
+  })
+
+  it('transfers only the matching pinned viewport between presentation instances and resets another ref', async () => {
+    history.mockResolvedValueOnce(page(chain(100))).mockResolvedValue(page(chain(100), false, { ...snapshot, selectedRef: 'refs/heads/other', checkedAt: 2 }))
+    function ReadingOwner({ place }: { place: string }) {
+      const value = useGitHistory(workspace, true)
+      const position = useRef<GitHistoryViewportState | null>(null)
+      return createElement(GitHistoryPanel, { key: place, workspace, history: value, viewportState: position, onSelectCommit: () => {} })
+    }
+    await act(async () => root.render(createElement(ReadingOwner, { place: 'sidebar' })))
+    await move(1200)
+    const first = rows()[0]
+    await act(async () => root.render(createElement(ReadingOwner, { place: 'repository' })))
+    expect(scroll().scrollTop).toBe(1200); expect(rows()[0]).toBe(first)
+    expect(history).toHaveBeenCalledTimes(1)
+    await select('refs/heads/main')
+    expect(scroll().scrollTop).toBe(0)
+    expect(rows()[0]).toBe(a)
+  })
+
+  it('reaches offscreen rows with keyboard and reveals an explicit target without jumping to ordinary selection', async () => {
+    history.mockResolvedValue(page(chain(100)))
+    function Controlled({ revealOid, selectedOid }: { revealOid?: string; selectedOid?: string }) {
+      const value = useGitHistory(workspace, true)
+      return createElement(GitHistoryPanel, { workspace, history: value, revealOid, selectedOid, onSelectCommit: snapshot => fixture.state.openGitWorkbench(workspace.id, snapshot) })
+    }
+    const target = chain(100)[70]!.oid
+    await act(async () => root.render(createElement(Controlled, { selectedOid: target })))
+    expect(scroll().scrollTop).toBe(0); expect(rows()).not.toContain(target)
+    await act(async () => host.querySelector<HTMLElement>('[data-history-index="0"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })))
+    expect((document.activeElement as HTMLElement).dataset.historyIndex).toBe('99')
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    expect(fixture.state.openGitWorkbench).toHaveBeenCalledExactlyOnceWith(workspace.id, expect.objectContaining({ commitOid: chain(100)[99]!.oid }))
+    await act(async () => root.render(createElement(Controlled, { selectedOid: target, revealOid: target })))
+    expect(rows()).toContain(target)
+    expect(scroll().scrollTop).toBeGreaterThan(1200)
+  })
+
+  it('opens repository history as a separate explicit action without selecting a fabricated latest commit', async () => {
+    history.mockResolvedValue(page(chain(100)))
+    const openRepository = vi.fn(), choose = vi.fn()
+    function Owner() { const value = useGitHistory(workspace, true); return createElement(GitHistoryPanel, { workspace, history: value, onSelectCommit: choose, onOpenRepository: openRepository }) }
+    await act(async () => root.render(createElement(Owner)))
+    await click('Open repository history')
+    expect(openRepository).toHaveBeenCalledExactlyOnceWith()
+    expect(choose).not.toHaveBeenCalled()
   })
 })
