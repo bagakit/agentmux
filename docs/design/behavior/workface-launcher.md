@@ -43,7 +43,9 @@
 ## Resume 与交互连续
 
 
-- **Resume 信息够用且诚实。** 范围与恢复边界沿[《启动页 Resume 快捷入口》](session-recovery.md#启动页-resume-快捷入口)。候选同时可识别实际 Agent 名、Provider / Executor、所属项目与 Host、最近活动、稳定 Session ID，以及来自已保留记录的 recap / 请求摘要；缺摘要明确无可用 recap，不从 Provider、时间或名字编造。完整 ID / 路径可按需查看或复制，显示名永不当恢复 key。列表、计数、过滤与被选恢复对象同源，当前项目零候选仍能切全部项目。查找范围与有界摘要读取只见上述 Resume 合同，不以未读取内容作搜索承诺。
+- **已有原生会话可以从这里继续。** Resume 候选覆盖 Core 已管理的 AgentSession 与 Provider 可验证的原生持久会话；原生会话不以曾由 AgentMux 创建、已有 Runtime Run 或未在其它工作面展示为入选前提。Core 通过 Provider 确认原生来源、身份及真实执行目录，Launcher 消费同一公开能力，不自行解析厂商存储。已管理的同一原生会话沿原 AgentSession 与执行身份恢复；首次接入未管理会话可以建立 AgentSession，但必须继续准确原生 conversation，不能把新 Run、空会话或另一原生 ID 当作恢复完成。具体 reattach、native resume、当前 Run 重读与已退休会话的显式继续沿[恢复合同](session-recovery.md#启动页-resume-快捷入口)，不复制生命周期逻辑。原生候选按用户打开 Resume 后的查询范围按需读取，冷启动不因这个入口扫描或批量启动历史 CLI。
+
+- **Resume 信息够用且诚实。** 范围与恢复边界沿[《启动页 Resume 快捷入口》](session-recovery.md#启动页-resume-快捷入口)。候选同时可识别已知 Agent 名、Provider / Executor、所属项目与 Host、最近活动及来自已保留记录的 recap / 请求摘要；已管理候选保稳定 AgentSession ID，未管理候选保准确 Provider 原生 ID，缺失字段明确未知，不以 Run ID 代称语义会话。缺摘要明确无可用 recap，不从 Provider、时间或名字编造。完整 ID / 路径可按需查看或复制，显示名永不当恢复 key。列表、计数、过滤与被选恢复对象同源，同一 Host / Provider 原生会话只呈现同一准确目标，已管理绑定优先沿原 Session；当前项目零候选仍能切全部项目。查找范围与有界摘要读取只见上述 Resume 合同，不以未读取内容作搜索承诺。原生发现或摘要读取失败保留已知候选、原草稿和健康 Run，说明失败范围与可重试动作，不把某个 Provider 的观察缺口说成全部会话不存在。
 
 - **交互先兑现，动态随真实动作。** Agent 选择和部分开合由原控件与原状态立即兑现；键盘 Tab、Enter / Space 与浮层 Escape、关闭返回焦点沿既有可访问控件，不等待动效才允许输入或提交。Browser 收起或工具关闭移除原控件后，焦点交回同一对象在本 Launcher 的展开 / 恢复入口，不能落到 BODY 让用户重新寻找位置。Host / Options 的有限退出呈现不能继续接收点击、Tab 或旧提交；快速关闭重开、切 Agent 和尺寸变化后，旧完成事件不得关掉新面、覆盖真实选择、丢草稿或抢焦点。选择连续反馈只跟随本次真实目标，hover 不选择，未知环境不冒充已连接；动效不重挂编辑器、Terminal 或复制 Runtime / draft / selection owner。原选中 Agent、Options、名称、Prompt、Browser / Note 草稿和健康 Run 保留。截图、文件或 Skills 选择器的异步结果沿准确来源 Region / 草稿归属，来源已改变时不得写入后来的输入或抢焦点；原引用与失败事实保持可追溯。当前 Launcher 只订阅自己实际使用的输入与名称，不因无关 Session 更新而放大 retained 工作面的局部观察或渲染工作。减少动态、Launcher / document 隐藏或 retained inert 时停止装饰动态及无关局部观察，按当前状态立即呈现可读静态反馈，临时退出内容确实释放；不以动画终止事件缺席阻断原动作。视觉与材质复用唯一见密度 SSOT 同节。
 
