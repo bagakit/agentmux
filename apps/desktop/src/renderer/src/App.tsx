@@ -26,6 +26,7 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
+import { resolveBrowserStartPage } from '../../shared/browser-start-page'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { MoteWorkface } from './components/MoteWorkface'
 import { moteWorkbenchProjection } from './lib/mote-workbench-projection'
@@ -317,7 +318,7 @@ function DesktopApp() {
         if (projected.unsupportedTabIds.has(reference.tabId)) continue
         append(reference.tabId, { hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
           active: !(surveyToolsOpen && narrowControls) && (surveyCurrentSelection?.active?.tabId !== reference.tabId ||
-            sameWorkbenchProjectionSelection(surveyCurrentSelection.active, reference)), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', controlsOpen: surveyToolsOpen,
+            sameWorkbenchProjectionSelection(surveyCurrentSelection.active, reference)), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', browserStartPage: resolveBrowserStartPage(config?.browser.startPage), controlsOpen: surveyToolsOpen,
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) })
       }
     }
@@ -342,7 +343,7 @@ function DesktopApp() {
       })
     }
     return targets
-  }, [moteViewTargets, surveyVisible, surveyProjection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
+  }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
     focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
   const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
   useEffect(() => { if (mainSurface === 'recall') setRecallVisited(true) }, [mainSurface])

@@ -3,6 +3,7 @@ import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
 import { workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { desktopElementVisible } from './desktop-presentation'
+import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 
 /** Spatial visibility alone does not authorize launcher activation or a focus move. */
 export type BrowserControlConfirmation = (regionId: string, unconfirmed: boolean) => void
@@ -13,7 +14,7 @@ export function useWorkbenchPresentationActive(): boolean { return useContext(Wo
 export function useWorkbenchRetainedRegionId(): string | null { return useContext(WorkbenchPresentationContext).retainedRegionId }
 export function useWorkbenchBrowserPresentation() { return useContext(WorkbenchPresentationContext) }
 export type WorkbenchViewTargets = Readonly<Record<string, readonly WorkbenchViewTarget[]>>
-export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'recall' | 'survey' | 'focus' | 'space' | 'mote'; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
+export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'recall' | 'survey' | 'focus' | 'space' | 'mote'; browserStartPage?: BrowserStartPageConfig; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
 
 /** A Tab's committed host does not change occurrence when its selected sibling changes. */
 function committedTabMarkerMatches(tab: WorkbenchTab, prefix: 'primary' | 'view', reference: WorkbenchProjectionSelection, marker: string | undefined): boolean {

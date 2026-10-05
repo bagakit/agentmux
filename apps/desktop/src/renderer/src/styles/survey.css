@@ -8,7 +8,7 @@
   color: var(--text); background: var(--surface-0); gap: 0; padding: 0;
 }
 :is(.global-survey-surface, .global-recall-surface)[hidden], .survey-management[hidden], .survey-tabs[hidden] { display: none; }
-.survey-navigation, .survey-management, .survey-start-input, .survey-topic-menu {
+.survey-navigation, .survey-management, .survey-topic-menu {
   background: linear-gradient(135deg, var(--wash-1), transparent 48%), var(--survey-glass);
   backdrop-filter: blur(20px) saturate(110%); border: 1px solid var(--survey-edge);
   box-shadow: inset 0 1px var(--wash-2), var(--elev-1);
@@ -96,17 +96,6 @@
 .survey-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
 .survey-page-content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface-0); }
 :is(.global-survey-surface, .global-recall-surface) .browser-toolbar { border-bottom: 1px solid var(--survey-edge); }
-.browser-toolbar__empty-address { flex: 1; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
-.survey-start { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-6); min-width: 0; min-height: 0; padding: var(--sp-7); }
-.survey-start-mark { display: grid; place-items: center; color: var(--text-2); width: 48px; height: 48px; border-radius: var(--radius-lg); background: var(--wash-1); box-shadow: inset 0 1px var(--wash-2); }
-.survey-start > small { color: var(--text-3); font-size: var(--fs-meta); }
-.survey-start-input { display: flex; align-items: center; gap: var(--sp-3); width: min(520px, 100%); min-width: 0; min-height: 48px; padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4); border: 1px solid var(--survey-edge); border-radius: var(--radius-lg); box-shadow: inset 0 1px var(--wash-2), var(--elev-2); }
-.survey-start-input:focus-within { border-color: var(--focus-line); box-shadow: none; }
-.survey-start-input input { flex: 1; min-width: 0; width: 100%; border: 0; padding: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-prose); }
-.survey-start-input input.ui-input:focus-visible { outline: none; }
-.survey-start-input input::placeholder { color: var(--text-3); }
-.survey-start-input button { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--bg); background: var(--green-2); cursor: pointer; }
-.survey-start-input button:disabled { opacity: .4; cursor: default; }
 .survey-error, .browser-address-error { flex: none; margin: 0; padding: var(--sp-3) var(--sp-4); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); line-height: 1.45; }
 .survey-restore-notice { margin: auto; max-width: 420px; padding: var(--sp-5); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
 .survey-restore-notice p { color: var(--text-3); }
@@ -250,10 +239,6 @@
 .global-survey-surface .survey-navigation[data-collapsed="true"] .survey-new-page { justify-content: center; padding-inline: 0; }
 /* Expand the rail for its per-item creation shortcuts; keyboard selection remains available while compact. */
 .global-survey-surface .survey-navigation[data-collapsed="true"] .survey-item-shortcuts { display: none; }
-.survey-start-brand { display: grid; justify-items: center; gap: var(--sp-3); max-width: 520px; text-align: center; }
-.survey-start-brand h1 { margin: 0; color: var(--text); font-size: var(--fs-display); font-weight: 550; letter-spacing: -.025em; }
-.survey-start-brand p { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; }
-.survey-start-brand .brand-icon { flex: none; border-radius: 10px; }
 @media (prefers-reduced-motion: reduce) { .global-survey-surface .survey-navigation { transition: none; } }
 
 .survey-page-favicon { display: inline-grid; width: 16px; height: 16px; }

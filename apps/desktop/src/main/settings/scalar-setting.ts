@@ -42,12 +42,12 @@ export function invalid(key: string, value: string): Error {
 
 /** Freeform text still has a declared, bounded setting owner; no arbitrary config paths. */
 export function textSetting(key: string, read: (config: AppConfig) => string,
-  write: (config: AppConfig, value: string) => AppConfig, valid: (value: string) => boolean): ScalarSetting {
+  write: (config: AppConfig, value: string) => AppConfig, valid: (value: string) => boolean, defaultValue = ''): ScalarSetting {
   return {
     key,
-    entry(config) { return { key, kind: 'string', value: read(config), default: '' } },
+    entry(config) { return { key, kind: 'string', value: read(config), default: defaultValue } },
     apply(config, value) {
-      if (!valid(value)) throw Object.assign(new Error('Invalid value for ' + key + '. Check the profile field limits and use a static PNG or JPEG avatar.'), { code: 'INVALID_SETTING_VALUE' })
+      if (!valid(value)) throw Object.assign(new Error(`Invalid value for ${key}. Run amux settings inspect ${key} for valid values.`), { code: 'INVALID_SETTING_VALUE' })
       return read(config) === value ? config : write(config, value)
     }
   }
