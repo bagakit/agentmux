@@ -1,10 +1,10 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import type { AgentProviderId } from '@agentmux/core'
+import type { AmuxObjectLinkTarget } from '@agentmux/core/sharing'
 import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conversation-speaker.js'
 
 export type ClientUiIconName = 'neutral' | 'working' | 'failed'
-export type AgentLinkReference = { uri: string; agentSessionId: string; label?: string }
-export type MarkdownDiagramInput = { code: string; language: 'mermaid' | 'dot' | 'gv' | 'drawio' | 'plantuml'; visible: boolean }
+export type ObjectLinkReference = { uri: string; target: AmuxObjectLinkTarget; label?: string }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
@@ -22,17 +22,15 @@ export type ClientUiPlatform = {
   renderProjectIcon(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderProjectLabel(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderIcon(name: ClientUiIconName, size: number): ReactNode
-  /** Optional inline presentation of an exact Agent URI. The host owns facts and navigation. */
-  renderAgentLink?(reference: AgentLinkReference): ReactNode
-  /** Optional transient diagram presentation. The host owns cancelable, isolated computation. */
-  renderMarkdownDiagram?(input: MarkdownDiagramInput): ReactNode
+  /** Optional inline presentation of an exact Core object URI. The host owns facts and navigation. */
+  renderObjectLink?(reference: ObjectLinkReference): ReactNode
 }
 
 const PlatformContext = createContext<ClientUiPlatform | null>(null)
 
 /** Standalone Markdown also works without a host adapter, retaining its original text. */
-export function useAgentLinkRenderer(): ClientUiPlatform['renderAgentLink'] {
-  return useContext(PlatformContext)?.renderAgentLink
+export function useObjectLinkRenderer(): ClientUiPlatform['renderObjectLink'] {
+  return useContext(PlatformContext)?.renderObjectLink
 }
 
 export function useMarkdownDiagramRenderer(): ClientUiPlatform['renderMarkdownDiagram'] {
