@@ -296,15 +296,8 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
     for (const container of ICON_CONTAINERS) {
       const source = componentSource(container)
       expect(source, `${container} 没有从 ${ICON_MODULE} 取图标`).toContain(ICON_MODULE)
-      // 自己从 lucide 直接取方向箭头，就是又建了一张表。ArrowRight 等四个名字只该出现在共用模块里。
-      const lucideImport = source.match(/import\s*\{([^}]*)\}\s*from\s*'lucide-react'/)
-      expect(lucideImport, `${container} 读不出 lucide 的 import 段`).not.toBeNull()
-      for (const arrow of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
-        expect(
-          lucideImport![1]!,
-          `${container} 自己从 lucide 取了 ${arrow}——方向图标只该有共用模块那一份`
-        ).not.toContain(arrow)
-      }
+      expect(source, `${container} 不能持有第二份图形`).not.toMatch(/from\s*['"]lucide-react['"]/)
+      expect(source, `${container} 不能自行定义 split 语义目录`).not.toMatch(/semanticIconComponent\(['"]layout\.split-/)
     }
   })
 
