@@ -30,6 +30,7 @@
 @import './settings-overview.css';
 @import './settings-toolkit.css';
 @import './toolkit-custom.css';
+@import './mobile-connection.css';
 @import './toolkit-agent-cards.css';
 @import './settings-keyboard-shortcuts.css';
 @import './settings-workflows.css';
