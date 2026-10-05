@@ -1,6 +1,9 @@
 import { useState, type CSSProperties } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppUsage, MetricsObservation, RendererPerformanceSnapshot } from '@agentmux/core/control'
+
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 export const cpuCoreEquivalent = (value: number | null | undefined, basis: string | undefined) =>
   value == null || basis !== 'one-logical-core' ? null : `${(value / 100).toFixed(2)} cores`
@@ -38,7 +41,7 @@ function WorkAndWait({ performance: p, available }: { performance: RendererPerfo
   const end = Math.min(epoch.endMonoMs, epochs.observedMonoMs)
   const coverage = Math.max(0, end - start)
   return <details className="performance-work" data-performance-work>
-    <summary>Work &amp; wait <span>{selected === 'previous' ? 'Previous period' : 'Current period'}</span><ChevronDown size={12} /></summary>
+    <summary>Work &amp; wait <span>{selected === 'previous' ? 'Previous period' : 'Current period'}</span><ThemeNavigationDownIcon size={12} /></summary>
     <div className="performance-period-controls" role="group" aria-label="Work and wait period">
       <button type="button" data-performance-period="current" aria-pressed={selected === 'current'} onClick={() => setPeriod('current')}>Current</button>
       {epochs.previous ? <button type="button" data-performance-period="previous" aria-pressed={selected === 'previous'} onClick={() => setPeriod('previous')}>Previous</button> : null}
@@ -106,7 +109,7 @@ export function PerformanceAttribution({ observation, paused = false }: { observ
         renderer.window.generation === observation.window.generation && renderer.process.creationTime !== null && processes.some(value =>
         value.pid === renderer.process.pid && value.creationTime === renderer.process.creationTime)
       return [<details className="performance-resource-group" data-performance-role={role} key={role}>
-        <summary className="performance-resource-row"><span className="performance-process-name"><ChevronDown size={12} /><strong>{roles[role]}</strong><small>{group.processCount}</small></span>
+        <summary className="performance-resource-row"><span className="performance-process-name"><ThemeNavigationDownIcon size={12} /><strong>{roles[role]}</strong><small>{group.processCount}</small></span>
           <CpuCell value={group.cpuPercent} basis={basis} available={available} /><span className="performance-heat-cell" style={heat(group.rssKib, maximumRss, available, '--blue')}>{resident(group.rssKib)}</span></summary>
         <div className="performance-processes">
           <p className="performance-note">Process CPU is the latest interval average, not the group’s 10s peak. Values use independent intensity; do not add peaks.</p>

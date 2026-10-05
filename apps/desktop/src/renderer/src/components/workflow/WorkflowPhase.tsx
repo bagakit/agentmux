@@ -1,8 +1,11 @@
 import { useId, useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { visibleWorkflowAgents, type WorkflowPhase as WorkflowPhaseData } from './types'
 import { WorkflowStatusGlyph } from './WorkflowStatusGlyph'
 import { WorkflowAgentRow } from './WorkflowAgentRow'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -26,7 +29,7 @@ export function WorkflowPhase({ phase, compact = false }: { phase: WorkflowPhase
         aria-controls={phaseId}
         onClick={toggle}
       >
-        <ChevronRight className="wf-chev" size={12} aria-hidden="true" />
+        <ThemeNavigationDisclosureIcon className="wf-chev" size={12} aria-hidden="true" />
         <WorkflowStatusGlyph status={phase.status} size={12} />
         <span className="wf-phase__title">{phase.label}</span>
         <span className="wf-phase__count">{phase.completed}/{phase.total}</span>

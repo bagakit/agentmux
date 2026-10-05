@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, MoreHorizontal, Smartphone, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ToolkitToolConfiguration } from '@agentmux/core/control'
 import { resolvePerformancePreferences, resolveMobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
@@ -9,6 +9,13 @@ import { ToolkitIcon } from './ToolkitIcon'
 import { MobileConnectionToolkit } from './MobileConnectionToolkit'
 import { toolkitIdentity, useToolkitPackages, type ToolkitToolIdentity } from './use-toolkit-packages'
 import { UserToolkitResult } from './UserToolkitResult'
+
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
+const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
+
 
 const OVERFLOW_SELECTION = Symbol('toolkit-overflow')
 const NO_TOOLS: readonly ToolkitToolConfiguration[] = []
@@ -23,9 +30,9 @@ const Overflow = memo(function Overflow({ tools, selection }: { tools: readonly 
   const chosen = tools.find(tool => tool.id === selection.selectedToolId)
   const [visible, setVisible] = useState(false)
   const changed = useCallback((value: boolean) => setVisible(value), [])
-  return <ToolkitPopover {...selection} toolId={chosen?.id ?? OVERFLOW_SELECTION} name={chosen ? `More tools · ${chosen.name}` : 'More tools'} icon={<MoreHorizontal size={14} aria-hidden="true" />} onVisibleChange={changed} focusKey={chosen?.id ?? 'library'}>
-    {close => chosen ? <><button type="button" className="small-button toolkit-overflow__back" onClick={() => selection.onSelectTool(OVERFLOW_SELECTION)}><ArrowLeft size={13} /> Back to tools</button><UserToolkitResult key={chosen.id} definition={chosen} active={visible} close={close} /></> : <>
-      <header className="performance-header"><div className="performance-title"><h2>More tools</h2></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label="Close tool list" onClick={close}><X size={14} /></button></header>
+  return <ToolkitPopover {...selection} toolId={chosen?.id ?? OVERFLOW_SELECTION} name={chosen ? `More tools · ${chosen.name}` : 'More tools'} icon={<ThemeActionMoreIcon size={14} aria-hidden="true" />} onVisibleChange={changed} focusKey={chosen?.id ?? 'library'}>
+    {close => chosen ? <><button type="button" className="small-button toolkit-overflow__back" onClick={() => selection.onSelectTool(OVERFLOW_SELECTION)}><ThemeNavigationBackIcon size={13} /> Back to tools</button><UserToolkitResult key={chosen.id} definition={chosen} active={visible} close={close} /></> : <>
+      <header className="performance-header"><div className="performance-title"><h2>More tools</h2></div><button type="button" className="performance-icon-button" data-toolkit-close aria-label="Close tool list" onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
       <div className="performance-body toolkit-overflow__list">{tools.map(tool => <button type="button" className="toolkit-overflow__item" key={tool.id} onClick={() => selection.onSelectTool(tool.id)}><ToolkitIcon icon={tool.icon} size={16} /><span>{tool.name}</span></button>)}</div>
     </>}
   </ToolkitPopover>
@@ -87,8 +94,8 @@ export const ToolkitStatusBar = memo(function ToolkitStatusBar() {
     {enabled.slice(0,visibleCount).map(tool => <UserTool key={tool.id} definition={tool} selection={selection} />)}
     {visibleCount < enabled.length ? <Overflow tools={overflow} selection={selection} /> : null}
     <div ref={measure} className="toolkit-statusbar__measure" aria-hidden="true" inert>
-      {performance.enabled ? <span className="performance-trigger" data-measure-tool><Activity size={14} />{performance.statusBar === 'label' ? <span>Performance</span> : null}</span> : null}
-      {mobileConnection.enabled ? <span className="performance-trigger" data-measure-tool><Smartphone size={14} />{mobileConnection.statusBar === 'label' ? <span>手机连接</span> : null}</span> : null}
+      {performance.enabled ? <span className="performance-trigger" data-measure-tool><ThemeObjectPerformanceIcon size={14} />{performance.statusBar === 'label' ? <span>Performance</span> : null}</span> : null}
+      {mobileConnection.enabled ? <span className="performance-trigger" data-measure-tool><ThemeObjectPhoneIcon size={14} />{mobileConnection.statusBar === 'label' ? <span>手机连接</span> : null}</span> : null}
       {enabled.map(tool => <span className="performance-trigger" data-measure-tool key={tool.id}><ToolkitIcon icon={tool.icon} size={14} />{tool.statusBar === 'label' ? <span>{tool.name}</span> : null}</span>)}
     </div>
   </div>
