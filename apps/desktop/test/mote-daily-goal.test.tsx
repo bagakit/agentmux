@@ -73,6 +73,10 @@ import { deliverContinuousProgress } from '../src/main/continuous-progress-deliv
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { GoalContinuationControl } from '../src/renderer/src/components/GoalContinuationControl'
+import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
+import { MobileGoalActions } from '../../mobile/src/goals/MobileGoalActions'
+import { runDemandCli } from '../../../packages/demand/src/cli'
+import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '../src/main/demand-participation'
 import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalAlignment'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
@@ -617,4 +621,144 @@ it('closing the last actual resource Tab and opening a new discussion retain ori
   const fresh = moteGoalContext(useAppStore.getState(), scope)
   expect(goalsForMote(useAppStore.getState().demands, fresh.sessionIds, fresh.contentRef).map(goal => goal.id)).toContain('goal')
   expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(writes).toEqual([])
+})
+
+
+it('collaboration public Source CLI saves exact relations atomically and reaches original Desktop filters and detail', async () => {
+  const peer = { ...structuredClone(session), agentSessionId: 'peer-agent', run: { runId: 'peer-run' }, capabilityHash: hashAgentCapability(issueAgentCapability()) }
+  await (client as any).store.compareAndSwap(null, peer); await (client as any).registry.load('local')
+  await demands.linkSession('goal', 'remote/retained-history')
+  await useAppStore.getState().refreshDemand('goal')
+  const server = new PublicServer({ socketPath: join(directory, 'relations.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
+  await server.start()
+  const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
+  const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))), AGENTMUX_AGENT_SESSION_ID: session.agentSessionId, AGENTMUX_AGENT_CAPABILITY: activityCapability }
+  const run = async (args: string[]) => {
+    let response: any
+    await act(async () => {
+      try { response = JSON.parse((await promisify(execFile)(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, ...args], { env: environment, timeout: 15000 })).stdout) }
+      catch (error) { const output = (error as any).stdout || (error as any).stderr; if (!output) throw error; response = JSON.parse(output) }
+    }); return response
+  }
+  const mutate = async (method: string, params: any) => { let result: any; await act(async () => { result = await (typed.call as any)(method, params) }); return result }
+  try {
+    const old = (await demands.get('goal'))!
+    const assigned = await run(['goal', 'assign', '--goal', 'goal', '--assignees', '["progress-agent","peer-agent"]', '--supervisor', 'progress-agent', '--expected-updated-at', String(old.updatedAt), '--operation-id', 'relations-assignment'])
+    expect(assigned.ok, JSON.stringify(assigned)).toBe(true)
+    expect(assigned.result.goal).toMatchObject({ assigneeSessionIds: ['progress-agent', 'peer-agent'], supervisorSessionId: 'progress-agent', sessionIds: ['progress-agent', 'remote/retained-history', 'peer-agent'] })
+    expect(writes).toEqual([]); expect(await manager.list()).toEqual([])
+    const current = (await demands.get('goal'))!, bytes = await readFile(demands.storePath, 'utf8')
+    await expect(mutate('goal.assign', { goalId: 'goal', assigneeSessionIds: [], supervisorSessionId: null, start: false, expectedUpdatedAt: old.updatedAt, operationId: 'stale-relations' })).rejects.toThrow('changed')
+    expect(await readFile(demands.storePath, 'utf8')).toBe(bytes)
+    await expect(mutate('goal.assign', { goalId: 'goal', assigneeSessionIds: ['peer-agent'], start: false, expectedUpdatedAt: current.updatedAt, operationId: 'dangling-supervisor' })).rejects.toThrow('inconsistent')
+    expect(await readFile(demands.storePath, 'utf8')).toBe(bytes)
+    const filtered = await run(['goal', 'ls', '--assignee', 'peer-agent', '--supervisor', 'progress-agent'])
+    expect(filtered.ok).toBe(true); expect(filtered.result.goals.map((goal: any) => goal.id)).toEqual(['goal'])
+    expect((await typed.call('app.snapshot', { include: ['goals'], assigneeSessionId: 'peer-agent', supervisorSessionId: 'progress-agent' })).goals.map(goal => goal.id)).toEqual(['goal'])
+    expect((await typed.call('goal.ls', { assigneeSessionId: 'remote/retained-history' })).goals).toEqual([])
+    expect((await typed.call('goal.ls', { agentSessionId: 'remote/retained-history' })).goals.map(goal => goal.id)).toEqual(['goal'])
+    useAppStore.setState({ selectedDemandId: 'goal', agentNames: { 'progress-agent': 'Original supervisor', 'peer-agent': 'Peer owner' } })
+    await act(async () => root.render(<GlobalBoardSurface />))
+    expect(container.querySelector('[aria-label="Goal assignees"]')?.textContent).toBe('Original supervisor, Peer owner')
+    expect(container.querySelector('[aria-label="Goal assignee"]')).toBeNull()
+    await act(async () => (container.querySelector('[aria-label="Goal filters"]') as HTMLButtonElement).click())
+    const select = container.querySelector('[aria-label="Filter assignee"]') as HTMLSelectElement
+    await act(async () => { select.value = 'peer-agent'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(container.querySelectorAll('[data-demand-id="goal"]')).toHaveLength(1)
+    const handoff = await run(['goal', 'handoff', '--goal', 'goal', '--assignees', '["peer-agent"]', '--clear-supervisor', '--expected-updated-at', String(current.updatedAt), '--operation-id', 'relations-handoff'])
+    expect(handoff.ok, JSON.stringify(handoff)).toBe(true)
+    expect(handoff.result.goal).toMatchObject({ assigneeSessionIds: ['peer-agent'], supervisorSessionId: null, sessionIds: ['progress-agent', 'remote/retained-history', 'peer-agent'] })
+    expect((await typed.call('goal.ls', { assigneeSessionId: 'progress-agent' })).goals).toEqual([])
+    expect(writes).toEqual([]); expect(await manager.list()).toEqual([])
+    await demands.update('goal', { assigneeSessionIds: ['missing/retained-owner'] }); await useAppStore.getState().refreshDemand('goal')
+    await mutate('goal.assign', { goalId: 'goal', assigneeSessionIds: ['missing/retained-owner', 'peer-agent'], start: false, operationId: 'retain-unknown-owner' })
+    expect((await demands.get('goal'))!.assigneeSessionIds).toEqual(['missing/retained-owner', 'peer-agent'])
+    await expect(mutate('goal.assign', { goalId: 'goal', assigneeSessionIds: ['unknown-new-owner'], start: false, operationId: 'new-unknown-owner' })).rejects.toThrow()
+  } finally { await typed.dispose(); await server.stop() }
+})
+
+it('collaboration original provenance authenticates create and requirements while protecting old identities and first-default eligibility', async () => {
+  const server = new PublicServer({ socketPath: join(directory, 'origin.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
+  await server.start()
+  const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
+  const mutate = async (method: string, params: any) => { let result: any; await act(async () => { result = await (typed.call as any)(method, params) }); return result }
+  try {
+    const created = await mutate('goal.create', { goalId: 'authored-goal', title: 'Precisely authored request', risk: 'low', confirmation: 'user', assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent', operationId: 'original-create-source' })
+    expect(created.goal.participations).toMatchObject([{ kind: 'create', agentSessionId: 'progress-agent', hostId: 'local', entryPoint: 'goal.create', operationId: 'original-create-source' }])
+    expect(created.goal.participations[0].mote).toBeUndefined(); expect(created.goal.creationOrigin).toBeUndefined()
+    const requirements = await mutate('goal.update', { goalId: 'authored-goal', patch: { description: 'Actual clarified requirement' }, expectedUpdatedAt: created.goal.updatedAt, operationId: 'actual-requirements-source' })
+    expect(requirements.goal.participations.map((source: any) => [source.kind, source.agentSessionId, source.operationId])).toEqual([['create', 'progress-agent', 'original-create-source'], ['requirements', 'progress-agent', 'actual-requirements-source']])
+    const body = { goalId: 'authored-goal', kind: 'requirements', message: 'Original append also records its actual participant', operationId: 'requirements-activity' }
+    const first = await mutate('goal.activity.append', body); const replay = await mutate('goal.activity.append', body)
+    expect(replay.activity.id).toBe(first.activity.id)
+    expect((await demands.get('authored-goal'))!.participations.filter(source => source.operationId === body.operationId)).toHaveLength(1)
+    await expect(mutate('goal.create', { goalId: 'spoofed-goal', title: 'Untrusted metadata', participations: created.goal.participations, operationId: 'spoofed-source' })).rejects.toThrow()
+    await expect(mutate('goal.update', { goalId: 'authored-goal', patch: { creationOrigin: { requesterAsSupervisor: true } }, operationId: 'spoofed-origin' })).rejects.toThrow()
+    await expect(mutate('goal.assign', { goalId: 'authored-goal', assigneeExecutorId: 'codex', start: false, operationId: 'legacy-assignee' })).rejects.toThrow()
+    await expect(mutate('goal.create', { title: 'Legacy Executor is not an owner', executorId: 'codex', operationId: 'legacy-create' })).rejects.toThrow()
+    const oldSnapshot = JSON.parse(await readFile(demands.storePath, 'utf8'))
+    const legacy = oldSnapshot.demands.find((goal: any) => goal.id === 'goal')
+    delete legacy.assigneeSessionIds; delete legacy.supervisorSessionId; delete legacy.participations; legacy.executorId = 'retained-provider-config'
+    await writeFile(demands.storePath, JSON.stringify(oldSnapshot))
+    expect(await demands.get('goal')).toMatchObject({ executorId: 'retained-provider-config', sessionIds: ['progress-agent'], assigneeSessionIds: [], supervisorSessionId: null, participations: [] })
+    const trusted = await demands.create({ id: 'eligible-goal', title: 'Internal creation eligibility' }, { operationId: 'eligible-create', creationOrigin: { requesterAsSupervisor: true } })
+    expect(trusted.demand.creationOrigin).toMatchObject({ operationId: 'eligible-create', requesterAsSupervisor: true, requesterParticipationId: null, supervisorDefaultPending: true })
+    await demands.update('eligible-goal', { supervisorSessionId: null }, { expectedUpdatedAt: trusted.demand.updatedAt })
+    expect((await demands.get('eligible-goal'))!.creationOrigin!.supervisorDefaultPending).toBe(false)
+    const source = { kind: 'discussion' as const, agentSessionId: 'progress-agent', hostId: 'local', entryPoint: 'confirmed-input' }
+    const one = await demands.recordParticipation('eligible-goal', source, { operationId: 'discussion-original' })
+    const two = await demands.recordParticipation('eligible-goal', source, { operationId: 'discussion-original', expectedUpdatedAt: trusted.demand.updatedAt })
+    expect(two.demand.participations).toEqual(one.demand.participations)
+    expect(two.demand.creationOrigin!.supervisorDefaultPending).toBe(false)
+    await expect(demands.recordParticipation('eligible-goal', { ...source, hostId: 'foreign-host' }, { operationId: 'discussion-original' })).rejects.toThrow('conflicts')
+    await expect(demands.update('eligible-goal', { creationOrigin: {} } as any)).rejects.toThrow('trusted host')
+    const output: string[] = [], error: string[] = []
+    expect(await runDemandCli(['--root', demands.root, 'assign', '--id', 'goal', '--assignee-session-id', 'progress-agent', '--supervisor-session-id', 'progress-agent'], { stdout: value => output.push(value), stderr: value => error.push(value) })).toBe(0)
+    expect(JSON.parse(output[0]).demand).toMatchObject({ executorId: 'retained-provider-config', assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent' })
+    expect(await runDemandCli(['--root', demands.root, 'create', '--title', 'Not a Session', '--executor-id', 'codex'], { stdout: value => output.push(value), stderr: value => error.push(value) })).toBe(1)
+    expect(error).toHaveLength(1)
+    const context = { actor: { kind: 'agent' as const, id: 'progress-agent', verified: true }, source: 'explicit-edit', entryPoint: 'goal.create', transport: 'unix', location: { callerSessionId: 'progress-agent', hostId: 'local', callerCwd: _hygiene_fixturePath("precise/source") } }
+    const scratch = { readForDirectory: vi.fn().mockResolvedValue({ id: 'exact-mote', identityDirectoryPath: _hygiene_fixturePath("precise/mote") }), read: vi.fn().mockResolvedValue({ kind: 'mote' }) }
+    expect(await admittedDemandParticipation(context, 'create', config, scratch as any)).toMatchObject({ agentSessionId: 'progress-agent', hostId: 'local', mote: { workspaceId: '__scratch__', topicId: 'exact-mote', identityDirectoryPath: _hygiene_fixturePath("precise/mote") } })
+    scratch.read.mockResolvedValue({ kind: 'topic' }); expect((await admittedDemandParticipation(context, 'create', config, scratch as any))?.mote).toBeUndefined()
+    expect(await admittedDemandParticipation({ ...context, actor: { kind: 'agent', id: 'body-claim', verified: false } }, 'create', config, scratch as any)).toBeUndefined()
+    expect(await admittedDemandParticipation({ ...context, location: { ...context.location, callerSessionId: 'different-verified-source' } }, 'create', config, scratch as any)).toBeUndefined()
+    const admitted = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'admit-op', operation: 'demand.create' as const, title: 'Original', projectId: 'project-original', sessionIds: ['accurate-original'] }
+    const input = { title: 'Original', projectId: 'project-original', sessionIds: ['accurate-original'] }
+    expect(admittedDemandCreateMatches(admitted, input)).toBe(true)
+    expect(admittedDemandCreateMatches(admitted, { ...input, projectId: 'other-project' })).toBe(false)
+    expect(admittedDemandCreateMatches(admitted, { ...input, sessionIds: ['body-session'] })).toBe(false)
+    const updated = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'update-op', operation: 'demand.update' as const, demandId: 'goal', patch: { description: 'Authored description' }, expectedUpdatedAt: 7 }
+    expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description' }, 7)).toBe(true)
+    expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description', assigneeSessionIds: ['not-authored'] }, 7)).toBe(false)
+    expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description' }, 8)).toBe(false)
+  } finally { await typed.dispose(); await server.stop() }
+})
+
+it('collaboration Mobile original controls save exact assignees and Supervisor through the public Main owner', async () => {
+  const server = new PublicServer({ socketPath: join(directory, 'phone-relations.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
+  await server.start()
+  const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
+  const forwardRpc = vi.fn((method: any, params: any) => (typed.call as any)(method, params))
+  function Consumer() {
+    const goal = useAppStore(state => state.demands.goal)!
+    return <MobileGoalActions client={{ forwardRpc } as any} goal={goal as any} visible updated={() => {}} deleted={() => {}} />
+  }
+  try {
+    await act(async () => root.render(<Consumer />))
+    const input = container.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement
+    const supervisor = container.querySelector('[aria-label="Supervisor Session ID"]') as HTMLInputElement
+    const enter = async (field: HTMLInputElement, value: string) => { await act(async () => { Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }) }
+    await enter(input, 'progress-agent'); await enter(supervisor, 'progress-agent')
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存负责人分配')!.click())
+    await vi.waitFor(() => expect(container.textContent).toContain('负责人分配已保存'))
+    expect(forwardRpc).toHaveBeenCalledWith('goal.assign', expect.objectContaining({ assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent', start: false, expectedUpdatedAt: expect.any(Number) }))
+    expect((await demands.get('goal'))!).toMatchObject({ assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent', sessionIds: ['progress-agent'] })
+    await enter(input, ''); await enter(supervisor, '')
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存交接关系')!.click())
+    await vi.waitFor(() => expect(container.textContent).toContain('交接关系已保存'))
+    expect((await demands.get('goal'))!).toMatchObject({ assigneeSessionIds: [], supervisorSessionId: null, sessionIds: ['progress-agent'] })
+    expect(forwardRpc.mock.calls.every(([, params]) => !Object.hasOwn(params, 'assigneeExecutorId'))).toBe(true)
+    expect(writes).toEqual([]); expect(await manager.list()).toEqual([])
+  } finally { await typed.dispose(); await server.stop() }
 })

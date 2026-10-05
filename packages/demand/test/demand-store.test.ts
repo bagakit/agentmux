@@ -10,13 +10,13 @@ async function tempRoot(): Promise<string> {
 }
 
 describe('DemandStore', () => {
-  it('stores a demand with zero or multiple session links and explicit project/executor links', async () => {
+  it('stores a demand with zero or multiple session links and explicit project and Session assignees', async () => {
     const root = await tempRoot()
     const store = openDemandStore({ root })
     const first = await store.create({ id: 'd-zero', title: 'No session yet' })
     expect(first.demand.sessionIds).toEqual([])
     await store.linkProject('d-zero', 'project-a', 'Project A')
-    await store.update('d-zero', { executorId: 'executor-a', status: 'in_progress' })
+    await store.update('d-zero', { assigneeSessionIds: ['session-1'], supervisorSessionId: 'session-1', status: 'in_progress' })
     await store.linkSession('d-zero', 'session-1')
     await store.linkSession('d-zero', 'session-2')
     await store.addActivity('d-zero', { kind: 'note', message: 'started', actorId: null })
@@ -26,7 +26,9 @@ describe('DemandStore', () => {
     expect(loaded).toMatchObject({
       status: 'in_progress',
       projectId: 'project-a',
-      executorId: 'executor-a',
+      executorId: null,
+      assigneeSessionIds: ['session-1'],
+      supervisorSessionId: 'session-1',
       sessionIds: ['session-1', 'session-2'],
     })
     expect(loaded?.activities).toHaveLength(1)
