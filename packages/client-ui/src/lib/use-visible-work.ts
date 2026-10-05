@@ -25,5 +25,7 @@ export function useVisibleWork<T extends HTMLElement>(active = true) {
     document.addEventListener('visibilitychange', update)
     return () => document.removeEventListener('visibilitychange', update)
   }, [active, intersecting])
-  return { ref, visible: active && foreground && intersecting }
+  // The visibility listener is parked offscreen; reject a stale foreground bit
+  // synchronously when a hidden document's element re-enters the viewport.
+  return { ref, visible: active && foreground && intersecting && typeof document !== 'undefined' && document.visibilityState !== 'hidden' }
 }

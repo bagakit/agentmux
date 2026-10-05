@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import type { ExcalidrawProps, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import '@excalidraw/excalidraw/index.css'
 import { validateExcalidrawScene } from '../../lib/file-formats/excalidraw-scene'
 
 type Scene = Awaited<ReturnType<typeof import('@excalidraw/excalidraw')['loadFromBlob']>>
-type Loaded = { content: string; Component: typeof import('@excalidraw/excalidraw')['Excalidraw']; scene: Scene }
+type Loaded = { owner: object; Component: typeof import('@excalidraw/excalidraw')['Excalidraw']; scene: Scene }
 
 export function ExcalidrawFilePreview({ content, visible = true }: { content: string; path?: string; workspaceId?: string; visible?: boolean }) {
+  const { ref, visible: inView } = useVisibleWork<HTMLDivElement>(visible)
   const [attempt, setAttempt] = useState(0)
+  const owner = useMemo(() => ({}), [content, inView, attempt])
   const [loaded, setLoaded] = useState<Loaded | null>(null)
-  const [failure, setFailure] = useState<{ content: string; message: string } | null>(null)
+  const [failure, setFailure] = useState<{ owner: object; message: string } | null>(null)
   useEffect(() => {
-    if (!visible) return
-    let cancelled = false
     setLoaded(null)
     setFailure(null)
+    if (!inView) return
+    let cancelled = false
     void (async () => {
       validateExcalidrawScene(content)
       // Set before importing the package: its font registry is initialized at module load.
@@ -22,14 +25,16 @@ export function ExcalidrawFilePreview({ content, visible = true }: { content: st
       const engine = await import('@excalidraw/excalidraw')
       if (cancelled) return
       const scene = await engine.loadFromBlob(new Blob([content], { type: 'application/vnd.excalidraw+json' }), null, null)
-      if (!cancelled) setLoaded({ content, Component: engine.Excalidraw, scene })
-    })().catch(error => { if (!cancelled) setFailure({ content, message: error instanceof Error ? error.message : String(error) }) })
+      if (!cancelled) setLoaded({ owner, Component: engine.Excalidraw, scene })
+    })().catch(error => { if (!cancelled) setFailure({ owner, message: error instanceof Error ? error.message : String(error) }) })
     return () => { cancelled = true }
-  }, [content, visible, attempt])
+  }, [content, inView, owner])
   if (!visible) return null
-  if (failure?.content === content) return <div className="file-preview-state" role="alert"><strong>Excalidraw preview could not load</strong><span>{failure.message}</span><button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div>
-  if (loaded?.content !== content) return <div className="file-preview-state" role="status">Preparing Excalidraw preview…</div>
-  return <ReadOnlyScene loaded={loaded} />
+  return <div ref={ref} style={{ width: '100%', height: '100%', minHeight: 320 }}>
+    {inView && failure?.owner === owner ? <div className="file-preview-state" role="alert"><strong>Excalidraw preview could not load</strong><span>{failure.message}</span><button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div>
+      : inView && loaded?.owner === owner ? <ReadOnlyScene loaded={loaded} />
+        : <div className="file-preview-state" role="status">Preparing Excalidraw preview…</div>}
+  </div>
 }
 
 function ReadOnlyScene({ loaded }: { loaded: Loaded }) {

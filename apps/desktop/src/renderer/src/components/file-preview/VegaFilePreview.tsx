@@ -1,4 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import './VegaFilePreview.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { VegaMode } from '../../lib/file-formats/vega-spec'
@@ -8,17 +9,19 @@ import { createWorkspaceVegaLoader } from '../../lib/file-formats/workspace-vega
 import { useAppStore } from '../../store'
 
 export function VegaFilePreview({ content, path, workspaceId, visible = true, mode }: { content: string; path: string; workspaceId: string; visible?: boolean; mode: VegaMode }) {
-  const container = useRef<HTMLDivElement>(null), image = useRef<HTMLImageElement>(null)
+  const { ref: container, visible: inView } = useVisibleWork<HTMLDivElement>(visible)
+  const image = useRef<HTMLImageElement>(null)
   const chart = useRef<ReturnType<typeof createVegaPreview> | null>(null)
   const [attempt, setAttempt] = useState(0)
   const resource = useAppStore(state => {
     const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
     return JSON.stringify([workspaceId, workspace?.hostId, workspace?.path])
   })
-  const owner = useMemo(() => ({}), [content, path, workspaceId, visible, mode, attempt, resource])
+  const owner = useMemo(() => ({}), [content, path, workspaceId, inView, mode, attempt, resource])
   const [state, setState] = useState<{ owner: typeof owner; url?: string; snapshot?: ChartSnapshot; message?: string }>({ owner })
   useEffect(() => {
-    if (!visible || !container.current || !image.current) return
+    setState({ owner })
+    if (!inView || !container.current || !image.current) return
     const target = container.current, element = image.current, controller = new AbortController()
     const loader = createWorkspaceVegaLoader(workspaceId, path, controller.signal)
     let url: string | undefined, dimensions = [1, 1], removeEvents = () => {}, cleaned = false
@@ -30,7 +33,6 @@ export function VegaFilePreview({ content, path, workspaceId, visible = true, mo
       if (url) URL.revokeObjectURL(url)
       if (chart.current === preview) chart.current = null
     }
-    setState({ owner })
     const attachEvents = (snapshot: ChartSnapshot) => {
       removeEvents()
       const removals: (() => void)[] = []
@@ -71,7 +73,7 @@ export function VegaFilePreview({ content, path, workspaceId, visible = true, mo
     })
     observer.observe(target)
     return cleanup
-  }, [owner, content, path, workspaceId, visible, mode])
+  }, [owner, content, path, workspaceId, inView, mode])
   if (!visible) return null
   const current = state.owner === owner ? state : { owner }
   return <div ref={container} className="file-vega-preview" style={{ height: '100%', overflow: 'auto', padding: 16 }}>
