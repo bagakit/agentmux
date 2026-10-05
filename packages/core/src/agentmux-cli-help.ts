@@ -8,7 +8,7 @@ export { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 const syntax = (entry: AgentMuxCliCommand) => `amux ${entry.method.replaceAll('.', ' ')}${entry.usage ? ' ' + entry.usage : ''}`
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
-const GIT_GUIDE = `Discover the original workspace ID, hostId and path with agentmux app snapshot.
+const GIT_GUIDE = `Discover the original workspace ID, hostId and path with amux app snapshot.
 Pass all three to git history, commit, diff and open; an endpoint or current cwd is not that target.
 History pages bind fixed roots. Reuse nextCursor unchanged; omit cursor to refresh.
 Commit reads return the full message, all direct parents, a chosen-parent snapshot and entries.
