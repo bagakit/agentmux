@@ -1,6 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, useRef, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Notebook, NotebookPage } from '@agentmux/core/notebook-catalog'
@@ -20,6 +21,7 @@ vi.mock('../src/renderer/src/lib/notebook-library', () => ({ notebookPageResourc
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { NotebookNavigation, NotebookHome } from '../src/renderer/src/components/NotebookNavigation'
 import { NoteTalkAgent } from '../src/renderer/src/components/NoteTalkAgent'
+import { resolveOverlayContainer } from '../src/renderer/src/components/WindowOverlayHost'
 
 const book: Notebook = { notebookId: 'quick-notes', name: 'Notes', createdAt: 1 }
 const page = (id: string): NotebookPage => ({ noteId: id, notebookId: book.notebookId, parentNoteId: null,
@@ -36,20 +38,23 @@ function report(requestId: string, outcome: 'unknown' | 'opened' = 'unknown'): A
 let root: Root, container: HTMLDivElement
 const restoredFocus = vi.fn()
 const opened = vi.fn(), talked = vi.fn(), activated = vi.fn(), dismissed = vi.fn(), selectedReference = vi.fn()
-let controls: { target(page: NotebookPage | null): void; visible(value: boolean): void }
+let controls: { target(page: NotebookPage | null): void; visible(value: boolean): void; external(value: boolean): void }
 type Directory = 'sidebar' | 'tree' | 'cards' | 'graph'
 function Harness({ directory = 'sidebar', initial = null }: { directory?: Directory; initial?: NotebookPage | null }) {
-  const [target, setTarget] = useState(initial), [visible, setVisible] = useState(true)
-  controls = { target: setTarget, visible: setVisible }
+  const [target, setTarget] = useState(initial), [visible, setVisible] = useState(true), [external, setExternal] = useState(false)
+  controls = { target: setTarget, visible: setVisible, external: setExternal }
   const returnFocus = useRef<HTMLElement | null>(null)
   const onTalk = (value: NotebookPage, invoker?: HTMLElement | null) => { talked(value, invoker); returnFocus.current = invoker ?? null; setTarget(value) }
   return <><div data-open-note={fixture.state.recallNoteId}>
-    {directory === 'sidebar' ? <NotebookNavigation notebooks={[book]} pages={[a, b]} selectedId={book.notebookId} selectedNoteId="A"
+    {directory === 'sidebar' ? <NotebookNavigation notebooks={[book]} pages={[a, b]} selectedId={book.notebookId} selectedNoteId={fixture.state.recallNoteId}
       onSelect={() => {}} onOpen={opened} onTalk={onTalk} onCreateChild={() => {}} query="" onQuery={() => {}} onCreate={() => {}}
       pending={false} actions={null} archived={false} onArchivedChange={() => {}} />
       : <NotebookHome notebook={book} pages={[a, b]} pending={false} onCreate={() => {}} onOpen={opened} onTalk={onTalk} query="" view={directory} />}
     </div><NoteTalkAgent page={target} notebook={book} visible={visible} onDismiss={() => { dismissed(); setTarget(null) }}
-      onActivate={value => { activated(value); fixture.state.recallNoteId = value.noteId }} onSelectReference={selectedReference} onRestoreFocus={() => { restoredFocus(); returnFocus.current?.focus() }} /><button data-right-agent-input>Right Agent input</button></>
+      onActivate={value => { activated(value); fixture.state.recallNoteId = value.noteId }} onSelectReference={selectedReference} onRestoreFocus={() => { restoredFocus(); returnFocus.current?.focus() }} /><button data-right-agent-input>Right Agent input</button>
+    <Dialog.Root open={external}><Dialog.Portal container={resolveOverlayContainer()}><Dialog.Content aria-describedby={undefined}>
+      <Dialog.Title>Later external focus owner</Dialog.Title><button data-external-focus>External focused control</button>
+    </Dialog.Content></Dialog.Portal></Dialog.Root></>
 }
 async function render(directory: Directory = 'sidebar', initial: NotebookPage | null = null) { await act(async () => root.render(<Harness directory={directory} initial={initial} />)) }
 function button(text: string) { const node = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === text || node.querySelector('strong')?.textContent === text); expect(node, `button ${text}`).toBeDefined(); return node! }
@@ -72,7 +77,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   for (const spy of [opened, talked, activated, dismissed, selectedReference, restoredFocus, fixture.talk, fixture.inspect]) spy.mockReset()
   fixture.state = { config, documents: {}, sessions: [], executorDetections: {}, hostExecutorInventories: {}, spatialRequests: {},
-    mainSurface: 'recall', recallNoteId: 'A', recallZoneSelection: null, executeControl: fixture.inspect } as unknown as typeof fixture.state
+    mainSurface: 'recall', recallNotebookId: book.notebookId, recallNoteId: 'A', recallZoneSelection: null, executeControl: fixture.inspect } as unknown as typeof fixture.state
   fixture.talk.mockImplementation(async input => report(input.requestId))
   fixture.inspect.mockResolvedValue({ operation: 'space.inspect', catalog: { spaces: [], zones: [], bindings: [], tabs: [], regions: [], locations: [] }, request: { known: false, report: null } })
   container = document.createElement('div'); document.body.appendChild(container); root = createClientUiRoot(container)
@@ -202,4 +207,39 @@ it('keeps a late Check result on its original Note without dismissing or activat
   await act(async () => controls.target(b))
   expect(button('Start another Agent')).toBeDefined()
   expect(fixture.inspect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'space.inspect', target: { requestId: id } }))
+})
+
+
+it('does not return to the old row when the same Note has a newer Recall location on Cancel', async () => {
+  fixture.state.recallNoteId = 'B'
+  const originalReference = { tabId: 'original-tab', regionId: 'original-file' }
+  fixture.state.recallZoneSelection = { zoneId: 'note-zone', selection: [originalReference], active: originalReference }
+  await render(); const invoker = await rightClickB(); await chooseTalk()
+  const laterReference = { tabId: 'later-tab', regionId: 'later-file' }
+  const laterSelection = { zoneId: 'note-zone', selection: [laterReference], active: laterReference }
+  fixture.state.recallZoneSelection = laterSelection
+  const close = document.querySelector<HTMLButtonElement>('[aria-label="Close Agent selection"]')!
+  await act(async () => { close.focus(); close.click() })
+  await vi.waitFor(() => expect(document.querySelector('.note-talk-dialog')).toBeNull())
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(fixture.state.recallNoteId).toBe('B'); expect(fixture.state.recallZoneSelection).toBe(laterSelection)
+  expect(document.activeElement).not.toBe(invoker); expect(restoredFocus).not.toHaveBeenCalled()
+  expect(fixture.talk).not.toHaveBeenCalled(); expect(activated).not.toHaveBeenCalled()
+})
+
+it('does not reclaim an external DOM focus owner when the original dialog is programmatically closed', async () => {
+  await render(); const invoker = await rightClickB(); await chooseTalk()
+  const originalDialog = document.querySelector<HTMLElement>('.note-talk-dialog')!
+  const close = originalDialog.querySelector<HTMLButtonElement>('[aria-label="Close Agent selection"]')!
+  // A later real modal owns focus and pauses the earlier Radix trap. No focus API or activeElement is mocked.
+  await act(async () => controls.external(true))
+  const external = document.querySelector<HTMLButtonElement>('[data-external-focus]')!
+  await act(async () => external.focus())
+  expect(document.activeElement).toBe(external); expect(originalDialog.contains(document.activeElement)).toBe(false)
+  // Programmatic click intentionally does not focus Close, matching an external close request.
+  await click(close)
+  await vi.waitFor(() => expect(originalDialog.isConnected).toBe(false))
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(document.activeElement).toBe(external); expect(document.activeElement).not.toBe(invoker)
+  expect(restoredFocus).not.toHaveBeenCalled(); expect(fixture.talk).not.toHaveBeenCalled(); expect(activated).not.toHaveBeenCalled()
 })
