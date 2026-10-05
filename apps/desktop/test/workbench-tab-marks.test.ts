@@ -345,7 +345,7 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     expect(html).toContain('data-semantic-icon="object.browser"')
     expect(html.match(/<svg/g)).toHaveLength(2)
     // 悬停也要说得出来：图标本身不自带含义，标签上没有别的地方能解释这只 Bot 是什么意思。
-    expect(html).toContain('Agent driving')
+    expect(html).toContain('role="img" aria-label="Agent driving" title="Agent driving"')
   })
 
   it('反向：没在被驱动的 Browser 画地球，不画 Bot', () => {
