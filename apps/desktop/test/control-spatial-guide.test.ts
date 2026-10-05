@@ -194,8 +194,13 @@ describe('T-006 以方向、可读性、最小扰动决策并回读', () => {
   })
 
   it('skill：任何搬动之后回读/inspect 结果确认落点', () => {
-    const section = skillSection('## Confirm the actual destination', 'Agent-first workflow:')
+    // Spatial command help owns this guide's boundary; other skill guides may follow it.
+    const spaceHelp = agentMuxCommandHelp('space')!
+    const sectionStart = spaceHelp.indexOf('## Confirm the actual destination')
+    expect(sectionStart).toBeGreaterThanOrEqual(0)
+    const section = spaceHelp.slice(sectionStart)
     expect(section.length).toBeGreaterThan(0)
+    expect(AGENTMUX_CLI_SKILL).toContain(section.trim())
     expect(section).toMatch(/after any move inspect the result/i)
     expect(section).toContain('--display-workspace')
     expect(section).toContain('--group')
