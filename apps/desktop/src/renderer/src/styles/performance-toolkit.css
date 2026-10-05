@@ -98,3 +98,45 @@
 .mobile-connection-toolkit .host-settings-card ol { padding-left:var(--sp-6); font-size:var(--fs-meta); line-height:1.6; overflow-wrap:anywhere; }
 .mobile-connection-toolkit .host-edit-grid { grid-template-columns:minmax(0,1fr); }
 .mobile-connection-toolkit input { min-width:0; max-width:100%; }
+
+/* Bounded process heatmap: fixed identities and metric columns, no update animation. */
+.performance-core-equivalent { display:block; color:var(--text-3); font-size:var(--fs-micro); font-weight:400; white-space:nowrap; }
+.performance-resource-group { border-bottom:1px solid var(--line-soft); }
+.performance-resource-row { display:grid; grid-template-columns:minmax(0,1fr) 108px 78px; gap:var(--sp-2); align-items:stretch; padding:var(--sp-2) 0; }
+.performance-resource-group > summary { list-style:none; cursor:pointer; }
+.performance-resource-group > summary::-webkit-details-marker { display:none; }
+.performance-process-name { display:flex; flex-wrap:wrap; align-content:center; align-items:center; column-gap:var(--sp-2); min-width:0; padding:var(--sp-2) 0; }
+.performance-process-name > svg { flex:none; color:var(--text-3); transform:rotate(-90deg); }
+.performance-resource-group[open] > summary .performance-process-name > svg { transform:none; }
+.performance-process-name > strong { font-size:var(--fs-body); font-weight:500; overflow-wrap:anywhere; }
+.performance-process-name > small { color:var(--text-3); font-size:var(--fs-meta); }
+.performance-process-row .performance-process-name { display:grid; gap:var(--sp-1); padding-left:var(--sp-3); }
+.performance-heat-cell { background:color-mix(in srgb,var(--heat-color,transparent) var(--heat-intensity,0%),transparent); display:flex; flex-direction:column; justify-content:center; align-items:flex-end; padding:var(--sp-3) var(--sp-2); border-radius:var(--radius-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.performance-heat-cell > small { color:var(--text-2); font-size:var(--fs-meta); }
+.performance-attribution > .performance-table-head { grid-template-columns:minmax(0,1fr) 108px 78px; gap:var(--sp-2); }
+.performance-attribution > .performance-note { margin-bottom:var(--sp-3); }
+.performance-processes { padding:var(--sp-2) 0 var(--sp-4); }
+.performance-window { border-top:1px solid var(--line-soft); margin-top:var(--sp-3); }
+.performance-heap-summary { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-5); }
+.performance-heap-summary > div { display:grid; gap:var(--sp-2); }
+.performance-heap-summary small { color:var(--text-3); font-size:var(--fs-meta); }
+.performance-heap-summary strong { font-size:var(--fs-title); font-weight:550; font-variant-numeric:tabular-nums; }
+.performance-work > summary { display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-3) 0; cursor:pointer; list-style:none; color:var(--text-2); }
+.performance-work > summary::-webkit-details-marker { display:none; }
+.performance-work > summary > span { margin-left:auto; font-size:var(--fs-meta); color:var(--text-3); }
+.performance-work > summary > svg { flex:none; }
+.performance-work[open] > summary > svg { transform:rotate(180deg); }
+.performance-work-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2); }
+.performance-work-cell { background:color-mix(in srgb,var(--heat-color,transparent) var(--heat-intensity,0%),transparent); display:grid; align-content:start; gap:var(--sp-2); padding:var(--sp-4); border:1px solid var(--line-soft); border-radius:var(--radius-sm); }
+.performance-work-cell > strong { font-size:var(--fs-meta); font-weight:550; }
+.performance-work-cell small { display:block; color:var(--text-3); font-size:var(--fs-meta); line-height:1.4; }
+.performance-work-cell > span { font-variant-numeric:tabular-nums; padding-top:var(--sp-2); }
+@media(max-width:400px) {
+ .performance-resource-row,.performance-attribution > .performance-table-head { grid-template-columns:minmax(0,1fr) 90px 68px; }
+ .performance-heat-cell { padding-inline:var(--sp-1); }
+ .performance-work-cell { padding:var(--sp-3); }
+}
+
+.performance-period-controls { display:flex; gap:var(--sp-2); }
+.performance-period-controls button { border:1px solid var(--line-soft); background:transparent; color:var(--text-3); font-size:var(--fs-meta); border-radius:var(--radius-sm); padding:var(--sp-2) var(--sp-4); cursor:pointer; }
+.performance-period-controls button[aria-pressed=true] { background:var(--wash-3); color:var(--text); }

@@ -76,6 +76,20 @@ import type {
 } from '../shared/git-contracts.js'
 
 const api: AgentMuxPreloadApi = {
+  readRendererMemory() {
+    const sampledAt = Date.now()
+    let creationTime: number | null = null
+    try { creationTime = process.getCreationTime() } catch { /* Identity remains explicitly unknown. */ }
+    try {
+      const heap = process.getHeapStatistics()
+      return { process: { pid: process.pid, creationTime }, memory: { sampledAt, scope: 'renderer-v8-isolate',
+        heap: { usedHeapKib: heap.usedHeapSize, totalHeapKib: heap.totalHeapSize,
+          physicalHeapKib: heap.totalPhysicalSize, heapLimitKib: heap.heapSizeLimit }, unavailable: null } }
+    } catch {
+      return { process: { pid: process.pid, creationTime }, memory: { sampledAt, scope: 'renderer-v8-isolate',
+        heap: null, unavailable: 'Renderer V8 heap observation is unavailable.' } }
+    }
+  },
   notesStorage: {
     inspect: operationId => ipcRenderer.invoke('notesStorage:inspect', operationId),
     change: input => ipcRenderer.invoke('notesStorage:change', input),

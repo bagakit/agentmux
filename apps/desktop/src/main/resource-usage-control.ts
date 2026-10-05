@@ -68,15 +68,15 @@ export function createResourceMetricsPort(args: {
 }
 
 export async function observeRendererResources(
-  bridge: DesktopControlIpcBridge, currentWindow: () => MetricsWindow | null, signal: AbortSignal
+  bridge: DesktopControlIpcBridge, currentWindow: () => MetricsWindow | null, signal: AbortSignal, currentProcessId: () => number | null
 ) {
-  const window = currentWindow()
-  if (!window) throw new AgentMuxError('Current Renderer is not connected.', 'CONTROL_UNAVAILABLE')
+  const window = currentWindow(), processId = currentProcessId()
+  if (!window || processId === null || processId <= 0) throw new AgentMuxError('Current Renderer is not connected.', 'CONTROL_UNAVAILABLE')
   const result = parseMetricsRendererResult(await bridge.execute({ operation: 'metrics.renderer', requestId: randomUUID(), window }, signal))
   const current = currentWindow()
-  if (signal.aborted || !current || [current, result.window].some(value =>
+  if (signal.aborted || !current || currentProcessId() !== processId || result.process.pid !== processId || [current, result.window].some(value =>
     value.windowId !== window.windowId || value.webContentsId !== window.webContentsId || value.generation !== window.generation)) {
     throw new AgentMuxError('Renderer observation belongs to an ended generation.', 'CONTROL_OWNER_LOST')
   }
-  return { observedAt: result.observedAt, data: { window: result.window, counts: result.counts, performance: result.performance } }
+  return { observedAt: result.observedAt, data: { window: result.window, process: result.process, memory: result.memory, counts: result.counts, performance: result.performance } }
 }

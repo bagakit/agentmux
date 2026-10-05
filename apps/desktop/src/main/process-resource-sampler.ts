@@ -1,6 +1,8 @@
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { execFile } from 'node:child_process'
 import { app } from 'electron'
+import { cpus } from 'node:os'
+import type { AppUsageProcess } from '@agentmux/core/control'
 import type { MetricsRenderer, PerformanceDiagnostics } from '@agentmux/core/control'
 import {
   USAGE_SAMPLE_INTERVAL_MS,
@@ -83,6 +85,7 @@ export class ProcessResourceSampler {
   private runtimeInFlight: Promise<void> | null = null
   private readonly appSamples = new Map<string, UsageSample[]>()
   private appCpuCounters = new Map<string, { seconds: number; at: number }>()
+  private readonly logicalCpuCount: number | null
   /**
    * 「这次采样属于哪一段观察」。
    *
@@ -100,8 +103,14 @@ export class ProcessResourceSampler {
     private readonly readTable: ProcessTableReader = readProcessTable,
     private readonly now: () => number = Date.now,
     private readonly appMetrics: () => Electron.ProcessMetric[] = () => app.getAppMetrics(),
-    private readonly cpuNow: () => number = () => performance.now()
-  ) {}
+    private readonly cpuNow: () => number = () => performance.now(),
+    logicalCpuCount: () => number = () => cpus().length
+  ) {
+    try {
+      const value = logicalCpuCount()
+      this.logicalCpuCount = Number.isSafeInteger(value) && value > 0 ? value : null
+    } catch { this.logicalCpuCount = null }
+  }
 
   /** Wire the existing Main owners once; none of these readers run while the panel is closed. */
   setObservationSources(sources: ProcessResourceObservationSources): () => void {
@@ -203,12 +212,14 @@ export class ProcessResourceSampler {
       const metrics = [...new Map(this.appMetrics().map((metric) => [metric.pid, metric])).values()]
       const at = this.cpuNow(), nextCounters = new Map<string, { seconds: number; at: number }>()
       const cpuByPid = new Map<number, number | null>()
+      const intervalByPid = new Map<number, number | null>()
       for (const metric of metrics) {
         const key = `${metric.pid}:${metric.creationTime}`, seconds = metric.cpu.cumulativeCPUUsage
         const previous = this.appCpuCounters.get(key)
         const valid = seconds !== undefined && Number.isFinite(seconds) && seconds >= 0
         cpuByPid.set(metric.pid, valid && previous && seconds >= previous.seconds && at > previous.at
           ? 100_000 * (seconds - previous.seconds) / (at - previous.at) : null)
+        intervalByPid.set(metric.pid, cpuByPid.get(metric.pid) !== null ? at - previous!.at : null)
         if (valid) nextCounters.set(key, { seconds, at })
       }
       this.appCpuCounters = nextCounters
@@ -243,13 +254,28 @@ export class ProcessResourceSampler {
       })
       const rssKib = metrics.reduce((sum, metric) => sum + metric.memory.workingSetSize, 0)
       const cpuPercent = metrics.length === 0 ? 0 : this.appCpu('total', metrics, observedAt, rssKib, cpuByPid)
-      return { processCount: metrics.length, rssKib, cpuPercent, groups, unavailable: null }
+      const allProcesses: AppUsageProcess[] = metrics.map(metric => ({ pid: metric.pid, creationTime: metric.creationTime,
+        role: roleFor(metric), type: metric.type, rssKib: metric.memory.workingSetSize,
+        cpuPercent: cpuByPid.get(metric.pid) ?? null, intervalMs: intervalByPid.get(metric.pid) ?? null }))
+      // Interleave current CPU and RSS hotspots; the full batch still owns all aggregate facts.
+      const byCpu = [...allProcesses].sort((a, b) => (b.cpuPercent ?? -1) - (a.cpuPercent ?? -1) || b.rssKib - a.rssKib || a.pid - b.pid)
+      const byRss = [...allProcesses].sort((a, b) => b.rssKib - a.rssKib || (b.cpuPercent ?? -1) - (a.cpuPercent ?? -1) || a.pid - b.pid)
+      const selected = new Map<number, AppUsageProcess>()
+      for (let index = 0; selected.size < 256 && index < allProcesses.length; index++) {
+        for (const process of [byCpu[index]!, byRss[index]!]) {
+          if (selected.size < 256) selected.set(process.pid, process)
+        }
+      }
+      return { processCount: metrics.length, rssKib, cpuPercent, groups, processes: [...selected.values()],
+        omittedProcesses: allProcesses.length - selected.size, logicalCpuCount: this.logicalCpuCount, unavailable: null }
     } catch (error) {
       return {
         processCount: this.latest?.app?.processCount ?? null,
         rssKib: this.latest?.app?.rssKib ?? null,
         cpuPercent: this.latest?.app?.cpuPercent ?? null,
         groups: this.latest?.app?.groups ?? [],
+        processes: this.latest?.app?.processes ?? [], omittedProcesses: this.latest?.app?.omittedProcesses ?? 0,
+        logicalCpuCount: this.logicalCpuCount,
         unavailable: error instanceof Error ? error.message : String(error)
       }
     }

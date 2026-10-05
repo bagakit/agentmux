@@ -16,9 +16,15 @@ export type RunUsage = {
 }
 export type AppProcessRole = 'main' | 'renderer' | 'browser' | 'gpu' | 'utility' | 'other'
 export type AppUsageGroup = { role: AppProcessRole; processCount: number; cpuPercent: number | null; rssKib: number }
+export type AppProcessType = string
+/** Latest cumulative-counter interval, distinct from the group's 10s reading peak. */
+export type AppUsageProcess = {
+  pid: number; creationTime: number; role: AppProcessRole; type: AppProcessType
+  cpuPercent: number | null; intervalMs: number | null; rssKib: number
+}
 export type AppUsage = {
   processCount: number | null; cpuPercent: number | null; rssKib: number | null
-  groups: AppUsageGroup[]; unavailable: string | null
+  groups: AppUsageGroup[]; processes: AppUsageProcess[]; omittedProcesses: number; logicalCpuCount: number | null; unavailable: string | null
 }
 export type MainResourceOwnerCounts = {
   sessionAttachmentOwners: number; sessionAttachmentLeases: number; fileWatchers: number
@@ -35,7 +41,14 @@ export type MetricsSource<T> = {
   observedAt: number | null; lastSuccessAt: number | null; reason: string | null; data: T | null
 }
 export type MetricsWindow = { windowId: number; webContentsId: number; generation: number }
-export type MetricsRenderer = { window: MetricsWindow; counts: RendererResourceOwnerCounts; performance: RendererPerformanceSnapshot }
+export type RendererProcessIdentity = { pid: number | null; creationTime: number | null }
+export type RendererMemoryObservation = {
+  sampledAt: number; scope: 'renderer-v8-isolate'
+  heap: { usedHeapKib: number; totalHeapKib: number; physicalHeapKib: number; heapLimitKib: number } | null
+  unavailable: string | null
+}
+export type RendererMemorySnapshot = { process: RendererProcessIdentity; memory: RendererMemoryObservation }
+export type MetricsRenderer = RendererMemorySnapshot & { window: MetricsWindow; counts: RendererResourceOwnerCounts; performance: RendererPerformanceSnapshot }
 export type MetricsRendererRequest = { operation: 'metrics.renderer'; requestId: string; window: MetricsWindow }
 export type MetricsRendererResult = MetricsRenderer & { operation: 'metrics.renderer'; observedAt: number }
 export type MetricsObservation = {
@@ -167,16 +180,35 @@ export function parseRendererPerformanceSnapshot(value: unknown): RendererPerfor
 export function parseRendererResourceOwnerCounts(value: unknown): RendererResourceOwnerCounts {
   countsParser(value); return value as RendererResourceOwnerCounts
 }
+const positiveCount: Parser = v => { count(v); if (v === 0) invalid() }
+const rendererProcessParser = record({ pid: nullable(positiveCount), creationTime: nullable(number) })
+const rendererMemoryShape = record({ sampledAt: number, scope: literal('renderer-v8-isolate'),
+  heap: nullable(record({ usedHeapKib: number, totalHeapKib: number, physicalHeapKib: number, heapLimitKib: number })), unavailable: nullable(identity) })
+const rendererMemoryParser: Parser = v => {
+  rendererMemoryShape(v)
+  const memory = v as RendererMemoryObservation
+  if ((memory.heap === null) !== (memory.unavailable !== null)) invalid()
+}
 export function parseMetricsRendererResult(value: unknown): MetricsRendererResult {
-  record({ operation: literal('metrics.renderer'), window: windowParser, observedAt: number, counts: countsParser, performance: performanceParser })(value)
+  record({ operation: literal('metrics.renderer'), window: windowParser, observedAt: number, process: rendererProcessParser,
+    memory: rendererMemoryParser, counts: countsParser, performance: performanceParser })(value)
   return value as MetricsRendererResult
 }
 const runParser = record({ runId: identity, hostId: identity, rootPid: count,
   processCount: nullable(count), cpuPercent: nullable(number), rssKib: nullable(number), rootRssKib: nullable(number),
   descendantsRssKib: nullable(number), descendantProcessCount: nullable(count) })
+const appRoleParser: Parser = v => { if (!['main','renderer','browser','gpu','utility','other'].includes(v as string)) invalid() }
+const appProcessShape = record({ pid: positiveCount, creationTime: number, role: appRoleParser,
+  type: v => { identity(v); if ((v as string).length > 128) invalid() },
+  cpuPercent: nullable(number), intervalMs: nullable(v => { number(v); if (v === 0) invalid() }), rssKib: number })
+const appProcessParser: Parser = v => {
+  appProcessShape(v)
+  const process = v as AppUsageProcess
+  if ((process.cpuPercent === null) !== (process.intervalMs === null)) invalid()
+}
 const appParser = record({ processCount: nullable(count), cpuPercent: nullable(number), rssKib: nullable(number),
-  groups: array(record({ role: v => { if (!['main','renderer','browser','gpu','utility','other'].includes(v as string)) invalid() },
-    processCount: count, cpuPercent: nullable(number), rssKib: number })), unavailable: nullable(text) })
+  groups: boundedArray(6, record({ role: appRoleParser, processCount: count, cpuPercent: nullable(number), rssKib: number })),
+  processes: boundedArray(256, appProcessParser), omittedProcesses: count, logicalCpuCount: nullable(positiveCount), unavailable: nullable(text) })
 const runtimeParser = record({ hostId: identity,
   resources: nullable(record({ observedAt: number, runCount: count, runningRuns: count, terminatedRuns: count,
     terminatedUnattachedRuns: count, attachments: count, retainedOutputBytes: number })),
@@ -203,7 +235,7 @@ const observationParser = record({ schema: literal('agentmux.metrics.v1'), obser
   window: nullable(windowParser), units: record({ cpu: literal('percent'), cpuBasis: literal('one-logical-core'), rss: literal('KiB'), storage: literal('bytes'),
     cpuAggregate: literal('10s-reading-peak'), rssAggregate: literal('latest') }),
   process: source(array(runParser)), app: source(appParser), runtime: source(array(runtimeParser)),
-  diagnostics: source(diagnosticsParser), main: source(mainParser), renderer: source(record({ window: windowParser, counts: countsParser, performance: performanceParser })) })
+  diagnostics: source(diagnosticsParser), main: source(mainParser), renderer: source(record({ window: windowParser, process: rendererProcessParser, memory: rendererMemoryParser, counts: countsParser, performance: performanceParser })) })
 export function parseMetricsObservation(value: unknown): MetricsObservation {
   observationParser(value)
   const result = value as MetricsObservation
