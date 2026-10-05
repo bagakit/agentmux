@@ -1,3 +1,4 @@
+import { Textarea } from '@agentmux/client-ui/input'
 import { ArrowLeft, Code2, Play, RefreshCw, Settings2, Square, X } from 'lucide-react'
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ToolkitAction, ToolkitConfirmedResult } from '@agentmux/core/control'
@@ -140,7 +141,7 @@ export function UserToolkitResult({ definition, active, close, official = false,
       {execution ? <time dateTime={new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toISOString()}>{new Date('endedAt' in execution ? execution.endedAt : execution.startedAt).toLocaleTimeString()}</time> : null}
     </div>
     <div className="performance-body toolkit-result">
-      {scriptOpen ? <><button type="button" className="small-button" onClick={() => setScriptOpen(false)}><ArrowLeft size={13} /> Back to result</button><p className="settings-hint">{execution ? `Captured ${execution.action ? 'action' : 'entry'} script for this execution. ${capturedDefinition?.package ? 'Local package files are captured; external files and the environment remain live.' : 'Imports, local files and environment are not frozen.'}` : 'Current entry script · read only'}</p><textarea className="toolkit-result__script" aria-label="Read-only toolkit script" value={capturedScript ?? ''} readOnly /><p className="settings-hint">Arguments · {capturedArgs?.length ? JSON.stringify(capturedArgs) : 'None'}</p></> : <>
+      {scriptOpen ? <><button type="button" className="small-button" onClick={() => setScriptOpen(false)}><ArrowLeft size={13} /> Back to result</button><p className="settings-hint">{execution ? `Captured ${execution.action ? 'action' : 'entry'} script for this execution. ${capturedDefinition?.package ? 'Local package files are captured; external files and the environment remain live.' : 'Imports, local files and environment are not frozen.'}` : 'Current entry script · read only'}</p><Textarea className="toolkit-result__script" aria-label="Read-only toolkit script" value={capturedScript ?? ''} readOnly /><p className="settings-hint">Arguments · {capturedArgs?.length ? JSON.stringify(capturedArgs) : 'None'}</p></> : <>
         {reading.error ? <p className="toolkit-result__notice" role="status">{reading.error} The last confirmed facts are kept. Check status before starting again.</p> : null}
         {reading.sourceReason ? <p className="toolkit-result__notice" role="status">Package source unavailable: {reading.sourceReason} The retained execution can still be stopped.</p> : null}
         {snapshot?.reason ? <p className="toolkit-result__notice" role="status">{snapshot.reason}</p> : null}
