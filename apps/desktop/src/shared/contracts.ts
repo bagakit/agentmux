@@ -1568,6 +1568,8 @@ export type AgentMuxDesktopApi = {
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
     /** One complete, revision-verified bytes snapshot within the shared preview budget. */
     readPreview(workspaceId: string, path: string, options?: WorkspaceFilePreviewReadOptions): Promise<WorkspaceFilePreviewResult>
+    readPreviewResource(request: import('./workspace-file-preview').WorkspacePreviewResourceRequest): Promise<import('./workspace-file-preview').WorkspacePreviewResourceResult>
+    cancelPreviewResource(id: string): Promise<void>
     /** Read-only current HTML buffer and confined relative assets, isolated from the host renderer. */
     openHtmlPreview(workspaceId: string, path: string, content: string): Promise<{ id: string; url: string }>
     releaseHtmlPreview(id: string): Promise<void>

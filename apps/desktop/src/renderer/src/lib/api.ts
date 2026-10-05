@@ -573,6 +573,8 @@ const mockApi: AgentMuxDesktopApi = {
       return { url: parseBookmarkUrl(kind, content), binary: isBinaryContent(content) }
     },
     readPreview: async () => ({ status: 'unavailable', code: 'WEB_PREVIEW_FILES_UNAVAILABLE', message: 'Workspace bytes preview is available in the desktop application.' }),
+    readPreviewResource: async () => { throw new Error('Preview resources require the original Desktop file owner.') },
+    cancelPreviewResource: async () => {},
     openHtmlPreview: async () => { throw new Error('HTML workspace preview is available in the desktop application.') },
     releaseHtmlPreview: async () => {},
     renderDiagram: async () => { throw new Error('Isolated diagram rendering is available in the desktop application.') },
