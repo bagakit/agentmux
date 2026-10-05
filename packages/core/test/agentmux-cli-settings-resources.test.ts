@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
@@ -28,7 +29,7 @@ describe('resource CLI consumes the public Control owner without a caller or Vie
   beforeEach(async () => {
     root = await mkdtemp(fixturePath("tmp/amux-resource-cli-"))
     seen = []
-    records = { executors: new Map([['first', structuredClone(initial)]]), prompts: new Map() }
+    records = { executors: new Map([['first', structuredClone(initial)]]), prompts: new Map(), themes: new Map() }
     server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
       if (!('resource' in request)) throw new Error(`Unexpected ${request.operation}`)
@@ -112,6 +113,16 @@ describe('resource CLI consumes the public Control owner without a caller or Vie
     if (!receipt.ok) throw new Error('Expected success.')
     return receipt
   }
+
+  it('preserves theme readonly metadata, issues and exact raw deletion expectations over the public codec', () => {
+    const request = parseAgentMuxControlRequest({ ...base, operation: 'settings.resource.remove', resource: 'themes', id: 'custom.raw', expected: null })
+    expect(request).toMatchObject({ expected: null })
+    const result = parseAgentMuxControlReceipt({ ...base, ok: true, operation: 'settings.resource.list', result: {
+      resource: 'themes', partial: true, items: [{ id: 'graphite', value: initial, readonly: true }],
+      issues: [{ id: 'custom.raw', message: 'Original retained.' }, { id: '', message: 'Malformed identity retained.' }]
+    } })
+    expect(result).toMatchObject({ result: { items: [{ readonly: true }], issues: [{ id: 'custom.raw' }, { id: '' }] } })
+  })
 
   it('lists nonempty and empty owner collections and gets an exact item', async () => {
     expect(success(await run(['settings', 'executors', 'ls'])).result).toEqual({ resource: 'executors',
@@ -322,7 +333,7 @@ describe('resource protocol is bounded pure JSON with strict receipts', () => {
 
   it.each([
     ['undefined', { hidden: undefined }], ['NaN', { nan: NaN }], ['infinity', { infinity: Infinity }],
-    ['function', { fn: () => true }], ['BigInt', { bigint: 1n }], ['Date', { date: new Date(0) }],
+    ['function', { fn: () => true }], ['BigInt', { bigint: 1n }], ['Date', { date: new Date(reshapeFixtureEpoch(0, 0, 0)) }],
     ['sparse array', { sparse: Array(1) }], ['array extra field', { array: Object.assign([], { extra: true }) }],
     ['symbol value', { symbol: Symbol('not-json') }], ['inherited field', Object.create({ inherited: true })],
     ['hidden field', Object.defineProperty({}, 'hidden', { value: true })],
@@ -334,7 +345,7 @@ describe('resource protocol is bounded pure JSON with strict receipts', () => {
 
   it('rejects full request and aggregate list receipts exceeding the existing message budget', () => {
     invalid(() => parseAgentMuxControlRequest(request({ body: 'x'.repeat(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES - 40) })), 'INVALID_CONTROL_REQUEST')
-    const value = { body: 'x'.repeat(150_000) }
+    const value = { body: 'x'.repeat(Math.floor(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES / 2)) }
     invalid(() => parseAgentMuxControlReceipt(receipt('settings.resource.list', { resource: 'prompts', partial: true,
       items: [{ id: 'a', value }, { id: 'b', value }] })), 'CONTROL_PROTOCOL_ERROR')
   })
@@ -345,6 +356,9 @@ describe('resource protocol is bounded pure JSON with strict receipts', () => {
     ['settings.resource.list', { resource: 'prompts', partial: true, items: Array(1) }],
     ['settings.resource.list', { resource: 'prompts', partial: true, items: [null] }],
     ['settings.resource.list', { resource: 'prompts', partial: true, items: [], extra: true }],
+    ['settings.resource.list', { resource: 'themes', partial: true, items: [], issues: [{ id: 1, message: 'Bad identity' }] }],
+    ['settings.resource.list', { resource: 'themes', partial: true, items: [], issues: Array(1) }],
+    ['settings.resource.get', { resource: 'themes', item: { ...item, readonly: 'yes' } }],
     ['settings.resource.get', { resource: 'other', item }],
     ['settings.resource.get', { resource: 'prompts', item: { ...item, extra: true } }],
     ['settings.resource.get', { resource: 'prompts', item: { id: 'one', value: { id: 'nested identity' } } }],
