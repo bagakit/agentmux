@@ -1,4 +1,8 @@
 .mote-identity-motion { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+/* A root SVG can relayout its animated parts locally unless it is a flex/grid
+   item. Keep the original intrinsic slot and visible overflow; containment on
+   the flex carrier alone does not establish this browser layout boundary. */
+.mote-identity-motion:has(svg.mote-face) { display: inline-block; }
 .mote-identity-motion > .space-object-icon { display: contents; }
 .mote-face__eyes, .mote-face__gaze, .mote-face__head, .mote-face__mouth, .mote-face__brows { transform-box: fill-box; transform-origin: center; }
 .mote-identity-motion[data-mote-expression="thinking"] .mote-face__brows,
