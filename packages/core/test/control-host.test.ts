@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import type { AgentMuxMessageEnvelope } from '../src/agent-global-message-queue.js'
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
@@ -35,7 +36,7 @@ import {
 } from '../src/control.js'
 
 function localMessage(body: string, recipient = 'semantic-1'): AgentMuxMessageEnvelope {
-  return { schema: 'agentmux.a2a.v1', messageId: 'test-message', operationId: 'test-operation', createdAt: 1,
+  return { schema: 'agentmux.a2a.v1', messageId: 'test-message', operationId: 'test-operation', createdAt: reshapeFixtureEpoch(0, 0, 1),
     sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: recipient },
     senderSessionId: null, senderRunId: null, recipientSessionId: recipient, recipientRunId: null,
     threadId: 'test-thread', correlationId: 'test-correlation', replyTo: null, workspaceId: null, body }
@@ -213,7 +214,7 @@ describe('Control protocol', () => {
 
   it('binds an A2A sender to the managed caller and its explicit Control target', () => {
     const message = {
-      schema: 'agentmux.a2a.v1', messageId: 'message-1', operationId: 'request-1', createdAt: 1,
+      schema: 'agentmux.a2a.v1', messageId: 'message-1', operationId: 'request-1', createdAt: reshapeFixtureEpoch(0, 0, 1),
       sender: { kind: 'agent-session', agentSessionId: 'caller' },
       recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
       threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null,
@@ -407,7 +408,7 @@ describe('Control protocol', () => {
       requestId: 'history', operation: 'browser.history', browserId: 'browser:1'
     })
     expect(history).toMatchObject({ operation: 'browser.history', browserId: 'browser:1' })
-    const operation = { id: 'op:replay', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
+    const operation = { id: 'op:replay', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: reshapeFixtureEpoch(0, 0, 1), phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     const replay = parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'replay', ok: true, operation: 'browser.replay',
@@ -500,7 +501,7 @@ describe('Control protocol', () => {
       expect((thrown as { code?: string }).code, `${operation} 缺 id 的拒绝不是 typed 的`)
         .toBe('INVALID_CONTROL_REQUEST')
     }
-    const operation = { id: 'op:1', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'running', summary: 'Agent is operating the Browser', url: 'https://example.test/', steps: [] }
+    const operation = { id: 'op:1', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: reshapeFixtureEpoch(0, 0, 1), phase: 'running', summary: 'Agent is operating the Browser', url: 'https://example.test/', steps: [] }
     // 回执两侧：答出那条操作的事实，**以及**答出 `null`。
     //
     // `null` 是一次成功的回答，不是解析失败：id 可能来自另一台机器、或者早被日志轮转掉了。
@@ -536,7 +537,7 @@ describe('Control protocol', () => {
   })
 
   it('round-trips a browser.run receipt with its logs and four-class outcome', () => {
-    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
+    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: reshapeFixtureEpoch(0, 0, 1), phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     expect(parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'run-basic',
@@ -565,7 +566,7 @@ describe('Control protocol', () => {
   // 承重的一条。四类结局若在线上被折成两类（成功 / 失败），"做到哪一步不知道"就消失了——而那正是
   // 真实危险所在：indeterminate 意味着页面上**可能已经点过一次**，调用方不许重试。
   it('keeps all four browser.run outcome classes distinct on the wire', () => {
-    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
+    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: reshapeFixtureEpoch(0, 0, 1), phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     const outcomes = [
       { kind: 'completed' },
       { kind: 'script-failed', message: 'boom' },
@@ -609,7 +610,7 @@ describe('Control protocol', () => {
   // `logs: [{}]` 会一路流进 UI 渲染成 "[object Object]"，或者在某个 `.split()` 上炸得离题万里。
   // 上限同理：这是线上解析器，对面不一定是我们自己的进程。
   it('validates browser.run logs line by line and caps how many it will take', () => {
-    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: 1, phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
+    const operation = { id: 'op:test', browserId: 'browser:1', operator: { id: 'agent:test', name: 'Test Agent' }, startedAt: reshapeFixtureEpoch(0, 0, 1), phase: 'completed', summary: 'done', url: 'https://example.test/', steps: [] }
     const receipt = parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'run-logs',
@@ -995,7 +996,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       // 要等外面的。
       'toolkit.add': 'long', 'toolkit.update': 'long', 'toolkit.remove': 'long',
       'toolkit.list': 'short', 'toolkit.get': 'short', 'toolkit.script': 'short',
-      'toolkit.run': 'long', 'toolkit.action': 'long', 'toolkit.stop': 'long', 'toolkit.watch': 'short',
+      'toolkit.run': 'long', 'toolkit.evaluate': 'long', 'toolkit.action': 'long', 'toolkit.stop': 'long', 'toolkit.watch': 'short',
       'metrics.get': 'short', 'metrics.watch': 'short',
       'open.file': 'long', 'agent.view': 'long', 'space.view': 'long', 'space.swap': 'long',
       'agent.rename': 'long', 'agent.inspect': 'short', 'space.rename': 'long',
@@ -1155,7 +1156,7 @@ describe('Browser 公共 RPC 订阅：唯一 response 后按序 notification，�
     id: 'op-stream',
     browserId: 'b1',
     operator: { id: 'agent-1', name: 'Agent 1' },
-    startedAt: 1,
+    startedAt: reshapeFixtureEpoch(0, 0, 1),
     phase,
     summary: 'streaming',
     url: 'https://example.invalid/',

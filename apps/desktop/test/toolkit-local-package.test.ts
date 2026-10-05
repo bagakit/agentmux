@@ -12,7 +12,7 @@ import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner'
 import { captureToolkitPackage, readToolkitPackageSnapshot, writeToolkitPackageSnapshot, removeToolkitPackageSnapshot } from '../src/main/toolkit-package'
 import { executeToolkitConfig, prepareToolkitConfig } from '../src/main/toolkit-config'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port'
-vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
+vi.mock('electron', () => ({ app: { getPath: () => tmpdir(), getAppPath: () => process.cwd() } }))
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true }) })
 async function localPackage() {
