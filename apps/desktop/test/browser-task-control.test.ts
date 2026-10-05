@@ -272,7 +272,7 @@ it('actual Main dispatcher refuses a selected condition action after its documen
   const taskAuthority = vi.spyOn(f.assets, 'isExecutionCurrent').mockReturnValue(true)
   Object.assign(f.manager, { refLedgers: { read: vi.fn(async () => null), write: vi.fn() } })
   const sender = { sendCommand: vi.fn(), frames: new Map() }
-  const actual = (f.manager as any).pageCallHandler(f.entry, sender, [], { at: null }, operation, false, new AbortController().signal,
+  const actual = (f.manager as any).pageCallHandler(f.entry, sender, [], operation, false, new AbortController().signal,
     { cursor: { runId: 'original-selected-run', assetId: f.asset.id, version: 1, browserId, stepId: 'navigation', expectedNavigationId: 'old-condition-navigation' } })
   await expect(actual('gotoUrl', ['https://generic.invalid/next'])).rejects.toThrow('condition document changed')
   expect((f.entry as any).feedback.begin).toHaveBeenCalledOnce(); expect(nativeNavigation).not.toHaveBeenCalled(); expect(sender.sendCommand).not.toHaveBeenCalled()
