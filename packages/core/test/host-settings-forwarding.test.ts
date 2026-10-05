@@ -60,7 +60,9 @@ it('compiled CLI crosses the Host/Desktop Unix bridge to the target inventory an
   const saved = await cli(['settings', 'executors', 'register', 'wrapper', '--host', 'remote', '--input', '-'], JSON.stringify({ config }), true)
   expect(saved.code, saved.stderr).toBe(0)
   expect(JSON.parse(saved.stdout).result).toMatchObject({ routeHostId: 'remote', executor: { executorId: 'wrapper', command } })
-  const source = await local.client.agentCreationAuthority(), input = { sourceRuntimeId: source.runtimeId, publicKey: source.publicKey }
+  const source = await local.client.agentCreationAuthority(), target = await remote.client.agentCreationAuthority()
+  const input = { sourceRuntimeId: source.runtimeId, publicKey: source.publicKey,
+    targetRuntimeId: target.runtimeId, targetKeyFingerprint: target.fingerprint }
   const count = forward.mock.calls.length
   const rejected = await cli(['settings', 'hosts', 'trust-source', '--host', 'remote', '--input', '-'], JSON.stringify(input), true)
   expect(rejected.code).toBe(1); expect(JSON.parse(rejected.stderr).error.code).toBe('CONTROL_PERMISSION_DENIED')
@@ -69,7 +71,8 @@ it('compiled CLI crosses the Host/Desktop Unix bridge to the target inventory an
   expect(trust.code, trust.stderr).toBe(0)
   const read = await cli(['settings', 'hosts', 'trusted-sources', '--host', 'remote'], '', true)
   expect(read.code, read.stderr).toBe(0)
-  expect(JSON.parse(read.stdout).result).toMatchObject({ routeHostId: 'remote', authority: { runtimeId: 'remote-runtime' }, sources: [input] })
+  expect(JSON.parse(read.stdout).result).toMatchObject({ routeHostId: 'remote', authority: { runtimeId: 'remote-runtime' },
+    sources: [{ sourceRuntimeId: source.runtimeId, publicKey: source.publicKey, targetRuntimeId: target.runtimeId }] })
   expect(await local.client.listTrustedCreationSources()).toEqual([])
   expect(local.inner.kernel.stop).not.toHaveBeenCalled(); expect(remote.inner.kernel.stop).not.toHaveBeenCalled()
 })
@@ -99,7 +102,8 @@ it('delegates only absent routes, validates returned ownership, and preserves th
 })
 
 it('refuses invalid authors and non-user source trust before the bridge can acquire a new Unix user principal', async () => {
-  const f = await fixture(), input = { hostId: 'remote', input: { sourceRuntimeId: 'source', publicKey: 'invalid-key' } }
+  const f = await fixture(), input = { hostId: 'remote', input: { sourceRuntimeId: 'source', publicKey: 'invalid-key',
+    targetRuntimeId: 'target', targetKeyFingerprint: 'a'.repeat(64) } }
   for (const context of [{}, { principal: { kind: 'device' as const, id: 'phone' } }, { ...user, caller: f.credentials }]) {
     await expect(f.service.call('settings.hosts.trust-source', input, context)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   }

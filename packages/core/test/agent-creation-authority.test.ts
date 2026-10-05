@@ -22,10 +22,28 @@ async function fixture() {
     launchOptions: { permission: 'ask' }, cols: 100, rows: 40 }
   const destination = { runtimeId: 'target-runtime', intentDigest: agentCreationIntentDigest(intent) }
   const sender = { agentSessionId: 'source-session', runId: 'source-run' }
-  return { source, target, sourceDirectory, targetDirectory, intent, destination, sender }
+  const targetBinding = async () => { const identity = await target.identity(); return { targetRuntimeId: identity.runtimeId, targetKeyFingerprint: identity.fingerprint } }
+  return { targetBinding, source, target, sourceDirectory, targetDirectory, intent, destination, sender }
 }
 
 describe('Runtime-scoped Agent creation authority', () => {
+  it('rejects a target Runtime or key change between review and approval without publishing a pin', async () => {
+    const f = await fixture(), source = await f.source.identity(), binding = await f.targetBinding()
+    const input = { ...binding, sourceRuntimeId: source.runtimeId, publicKey: source.publicKey }
+    for (const wrong of [{ ...input, targetRuntimeId: 'another-target' }, { ...input, targetKeyFingerprint: '0'.repeat(64) }]) {
+      await expect(f.target.trust(wrong, { kind: 'user', id: 'user' })).rejects.toMatchObject({ code: 'AGENT_CREATION_TARGET_MISMATCH' })
+      expect(await f.target.listTrusted()).toEqual([])
+    }
+    await expect(f.target.trust({ sourceRuntimeId: source.runtimeId, publicKey: source.publicKey } as never,
+      { kind: 'user', id: 'user' })).rejects.toMatchObject({ code: 'AGENT_CREATION_PROVENANCE_INVALID' })
+    const other = new AgentMuxCreationAuthority({ stateDirectory: join(f.targetDirectory, '..', 'replacement'), runtimeId: 'target-runtime' })
+    await other.identity()
+    const replacement = await readFile(join(f.targetDirectory, '..', 'replacement', 'agent-creation-identity.json'))
+    await writeFile(join(f.targetDirectory, 'agent-creation-identity.json'), replacement)
+    await expect(f.target.trust(input, { kind: 'user', id: 'user' })).rejects.toMatchObject({ code: 'AGENT_CREATION_TARGET_MISMATCH' })
+    expect(await f.target.listTrusted()).toEqual([])
+    expect(await readFile(join(f.targetDirectory, 'agent-creation-identity.json'))).toEqual(replacement)
+  })
   it('is lazy and publishes one protected signing identity across concurrent owners', async () => {
     const f = await fixture()
     expect(await readdir(join(f.sourceDirectory, '..'))).toEqual([])
@@ -43,7 +61,7 @@ describe('Runtime-scoped Agent creation authority', () => {
     const admission = await f.source.attest(f.sender, f.destination)
     await expect(f.target.verify(admission, f.destination)).rejects.toMatchObject({ code: 'AGENT_CREATION_SOURCE_UNTRUSTED' })
     const identity = await f.source.identity()
-    const trust = await f.target.trust({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
+    const trust = await f.target.trust({ ...await f.targetBinding(), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
     const reloaded = new AgentMuxCreationAuthority({ stateDirectory: f.targetDirectory, runtimeId: 'target-runtime' })
     const origin = await reloaded.verify(admission, f.destination)
     expect(origin).toEqual({ source: { runtimeId: 'source-runtime', ...f.sender },
@@ -56,7 +74,7 @@ describe('Runtime-scoped Agent creation authority', () => {
 
   it('rejects tampered source, target and signature before returning provenance', async () => {
     const f = await fixture(), identity = await f.source.identity()
-    await f.target.trust({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
+    await f.target.trust({ ...await f.targetBinding(), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
     const admission = await f.source.attest(f.sender, f.destination)
     for (const source of [{ ...admission.source, agentSessionId: 'forged-author' }, { ...admission.source, runId: 'other-run' }]) {
       await expect(f.target.verify({ ...admission, source }, f.destination)).rejects.toMatchObject({ code: 'AGENT_CREATION_ADMISSION_INVALID' })
@@ -76,7 +94,7 @@ describe('Runtime-scoped Agent creation authority', () => {
 
   it('retains the first user receipt and rejects a replacement key without rewriting it', async () => {
     const f = await fixture(), identity = await f.source.identity()
-    const request = { sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }
+    const request = { ...await f.targetBinding(), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }
     const first = await f.target.trust(request, { kind: 'user', id: 'original-user' })
     const directory = join(f.targetDirectory, 'agent-creation-trusted-sources')
     const path = join(directory, (await readdir(directory))[0]!)
@@ -92,10 +110,10 @@ describe('Runtime-scoped Agent creation authority', () => {
 
   it('rejects a device before creating a trust directory and refuses malformed keys', async () => {
     const f = await fixture(), identity = await f.source.identity()
-    await expect(f.target.trust({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'device', id: 'forged-user' } as never))
+    await expect(f.target.trust({ targetRuntimeId: 'target-runtime', targetKeyFingerprint: 'a'.repeat(64), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'device', id: 'forged-user' } as never))
       .rejects.toMatchObject({ code: 'AGENT_CREATION_TRUST_PERMISSION_REQUIRED' })
     await expect(stat(f.targetDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(f.target.trust({ sourceRuntimeId: identity.runtimeId, publicKey: 'not-an-ed25519-key' }, { kind: 'user', id: 'target-user' }))
+    await expect(f.target.trust({ targetRuntimeId: 'target-runtime', targetKeyFingerprint: 'a'.repeat(64), sourceRuntimeId: identity.runtimeId, publicKey: 'not-an-ed25519-key' }, { kind: 'user', id: 'target-user' }))
       .rejects.toMatchObject({ code: 'AGENT_CREATION_AUTHORITY_INVALID' })
     await expect(stat(f.targetDirectory)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -104,8 +122,8 @@ describe('Runtime-scoped Agent creation authority', () => {
     const f = await fixture(), firstKey = (await f.source.identity()).publicKey, secondKey = (await f.target.identity()).publicKey
     const secondTarget = new AgentMuxCreationAuthority({ stateDirectory: f.targetDirectory, runtimeId: 'target-runtime' })
     const results = await Promise.allSettled([
-      f.target.trust({ sourceRuntimeId: 'source-runtime', publicKey: firstKey }, { kind: 'user', id: 'first-user' }),
-      secondTarget.trust({ sourceRuntimeId: 'source-runtime', publicKey: secondKey }, { kind: 'user', id: 'second-user' })
+      f.target.trust({ ...await f.targetBinding(), sourceRuntimeId: 'source-runtime', publicKey: firstKey }, { kind: 'user', id: 'first-user' }),
+      secondTarget.trust({ ...await f.targetBinding(), sourceRuntimeId: 'source-runtime', publicKey: secondKey }, { kind: 'user', id: 'second-user' })
     ])
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter(result => result.status === 'rejected')).toEqual([
@@ -134,7 +152,7 @@ describe('Runtime-scoped Agent creation authority', () => {
 
   it('preserves invalid trust bytes and never silently recreates a damaged pin', async () => {
     const f = await fixture(), identity = await f.source.identity()
-    const request = { sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }
+    const request = { ...await f.targetBinding(), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }
     await f.target.trust(request, { kind: 'user', id: 'target-user' })
     const directory = join(f.targetDirectory, 'agent-creation-trusted-sources'), path = join(directory, (await readdir(directory))[0]!)
     await writeFile(path, '{damaged pin')
@@ -145,7 +163,7 @@ describe('Runtime-scoped Agent creation authority', () => {
 
   it('does not accept a disk pin copied from another target Runtime', async () => {
     const f = await fixture(), identity = await f.source.identity()
-    await f.target.trust({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
+    await f.target.trust({ ...await f.targetBinding(), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
     const wrongRuntime = new AgentMuxCreationAuthority({ stateDirectory: f.targetDirectory, runtimeId: 'replacement-runtime' })
     await expect(wrongRuntime.listTrusted()).rejects.toMatchObject({ code: 'AGENT_CREATION_TRUST_INVALID' })
   })
@@ -159,7 +177,7 @@ describe('Runtime-scoped Agent creation authority', () => {
       expect(() => agentCreationIntentDigest(value)).toThrowError(expect.objectContaining({ code: 'AGENT_CREATION_INTENT_INVALID' }))
     }
     const f = await fixture(), identity = await f.source.identity()
-    const trust = await f.target.trust({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
+    const trust = await f.target.trust({ ...await f.targetBinding(), sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'target-user' })
     const admission = await f.source.attest(f.sender, f.destination), origin = await f.target.verify(admission, f.destination)
     expect(parseAgentMuxCreationTrust(trust)).toEqual(trust)
     expect(parseAgentMuxCreationAdmission(admission)).toEqual(admission)
