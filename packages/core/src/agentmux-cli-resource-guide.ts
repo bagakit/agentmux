@@ -25,8 +25,10 @@ CAS and persistence. IDs and input paths are literal data, with no shell expansi
 
 Creation-source trust is configured explicitly by a transport-approved user. Read
 settings hosts trusted-sources --host <id> to obtain that Host authority and its public
-key fingerprint. After verifying the source, settings hosts trust-source --host <id>
---input <file|-> accepts exactly {"sourceRuntimeId":string,"publicKey":string}. Managed
+key fingerprint. After verifying both source and target, settings hosts trust-source --host <id>
+--input <file|-> accepts exactly {"sourceRuntimeId":string,"publicKey":string,
+"targetRuntimeId":string,"targetKeyFingerprint":string}. The target identity must still
+match the reviewed values when it accepts approval. Managed
 Agents and devices cannot approve source trust. Opening a remote Agent never silently
 trusts a key or copies the caller capability to the target Host.
 

@@ -1516,6 +1516,11 @@ export type WindowResizeEvent = {
 export type SessionQuestionReplyInput = Omit<AgentMuxSessionQuestionReplyInput,
   'agentSessionId' | 'authorHuman' | 'sourceDevice' | 'sourceChannel' | 'signal' | 'commandOverride' | 'args' | 'env'>
 
+export type HostCreationTrustSnapshot = {
+  source: import('@agentmux/core').AgentMuxCreationAuthorityIdentity
+  target: AgentMuxRpcResult<'settings.hosts.trusted-sources'>
+}
+
 export type AgentMuxDesktopApi = {
   /** Fixed-size synchronous V8-isolate observation; no process dump or object scan. */
   readRendererMemory(): import('@agentmux/core/control').RendererMemorySnapshot
@@ -1538,6 +1543,8 @@ export type AgentMuxDesktopApi = {
   }
   hosts: {
     check(host: HostConfig): Promise<HostCheckResult>
+    creationTrust(host: HostConfig): Promise<HostCreationTrustSnapshot>
+    trustCreationSource(host: HostConfig, expected: HostCreationTrustSnapshot): Promise<HostCreationTrustSnapshot>
     upgradeCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreUpgradeCheck>
     upgrade(host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt>
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>

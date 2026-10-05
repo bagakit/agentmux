@@ -14,6 +14,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { HostUpgradePanel } from './HostUpgradePanel'
+import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 
 const NO_SESSIONS: SessionSnapshot[] = []
 const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
@@ -230,6 +231,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             const committed = config.hosts.find(host => host.id === id)
             return draft?.kind === 'ssh' ? <div key={id} hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
               <HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
+              <HostCreationTrustPanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
             </div> : null
           })}
           {projectHosts.filter(id => hosts.some(host => host.id === id)).map(id => {

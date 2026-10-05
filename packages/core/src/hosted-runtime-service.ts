@@ -3,6 +3,7 @@ import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedMethod, type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
@@ -163,12 +164,9 @@ export class AgentMuxHostedRuntimeService {
       if (input.args.length !== 1 || context.caller !== undefined || context.principal?.kind !== 'user') {
         throw new AgentMuxError('Creation-source trust requires one input and a transport-approved user.', 'CONTROL_PERMISSION_DENIED')
       }
-      const trust = record(input.args[0], ['sourceRuntimeId', 'publicKey'])
-      if (typeof trust.sourceRuntimeId !== 'string' || typeof trust.publicKey !== 'string') {
-        throw new AgentMuxError('Creation-source trust requires an exact Runtime and public key.', 'INVALID_CONTROL_REQUEST')
-      }
+      const trust = parseAgentMuxCreationTrustInput(record(input.args[0], ['sourceRuntimeId', 'publicKey', 'targetRuntimeId', 'targetKeyFingerprint']))
       context.signal?.throwIfAborted()
-      return { value: encodeHostedValue(await this.client.trustCreationSource({ sourceRuntimeId: trust.sourceRuntimeId, publicKey: trust.publicKey },
+      return { value: encodeHostedValue(await this.client.trustCreationSource(trust,
         { kind: 'user', id: identifier(context.principal.id) })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation

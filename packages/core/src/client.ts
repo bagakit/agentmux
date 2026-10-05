@@ -745,7 +745,7 @@ export class AgentMuxClient {
 
   async listTrustedCreationSources() { return await this.requireCreationAuthority().listTrusted() }
 
-  async trustCreationSource(input: { sourceRuntimeId: string; publicKey: string }, principal?: { kind: 'user'; id: string }) {
+  async trustCreationSource(input: import('./agent-creation-admission.js').AgentMuxCreationTrustInput, principal?: { kind: 'user'; id: string }) {
     if (principal?.kind !== 'user' || !principal.id) throw new AgentMuxError('Source trust requires an authenticated user configuration action.', 'CONTROL_PERMISSION_DENIED')
     return await this.requireCreationAuthority().trust(input, principal)
   }

@@ -4,6 +4,12 @@ export type AgentMuxCreationSource = { runtimeId: string; agentSessionId: string
 export type AgentMuxCreationTarget = { runtimeId: string; intentDigest: string }
 export type AgentMuxCreationAuthorityIdentity = { runtimeId: string; publicKey: string; fingerprint: string }
 export type AgentMuxCreationUserPrincipal = { kind: 'user'; id: string }
+export type AgentMuxCreationTrustInput = {
+  sourceRuntimeId: string
+  publicKey: string
+  targetRuntimeId: string
+  targetKeyFingerprint: string
+}
 export type AgentMuxCreationTrust = {
   sourceRuntimeId: string
   publicKey: string
@@ -41,6 +47,12 @@ function text(value: unknown): string {
 function digest(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) invalid()
   return value
+}
+export function parseAgentMuxCreationTrustInput(value: unknown): AgentMuxCreationTrustInput {
+  const p = record(value, ['sourceRuntimeId', 'publicKey', 'targetRuntimeId', 'targetKeyFingerprint'])
+  if (typeof p.publicKey !== 'string' || !p.publicKey) invalid()
+  return { sourceRuntimeId: text(p.sourceRuntimeId), publicKey: p.publicKey,
+    targetRuntimeId: text(p.targetRuntimeId), targetKeyFingerprint: digest(p.targetKeyFingerprint) }
 }
 function source(value: unknown): AgentMuxCreationSource {
   const p = record(value, ['runtimeId', 'agentSessionId', 'runId'])
