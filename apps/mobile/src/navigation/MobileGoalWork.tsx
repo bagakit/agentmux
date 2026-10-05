@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CheckCircle2, ExternalLink, RefreshCw, Target } from 'lucide-react'
@@ -117,13 +118,13 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     const intervalMs = Number(minutes) * 60000
     if (!Number.isSafeInteger(intervalMs) || intervalMs < 60000) return
     try { void perform({ ...goalWorkTarget(client, owner, agentSessionId, actual.goal.id), kind: 'start',
-      operationId: crypto.randomUUID(), intervalMs, alignmentRevision: actual.goal.alignment.revision }) }
+      operationId: randomClientRequestId(), intervalMs, alignmentRevision: actual.goal.alignment.revision }) }
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
   const action = (loop: ContinuousProgressLoop, action: 'pause' | 'resume' | 'stop' | 'check') => {
     if (!client || !agentSessionId || !goalId || saved.length || !loop.revision) return
     try { void perform({ ...goalWorkTarget(client, owner, agentSessionId, goalId), kind: 'action', loopId: loop.loopId,
-      operationId: crypto.randomUUID(), action, expectedRevision: loop.revision }) }
+      operationId: randomClientRequestId(), action, expectedRevision: loop.revision }) }
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
   const retryStart = (loop: ContinuousProgressLoop) => {

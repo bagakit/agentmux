@@ -7,7 +7,7 @@ import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
-  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact
+  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact, AgentMuxMotePresentation, AgentMuxMoteConversationReference
 } from './space-control.js'
 
 const MAX_SPATIAL_ID_BYTES = 16 * 1024
@@ -246,7 +246,7 @@ function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
 
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
-  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance', 'agentPresentation', 'survey'], code)
+  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance', 'agentPresentation', 'motePresentation', 'survey'], code)
   const projectGroups = Object.hasOwn(source, 'projectGroups') ? unique(list(source.projectGroups, value => {
     const item = fields(value, ['groupId', 'name', 'projectIds'], code)
     const name = string(item.name, 'Project group name', code)
@@ -283,6 +283,45 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), spaceId: spaceControlId(item.spaceId, 'Space', code, true) }
   }, 'Bindings', code), item => JSON.stringify([item.zoneId, item.spaceId]), 'Bindings', code)
   const locations = unique(list(source.locations, value => address(value, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
+  const moteConversation = (value: unknown): AgentMuxMoteConversationReference => {
+    const item = fields(value, ['hostId', 'sessionId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
+    return { hostId: spaceControlId(item.hostId, 'Mote conversation Host', code), sessionId: spaceControlId(item.sessionId, 'Mote conversation Session', code),
+      displayWorkspaceId: spaceControlId(item.displayWorkspaceId, 'Mote display Workspace', code), groupId: spaceControlId(item.groupId, 'Mote Group', code),
+      tabId: spaceControlId(item.tabId, 'Mote Tab', code, true), regionId: spaceControlId(item.regionId, 'Mote Region', code, true) }
+  }
+  const motePresentation = Object.hasOwn(source, 'motePresentation') ? unique(list(source.motePresentation, value => {
+    const item = fields(value, ['spaceId', 'content', 'quickMode', 'conversation', 'issue'], code)
+    const spaceId = spaceControlId(item.spaceId, 'Mote Space', code, true)
+    if (!spaces.some(space => space.spaceId === spaceId && space.kind === 'mote')) fail('Mote presentation belongs to an unknown Mote.', code)
+    const content = item.content === null ? null : (() => {
+      const resource = fields(item.content, ['zoneId', 'hostId', 'workspaceId', 'workspacePath'], code)
+      return { zoneId: spaceControlId(resource.zoneId, 'Mote content Zone', code, true), hostId: spaceControlId(resource.hostId, 'Mote content Host', code),
+        workspaceId: spaceControlId(resource.workspaceId, 'Mote content Workspace', code), workspacePath: string(resource.workspacePath, 'Mote content Workspace path', code) }
+    })()
+    const raw = fields(item.quickMode, ['status', 'defaults', 'version', 'message'], code)
+    let quickMode: AgentMuxMotePresentation['quickMode']
+    if (raw.status === 'saved') {
+      fields(raw, ['status', 'defaults', 'version'], code)
+      const defaults = fields(raw.defaults, ['executorId', 'conversation', 'recovery'], code)
+      quickMode = { status: 'saved', version: string(raw.version, 'Mote preferences version', code), defaults: {
+        ...(Object.hasOwn(defaults, 'executorId') ? { executorId: spaceControlId(defaults.executorId, 'Mote default Executor', code) } : {}),
+        ...(Object.hasOwn(defaults, 'conversation') ? { conversation: moteConversation(defaults.conversation) } : {}),
+        ...(Object.hasOwn(defaults, 'recovery') ? { recovery: member(defaults.recovery, ['startup', 'on-open'], 'Mote recovery timing', code) } : {}) } }
+    } else if (raw.status === 'missing') {
+      fields(raw, ['status'], code); quickMode = { status: 'missing' }
+    } else if (raw.status === 'unconfirmed') {
+      fields(raw, ['status', 'message'], code); quickMode = { status: 'unconfirmed', message: string(raw.message, 'Mote preferences issue', code) }
+    } else return fail('Mote preferences status is invalid.', code)
+    if (content && !zones.some(zone => zone.zoneId === content.zoneId && zone.kind === 'home' && zone.hostId === content.hostId && zone.workspaceId === content.workspaceId &&
+      bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === zone.zoneId))) fail('Mote content belongs to another resource.', code)
+    const conversation = item.conversation === null ? null : moteConversation(item.conversation)
+    const saved = quickMode.status === 'saved' ? quickMode.defaults.conversation : undefined
+    if (conversation && (!saved || Object.keys(conversation).some(key => conversation[key as keyof typeof conversation] !== saved[key as keyof typeof saved]))) {
+      fail('Confirmed Mote conversation differs from its saved reference.', code)
+    }
+    return { spaceId, content, quickMode, conversation,
+      ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Mote presentation issue', code) } : {}) }
+  }, 'Mote presentation', code), item => item.spaceId, 'Mote presentation', code) : undefined
   const appearance = Object.hasOwn(source, 'appearance') ? unique(list(source.appearance, value => {
     const item = fields(value, ['spaceId', 'glyph', 'parts', 'image', 'issue', 'preset', 'expression', 'activities'], code)
     const spaceId = spaceControlId(item.spaceId, 'Space appearance', code, true)
@@ -341,7 +380,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(Object.hasOwn(raw, 'issue') ? { issue: string(raw.issue, 'Survey issue', code) } : {})
     }
   })() : undefined
-  return { ...(survey ? { survey } : {}), ...(agentPresentation ? { agentPresentation } : {}), ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
+  return { ...(motePresentation ? { motePresentation } : {}), ...(survey ? { survey } : {}), ...(agentPresentation ? { agentPresentation } : {}), ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
 }
 function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
   return list(value, value => {

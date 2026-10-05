@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -41,7 +42,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
   }, [client, visible, revision])
   async function discussion(value: Creation, goal: AgentMuxRpcGoal) {
     setRequest({ ...value, phase: 'pmo', issue: '原目标已确认保存，正在打开它的主 Mote 讨论。' })
-    const input = { goalId: value.input.goalId, mode: 'open' as const, operationId: crypto.randomUUID() }
+    const input = { goalId: value.input.goalId, mode: 'open' as const, operationId: randomClientRequestId() }
     try {
       assertGoalIntentScope(client, owner, intent(value))
       const result = await client!.forwardRpc!('goal.discuss', input)
@@ -72,7 +73,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
     try {
       if (action === 'new') {
         if (request && request.phase !== 'ready') return
-        const value: Creation = { input: { goalId: mintObjectId(), title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: crypto.randomUUID() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存待定义目标；创建不会开始执行。' }
+        const value: Creation = { input: { goalId: mintObjectId(), title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: randomClientRequestId() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存待定义目标；创建不会开始执行。' }
         setRequest(value); owner.retainGoalIntent(intent(value)); await save(value)
       } else if (request && action === 'save-same' && request.phase === 'not-saved') {
         const value = { ...request, phase: 'saving' as const, issue: '正在明确保存原 ID 的同一个目标。' }

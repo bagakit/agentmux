@@ -3,6 +3,7 @@ import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
 import type { PromptAttempt, ResponseAttempt } from '../conversation/local-drafts'
 import { parseMobileFileUpload, type MobileFileUpload } from '../conversation/attachments'
+import { parsePresentationRoute, type MobilePresentationRoute } from './presentation-route'
 
 export const DEVICE_WORKFACE_KEY = 'agentmux-mobile-workface-v1'
 export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
@@ -40,7 +41,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  host: { origin: string; hostId: string } | null; conversation: DraftRecord; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[] }
+  host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -88,6 +89,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (item && typeof item === 'object' && Object.hasOwn(item, 'logId')) keys.push('logId')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'inputRequested')) keys.push('inputRequested')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'originalRuntimeId')) keys.push('originalRuntimeId')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'originalHostId')) keys.push('originalHostId')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'explicit')) keys.push('explicit')
     const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
@@ -96,6 +98,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (attempt.inputRequested !== undefined && typeof attempt.inputRequested !== 'boolean') throw invalid()
     if (attempt.explicit !== undefined && typeof attempt.explicit !== 'boolean') throw invalid()
     if (attempt.originalRuntimeId !== undefined && !(attempt.originalRuntimeId === null || id(attempt.originalRuntimeId))) throw invalid()
+    if (attempt.originalHostId !== undefined && !(attempt.originalHostId === null || id(attempt.originalHostId))) throw invalid()
     if (attempt.request !== undefined) {
       const r = record(attempt.request, ['condition', 'execution', 'explicit', 'runtimeId'])
       const c = record(r.condition, ['expectedRun', 'afterSubmissionId'])
@@ -115,6 +118,7 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalWork')) keys.push('goalWork')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalIntents')) keys.push('goalIntents')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'fileUploads')) keys.push('fileUploads')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'presentation')) keys.push('presentation')
   const v = record(value, keys)
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
     || !(v.hostUrl === '' || origin(v.hostUrl))
@@ -124,6 +128,7 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
     if (!origin(host.origin) || !id(host.hostId)) throw invalid()
   }
   parseDraftRecord(v.conversation)
+  if (Object.hasOwn(v, 'presentation')) parsePresentationRoute(v.presentation)
   if (v.fileUploads !== undefined) {
     if (!Array.isArray(v.fileUploads) || v.fileUploads.length > MAX_ENTRIES) throw invalid()
     const found = new Set<string>()
@@ -229,6 +234,9 @@ export class DeviceWorkfaceStore {
   }
   updateNavigation(navigation: Navigation): void {
     this.refresh(); this.update({ ...this.value, ...navigation })
+  }
+  updatePresentation(navigation: Navigation, presentation: MobilePresentationRoute): void {
+    this.refresh(); this.update({ ...this.value, ...navigation, presentation: parsePresentationRoute(presentation) })
   }
   updateConversation(conversation: DraftRecord): void {
     this.refresh(); this.update({ ...this.value, conversation: parseDraftRecord(conversation) })

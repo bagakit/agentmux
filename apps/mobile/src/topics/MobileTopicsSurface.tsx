@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -8,9 +8,9 @@ import './topics.css'
 
 export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topicId?: string | null; onOpenTopic(topic: KnowledgeTopic): void | Promise<void>;
   renderWorkface(topic: KnowledgeTopic, visible: boolean): ReactNode; openSource(source: TopicKnowledgeSource): void | Promise<void>;
-  openHttpLink?: OpenHttpLink }
+  openHttpLink?: OpenHttpLink; onBackChange?(back: (() => void) | null): void }
 /** Content discovery only; the host callback owns exact workface navigation and lifecycle. */
-export function MobileTopicsSurface({ rpc, onOpenTopic, renderWorkface, openSource, openHttpLink, visible = true, topicId }: MobileTopicsSurfaceProps) {
+export function MobileTopicsSurface({ rpc, onOpenTopic, renderWorkface, openSource, openHttpLink, onBackChange, visible = true, topicId }: MobileTopicsSurfaceProps) {
   const [categories, setCategories] = useState<TopicCategory[]>([]), [category, setCategory] = useState<TopicCategory | null>(null)
   const [topics, setTopics] = useState<KnowledgeTopic[]>([]), [topic, setTopic] = useState<KnowledgeTopic | null>(null)
   const [visited, setVisited] = useState<KnowledgeTopic[]>([])
@@ -18,6 +18,22 @@ export function MobileTopicsSurface({ rpc, onOpenTopic, renderWorkface, openSour
   const [mode, setMode] = useState<'topics' | 'knowledge'>('topics'), [query, setQuery] = useState('')
   const [categoryIssue, setCategoryIssue] = useState(''), [topicsIssue, setTopicsIssue] = useState(''), [openIssue, setOpenIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
   const navigationIntent = useRef(0)
+  const [knowledgeBack, setKnowledgeBack] = useState<{ scopeId: string; back: () => void } | null>(null)
+  const reportKnowledgeBack = useCallback((scopeId: string, back: (() => void) | null) => {
+    setKnowledgeBack(previous => back ? previous?.scopeId === scopeId && previous.back === back ? previous : { scopeId, back }
+      : previous?.scopeId === scopeId ? null : previous)
+  }, [])
+  const backToDiscussion = useCallback(() => { navigationIntent.current += 1; setMode('topics') }, [])
+  const backToCategory = useCallback(() => { navigationIntent.current += 1; setInTopic(false); setMode('topics') }, [])
+  const backToAllCategories = useCallback(() => { navigationIntent.current += 1; setCategory(null); setQuery('') }, [])
+  const activeScope = inTopic ? topic?.topicId : 'all-topics'
+  const activeBack = mode === 'knowledge' ? knowledgeBack && knowledgeBack.scopeId === activeScope ? knowledgeBack.back : backToDiscussion
+    : inTopic ? backToCategory : category ? backToAllCategories : null
+  useEffect(() => {
+    if (!visible || !onBackChange) return
+    onBackChange(activeBack)
+    return () => onBackChange(null)
+  }, [visible, onBackChange, activeBack])
   const [deepLinkIssue, setDeepLinkIssue] = useState(''), [deepLinkRetry, setDeepLinkRetry] = useState(0)
   useEffect(() => {
     if (!visible || topicId === undefined) return
@@ -60,8 +76,8 @@ export function MobileTopicsSurface({ rpc, onOpenTopic, renderWorkface, openSour
   }
   return <section className="mobile-topics" aria-label="Topics" hidden={!visible}>
     <header className="mobile-topics-actions">
-      {inTopic ? <button aria-label="返回分类目录" onClick={() => { navigationIntent.current += 1; setInTopic(false); setMode('topics') }}>返回</button>
-        : category && <button aria-label="返回所有分类" onClick={() => { navigationIntent.current += 1; setCategory(null); setQuery('') }}>返回</button>}
+      {inTopic ? <button aria-label="返回分类目录" onClick={backToCategory}>返回</button>
+        : category && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
       <h1>{inTopic ? topic?.title : category?.title ?? 'Topics'}</h1>
       <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={inTopic ? topic : null} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
     </header>
@@ -76,8 +92,17 @@ export function MobileTopicsSurface({ rpc, onOpenTopic, renderWorkface, openSour
           <button aria-current={topic?.topicId === value.topicId ? 'page' : undefined} onClick={() => open(value)}><strong>{value.title}</strong><small>{value.readError ?? value.summary}</small></button></li>)}</ul>
       {!loading && !(category ? topics.length : categories.length) && <p className="mobile-topics-empty">{(category ? topicsIssue : categoryIssue) ? '目录尚未确认，原工作面仍保留。' : category ? '此分类暂无已确认 Topic。' : '暂无已确认分类。'}</p>}
     </div>
-    <div hidden={mode !== 'knowledge' || inTopic}><MobileTopicKnowledge visible={visible && mode === 'knowledge' && !inTopic} rpc={rpc} title="All Topics" openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>
-    {visited.map(value => <div key={value.topicId} hidden={mode !== 'knowledge' || !inTopic || topic?.topicId !== value.topicId}><MobileTopicKnowledge visible={visible && inTopic && mode === 'knowledge' && topic?.topicId === value.topicId} rpc={rpc} topicId={value.topicId} title={value.title} openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}
+    <div hidden={mode !== 'knowledge' || inTopic}><ScopedKnowledge reportBack={reportKnowledgeBack} visible={visible && mode === 'knowledge' && !inTopic} rpc={rpc} title="All Topics" openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>
+    {visited.map(value => <div key={value.topicId} hidden={mode !== 'knowledge' || !inTopic || topic?.topicId !== value.topicId}><ScopedKnowledge reportBack={reportKnowledgeBack} visible={visible && inTopic && mode === 'knowledge' && topic?.topicId === value.topicId} rpc={rpc} topicId={value.topicId} title={value.title} openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}
     {topic && <div className="mobile-topic-workface" hidden={!inTopic || mode !== 'topics'}>{renderWorkface(topic, visible && inTopic && mode === 'topics')}</div>}
   </section>
+}
+
+/** Each retained reader reports only its own callback; hiding one cannot clear another scope. */
+function ScopedKnowledge({ reportBack, ...props }: Parameters<typeof MobileTopicKnowledge>[0] & {
+  reportBack(scopeId: string, back: (() => void) | null): void
+}) {
+  const scopeId = props.topicId ?? 'all-topics'
+  const onBackChange = useCallback((back: (() => void) | null) => reportBack(scopeId, back), [scopeId, reportBack])
+  return <MobileTopicKnowledge {...props} onBackChange={onBackChange} />
 }

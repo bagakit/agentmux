@@ -111,7 +111,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const available = Boolean(client && agentSessionId && reading.session && connection.state === 'connected' && !reading.disconnected)
   const setDraft = (value: string, key = draftKey) => { drafts.current.set(key, value); local.save(); redraw(value => value + 1) }
   const confirmPrompt = (key: string, original: PromptAttempt, message = 'Core 已确认输入。') => {
-    if (attempts.current.get(key) !== original) return
+    if (!mounted.current || attempts.current.get(key) !== original) return
     original.phase = 'confirmed'
     original.message = message
     // A receipt belongs to its captured operation, including after navigating elsewhere.
@@ -152,6 +152,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const owner = original.request?.runtimeId ? `runtime:${original.request.runtimeId}` : diagnosticOwner(originalClient)
     const log = await diagnostics.failed(seed, error, stage, owner)
     reportDiagnostics(originalClient)
+    if (!mounted.current) return
     // A refusal of this click cannot settle an older unknown logical message.
     original.phase = original.inputRequested === false ? 'rejected'
       : retry && original.phase !== 'rejected' ? 'unknown' : deliveryOutcome(error, 'prompt')
@@ -175,7 +176,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const originalClient = client, originalId = agentSessionId, originalKey = draftKey
     const original: PromptAttempt = { operationId: randomClientRequestId(), runId: reading.session?.run.runId ?? null,
       draft, phase: 'sending', message: '正在发送输入…', inputRequested: false,
-      originalRuntimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null, explicit }
+      originalRuntimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
+      originalHostId: reading.session?.hostId ?? null, explicit }
     let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
       hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(draft) })
     attempts.current.set(originalKey, original)
@@ -222,8 +224,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       // Only a locally known never-requested intent may obtain its first condition
       // after reconnect. Legacy missing facts and unknown dispatched input cannot.
       if (!original.request && original.inputRequested === false) {
-        if (originalSession.agentSessionId !== originalId || original.runId !== null && originalSession.run.runId !== original.runId) {
-          throw Object.assign(new Error('原消息的 Session 或 Run 已变化；本次未请求输入。'), { code: 'STALE_AGENT_SESSION' })
+        const changedRun = original.runId !== null && originalSession.run.runId !== original.runId
+        if (originalSession.agentSessionId !== originalId || original.originalHostId && originalSession.hostId !== original.originalHostId
+          || changedRun && (!originalRuntimeId || !original.originalHostId)) {
+          throw Object.assign(new Error('原消息的 Session 或执行 Host 无法核实；本次未请求输入。'), { code: 'STALE_AGENT_SESSION' })
         }
         if (original.explicit === undefined) throw Object.assign(new Error(
           '原消息最初的执行选择无法核实；本次未请求输入，原消息保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
@@ -410,11 +414,17 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {attempt && attempt.phase !== 'confirmed' ? <aside className="mobile-send-status" data-phase={attempt.phase} aria-live="polite">
           <div className="mobile-send-status__summary">
             <span>{attempt.phase === 'sending' ? '正在发送…' : attempt.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
-            {attempt.phase !== 'sending' ? <button type="button" onClick={() => { void retryOriginalPrompt() }}>重试原请求</button> : null}
-            {attempt.phase !== 'sending' ? <button type="button" onClick={() => { void reading.refresh() }}>刷新</button> : null}
-            {attempt.phase !== 'sending' && onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
-            {attempt.phase !== 'sending' ? <><p role="alert">{attempt.message}</p>{attempt.logId ? <DeliveryLogDetails log={diagnostics.get(attempt.logId)} logId={attempt.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}</> : null}
+            {attempt.phase !== 'sending' ? <div className="mobile-send-status__actions">
+              <button type="button" onClick={() => { void retryOriginalPrompt() }}>重试原请求</button>
+              <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
+            </div> : null}
           </div>
+          {attempt.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
+            <dl><dt>原操作</dt><dd>{attempt.operationId}</dd><dt>原 Run</dt><dd>{attempt.runId ?? '尚未确认'}</dd></dl>
+            <p role="alert">{attempt.message}</p>
+            {attempt.logId ? <DeliveryLogDetails log={diagnostics.get(attempt.logId)} logId={attempt.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
+            {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
+          </details> : null}
         </aside> : null}
       </div>
     </section>

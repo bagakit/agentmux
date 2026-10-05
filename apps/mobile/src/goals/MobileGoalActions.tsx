@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -23,7 +24,7 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   }, [client, expanded, visible, revision])
   const execute = async (action: 'assign' | 'start' | 'handoff' | 'delete') => {
     if (inFlight.current) return
-    const operationId = crypto.randomUUID()
+    const operationId = randomClientRequestId()
     const common = { goalId: goal.id, operationId }
     let request: Record<string, unknown> = common
     const report = (text: string) => setMessages(values => [...values, { operationId, text, action, request }])

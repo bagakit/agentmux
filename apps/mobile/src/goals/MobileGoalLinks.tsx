@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -13,7 +14,7 @@ export function MobileGoalLinks({ client, goal, updated }: {
   const link = async (kind: 'session' | 'project') => {
     if (inFlight.current) return
     if (!client?.forwardRpc) { setMessages(values => [...values, '关联未发送：目标公共端口暂不可用，原关系保留。']); return }
-    const operationId = crypto.randomUUID()
+    const operationId = randomClientRequestId()
     inFlight.current = true; setPending(true)
     try {
       const result = kind === 'session'

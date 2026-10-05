@@ -14,5 +14,6 @@ export default defineConfig(({ command }) => ({
   worker: { format: 'es' },
   server: { host: '127.0.0.1', port: 4321, strictPort: true },
   preview: { host: '127.0.0.1', port: 4321, strictPort: true },
-  build: { target: 'es2022', outDir: 'dist', emptyOutDir: true }
+  build: { target: 'es2022', outDir: 'dist', emptyOutDir: true,
+    assetsInlineLimit: filePath => /\.(woff2?|ttf|otf)$/iu.test(filePath) ? false : undefined }
 }))

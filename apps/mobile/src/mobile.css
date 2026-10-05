@@ -159,6 +159,25 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-home-settings input { accent-color: var(--green); width: 18px; height: 18px; }
 .mobile-menu-row { width: 100%; border-top: 0; border-left: 0; border-right: 0; color: var(--text); background: transparent; text-align: left; font: inherit; cursor: pointer; min-height: 48px; padding: 6px 0; gap: 10px; font-size: 13px; }
 .mobile-menu-row[aria-current='page'] { color: var(--green); background: var(--surface-1); border-radius: 8px; padding-inline: 8px; }
+.mobile-mote-profile { color: var(--text); font-size: 13px; }
+.mobile-mote-profile__defaults { display: grid; grid-template-columns: minmax(82px, 1fr) minmax(0, 1.8fr); gap: 14px 12px; margin: 18px 0; }
+.mobile-mote-profile__defaults dt { color: var(--text-3); line-height: 1.6; }
+.mobile-mote-profile__defaults dd { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.mobile-mote-profile__defaults small { display: block; margin-top: 3px; color: var(--text-3); font-size: 11px; }
+.mobile-mote-profile__sources { margin-top: 20px; }
+.mobile-mote-profile__sources h3 { font-size: 12px; font-weight: 550; color: var(--text-3); margin: 0 0 6px; }
+.mobile-mote-profile > details, .mobile-mote-source > details { color: var(--text-3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.mobile-mote-profile summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.mobile-mote-profile details dl { margin: 0 0 12px; }
+.mobile-mote-profile details dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 8px; padding: 3px 0; }
+.mobile-mote-profile details dd { margin: 0; }
+.mobile-sheet .mobile-mote-profile > p { font-size: 12px; line-height: 1.7; margin: 14px 0; }
+.mobile-mote-source > h3 { margin: 8px 0 12px; font-size: 15px; font-weight: 550; }
+.mobile-mote-source .md { font-size: 13px; line-height: 1.75; color: var(--text-2); overflow-wrap: anywhere; }
+.mobile-sheet .mobile-mote-source :is(.md p, .md-paragraph) { font-size: 13px; color: var(--text-2); margin: 10px 0; line-height: 1.75; }
+.mobile-mote-source .md :is(h1, h2, h3) { color: var(--text); font-size: 16px; line-height: 1.5; margin: 18px 0 10px; }
+.mobile-mote-source .md pre { max-width: 100%; overflow-x: auto; }
+.mobile-mote-source > details p { font-size: 11px; margin: 4px 0; }
 .is-refreshing { animation: mobile-spatial-spin 1s linear infinite; }
 @keyframes mobile-spatial-spin {
 to { transform: rotate(360deg); } }

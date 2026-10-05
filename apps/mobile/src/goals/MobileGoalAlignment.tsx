@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcParams } from '@agentmux/core'
@@ -51,7 +52,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
     if (flights.current.has(method) || method !== 'goal.discuss' && (needsRead || humanPending || flights.current.has('read'))) return
     if (!client?.forwardRpc) { setIssue('请求未发送：原目标公共端口暂不可用，原目标与会话保留。'); return }
     start(method)
-    const input = { ...params, operationId: crypto.randomUUID() }
+    const input = { ...params, operationId: randomClientRequestId() }
     const present = beginPresentation()
     let retainedIntent: GoalIntent | undefined
     try {

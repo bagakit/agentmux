@@ -11,6 +11,7 @@ export type PromptAttempt = {
   /** Missing means historical/unknown, never permission to construct another input. */
   inputRequested?: boolean
   originalRuntimeId?: string | null
+  originalHostId?: string | null
   explicit?: boolean
   logId?: string
 }
@@ -61,6 +62,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.request ? { request: structuredClone(intent.request) } : {}), ...(intent.logId ? { logId: intent.logId } : {}),
           ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
+          ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),
           ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {})
         }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase }]) }
       owner.updateConversation(record)
