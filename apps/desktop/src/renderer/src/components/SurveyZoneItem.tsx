@@ -1,10 +1,11 @@
+import { Bot, NotebookPen } from 'lucide-react'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { currentDisplayNameRevision } from '../store'
 
-/** A navigation row references the original Zone; actions belong to the selected Item menu. */
-export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, onRename, onEdit, onSelect }: {
+/** Both navigation and shortcuts address this row’s original Zone. */
+export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, onRename, onEdit, onSelect, onNewNote, onNewAgent }: {
   zone: AgentMuxZoneFact
   title: string
   glyph: ReactNode
@@ -13,6 +14,8 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   editing?: boolean
   onRename?: (name: string, expectedNameRevision: number) => Promise<boolean>
   onEdit?: (editing: boolean) => void
+  onNewNote?(zoneId: string): void
+  onNewAgent?(zoneId: string): void
   onSelect(zoneId: string): void
 }) {
   const [draft, setDraft] = useState(title)
@@ -31,5 +34,9 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
       <strong>{title}</strong>
       <span className="survey-item-meta"><span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span></span>
     </button>}
+    {!editing ? <div className="survey-item-shortcuts" aria-label={`Create from ${title}`}>
+      {onNewNote ? <button type="button" aria-label={`New note in Recall from ${title}`} title="New note in Recall" onClick={() => onNewNote(zone.zoneId)}><NotebookPen size={14} /></button> : null}
+      {onNewAgent ? <button type="button" aria-label={`New agent in ${title}`} title="New agent" onClick={() => onNewAgent(zone.zoneId)}><Bot size={14} /></button> : null}
+    </div> : null}
   </div>
 }

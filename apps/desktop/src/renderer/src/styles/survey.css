@@ -227,3 +227,31 @@
 .recall-start .survey-start-heading { display: grid; justify-items: center; gap: 12px; }
 .recall-start .survey-start-heading > svg { color: var(--text-muted); }
 .global-recall-surface .survey-sidebar-actions { grid-template-columns: 1fr; }
+
+/* Survey keeps the original items selectable in its compact rail. Recall owns its own layout. */
+.global-survey-surface .survey-navigation { transition: width 180ms ease; overflow: hidden; }
+.global-survey-surface .survey-navigation.survey-tabs--resizing { transition: none; }
+.global-survey-surface .survey-tabs { width: 100%; padding-inline: var(--sp-2); box-sizing: border-box; }
+.global-survey-surface .survey-sidebar-actions { flex: none; margin: 0 var(--sp-2); }
+.global-survey-surface .survey-new-page { min-height: 32px; justify-content: flex-start; }
+.global-survey-surface .survey-item-actions { margin-top: 0; }
+.global-survey-surface .survey-item-shortcuts { position: absolute; right: 3px; top: 2px; display: flex; align-items: center; gap: 2px; opacity: 0; pointer-events: none; background: var(--surface-2); border-radius: var(--radius-sm); }
+.global-survey-surface .survey-item-shortcuts button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
+.global-survey-surface .survey-item-shortcuts button:hover { color: var(--text); background: var(--wash-2); }
+.global-survey-surface .survey-item-row:is(:hover, :focus-within) .survey-item-shortcuts { opacity: 1; pointer-events: auto; }
+.global-survey-surface .survey-item-row:is(:hover, :focus-within) .survey-item { padding-right: 62px; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] { min-width: 0; max-width: none; align-items: stretch; padding-inline: 0; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-tabs { padding-inline: 4px; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-item { justify-content: center; padding: 6px; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-item strong,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-item-meta,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-new-page > span { display: none; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-sidebar-actions { margin-inline: 4px; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-new-page { justify-content: center; padding-inline: 0; }
+/* Expand the rail for its per-item creation shortcuts; keyboard selection remains available while compact. */
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-item-shortcuts { display: none; }
+.survey-start-brand { display: grid; justify-items: center; gap: var(--sp-3); max-width: 520px; text-align: center; }
+.survey-start-brand h1 { margin: 0; color: var(--text); font-size: var(--fs-display); font-weight: 550; letter-spacing: -.025em; }
+.survey-start-brand p { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; }
+.survey-start-brand .brand-icon { flex: none; border-radius: 10px; }
+@media (prefers-reduced-motion: reduce) { .global-survey-surface .survey-navigation { transition: none; } }
