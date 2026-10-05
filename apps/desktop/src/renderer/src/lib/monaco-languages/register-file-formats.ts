@@ -9,15 +9,16 @@ export class DelimitedState {
   equals(other: Monaco.languages.IState): boolean { return other instanceof DelimitedState && other.delimiter === this.delimiter && other.column === this.column && other.quoted === this.quoted }
 }
 
-function guessDelimiter(line: string): string {
+function guessDelimiter(line: string, quoted: boolean): string | null {
   const counts = new Map([',', ';', '\t', '|'].map(value => [value, 0]))
-  let quoted = false
   for (let index = 0; index < line.length; index++) {
     const char = line[index]!
     if (char === '"') { if (quoted && line[index + 1] === '"') index++; else quoted = !quoted }
     else if (!quoted && counts.has(char)) counts.set(char, counts.get(char)! + 1)
   }
-  return [...counts].sort((left, right) => right[1] - left[1])[0]![0]
+  const [delimiter, count] = [...counts].sort((left, right) => right[1] - left[1])[0]!
+  // Blank or single-column lines provide no evidence for locking an automatic dialect.
+  return count > 0 ? delimiter : null
 }
 
 /** Quoted multiline fields keep their column; escaped quotes do not create a new field. */
@@ -25,7 +26,7 @@ export function delimitedTokens(delimiter: string | null): Monaco.languages.Toke
   return {
     getInitialState: () => new DelimitedState(delimiter),
     tokenize(line, input) {
-      const state = input as DelimitedState, separator = state.delimiter ?? guessDelimiter(line)
+      const state = input as DelimitedState, separator = state.delimiter ?? guessDelimiter(line, state.quoted)
       let column = state.column, quoted = state.quoted, fieldStart = !quoted
       const tokens: Monaco.languages.IToken[] = [{ startIndex: 0, scopes: columns[column % columns.length]! }]
       for (let index = 0; index < line.length; index++) {
