@@ -200,7 +200,7 @@ export async function saveMoteBehaviorPreferences(scope: MoteWorkfaceScope, pref
 
 export async function saveMoteFile(scope: MoteWorkfaceScope, path: string, saved: FileDocument, next: string,
   open: (path: string) => Promise<unknown>, stillCurrent: () => boolean,
-  exact: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>): Promise<FileDocument> {
+  exact: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>, onWrite?: () => void): Promise<FileDocument> {
   const key = documentKey(scope.workspace.id, path), before = useAppStore.getState()
   if (before.dirtyDocuments[key] || before.documentIssues[key]) throw new Error('The original Editor has an unsaved or unconfirmed draft. It is kept; review that file before saving settings.')
   const selected = await stageMoteFileEdit(scope, path, document => {
@@ -208,6 +208,7 @@ export async function saveMoteFile(scope: MoteWorkfaceScope, path: string, saved
       throw new Error('The original Editor revision changed. Your form and original draft are kept; reread the file.')
     return next
   }, open, stillCurrent, exact)
+  onWrite?.()
   await useAppStore.getState().saveDocument(selected.tabId, selected.regionId)
   const state = useAppStore.getState(), document = state.documents[key]
   const region = state.tabs[selected.tabId]?.regions[selected.regionId]

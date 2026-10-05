@@ -1,3 +1,4 @@
+import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickDrafts, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError, type MoteQuickDraft, type MoteQuickDraftCommit } from './mote-quick-drafts'
 import { parseQuestionReplyAttempt } from '@agentmux/client-ui/conversation-question-reply'
 import type { MobileQuestionReplyAttempt } from '../conversation/question-replies'
 import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
@@ -61,7 +62,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
 }
 export type DeviceWorkface = Navigation & { version: 1;
   recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
-  moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[] }
+  moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[]; moteQuickDrafts?: MoteQuickDraft[]; moteQuickDraftConflicts?: MoteQuickDraft[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -168,6 +169,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'knowledgeDraftConflicts')) keys.push('knowledgeDraftConflicts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteFileDrafts')) keys.push('moteFileDrafts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteFileDraftConflicts')) keys.push('moteFileDraftConflicts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'moteQuickDrafts')) keys.push('moteQuickDrafts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'moteQuickDraftConflicts')) keys.push('moteQuickDraftConflicts')
   const v = record(value, keys)
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
@@ -184,6 +187,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (v.knowledgeDraftConflicts !== undefined) parseMobileKnowledgeDraftConflicts(v.knowledgeDraftConflicts)
   if (v.moteFileDrafts !== undefined) parseMoteFileDrafts(v.moteFileDrafts)
   if (v.moteFileDraftConflicts !== undefined) parseMoteFileDraftConflicts(v.moteFileDraftConflicts)
+  if (v.moteQuickDrafts !== undefined) parseMoteQuickDrafts(v.moteQuickDrafts)
+  if (v.moteQuickDraftConflicts !== undefined) parseMoteQuickDrafts(v.moteQuickDraftConflicts, true)
   if (Object.hasOwn(v, 'presentation')) parsePresentationRoute(v.presentation)
   if (v.fileUploads !== undefined) {
     if (!Array.isArray(v.fileUploads) || v.fileUploads.length > MAX_ENTRIES) throw invalid()
@@ -423,6 +428,27 @@ export class DeviceWorkfaceStore {
       const draft = committed.moteFileDrafts?.find(item => moteFileDraftKey(item.scope) === key) ?? null
       const applied = sameValue(draft, captured)
       const conflict = applied ? null : committed.moteFileDraftConflicts?.find(item => sameValue(item, captured)) ?? null
+      return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
+    })
+  }
+  /** One exact typed Quick draft; the original Desktop helper remains the configuration writer. */
+  editMoteQuickDraft(expected: MoteQuickDraft | null, next: MoteQuickDraft, recordId: string | null): Promise<MoteQuickDraftCommit> {
+    const captured = parseMoteQuickDraft(next), previous = expected === null ? null : parseMoteQuickDraft(expected)
+    const key = moteQuickDraftKey(captured.scope)
+    if (previous && moteQuickDraftKey(previous.scope) !== key) throw new MoteQuickDraftInvalidError('原配置、Mote 或 Host 不同；正文保留，本次保存未发送。')
+    return this.update(value => {
+      const drafts = value.moteQuickDrafts ?? [], current = drafts.find(item => moteQuickDraftKey(item.scope) === key) ?? null
+      let result: DeviceWorkface
+      if (!sameValue(current, previous) && !sameValue(current, captured)) {
+        const conflicts = value.moteQuickDraftConflicts ?? []
+        result = { ...value, moteQuickDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
+      } else result = { ...value, moteQuickDrafts: [...drafts.filter(item => moteQuickDraftKey(item.scope) !== key), captured] }
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MoteQuickDraftCapacityError('设备原工作面超过备份范围；本次设备更新未应用，原记录与当前正文保留。')
+      return result
+    }, recordId, committed => {
+      const draft = committed.moteQuickDrafts?.find(item => moteQuickDraftKey(item.scope) === key) ?? null
+      const applied = sameValue(draft, captured)
+      const conflict = applied ? null : committed.moteQuickDraftConflicts?.find(item => sameValue(item, captured)) ?? null
       return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
     })
   }

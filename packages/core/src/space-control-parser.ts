@@ -5,6 +5,8 @@ import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
+import { parseMoteDefaultConversation, parseMotePreferencesReadInput, parseMotePreferencesSaveInput,
+  parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
   AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact, AgentMuxMotePresentation, AgentMuxMoteConversationReference
@@ -105,6 +107,7 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
 }
 
 export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceControlRequest['operation'] {
+  if (value === 'space.mote.preferences.read' || value === 'space.mote.preferences.save') return true
   return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
     value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename' ||
     value === 'space.bind' || value === 'space.unbind' || value === 'open.file' ||
@@ -112,12 +115,17 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
-  if (operation === 'agent.view' || operation === 'space.view') {
+  if (operation === 'space.mote.preferences.read' || operation === 'space.mote.preferences.save') {
+    const { schemaVersion: _schema, requestId: _id, operation: _operation, ...input } = source
+    request = operation === 'space.mote.preferences.read'
+      ? { ...base, operation, ...parseMotePreferencesReadInput(input, code) }
+      : { ...base, operation, ...parseMotePreferencesSaveInput(input, code) }
+  } else if (operation === 'agent.view' || operation === 'space.view') {
     const target = operation === 'agent.view' ? 'agentSessionId' : 'regionId'
     fields(source, ['schemaVersion', 'requestId', 'operation', target, 'mode'], code)
     const mode = Object.hasOwn(source, 'mode') ? (operation === 'agent.view'
@@ -283,12 +291,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), spaceId: spaceControlId(item.spaceId, 'Space', code, true) }
   }, 'Bindings', code), item => JSON.stringify([item.zoneId, item.spaceId]), 'Bindings', code)
   const locations = unique(list(source.locations, value => address(value, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
-  const moteConversation = (value: unknown): AgentMuxMoteConversationReference => {
-    const item = fields(value, ['hostId', 'sessionId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
-    return { hostId: spaceControlId(item.hostId, 'Mote conversation Host', code), sessionId: spaceControlId(item.sessionId, 'Mote conversation Session', code),
-      displayWorkspaceId: spaceControlId(item.displayWorkspaceId, 'Mote display Workspace', code), groupId: spaceControlId(item.groupId, 'Mote Group', code),
-      tabId: spaceControlId(item.tabId, 'Mote Tab', code, true), regionId: spaceControlId(item.regionId, 'Mote Region', code, true) }
-  }
+  const moteConversation = (value: unknown): AgentMuxMoteConversationReference => parseMoteDefaultConversation(value, code)
   const motePresentation = Object.hasOwn(source, 'motePresentation') ? unique(list(source.motePresentation, value => {
     const item = fields(value, ['spaceId', 'content', 'quickMode', 'conversation', 'issue'], code)
     const spaceId = spaceControlId(item.spaceId, 'Mote Space', code, true)
@@ -490,7 +493,15 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
-  if (operation === 'agent.view' || operation === 'space.view' || operation === 'space.swap' || operation === 'open.file') {
+  if (operation === 'space.mote.preferences.read') {
+    result = { operation, ...parseMotePreferencesReadResult(source.result) }
+  } else if (operation === 'space.mote.preferences.save') {
+    const body = fields(source.result, ['kind', 'target', 'requestId', 'status', 'source', 'message'], code)
+    if (body.requestId !== requestId) fail('Mote preferences receipt Request ID is mismatched.', code)
+    const { requestId: _request, ...publicBody } = body
+    const { operationId: _id, ...parsed } = parseMotePreferencesSaveResult({ ...publicBody, operationId: requestId })
+    result = { operation, requestId, ...parsed }
+  } else if (operation === 'agent.view' || operation === 'space.view' || operation === 'space.swap' || operation === 'open.file') {
     result = workfaceReport(operation, source.result, code)
   } else if (operation === 'file.format') {
     const body = fields(source.result, ['regionId', 'status', 'message'], code)

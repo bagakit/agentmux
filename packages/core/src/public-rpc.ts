@@ -27,6 +27,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'message.pending.archive': 'message.pending.archive', 'message.pending.restore': 'message.pending.restore',
   'agent.open': 'agent.open', 'agent.rename': 'agent.rename', 'agent.view': 'agent.view',
   'agent.interrupt': 'interrupt', 'agent.resume': 'resume', 'agent.stop': 'stop',
+  'space.mote.preferences.read': 'space.mote.preferences.read', 'space.mote.preferences.save': 'space.mote.preferences.save',
   'space.ls': 'space.ls', 'space.inspect': 'space.inspect', 'space.rename': 'space.rename',
   'space.mv': 'space.mv', 'space.swap': 'space.swap', 'space.bind': 'space.bind',
   'space.unbind': 'space.unbind', 'space.focus': 'focus', 'space.promote': 'promote.region',
@@ -93,6 +94,7 @@ type OperationKeys<T> = T extends object ? {
 } : T
 type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: boolean }
+  : M extends 'space.mote.preferences.save' ? import('./mote-preferences.js').MotePreferencesSaveParams
   : M extends 'goal.ls' ? AgentMuxRpcGoalFilters
   : M extends 'goal.create' ? GoalKeys<Omit<BusinessParams<M>, 'decision'>> & {
       risk?: import('./control.js').AgentMuxDemandDecision['risk'];

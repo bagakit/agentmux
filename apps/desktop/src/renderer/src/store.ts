@@ -4435,6 +4435,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal, options) {
+    if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
+      return await (await import('./lib/mote-preferences-control')).executeMotePreferencesControl(request, signal)
+    }
     if (isToolkitRequest(request)) {
       throw Object.assign(new Error('Toolkit requests belong to the Main execution owner.'), { code: 'CONTROL_FAILED' })
     }

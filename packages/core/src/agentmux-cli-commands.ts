@@ -1,3 +1,4 @@
+import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams } from './mote-preferences.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
 import { randomUUID } from 'node:crypto'
@@ -303,6 +304,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.role.ls', '[--workspace PATH]', 'Read original role bindings in an explicit or verified execution scope.', { '--workspace': 'data' }, f => fields(f, { '--workspace': 'workspacePath' })),
   command('agent.role.register', '--role ROLE [--provider ID]', 'Register the verified caller in its original role directory.', { '--role': 'data', '--provider': 'data' }, f => ({ role: id(f, '--role'), ...fields(f, { '--provider': 'providerId' }) })),
   command('agent.role.resolve', '--role ROLE [--workspace PATH]', 'Resolve a role through its original owner; unavailable is not unassigned.', { '--role': 'data', '--workspace': 'data' }, f => ({ role: id(f, '--role'), ...fields(f, { '--workspace': 'workspacePath' }) })),
+  command('space.mote.preferences.read', '--input FILE|-', 'Read original Mote Quick preferences and exact eligible display locations without starting an Agent.', { '--input': 'data' }, async f => parseMotePreferencesReadInput(await readControlJsonInput(value(f, '--input', true)!, 'Mote preferences')) as unknown as Record<string, unknown>),
+  command('space.mote.preferences.save', '--input FILE|-', 'Save frozen Quick preferences through the original Files/Editor owner at the exact original revision and display location.', { '--input': 'data' }, async f => parseMotePreferencesSaveParams(await readControlJsonInput(value(f, '--input', true)!, 'Mote preference save')) as unknown as Record<string, unknown>, 'The complete input includes the original operationId, target, baseline, values and a discovered destination. Unconfirmed results retain the original request; reading a file is not its save acknowledgement.'),
   command('space.ls', '[--space ID] [--zone ID]', 'List actual Space/Zone/Tab/Region bindings globally.', { '--space': 'data', '--zone': 'data' }, f => ({ target: selector(f) })),
   command('space.inspect', '<selector>|--operation-id ID', 'Read exact presentation facts or retained spatial operation facts.', { ...SELECTOR, ...OP }, f => {
     const selected = selector(f)

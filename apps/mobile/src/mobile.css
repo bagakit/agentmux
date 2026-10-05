@@ -254,3 +254,10 @@ to { transform: rotate(360deg); } }
 .mobile-drawer .mobile-sheet-title h2 { margin: 8px 0; font-size: 17px; }
 .mobile-navigation { justify-content: space-around; background: #111419; padding-top: 3px; padding-bottom: max(4px, env(safe-area-inset-bottom)); grid-row: 5; padding-block: 2px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 3px max(6px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)); border-top: 1px solid var(--line-soft); }
 .mobile-navigation > button { padding-block: 2px; padding: 2px 0; min-height: 44px; gap: 2px; }
+
+.mobile-mote-quick-editor { min-width: 0; max-width: 100%; display: grid; gap: 12px; }
+.mobile-mote-quick-editor form { min-width: 0; display: grid; gap: 16px; }
+.mobile-mote-quick-editor label { min-width: 0; display: grid; gap: 6px; }
+.mobile-mote-quick-editor select { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; font-size: 16px; color: inherit; background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.mobile-mote-quick-editor details, .mobile-mote-quick-editor article { min-width: 0; overflow-wrap: anywhere; }
+.mobile-mote-quick-editor pre { max-width: 100%; overflow: auto; white-space: pre; }
