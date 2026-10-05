@@ -45,43 +45,31 @@ it('zero states are icon-only while positive badges retain exact counts, stable 
   await mount()
   expect(groups(), container.innerHTML).not.toBeNull()
   expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working'])
-  for (const state of ['attention', 'results', 'idle', 'disconnected']) {
+  for (const state of ['attention', 'results', 'idle']) {
     const group = titleState(state), header = group
     expect(section(state)).toBeNull(); expect(header.querySelector('svg')).not.toBeNull()
     expect(header.querySelector('.focus-context-group__count')).toBeNull()
     expect(header.title).toContain('0'); expect(header.getAttribute('aria-label')).toContain('0')
-    expect(group.querySelectorAll('button')).toHaveLength(state === 'disconnected' ? 1 : 0)
+    expect(group.querySelectorAll('button')).toHaveLength(0)
   }
-  const working = section('working'), header = working.querySelector<HTMLElement>('header')!
+  const working = section('working'), header = titleState('working')
   expect(header.querySelector('.focus-context-group__count')?.textContent).toBe('1')
   expect(header.title).toBe('Working · 1')
   const original = working.querySelector('[data-session-id="working"]')
   expect(original).not.toBeNull()
   await act(async () => useAppStore.setState({ sessions: [agent('working'), ...Array.from({ length: 100 }, (_, i) => agent('work-' + i))] }))
-  expect(header.querySelector('.focus-context-group__count')?.textContent).toBe('99+')
-  expect(header.title).toBe('Working · 101'); expect(header.getAttribute('aria-label')).toBe('Working · 101')
+  const expandedHeader=working.querySelector<HTMLElement>('header')!
+  expect(expandedHeader.querySelector('.focus-context-group__count')?.textContent).toBe('99+')
+  expect(expandedHeader.title).toBe('Working · 101'); expect(expandedHeader.getAttribute('aria-label')).toBe('Working · 101')
   expect(working.querySelector('[data-session-id="working"]')).toBe(original)
   expect(working.querySelectorAll('.focus-context')).toHaveLength(101)
   expect(useAppStore.getState().agentComposerDrafts.working).toBe('Original unsent draft')
 })
 
-it('disconnected badges stay bounded without losing exact hover facts, directory navigation or Return', async () => {
-  await act(async () => useAppStore.setState({ sessions: [agent('working'), ...Array.from({ length: 105 }, (_, i) => agent('offline-' + i, true))] }))
-  await mount()
-  const state = useAppStore.getState(), group = titleState('disconnected'), entry = group.querySelector<HTMLButtonElement>('.focus-disconnected-entry')!
-  expect(entry).not.toBeNull(); expect(entry.disabled).toBe(false)
-  expect(entry.querySelector('.focus-context-group__count')?.textContent).toBe('99+')
-  expect(entry.title).toBe('Disconnected · 105'); expect(entry.getAttribute('aria-label')).toBe('View disconnected contexts · 105')
-  expect(group.querySelectorAll('.focus-context')).toHaveLength(0)
-  await act(async () => entry.focus())
-  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Disconnected · 105')
-  await act(async () => entry.click())
-  const directory = container.querySelector<HTMLElement>('[aria-label="Disconnected projects"]')!
-  expect(directory).not.toBeNull(); expect(directory.querySelectorAll('.focus-context')).toHaveLength(105)
-  expect(group.querySelectorAll('.focus-context')).toHaveLength(0)
-  await act(async () => directory.querySelector<HTMLButtonElement>('.focus-disconnected-projects__return')!.click())
-  expect(document.activeElement).toBe(entry)
-  expect(useAppStore.getState().sessions).toBe(state.sessions)
-  expect(useAppStore.getState().agentFocus).toBe(state.agentFocus)
-  expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+it('Recovery badges stay bounded while every interrupted task remains in its original project',async()=>{
+  await act(async()=>useAppStore.setState({sessions:[agent('working'),...Array.from({length:105},(_,i)=>agent('offline-'+i,true))]}));await mount()
+  const state=useAppStore.getState(),group=section('idle'),header=group.querySelector<HTMLElement>('header')!
+  expect(header.querySelector('.focus-context-group__count')?.textContent).toBe('99+');expect(header.getAttribute('aria-label')).toContain('Recovery 105')
+  expect(group.querySelectorAll('.focus-context')).toHaveLength(105);expect(group.querySelector('[data-session-id="offline-0"]')?.textContent).toContain('Run interrupted')
+  expect(container.querySelector('[aria-label="Disconnected projects"]')).toBeNull();expect(useAppStore.getState().sessions).toBe(state.sessions);expect(useAppStore.getState().agentFocus).toBe(state.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
 })

@@ -72,7 +72,8 @@ beforeEach(async () => {
   const examples = snapshot.sessions.map(item => ({ ...item, workspacePath: resolve(item.workspacePath) })), workspace = config.workspaces[0]!
   workspaceId = workspace.id
   const base = examples.find((session): session is Extract<SessionSnapshot,{kind:'agent'}> => session.kind === 'agent'); expect(base).toBeDefined()
-  const agent = { ...base!, id: 'agent', hostId: 'local', workspacePath: workspace.path, label: 'Inspect the parser', status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
+  const {semanticStatus: _previousSemanticStatus, ...originalAgent}=base!
+  const agent = { ...originalAgent, id: 'agent', hostId: 'local', workspacePath: workspace.path, label: 'Inspect the parser', status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
   const agents = [agent, ...(['attention', 'results', 'idle', 'disconnected', 'healthy-lost'] as const).map(id => ({ ...agent, id, label: id, processState: id === 'disconnected' ? 'interrupted' as const : 'running' as const, status: { state: id === 'attention' ? 'error' as const : id === 'results' ? 'done' as const : id === 'disconnected' || id === 'healthy-lost' ? 'disconnected' as const : 'running' as const, source: 'native-hook' as const, observedAt: 1 }, control: { ...agent.control, run: {runId:id+'-run'} } }))]
   const tabs = { original: pair('original', 'first', 'second'), neighbour: pair('neighbour', 'third', 'fourth'), agent: createWorkbenchTab('agent', { kind: 'agent', phase: 'attached', regionId: 'agent-region', sessionId: 'agent', workspaceId }) }
   for (const [id, tab] of Object.entries(tabs)) tabs[id as keyof typeof tabs] = new Proxy(tab, { get(target, key, receiver) {
@@ -89,12 +90,6 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 const agentIds = ['agent', 'attention', 'disconnected', 'healthy-lost', 'idle', 'results']
-async function expandDisconnected() {
-  const entry = container.querySelector<HTMLButtonElement>('[data-bucket="disconnected"] .focus-disconnected-entry')
-  expect(entry).not.toBeNull()
-  await act(async () => entry!.click())
-  expect(container.querySelector('[aria-label="Disconnected projects"] .focus-recovery-toggle')?.getAttribute('aria-expanded')).toBe('true')
-}
 // Agent-only membership is the left lane collection, not the separately retained right work surface.
 function renderedIds() { return [...container.querySelectorAll<HTMLElement>('.global-focus-main [data-session-id]')].map(node=>node.dataset.sessionId).sort() }
 function focusSurface() {
@@ -105,14 +100,14 @@ function focusSurface() {
 
 it('mounted lanes exclude ordinary running, failed and disconnected Terminals and retain every confirmed Agent state',async()=>{
   useAppStore.setState(state=>({sessions:state.sessions.map(session=>session.id==='second'?{...session,processState:'exited',status:{state:'error',source:'run-process',observedAt:1,exitCode:1}}:session.id==='third'?{...session,processState:'interrupted',status:{state:'disconnected',source:'run-process',observedAt:1}}:session)}))
-  await act(async()=>root.render(focusSurface()));await expandDisconnected()
+  await act(async()=>root.render(focusSurface()))
   expect(renderedIds()).toEqual(agentIds)
   expect(row('agent').dataset.bucket).toBe('working');expect(row('attention').dataset.bucket).toBe('attention');expect(row('results').dataset.bucket).toBe('results');expect(row('idle').dataset.bucket).toBe('idle')
   expect(row('healthy-lost').closest('[data-bucket="idle"]')).not.toBeNull()
-  expect(row('disconnected').closest('[aria-label="Disconnected projects"]')).not.toBeNull()
+  expect(row('disconnected').closest('[data-bucket="idle"]')).not.toBeNull()
   expect(row('disconnected').dataset.state).toBe('disconnected')
   const options=(await focusFilterOptions(container,'state')).map(option=>option.text)
-  expect(options).toEqual(['All states','Attention · 1','Working · 1','Results · 1','Idle / Recovery · 2','Disconnected · 1'])
+  expect(options).toEqual(['All states','Attention · 1','Working · 1','Results · 1','Idle / Recovery · 3'])
   const axes=[...container.querySelectorAll<HTMLButtonElement>('.focus-project-lanes__axis')].filter(axis => !axis.closest('.focus-disconnected-projects'));expect(axes).toHaveLength(1);expect(axes[0]!.title).toContain('· 5 live ·')
 })
 it('actual hover totals and permanent counts consume the same Agent-only set',async()=>{
@@ -120,8 +115,8 @@ it('actual hover totals and permanent counts consume the same Agent-only set',as
   expect(container.querySelector('[data-focus-count="working"]')?.textContent).toBe('1');expect(container.querySelector('[data-focus-count="attention"]')?.textContent).toBe('1')
   expect(container.querySelector('.focus-navigation-preview__header')?.textContent).toBe('Focus6 contexts')
   expect([...container.querySelectorAll<HTMLElement>('[data-preview-session]')].map(node=>node.dataset.previewSession)).toEqual(['attention','agent','results'])
-  expect([...container.querySelectorAll('[data-preview-count] b')].map(node=>node.textContent)).toEqual(['1','1','1','1'])
-  expect(container.querySelector('.focus-navigation-preview__recovery')?.textContent).toContain('2 disconnected')
+  expect([...container.querySelectorAll('[data-preview-count] b')].map(node=>node.textContent)).toEqual(['1','1','1','3'])
+  expect(container.querySelector('.focus-navigation-preview__recovery')).toBeNull()
 })
 it('exclusion keeps the actual selected Terminal workspace, owner, Region, Run, draft, visits and layout',async()=>{
   await act(async()=>useAppStore.getState().focusRegion(workspaceId,'original','original-left','keyboard'))
@@ -149,7 +144,7 @@ it('original Terminal rename, reorder and return remain precise without adding c
   state.sessions.forEach((session,index)=>expect(session.control.run).toBe(runs[index]));expect(renderedIds()).not.toContain('first')
 })
 it('irrelevant Terminal bytes, heartbeats, drafts and rename never derive owners or redraw Agent cards',async()=>{
-  await act(async()=>root.render(focusSurface()));expect(Object.keys(work.commits).sort()).toEqual(['agent','attention','healthy-lost','idle','results'])
+  await act(async()=>root.render(focusSurface()));expect(Object.keys(work.commits).sort()).toEqual(['agent','attention','disconnected','healthy-lost','idle','results'])
   resetWork()
   await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.map(session=>({...session,latestOutputBytes:session.latestOutputBytes+10,status:{...session.status,observedAt:2}}))})))
   await act(async()=>useAppStore.getState().setAgentComposerDraft('first','Another shell draft'))

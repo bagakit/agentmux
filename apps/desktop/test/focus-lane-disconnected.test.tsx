@@ -40,35 +40,9 @@ beforeEach(async () => {
 })
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()})
 const mount=()=>act(async()=>root.render(createElement(GlobalFocusSurface)))
-function lane(){const node=container.querySelector<HTMLElement>('.focus-project-board > .focus-project-lanes [data-project-id="repo"]');expect(node).not.toBeNull();return node!}
-function offlineColumn(){const node=lane().querySelector<HTMLElement>('section[data-bucket="disconnected"]');expect(node).not.toBeNull();return node!}
+function lane(){const node=container.querySelector<HTMLElement>('[data-project-id="repo"]');expect(node).not.toBeNull();return node!}
 function row(id:string){const node=container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`);expect(node).not.toBeNull();return node!}
-async function expand(){const node=offlineColumn().querySelector<HTMLButtonElement>('.focus-recovery-toggle');expect(node).not.toBeNull();await act(async()=>node!.click())}
-async function filter(value:string){await chooseFocusFilter(container,'state',value)}
-async function search(value:string){const node=container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]');expect(node).not.toBeNull();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(node,value);node!.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function seedTopic(){await act(async()=>useAppStore.setState({sessions:[agent('topic-agent','working','running',ordinary.directoryPath)],agentNames:{'topic-agent':'Scrolling'},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:scratchTopicsScope(scratch),revision:0,topics:[ordinary,mote],error:null,reading:false}}}));await mount()}
-it('keeps five stable columns and moves mixed offline out of Idle / Recovery',async()=>{
- await mount();expect([...lane().querySelectorAll('section[data-bucket]')].map(node=>(node as HTMLElement).dataset.bucket)).toEqual(['attention','working','results','idle','disconnected'])
- expect(lane().querySelector('section[data-bucket="idle"]')!.getAttribute('data-empty')).toBe('true')
- expect(offlineColumn().querySelector('.focus-context-group__header')!.getAttribute('aria-label')).toBe('Disconnected · 1')
- expect(offlineColumn().querySelectorAll('.focus-context')).toHaveLength(0);await expand()
- expect(lane().querySelector('section[data-bucket="idle"]')!.querySelectorAll('[data-session-id="offline"]')).toHaveLength(0)
- expect(row('offline').closest('section[data-bucket="disconnected"]')).toBe(offlineColumn());expect(row('offline').classList.contains('focus-context--compact')).toBe(true)
-})
-it('uses the same presentation classification for state filtering and counts',async()=>{
- await mount();const options=await focusFilterOptions(container,'state')
- expect(options.map(option=>option.text)).toEqual(['All states','Attention · 0','Working · 1','Results · 0','Idle / Recovery · 0','Disconnected · 1'])
- await filter('idle');expect(container.querySelectorAll('.focus-context')).toHaveLength(0)
- await filter('disconnected');expect(lane().querySelector('section[data-bucket="working"]')!.getAttribute('data-empty')).toBe('true');await expand();expect(row('offline').closest('[aria-label="Disconnected projects"]')).toBeNull()
-})
-it('search and selected offline remain compact, reachable and preserve original controls/draft',async()=>{
- await mount();const sessions=useAppStore.getState().sessions,controls=sessions.map(item=>item.control),draft=useAppStore.getState().agentComposerDrafts
- await search('Earlier work');expect(row('offline').classList.contains('focus-context--compact')).toBe(true)
- const disclosure=offlineColumn().querySelector<HTMLButtonElement>('.focus-recovery-toggle')!;expect(disclosure.getAttribute('aria-expanded')).toBe('true');expect(disclosure.disabled).toBe(true);expect(disclosure.textContent).toBe('Search matches1')
- await act(async()=>row('offline').click());expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
- await search('');expect(row('offline').getAttribute('aria-pressed')).toBe('true');expect(row('offline').title).toContain(_hygiene_fixturePath("repo"));expect(disclosure.getAttribute('aria-expanded')).toBe('false');expect(disclosure.disabled).toBe(false)
- expect(useAppStore.getState().sessions).toBe(sessions);expect(useAppStore.getState().sessions.map(item=>item.control)).toEqual(controls);expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
-})
 it('does not compact a running Run when only its observation connection was lost',async()=>{
  await act(async()=>useAppStore.setState({sessions:[agent('still-live','disconnected')],agentNames:{'still-live':'Healthy running context'}}));await mount()
  expect(container.querySelectorAll('[aria-label="Disconnected projects"]')).toHaveLength(0)
@@ -81,17 +55,7 @@ it('retains a concrete pending request in Attention even after process interrupt
  expect(row('offline-request').closest('section[data-bucket="attention"]')).not.toBeNull();expect(row('offline-request').textContent).toContain('Allow editing src/scroll.ts?')
  expect(container.querySelector('[aria-label="Disconnected projects"]')).toBeNull();expect(row('offline-request').classList.contains('focus-context--compact')).toBe(false)
 })
-it('keeps idle, starting, unknown, stopped and genuine error separate from Disconnected',async()=>{
- await act(async()=>useAppStore.setState({sessions:[agent('idle','done'),agent('starting','starting'),agent('unknown','running'),agent('stopped','exited','exited'),agent('failed','error','exited')]}));await mount()
- expect([...container.querySelectorAll('.focus-context')].map(node=>[node.getAttribute('data-session-id'),node.closest('section[data-bucket]')!.getAttribute('data-bucket')])).toEqual([['failed','attention'],['starting','working'],['idle','idle'],['unknown','idle'],['stopped','idle']])
- expect(offlineColumn().getAttribute('data-empty')).toBe('true')
-})
-it('condenses only full-project confirmed offline rows without moving a filtered mixed project',async()=>{
- await act(async()=>useAppStore.setState(state=>({sessions:[...state.sessions,agent('old-one','disconnected','interrupted',_hygiene_fixturePath("old")),agent('old-two','disconnected','interrupted',_hygiene_fixturePath("old"))]})));await mount();await filter('disconnected')
- const drawer=container.querySelector('[aria-label="Disconnected projects"]');expect(drawer).not.toBeNull();const button=drawer!.querySelector<HTMLButtonElement>('button')!;expect(button.textContent).toBe('Disconnected1 project · 2 contexts')
- await act(async()=>button.click());expect([...drawer!.querySelectorAll('.focus-context')].map(node=>node.getAttribute('data-session-id'))).toEqual(['old-one','old-two'])
- expect([...drawer!.querySelectorAll('.focus-context--compact')].map(node=>node.getAttribute('data-session-id'))).toEqual(['old-one','old-two']);expect(lane()).not.toBeNull()
-})
+
 it('renders a confirmed Topic alone with notebook glyph and no parent Project probe',async()=>{
  await seedTopic();const heading=container.querySelector('.focus-project-lanes__axis')!;expect([...heading.querySelectorAll('strong')].map(node=>node.textContent)).toEqual(['Fix scrolling'])
  expect(heading.querySelector('svg.lucide-notebook-text')).not.toBeNull();expect(heading.querySelector('[data-monogram]')).toBeNull();expect(api.workspaces.appearance).not.toHaveBeenCalled()
