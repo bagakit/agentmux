@@ -34,7 +34,7 @@ export function deepMetricsSnapshot(): ToolkitMetricsSnapshot {
     diagnostics: pending, process: pending, runTotals: null, app: pending, runtime: pending, main: pending,
     renderer: { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null, data: { window, ...rendererMemoryFixture(),
       counts: { monacoEditors: 0, monacoModels: 0, documents: 0, runtimeSubscriptions: 1, terminalViews: 1, terminalAddons: 1, terminalListeners: 1 }, performance } } }
-  return { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'execution',
+  return { diagnostics: { captureEnabled: false, failureEvidence: 'none', droppedWrites: 0, lastFailure: null, persistence: 'not-requested', issue: null, cleanupIssue: null }, schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'execution',
     run: { hostId: 'local', runId: 'observer-run' }, state: 'observing', reason: null, startedAt: 1,
     observedAt: 1000, observation, document: null, manual: false, consumerCount: 1, sequence: 1,
     trend: [{ observedAt: 1000, appCpuPercent: null, appRssKib: null }] }

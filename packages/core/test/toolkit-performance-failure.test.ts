@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest'
 import { ToolkitFailureCapture, parseToolkitPerformanceFailureDetails, parseToolkitPerformanceFailure, toolkitFailureError } from '../src/toolkit-performance-failure.js'
+import { parseToolkitRequest, parseToolkitSnapshot } from '../src/toolkit.js'
+import { deepMetricsSnapshot } from './helpers/toolkit-metrics.js'
 const details = () => ({ stage: 'toolkit-json' as const, error: toolkitFailureError(new SyntaxError('original syntax failure')), bytes: null, exit: null })
 it('retains non-overlapping byte ranges across chunks without retaining input storage', () => {
   const raw = Buffer.alloc(25000); for (let i=0;i<raw.length;i++) raw[i]=i%251
@@ -31,6 +33,14 @@ it('bounds error UTF8 bytes and explicitly reports clipped text', () => {
   expect(primary).toMatchObject({messageTruncated:true,stackTruncated:true})
   expect(()=>parseToolkitPerformanceFailureDetails({...details(),error:primary})).not.toThrow()
 })
+it('retains the failure original identity after current Run cleanup through typed snapshot', () => {
+  const snapshot=deepMetricsSnapshot()
+  const failure=parseToolkitPerformanceFailure({schema:'agentmux.performance.failure.v1',executionId:'prior-execution',run:{hostId:'local',runId:'original-run'},recordedAt:1000,details:details()})
+  snapshot.run=null;snapshot.diagnostics={captureEnabled:false,failureEvidence:'included',droppedWrites:0,lastFailure:failure,persistence:'confirmed',issue:null,cleanupIssue:null}
+  expect(parseToolkitSnapshot(snapshot)).toEqual(snapshot)
+  expect((parseToolkitSnapshot(snapshot) as typeof snapshot).diagnostics.lastFailure?.run?.runId).toBe('original-run')
+})
+
 it('admits the largest legal escaped error and fragments within the derived file budget',()=>{
  const capture=new ToolkitFailureCapture('metrics-rpc-stdout',0);capture.append(Buffer.alloc(20000,65))
  const failure={schema:'agentmux.performance.failure.v1',executionId:'execution',run:{hostId:'local',runId:'run'},recordedAt:1000,details:{
