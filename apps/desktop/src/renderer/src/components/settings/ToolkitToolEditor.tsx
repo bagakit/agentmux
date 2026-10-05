@@ -19,6 +19,7 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAddOperationIcon = semanticIconComponent('action.add-operation')
 const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
 const ThemeActionAddArgumentIcon = semanticIconComponent('action.add-argument')
+const ThemeActionRemoveArgumentIcon = semanticIconComponent('action.remove-argument')
 
 
 const ScriptEditor = lazy(() => import('./ToolkitScriptEditor'))
@@ -135,7 +136,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       </div></fieldset>
       {(displayOpen ? Boolean(tool.display) : actionId === null || action) ? <details className="toolkit-editor__arguments"><summary>{displayOpen ? 'Display arguments' : actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
         <p className="settings-hint">Each argument is a separate value. No shell expansion or interpolation.</p>
-        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveIcon size={13} /></button></label>)}
+        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></button></label>)}
         <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</button>
       </details> : null}
     </div>
