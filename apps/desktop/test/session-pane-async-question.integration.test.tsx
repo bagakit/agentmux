@@ -5,6 +5,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { createClientUiRoot } from './helpers/client-ui-render';
 import { fixture, request } from './helpers/native-async-question-fixture';
 import { AgentMuxError } from '@agentmux/core';
+import { agentPromptNotApplied } from '@agentmux/core/prompt-condition';
 import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state';
 import { RuntimeController } from '../src/main/runtime-controller';
 import { useAppStore } from '../src/renderer/src/store';
@@ -318,4 +319,32 @@ it('keeps the actual Activity observation quiet on unrelated rerenders but confi
     [control.agentSessionId]: { [key]: { hostId: control.hostId, input, phase: 'unknown' } } } }))); await flush()
   await vi.waitFor(() => expect(useAppStore.getState().questionReplies[control.agentSessionId]?.[key]?.phase).toBe('confirmed'))
   expect(reads.mock.calls.length).toBe(readCount); expect(send).not.toHaveBeenCalled()
+})
+
+it('keeps the first submit-phase zero-byte refusal unknown after real Native payload acceptance and retries only that original input', async () => {
+  const { h, send, reads } = await setup()
+  const nativeInput = h.inner.kernel.input
+  h.inner.kernel.input = async (runId, operation) => {
+    if (operation.data === '\r') throw new AgentMuxError('Submit Native phase refused', 'CTXMUX_input_cursor_mismatch', 'not_applied',
+      { disposition: 'not_applied', confirmedInputBytes: 0 })
+    return nativeInput(runId, operation)
+  }
+  await fill(activeCard().querySelector('textarea')!, 'Original partially accepted answer')
+  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  await vi.waitFor(() => expect(send).toHaveBeenCalledOnce())
+  const input = send.mock.calls[0]![1]
+  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
+  const exact = h.client.agentSession('question-session')
+  expect(exact.terminalPromptSubmission).toMatchObject({ submissionId: input.operationId,
+    payload: { acknowledged: true }, submit: { notApplied: true, acknowledged: false } })
+  expect(agentPromptNotApplied(exact)).toBeUndefined(); expect(h.writes).toHaveLength(1)
+  expect(h.writes[0]!.data).toContain('Original partially accepted answer')
+  await fill(activeCard().querySelector('textarea')!, 'Another unsent answer')
+  const count = reads.mock.calls.length
+  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
+  expect(send.mock.calls[1]![1]).toEqual(input); expect(h.writes).toHaveLength(1)
+  expect(activeCard().querySelector('textarea')?.value).toBe('Another unsent answer')
+  expect(reads.mock.calls.length).toBe(count)
 })
