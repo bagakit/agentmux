@@ -124,6 +124,10 @@ it('uses managed Core history and refuses a reply for another managed Session wi
  const original = document.querySelector<HTMLElement>('[data-resume-key="original"]')!, other = document.querySelector<HTMLElement>('[data-resume-key="other"]')!
  expect(original.textContent).toContain('Input · Actual managed request'); expect(other.textContent).toContain('Preview could not be read')
  expect(api.sessions.historyPage).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'original' }, { limit: 100 })
+ vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(() => {}))
+ await act(async () => original.click())
+ expect(original.textContent).toContain('Input · Actual managed request')
+ expect(document.querySelector('.launcher-resume__detail')!.textContent).toContain('Actual managed request')
  expect(document.querySelector<HTMLButtonElement>('.launcher-resume__footer .primary-button')!.disabled).toBe(false)
  expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
