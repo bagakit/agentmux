@@ -11,6 +11,8 @@ import { parseMobileFileUpload, type MobileFileUpload } from '../conversation/at
 import { parsePresentationRoute, type MobilePresentationRoute } from './presentation-route'
 import { mobileGoalDraftKey, parseMobileGoalDraft, parseMobileGoalDrafts, parseMobileGoalDraftConflicts,
   MobileGoalDraftInvalidError, type MobileGoalDraft, type MobileGoalDraftCommit } from './goal-drafts'
+import { mobileKnowledgeDraftKey, parseMobileKnowledgeDraft, parseMobileKnowledgeDrafts, parseMobileKnowledgeDraftConflicts,
+  MobileKnowledgeDraftInvalidError, type MobileKnowledgeDraft, type MobileKnowledgeDraftCommit } from './knowledge-drafts'
 
 export { DEVICE_WORKFACE_KEY } from './device-storage-lock'
 export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
@@ -56,7 +58,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[] }
+  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -159,6 +161,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'recordId')) keys.push('recordId')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalDrafts')) keys.push('goalDrafts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalDraftConflicts')) keys.push('goalDraftConflicts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'knowledgeDrafts')) keys.push('knowledgeDrafts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'knowledgeDraftConflicts')) keys.push('knowledgeDraftConflicts')
   const v = record(value, keys)
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
@@ -171,6 +175,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   parseDraftRecord(v.conversation)
   if (v.goalDrafts !== undefined) parseMobileGoalDrafts(v.goalDrafts)
   if (v.goalDraftConflicts !== undefined) parseMobileGoalDraftConflicts(v.goalDraftConflicts)
+  if (v.knowledgeDrafts !== undefined) parseMobileKnowledgeDrafts(v.knowledgeDrafts)
+  if (v.knowledgeDraftConflicts !== undefined) parseMobileKnowledgeDraftConflicts(v.knowledgeDraftConflicts)
   if (Object.hasOwn(v, 'presentation')) parsePresentationRoute(v.presentation)
   if (v.fileUploads !== undefined) {
     if (!Array.isArray(v.fileUploads) || v.fileUploads.length > MAX_ENTRIES) throw invalid()
@@ -339,9 +345,9 @@ export class DeviceWorkfaceStore {
     const captured = structuredClone(navigation)
     return this.update(value => ({ ...value, ...captured }))
   }
-  updatePresentation(navigation: Navigation, presentation: MobilePresentationRoute): Promise<void> {
+  updatePresentation(navigation: Navigation, presentation: MobilePresentationRoute, expectedRecordId?: string | null): Promise<void> {
     const parsed = parsePresentationRoute(presentation), captured = structuredClone(navigation)
-    return this.update(value => ({ ...value, ...captured, presentation: parsed }))
+    return this.update(value => ({ ...value, ...captured, presentation: parsed }), expectedRecordId)
   }
   /** Whole-record recovery/fixtures only. Draft readers use editConversation. */
   updateConversation(conversation: DraftRecord): Promise<void> {
@@ -368,6 +374,27 @@ export class DeviceWorkfaceStore {
       const draft = committed.goalDrafts?.find(item => mobileGoalDraftKey(item.goalId, item.scope) === key) ?? null
       const applied = sameValue(draft, captured)
       const conflict = applied ? null : committed.goalDraftConflicts?.find(item => sameValue(item, captured)) ?? null
+      return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
+    })
+  }
+  /** One original Knowledge entry, preserving other fields under the existing transaction. */
+  editKnowledgeDraft(expected: MobileKnowledgeDraft | null, next: MobileKnowledgeDraft, recordId: string | null): Promise<MobileKnowledgeDraftCommit> {
+    const captured = parseMobileKnowledgeDraft(next), previous = expected === null ? null : parseMobileKnowledgeDraft(expected)
+    const key = mobileKnowledgeDraftKey(captured.topicId, captured.entryId, captured.scope)
+    if (previous && mobileKnowledgeDraftKey(previous.topicId, previous.entryId, previous.scope) !== key) throw new MobileKnowledgeDraftInvalidError('知识草稿的原条目或 Host 不同；本次保存未发送，原正文保留。')
+    return this.update(value => {
+      const drafts = value.knowledgeDrafts ?? [], current = drafts.find(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) === key) ?? null
+      let result: DeviceWorkface
+      if (!sameValue(current, previous) && !sameValue(current, captured)) {
+        const conflicts = value.knowledgeDraftConflicts ?? []
+        result = { ...value, knowledgeDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
+      } else result = { ...value, knowledgeDrafts: [...drafts.filter(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) !== key), captured] }
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MobileKnowledgeDraftInvalidError('当前设备工作面已超过原保存范围；本次请求未发送，原记录与本页草稿保留，请先保全内容。')
+      return result
+    }, recordId, committed => {
+      const draft = committed.knowledgeDrafts?.find(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) === key) ?? null
+      const applied = sameValue(draft, captured)
+      const conflict = applied ? null : committed.knowledgeDraftConflicts?.find(item => sameValue(item, captured)) ?? null
       return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
     })
   }

@@ -4,7 +4,7 @@ import { ChevronRight, Link2, MessageSquare, MoreHorizontal, Pencil, ShieldCheck
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledgeSource } from '@agentmux/core/control'
 import { MobileTopicSource } from './topics/MobileTopicSource'
-import { MobileTopicsSurface } from './topics/MobileTopicsSurface'
+import { MobileTopicsSurface, type MobileTopicsContext } from './topics/MobileTopicsSurface'
 import { MobileSurveySurface } from './survey/MobileSurveySurface'
 import { MobileGoalsSurface } from './goals/MobileGoalsSurface'
 import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
@@ -26,7 +26,8 @@ import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWork
 import { MobileGoalWork } from './navigation/MobileGoalWork'
 import { MobileMoteProfile } from './navigation/MobileMoteProfile'
 import { useMobileBack } from './navigation/useMobileBack'
-import { retainObjectReference, type MobilePresentationRoute, type MobileGoalsContext } from './recovery/presentation-route'
+import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
+import type { MobileTopicSourceContentReference } from './topics/source-reference'
 
 type Workface = Navigation
 
@@ -48,6 +49,8 @@ export function MobileApp({ client, connection, platform, native = false, focusC
 }) {
   const initial = useRef<ReturnType<typeof loadWorkface> | null>(null)
   initial.current ??= loadWorkface()
+  const navigationRecord = useRef<{ recordId: string | null } | null>(null)
+  navigationRecord.current ??= { recordId: getDeviceWorkface().recordIdentity() }
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
   useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
   const [workface, setWorkface] = useState<Workface>(initial.current.workface)
@@ -58,12 +61,32 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [defaultHome, setDefaultHome] = useState<MobilePrimaryWorkface>(initialHome.current.home)
   const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
   const [secondary, setSecondary] = useState<'topics' | 'survey' | 'goals' | null>(initialPrimary === 'goals' || initialPrimary === 'topics' || initialPrimary === 'survey' ? initialPrimary : null)
-  const [topicId, setTopicId] = useState<string | null>(null)
-  const [source, setSource] = useState<TopicKnowledgeSource | null>(null)
+  const [topicsRoute, setTopicsRoute] = useState<MobileTopicsRoute>(initial.current.presentation?.topics
+    ?? { context: { categoryId: null, topicId: null, mode: 'discussion' }, sources: [] })
   const [goalsContext, setGoalsContext] = useState<MobileGoalsContext>(initial.current.presentation?.goals
     ?? { goalId: null, mode: 'detail', discussion: null })
   const updateGoalsContext = useCallback((context: MobileGoalsContext) => setGoalsContext(value =>
     JSON.stringify(value) === JSON.stringify(context) ? value : context), [])
+  const topicId = topicsRoute.context.topicId, source = topicsRoute.sources.at(-1)?.source ?? null
+  const sourceReference = topicsRoute.sources.at(-1)?.content
+  const sourceBytes = JSON.stringify(source)
+  const updateSourceReference = useCallback((content: MobileTopicSourceContentReference) => setTopicsRoute(value => {
+    const frame = value.sources.at(-1)
+    if (!frame || JSON.stringify(frame.source) !== sourceBytes || JSON.stringify(frame.content) === JSON.stringify(content)) return value
+    return { ...value, sources: [...value.sources.slice(0, -1), { ...frame, content }] }
+  }), [sourceBytes])
+  const updateTopicsContext = useCallback((context: MobileTopicsContext) => setTopicsRoute(value =>
+    value.context.categoryId === context.categoryId && value.context.topicId === context.topicId && value.context.mode === context.mode
+      ? value : { ...value, context }), [])
+  const updateKnowledgeReference = useCallback((knowledge: MobileKnowledgeReference) => setTopicsRoute(value =>
+    JSON.stringify(value.knowledge) === JSON.stringify(knowledge) ? value : { ...value, knowledge }), [])
+  const leaveSource = useCallback(() => setTopicsRoute(value => {
+    const frame = value.sources.at(-1)
+    if (!frame) return value
+    const { knowledge: _knowledge, ...rest } = value
+    return { ...rest, context: frame.origin, sources: value.sources.slice(0, -1),
+      ...(frame.originKnowledge ? { knowledge: frame.originKnowledge } : {}) }
+  }), [])
   const pageName = secondary === 'topics' ? 'Topics' : secondary === 'survey' ? 'Survey' : secondary === 'goals' ? 'Goals' : home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'
   const rpc = useCallback<NonNullable<AgentMuxHostedClient['forwardRpc']>>((method, params) => {
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，原工作面保留。'))
@@ -89,8 +112,11 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const openSource = (value: TopicKnowledgeSource) => {
     navigationRevision.current += 1
     if (value.kind === 'url') { openBrowserHttpLink(value.url); return }
-    if (value.kind === 'topic') { setTopicId(value.topicId); setSecondary('topics') }
-    setSource(value)
+    setTopicsRoute(current => ({ ...current, context: value.kind === 'topic'
+      ? { categoryId: null, topicId: value.topicId, mode: 'discussion' } : current.context,
+      sources: [...current.sources, { source: value, origin: current.context,
+        ...(current.knowledge ? { originKnowledge: current.knowledge } : {}) }] }))
+    setSecondary('topics')
   }
   const openPrimaryWorkface = (value: MobilePrimaryWorkface) => {
     navigationRevision.current += 1
@@ -103,7 +129,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     void rpc('space.inspect', { target: { spaceId } }).then(value => {
       if (revision !== navigationRevision.current) return
       const topic = value.catalog.spaces.find(item => item.spaceId === spaceId)?.topicId
-      if (topic) { setTopicId(topic); setSource(null); setSecondary('topics') }
+      if (topic) { setTopicsRoute({ context: { categoryId: null, topicId: topic, mode: 'discussion' }, sources: [] }); setSecondary('topics') }
       else setNotice('原 Topic 身份尚未确认，研究与资料保留。')
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
@@ -116,13 +142,15 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [profileBack, setProfileBack] = useState<(() => void) | null>(null)
   const [spatialBack, setSpatialBack] = useState<(() => void) | null>(null)
   const [topicsBack, setTopicsBack] = useState<(() => void) | null>(null)
+  const [sourceBack, setSourceBack] = useState<(() => void) | null>(null)
   const [goalsBack, setGoalsBack] = useState<(() => void) | null>(null)
   const registerProfileBack = useCallback((back: (() => void) | null) => setProfileBack(() => back), [])
   const registerSpatialBack = useCallback((back: (() => void) | null) => setSpatialBack(() => back), [])
   const registerTopicsBack = useCallback((back: (() => void) | null) => setTopicsBack(() => back), [])
+  const registerSourceBack = useCallback((back: (() => void) | null) => setSourceBack(() => back), [])
   const registerGoalsBack = useCallback((back: (() => void) | null) => setGoalsBack(() => back), [])
   const familyBack = secondary === 'topics' ? topicsBack : secondary === 'goals' ? goalsBack : secondary === null ? spatialBack : null
-  const hasBack = sheet !== null || showSession || source !== null || familyBack !== null
+  const hasBack = sheet !== null || showSession || secondary === 'topics' && source !== null || familyBack !== null
   const requestBack = useMobileBack(hasBack, () => {
     navigationRevision.current += 1
     if (sheet !== null) {
@@ -132,7 +160,10 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       if (showGoalWork) setShowGoalWork(false)
       else if (workface.panel === 'terminal') setWorkface(value => ({ ...value, panel: 'conversation' }))
       else closeSession()
-    } else if (source) setSource(null)
+    } else if (secondary === 'topics' && source) {
+      if (source.kind === 'topic') topicsBack ? topicsBack() : leaveSource()
+      else sourceBack ? sourceBack() : leaveSource()
+    }
     else familyBack?.()
   })
   const backRef = useRef(requestBack)
@@ -164,7 +195,9 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     // Keep the local reading reference, including after retirement. The original Core determines
     // whether its history remains readable; unknown/old-Run events cannot erase a saved workface.
   }), [client])
-  const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork,
+  const retainTopics = initial.current.presentation?.topics !== undefined || topicsRoute.context.categoryId !== null || topicId !== null
+    || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
+  const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
     ...(initial.current.presentation?.goals || goalsContext.goalId !== null ? { goals: goalsContext } : {}),
     identity: retainObjectReference(objectIdentity), profile: sheet === 'identity' && profileIdentity
       ? { identity: retainObjectReference(profileIdentity)!, sourcePath: profileSourcePath } : null }
@@ -173,7 +206,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   useEffect(() => {
     if (workface === initial.current?.workface && savedPresentation.current === presentationBytes) return
     try {
-      void getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute).then(() => { savedPresentation.current = presentationBytes }).catch(() => { setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。') })
+      void getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute, navigationRecord.current!.recordId).then(() => { savedPresentation.current = presentationBytes }).catch(() => { setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。') })
     } catch {
       setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。')
     }
@@ -183,6 +216,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     try {
       const owner = getDeviceWorkface()
       await owner.replaceUnreadableWithCurrent(workface)
+      navigationRecord.current = { recordId: owner.recordIdentity() }
       setCanPersist(true)
       setNotice('已用当前工作面替换这台设备无法读取的原记录。导航、草稿和未确认输入一起保存；Mac 上的原会话保持不变。')
     } catch { setNotice('这台设备仍无法保存导航。原记录尚未覆盖；当前仍按临时导航继续阅读。') }
@@ -218,17 +252,22 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       {workspaceVisible && <>
         <div hidden={showSession || secondary !== null}><MobileSpatialNavigation visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openProfile={openProfile} onBackChange={registerSpatialBack} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
-          onOpenTopic={topic => { setTopicId(topic.topicId); if (source?.kind === 'topic' && source.topicId !== topic.topicId) setSource(null) }} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
+          client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
+          initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
+          {...(source?.kind === 'topic' ? { onLeaveTopic: leaveSource, topicBackLabel: '返回知识' } : {})}
+          onOpenTopic={topic => updateTopicsContext({ ...topicsRoute.context, topicId: topic.topicId, mode: 'discussion' })} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
           renderWorkface={(topic, visible) => <MobileZoneWorkface key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible}
             {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
         <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
           openTopic={openSurveyTopic} /></div>
         {source && source.kind !== 'topic' && <div hidden={showSession || secondary !== 'topics'}>
           {source.kind === 'space' || source.kind === 'survey' ? <>
-            <button className="mobile-text-button" onClick={() => setSource(null)}><ArrowLeft size={16} />返回知识</button>
+            <button className="mobile-text-button" onClick={leaveSource}><ArrowLeft size={16} />返回知识</button>
             <MobileZoneWorkface key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={exposed && !showSession && secondary === 'topics'} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
-          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource source={source} rpc={rpc} onBack={() => setSource(null)} openHttpLink={openBrowserHttpLink}
-            openScope={scope => { setSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
+          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
+            visible={exposed && !showSession && secondary === 'topics'} onBackChange={registerSourceBack}
+            {...(sourceReference ? { initialReference: sourceReference } : {})} onReferenceChange={updateSourceReference}
+            openScope={scope => { openSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
         </div>}
         <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
           context={goalsContext} onContextChange={updateGoalsContext} copyText={platform.copyText} /></div>

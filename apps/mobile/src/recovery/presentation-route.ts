@@ -1,6 +1,9 @@
-import type { AgentMuxMotePresentation, AgentMuxSpaceAddress } from '@agentmux/core/control'
+import type { AgentMuxMotePresentation, AgentMuxSpaceAddress, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
 import type { MobilePrimaryWorkface } from '../navigation/home-preference'
+import type { MobileTopicsContext } from '../topics/MobileTopicsSurface'
+import { parseMobileKnowledgeDraftKey } from './knowledge-drafts'
+import { parseMobileTopicSourceContentReference, type MobileTopicSourceContentReference } from '../topics/source-reference'
 
 /** Display references only: original content, appearance and Runtime facts stay with their owners. */
 export type MobileObjectReference = { name: string; project: string; context?: AgentMuxSpaceAddress;
@@ -9,10 +12,18 @@ export type MobilePresentationRoute = {
   primary: MobilePrimaryWorkface | 'survey'; showSession: boolean; showGoalWork: boolean
   identity: MobileObjectReference | null
   profile: { identity: MobileObjectReference; sourcePath: string | null } | null
+  topics?: MobileTopicsRoute
   goals?: MobileGoalsContext
 }
 export type MobileGoalsContext = { goalId: string | null; mode: 'detail' | 'edit';
   discussion: { goalId: string; tabId: string; agentSessionId: string | null } | null }
+export type MobileTopicSourceReference = Exclude<TopicKnowledgeSource, { kind: 'url' }>
+export type MobileKnowledgeReference = { topicId: string | null; entryId: string | null;
+  view: 'list' | 'read' | 'edit'; query?: string; draftKey?: string }
+export type MobileTopicsRoute = { context: MobileTopicsContext;
+  knowledge?: MobileKnowledgeReference;
+  sources: Array<{ source: MobileTopicSourceReference; origin: MobileTopicsContext; originKnowledge?: MobileKnowledgeReference;
+    content?: MobileTopicSourceContentReference }> }
 const sourcePaths = ['MOTE.md', 'BEHAVIOR.md', 'SOUL.md', 'topic.md']
 function invalid(): never { throw new Error('设备原工作面引用无法完整核实；原记录保留。') }
 function object(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
@@ -22,6 +33,35 @@ function object(value: unknown, required: string[], optional: string[] = []): Re
   return v
 }
 function text(value: unknown, max = 4096): value is string { return typeof value === 'string' && value.length > 0 && value.length <= max }
+function parseTopicsContext(value: unknown): void {
+  const v = object(value, ['categoryId', 'topicId', 'mode'])
+  for (const key of ['categoryId', 'topicId']) if (v[key] !== null && !text(v[key], 256)) invalid()
+  if (v.mode !== 'discussion' && v.mode !== 'knowledge') invalid()
+}
+function parseKnowledgeReference(value: unknown): void {
+  const v = object(value, ['topicId', 'entryId', 'view'], ['query', 'draftKey'])
+  if (!(v.topicId === null || text(v.topicId, 256)) || !(v.entryId === null || text(v.entryId, 256))
+    || !['list', 'read', 'edit'].includes(String(v.view))
+    || v.view === 'list' && v.entryId !== null || v.view !== 'list' && (v.topicId === null || v.entryId === null)) invalid()
+  if (v.query !== undefined && (typeof v.query !== 'string' || v.query.length > 4096)) invalid()
+  if (v.draftKey !== undefined) {
+    const key = parseMobileKnowledgeDraftKey(v.draftKey)
+    if (key.topicId !== v.topicId || key.entryId !== v.entryId) invalid()
+  }
+}
+function parseTopicSource(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid()
+  const kind = (value as Record<string, unknown>).kind
+  const fields = kind === 'topic' ? [['topicId'], ['chatId', 'threadId']]
+    : kind === 'file' ? [['hostId', 'path'], ['projectId', 'revision']]
+    : kind === 'note' ? [['noteId'], ['blockId']]
+    : kind === 'notebook' ? [['notebookId'], []]
+    : kind === 'space' || kind === 'survey' ? [['zoneId'], ['tabId', 'regionId']] : null
+  if (!fields) invalid()
+  const v = object(value, ['kind', ...fields[0]!], fields[1]!)
+  for (const key of fields[0]!) if (!text(v[key], key === 'path' ? 4096 : 256)) invalid()
+  for (const key of fields[1]!) if (v[key] !== undefined && !text(v[key], key === 'revision' ? 4096 : 256)) invalid()
+}
 function parseIdentity(value: unknown): MobileObjectReference {
   const v = object(value, ['name', 'project'], ['context', 'mote'])
   if (!text(v.name) || typeof v.project !== 'string' || v.project.length > 4096) invalid()
@@ -55,7 +95,7 @@ export function retainObjectReference(identity: MobileObjectIdentity | null): Mo
       ...(content ? { contentReference: content } : {}) } } : {}) }
 }
 export function parsePresentationRoute(value: unknown): MobilePresentationRoute {
-  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['goals'])
+  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'goals'])
   if (!['goals', 'topics', 'mote', 'focus', 'space', 'survey'].includes(String(v.primary)) ||
     typeof v.showSession !== 'boolean' || typeof v.showGoalWork !== 'boolean' || v.showGoalWork && !v.showSession) invalid()
   if (v.identity !== null) parseIdentity(v.identity)
@@ -63,6 +103,18 @@ export function parsePresentationRoute(value: unknown): MobilePresentationRoute 
     const p = object(v.profile, ['identity', 'sourcePath'])
     parseIdentity(p.identity)
     if (p.sourcePath !== null && !sourcePaths.includes(String(p.sourcePath))) invalid()
+  }
+  if (v.topics !== undefined) {
+    const topics = object(v.topics, ['context', 'sources'], ['knowledge'])
+    parseTopicsContext(topics.context)
+    if (topics.knowledge !== undefined) parseKnowledgeReference(topics.knowledge)
+    if (!Array.isArray(topics.sources) || topics.sources.length > 128) invalid()
+    for (const value of topics.sources) {
+      const frame = object(value, ['source', 'origin'], ['originKnowledge', 'content'])
+      parseTopicSource(frame.source); parseTopicsContext(frame.origin)
+      if (frame.originKnowledge !== undefined) parseKnowledgeReference(frame.originKnowledge)
+      if (frame.content !== undefined) parseMobileTopicSourceContentReference(frame.content, frame.source as TopicKnowledgeSource)
+    }
   }
   if (v.goals !== undefined) {
     const goals = object(v.goals, ['goalId', 'mode', 'discussion'])

@@ -1,29 +1,42 @@
-.mobile-topics { height: 100%; overflow-y: auto; color: var(--text); overscroll-behavior: contain; padding: 4px 12px 12px; }
+.mobile-topics { height: 100%; overflow-y: auto; color: var(--text); padding: 4px 12px 12px; font-size: 13px; }
+.mobile-topics [hidden] { display: none !important; }
+.mobile-topics-heading { flex: 1; min-width: 0; }
+.mobile-topics-heading > small { display: block; font-size: 11px; line-height: 1.4; }
+.mobile-topics:not(.mobile-topic-source-reader) > header { min-height: 44px; padding-right: 52px; }
+.mobile-topics > .mobile-topic-organization { margin-top: -44px; }
+.mobile-topics > .mobile-topic-organization > summary { width: 44px; margin-left: auto; }
 .mobile-topics h1, .mobile-topics h2 { overflow-wrap: anywhere; font-size: 17px; margin: 4px 0; }
 .mobile-topics button { min-height: 44px; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); }
 .mobile-topics button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mobile-topics-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .mobile-topics-actions h1, .mobile-topics-actions small { flex: 1; }
 .mobile-topic-organization { position: relative; }
-.mobile-topic-organization > summary { min-height: 44px; display: flex; align-items: center; padding: var(--sp-4); cursor: pointer; }
+.mobile-topic-organization > summary { min-height: 44px; display: flex; align-items: center; justify-content: flex-end; padding: var(--sp-4); cursor: pointer; font-size: 12px; }
 .mobile-topic-organization[open] > .mobile-topics-actions { position: absolute; right: 0; top: 100%; z-index: 3; min-width: 180px; padding: var(--sp-4); background: var(--surface-2); box-shadow: var(--elev-2); border-radius: var(--radius); display: grid; }
-.mobile-topic-organization .mobile-topic-editor { position: fixed; inset: 10% var(--sp-5) auto; max-height: 80%; z-index: 4; overflow-y: auto; padding: var(--sp-6); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-2); }
-.mobile-topics-tabs { display: flex; gap: 4px; margin: 4px 0; }
-.mobile-topics-tabs button[aria-pressed="true"] { box-shadow: none; font-weight: 600; color: var(--green); background: var(--surface-2); }
+.mobile-topic-organization .mobile-topic-editor { position: static; margin: 0; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.mobile-topics-tabs { display: flex; gap: 3px; margin: 4px 0 10px; padding: 3px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.mobile-topics-tabs button { flex: 1; min-width: 0; background: transparent; color: var(--text-3); }
+.mobile-topics-tabs button[aria-pressed="true"] { box-shadow: none; font-weight: 600; color: var(--text); background: var(--surface-2); }
 .mobile-topics-search { display: flex; gap: var(--sp-4); margin: var(--sp-4) 0; }
 .mobile-topics input, .mobile-topics textarea, .mobile-topics select { min-height: 44px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); padding: var(--sp-4); font: inherit; font-size: 16px; }
 .mobile-topics-search input { flex: 1; min-width: 0; }
 .mobile-topics-list { list-style: none; margin: var(--sp-4) 0; padding: 0; }
 .mobile-topics-list button { width: 100%; text-align: left; display: grid; gap: var(--sp-2); background: transparent; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 8px 0; min-height: 48px; }
 .mobile-topics-list button[aria-current="page"] { background: var(--surface-2); }
-.mobile-topics-list strong { font-size: var(--fs-body); overflow-wrap: anywhere; }
-.mobile-topics small, .mobile-topics-empty { color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-topics-list strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.mobile-topics small, .mobile-topics-empty { color: var(--text-3); font-size: 11px; }
 .mobile-topics-list small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mobile-topics-issue { color: var(--amber); font-size: var(--fs-meta); white-space: pre-wrap; overflow-wrap: anywhere; }
-.mobile-topic-reading { line-height: 1.65; overflow-wrap: anywhere; }
+.mobile-topic-reading { line-height: 1.6; overflow-wrap: anywhere; font-size: 13px; }
+.mobile-topic-reading > h2 { margin-top: 10px; }
+.mobile-topic-reading .markdown-block { font-size: 13px; }
+.mobile-topic-sources { margin-top: 12px; border-top: 1px solid var(--line-soft); }
+.mobile-topic-sources > summary, .mobile-topic-source-reader summary { min-height: 44px; display: flex; align-items: center; font-size: 12px; }
+.mobile-topic-source-reader .mobile-topics-heading h1 { margin: 0; }
+.mobile-topic-source-reader > div > article > p { color: var(--text-3); font-size: 11px; }
 .mobile-topic-reading pre, .mobile-topic-editor pre { overflow-x: auto; white-space: pre-wrap; }
 .mobile-topic-source { display: block; width: 100%; text-align: left; overflow-wrap: anywhere; }
 .mobile-topic-editor { border-top: 1px solid var(--line-soft); margin-top: 12px; padding-top: 8px; }
-.mobile-topic-editor form, .mobile-topic-editor label { display: grid; gap: var(--sp-4); }
+.mobile-topic-editor form, .mobile-topic-editor label { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--sp-4); }
 .mobile-topic-editor textarea { resize: vertical; }
 .mobile-topic-workface { min-height: 0; }
