@@ -367,7 +367,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 - **身份授权必须在 Core 里完成，不能把 `AGENTMUX_AGENT_SESSION_ID` 或 Control caller 字段当凭证。** 受管 Agent 的 send 必须携带当前 Run 的 invocation capability，由 Core 核对 capability hash、Session 和 Run；没有 capability 或 capability 属于旧 Run 的请求必须拒绝，健康 Agent 仍可继续工作。
 - **队列写入必须能从写入者崩溃中恢复，且回收不能碰掉新写入者。** 同一路径的跨进程排他性以系统可随进程退出释放的事务锁为准；遗留的孤儿 `.lock` 文件不得阻断新写入。并发恢复后每条消息仍只能占一个唯一、连续的顺序号，健康 Agent 不能永久收到 backpressure。
 - **相同 `messageId` 是重试的幂等身份，跨新的 Control request/operation 与 createdAt 仍返回原 receipt；冲突正文、目标或来源必须拒绝。** Region/Tab 只是寻址输入，落盘 envelope 和收件信封必须写入解析后的真实 recipient Session/Run。
-- `agentmux send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
+- `amux agent send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
 - 全局消息队列由 AgentMux Core 独占持有。消息记录 append-only 且不可变，至少保留 `messageId`、版本化 A2A envelope、`createdAt`、sender/recipient、workspace/session/run 关联、thread/correlation/replyTo、顺序号，以及独立的投递状态变更和失败原因；消息本体和投递状态不能因空快照、握手超时或重启被清空。
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
 - 单条解析、在途提交和消费者未消费 backlog 须有明确资源边界与背压／拒绝码；合法累计消息及恢复记录不能按固定总条数或共享文件额度裁剪。无法确认 durable append 时不返回已入队；Store 故障保原正文、意图与服务窗，不误判健康 Agent 死亡。可读来源用于展示，不能作为认证。

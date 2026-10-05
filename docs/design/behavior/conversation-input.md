@@ -230,7 +230,7 @@ Command 与 Skill 的体验差异要求分别核对实际发现路径、目录�
   这一轮里去"，与裸 Enter 的"按常规发送"是两个不同的意图，不能互相退化；Agent 闲着时它也必须有
   确定含义，而不是只在忙的时候才存在。
   - 用户再次反馈「MessageTool 原始需求是发送直接 steer，结果现在都在排队」：Cmd/Ctrl+Enter、显式 Send 和发件条目的“立即发送”本身就是**这一条消息**的 steer 授权，不要求再点 Continue。它应立即尝试向当前 Run 投递；实际输入语义由[《Steer 与 Provider 输入能力》](agent-capabilities-and-messaging.md#steer-与-provider-输入能力)唯一约束。真实交互、部分投递或错误 Run 仍可拒绝，并保留原因和文字。缺少回合结束或屏幕确认属于流程观测，须如实说明，不能因此永久阻断本可输入的 Agent。
-  - 同一原意适用于已通过目标、身份和当前 Run 校验的 Control `send` 与 CLI `agentmux send`：这一条明确命令就是当前消息的 steer 意图。缺少上一轮完成或输入框确认不能把它挡成未投递；沿 Core 既有单消息选择尝试，保留真实不确定性告示。交互、部分投递、操作幂等、Run 与能力边界仍由各自 owner 裁决；定时／持续推进、后台消费和普通队列不借用这一次命令的授权。
+  - 同一原意适用于已通过目标、身份和当前 Run 校验的 Control `send` 与 CLI `amux agent send`：这一条明确命令就是当前消息的 steer 意图。缺少上一轮完成或输入框确认不能把它挡成未投递；沿 Core 既有单消息选择尝试，保留真实不确定性告示。交互、部分投递、操作幂等、Run 与能力边界仍由各自 owner 裁决；定时／持续推进、后台消费和普通队列不借用这一次命令的授权。
   - 裸 Enter 在 working／待答时仍表示排队，不借用另一条消息的显式授权。旧 queue-only 项不阻塞新明确 steer；多个明确 steer 保持自身队列顺序，共用唯一消费者，不双发。发送中再来的 steer 意图不能因 await 丢失；重启、自动消费、阅读、队列重排或其他消息不生成新的 steer 授权。
   - 对未恢复 Session 的显式发送仍是这条原消息的发送意图，不能因用户在 Conversation mode 输入、等待恢复、保存或回答既有交互而降为普通排队；同次发送的原身份、正文、目标与执行意图跨这些等待保留。恢复沿[Session 恢复合同](session-recovery.md#sessionrun-与-view)交给 Core，不暗中重建另一个会话或将 Level B 降为重启；原来已绑定旧 Run 的意图不能自动改投恢复后的新 Run。普通队列与后台事件不借此取得新的 steer 授权，应用重启后旧待执行条目仍沿原显式 Send 边界。恢复完成、字节被 Runtime 接受和 Provider 按原输入意图接纳继续按[《Steer 与 Provider 输入能力》](agent-capabilities-and-messaging.md#steer-与-provider-输入能力)分别表达，不把正文留在原生输入框或普通 Enter 的字节回执写成立即执行已兑现；这个回执边界同样适用于已经运行的 Session，未确认不能统一归因为尚未恢复。
 
