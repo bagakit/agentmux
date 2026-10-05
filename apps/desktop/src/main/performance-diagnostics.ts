@@ -1,7 +1,7 @@
 import { statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { ClientPerformanceDiagnostics } from '@agentmux/core'
-import type { PerformanceDiagnostics } from '@agentmux/core/control'
+import { parseClientPerformanceDiagnostics, type PerformanceDiagnostics } from '@agentmux/core/control'
 
 type HostClient = { clientPerformanceDiagnostics(options: { signal: AbortSignal }): Promise<ClientPerformanceDiagnostics> }
 type Storage = NonNullable<PerformanceDiagnostics['storage']>
@@ -40,7 +40,7 @@ export class MainPerformanceDiagnostics {
       let current = this.hosts.get(client)
       if (!current) {
         const controller = new AbortController()
-        current = reading(() => client.clientPerformanceDiagnostics({ signal: controller.signal }), () => controller.abort(), () => this.hosts.delete(client), this.timeoutMs)
+        current = reading(() => client.clientPerformanceDiagnostics({ signal: controller.signal }).then(parseClientPerformanceDiagnostics), () => controller.abort(), () => this.hosts.delete(client), this.timeoutMs)
         this.hosts.set(client, current)
       }
       reads.push(current)
