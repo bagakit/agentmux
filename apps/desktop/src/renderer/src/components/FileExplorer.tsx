@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { Link2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { InlineRenameField } from '@agentmux/client-ui/components/InlineRenameField'
 import {
@@ -18,25 +18,6 @@ import {
   type DragOverEvent,
   type DragStartEvent
 } from '@dnd-kit/core'
-import {
-  ChevronDown,
-  ChevronRight,
-  Check,
-  ChevronsDownUp,
-  Eye,
-  FilePlus2,
-  Folder,
-  FolderOpen,
-  FolderPlus,
-  GripVertical,
-  GitBranch,
-  LoaderCircle,
-  MoreHorizontal,
-  RefreshCw,
-  Search,
-  TriangleAlert,
-  X
-} from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
@@ -100,6 +81,27 @@ import {
   FILE_EXPLORER_RENAME_KEY,
   type FileExplorerMoveTarget
 } from '../lib/file-explorer-move'
+
+const ThemeStatusDirtyIcon = semanticIconComponent('status.dirty')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeActionCreateFileIcon = semanticIconComponent('action.create-file')
+const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeLayoutCollapseAllIcon = semanticIconComponent('layout.collapse-all')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeActionRevealIcon = semanticIconComponent('action.reveal')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeActionDragIcon = semanticIconComponent('action.drag')
+
 
 type InlineEdit = { id: number; workspaceId: string; workspacePath: string; rootPath: string } & (
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
@@ -311,7 +313,7 @@ function FileTreeRow({
           }}
           aria-label={node.isDirectory ? `${expanded ? 'Collapse' : 'Expand'} ${node.name}` : undefined}
         >
-          {node.isDirectory ? expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} /> : null}
+          {node.isDirectory ? expanded ? <ThemeNavigationDownIcon size={12} /> : <ThemeNavigationDisclosureIcon size={12} /> : null}
         </button>
         <span
           className="tree-row__icon"
@@ -320,9 +322,9 @@ function FileTreeRow({
           title={loadFailure ?? undefined}
         >
           {loadFailure
-            ? <TriangleAlert size={14} aria-label={`Could not read ${node.name}`} />
+            ? <ThemeStatusWarningIcon size={14} aria-label={`Could not read ${node.name}`} />
             : node.isDirectory
-              ? expanded ? <FolderOpen size={14} /> : <Folder size={14} />
+              ? expanded ? <ThemeObjectFolderOpenIcon size={14} /> : <ThemeObjectFolderIcon size={14} />
               : <FileIcon size={13} />}
         </span>
         {editing ? (
@@ -356,7 +358,7 @@ function FileTreeRow({
             {node.name}
           </button>
         )}
-        {dirty ? <i className="tree-row__dirty" aria-label="Unsaved changes" /> : null}
+        {dirty ? <ThemeStatusDirtyIcon size={6} className="tree-row__dirty" role="img" aria-hidden="false" aria-label="Unsaved changes" /> : null}
         {/*
           源码状态标记。字母（M/A/?/D/R/!）是承重的非色信号，颜色只是强化——见 dock.css 里
           .tree-row__git 的理由。判定不在这里：状态、class、字母全出自 lib/file-tree-git-status.ts
@@ -371,7 +373,7 @@ function FileTreeRow({
             {FILE_TREE_GIT_STATUS_MARK[gitStatus]}
           </span>
         ) : null}
-        {node.isSymlink ? <Link2 size={11} className="tree-row__link" aria-label={node.linkIssue ? 'Unavailable symbolic link' : node.isDirectory ? 'Directory symbolic link' : 'File symbolic link'} /> : null}
+        {node.isSymlink ? <ThemeObjectLinkIcon size={11} className="tree-row__link" aria-label={node.linkIssue ? 'Unavailable symbolic link' : node.isDirectory ? 'Directory symbolic link' : 'File symbolic link'} /> : null}
       </div>
     </FileTreeContextMenu>
   )
@@ -389,7 +391,7 @@ function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disable
       className={`file-tree-root-target ${isOver ? 'file-tree-root-target--over' : ''}`}
       data-move-drop-disabled={disabled ? 'true' : 'false'}
     >
-      <FolderOpen size={12} /><span>{rootLabel}</span>
+      <ThemeObjectFolderOpenIcon size={12} /><span>{rootLabel}</span>
     </div>
   )
 }
@@ -1024,7 +1026,7 @@ export function FileExplorer({
     : null
   const createRow = createEdit ? (
     <div className="tree-create-row" style={{ '--tree-depth': (createEdit.parentPath ? createEdit.parentPath.split('/').length : 0) - (rootPath ? rootPath.split('/').length : 0) } as React.CSSProperties}>
-      {createEdit.kind === 'create-directory' ? <Folder size={14} /> : <FilePlus2 size={13} />}
+      {createEdit.kind === 'create-directory' ? <ThemeObjectFolderIcon size={14} /> : <ThemeActionCreateFileIcon size={13} />}
       <InlineRenameField inputClassName="tree-inline-input" key={createEdit.id}
         label={createEdit.kind === 'create-directory' ? 'New folder name' : 'New file name'}
         error={editError}
@@ -1038,16 +1040,16 @@ export function FileExplorer({
     </div>
   ) : null
   const toolbar = <div className="explorer-header__actions" role="group" aria-label="File actions">
-    <button onClick={() => beginCreate('create-file')} title="New file"><FilePlus2 size={13} /></button>
-    <button onClick={() => beginCreate('create-directory')} title="New folder"><FolderPlus size={13} /></button>
+    <button onClick={() => beginCreate('create-file')} title="New file"><ThemeActionCreateFileIcon size={13} /></button>
+    <button onClick={() => beginCreate('create-directory')} title="New folder"><ThemeActionCreateFolderIcon size={13} /></button>
     <button onClick={() => void refreshExplorer()} title="Refresh explorer">
-      {tree.rootCache?.loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+      {tree.rootCache?.loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
     </button>
-    <button onClick={collapseAll} title="Collapse all folders" aria-label="Collapse all folders"><ChevronsDownUp size={13} /></button>
-    <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" aria-label="Explorer options" title="Explorer options"><MoreHorizontal size={13} /></button></DropdownMenu.Trigger>
+    <button onClick={collapseAll} title="Collapse all folders" aria-label="Collapse all folders"><ThemeLayoutCollapseAllIcon size={13} /></button>
+    <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" aria-label="Explorer options" title="Explorer options"><ThemeActionMoreIcon size={13} /></button></DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
-        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showHidden} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowHidden()}><Eye size={13} /><span>Show hidden files</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showIgnored} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowIgnored()}><GitBranch size={13} /><span>Show Git ignored files</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showHidden} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowHidden()}><ThemeActionRevealIcon size={13} /><span>Show hidden files</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showIgnored} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowIgnored()}><ThemeObjectBranchIcon size={13} /><span>Show Git ignored files</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
   </div>
@@ -1057,9 +1059,9 @@ export function FileExplorer({
         ? toolbarTarget ? createPortal(toolbar, toolbarTarget) : null
         : <div className="explorer-header"><span>Explorer</span>{toolbar}</div>}
       <label className="file-search">
-        <Search size={13} />
+        <ThemeActionSearchIcon size={13} />
         <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find loaded files" />
-        {query ? <button onClick={() => setQuery('')} title="Clear"><X size={11} /></button> : null}
+        {query ? <button onClick={() => setQuery('')} title="Clear"><ThemeActionClearIcon size={11} /></button> : null}
       </label>
       <DndContext
         sensors={sensors}
@@ -1191,7 +1193,7 @@ export function FileExplorer({
                 <button className="small-button" onClick={() => void refreshExplorer()}>Retry</button>
                 {workspace?.hostId === 'local' && isFolderWorkspace(workspace) ? (
                   <button className="small-button" disabled={relinking} onClick={() => void rebindWorkspacePath()}>
-                    {relinking ? <LoaderCircle className="spin" size={12} /> : <FolderOpen size={12} />}
+                    {relinking ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeObjectFolderOpenIcon size={12} />}
                     {relinking ? 'Choosing…' : 'Choose new folder'}
                   </button>
                 ) : null}
@@ -1203,7 +1205,7 @@ export function FileExplorer({
         </div>
         <DragOverlay dropAnimation={null}>
           {activeDrag ? (
-            <div className="file-tree-drag-preview"><GripVertical size={12} /><span>{activeDrag.name}</span></div>
+            <div className="file-tree-drag-preview"><ThemeActionDragIcon size={12} /><span>{activeDrag.name}</span></div>
           ) : null}
         </DragOverlay>
       </DndContext>

@@ -195,7 +195,7 @@
  * 的呼吸是有意义的（那一枚点单独存在）。这里静止的彩色已经够把它从灰图标里分出来。
  */
 .workbench-tab__driving-mark { color: var(--green); }
-.workbench-tab__dirty { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--amber); }
+.workbench-tab__dirty { width: 6px; height: 6px; flex: 0 0 auto; color: var(--amber); }
 .workbench-tab__close {
   width: 16px;
   height: 16px;

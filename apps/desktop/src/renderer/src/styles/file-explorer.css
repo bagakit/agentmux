@@ -95,7 +95,7 @@
 .tree-row--load-failed .tree-row__label { color: var(--red-text); }
 .tree-row__label { min-width: 0; max-width: 100%; justify-self: start; padding:0 var(--sp-1); overflow: hidden; font-size: var(--fs-micro); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .tree-row__badge { padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--blue); background: var(--surface-2); font-size: var(--fs-micro); text-transform: uppercase; }
-.tree-row__dirty { width: 6px; height: 6px; flex: none; margin-left:auto; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--amber-wash); }
+.tree-row__dirty { width: 6px; height: 6px; flex: none; margin-left:auto; color: var(--amber); filter: drop-shadow(0 0 1px var(--amber-wash)); }
 .tree-row__dirty + .tree-row__badge { margin-left:0; }
 /*
   源码状态标记（挂在 dirty/badge 之前的倒数第二个 auto 列）。**颜色不是唯一信号**（无障碍）：这枚标记
