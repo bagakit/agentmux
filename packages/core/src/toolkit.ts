@@ -5,6 +5,7 @@ import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecor
 import { parseToolkitResultDocument, type ToolkitResultDocument } from './toolkit-result-document.js'
 export * from './toolkit-result-document.js'
 export * from './toolkit-performance-failure.js'
+import { parseToolkitPerformanceDiagnostics, type ToolkitPerformanceDiagnostics } from './toolkit-performance-failure.js'
 
 export const TOOLKIT_STATES = ['idle', 'starting', 'observing', 'paused', 'stopping', 'failed', 'unknown'] as const
 export type ToolkitState = typeof TOOLKIT_STATES[number]
@@ -12,6 +13,7 @@ export type ToolkitMetricsSnapshot = {
   schema: 'agentmux.toolkit.v1'; kind: 'metrics'; toolId: 'performance'; executionId: string | null
   run: { hostId: string; runId: string } | null; state: ToolkitState; reason: string | null
   startedAt: number | null; observedAt: number | null; observation: MetricsObservation | null; document: ToolkitResultDocument | null
+  diagnostics: ToolkitPerformanceDiagnostics
   manual: boolean; consumerCount: number; sequence: number
   trend: { observedAt: number; appCpuPercent: number | null; appRssKib: number | null }[]
 }
@@ -94,7 +96,9 @@ export type ToolkitOperation = typeof TOOLKIT_OPERATIONS[number]
 type Envelope = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
 export type ToolkitRequest = Envelope & (
   | { operation: 'toolkit.list' }
-  | { operation: 'toolkit.get' | 'toolkit.script' | 'toolkit.watch'; toolId: string }
+  | { operation: 'toolkit.script'; toolId: string }
+  | { operation: 'toolkit.get'; toolId: string; includeFailureEvidence?: true }
+  | { operation: 'toolkit.watch'; toolId: string; captureFailure?: true; includeFailureEvidence?: true }
   | { operation: 'toolkit.run'; toolId: string; input?: ToolkitRunInput }
   | { operation: 'toolkit.action'; toolId: string; actionId: string; input: ToolkitActionInput }
   | { operation: 'toolkit.stop'; toolId: string; executionId?: string | null }
@@ -112,7 +116,7 @@ export type ToolkitResult =
 export interface AgentMuxToolkitPort {
   execute(request: ToolkitRequest, signal: AbortSignal, context?: import('./display-label.js').AgentMuxNameContext): Promise<ToolkitResult>
   subscribe(toolId: string, onSnapshot: (value: ToolkitSnapshot) => void,
-    onEnd: (error?: Error) => void, signal: AbortSignal): Promise<{ dispose(): void }>
+    onEnd: (error?: Error) => void, signal: AbortSignal, options?: { captureFailure?: true; includeFailureEvidence?: true }): Promise<{ dispose(): void }>
 }
 export function isToolkitOperation(value: unknown): value is ToolkitOperation {
   return typeof value === 'string' && (TOOLKIT_OPERATIONS as readonly string[]).includes(value)
@@ -305,7 +309,7 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
 export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
   const source = settingsResourceEnvelope(value, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained',
     'definition', 'state', 'admission', 'latestConfirmed', 'consumerCount', 'sequence',
-    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'trend'], 'CONTROL_PROTOCOL_ERROR')
+    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'trend', 'diagnostics'], 'CONTROL_PROTOCOL_ERROR')
   if (source.schema !== 'agentmux.toolkit.v1') invalid()
   if (source.kind === 'package-unavailable') {
     const r = record(source, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained'])
@@ -330,10 +334,11 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     count(r.consumerCount); count(r.sequence); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096))
     return { ...r, definition, admission, latestConfirmed } as ToolkitScriptSnapshot
   }
-  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'consumerCount', 'sequence', 'trend'])
+  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'consumerCount', 'sequence', 'trend', 'diagnostics'])
   if (r.kind !== 'metrics' || r.toolId !== 'performance' || !TOOLKIT_STATES.includes(r.state as ToolkitState) || typeof r.manual !== 'boolean') invalid()
   nullable(r.executionId, identity); nullable(r.reason, text); nullable(r.startedAt, time); nullable(r.observedAt, time)
   count(r.consumerCount); count(r.sequence); runRef(r.run)
+  parseToolkitPerformanceDiagnostics(r.diagnostics)
   if (r.observation !== null) {
     const obs = parseMetricsObservation(r.observation)
     if (r.observedAt !== obs.observedAt) invalid()
@@ -446,6 +451,13 @@ export function parseToolkitRequest(value: unknown): ToolkitRequest {
       identity(source.actionId, code); parseToolkitActionInput(source.input, code); break
     }
     case 'toolkit.stop': record(source, source.toolId === 'performance' ? base : [...base, 'executionId'], [], code); if (source.toolId !== 'performance' && source.executionId !== null) identity(source.executionId, code); break
+    case 'toolkit.get':
+    case 'toolkit.watch':
+      record(source, base, source.operation === 'toolkit.watch' ? ['captureFailure', 'includeFailureEvidence'] : ['includeFailureEvidence'], code)
+      for (const key of ['captureFailure', 'includeFailureEvidence']) {
+        if (Object.hasOwn(source, key) && (source.toolId !== 'performance' || source[key] !== true)) invalid(code)
+      }
+      break
     default: record(source, base, [], code)
   }
   return source as ToolkitRequest
