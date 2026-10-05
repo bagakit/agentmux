@@ -11,7 +11,7 @@ export function confirmedSteerDelivery(timeline: AgentTimelineSnapshot | undefin
 /** Core records prompt:<operationId> only after the input side effect succeeds. A lost IPC reply
  * or renderer restart must not turn that durable delivery back into a retryable local draft. */
 export function reconcileDeliveredSteers<State extends {
-  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true; goalPmo?: { creationOperationId?: string } }>>
+  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true; goalDispatch?: { goalId: string; operationId: string }; goalPmo?: { creationOperationId?: string } }>>
   timelines: Record<string, AgentTimelineSnapshot>
   sessions: SessionSnapshot[]
 }>(state: State, sessionId: string): State {
@@ -25,7 +25,7 @@ export function reconcileDeliveredSteers<State extends {
     .map((item) => item.id))
   // Original input confirmation does not confirm the first Goal source write. Keep its
   // exact existing queue reference until the caller reconciles that owner without input.
-  const pending = queue.filter((entry) => entry.archived || entry.goalPmo?.creationOperationId !== undefined || !delivered.has(`prompt:${entry.operationId}`))
+  const pending = queue.filter((entry) => entry.archived || entry.goalDispatch !== undefined || entry.goalPmo?.creationOperationId !== undefined || !delivered.has(`prompt:${entry.operationId}`))
   if (pending.length === queue.length) return state
   const agentSteerQueues = { ...state.agentSteerQueues }
   if (pending.length) agentSteerQueues[sessionId] = pending

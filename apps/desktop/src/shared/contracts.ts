@@ -1619,6 +1619,9 @@ export type AgentMuxDesktopApi = {
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
   }
   demands: {
+    prepareGoalStart(goalId: string, intent: import('@agentmux/demand').DemandDispatchIntent, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
+    inspectDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandDispatch | null>
+    reconcileDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandReceipt>
     list(): Promise<import('@agentmux/demand').Demand[]>
     create(input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
     reconcilePmoCreation(intent: import('./goal-pmo-origin').GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string): Promise<import('@agentmux/demand').DemandReceipt>
@@ -1745,7 +1748,7 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference): Promise<void>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
     respondInteraction(

@@ -381,6 +381,7 @@ export type AgentMuxDemand = {
   parentDemandId?: string | null
   phaseIndex?: number | null
   activityLog?: string[]
+  dispatches?: import('@agentmux/demand').DemandDispatch[]
   activities?: AgentMuxDemandActivity[]
   participations: import('@agentmux/demand').DemandParticipation[]
   creationOrigin?: import('@agentmux/demand').DemandCreationOrigin

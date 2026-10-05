@@ -1,3 +1,4 @@
+import type { DemandDispatch } from './dispatch.js'
 import type { DemandCreationOrigin, DemandParticipation, DemandParticipationSource } from './collaboration.js'
 import type { DemandContentReference } from './content-references.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from './goals.js'
@@ -98,6 +99,8 @@ export type Demand = {
   creationOrigin?: DemandCreationOrigin
   /** Append-only original content provenance, not execution or display ownership. */
   contentRefs?: DemandContentReference[]
+  /** Explicit Start provenance. Historical relations and activity never author this fact. */
+  dispatches?: DemandDispatch[]
   activities: DemandActivity[]
   decisions: DemandDecision[]
   alignment?: DemandAlignment

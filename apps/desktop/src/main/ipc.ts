@@ -1,3 +1,6 @@
+import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
+import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
+import { parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
 import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from './demand-participation.js'
 import { resolveGoalsPreferences } from '../shared/goals-preferences.js'
 import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '../shared/goal-pmo-origin.js'
@@ -828,6 +831,40 @@ export async function registerIpc(args: {
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
   handle('demands:list', async () => await demands.list())
+  const goalDispatchInputs = new GoalDispatchInputOwner(demands, args.runtime)
+  handleWithEvent('demands:inspectDispatch', async (event, reference: GoalDispatchReference) => {
+    requireTrustedSender('demands:inspectDispatch', event); assertGoalDispatchReference(reference)
+    return demands.inspectDispatch(reference.goalId, reference.operationId)
+  })
+  handleWithEvent('demands:reconcileDispatch', async (event, reference: GoalDispatchReference) => {
+    requireTrustedSender('demands:reconcileDispatch', event); assertGoalDispatchReference(reference)
+    return goalDispatchInputs.reconcile(reference)
+  })
+  handleWithEvent('demands:prepareGoalStart', async (event, goalId: string, input: DemandDispatchIntent, controlRequestId?: string) => {
+    requireTrustedSender('demands:prepareGoalStart', event)
+    const intent = parseDemandDispatchIntent(input)
+    if (controlRequestId !== undefined) controlBridge.nameRequest(controlRequestId, request =>
+      (request.operation === 'demand.start' || request.operation === 'demand.assign' && request.start === true) &&
+      request.demandId === goalId && request.requestId === intent.operationId &&
+      (request.sessionId === undefined || request.sessionId === intent.agentSessionId) &&
+      (request.operation !== 'demand.start' || Boolean(request.continuation) === (intent.execution === 'continue')))
+    const original = await demands.inspectDispatch(goalId, intent.operationId)
+    if (original) {
+      if (!sameDemandDispatchIntent(original, intent)) throw new AgentMuxError('The original Goal Start input or target changed.', 'CONTROL_REQUEST_CONFLICT')
+      return demands.prepareDispatch(goalId, intent)
+    }
+    const goal = await demands.get(goalId)
+    if (!goal) throw new AgentMuxError('The original Goal is unavailable. Its Agent and input remain available.', 'CONTROL_UNAVAILABLE')
+    if (intent.execution === 'continue') {
+      const loops = await args.progressLoops.listGoals(goalId), loop = loops.find(loop => loop.loopId === intent.loopId)
+      if (!loop || loop.creationOperationId !== intent.operationId || loop.agentSessionId !== intent.agentSessionId || loop.hostId !== intent.hostId ||
+          loop.initialDelivery?.condition.expectedRun.runId !== intent.runId || loop.initialDelivery.prompt !== intent.prompt || (loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== intent.alignmentRevision))
+        throw new AgentMuxError('The original prepared Goal Loop does not match this input. Keep its exact target and operation.', 'CONTROL_REQUEST_CONFLICT')
+    } else if (!goal.assigneeSessionIds.includes(intent.agentSessionId)) throw new AgentMuxError('This Start must target an exact responsible Agent Session. Its manual input remains available.', 'CONTROL_REQUEST_CONFLICT')
+    const native = await args.runtime.agentCreation(intent.hostId, intent.agentSessionId)
+    if (native.agentSessionId !== intent.agentSessionId || native.run.runId !== intent.runId) throw new AgentMuxError('The original Goal Run changed before preparation. Keep the original Agent and inspect this operation.', 'CONTROL_REQUEST_CONFLICT')
+    return demands.prepareDispatch(goalId, intent)
+  })
   const pmoGoal = async (intent: GoalPmoIntent) => {
     assertGoalPmoIntent(intent)
     const goal = await demands.get(intent.goalId)
@@ -1291,7 +1328,8 @@ export async function registerIpc(args: {
     agentMuxNote?: string,
     sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8],
     goalContinuation?: { goalId: string; loopId: string },
-    goalPmo?: GoalPmoIntent
+    goalPmo?: GoalPmoIntent,
+    goalDispatch?: GoalDispatchReference
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
     if (goalPmo) {
@@ -1305,15 +1343,22 @@ export async function registerIpc(args: {
       effectiveAuthorHuman = true
     }
     if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-    if (goalContinuation) {
-      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-      if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
-      await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
-        (isCurrent, signal) => args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel))
-    } else {
-      pauseUserProgress(session, 'Paused for your message.')
-      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
+    const submitOriginal = async () => {
+      if (goalContinuation) {
+        assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+        if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
+          (isCurrent, signal) => args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel))
+      } else {
+        pauseUserProgress(session, 'Paused for your message.')
+        await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
+      }
     }
+    if (goalDispatch) {
+      assertManualPromptSenderTrusted(event.sender, args.window.webContents); assertGoalDispatchReference(goalDispatch)
+      if (goalPmo) throw new AgentMuxError('A PMO discussion cannot impersonate an explicit Goal Start.', 'CONTROL_REQUEST_CONFLICT')
+      await goalDispatchInputs.submit(goalDispatch, session, operationId, prompt, submitOriginal, goalContinuation)
+    } else await submitOriginal()
     if (goalPmo) {
       const original = await args.runtime.agentCreation(session.hostId, session.agentSessionId)
       if (original.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The confirmed PMO recipient changed.', 'CONTROL_REQUEST_CONFLICT')

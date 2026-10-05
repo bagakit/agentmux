@@ -249,6 +249,9 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('scratch:resetWiki', workspaceId, topicId)
   },
   demands: {
+    prepareGoalStart: (goalId, intent, controlRequestId) => ipcRenderer.invoke('demands:prepareGoalStart', goalId, intent, controlRequestId),
+    inspectDispatch: (reference) => ipcRenderer.invoke('demands:inspectDispatch', reference),
+    reconcileDispatch: (reference) => ipcRenderer.invoke('demands:reconcileDispatch', reference),
     list: () => ipcRenderer.invoke('demands:list'),
     create: (input, controlRequestId) => ipcRenderer.invoke('demands:create', input, controlRequestId),
     reconcilePmoCreation: (intent, hostId, agentSessionId, createOperationId) => ipcRenderer.invoke('demands:reconcilePmoCreation', intent, hostId, agentSessionId, createOperationId),
@@ -432,8 +435,8 @@ const api: AgentMuxPreloadApi = {
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
     recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>

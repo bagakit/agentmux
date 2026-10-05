@@ -1,3 +1,4 @@
+import { RegionCurrentDemand } from './RegionCurrentDemand'
 import { ArrowRight, History, MoreHorizontal, RotateCcw } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -61,6 +62,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     <HostBadge host={executionHost} />
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {resultReview}
+    {sessionKind === 'agent' && nativeSession ? <RegionCurrentDemand agentSessionId={nativeSession.control.agentSessionId} hostId={nativeSession.control.hostId} /> : null}
     <DropdownMenu.Root>
       <DropdownMenu.Trigger className="agent-region-header__more"
         aria-label={`More actions for ${name}${nativeSession && nativeSourceLabel(nativeSession) ? `; ${nativeSourceLabel(nativeSession)}` : ''}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
