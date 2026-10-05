@@ -17,6 +17,8 @@ export type ConversationBucket = 'drafts' | 'attempts' | 'responses'
 export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Pick<ResponseAttempt, 'phase'>
 export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
 export type ConversationConflict = { bucket: ConversationBucket; key: string; value: ConversationValue }
+/** Facts written by this transaction, excluding later optimistic edits. */
+export type ConversationCommit = { recordId: string | null; conversation: DraftRecord }
 const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 export type GoalWorkSelection = { runtimeId: string; deviceHostId: string | null; sessionId: string; goalId: string }
 export type MobileGoalOperation = GoalWorkSelection & { operationId: string } & (
@@ -266,7 +268,8 @@ export class DeviceWorkfaceStore {
     // setItem is atomic; a read/modify/write is not. All writers share this lock.
     return withDeviceStorageLock(action)
   }
-  private update(change: (value: DeviceWorkface) => DeviceWorkface, expectedRecordId?: string | null): Promise<void> {
+  private update<T = void>(change: (value: DeviceWorkface) => DeviceWorkface, expectedRecordId?: string | null,
+    acknowledge?: (committed: DeviceWorkface) => T): Promise<T> {
     this.refresh()
     const recordId = expectedRecordId === undefined ? this.value.recordId ?? null : expectedRecordId
     if ((this.value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。')
@@ -288,9 +291,11 @@ export class DeviceWorkfaceStore {
       if ((latest.recordId ?? null) !== recordId) { domainFailure = true; throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。') }
       try { next = parseDeviceWorkface(change(latest)) } catch (error) { domainFailure = true; throw error }
       this.write(next)
+      const acknowledged = acknowledge?.(next) as T
       releasePending()
       this.value = this.projectPending(next)
       this.temporary = this.pending.length > 0
+      return acknowledged
     })).catch(error => {
       releasePending()
       if (domainFailure && failedLatest) {
@@ -320,7 +325,7 @@ export class DeviceWorkfaceStore {
     const parsed = parseDraftRecord(conversation)
     return this.update(value => ({ ...value, conversation: parsed }))
   }
-  editConversation(edits: ConversationEdit[], recordId: string | null): Promise<void> {
+  editConversation(edits: ConversationEdit[], recordId: string | null): Promise<ConversationCommit> {
     const captured = structuredClone(edits)
     return this.update(value => {
       const conversation = structuredClone(value.conversation)
@@ -340,7 +345,7 @@ export class DeviceWorkfaceStore {
       }
       if (conflicts.length) conversation.conflicts = conflicts
       return { ...value, conversation: parseDraftRecord(conversation) }
-    }, recordId)
+    }, recordId, committed => ({ recordId: committed.recordId ?? null, conversation: structuredClone(committed.conversation) }))
   }
   retainFileUpload(input: MobileFileUpload, expectedRecordId = this.recordIdentity(), expectedUpload?: MobileFileUpload): Promise<void> {
     const upload = parseMobileFileUpload(input)
