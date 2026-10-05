@@ -77,6 +77,13 @@ function dispatchWith(
   })
 }
 
+describe('Browser command guidance', () => {
+  it('points an unsupported page function to the public amux Browser command', async () => {
+    const dispatch = dispatchOn(fakeSession())
+    await expect(dispatch('newPage', [])).rejects.toThrow('use gotoUrl() here, and `amux browser open` to get another page.')
+  })
+})
+
 describe('够不着的 frame 要浮现，不能被读成「这页没有 iframe」', () => {
   it('子 frame 自动 attach 失败时，快照在 missingFrames 里说出来', async () => {
     const dispatch = dispatchOn(fakeSession({ frameDiscoveryFailure: 'not supported on this target' }))
