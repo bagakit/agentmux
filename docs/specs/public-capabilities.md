@@ -80,7 +80,7 @@ typed Metrics 由 [metrics.ts](../../packages/core/src/metrics.ts) 校验，Sett
 
 ### 设备与移动连接
 
-手机连接的来源为 [Relay framing](../../packages/core/src/public-rpc-relay.ts)、[有限浏览器 Hosted adapter](../../packages/core/src/relay-hosted.ts)、[设备领域类型及严格解析](../../packages/core/src/public-rpc-device.ts)和 [Host 原 Authority 组合](../../apps/host/src/host.ts)。`agentmux device link` 返回当前完整公有 offer 链接，`device ls` 回读连接与设备事实，`device revoke --device ID` 撤销精确设备；设备命名只沿已认证的 `device hello --name NAME`。GUI 复用原服务，Relay 与手机页面由本机 Host 提供。接入、身份、重连与权限约束唯一沿[《手机版 Relay 连接》](../design/behavior/public-control.md#手机版-relay-连接)，构建成功不代替真机验收。
+手机连接的来源为 [Relay framing](../../packages/core/src/public-rpc-relay.ts)、[有限浏览器 Hosted adapter](../../packages/core/src/relay-hosted.ts)、[设备领域类型及严格解析](../../packages/core/src/public-rpc-device.ts)和 [Host 原 Authority 组合](../../apps/host/src/host.ts)。`amux device link` 返回当前完整公有 offer 链接，`device ls` 回读连接与设备事实，`device revoke --device ID` 撤销精确设备；设备命名只沿已认证的 `device hello --name NAME`。GUI 复用原服务，Relay 与手机页面由本机 Host 提供。接入、身份、重连与权限约束唯一沿[《手机版 Relay 连接》](../design/behavior/public-control.md#手机版-relay-连接)，构建成功不代替真机验收。
 
 核对能力按同一对象寻找业务类型、实际 owner、服务接线、CLI／Client 消费及验证证据；查看事实、修改状态与执行 Agent 的副作用须各自明确。CLI 与 GUI 是同一业务 owner 的消费面，不成为事实镜像。运行中的 help 只说明该执行版本公开什么；源码、构建、安装与当前实例的身份需分别核对。
 
