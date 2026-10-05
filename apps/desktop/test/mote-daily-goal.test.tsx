@@ -348,10 +348,10 @@ it('Demand Supervisor: the no-Supervisor banner opens the shared choice without 
   expect((await demands.get('goal'))!.supervisorSessionId).toBeNull(); expect(writes).toEqual([]); expect(manager.list()).toEqual([])
 })
 
-it('Demand Supervisor: shared Continue uses the saved Supervisor instead of Mote selection or first historical association', async () => {
+it('Demand Supervisor: shared Continue uses the saved Supervisor instead of first historical association', async () => {
   await demands.update('goal', { sessionIds: ['first-history-only', session.agentSessionId] }); await useAppStore.getState().refreshDemand('goal')
   const goal = useAppStore.getState().demands.goal!
-  await act(async () => root.render(<GoalContinuationControl demand={goal} initialSessionId="first-history-only" />))
+  await act(async () => root.render(<GoalContinuationControl demand={goal} />))
   await vi.waitFor(() => expect(container.querySelector('form')).not.toBeNull())
   expect(container.querySelector('[aria-label="Goal continuation Agent"]')).toBeNull()
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Start and continue')!
@@ -493,6 +493,66 @@ it.each(['finite', 'continue'] as const)('Demand Supervisor: canonical %s start 
   expect((await publicOwner.call('goal.inspect', { goalId: 'goal' })).goal).toMatchObject({ supervisorSessionId: session.agentSessionId, assigneeSessionIds: [session.agentSessionId] })
   expect((await demands.get('goal'))!.sessionIds).toEqual([session.agentSessionId])
 })
+it.each(['confirmed', 'reconciled', 'missing', 'inspect-failed', 'reconcile-failed', 'still-unknown', 'different-operation'] as const)(
+  'Goal replay queue: %s preserves the original input and releases only a confirmed Goal operation', async observation => {
+    await act(async () => root.render(null))
+    const publicOwner = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], execute: request => useAppStore.getState().executeControl(request) })
+    const input = { goalId: 'goal', sessionId: session.agentSessionId, operationId: 'replay-queue-original', continuation: { intervalMs: 60_000, alignmentRevision: 1 } }
+    const deliver = bridge.deliver
+    bridge.deliver = (channel, ...args) => {
+      if (channel === SESSION_EVENT_CHANNEL && args[0]?.event?.type === 'agent-timeline') return
+      deliver(channel, ...args)
+    }
+    const confirm = api.continuousProgress.initialGoalInput
+    const lost = vi.spyOn(api.continuousProgress, 'initialGoalInput').mockImplementation(async (...args) => {
+      const result = await confirm(...args)
+      if (args[3] === 'confirm') throw new Error('Original confirmation reply lost')
+      return result
+    })
+    await expect(publicOwner.call('goal.start', input)).rejects.toThrow('confirmation reply lost')
+    lost.mockRestore()
+    const original = useAppStore.getState().agentSteerQueues[session.agentSessionId]![0]!
+    expect(original.goalDispatch).toEqual({ goalId: 'goal', operationId: input.operationId })
+    const reference = original.goalDispatch!
+    // Confirm the real business owner from its actual Core timeline before losing only
+    // an observation reply. No fixture creates a dispatch/Loop/input confirmation.
+    const receipt = await api.demands.reconcileDispatch(reference)
+    const dispatch = await api.demands.inspectDispatch(reference)
+    expect(dispatch?.stage).toBe('confirmed')
+    const accepted = [...writes]
+    expect(accepted.length).toBeGreaterThan(0)
+    const { goalDispatch: _dispatch, goalContinuation: _continuation, ...manual } = original
+    const retained = [
+      { ...original, goalDispatch: { goalId: 'another-goal', operationId: input.operationId } },
+      { ...original, operationId: 'another-operation', goalDispatch: { goalId: 'goal', operationId: 'another-operation' } },
+      { ...manual, operationId: 'manual-operation', text: 'My queued manual message', origin: 'manual' as const }
+    ]
+    const otherQueue = [{ ...manual, operationId: 'another-presentation', text: 'Retain this unrelated presentation' }]
+    useAppStore.setState({ agentSteerQueues: { [session.agentSessionId]: [original, ...retained], unrelated: otherQueue } })
+    useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'My healthy unsent draft')
+    await vi.waitFor(() => expect(manager.list()[0]?.status).toBe('paused'))
+    const loops = structuredClone(manager.list())
+    const unknown = { ...dispatch!, stage: 'unknown' as const }
+    if (observation === 'missing') vi.spyOn(api.demands, 'inspectDispatch').mockResolvedValueOnce(null)
+    else if (observation === 'inspect-failed') vi.spyOn(api.demands, 'inspectDispatch').mockRejectedValueOnce(new Error('Original dispatch observation unavailable'))
+    else if (observation !== 'confirmed') {
+      vi.spyOn(api.demands, 'inspectDispatch').mockResolvedValueOnce(unknown)
+      if (observation === 'reconcile-failed') vi.spyOn(api.demands, 'reconcileDispatch').mockRejectedValueOnce(new Error('Original dispatch reconciliation unavailable'))
+      else if (observation === 'still-unknown' || observation === 'different-operation') {
+        vi.spyOn(api.demands, 'reconcileDispatch').mockResolvedValueOnce({ ...receipt, demand: { ...receipt.demand,
+          dispatches: [observation === 'still-unknown' ? unknown : { ...dispatch!, operationId: 'different-confirmed-operation' }] } })
+      }
+      // 'reconciled' consumes the original Main/Core/Demand reconciliation unchanged.
+    }
+    expect(await publicOwner.call('goal.start', input)).toMatchObject({ receipt: { goalId: 'goal', sessionId: session.agentSessionId } })
+    const confirmed = observation === 'confirmed' || observation === 'reconciled'
+    expect(useAppStore.getState().agentSteerQueues[session.agentSessionId]).toEqual(confirmed ? retained : [original, ...retained])
+    expect(useAppStore.getState().agentSteerQueues.unrelated).toEqual(otherQueue)
+    expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('My healthy unsent draft')
+    expect(writes).toEqual(accepted); expect(manager.list()).toEqual(loops)
+    expect(useAppStore.getState().sessions[0]).toMatchObject({ id: session.agentSessionId, processState: 'running', control: { run: session.run } })
+    bridge.deliver = deliver
+  })
 function refuseImmediatePreparation() {
   return vi.spyOn((client as any).promptSubmission, 'qualifyInputTransport')
     .mockRejectedValue(new Error('Native immediate preparation is unavailable'))
