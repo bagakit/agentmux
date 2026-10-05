@@ -1,0 +1,23 @@
+.recall-notebook-selector { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 10px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--wash-1); color: var(--text-2); text-align: left; cursor: pointer; }
+.recall-notebook-selector:hover, .recall-notebook-selector[data-state="open"] { background: var(--wash-2); border-color: var(--line); }
+.recall-notebook-selector > span { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.recall-notebook-selector small { font-size: 10px; color: var(--text-3); }
+.recall-notebook-selector strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 550; }
+.recall-notebook-selector > svg { flex: none; }
+.recall-notebook-menu { z-index: 1000; width: min(300px, calc(100vw - 24px)); padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--text); box-shadow: var(--shadow-overlay, 0 12px 35px #0003); }
+.recall-notebook-menu-label { padding: 7px 8px; font-size: 10px; color: var(--text-3); }
+.recall-notebook-menu-books { max-height: min(360px, 50vh); overflow: auto; }
+.recall-notebook-menu-item { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 6px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; outline: none; }
+.recall-notebook-menu-item > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.recall-notebook-menu-item > svg { flex: none; }
+.recall-notebook-menu-item[data-highlighted] { background: var(--wash-2); }
+.recall-notebook-menu-item[data-disabled] { opacity: .5; cursor: default; }
+.recall-notebook-menu-separator { height: 1px; margin: 5px; background: var(--line-soft); }
+.recall-directory-tools { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.recall-directory-home { padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font-size: 11px; cursor: pointer; }
+.recall-directory-home:hover, .recall-directory-home[aria-current] { color: var(--text); background: var(--wash-1); }
+.recall-directory-state { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; max-width: 500px; margin: 10vh auto; padding: 24px; color: var(--text-3); }
+.recall-directory-state h2 { margin: 0; font-size: 20px; font-weight: 500; color: var(--text); }
+.recall-directory-state p { margin: 0; line-height: 1.7; font-size: 13px; }
+.global-recall-surface .survey-page-list { min-height: 0; }
+.global-recall-surface .survey-tabs { gap: 12px; }
