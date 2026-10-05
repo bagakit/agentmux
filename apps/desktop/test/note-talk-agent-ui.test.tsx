@@ -30,7 +30,7 @@ const a = page('A'), b = page('B')
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {
   one: { label: 'First Agent', providerId: 'codex', command: 'first-agent', args: [], env: {}, injectAgentMuxGuide: true },
   two: { label: 'Second Agent', providerId: 'claude', command: 'second-agent', args: [], env: {}, injectAgentMuxGuide: true }
-}, workspaces: [{ id: '__notes__', name: 'Recall', hostId: 'local', path: _hygiene_fixturePath("notes"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' } }
+}, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }, workspaces: [{ id: '__notes__', name: 'Recall', hostId: 'local', path: _hygiene_fixturePath("notes"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' } }
 function report(requestId: string, outcome: 'unknown' | 'opened' = 'unknown'): AgentMuxSpaceMutationReport {
   return { requestId, outcome, from: null, to: null, agent: null, resource: null, save: { layoutApplied: true,
     localStorageWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: null }, issues: [] }
@@ -40,16 +40,16 @@ const restoredFocus = vi.fn()
 const opened = vi.fn(), talked = vi.fn(), activated = vi.fn(), dismissed = vi.fn(), selectedReference = vi.fn()
 let controls: { target(page: NotebookPage | null): void; visible(value: boolean): void; external(value: boolean): void }
 type Directory = 'sidebar' | 'tree' | 'cards' | 'graph'
-function Harness({ directory = 'sidebar', initial = null }: { directory?: Directory; initial?: NotebookPage | null }) {
+function Harness({ directory = 'sidebar', initial = null, pages = [a, b] }: { directory?: Directory; initial?: NotebookPage | null; pages?: NotebookPage[] }) {
   const [target, setTarget] = useState(initial), [visible, setVisible] = useState(true), [external, setExternal] = useState(false)
   controls = { target: setTarget, visible: setVisible, external: setExternal }
   const returnFocus = useRef<HTMLElement | null>(null)
   const onTalk = (value: NotebookPage, invoker?: HTMLElement | null) => { talked(value, invoker); returnFocus.current = invoker ?? null; setTarget(value) }
   return <><div data-open-note={fixture.state.recallNoteId}>
-    {directory === 'sidebar' ? <NotebookNavigation notebooks={[book]} pages={[a, b]} selectedId={book.notebookId} selectedNoteId={fixture.state.recallNoteId}
+    {directory === 'sidebar' ? <NotebookNavigation notebooks={[book]} pages={pages} selectedId={book.notebookId} selectedNoteId={fixture.state.recallNoteId}
       onSelect={() => {}} onOpen={opened} onTalk={onTalk} onCreateChild={() => {}} query="" onQuery={() => {}} onCreate={() => {}}
       pending={false} actions={null} archived={false} onArchivedChange={() => {}} />
-      : <NotebookHome notebook={book} pages={[a, b]} pending={false} onCreate={() => {}} onOpen={opened} onTalk={onTalk} query="" view={directory} />}
+      : <NotebookHome notebook={book} pages={pages} pending={false} onCreate={() => {}} onOpen={opened} onTalk={onTalk} query="" view={directory} />}
     </div><NoteTalkAgent page={target} notebook={book} visible={visible} onDismiss={() => { dismissed(); setTarget(null) }}
       onActivate={value => { activated(value); fixture.state.recallNoteId = value.noteId }} onSelectReference={selectedReference} onRestoreFocus={() => { restoredFocus(); returnFocus.current?.focus() }} /><button data-right-agent-input>Right Agent input</button>
     <Dialog.Root open={external}><Dialog.Portal container={resolveOverlayContainer()}><Dialog.Content aria-describedby={undefined}>
@@ -155,7 +155,7 @@ it.each(['hidden', 'different Note'] as const)('keeps later %s navigation when t
   expect(input.authorize!()).toBe(true)
   await act(async () => {
     fixture.state.recallNoteId = 'A'
-    if (mode === 'hidden') { fixture.state.mainSurface = 'work'; controls.visible(false) }
+    if (mode === 'hidden') { fixture.state.mainSurface = 'workbench'; controls.visible(false) }
     else controls.target(a)
   })
   expect(input.authorize!()).toBe(false)
@@ -242,4 +242,48 @@ it('does not reclaim an external DOM focus owner when the original dialog is pro
   await new Promise(resolve => setTimeout(resolve, 20))
   expect(document.activeElement).toBe(external); expect(document.activeElement).not.toBe(invoker)
   expect(restoredFocus).not.toHaveBeenCalled(); expect(fixture.talk).not.toHaveBeenCalled(); expect(activated).not.toHaveBeenCalled()
+})
+
+
+it.each(['sidebar', 'tree', 'cards', 'graph'] as const)('keeps closed %s menu input cost independent of 1/10/100 Note rows', async directory => {
+  const add = document.addEventListener.bind(document), remove = document.removeEventListener.bind(document)
+  const listeners = new Map<EventListenerOrEventListenerObject, EventListener>()
+  let calls = 0
+  vi.spyOn(document, 'addEventListener').mockImplementation((type, listener, options) => {
+    const capture = typeof options === 'boolean' ? options : options?.capture
+    if (type === 'keydown' && capture && listener) {
+      const observed: EventListener = event => { calls++; if (typeof listener === 'function') listener.call(document, event); else listener.handleEvent(event) }
+      listeners.set(listener, observed); add(type, observed, options)
+    } else add(type, listener, options)
+  })
+  vi.spyOn(document, 'removeEventListener').mockImplementation((type, listener, options) => {
+    const observed = listener && listeners.get(listener)
+    if (type === 'keydown' && observed) { listeners.delete(listener!); remove(type, observed, options) }
+    else remove(type, listener, options)
+  })
+  const input = document.createElement('input'); document.body.append(input)
+  try {
+    for (const count of [1, 10, 100]) {
+      await act(async () => root.render(<Harness directory={directory} pages={Array.from({ length: count }, (_, index) => page(`row-${index}`))} />))
+      expect(document.querySelector('[role="menu"]')).toBeNull()
+      expect(listeners.size, `${count} rows share one menu listener`).toBe(1)
+      await act(async () => { input.focus(); calls = 0; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true })) })
+      expect(calls, `${count} rows must not amplify unrelated input`).toBe(1)
+      expect(document.activeElement).toBe(input)
+      await act(async () => root.render(null)); expect(listeners.size).toBe(0)
+    }
+  } finally { input.remove() }
+})
+
+it('shares the menu without replacing row DOM or confusing a later clicked Note', async () => {
+  await render('cards')
+  const originalA = button('Note A'), originalB = button('Note B')
+  await rightClickB(); await escape()
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull())
+  expect(button('Note A')).toBe(originalA); expect(button('Note B')).toBe(originalB)
+  await act(async () => originalA.querySelector('strong')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 })))
+  await chooseTalk()
+  expect(talked).toHaveBeenCalledExactlyOnceWith(a, originalA)
+  expect(originalA.isConnected).toBe(true); expect(originalB.isConnected).toBe(true)
+  expect(opened).not.toHaveBeenCalled()
 })
