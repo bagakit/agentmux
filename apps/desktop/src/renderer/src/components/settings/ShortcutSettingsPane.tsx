@@ -176,7 +176,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
                 {PROMPT_REACTION_ICONS.map(icon => <button type="button" className="small-button" key={icon} aria-label={`Quick reply icon ${icon}`} aria-pressed={prompt.reactionIcon === icon} onClick={() => bindReaction(prompt.id, icon)}>
                   <PromptReactionIconView icon={icon} />{icon === 'check' ? 'Check' : icon === 'play' ? 'Play' : 'Explain'}</button>)}
               </div><small>Clicking its SVG sends this saved instruction only, with the original reply reference. It never approves permission requests.</small>
-              {prompt.reactionIcon ? <small>Agent lookup: <code>agentmux settings prompts inspect --keyword {prompt.keyword.trim() || 'code'}</code></small> : null}
+              {prompt.reactionIcon ? <small>Agent lookup: <code>amux settings prompts inspect --keyword {prompt.keyword.trim() || 'code'}</code></small> : null}
             </fieldset>
             <fieldset className="prompt-state-settings"><legend>Available in Agent status when</legend><div className="prompt-state-settings__choices">{COMPOSER_PROMPT_STATES.map((state) => {
               const meaning = describeAgentDisplayState(state)
