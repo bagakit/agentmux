@@ -9,7 +9,7 @@ export const devicesSettingsModule = {
   id: 'devices',
   group: 'connections',
   title: 'Phone & Devices',
-  description: 'Connect your phone and review devices and recent activity.',
+  description: 'Connect your phone and identify paired devices.',
   icon: ThemeObjectPhoneIcon,
   keywords: 'phone mobile device connection relay access network 手机 设备 连接 局域网',
   savedSummary: () => 'Phone connections and device access',

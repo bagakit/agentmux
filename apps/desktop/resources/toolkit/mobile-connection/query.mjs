@@ -12,10 +12,13 @@ async function query(action) {
   return response.result
 }
 const facts = await query('ls')
-const devices = facts.devices.filter(device => device.revokedAt === undefined)
-const result = { schema: 'agentmux.toolkit.result.v1', summary: `${devices.filter(device => device.online).length} online · ${devices.length} authorized`,
-  items: devices.slice(0, 128).map(device => ({ label: device.name, value: device.online ? 'Online' : 'Offline' })), links: [],
-  notice: facts.mobileAccess.state === 'connected' ? 'Connect your phone and Mac to the same Wi-Fi, then open the link.' : `Phone connection unavailable: ${facts.mobileAccess.message}` }
+const registered = facts.devices.filter(device => device.revokedAt === undefined)
+const devices = registered.filter(device => device.online === true)
+const unconfirmed = registered.some(device => device.online === undefined)
+const result = { schema: 'agentmux.toolkit.result.v1', summary: unconfirmed ? `${devices.length} confirmed connected · other connections unconfirmed` : `${devices.length} connected`,
+  items: devices.map(device => ({ label: device.name, value: device.connection?.address ? `Connected · ${device.connection.address}` : 'Connected' })), links: [],
+  notice: (facts.mobileAccess.state === 'connected' ? 'Connect your phone and Mac to the same Wi-Fi, then open the link.' : `Phone connection unavailable: ${facts.mobileAccess.message}`)
+    + (unconfirmed ? ' Some device connections are unconfirmed. Refresh to check their status.' : '') }
 if (mode === 'link') {
   const link = await query('link')
   result.links.push({ label: 'Phone connection link', url: link.url })

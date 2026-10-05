@@ -100,8 +100,29 @@
 }
 .device-management__devices { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
 .device-management__devices > .settings-pane-toolbar { flex-wrap: wrap; gap: var(--sp-3); }
-.device-management__devices > .settings-pane-toolbar h3 { margin: 0; }
+.device-management__devices > .settings-pane-toolbar h3 { margin: 0 auto 0 0; }
 .device-management__updated { margin: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.device-management__records > summary { padding-block: var(--sp-3); color: var(--text-2); cursor: pointer; font-size: var(--fs-body); }
+.device-management__record { min-width: 0; border-top: 1px solid var(--line-soft); }
+.device-management__record > summary { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 0; cursor: pointer; font-size: var(--fs-meta); }
+.device-management__record > summary::before { content: '▸'; color: var(--text-3); }
+.device-management__record[open] > summary::before { content: '▾'; }
+.device-management__record > summary > svg { color: var(--text-3); flex-shrink: 0; }
+.device-management__record > summary > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 550; }
+.device-management__record > summary > span { flex-shrink: 0; color: var(--text-3); }
+.device-management__record-body { padding: 0 0 var(--sp-4) var(--sp-5); }
+.device-management__identity { margin: 0; font-size: var(--fs-meta); line-height: 1.6; }
+.device-management__identity > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--sp-3); padding-block: var(--sp-2); }
+.device-management__identity dt { color: var(--text-3); }
+.device-management__identity dd { margin: 0; min-width: 0; color: var(--text-2); overflow-wrap: anywhere; user-select: text; }
+.device-management__identity code { font: inherit; font-family: var(--font-mono); }
+.device-management__identity dd > button { vertical-align: middle; margin-left: var(--sp-2); }
+.device-management__identity dd > small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
+.device-management__connection-record { margin: var(--sp-4) 0; font-size: var(--fs-meta); color: var(--text-3); }
+.device-management__connection-record p { margin: var(--sp-2) 0; }
+.device-management__connection-record time { margin-left: var(--sp-2); font-variant-numeric: tabular-nums; }
+.device-management__records summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+@media (max-width: 560px) { .device-management__identity > div { grid-template-columns: 1fr; gap: 0; } }
 .device-management__spinner { animation: device-management-spin 1s linear infinite; }
 @keyframes device-management-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .device-management__spinner { animation: none; } }
