@@ -1,20 +1,21 @@
-import {
-  AlignHorizontalDistributeCenter,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Columns3,
-  Grid2x2,
-  Grid3x3,
-  LayoutGrid,
-  PanelLeft
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SplitDirection, WorkbenchRegionLayoutPreset } from '@agentmux/layout'
 import type {
   WorkbenchRegionRearrangeMode,
   WorkbenchSplitMenuEntry
 } from '../lib/workbench-tab-actions'
+
+const ThemeLayoutSplitLeftIcon = semanticIconComponent('layout.split-left')
+const ThemeLayoutSplitRightIcon = semanticIconComponent('layout.split-right')
+const ThemeLayoutSplitUpIcon = semanticIconComponent('layout.split-up')
+const ThemeLayoutSplitDownIcon = semanticIconComponent('layout.split-down')
+const ThemeLayoutColumns3Icon = semanticIconComponent('layout.columns-3')
+const ThemeLayoutGrid4Icon = semanticIconComponent('layout.grid-4')
+const ThemeLayoutGrid6Icon = semanticIconComponent('layout.grid-6')
+const ThemeLayoutGrid9Icon = semanticIconComponent('layout.grid-9')
+const ThemeLayoutBalanceIcon = semanticIconComponent('layout.balance')
+const ThemeLayoutActiveFirstIcon = semanticIconComponent('layout.active-first')
+
 
 /**
  * 分屏方向与布局预设的图标——**一份**，全部菜单容器共用。
@@ -29,18 +30,18 @@ import type {
  * 编译器会替我们记得配图标。
  */
 const SPLIT_ICONS = {
-  left: ArrowLeft,
-  right: ArrowRight,
-  up: ArrowUp,
-  down: ArrowDown
-} satisfies Record<SplitDirection, typeof ArrowRight>
+  left: ThemeLayoutSplitLeftIcon,
+  right: ThemeLayoutSplitRightIcon,
+  up: ThemeLayoutSplitUpIcon,
+  down: ThemeLayoutSplitDownIcon
+} satisfies Record<SplitDirection, typeof ThemeLayoutSplitRightIcon>
 
 const PRESET_ICONS = {
-  'columns-3': Columns3,
-  'grid-4': Grid2x2,
-  'grid-6': LayoutGrid,
-  'grid-9': Grid3x3
-} satisfies Record<WorkbenchRegionLayoutPreset, typeof Grid2x2>
+  'columns-3': ThemeLayoutColumns3Icon,
+  'grid-4': ThemeLayoutGrid4Icon,
+  'grid-6': ThemeLayoutGrid6Icon,
+  'grid-9': ThemeLayoutGrid9Icon
+} satisfies Record<WorkbenchRegionLayoutPreset, typeof ThemeLayoutGrid4Icon>
 
 /**
  * 不依赖格数那两档重排的图标。与 `PRESET_ICONS` 同样是按判别值索引的完整映射——`kind` 是字面量
@@ -50,29 +51,29 @@ const PRESET_ICONS = {
  * 预设那组画的是"网格长什么样"，这两档画的是"做什么动作"。
  */
 const REARRANGE_ICONS = {
-  balance: AlignHorizontalDistributeCenter,
-  'active-first': PanelLeft
-} satisfies Record<WorkbenchRegionRearrangeMode['kind'], typeof Grid2x2>
+  balance: ThemeLayoutBalanceIcon,
+  'active-first': ThemeLayoutActiveFirstIcon
+} satisfies Record<WorkbenchRegionRearrangeMode['kind'], typeof ThemeLayoutGrid4Icon>
 
 /**
  * 一个方向的图标。除了分屏菜单，Tab 菜单的「移到新组」也按方向出图标——那是另一个动作
  * （搬 Tab，不是分格），但「左就是这个箭头」必须是同一个答案，否则同一张菜单里两处朝向不一致。
  */
-export function workbenchSplitDirectionIcon(direction: SplitDirection): typeof ArrowRight {
+export function workbenchSplitDirectionIcon(direction: SplitDirection): typeof ThemeLayoutSplitRightIcon {
   return SPLIT_ICONS[direction]
 }
 
 /** 一档预设的图标。 */
 export function workbenchRegionPresetIcon(
   preset: WorkbenchRegionLayoutPreset
-): typeof Grid2x2 {
+): typeof ThemeLayoutGrid4Icon {
   return PRESET_ICONS[preset]
 }
 
 /** 一档「不依赖格数」的重排的图标。 */
 export function workbenchRegionRearrangeIcon(
   mode: WorkbenchRegionRearrangeMode
-): typeof Grid2x2 {
+): typeof ThemeLayoutGrid4Icon {
   return REARRANGE_ICONS[mode.kind]
 }
 
@@ -87,7 +88,7 @@ export function workbenchRegionRearrangeIcon(
  */
 export function workbenchSplitMenuIcon(
   entry: Extract<WorkbenchSplitMenuEntry, { kind: 'split' | 'preset' | 'rearrange' }>
-): typeof ArrowRight {
+): typeof ThemeLayoutSplitRightIcon {
   switch (entry.kind) {
     case 'split': return workbenchSplitDirectionIcon(entry.direction)
     case 'preset': return workbenchRegionPresetIcon(entry.preset)
