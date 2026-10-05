@@ -4,6 +4,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const boundary = vi.hoisted(() => {
+  let releaseEngine!: () => void, releaseViewer!: () => void
+  const engineGate = new Promise<void>(resolve => { releaseEngine = resolve }), viewerGate = new Promise<void>(resolve => { releaseViewer = resolve })
   class EventBus {
     listeners = new Map<string, Set<(event: any) => void>>()
     on(type: string, listener: (event: any) => void) { const group = this.listeners.get(type) ?? new Set(); group.add(listener); this.listeners.set(type, group) }
@@ -30,11 +32,17 @@ const boundary = vi.hoisted(() => {
     const task = { promise: new Promise((yes, no) => { resolve = yes; reject = no }), resolve: (value: any) => resolve(value), reject: (error: Error) => reject(error), destroy: vi.fn(async () => {}) }
     tasks.push(task); return task
   })
-  return { EventBus, Viewer, tasks, getDocument }
+  return { EventBus, Viewer, tasks, getDocument, holdColdImports: false, engineReady: false, viewerEvaluations: 0, engineGate, viewerGate, releaseEngine, releaseViewer }
 })
 // Only the third-party rendering engine is substituted; the reader and lifecycle below are production.
-vi.mock('pdfjs-dist', () => ({ getDocument: boundary.getDocument, GlobalWorkerOptions: {} }))
-vi.mock('pdfjs-dist/web/pdf_viewer.mjs', () => ({ EventBus: boundary.EventBus, PDFViewer: boundary.Viewer, PDFFindController: class { setDocument = vi.fn() }, RenderingStates: { FINISHED: 3 }, PDFLinkService: class { setViewer = vi.fn(); setDocument = vi.fn(); goToDestination = vi.fn(async () => {}) } }))
+vi.mock('pdfjs-dist', async () => { if (boundary.holdColdImports) await boundary.engineGate; boundary.engineReady = true; return { getDocument: boundary.getDocument, GlobalWorkerOptions: {} } })
+vi.mock('pdfjs-dist/web/pdf_viewer.mjs', async () => {
+  boundary.viewerEvaluations++
+  // The real viewer destructures globalThis.pdfjsLib at its module top level.
+  if (!boundary.engineReady) throw new Error('The PDF viewer consumed the engine before globalThis.pdfjsLib exists')
+  if (boundary.holdColdImports) await boundary.viewerGate
+  return { EventBus: boundary.EventBus, PDFViewer: boundary.Viewer, PDFFindController: class { setDocument = vi.fn() }, RenderingStates: { FINISHED: 3 }, PDFLinkService: class { setViewer = vi.fn(); setDocument = vi.fn(); goToDestination = vi.fn(async () => {}) } }
+})
 import { PdfContent } from '../src/renderer/src/components/PdfContent'
 
 let root: Root, container: HTMLDivElement
@@ -66,6 +74,24 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('the actual File PDF reader', () => {
+  it('waits for the cold engine before evaluating its viewer and fences both pending imports when hidden', async () => {
+    boundary.holdColdImports = true
+    const tick = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+    try {
+      await act(async () => root.render(<PdfContent data={first} name="cold.pdf" />)); await tick()
+      expect(boundary.engineReady).toBe(false); expect(boundary.viewerEvaluations).toBe(0)
+      await act(async () => root.render(<PdfContent data={first} name="cold.pdf" visible={false} />))
+      boundary.releaseEngine(); await act(async () => { await vi.dynamicImportSettled() })
+      expect(boundary.viewerEvaluations).toBe(0); expect(boundary.getDocument).not.toHaveBeenCalled()
+      await act(async () => root.render(<PdfContent data={first} name="cold.pdf" />)); await tick()
+      expect(boundary.viewerEvaluations).toBe(1)
+      await act(async () => root.render(<PdfContent data={first} name="cold.pdf" visible={false} />))
+      boundary.releaseViewer(); await act(async () => { await vi.dynamicImportSettled() })
+      expect(boundary.getDocument).not.toHaveBeenCalled()
+      await render(<PdfContent data={first} name="cold.pdf" />)
+      expect(boundary.getDocument).toHaveBeenCalledTimes(1)
+    } finally { boundary.holdColdImports = false; boundary.releaseEngine(); boundary.releaseViewer() }
+  })
   it('connects text search to the reader controller, navigates matches and reports current query only', async () => {
     await render(<PdfContent data={first} name="search.pdf" />); await loaded(); await event('pagerendered')
     const reader = boundary.Viewer.instances.at(-1)!, bus = reader.options.eventBus, dispatch = vi.spyOn(bus, 'dispatch')
