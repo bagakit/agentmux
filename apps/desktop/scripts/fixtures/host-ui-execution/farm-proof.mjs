@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 
 export const farmTarget = { hostId: 'dafarm-cn4-flowlens-6dad', hostname: 'cn4',
-  remoteCommand: _hygiene_fixturePath("tmp/amx-flowlens-261006-6dad/bin/agentmux"),
+  remoteCommand: _hygiene_fixturePath("tmp/amx-flowlens-261006-6dad/bin/amux"),
   remoteSocketPath: _hygiene_fixturePath("tmp/amx-flowlens-261006-6dad/runtime/control.sock") }
 export const farmRuntimeId = '9eb04a3b-e469-4137-a7ae-170885dbb715'
 export const clonePath = _hygiene_fixturePath("home/zhouliqihan/proj/larkvc/flowlens-agentmux-261006-6dad")

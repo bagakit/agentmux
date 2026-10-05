@@ -106,7 +106,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
     const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     try {
       f.sender.isDestroyed.mockReturnValue(true)
-      const result = await exec(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'settings', 'executors', 'refresh', 'first', '--host', 'local'],
+      const result = await exec(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix:${server.path}`, 'settings', 'executors', 'refresh', 'first', '--host', 'local'],
         { timeout: 5_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: f.root, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })
       expect(JSON.parse(result.stdout).result).toEqual({ input: { executorId: 'first', providerId: 'codex', command: f.executable, host: f.config.hosts[0] },
         executable: f.executable, availability: 'available' })

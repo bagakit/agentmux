@@ -114,7 +114,7 @@ describe('original Space focus resolver and control owner', () => {
     expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
   })
   it('consumes Category parent and relocated Zone through actual compiled CLI, original Unix RPC service and real Store focus', async () => {
-    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve(import.meta.dirname, '../../../packages/core/bin/agentmux'))
+    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve(import.meta.dirname, '../../../packages/core/bin/amux'))
     const { state } = arrange(), root = await mkdtemp(_hygiene_fixturePath("tmp/amx-spatial-link-")), seen: string[] = [], executions: unknown[] = [], results: unknown[] = []
     const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: async request => {
       seen.push(request.operation); executions.push(request)
@@ -170,7 +170,7 @@ describe('original Space focus resolver and control owner', () => {
 
 
 it.each([false, true])('opens an Agent URI via the original service/Store and guards against a replaced occupant (replace=%s)', async replace => {
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve(import.meta.dirname, '../../../packages/core/bin/agentmux'))
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve(import.meta.dirname, '../../../packages/core/bin/amux'))
   const { state, catalog } = arrange(1)
   const originalRegion = catalog.regions.find(region => region.agentSessionId === 'healthy:view:one')!
   expect(originalRegion).toBeDefined()

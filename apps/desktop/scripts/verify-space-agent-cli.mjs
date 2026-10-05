@@ -72,7 +72,7 @@ try {
     await fs.rm(path.join(evidence, `${phase}.json`), { force: true })
     const stderr = []
     const exit = await runProbeProcess(electron, [path.join(privateRoot, 'main/main.mjs'), path.join(privateRoot, 'renderer/index.html'),
-      privateRoot, phase, path.join(fixture, 'preload.cjs'), evidence, process.execPath, path.join(root, 'packages/core/bin/agentmux'), phaseRoot],
+      privateRoot, phase, path.join(fixture, 'preload.cjs'), evidence, process.execPath, path.join(root, 'packages/core/bin/amux'), phaseRoot],
       { temporaryRoot: phaseRoot, cwd: root, env, timeoutMs: 150000, onLine: line => { stderr.push(line.slice(0, 1800)); process.stderr.write(`${phase}: ${line.slice(0, 350)}\n`) } })
     const entry = { phase, exit, stderr }; receipt.phases.push(entry)
     await fs.writeFile(path.join(evidence, `${phase}-stderr.log`), stderr.join('\n'))

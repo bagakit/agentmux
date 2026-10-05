@@ -107,7 +107,7 @@ const BINARY_EXTENSIONS = ['.png', '.icns', '.tgz']
 /**
  * 无扩展名、但确实是二进制的跟踪文件。按路径逐条列，不按目录放过。
  *
- * 只有 vendored 的两个 mach-o 可执行文件。注意 `packages/core/bin/agentmux` 也没有扩展名，
+ * 只有 vendored 的两个 mach-o 可执行文件。注意 `packages/core/bin/amux` 也没有扩展名，
  * 但它是 text/plain 的 shell 包装，**必须**被扫描——所以这里不能写成「凡 bin/ 下放过」。
  */
 const BINARY_PATHS = new Set([

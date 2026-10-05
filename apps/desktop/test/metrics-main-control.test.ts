@@ -75,7 +75,7 @@ function samplerState(sampler: ProcessResourceSampler) {
 }
 function capturedControlOptions(): AgentMuxControlServerOptions | undefined { return fixture.controlOptions }
 function startCli(directory: string, command: 'get' | 'watch') {
-  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/agentmux')
+  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
   const child = spawn(process.execPath, [cli, '--endpoint', `unix://${join(directory, 'control.sock')}`, 'system', 'metrics', command], {
     env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
   children.push(child)

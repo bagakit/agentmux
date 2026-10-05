@@ -107,7 +107,7 @@ it('runs the actual official script through real public metrics owner and compil
   expect(Buffer.byteLength(JSON.stringify(opening(data)))).toBeGreaterThan(256 * 1024)
   const owner = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: vi.fn(), metrics: { async subscribe(push) { push(data); return { dispose } } } })
   await owner.start(); cleanups.push(() => owner.stop())
-  const child = spawn(process.execPath, [(process.env.AGENTMUX_PERFORMANCE_SCRIPT ?? resolve('apps/desktop/resources/toolkit/performance.mjs')), (process.env.AGENTMUX_PROTOCOL_PUBLIC_CLI ?? resolve('packages/core/bin/agentmux'))], { env: objectCliEnvironment(root), stdio: ['pipe','pipe','pipe'] })
+  const child = spawn(process.execPath, [(process.env.AGENTMUX_PERFORMANCE_SCRIPT ?? resolve('apps/desktop/resources/toolkit/performance.mjs')), (process.env.AGENTMUX_PROTOCOL_PUBLIC_CLI ?? resolve('packages/core/bin/amux'))], { env: objectCliEnvironment(root), stdio: ['pipe','pipe','pipe'] })
   cleanups.push(() => { if (child.exitCode === null) child.kill('SIGKILL') })
   const frames = await read(child), close = new Promise(resolve => child.once('close', resolve))
   await vi.waitFor(() => expect(frames()[0]?.payload, JSON.stringify(frames())).toEqual(data), { timeout: 5000 })
@@ -167,7 +167,7 @@ async function publicCli() {
     const timer = setInterval(() => push(data), 2)
     return { dispose() { clearInterval(timer); dispose() } }
   } } }); await owner.start(); cleanups.push(() => owner.stop())
-  const child = spawn(process.execPath, [process.env.AGENTMUX_PROTOCOL_PUBLIC_CLI ?? resolve('packages/core/bin/agentmux'), 'system','metrics','watch'], { env: objectCliEnvironment(root), stdio: ['pipe','pipe','pipe'] })
+  const child = spawn(process.execPath, [process.env.AGENTMUX_PROTOCOL_PUBLIC_CLI ?? resolve('packages/core/bin/amux'), 'system','metrics','watch'], { env: objectCliEnvironment(root), stdio: ['pipe','pipe','pipe'] })
   cleanups.push(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') })
   let stderr = ''; child.stderr.on('data', bytes => { stderr += bytes.toString() })
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => child.once('close', (code,signal) => resolve({code,signal})))

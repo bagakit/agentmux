@@ -16,7 +16,7 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture.js'
 
 const exec = promisify(execFile)
-const cli = join(process.cwd(), 'packages/core/bin/agentmux')
+const cli = join(process.cwd(), 'packages/core/bin/amux')
 const original = useAppStore.getState()
 const sid = 'agent-name-exact'
 const tabId = 'tab-name-exact'

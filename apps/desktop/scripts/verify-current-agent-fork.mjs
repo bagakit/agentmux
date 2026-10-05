@@ -57,7 +57,7 @@ try {
     }
   }
   await writeFile(join(temporary, 'package.json'), '{"type":"module"}\n')
-  await writeFile(join(temporary, 'bin/agentmux'), "#!/usr/bin/env node\nimport '../dist/agentmux.js'\n")
+  await writeFile(join(temporary, 'bin/amux'), "#!/usr/bin/env node\nimport '../dist/agentmux.js'\n")
   const cli = await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(temporary, 'dist/agentmux.js'),
     bundle: true, format: 'esm', platform: 'node', packages: 'external', alias: workspaceAliases, plugins: [sourcePlugin], metafile: true })
   for (const file of ['agentmux-cli-commands.ts', 'agent-fork.ts', 'space-control-parser.ts']) assert.ok(Object.keys(cli.metafile.inputs).some(path => path.endsWith('/' + file)), 'Actual CLI source: ' + file)
@@ -81,7 +81,7 @@ try {
     await writeFile(loadedPath, '')
     let result
     try { const actual = await run(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', suite.config], {
-      cwd: root, env: { ...process.env, AGENTMUX_TEST_OBJECT_CLI: join(temporary, 'bin/agentmux'), AMX_FORK_STORE_MODULE: join(temporary, 'dist/store.js'),
+      cwd: root, env: { ...process.env, AGENTMUX_TEST_OBJECT_CLI: join(temporary, 'bin/amux'), AMX_FORK_STORE_MODULE: join(temporary, 'dist/store.js'),
         AMX_FORK_SPATIAL_MODULE: join(temporary, 'dist/spatial.js'),
         [suite.mutationKey]: mutation, [suite.loadedKey]: loadedPath }, timeout: 150000, maxBuffer: 4 * 1024 * 1024 }); result = { code: 0, output: actual.stdout + actual.stderr } }
     catch (error) { result = { code: error.code, output: (error.stdout ?? '') + (error.stderr ?? '') } }

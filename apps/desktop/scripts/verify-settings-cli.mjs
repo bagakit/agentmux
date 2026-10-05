@@ -32,7 +32,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
   const evidence = join(evidenceRoot, ("run-" + (globalThis.crypto.randomUUID()) + "-" + (randomUUID()) + "")), userData = join(root, 'user-data')
   const privateHome = join(root, 'home'), codexHome = join(privateHome, 'codex'), runtimeDirectory = join(root, 'runtime')
   const workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics'), configPath = join(userData, 'agentmux.config.json')
-  const cli = join(repositoryRoot, 'packages/core/bin/agentmux')
+  const cli = join(repositoryRoot, 'packages/core/bin/amux')
   const children = new Set(), connections = new Set(), deadline = Date.now() + (hosts ? 240_000 : 150_000)
   const workspaceId = 'settings-cli-workspace', tabId = 'settings-cli-tab', groupId = 'settings-cli-group'
   const agentRegionId = 'settings-cli-agent', fileRegionId = 'settings-cli-file'
@@ -55,7 +55,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       'apps/desktop/out', 'packages/core/dist', 'packages/demand/dist',
       'apps/desktop/scripts/fixtures/settings-cli']
     const files = ['apps/desktop/scripts/verify-settings-cli.mjs', 'apps/desktop/scripts/verify-settings-browser-cli.mjs', 'apps/desktop/scripts/verify-settings-workspace-add-cli.mjs', 'apps/desktop/scripts/verify-settings-hosts-cli.mjs', 'apps/desktop/scripts/verify-crash-log-diagnostics-cli.mjs', 'apps/desktop/scripts/verify-settings-executor-refresh-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
-      'packages/core/bin/agentmux', 'packages/core/package.json', 'apps/desktop/package.json',
+      'packages/core/bin/amux', 'packages/core/package.json', 'apps/desktop/package.json',
       'packages/core/scripts/build.mjs', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json']
     const dependencies = {}
     for (const name of ['core', 'demand', 'layout']) {

@@ -19,8 +19,8 @@ import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.j
 import { executorDetectionKey, useAppStore } from '../src/renderer/src/store.js'
 
 const exec = promisify(execFile)
-// packages/core/bin/agentmux — the real CLI entry the CLI attribution test also uses.
-const cli = fileURLToPath(new URL('../../../packages/core/bin/agentmux', import.meta.url))
+// packages/core/bin/amux — the real CLI entry the CLI attribution test also uses.
+const cli = fileURLToPath(new URL('../../../packages/core/bin/amux', import.meta.url))
 
 async function assertNoPrivateRuntime(runtime: string): Promise<void> {
   const owned = async () => (await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout.split('\n').flatMap(line => {

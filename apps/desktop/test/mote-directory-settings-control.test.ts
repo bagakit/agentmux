@@ -67,7 +67,7 @@ it('real CLI discovers, bounds, persists and reloads avatar size through public 
   const rpc = new AgentMuxRpcService({ execute: request => executeSettingsControl(request, f.owner) })
   const probe = new ObjectCliProbe(request => rpc.call(request.method as never, request.params as never, principal))
   await probe.start()
-  const cli = process.env.AGENTMUX_MOTE_SIZE_CLI ?? fileURLToPath(new URL('../../../packages/core/bin/agentmux', import.meta.url))
+  const cli = process.env.AGENTMUX_MOTE_SIZE_CLI ?? fileURLToPath(new URL('../../../packages/core/bin/amux', import.meta.url))
   async function run(...args: string[]) {
     const result = await promisify(execFile)(process.execPath, [cli, 'settings', ...args], { env: probe.environment(), timeout: 5000 })
     return JSON.parse(result.stdout)

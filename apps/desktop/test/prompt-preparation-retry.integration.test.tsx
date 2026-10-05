@@ -117,7 +117,7 @@ it('the actual compiled CLI and typed RPC expose the same visible backoff from t
   try {
     await server.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     const read = await rpc.call('message.pending.ls', { agentSessionId: sid })
-    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/agentmux'))
+    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
     const cli = await runCompiledObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'pending', 'ls', '--session', sid], objectCliEnvironment(root))
     expect(cli.code, cli.stderr).toBe(0)
     const result = JSON.parse(cli.stdout).result
@@ -141,7 +141,7 @@ it.each(['rpc', 'cli'] as const)('the actual public %s stops only the selected l
     await expect(rpc.call('message.pending.stop', { agentSessionId: sid, pendingId: 'different-message' })).rejects.toBeInstanceOf(Error)
     await expect(rpc.call('message.pending.stop', { agentSessionId: 'different-session', pendingId: operationId })).rejects.toBeInstanceOf(Error)
     expect(queue()[0]?.preparationWait?.state).toBe('waiting'); expect(submit).toHaveBeenCalledTimes(1)
-    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/agentmux'))
+    vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
     const cli = consumer === 'cli' ? await runCompiledObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'pending', 'stop', '--session', sid, '--pending-id', operationId], objectCliEnvironment(root)) : null
     if (cli) expect(cli.code, cli.stderr).toBe(0)
     const stopped = cli ? JSON.parse(cli.stdout).result : await rpc.call('message.pending.stop', { agentSessionId: sid, pendingId: operationId })

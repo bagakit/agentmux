@@ -209,7 +209,7 @@ describe('public Hook native identity survives a new Client and Desktop durable 
       command:cliPath,args:[],env:environment,injectAgentMuxGuide:false } },
       workspaces:[{id:'workspace-a',name:'Private identity fixture',hostId:'local',path:workspace,kind:'folder'}] }
     const nativeSpec = provider.hook.nativeHandle!
-    const fixture = { root,agentSessionId:sessionId,providerId:provider.id,agentMuxCli:resolve(import.meta.dirname, '../../../packages/core/bin/agentmux'),
+    const fixture = { root,agentSessionId:sessionId,providerId:provider.id,agentMuxCli:resolve(import.meta.dirname, '../../../packages/core/bin/amux'),
       format,nativeId,transcript,trace:tracePath,question:`question-${provider.id}`,answer:`answer-${provider.id}`,
       event:format === 'pi' ? 'agent_start' : 'SessionStart',sessionKey:nativeSpec.sessionIdKeys[0],
       transcriptKey:nativeSpec.transcriptPathKeys?.[0] ?? 'transcript_path',handshake:provider.terminalHandshake }

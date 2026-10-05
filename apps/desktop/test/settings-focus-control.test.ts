@@ -68,7 +68,7 @@ it('actual CLI discovers 48, sets it through the private public socket and durab
     return executeSettingsControl(request, f.owner)
   } }, join(socketDirectory, 'control.sock'))
   await server.start()
-  const cli = promisify(execFile), args = [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'settings']
+  const cli = promisify(execFile), args = [resolve('packages/core/bin/amux'), '--endpoint', `unix:${server.path}`, 'settings']
   const options = { timeout: 5000, env: { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
   try {
     const found = JSON.parse((await cli(process.execPath, [...args, 'inspect', 'focus.recentActivityHours'], options)).stdout).result
