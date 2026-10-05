@@ -140,3 +140,6 @@
 .performance-period-controls { display:flex; gap:var(--sp-2); }
 .performance-period-controls button { border:1px solid var(--line-soft); background:transparent; color:var(--text-3); font-size:var(--fs-meta); border-radius:var(--radius-sm); padding:var(--sp-2) var(--sp-4); cursor:pointer; }
 .performance-period-controls button[aria-pressed=true] { background:var(--wash-3); color:var(--text); }
+
+.performance-run-identity { display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
+.performance-run-identity > .toolkit-agent-card { flex:1; min-width:0; }
