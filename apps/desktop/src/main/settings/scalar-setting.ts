@@ -37,7 +37,7 @@ export function booleanSetting(
 }
 
 export function invalid(key: string, value: string): Error {
-  return Object.assign(new Error(`Invalid value for ${key}: ${value}. Run agentmux settings inspect ${key} for valid values.`), { code: 'INVALID_SETTING_VALUE' })
+  return Object.assign(new Error(`Invalid value for ${key}: ${value}. Run amux settings inspect ${key} for valid values.`), { code: 'INVALID_SETTING_VALUE' })
 }
 
 /** Freeform text still has a declared, bounded setting owner; no arbitrary config paths. */
