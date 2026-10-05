@@ -8,11 +8,13 @@ import { DEFAULT_NOTEBOOK_ID, type Notebook, type NotebookPage } from '@agentmux
 import { notebookPageRows } from '../lib/notebook-page-tree'
 import { NotebookCards, NotebookGraph, NotebookViewPicker, type NotebookDirectoryView } from './NotebookViews'
 import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperation'
+import { NotebookPageContextMenu, type NoteTalkHandler } from './NotebookPageContextMenu'
 
-export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onCreateChild, query, onQuery, onCreate, pending, actions, archived, onArchivedChange }: {
+export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onTalk, onCreateChild, query, onQuery, onCreate, pending, actions, archived, onArchivedChange }: {
   notebooks: Notebook[]; pages: NotebookPage[]; selectedId: string | null; selectedNoteId: string | null
   onSelect(notebookId: string): void; onOpen(page: NotebookPage): void; onCreateChild(page: NotebookPage): void; query: string; onQuery(query: string): void
   onCreate(): void; pending: boolean; actions: ReactNode; archived: boolean; onArchivedChange(archived: boolean): void
+  onTalk?: NoteTalkHandler | undefined
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const book = notebooks.find(candidate => candidate.notebookId === selectedId)
@@ -27,7 +29,7 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
     <div className="survey-notebook-pages" aria-label={`${book.name} pages`}>
       {rows.map(({ page, depth, hasChildren, expanded }) => <div key={page.noteId} className="survey-notebook-page-row" style={{ marginLeft: Math.min(depth, 8) * 10 }}>
         {hasChildren ? <button className="notebook-tree-toggle" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${page.title}`} aria-expanded={expanded} onClick={() => setCollapsed(held => { const next = new Set(held); if (next.has(page.noteId)) next.delete(page.noteId); else next.add(page.noteId); return next })}>{expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}</button> : <span className="notebook-tree-spacer" />}
-        <button className="survey-notebook-page" title={page.title} aria-current={selectedNoteId === page.noteId ? 'page' : undefined} data-selected={selectedNoteId === page.noteId} onClick={() => onOpen(page)}><FileText size={12} /><span>{page.title}</span></button>
+        <NotebookPageContextMenu page={page} onTalk={onTalk}><button className="survey-notebook-page" title={page.title} aria-current={selectedNoteId === page.noteId ? 'page' : undefined} data-selected={selectedNoteId === page.noteId} onClick={() => onOpen(page)}><FileText size={12} /><span>{page.title}</span></button></NotebookPageContextMenu>
         <button className="notebook-add-child" aria-label={`Add subpage to ${page.title}`} title="Add subpage" onClick={() => onCreateChild(page)}><Plus size={12} /></button>
       </div>)}
       {!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}
@@ -50,10 +52,11 @@ function NotebookName({ notebook }: { notebook: Notebook }) {
     onFocus={() => setEditing(true)} onChange={event => setDraft(event.target.value)} onBlur={() => { setEditing(false); if (cancelled.current) { cancelled.current = false; return } void save() }}
     onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { cancelled.current = true; setDraft(notebook.name); event.currentTarget.blur() } }} />}</h1><NotebookOperationIssue operation={operation} /></>
 }
-export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, query, onQuery, navigationVisible = false, archived = false, onArchivedChange, view = 'tree', onViewChange }: {
+export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, onTalk, query, onQuery, navigationVisible = false, archived = false, onArchivedChange, view = 'tree', onViewChange }: {
   notebook: Notebook; pages: NotebookPage[]; pending: boolean; onCreate(): void; onOpen(page: NotebookPage): void; query: string; onQuery?: ((query: string) => void) | undefined
   view?: NotebookDirectoryView; onViewChange?(view: NotebookDirectoryView): void
   navigationVisible?: boolean; archived?: boolean; onArchivedChange?: ((archived: boolean) => void) | undefined
+  onTalk?: NoteTalkHandler | undefined
 }) {
   const rows = notebookPageRows(pages, notebook.notebookId, query, new Set(), archived)
   return <section className="survey-notebook-home" aria-label={`${notebook.name} Notebook`}>
@@ -63,9 +66,9 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, query
     {!navigationVisible && onArchivedChange ? <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} /> : null}
     {!navigationVisible || !pages.length ? <button className="notebook-create-page" disabled={pending} onClick={onCreate}><Plus size={15} /><span>New page</span></button> : null}
     {pages.length ? <>{onQuery ? <label className="notebook-find notebook-find--directory"><Search size={14} /><TextInput aria-label="Search notebook pages" placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
-      {view === 'cards' ? <NotebookCards pages={rows.map(row => row.page)} onOpen={onOpen} /> : view === 'graph' ? <NotebookGraph pages={rows.map(row => row.page)} onOpen={onOpen} /> : <div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <button key={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
+      {view === 'cards' ? <NotebookCards pages={rows.map(row => row.page)} onOpen={onOpen} onTalk={onTalk} /> : view === 'graph' ? <NotebookGraph pages={rows.map(row => row.page)} onOpen={onOpen} onTalk={onTalk} /> : <div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <NotebookPageContextMenu key={page.noteId} page={page} onTalk={onTalk}><button style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
         <FileText size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ArrowUpRight size={14} />
-      </button>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div>} {view !== 'tree' && !rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
+      </button></NotebookPageContextMenu>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div>} {view !== 'tree' && !rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
   </section>
 }
 

@@ -1,0 +1,6 @@
+.note-talk-dialog { max-width: calc(100vw - 32px); }
+.note-talk-dialog .notebook-create-description,
+.note-talk-dialog .notebook-create-issue,
+.note-talk-dialog code { overflow-wrap: anywhere; }
+.note-talk-dialog .agent-catalog { min-width: 0; }
+.note-talk-dialog > .small-button + .small-button { margin-left: 8px; }
