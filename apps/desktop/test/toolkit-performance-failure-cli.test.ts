@@ -9,6 +9,7 @@ import { PerformanceToolkitOwner } from '../src/main/toolkit-owner.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/control-host.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port.js'
+import { desktopToolkitPublicPort } from './helpers/desktop-toolkit-public-port.js'
 const cleanup:(()=>Promise<unknown>|void)[]=[]
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close()})
 it('normal compiled public CLI watch capture and inspect consume original Owner evidence',async()=>{
@@ -20,7 +21,7 @@ it('normal compiled public CLI watch capture and inspect consume original Owner 
  const port:ToolkitRunPort={create:vi.fn(async(_input,onEvent)=>{accept=onEvent;return {runId:'private-cli-toolkit-run',pid:88,kind:'terminal'} as any}),attach:vi.fn(async()=>({replay:[],gap:null}) as any),replay:vi.fn(async()=>({replay:[],gap:null}) as any),stop:vi.fn(async()=>{}),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{})}
  const owner=new PerformanceToolkitOwner({openRunPort:async()=>port,launch:()=>({runner:process.execPath,cli,script:resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:dir,env:{}}),enabled:()=>true,receipts:{read:async()=>null,save:async()=>{}}})
  cleanup.push(()=>owner.dispose())
- const server=new AgentMuxControlServer({socketPath:join(dir,'control.sock'),coreClients:()=>[],execute:vi.fn(),toolkit:owner});await server.start();cleanup.push(()=>server.stop())
+ const server=new AgentMuxControlServer({socketPath:join(dir,'control.sock'),coreClients:()=>[],execute:vi.fn(),toolkit:desktopToolkitPublicPort(owner)});await server.start();cleanup.push(()=>server.stop())
  const child=spawn(process.execPath,[cli,'toolkit','watch','performance','--capture-failure','--failure-evidence'],{env,stdio:['ignore','pipe','pipe']});cleanup.push(()=>{if(child.exitCode===null)child.kill('SIGTERM')})
  const frames:any[]=[],stderr:string[]=[];let buffer='';child.stdout.on('data',bytes=>{buffer+=bytes;let lf;while((lf=buffer.indexOf('\n'))>=0){frames.push(JSON.parse(buffer.slice(0,lf)));buffer=buffer.slice(lf+1)}});child.stderr.on('data',bytes=>stderr.push(bytes.toString()))
  // Capture admission precedes asynchronous port creation. Inject output only

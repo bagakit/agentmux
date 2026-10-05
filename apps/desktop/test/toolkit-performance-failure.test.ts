@@ -12,6 +12,7 @@ import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/cor
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
 import { deepMetricsSnapshot } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port.js'
+import { desktopToolkitPublicPort } from './helpers/desktop-toolkit-public-port.js'
 const cleanup:(()=>Promise<unknown>|void)[]=[]
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();vi.restoreAllMocks()})
 const flush=async()=>{for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve))}
@@ -79,7 +80,7 @@ it('reads latest bounded disk bytes without claiming durable ACK or execution ad
  await writeFile(join(f.dir,'failure.json'),'x'.repeat(96*1024+1));await expect(f.store.read()).rejects.toThrow('budget')
 })
 it('public Unix RPC forwards explicit capture and exposes the same own failure',async()=>{
- const f=await fixture(),path=join(f.dir,'control.sock'),server=new AgentMuxControlServer({socketPath:path,coreClients:()=>[],execute:vi.fn(),toolkit:f.owner})
+ const f=await fixture(),path=join(f.dir,'control.sock'),server=new AgentMuxControlServer({socketPath:path,coreClients:()=>[],execute:vi.fn(),toolkit:desktopToolkitPublicPort(f.owner)})
  await server.start();cleanup.push(()=>server.stop());const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path}});cleanup.push(()=>rpc.dispose())
  const frames:any[]=[],lease=await rpc.subscribe('toolkit.watch',{toolId:'performance',captureFailure:true,includeFailureEvidence:true},{onInitial:()=>{},onEvent:event=>frames.push(event),onEnd:()=>{}})
  expect(f.owner.current.diagnostics.captureEnabled).toBe(true);f.bytes(Buffer.from('[bad]\n'));await flush();const result=await rpc.call('toolkit.inspect',{toolId:'performance'})
