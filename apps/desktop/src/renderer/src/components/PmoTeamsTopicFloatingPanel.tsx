@@ -36,6 +36,28 @@ import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import type { MoteWorkbenchProjectionResult } from '../lib/mote-workbench-projection'
 import { workbenchDisplayReferenceMatches } from '../lib/workbench-resource-display'
 import { spatialCatalog } from '../lib/space-agent-control'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { contextOperationKey, type MoteContextFailure, type MoteContextOperation, type MoteContextTarget } from '../../../shared/mote-context-observation'
+import { MoteContextStatus } from './MoteContextStatus'
+
+function capturedContextReference(reference: WorkbenchProjectionSelection | null | undefined): WorkbenchProjectionSelection | null {
+  return reference ? { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId,
+    tabId: reference.tabId, regionId: reference.regionId } : null
+}
+function startContextOperation(target: MoteContextTarget, action: MoteContextOperation['action']) {
+  const key = contextOperationKey(target, action)
+  const operation: MoteContextOperation = { target, action, state: 'pending', startedAt: Date.now(), settledAt: null,
+    failure: useAppStore.getState().moteContextOperations[key]?.failure ?? null }
+  useAppStore.setState(state => ({ moteContextOperations: { ...state.moteContextOperations, [key]: operation } }))
+  return operation
+}
+function settleContextOperation(operation: MoteContextOperation, state: MoteContextOperation['state'], failure?: MoteContextFailure | null) {
+  const key = contextOperationKey(operation.target, operation.action)
+  useAppStore.setState(current => current.moteContextOperations[key] !== operation ? current : ({
+    moteContextOperations: { ...current.moteContextOperations, [key]: { ...operation, state, settledAt: Date.now(),
+      failure: failure === undefined ? operation.failure : failure } }
+  }))
+}
 
 const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId, onRename, onAvatar, onOpenSpace, catalog, reference, targetAgent, onReferenceSelect }: {
   catalog?: AgentMuxSpaceCatalog | null | undefined; reference?: WorkbenchProjectionSelection | null | undefined
@@ -204,7 +226,12 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const floatingRef = useRef(floating); floatingRef.current = floating
   const spaceActionRef = useRef<AbortController | null>(null)
   const [preparationAttempt, setPreparationAttempt] = useState(0)
-  const [preparationIssue, setPreparationIssue] = useState<string | null>(null)
+  const contextOperations = useAppStore(state => state.moteContextOperations)
+  const contextTarget: MoteContextTarget | null = scratch ? { workspaceId: SCRATCH_WORKSPACE_ID, hostId: scratch.hostId,
+    directoryPath: scratch.path, topicId: target.topicId, tabId: target.tabId ?? null, reference: capturedContextReference(floating.reference) } : null
+  const preparation = contextTarget ? contextOperations[contextOperationKey(contextTarget, 'prepare')] : undefined
+  const spaceOpening = contextTarget ? contextOperations[contextOperationKey(contextTarget, 'open-space')] : undefined
+  const contextFailures = [preparation?.failure, spaceOpening?.failure].filter((failure): failure is MoteContextFailure => Boolean(failure))
   const [renameTarget, setRenameTarget] = useState<ScratchTopicSnapshot | null>(null)
   const [avatarTarget, setAvatarTarget] = useState<SpaceIconTarget | null>(null)
   const actionTopicId = useRef<string | null>(null)
@@ -271,19 +298,28 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   useEffect(() => {
     if (!floating.open || !scratch || target.identityIssue) return
     let current = true
-    setPreparationIssue(null)
-    void api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, target.topicId)
-      .then(() => {
-        if (!current || !target.tabId) return
-        return openScratchTopic(target.topicId, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: target.tabId })
-      }).catch(error => {
+    const captured: MoteContextTarget = { workspaceId: SCRATCH_WORKSPACE_ID, hostId: scratch.hostId, directoryPath: scratch.path,
+      topicId: target.topicId, tabId: target.tabId ?? null, reference: capturedContextReference(floatingRef.current.reference) }
+    const operation = startContextOperation(captured, 'prepare')
+    let step: MoteContextFailure['step'] = 'ensure-mote'
+    void (async () => {
+      const receipt = await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, captured.topicId)
+      if (!current) return
+      if (receipt.id !== captured.topicId) throw new Error('The original Mote preparation returned a different Topic identity.')
+      if (receipt.readError) throw new Error(receipt.readError)
+      if (captured.tabId) {
+        step = 'read-discussion'
+        const confirmed = await openScratchTopic(captured.topicId, SCRATCH_WORKSPACE_ID, { reveal: false, tabId: captured.tabId, reportFailure: false })
+        if (!confirmed) throw new Error('The original discussion preparation returned no confirmation.')
+      }
+      if (current) settleContextOperation(operation, 'confirmed', null)
+    })().catch(error => {
         if (current) {
-          setPreparationIssue('Context preparation did not complete. The original work surface remains available.')
-          reportError(error)
+          settleContextOperation(operation, 'unconfirmed', { target: captured, step, cause: presentError(error), observedAt: Date.now() })
         }
       })
-    return () => { current = false }
-  }, [floating.open, scratch, target.topicId, target.tabId, target.identityIssue, preparationAttempt, openScratchTopic, reportError])
+    return () => { current = false; settleContextOperation(operation, 'unconfirmed') }
+  }, [floating.open, scratch, target.topicId, target.tabId, target.identityIssue, preparationAttempt, openScratchTopic])
 
   useLayoutEffect(() => {
     const panel = panelRef.current
@@ -394,7 +430,12 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const close = useCallback(() => { endResize(false); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [endResize])
   const openSpace = useCallback((topicId = target.topicId, tabId = topicId === target.topicId ? target.tabId : undefined) => {
     spaceActionRef.current?.abort()
-    setPreparationIssue(null)
+    const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+    const captured: MoteContextTarget | null = workspace ? { workspaceId: SCRATCH_WORKSPACE_ID, hostId: workspace.hostId,
+      directoryPath: workspace.path, topicId, tabId: tabId ?? null,
+      reference: topicId === target.topicId && tabId === target.tabId
+        ? capturedContextReference(floating.reference !== undefined ? floating.reference : projectionState?.projection?.selection[0]) : null } : null
+    let operation: MoteContextOperation | null = null
     const controller = new AbortController(); spaceActionRef.current = controller
     const floatingIntent = () => {
       const current = readPmoTeamsTopicFloatingState(), reference = current?.reference
@@ -429,6 +470,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
         if (!destination || destination.tabId !== tabId || tab?.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId)
           throw new Error('This exact discussion location is not confirmed. Choose its current location; the original content is kept.')
       }
+      if (captured) operation = startContextOperation({ ...captured,
+        reference: capturedContextReference(destination ?? captured.reference) }, 'open-space')
       const topic = tabId ? topics?.find(topic => topic.id === topicId) : await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, topicId)
       if (controller.signal.aborted) return false
       if (!topic) throw new Error('The original Mote directory is still being confirmed')
@@ -478,15 +521,26 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       if (floatingIntent() !== intent) controller.abort()
     })
     const disposeNavigation = () => { unsubscribe(); unsubscribeFloating(); controller.signal.removeEventListener('abort', disposeNavigation) }
+    const cancelObservation = () => { if (operation) settleContextOperation(operation, 'unconfirmed') }
+    controller.signal.addEventListener('abort', cancelObservation, { once: true })
     if (controller.signal.aborted) disposeNavigation()
     else controller.signal.addEventListener('abort', disposeNavigation, { once: true })
     void opening.then(opened => {
-      if (opened && controller === spaceActionRef.current && !controller.signal.aborted) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+      if (opened && controller === spaceActionRef.current && !controller.signal.aborted) {
+        if (operation) settleContextOperation(operation, 'confirmed', null)
+        requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+      }
     }).catch(error => {
       if (controller === spaceActionRef.current && !controller.signal.aborted) {
-        setPreparationIssue('Opening this context in Space did not complete. The original work surface remains available.'); reportError(error)
+        if (captured) {
+          operation ??= startContextOperation(captured, 'open-space')
+          settleContextOperation(operation, 'unconfirmed', {
+            target: operation.target, step: 'open-space', cause: presentError(error), observedAt: Date.now() })
+        }
+        if (!captured || topicId !== target.topicId || tabId !== target.tabId) reportError(error, {
+          kind: 'indeterminate', summary: '未能打开 ' + (topics?.find(topic => topic.id === topicId)?.title ?? '这位 Mote') + ' 的 Space。原工作面保留。' })
       }
-    }).finally(disposeNavigation)
+    }).finally(() => { controller.signal.removeEventListener('abort', cancelObservation); disposeNavigation() })
   }, [target.topicId, target.tabId, floating.reference, projectionState, topics, reportError])
 
   return <WorkbenchPresentationContext.Provider value={presentation}><div ref={panelRef} id="pmo-teams-topic-floating-panel" popover="auto" role="dialog" aria-modal="false"
@@ -555,14 +609,6 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>
       <button type="button" className="small-button" onClick={() => void refreshTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</button>
     </div> : null}
-    {preparationIssue ? <div role="status" className="workbench-restore-notice mote-context-notice"><span>{preparationIssue}</span><button type="button" className="small-button" onClick={() => setPreparationAttempt(attempt => attempt + 1)}>Retry context</button></div> : null}
-    {target.identityIssue || projectionState?.issue ? <div role="status" className="workbench-restore-notice mote-context-notice">
-      <span>{target.identityIssue ?? projectionState?.issue}</span>
-      {projectionState?.choices.map((reference, index) => <button type="button" className="small-button" key={JSON.stringify(reference)}
-        onClick={() => setFloating({ targetTabId: reference.tabId, reference })}>
-        {useAppStore.getState().config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? 'Workspace'} · Location {index + 1}
-      </button>)}
-    </div> : null}
     <div className="pmo-teams-topic-floating__body">
       <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} reference={floating.reference}
         active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
@@ -573,7 +619,14 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
           topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
           projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
           retainedTabId={target.tabId} visible={visible} interactiveResize={false}
-          onTabSelect={selectDiscussion} onRecoverTab={tabId => selectDiscussion(tabId, undefined, undefined, true)} presentationAction={<>{profileTrigger}
+          onTabSelect={selectDiscussion} onRecoverTab={tabId => selectDiscussion(tabId, undefined, undefined, true)} presentationAction={<>
+            <MoteContextStatus scope={JSON.stringify(['mote-context', scratch?.hostId, scratch?.path, target.topicId, target.tabId, capturedContextReference(floating.reference)])}
+              visible={visible} failures={contextFailures} pending={failure => (failure.step === 'open-space' ? spaceOpening : preparation)?.state === 'pending'}
+              identityIssue={target.identityIssue ?? null} projection={projectionState}
+              onRetry={failure => failure.step === 'open-space' ? openSpace() : setPreparationAttempt(attempt => attempt + 1)}
+              onSelect={reference => setFloating({ targetTabId: reference.tabId, reference })}
+              locationName={(reference, index) => (useAppStore.getState().config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? 'Workspace') + ' · 位置 ' + (index + 1)} />
+            {profileTrigger}
             <button type="button" className="pane-action"
             aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ArrowUpRight size={14} /></button></>} /></MoteWorkface>}
       </MoteProfilePopover>

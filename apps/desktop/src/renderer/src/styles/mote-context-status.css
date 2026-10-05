@@ -1,0 +1,11 @@
+.mote-context-status { display: flex; min-width: 0; max-width: 16ch; }
+.mote-context-status:has(> .service-disclosure) { margin-inline-end: var(--sp-1); }
+.mote-context-status .service-disclosure { padding-inline: 0; }
+.mote-context-status__item + .mote-context-status__item { margin-top: var(--sp-3); padding-top: var(--sp-2); border-top: 1px solid var(--line-soft); }
+.mote-context-status__cause { margin: 0 0 var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.mote-context-status__target { margin-bottom: var(--sp-3); color: var(--text-3); }
+.mote-context-status__target summary { cursor: pointer; }
+.mote-context-status__target dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); }
+.mote-context-status__target dt { color: var(--text-3); }
+.mote-context-status__target dd { margin: 0; overflow-wrap: anywhere; }
+.mote-context-status__locations { display: flex; flex-wrap: wrap; gap: var(--sp-2); }

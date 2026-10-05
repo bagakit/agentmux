@@ -67,6 +67,7 @@ import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
+import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote-context-observation.js'
 import { isSplitDirection } from './split-direction-ssot.js'
 import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 
@@ -363,6 +364,16 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'inspect.client') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+  }
+  if (source.operation === 'inspect.mote-context') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'includeRaw', 'maxBytes'], 'INVALID_CONTROL_REQUEST')
+    try {
+      const target = parseMoteContextEvidenceTarget(source.target)
+      if (typeof source.includeRaw !== 'boolean' || !Number.isSafeInteger(source.maxBytes) ||
+        (source.maxBytes as number) < 1 || (source.maxBytes as number) > 128 * 1024) throw new Error('Invalid bounds')
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+        target, includeRaw: source.includeRaw, maxBytes: source.maxBytes as number }
+    } catch { throw new AgentMuxError('Mote context inspection request is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
   if (source.operation === 'settings.get') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
@@ -1210,6 +1221,12 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { observation: object(result.observation, 'Client observation is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  }
+  if (operation === 'inspect.mote-context') {
+    settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+    const observation = object(result.observation, 'Mote context observation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { observation: parseMoteContextObservation(observation, parseMoteContextEvidenceTarget(observation.target), true) } }
   }
   if (operation === 'settings.get') {
     settingsFields(result, ['entries', 'partial'], 'CONTROL_PROTOCOL_ERROR')

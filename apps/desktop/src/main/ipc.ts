@@ -37,6 +37,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILIT
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
+import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
@@ -457,6 +458,11 @@ export async function registerIpc(args: {
       }
     }
 
+    if (request.operation === 'inspect.mote-context') return await inspectMoteContext(request, {
+      renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
+      generation: () => args.runtime.rendererGeneration(args.window.webContents),
+      execute: input => controlBridge.execute(input)
+    })
     if (request.operation === 'inspect.client') return await inspectDesktopClient(request, {
       pid: process.pid, package: args.loadedPackage ?? null,
       renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
@@ -1753,6 +1759,7 @@ export async function registerIpc(args: {
   const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
     deliveryAttempts,
+    moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,
