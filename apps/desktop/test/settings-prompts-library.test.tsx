@@ -50,6 +50,16 @@ async function save() {
 }
 
 describe('Prompts library and one editor through the real SettingsPanel', () => {
+  it('shows the public amux lookup command for the selected quick reply without saving its draft', async () => {
+    await mount()
+    await dom.click('[aria-label="Quick reply icon check"]')
+    expect(editor().querySelector('.prompt-reaction-settings code')?.textContent).toBe('amux settings prompts inspect --keyword one')
+    await fill(field('Keyword'), 'review')
+    expect(editor().querySelector('.prompt-reaction-settings code')?.textContent).toBe('amux settings prompts inspect --keyword review')
+    expect(api.config.save).not.toHaveBeenCalled()
+    expect(f.owner.current.composerShortcuts).toEqual(prompts)
+  })
+
   it('identifies each instruction and searches every object fact without replacing a dirty selected editor', async () => {
     await mount()
     expect(ids()).toEqual(['one', 'two'])
