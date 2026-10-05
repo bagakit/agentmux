@@ -25,16 +25,11 @@ export class SettingsHostsUpgradeOwner {
   async check(value: unknown): Promise<RemoteCoreUpgradeCheck> {
     const captured = this.capture(value), check = await this.manager.check(captured)
     const receipt = check.latestOperation
-    if (receipt?.status !== 'completed') return check
-    try {
-      if (captured.kind !== 'ssh' || captured.remoteCommand !== receipt.remoteCommand) throw new Error('The original update completed remotely, but its saved connection binding has not been updated.')
-      await this.runtime.checkHost(captured)
-      return check
-    } catch (error) {
-      const { expected: _expected, ...unconfirmed } = check
-      return { ...unconfirmed, eligible: false, reason: 'unverified', latestOperation: { ...receipt, status: 'unknown', stage: 'verifying',
-        detail: `远端 Core 已升级，连接尚未确认：${error instanceof Error ? error.message : String(error)}。复查原操作，不要重复升级。` } }
-    }
+    // Maintenance qualifies the old Core independently of the ordinary SDK handshake.
+    if (receipt?.status !== 'completed' || captured.kind === 'ssh' && captured.remoteCommand === receipt.remoteCommand) return check
+    const { expected: _expected, ...unconfirmed } = check
+    return { ...unconfirmed, eligible: false, reason: 'unverified', latestOperation: { ...receipt, status: 'unknown', stage: 'verifying',
+      detail: '远端 Core 已升级，保存的连接命令尚未更新。复查原操作，不要重复升级。' } }
   }
   async upgrade(value: unknown, expected: RemoteCoreUpgradeExpected, operationId: string): Promise<RemoteCoreUpgradeReceipt> {
     const captured = await this.saved(value)
