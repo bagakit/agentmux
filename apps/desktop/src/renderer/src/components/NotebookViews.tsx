@@ -18,7 +18,7 @@ function sourceLabel(page: NotebookPage) {
   try { return new URL(source.url).hostname } catch { return source.title || source.url }
 }
 export function NotebookCards({ pages, onOpen }: { pages: NotebookPage[]; onOpen(page: NotebookPage): void }) {
-  return <div className="recall-note-cards" aria-label="Notebook cards">{pages.map(page => <button key={page.noteId} className="recall-note-card" data-note-id={page.noteId} onClick={() => onOpen(page)}>
+  return <div className="recall-note-cards" aria-label="Notebook cards">{pages.map(page => <button key={page.noteId} className="recall-note-card" title={`${page.title}\n${sourceLabel(page)}`} data-note-id={page.noteId} onClick={() => onOpen(page)}>
     <FileText size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
   </button>)}</div>
 }
@@ -37,7 +37,7 @@ export function NotebookGraph({ pages, onOpen }: { pages: NotebookPage[]; onOpen
           const start = { x: from.x + (sameRow ? right ? 200 : 0 : 100), y: from.y + (sameRow ? 40 : down ? 80 : 0) }, end = { x: to.x + (sameRow ? right ? 0 : 200 : 100), y: to.y + (sameRow ? 40 : down ? 0 : 80) }
           return <path key={edge.id} data-edge-kind={edge.kind} data-edge-from={edge.from} data-edge-to={edge.to} d={self ? `M ${from.x + 100} ${from.y} c -65 -30 65 -30 30 0` : `M ${start.x} ${start.y} Q ${(start.x + end.x) / 2 + (sameRow ? 0 : 28)} ${(start.y + end.y) / 2 - (sameRow ? 26 : 0)} ${end.x} ${end.y}`} markerEnd="url(#recall-graph-arrow)"><title>{edge.detail}</title></path> })}
       </svg>
-      {pages.map(page => { const position = positions.get(page.noteId)!; return <button key={page.noteId} className="recall-graph-node" data-note-id={page.noteId} style={{ left: position.x, top: position.y }} onClick={() => onOpen(page)}><FileText size={15} /><strong>{page.title}</strong><small>{sourceLabel(page)}</small></button> })}
+      {pages.map(page => { const position = positions.get(page.noteId)!; return <button key={page.noteId} className="recall-graph-node" title={`${page.title}\n${sourceLabel(page)}`} data-note-id={page.noteId} style={{ left: position.x, top: position.y }} onClick={() => onOpen(page)}><FileText size={15} /><strong>{page.title}</strong><small>{sourceLabel(page)}</small></button> })}
     </div></div>
   </section>
 }
