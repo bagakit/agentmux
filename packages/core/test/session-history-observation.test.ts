@@ -169,6 +169,36 @@ it('ordinary Session updatedAt does not change a watch; a precise native binding
   handle.dispose()
 })
 
+for (const provider of ['claude', 'pi'] as const) for (const count of [1, 16]) {
+  it(`${provider}: ${count} acquired history readers do no callback work for unrelated terminal bytes`, async () => {
+    const fixture = await setup(provider), dispatch = vi.fn(), events = vi.fn()
+    const originalEvent = AgentMuxClientEventPublisher.prototype.onEvent
+    const originalStatus = AgentMuxClientEventPublisher.prototype.onStatusEvent
+    vi.spyOn(AgentMuxClientEventPublisher.prototype, 'onEvent').mockImplementation(function (listener, options, initial) {
+      return originalEvent.call(this, event => { dispatch(event); listener(event) }, options, initial)
+    })
+    vi.spyOn(AgentMuxClientEventPublisher.prototype, 'onStatusEvent').mockImplementation(function (listener, options) {
+      return originalStatus.call(this, event => { dispatch(event); listener(event) }, options)
+    })
+    const handles = []
+    for (let n = 0; n < count; n++) handles.push(await fixture.client.observeSessionHistory('private-agent', events))
+    expect(handles).toHaveLength(count)
+    expect(watched.closes).toHaveLength(count)
+    dispatch.mockClear()
+    const publisher = (fixture.client as unknown as { publisher: AgentMuxClientEventPublisher }).publisher
+    publisher.publishRunEvent({ type: 'data', runId: 'unrelated-run', startByte: 0, endByte: 4,
+      data: 'live', dataBytes: new TextEncoder().encode('live') })
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(events).not.toHaveBeenCalled()
+    publisher.publish({ type: 'agent-session', session: { ...fixture.session,
+      nativeHandle: { kind: 'provider', providerId: provider, sessionId: 'changed-native-source', transcriptPath: fixture.path } } })
+    expect(events).toHaveBeenCalledTimes(count)
+    expect(events.mock.calls.every(([event]) => event.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')).toBe(true)
+    for (const handle of handles) handle.dispose()
+    expect(watched.closes.map(close => close.mock.calls.length)).toEqual(Array(count).fill(1))
+  })
+}
+
 it('a Provider cannot invalidate another source through a correctly acquired observation handle', async () => {
   const fixture = await setup('claude')
   let context!: AgentProviderSessionHistoryObservationContext
