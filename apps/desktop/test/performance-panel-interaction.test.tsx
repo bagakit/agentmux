@@ -12,17 +12,18 @@ import { App } from '../src/renderer/src/App'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { PerformanceOverview } from '../src/renderer/src/components/performance/PerformanceOverview'
-import { performanceContexts, performanceSnapshot } from '../scripts/fixtures/performance-panel/data'
+import { performanceSnapshot } from '../scripts/fixtures/performance-panel/data'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import type { ToolkitSnapshot } from '../src/shared/toolkit'
 import { parseMetricsObservation } from '@agentmux/core/control'
 import { appendFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const cost = { app: 0, panel: 0, projections: 0, visits: 0 }
+const cost = { app: 0, panel: 0, overview: 0, projections: 0, visits: 0 }
 Object.assign(globalThis, { __performanceUIRecord: (kind: string) => {
   if (kind === 'app-render') cost.app++
   if (kind === 'panel-render') cost.panel++
+  if (kind === 'overview-render') cost.overview++
   if (kind === 'identity-projection') cost.projections++
   if (kind === 'identity-visit') cost.visits++
 } })
@@ -34,7 +35,7 @@ let publish: (snapshot: ToolkitSnapshot) => void, release: ReturnType<typeof vi.
 let observation: ToolkitSnapshot
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  Object.assign(cost, { app: 0, panel: 0, projections: 0, visits: 0 })
+  Object.assign(cost, { app: 0, panel: 0, overview: 0, projections: 0, visits: 0 })
   initial = useAppStore.getState(); observation = structuredClone(performanceSnapshot)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   release = vi.fn(); publish = () => {}
@@ -84,7 +85,7 @@ it('通过 actual App Settings 左侧入口与右侧 Toolkit，并让 script、P
   const trigger = node('.performance-trigger'), settings = node('[aria-label="Settings"]')
   expect(document.querySelectorAll('[aria-label="Settings"]')).toHaveLength(1)
   expect(settings.closest('.surface-navigation'), 'Settings remains in the left navigation').toBe(node('.surface-navigation'))
-  expect(settings.previousElementSibling).toBe(node('.surface-navigation__surfaces'))
+  expect(settings.parentElement).toBe(node('.surface-navigation__settings'))
   expect(settings.hasAttribute('aria-current')).toBe(false)
   expect(node('.window-status-bar__right').querySelector('[aria-label="Settings"]')).toBeNull()
   expect(node('.window-status-bar__right').contains(trigger)).toBe(true)
@@ -142,7 +143,7 @@ it('同步跨桥 handle 在 observe 建立期间关闭即可释放，迟到帧�
 })
 
 it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新排名仍同节点和顺序', async () => {
-  const render = async () => act(async () => root.render(<PerformanceOverview snapshot={observation} contexts={performanceContexts} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
+  const render = async () => act(async () => root.render(<PerformanceOverview snapshot={observation} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
   observation.observedAt! += 30000; observation.observation!.observedAt += 30000; observation.observation!.app.state = 'stale'; observation.observation!.app.reason = 'Application readings could not be refreshed.'
   await render()
   expect.soft(node('.performance-observation').textContent, 'Source age uses its last successful reading').toContain('30s old')
@@ -163,7 +164,7 @@ it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新�
 
   // 原独立 mounted 反例纳入同一 actual owning 场景：其他消费者不能填回此 UI 的暂停期。
   const appRender = async (key: string, paused = false) => act(async () => root.render(<PerformanceOverview key={key} snapshot={observation}
-    contexts={performanceContexts} paused={paused} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
+    paused={paused} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
   const path = () => node<SVGPathElement>('.performance-metrics svg > path:last-child').getAttribute('d')!
   observation = structuredClone(performanceSnapshot)
   await appRender('pause')
@@ -196,7 +197,7 @@ it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新�
 })
 
 it('selected Run 来源时间独立于 gap marker；cached available 不追加旧点，fresh 才开始新段', async () => {
-  const render = async () => act(async () => root.render(<PerformanceOverview snapshot={observation} contexts={performanceContexts} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
+  const render = async () => act(async () => root.render(<PerformanceOverview snapshot={observation} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
   await render(); await click('[data-settings-target="runs"]')
   const row = node<HTMLDetailsElement>('[data-run-id="preparation-run-1"]')
   await act(async () => { row.open = true; row.dispatchEvent(new Event('toggle')) })
@@ -249,7 +250,7 @@ it('128 Session/8 Host 中 unrelated Store 更新不扫描身份；真实新 Ses
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map((session, index) => index ? session : { ...session, label: 'Actual related identity update' }) })))
   expect(node('[data-run-id="preparation-run-1"]').textContent).toContain('Actual related identity update')
   const relatedDelta = delta(related)
-  expect(relatedDelta.projections).toBe(1); expect(relatedDelta.visits).toBe(128); expect(relatedDelta.panel).toBeGreaterThan(0)
+  expect(relatedDelta.projections).toBe(1); expect(relatedDelta.visits).toBe(128); expect(relatedDelta.overview).toBeGreaterThan(0)
   await click('[data-toolkit-close]'); expect(release).toHaveBeenCalledTimes(1)
   const afterClose = baselineCost(); await updateBackground(); const afterCloseDelta = delta(afterClose)
   expect(afterCloseDelta.panel).toBe(0); expect(afterCloseDelta.visits).toBe(0)
