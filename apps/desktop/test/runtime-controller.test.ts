@@ -1,3 +1,5 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { fixturePath as _tail_fixturePath } from '../../../test/fixture-values.mjs'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
@@ -82,7 +84,7 @@ const runtimeFixture = vi.hoisted(() => {
         state: 'running' as const,
         cols: 80 as number | null,
         rows: 24 as number | null,
-        observedAt: 1,
+        observedAt: _reshape_fixtureEpoch(0, 0, 1),
         latestOutputBytes: 12,
         acceptedInputBytes: 4
       },
@@ -101,7 +103,7 @@ const runtimeFixture = vi.hoisted(() => {
         state: 'running' as const,
         cols: 80 as number | null,
         rows: 24 as number | null,
-        observedAt: 1,
+        observedAt: _reshape_fixtureEpoch(0, 0, 1),
         latestOutputBytes: 12,
         acceptedInputBytes: 4
       },
@@ -152,7 +154,7 @@ const runtimeFixture = vi.hoisted(() => {
       state: 'running' as const,
       cols: 80,
       rows: 24,
-      observedAt: 1,
+      observedAt: _reshape_fixtureEpoch(0, 0, 1),
       latestOutputBytes: 0,
       acceptedInputBytes: 0
     }))
@@ -177,8 +179,8 @@ const runtimeFixture = vi.hoisted(() => {
       run: { runId: 'run-1' },
       retiredRuns: [],
 
-      createdAt: 1,
-      updatedAt: 2
+      createdAt: _reshape_fixtureEpoch(0, 0, 1),
+      updatedAt: _reshape_fixtureEpoch(0, 0, 2)
     }))
     readonly refreshAgentSession = vi.fn(async () => this.agentSession())
     readonly agentSessions = vi.fn((): AgentMuxAgentSession[] => [])
@@ -379,7 +381,7 @@ function agentStatusFixture() {
     state: 'exited' as const,
     cols: 80,
     rows: 24,
-    observedAt: 2,
+    observedAt: _reshape_fixtureEpoch(0, 0, 2),
     latestOutputBytes: 12,
     acceptedInputBytes: 4,
     exitCode: 0
@@ -395,8 +397,8 @@ function agentStatusFixture() {
       run: { runId: run.runId },
       retiredRuns: [],
 
-      createdAt: 1,
-      updatedAt: 2
+      createdAt: _reshape_fixtureEpoch(0, 0, 1),
+      updatedAt: _reshape_fixtureEpoch(0, 0, 2)
     },
     run,
     capabilities: {
@@ -413,7 +415,7 @@ describe('RuntimeController configuration transaction', () => {
   it('routes the complete A2A envelope and credential through the Core delivery owner', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient?.instances?.at(-1)
-    const message = { envelope: { schema: 'agentmux.a2a.v1' as const, messageId: 'message', operationId: 'operation', createdAt: 1,
+    const message = { envelope: { schema: 'agentmux.a2a.v1' as const, messageId: 'message', operationId: 'operation', createdAt: _reshape_fixtureEpoch(0, 0, 1),
       sender: { kind: 'agent-session' as const, agentSessionId: 'caller-cli' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'recipient' },
       senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli', recipientSessionId: 'recipient', recipientRunId: 'run-recipient',
       threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null, body: 'original' },
@@ -455,7 +457,7 @@ describe('RuntimeController configuration transaction', () => {
     client.connect.mockImplementation(() => pending)
     Object.assign(client, { pasteAgent: vi.fn(async () => {}), signalAgent: vi.fn(async () => {}) })
     const diag = { code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING', message: 'Original terminal is available; Session observation pending. Retry observation.' }
-    client.eventListener?.({ type: 'connection-state', state: 'restored', diagnostic: diag, evidence: { source: 'run-process', observedAt: 1 } })
+    client.eventListener?.({ type: 'connection-state', state: 'restored', diagnostic: diag, evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) } })
     let input: Promise<void> | undefined
     try {
       let written = false
@@ -471,7 +473,7 @@ describe('RuntimeController configuration transaction', () => {
       expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' }, data: 'original input', source: 'user' })
       expect((client as any).pasteAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' }, text: 'original paste', terminalData: 'terminal paste' })
       expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ hostId: 'local', code: diag.code, message: diag.message }))
-      client.eventListener?.({ type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: 2 } })
+      client.eventListener?.({ type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 2) } })
       expect(controller.endpointWarningSnapshot()).toEqual([])
     } finally { release(); await input?.catch(() => {}); await controller.dispose() }
   })
@@ -531,7 +533,7 @@ describe('RuntimeController configuration transaction', () => {
     const config = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
     controller.commit(await controller.prepare(config))
     const [healthy, failing] = runtimeFixture.FakeClient.instances
-    const history: AgentSessionHistoryDescriptor[] = [{ agentSessionId: 'original-retired', hostId: 'local', state: 'retired', retiredAt: 3 }]
+    const history: AgentSessionHistoryDescriptor[] = [{ agentSessionId: 'original-retired', hostId: 'local', state: 'retired', retiredAt: _reshape_fixtureEpoch(0, 0, 3) }]
     healthy!.sessionHistorySources.mockResolvedValue(history)
     failing!.sessionHistorySources.mockRejectedValue(new Error('The retained Store observation failed.'))
     await vi.waitFor(() => expect(failing!.connected).toBe(true))
@@ -859,7 +861,7 @@ describe('RuntimeController configuration transaction', () => {
         run: await client.createTerminal.mock.results[0]?.value ?? {
           runId: 'terminal-run', kind: 'terminal', providerId: null, executorId: null,
           agentSessionId: null, workspacePath: _hygiene_fixturePath("repo"), pid: 44, state: 'running', cols: 80,
-          rows: 24, observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0
+          rows: 24, observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 0, acceptedInputBytes: 0
         }
       }]
     })
@@ -904,6 +906,52 @@ describe('RuntimeController configuration transaction', () => {
       prompt: 'Open Claude on the right.',
       initialMessage: { callerAgentSessionId: 'launch-author', capability: 'launch-capability' }
     }))
+  })
+
+  it('discovers native conversations through the configured local Executor without launching or changing an Agent', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const source = { nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'native-saved', transcriptPath: _tail_fixturePath("private/native.jsonl") },
+      workspacePath: _tail_fixturePath("repo"), revision: 'a'.repeat(64) }
+    const result = { providerId: 'codex', capabilities: new AgentProviderRegistry().catalog().find(entry => entry.id === 'codex')!.capabilities,
+      availability: 'available' as const, sessions: [{ source, updatedAt: _reshape_fixtureEpoch(0, 0, 8) }], issues: [{ code: 'SOURCE_UNREADABLE', message: 'Another record could not be read.' }] }
+    const list = vi.fn(async () => result)
+    Object.assign(client, { listNativeAgentSessions: list })
+    const config: AppConfig = { ...localConfig, executors: { saved: { label: 'Configured', providerId: 'codex', command: 'wrapper', args: [], env: { CODEX_HOME: _tail_fixturePath("private/profile") }, injectAgentMuxGuide: true } } }
+    await expect(controller.nativeAgentSessions({ hostId: 'local', executorId: 'saved', workspacePath: _tail_fixturePath("repo") }, config))
+      .resolves.toEqual({ hostId: 'local', executorId: 'saved', ...result })
+    expect(list).toHaveBeenCalledWith({ providerId: 'codex', workspacePath: _tail_fixturePath("repo"), env: { CODEX_HOME: _tail_fixturePath("private/profile") } })
+    await expect(controller.nativeAgentSessions({ hostId: 'local', executorId: 'missing' }, config)).rejects.toMatchObject({ code: 'EXECUTOR_UNKNOWN' })
+    await expect(controller.nativeAgentSessions({ hostId: 'local', executorId: 'saved', env: {} } as never, config)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(client.createAgent).not.toHaveBeenCalled(); expect(client.stopAgent).not.toHaveBeenCalled()
+    expect(client.stopTerminal).not.toHaveBeenCalled(); await controller.dispose()
+  })
+
+  it('discovers native conversations using the exact remote Host Executor owner', async () => {
+    const config: AppConfig = { ...localConfig, hosts: [remoteHost] }
+    const controller = new RuntimeController(store, localRuntimeConnector)
+    controller.commit(await controller.prepare(config))
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const result = { providerId: 'generic', capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: false, replyCorrelation: 'none' },
+      availability: 'unsupported', sessions: [], issues: [] }
+    const remote = vi.fn(async () => result), local = vi.fn()
+    Object.assign(client, { listHostNativeAgentSessions: remote, listNativeAgentSessions: local })
+    await expect(controller.nativeAgentSessions({ hostId: 'remote', executorId: 'host-owned' }, config))
+      .resolves.toEqual({ hostId: 'remote', executorId: 'host-owned', ...result })
+    expect(remote).toHaveBeenCalledWith({ executorId: 'host-owned' }); expect(local).not.toHaveBeenCalled()
+    expect(client.createAgent).not.toHaveBeenCalled(); expect(client.stopAgent).not.toHaveBeenCalled(); await controller.dispose()
+  })
+
+  it('passes one exact native source through creation without inventing a request and refuses relocation before dispatch', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const source = { nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'native-saved', transcriptPath: _tail_fixturePath("private/native.jsonl") }, workspacePath: _tail_fixturePath("repo"), revision: 'a'.repeat(64) }
+    const config: AppConfig = { ...localConfig, executors: { saved: { label: 'Configured', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } } }
+    const input = { executorId: 'saved', hostId: 'local', workspacePath: _tail_fixturePath("repo"), nativeResumeSource: source, createOperationId: 'original-resume' }
+    await expect(controller.launchAgent(input, config)).rejects.toThrow('stopped after input capture')
+    expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({ nativeResumeSource: source, createOperationId: 'original-resume', workspacePath: _tail_fixturePath("repo"), providerId: 'codex' }))
+    expect(client.createAgent.mock.calls[0]![0]).not.toHaveProperty('prompt')
+    await expect(controller.launchAgent({ ...input, workspacePath: _tail_fixturePath("elsewhere") }, config)).rejects.toMatchObject({ code: 'INVALID_AGENT_NATIVE_RESUME_SOURCE' })
+    await expect(controller.launchAgent({ ...input, nativeResumeSource: { ...source, nativeHandle: { ...source.nativeHandle, providerId: 'claude' } } }, config)).rejects.toMatchObject({ code: 'INVALID_AGENT_NATIVE_RESUME_SOURCE' })
+    expect(client.createAgent).toHaveBeenCalledOnce(); expect(client.stopAgent).not.toHaveBeenCalled(); await controller.dispose()
   })
 
   it.each([true, false])('new launch consumes the saved human profile only when shared (%s)', async shareWithAgents => {
@@ -1127,7 +1175,7 @@ describe('RuntimeController configuration transaction', () => {
     const status = agentStatusFixture()
     const delivery = {
       state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-replaced' as const,
-      submissionId: 'prompt-1', run: { ...status.session.run }, observedAt: 10
+      submissionId: 'prompt-1', run: { ...status.session.run }, observedAt: _reshape_fixtureEpoch(0, 0, 10)
     }
     Object.assign(status.session, { terminalPromptDelivery: delivery })
     client.createAgent.mockResolvedValue(status.session)
@@ -1292,7 +1340,7 @@ describe('RuntimeController configuration transaction', () => {
       kind: 'agent', agentSessionId: 'agent-1', providerId: 'codex', executorId: 'review',
       hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), run: { runId: 'run-1' }, retiredRuns: [],
       hookBindingId: 'race-binding', hookToken: 'race-token',
-      createdAt: 1, updatedAt: 1
+      createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1)
     }
     await privateStore.compareAndSwap(null, original)
     const core = new ActualCoreClient({ store: privateStore })
@@ -1331,7 +1379,7 @@ describe('RuntimeController configuration transaction', () => {
     vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(1)
     bridge.statusAgent.mockImplementation(async () => {
       const checked = await core.statusAgent('agent-1')
-      await inner.registry.put({ ...original, run: { runId: 'run-2' }, updatedAt: 2 }, original.run)
+      await inner.registry.put({ ...original, run: { runId: 'run-2' }, updatedAt: _reshape_fixtureEpoch(0, 0, 2) }, original.run)
       expect(checked.run).toMatchObject({ runId: 'run-1', state: 'running' })
       expect(core.agentSession('agent-1').run).toEqual({ runId: 'run-2' })
       return checked
@@ -1470,7 +1518,7 @@ describe('RuntimeController configuration transaction', () => {
         run: { ...running.run, state: 'running' as const },
         session: {
           ...running.session,
-          semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: 8 }
+          semanticStatus: { state: 'done' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 8) }
         }
       })
     client.submitAgentPrompt.mockRejectedValue(new AgentMuxError(
@@ -1580,7 +1628,7 @@ describe('RuntimeController configuration transaction', () => {
       ...previous.session,
       run: { runId: 'run-2' },
       retiredRuns: [previous.session.run],
-      updatedAt: 3
+      updatedAt: _reshape_fixtureEpoch(0, 0, 3)
     }
     const { exitCode: _exitCode, ...previousRun } = previous.run
     const resumedRun = {
@@ -1588,7 +1636,7 @@ describe('RuntimeController configuration transaction', () => {
       runId: 'run-2',
       state: 'running' as const,
       pid: 43,
-      observedAt: 3
+      observedAt: _reshape_fixtureEpoch(0, 0, 3)
     }
     client.ensureAgentContinuity.mockResolvedValueOnce({
       kind: 'resumed',
@@ -1599,7 +1647,7 @@ describe('RuntimeController configuration transaction', () => {
         kind: 'provider-native',
         providerId: 'codex',
         nativeSessionId: 'native-1',
-        previousRun: { kind: 'run-ended', state: 'exited', observedAt: 2 }
+        previousRun: { kind: 'run-ended', state: 'exited', observedAt: _reshape_fixtureEpoch(0, 0, 2) }
       }
     })
     client.runtimeProjection.mockResolvedValueOnce({
@@ -1657,7 +1705,7 @@ describe('RuntimeController configuration transaction', () => {
       agentSessionId: 'agent-1',
       previousRun: { runId: 'run-1' },
       reason: 'native-handle-unavailable',
-      evidence: { kind: 'run-missing', observedAt: 2 }
+      evidence: { kind: 'run-missing', observedAt: _reshape_fixtureEpoch(0, 0, 2) }
     })
 
     await expect(controller.recoverSession({
@@ -1670,7 +1718,7 @@ describe('RuntimeController configuration transaction', () => {
       agentSessionId: 'agent-1',
       previousRun: { runId: 'run-1' },
       reason: 'native-handle-unavailable',
-      evidence: { kind: 'run-missing', observedAt: 2 }
+      evidence: { kind: 'run-missing', observedAt: _reshape_fixtureEpoch(0, 0, 2) }
     })
     expect(client.runtimeProjection).not.toHaveBeenCalled()
     expect(client.resumeAgent).not.toHaveBeenCalled()
@@ -1898,7 +1946,7 @@ describe('RuntimeController configuration transaction', () => {
           state: 'interrupted' as const,
           cols: 80,
           rows: 24,
-          observedAt: 2,
+          observedAt: _reshape_fixtureEpoch(0, 0, 2),
           latestOutputBytes: 0,
           acceptedInputBytes: 0,
           interruptionReason: 'daemon_restart',
@@ -2012,7 +2060,7 @@ describe('RuntimeController configuration transaction', () => {
       options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
       evidence: {
         source: 'native-hook' as const,
-        observedAt: 3,
+        observedAt: _reshape_fixtureEpoch(0, 0, 3),
         run: { runId: 'run-1' },
         hookReceiptId: 'permission-1'
       }
@@ -2028,19 +2076,19 @@ describe('RuntimeController configuration transaction', () => {
         executorId: 'review',
         agentSession: {
           ...status.session,
-          updatedAt: 3,
+          updatedAt: _reshape_fixtureEpoch(0, 0, 3),
           semanticStatus: {
             state: 'waiting',
             source: 'native-hook',
-            observedAt: 3,
+            observedAt: _reshape_fixtureEpoch(0, 0, 3),
             detail: 'PermissionRequest'
           },
-          pendingInteraction: { request, nativeInput: { operationId: 'private-native-input', delivery: 'unknown', observedAt: 3 } }
+          pendingInteraction: { request, nativeInput: { operationId: 'private-native-input', delivery: 'unknown', observedAt: _reshape_fixtureEpoch(0, 0, 3) } }
         },
         run: {
           ...status.run,
           state: 'running',
-          observedAt: 4,
+          observedAt: _reshape_fixtureEpoch(0, 0, 4),
           exitCode: undefined
         }
       }]
@@ -2052,8 +2100,8 @@ describe('RuntimeController configuration transaction', () => {
       processState: 'running',
       status: { state: 'waiting', source: 'native-hook', detail: 'PermissionRequest' },
       pendingInteraction: request,
-      agentSessionUpdatedAt: 3,
-      updatedAt: 4,
+      agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 3),
+      updatedAt: _reshape_fixtureEpoch(0, 0, 4),
       interactionResponseUnavailableReason: 'Native input delivery is unknown. Check the terminal before answering; input will not be resent.'
     })
   })
@@ -2154,10 +2202,10 @@ describe('RuntimeController configuration transaction', () => {
           executorId: 'review',
           agentSession: {
             ...status.session,
-            updatedAt: 3,
-            semanticStatus: { state: 'waiting', source, observedAt: 3 }
+            updatedAt: _reshape_fixtureEpoch(0, 0, 3),
+            semanticStatus: { state: 'waiting', source, observedAt: _reshape_fixtureEpoch(0, 0, 3) }
           },
-          run: { ...runningRun, state: 'running', observedAt: 4 }
+          run: { ...runningRun, state: 'running', observedAt: _reshape_fixtureEpoch(0, 0, 4) }
         }]
       })
 
@@ -2254,18 +2302,18 @@ describe('RuntimeController configuration transaction', () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const status = agentStatusFixture()
-    const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: 999, stateEnteredAt: 7 }
+    const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 999), stateEnteredAt: _reshape_fixtureEpoch(0, 0, 7) }
     const stored = { ...status.session, semanticStatus }
     client.agentSessions.mockReturnValue([stored])
     client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: kind === 'missing' ? [] : [{
       subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
       providerId: stored.providerId, executorId: stored.executorId, agentSession: stored,
-      run: { ...status.run, state: 'exited', observedAt: 1234, exitCode: 0 }
+      run: { ...status.run, state: 'exited', observedAt: _reshape_fixtureEpoch(0, 0, 1234), exitCode: 0 }
     }] })
     const snapshot = await controller.snapshot(localConfig)
     if (kind === 'ended') {
       expect(snapshot.sessions).toHaveLength(1)
-      expect(snapshot.sessions[0]).toMatchObject({ processState: 'exited', status: { state: 'exited', observedAt: 1234 }, semanticStatus })
+      expect(snapshot.sessions[0]).toMatchObject({ processState: 'exited', status: { state: 'exited', observedAt: _reshape_fixtureEpoch(0, 0, 1234) }, semanticStatus })
     } else {
       expect(snapshot.recoveryCandidates).toHaveLength(1)
       expect(snapshot.recoveryCandidates[0]?.semanticStatus).toEqual(semanticStatus)
@@ -2348,7 +2396,7 @@ describe('RuntimeController configuration transaction', () => {
       if (unreadable.has(id)) throw new AgentMuxError(`History source unavailable for ${id}`, 'HISTORY_READ_FAILED')
       return { agentSessionId: id, revision, items: [{ id: `${id}-history`, agentSessionId: id,
         kind: 'lifecycle' as const, status: 'complete' as const, source: 'user' as const,
-        createdAt: 1, updatedAt: 1, title: 'Retained work' }] }
+        createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), title: 'Retained work' }] }
     })
     const initial = await controller.snapshot(localConfig)
     const tabs = Object.fromEntries(initial.sessions.map(session => [session.id, createWorkbenchTab(session.id, {
@@ -2522,7 +2570,7 @@ describe('RuntimeController configuration transaction', () => {
       data,
       evidence: {
         source: 'terminal-output',
-        observedAt: 1,
+        observedAt: _reshape_fixtureEpoch(0, 0, 1),
         run: { runId: 'run-1' },
         outputByteRange: {
           startByte,
@@ -2547,8 +2595,8 @@ describe('RuntimeController configuration transaction', () => {
         run: { runId: 'run-1' },
         retiredRuns: [],
 
-        createdAt: 1,
-        updatedAt: 1
+        createdAt: _reshape_fixtureEpoch(0, 0, 1),
+        updatedAt: _reshape_fixtureEpoch(0, 0, 1)
       }
     })
 
@@ -2565,17 +2613,17 @@ describe('RuntimeController configuration transaction', () => {
     controller.setTerminalViewColors({foreground:'#ffffff',background:'#000000'})
     const client=runtimeFixture.FakeClient.instances[0]!
     client.eventListener?.({type:'agent-session',session:{kind:'agent',agentSessionId:'agent-1',providerId:'codex',executorId:'codex',
-      hostId:'local',workspacePath:_hygiene_fixturePath("repo"),run:{runId:'run-1'},retiredRuns:[],createdAt:1,updatedAt:1}} satisfies AgentMuxClientEvent)
+      hostId:'local',workspacePath:_hygiene_fixturePath("repo"),run:{runId:'run-1'},retiredRuns:[],createdAt:_reshape_fixtureEpoch(0, 0, 1),updatedAt:_reshape_fixtureEpoch(0, 0, 1)}} satisfies AgentMuxClientEvent)
     const old='\x1b]11;?\x07ABC\x1b]10;'
     const afterByte=100+Buffer.byteLength(old)
     client.eventListener?.({type:'terminal-output',agentSessionId:'agent-1',run:{runId:'run-1'},data:old,dataBytes:Buffer.from(old),
-      evidence:{source:'terminal-output',observedAt:1,outputByteRange:{startByte:100,endByte:afterByte}}} satisfies AgentMuxClientEvent)
+      evidence:{source:'terminal-output',observedAt:_reshape_fixtureEpoch(0, 0, 1),outputByteRange:{startByte:100,endByte:afterByte}}} satisfies AgentMuxClientEvent)
     await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, source: 'terminal-protocol', data: '\x1b]11;rgb:0000/0000/0000\x1b\\' }))
     client.writeAgent.mockClear()
     const data=old+'?\x07'
     client.eventListener?.({type:'terminal-snapshot',agentSessionId:'agent-1',afterByte,
       run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'codex',agentSessionId:'agent-1',workspacePath:_hygiene_fixturePath("repo"),
-        pid:123,state:'running',cols:80,rows:24,observedAt:2,latestOutputBytes:100+Buffer.byteLength(data),acceptedInputBytes:0},
+        pid:123,state:'running',cols:80,rows:24,observedAt:_reshape_fixtureEpoch(0, 0, 2),latestOutputBytes:100+Buffer.byteLength(data),acceptedInputBytes:0},
       terminal:{type:'basic-vt',checkpoint:{runId:'run-1',throughByte:100,resizeRevision:0,size:{cols:80,rows:24}},
         restoreBytes:Buffer.from('\x1b]10;?\x07'),resizes:[]},gap:null,resizeRevision:0,
       replay:[{type:'data',runId:'run-1',startByte:100,endByte:100+Buffer.byteLength(data),data,dataBytes:Buffer.from(data)}]} satisfies AgentMuxClientEvent)
@@ -2615,7 +2663,7 @@ describe('RuntimeController configuration transaction', () => {
           state: 'running',
           cols: 80,
           rows: 24,
-          observedAt: 1,
+          observedAt: _reshape_fixtureEpoch(0, 0, 1),
           latestOutputBytes: 12,
           acceptedInputBytes: 4
         }
@@ -2743,7 +2791,7 @@ describe('RuntimeController configuration transaction', () => {
         run: {
           runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
           workspacePath: _hygiene_fixturePath("repo"), pid: 42, state: 'running', cols: 80, rows: 24,
-          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+          observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 12, acceptedInputBytes: 4
         }
       }]
     })
@@ -2815,7 +2863,7 @@ describe('RuntimeController configuration transaction', () => {
       state: 'running' as const,
       cols: 80,
       rows: 24,
-      observedAt: 1,
+      observedAt: _reshape_fixtureEpoch(0, 0, 1),
       latestOutputBytes: 12,
       acceptedInputBytes: 4
     }
@@ -2873,7 +2921,7 @@ describe('RuntimeController configuration transaction', () => {
         run: {
           runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
           workspacePath: _hygiene_fixturePath("repo"), pid: 42, state: 'running', cols: 80, rows: 24,
-          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+          observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 12, acceptedInputBytes: 4
         }
       }]
     })
@@ -2924,7 +2972,7 @@ describe('RuntimeController configuration transaction', () => {
         run: {
           runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
           workspacePath: _hygiene_fixturePath("repo"), pid: 42, state: 'running', cols: 80, rows: 24,
-          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+          observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 12, acceptedInputBytes: 4
         }
       }]
     })
@@ -3050,7 +3098,7 @@ describe('RuntimeController configuration transaction', () => {
         run: {
           runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
           workspacePath: _hygiene_fixturePath("repo"), pid: 42, state: 'running', cols: 80, rows: 24,
-          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+          observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 12, acceptedInputBytes: 4
         }
       }]
     })
@@ -3063,7 +3111,7 @@ describe('RuntimeController configuration transaction', () => {
       run: {
         runId: 'run-1', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
         workspacePath: _hygiene_fixturePath("repo"), pid: 42, state: 'running', cols: 80, rows: 24,
-        observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+        observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 12, acceptedInputBytes: 4
       },
       replay: [],
       gap: null
@@ -3089,7 +3137,7 @@ describe('RuntimeController configuration transaction', () => {
         run: {
           runId: 'new-run', kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionId: 'agent-1',
           workspacePath: _hygiene_fixturePath("repo"), pid: 42, state: 'running', cols: 80, rows: 24,
-          observedAt: 1, latestOutputBytes: 12, acceptedInputBytes: 4
+          observedAt: _reshape_fixtureEpoch(0, 0, 1), latestOutputBytes: 12, acceptedInputBytes: 4
         },
         replay: [],
         gap: null
@@ -3213,7 +3261,7 @@ it.each(['stalled', 'failed', 'foreign'])('short Mote Wiki recovery %s retains h
   const client=runtimeFixture.FakeClient.instances.at(-1)!,stored={...client.agentSession(),workspacePath:_hygiene_fixturePath("private/wiki-recovery/motes/0123456789abcdef")}
   client.agentSession.mockReturnValue(stored)
   client.ensureAgentContinuity.mockResolvedValue({kind:'reattachable',session:stored,run:stored.run})
-  client.runtimeProjection.mockResolvedValue({hostId:'local',subjects:[{subjectId:'agent:local:agent-1',kind:'agent',hostId:'local',workspacePath:stored.workspacePath,providerId:'codex',executorId:'review',agentSession:stored,run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'review',agentSessionId:'agent-1',workspacePath:stored.workspacePath,pid:42,state:'running',cols:80,rows:24,observedAt:1,latestOutputBytes:0,acceptedInputBytes:0}}]})
+  client.runtimeProjection.mockResolvedValue({hostId:'local',subjects:[{subjectId:'agent:local:agent-1',kind:'agent',hostId:'local',workspacePath:stored.workspacePath,providerId:'codex',executorId:'review',agentSession:stored,run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'review',agentSessionId:'agent-1',workspacePath:stored.workspacePath,pid:42,state:'running',cols:80,rows:24,observedAt:_reshape_fixtureEpoch(0, 0, 1),latestOutputBytes:0,acceptedInputBytes:0}}]})
   const began=Date.now(),result=await controller.recoverSession({kind:'agent',hostId:'local',agentSessionId:'agent-1',run:stored.run},config)
   expect(Date.now()-began).toBeLessThan(1000);expect(result).toMatchObject({kind:'reattachable',session:{id:'agent-1',processState:'running'}})
   if(variant!=='foreign')expect(result).toHaveProperty('advisory',expect.stringMatching(/Wiki directory association is unconfirmed/))
