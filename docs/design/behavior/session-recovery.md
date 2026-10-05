@@ -226,6 +226,8 @@ Take over 是用户明确选择一位新 Agent，先理解原会话留下的工�
 
 ### 我们的流程坏了，不等于 Agent 坏了
 
+- **安装包启动须在原安全隔离下建立 Desktop API 并完成界面就绪握手。** 缺失运行依赖或界面加载失败只证明 App 的启动步骤失败，不证明原 Agent／Run 已死亡；保留原 Session、工作面与磁盘数据，不通过关闭 sandbox 或重启健康 Runtime 修复界面依赖。
+
 - Native Hook 的观察期限与同 receipt 去重保留期限采用同一进程内的单调流逝时间；墙钟前跳、回拨或校准不得把有效观察重试当成新 owner 工作，提交未知仍保留原 receipt 与内容指纹核对，完整回执合同见[Hook 配置隔离](agent-capabilities-and-messaging.md#hook-配置隔离与非-agentmux-会话)。
 - Native Hook 的工具输入按正文、transcript locator 按路径、身份按身份分别校验；正常命令、脚本及多行正文不得误套短 ID 预算或被截断。观测保存失败时，原回执及服务窗保留可安全公开的具体字段拒绝原因，其余失败保留权威错误码与恢复动作；原 Session／Run、投递未知与可执行恢复动作仍可辨。诊断不复制工具正文或凭据，原生输入仍按既有健康能力合同保留。
 
