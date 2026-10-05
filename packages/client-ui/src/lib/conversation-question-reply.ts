@@ -55,10 +55,8 @@ export function createQuestionReplyMatcher(sessionId: string, page: AgentSession
     return attempt.input.answers.every(answer => answers!.has(answer.questionId))
   }
 }
-/** A later rejected invocation cannot prove an earlier unknown invocation was unapplied. */
-export function questionReplyFailurePhase(previous: QuestionReplyPhase | undefined, dispatched: boolean, error: unknown): 'unknown' | 'rejected' {
-  if (previous === 'unknown' || previous === 'sending' || previous === 'submitted') return 'unknown'
-  if (!dispatched) return 'rejected'
-  const failure = error as { detail?: unknown; controlFailure?: { disposition?: unknown; confirmedInputBytes?: unknown } } | null
-  return failure?.detail !== 'unknown' && failure?.controlFailure?.disposition === 'not_applied' && failure.controlFailure.confirmedInputBytes === 0 ? 'rejected' : 'unknown'
+/** A dispatched command failure describes its phase, never the whole original input. */
+export function questionReplyFailurePhase(previous: QuestionReplyPhase | undefined, dispatched: boolean): 'unknown' | 'rejected' {
+  if (previous === 'unknown' || previous === 'sending' || previous === 'submitted' || dispatched) return 'unknown'
+  return 'rejected'
 }

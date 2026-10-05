@@ -46,7 +46,7 @@ export async function replyConversationQuestion(control: AgentSessionControl,
     await retainConversationQuestionReply(control.agentSessionId, key, { ...attempt, phase: 'submitted' }, attempt)
     return receipt
   } catch (error) {
-    const next: DesktopQuestionReplyAttempt = { ...attempt, phase: questionReplyFailurePhase(previous?.phase, dispatched, error), diagnostic: {
+    const next: DesktopQuestionReplyAttempt = { ...attempt, phase: questionReplyFailurePhase(previous?.phase, dispatched), diagnostic: {
       code: typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'QUESTION_REPLY_UNCONFIRMED', message: presentError(error)
     } }
     // A late callback cannot replace a native confirmation or another owner update.
