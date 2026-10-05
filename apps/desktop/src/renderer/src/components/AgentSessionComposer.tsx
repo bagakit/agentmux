@@ -89,7 +89,7 @@ export function AgentSessionComposer({
   const enqueueAgentSteer = useAppStore.getState().enqueueAgentSteer
   const archiveAgentSteer = useAppStore.getState().archiveAgentSteer
   const moveAgentSteer = useAppStore.getState().moveAgentSteer
-  const sendQueuedAgentSteer = useAppStore.getState().sendQueuedAgentSteer
+  const sendQueuedAgentSteer = useAppStore.getState().resendRefusedAgentSteer
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
   // the two cannot drift. Each entry carries an operationId for retry correlation; only its text renders.
   // Falls back to a shared frozen empty array so an absent queue does not hand a fresh `[]` to the

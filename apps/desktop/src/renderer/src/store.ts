@@ -1121,6 +1121,8 @@ type AppState = {
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
+  /** An explicit GUI resend may establish new input only after Core settles the whole original as not applied. */
+  resendRefusedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
   cancelAgentSteerPreparation(sessionId: string, operationId: string): boolean
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
@@ -9121,6 +9123,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     // Rearranging intent grants no execution permission and does not wake the consumer.
   },
+  async resendRefusedAgentSteer(sessionId, operationId) {
+    const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
+    const session = get().sessions.find(item => item.id === sessionId)
+    const fact = session?.kind === 'agent' ? session.promptInputNotApplied : undefined
+    const whollyRefused = entry && !entry.archived && entry.promptCondition && session?.kind === 'agent' &&
+      session.hostId === session.control.hostId && session.control.agentSessionId === sessionId &&
+      entry.runId === session.control.run.runId && entry.promptCondition.expectedRun.runId === entry.runId &&
+      fact?.submissionId === operationId && fact.run.runId === entry.runId
+    if (!whollyRefused) return get().sendQueuedAgentSteer(sessionId, operationId)
+    // Goal business input identities belong to their original owner. A queue resend
+    // cannot bypass that contract by copying its metadata onto a new operation.
+    if (entry.goalContinuation || entry.goalPmo || entry.goalDispatch) {
+      return get().sendQueuedAgentSteer(sessionId, operationId).catch(error => {
+        error.message += '\n原 Goal 业务输入已保留。请在原 Goal 查看并明确建立新的业务输入，或另写一条普通消息。'
+        throw error
+      })
+    }
+    const newOperationId = crypto.randomUUID()
+    let changed = false
+    set(state => {
+      const current = state.agentSteerQueues[sessionId]
+      if (current?.find(item => item.operationId === operationId) !== entry ||
+        state.sessions.find(item => item.id === sessionId) !== session ||
+        state.agentSteerInFlight[sessionId] === operationId) return state
+      const { error: _error, errorCode: _code, logId: _log, preparationWait: _wait,
+        preparationInputNotApplied: _safe, awaitingExplicitSend: _pause, ...original } = entry
+      const next: AgentSteerQueueEntry = { ...original, operationId: newOperationId, enqueuedAt: Date.now(),
+        promptCondition: null, status: 'queued', awaitingExplicitSend: true }
+      changed = true
+      return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: current.flatMap(item =>
+        item === entry ? [{ ...entry, archived: true as const }, next] : [item]) } }
+    })
+    if (!changed) return get().sendQueuedAgentSteer(sessionId, operationId)
+    // The existing ordered owner freezes/persists the new condition before input.
+    // Its failure belongs to the new operation; it must not rewrite the old refusal.
+    return get().sendQueuedAgentSteer(sessionId, newOperationId)
+  },
   async sendQueuedAgentSteer(sessionId, operationId) {
     const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
     const session = get().sessions.find(item => item.id === sessionId)
@@ -9171,7 +9210,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const queue = state.agentSteerQueues[sessionId]
         if (!queue) return state
         return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue.map(item =>
-          item.operationId === operationId && item.text === entry?.text && item.agentMuxNote === entry?.agentMuxNote && item.sourceChannel === entry?.sourceChannel
+          !item.archived && item.operationId === operationId && item.text === entry?.text && item.agentMuxNote === entry?.agentMuxNote && item.sourceChannel === entry?.sourceChannel
             ? { ...item, awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
                 ...(failure.code ? { errorCode: failure.code } : {}), status: 'deferred' as const } : item) } }
       })
