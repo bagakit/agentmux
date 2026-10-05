@@ -62,7 +62,7 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
       // 被 Agent 驱动的那一格画 Bot，不是地球——它与旁边闲着的 Browser 必须一眼分得开，这正是
       // 这个标记存在的全部理由（页面内角标只在人看着那一页时成立）。`title` 让悬停也说得出来。
       return mark.driving
-        ? <ThemeObjectAgentIcon size={12} className="workbench-tab__driving-mark"><title>Agent driving</title></ThemeObjectAgentIcon>
+        ? <span className="workbench-tab__driving-mark" style={{ display: 'inline-flex', flex: 'none', lineHeight: 0 }} role="img" aria-label="Agent driving" title="Agent driving"><ThemeObjectAgentIcon size={12} /></span>
         : <ThemeObjectBrowserIcon size={12} />
     case 'launcher':
       return <ThemeObjectLauncherIcon size={12} />
