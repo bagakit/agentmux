@@ -5,7 +5,7 @@ import { useAppStore } from '../store'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 
 /** A presentation/read receipt owner. It never clears, retries or reclassifies the supplied facts. */
-export function ServiceNoticeDisclosure({ scope, notices, available = true, complete = true, visible = true, title, persistentTitle = false, children, actions, inlineActions, className }: {
+export function ServiceNoticeDisclosure({ scope, notices, available = true, complete = true, visible = true, title, detailsTitle, persistentTitle = false, children, actions, inlineActions, className }: {
   scope: string
   notices: readonly ServiceNoticeItem[]
   available?: boolean
@@ -13,6 +13,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
   complete?: boolean
   visible?: boolean
   title?: string
+  detailsTitle?: string
   /** Keep the source recognizable after acknowledgement without reopening its details. */
   persistentTitle?: boolean
   children: ReactNode
@@ -30,7 +31,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
   const acquire = useAppStore(state => state.acquireNativeSurfaceOverlay)
   const release = useAppStore(state => state.releaseNativeSurfaceOverlay)
   const heading = title ?? notices[0]?.notice.notice.step ?? 'Service notice'
-  const detailHeading = notices.length === 1 && heading === notices[0]?.notice.notice.step ? 'Details' : heading
+  const detailHeading = detailsTitle ?? (notices.length === 1 && heading === notices[0]?.notice.notice.step ? 'Details' : heading)
   const identity = JSON.stringify([scope, notices.map(item => [item.id, serviceNoticeFingerprint(item)])])
   useEffect(() => {
     if (!open) return

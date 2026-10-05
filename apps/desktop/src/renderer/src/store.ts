@@ -69,6 +69,8 @@ import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
+import type { MoteContextOperations } from '../../shared/mote-context-observation'
+import { observeMoteContextOperation } from './lib/mote-context-observation'
 import { sessionPresentationById, agentSessionPresentationIndex } from './lib/session-presentation'
 import { observeFocusHistoryIdentity } from './lib/focus-history-identity'
 import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
@@ -388,6 +390,8 @@ export type EditorRegionDiffState = {
 }
 export type MainSurface = 'recall' | 'survey' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
+  /** A caller with its own persistent failure surface reports the same rejection there. */
+  reportFailure?: boolean
   /** An explicit new discussion keeps the Mote identity and owns its first draft before preparation. */
   newTab?: boolean
   initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }
@@ -662,6 +666,8 @@ type AppState = {
   nameAuthorityRevision: number
   nameAcknowledgementRevision: number
   noticeReadReceipts: Record<string, Record<string, string>>
+  /** Original Mote action facts; ephemeral, shared by the status surface and read-only inspection. */
+  moteContextOperations: MoteContextOperations
   mainSurface: MainSurface
   notebookRecoveries: NotebookRecovery[]
   recallNotebookId: string | null
@@ -3546,6 +3552,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   launcherNameDrafts: {},
   launcherOptionDrafts: {},
   noticeReadReceipts: {},
+  moteContextOperations: {},
   agentNames: {},
   nameLabels: {},
   nameAuthorityRevision: 0,
@@ -4713,6 +4720,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'space.rename') {
       throw controlFailure('CONTROL_UNAVAILABLE', 'Tab name edits belong to the public spatial label owner; keep this workface and use that owner.')
+    }
+    if (request.operation === 'inspect.mote-context') {
+      return { operation: request.operation, observation: observeMoteContextOperation(get().moteContextOperations, request) }
     }
     if (request.operation === 'inspect.client') {
       const discoveryWorkspace = get().config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
@@ -7650,7 +7660,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     let snapshot: ScratchTopicSnapshot | null
     try { snapshot = await api.scratch.readTopic(workspace.id, topicId) }
-    catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'Topic metadata is unavailable. Original workface, references and healthy Agents are retained; retry this Topic.' }); throw error }
+    catch (error) {
+      if (options?.reportFailure !== false) get().reportError(error, { kind: 'indeterminate', summary: 'Topic metadata is unavailable. Original workface, references and healthy Agents are retained; retry this Topic.' })
+      throw error
+    }
     finally { release() }
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
     if (!reveal && options?.tabId) {

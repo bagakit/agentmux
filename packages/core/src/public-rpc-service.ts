@@ -68,6 +68,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>

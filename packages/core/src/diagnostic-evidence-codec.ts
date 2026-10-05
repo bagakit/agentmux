@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { parseMoteContextEvidenceTarget, parseMoteContextEvidence } from './mote-context-observation.js'
 import { parseToolkitPerformanceFailure } from './toolkit-performance-failure.js'
 import { toolkitFailureEvidenceCode, TOOLKIT_FAILURE_EVIDENCE_SIGNALS } from './toolkit-failure-evidence-reader.js'
 import { diagnosticCauseCode, DELIVERY_EVIDENCE_STAGES } from './delivery-evidence-reader.js'
@@ -62,6 +63,8 @@ function parseTarget(v: unknown): AgentMuxDiagnosticEvidenceTarget {
     if (p.authority !== undefined) { const a = object(p.authority, ['kind', 'id']); text(a.kind); text(a.id) }
   } else if (p.domain === 'toolkit.performance-failure') {
     object(p, ['domain', 'hostId', 'executionId']); text(p.hostId); text(p.executionId)
+  } else if (p.domain === 'mote.context.client') {
+    parseMoteContextEvidenceTarget(p)
   } else if (p.domain === 'native-recorder-failure') {
     object(p, ['domain', 'hostId', 'agentSessionId', 'runId']); text(p.hostId); text(p.agentSessionId); text(p.runId)
   } else bad()
@@ -131,7 +134,12 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
       member(raw.returned, ['included', 'withheld', 'unavailable']); member(raw.truncated, [true, false, null])
       if (!params.includeRaw && raw.returned === 'included') bad()
       if (r.availability === 'found') {
-        if (target.domain === 'toolkit.performance-failure') {
+        if (target.domain === 'mote.context.client') {
+          if (r.recordRef !== null || r.readAuthority !== null || r.authorityStatus !== 'unavailable' ||
+            r.persistence !== null || r.scope !== 'point-observation' || r.observedAt !== null) bad()
+          const data = parseMoteContextEvidence(r.data, target, params.includeRaw === true)
+          if ((data.original !== null) !== (raw.returned === 'included')) bad()
+        } else if (target.domain === 'toolkit.performance-failure') {
           if (r.recordRef !== null) bad()
           toolkit(r.data, params.includeRaw === true, target.executionId)
         } else {
@@ -153,7 +161,9 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
     for (const key of Object.keys(limits)) if (b[key] !== limits[key as keyof typeof limits]) bad()
     for (const key of ['usedReads', 'usedBytes', 'elapsedMs']) number(b[key])
     if (b.usedReads !== reads.length || b.usedBytes !== Buffer.byteLength(JSON.stringify(p))) bad()
-    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure']); member(c.target, ['log-id', 'session-run', 'execution-id']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed']) })
+    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client']); member(c.target, ['log-id', 'session-run', 'execution-id', 'mote-context']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
+      if ((c.domain === 'mote.context.client') !== (c.target === 'mote-context')) bad()
+    })
     return p as AgentMuxDiagnosticEvidenceResult
   } catch { return bad() }
 }

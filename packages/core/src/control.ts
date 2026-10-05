@@ -6,6 +6,7 @@ import type { PendingMessageControlRequest, PendingMessageControlResult } from '
 export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError, type AgentMuxControlFailure } from './errors.js'
+export { AgentMuxError } from './errors.js'
 import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
@@ -24,6 +25,8 @@ import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolk
 export * from './toolkit.js'
 export type * from './space-control.js'
 export type * from './desktop-focus-control.js'
+export * from './mote-context-observation.js'
+import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote-context-observation.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -241,6 +244,9 @@ type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requ
 export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' })
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client' }
+export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
+  operation: 'inspect.mote-context'; target: AgentMuxMoteContextEvidenceTarget; includeRaw: boolean; maxBytes: number
+}
 export type AgentMuxControlInspectTabRequest = RequestBase & {
   operation: 'inspect.tab'; target: AgentMuxTabAnchor; caller?: AgentMuxControlCaller
 }
@@ -613,6 +619,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlMetricsRequest
   | AgentMuxSpaceControlRequest
   | AgentMuxControlInspectClientRequest
+  | AgentMuxControlInspectMoteContextRequest
   | AgentMuxControlInspectTabRequest
   | AgentMuxControlInspectRegionRequest
   | AgentMuxControlOpenTerminalRequest
@@ -719,6 +726,7 @@ export type AgentMuxControlResult =
   | { operation: 'metrics.watch' }
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
+  | { operation: 'inspect.mote-context'; observation: AgentMuxMoteContextObservation }
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
@@ -973,6 +981,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.get': 'short',
   'metrics.watch': 'short',
   'inspect.client': 'short',
+  'inspect.mote-context': 'short',
   'inspect.tab': 'short',
   'inspect.region': 'short',
   'agent.open': 'long',

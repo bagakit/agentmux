@@ -18,7 +18,7 @@ type PendingControl = {
   nameRequest: ReturnType<typeof nameChangeRequests.getStore>
   resolve(value: DesktopControlResult): void
   reject(error: Error): void
-  timeout: NodeJS.Timeout
+  timeout: NodeJS.Timeout | null
 }
 
 type DesktopControlTransport = {
@@ -64,7 +64,9 @@ export class DesktopControlIpcBridge {
       // 路是同一个请求的两条到达方式，等待方不同而预算必须相同。此前两侧各手抄 2_000/60_000，且
       // 「哪些操作算慢」在这里被内联展开成四项析取——加一个慢操作时只改 core 的人会得到一个全绿的
       // 仓库，而这条路静默给它 2 秒。
-      const timeout = setTimeout(() => {
+      // DiagnosticEvidenceQuery owns caller deadlines. A cancelled observation is not an
+      // actual Renderer reply: retain this admitted read and its query slot until reply/disposal.
+      const timeout = request.operation === 'inspect.mote-context' ? null : setTimeout(() => {
         this.endObservation(
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
@@ -77,7 +79,7 @@ export class DesktopControlIpcBridge {
         this.transport.sendRequest(request)
       } catch (error) {
         this.pending.delete(request.requestId)
-        clearTimeout(timeout)
+        if (timeout) clearTimeout(timeout)
         reject(Object.assign(
           bridgeError('CONTROL_UNAVAILABLE', 'Desktop Control owner is unavailable.'),
           { cause: error }
@@ -99,7 +101,7 @@ export class DesktopControlIpcBridge {
     const pending = this.pending.get(response.requestId)
     if (!pending) return false
     this.pending.delete(response.requestId)
-    clearTimeout(pending.timeout)
+    if (pending.timeout) clearTimeout(pending.timeout)
     if (response.ok) pending.resolve(response.result)
     else pending.reject(controlError(response.error))
     return true
@@ -116,10 +118,11 @@ export class DesktopControlIpcBridge {
 
   private endObservation(requestId: string, error: Error & { code: AgentMuxControlErrorCode }): void {
     const pending = this.pending.get(requestId)
+    if (pending?.request.operation === 'inspect.mote-context') return
     if (pending?.request.operation !== 'file.format') return this.cancel(requestId, error)
     // An accepted format owns a draft edit. Ending its reader cannot cancel that edit.
     // Retain the ID until the actual reply or owner disposal, so retry cannot start it twice.
-    clearTimeout(pending.timeout)
+    if (pending.timeout) clearTimeout(pending.timeout)
     pending.reject(Object.assign(new Error(
       'Observation of file formatting has ended. The accepted formatting may still finish in the original File Region. Inspect its current draft before deciding whether to retry.'
     ), { code: error.code }))
@@ -129,7 +132,7 @@ export class DesktopControlIpcBridge {
     const pending = this.pending.get(requestId)
     if (!pending) return
     this.pending.delete(requestId)
-    clearTimeout(pending.timeout)
+    if (pending.timeout) clearTimeout(pending.timeout)
     try {
       if (this.transport.isAvailable()) {
         this.transport.sendCancellation({ requestId, code: error.code, message: error.message })

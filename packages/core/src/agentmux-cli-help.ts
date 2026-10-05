@@ -30,6 +30,18 @@ read and presentation are separate facts. Missing presentation replies remain un
 Inspect app snapshot and space inspect for the exact existing Git Region before another open.
 Wrong or unavailable targets reject only this request; existing workspaces and Agents remain available.`
 
+const DIAGNOSTIC_GUIDE = `Read system diagnostics inspect --list for actual injected readers.
+For mote.context.client, use --input FILE|- containing the complete typed query.
+Freeze scope.hostId/directoryPath from the resource Workspace row in app snapshot --include workspaces,
+topicId from Mote discovery, and Tab/reference from app inspect or space ls. A Mote's physical
+HomeZone or logical topic directory is not its captured resource Workspace path.
+The outer hostId selects the client reader route; scope.hostId can be a different resource Host.
+prepare reads one exact resource/Topic/Tab action; open-space additionally requires the complete
+captured display reference (or actual null). Do not substitute another occurrence.
+These are latest-per-scope-action observations, with original action/failure times, not historical
+logs or Agent health. Default raw stays withheld before IPC; explicitly requested original text
+requires original source authorization and fits the query budget. No retry, focus or Run starts.`
+
 const SPATIAL_GUIDE = `## Delegation and opening playbook (advisory)
 "subagent" can mean Provider-native delegation or an independent AgentMux Session.
 Choose from the user's purpose, available context and capabilities, how results return,
@@ -251,6 +263,8 @@ ${SPATIAL_GUIDE}
 ${NATIVE_RESUME_GUIDE}
 
 ${GIT_GUIDE}
+
+${DIAGNOSTIC_GUIDE}
 
 Agent-first workflow:
 1. Inspect Project resources and the intended Space separately with app snapshot and space inspect.
