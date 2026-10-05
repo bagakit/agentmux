@@ -26,9 +26,8 @@ it('keeps a whole-refused public message final and explicitly sends a new reply 
   try {
     const providers = (h.client as unknown as { providers: AgentProviderRegistry }).providers
     const template = providers.get('codex')
-    const { providerFork: _fork, promptExecution: _immediate, ...capabilities } = template.catalog.capabilities
     providers.register(defineAgentProvider({
-      catalog: { ...template.catalog, capabilities, id: 'generic-message', label: 'Generic message',
+      catalog: { ...template.catalog, id: 'generic-message', label: 'Generic message',
         executable: 'generic-message', expectedProcess: 'generic-message' },
       hook: template.hook, ...(template.planManagedHooks ? { planManagedHooks: template.planManagedHooks } : {}),
       buildArgs: (_prompt, args) => [...args]
@@ -138,7 +137,7 @@ it('keeps a whole-refused public message final and explicitly sends a new reply 
       replyMessageId: fresh.result.messageId, kind: 'worker_done' }, { credentials: worker })
     expect(completed).toMatchObject({ sourceMessageId: source.messageId, threadId, originAwaits: false,
       events: [{ kind: 'worker_done', replyMessageId: fresh.result.messageId }] })
-    expect((await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'owner' } }, { credentials: h.credentials })).session.run)
+    expect((await rpc.call('agent.inspect', { agentSessionId: 'owner' }, { credentials: h.credentials })).session.run)
       .toEqual({ runId: 'run-owner' })
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   } finally { await reader?.dispose(); await rpc?.dispose(); await server?.stop(); hosted?.dispose(); await h.close() }
