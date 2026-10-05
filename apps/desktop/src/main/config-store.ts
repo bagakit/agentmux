@@ -4,6 +4,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
+import { validateThemeConfigEdit } from './theme-config.js'
 import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile } from '@agentmux/core'
 import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
@@ -142,6 +143,10 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // renderer. `.transform` runs after `z.number()` accepts the value, so a non-number still fails the
 // field (and the preference falls back to default) rather than being coerced.
 const appearanceSchema = z.object({
+  themeId: z.string().optional(),
+  // Retain every literal authored key, including unsupported names. Zod's record parser omits __proto__.
+  customThemes: z.custom<Record<string, unknown>>(value => value !== null && typeof value === 'object' &&
+    !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)).optional(),
   spaceObjectIcons: z.record(z.string(), z.unknown()).optional(),
   agentAvatars: z.record(z.string().min(1), z.object({
     tint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
@@ -1124,6 +1129,7 @@ export class ConfigStore {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
+      validateThemeConfigEdit(previousText === undefined ? undefined : JSON.parse(previousText), config)
       if (enforceExecutorBinding && previousText !== undefined) {
         // Parse the prior bytes for the binding check. A parse/schema failure is rethrown, exactly as
         // the original ENOENT-only catch did: `get()` refuses to launch on a config the current schema

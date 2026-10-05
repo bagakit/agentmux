@@ -74,7 +74,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     body.target = { kind: 'goal', goalId: rpcString(p.goalId, 'Goal ID') }
     body.inputPolicy = p.input ?? 'preserve'
   }
-  const resource = /^settings\.(executors|prompts)\.(ls|inspect|create|update|delete)$/u.exec(method)
+  const resource = /^settings\.(executors|prompts|themes)\.(ls|inspect|create|update|delete)$/u.exec(method)
   if (resource) body.resource = resource[1]
   if (method.endsWith('.update') && resource || method === 'toolkit.update') {
     const p = rpcRecord(body.input, ['changes', 'expected'])
@@ -335,7 +335,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
     const p = rpcRecord(params), identity = method.startsWith('goal.') ? goalKeys(p, true) : { ...p }
     if (method === 'goal.focus') { identity.target = { kind: 'goal', goalId: p.goalId }; identity.inputPolicy = p.input ?? 'preserve' }
     if (method === 'space.inspect' && identity.target && Object.hasOwn(identity.target as object, 'operationId')) identity.target = operationKeys(identity.target as Record<string, unknown>, true)
-    const resource = /^settings\.(executors|prompts)\./u.exec(method)
+    const resource = /^settings\.(executors|prompts|themes)\./u.exec(method)
     if (resource) identity.resource = resource[1]
     if (method === 'settings.browser-links.forget') identity.scheme = rpcRecord(p.input).scheme
     const request = { ...identity, operation, requestId: p.operationId ?? ('requestId' in result ? result.requestId : '') } as AgentMuxControlRequest

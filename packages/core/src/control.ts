@@ -297,7 +297,7 @@ export type AgentMuxControlSettingsBrowserLinksRequest = RequestBase & (
   | { operation: 'settings.browser.links.list' }
   | { operation: 'settings.browser.links.forget'; scheme: string }
 )
-export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts'
+export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts' | 'themes'
 export type AgentMuxControlSettingsResourceJson = null | boolean | number | string
   | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
 export type AgentMuxControlSettingsResourceFields = { [key: string]: AgentMuxControlSettingsResourceJson }
@@ -336,7 +336,9 @@ export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
   | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
   | { operation: 'settings.hosts.upgrade-inspect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
-export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields }
+export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields; readonly?: boolean }
+/** Unreadable authored records remain in their owner; these diagnostics never imply deletion. */
+export type AgentMuxControlSettingsResourceIssue = { id: string; message: string }
 export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
   operation: 'settings.workspaces.add'; input: AgentMuxControlSettingsResourceFields
 }
@@ -346,10 +348,11 @@ export type AgentMuxControlSettingsResourceRequest = RequestBase & (
   | { operation: 'settings.resource.get'; resource: 'prompts'; keyword: string; id?: never }
   | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; id: string; value: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; id: string; changes: AgentMuxControlSettingsResourceFields; expected?: AgentMuxControlSettingsResourceFields }
-  | { operation: 'settings.resource.remove'; resource: AgentMuxControlSettingsResourceKind; id: string; expected?: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.resource.remove'; resource: Exclude<AgentMuxControlSettingsResourceKind, 'themes'>; id: string; expected?: AgentMuxControlSettingsResourceFields }
+  | { operation: 'settings.resource.remove'; resource: 'themes'; id: string; expected?: AgentMuxControlSettingsResourceJson }
 )
 export type AgentMuxControlSettingsResourceResult =
-  | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind; items: AgentMuxControlSettingsResourceItem[]; partial: true }
+  | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind; items: AgentMuxControlSettingsResourceItem[]; partial: true; issues?: AgentMuxControlSettingsResourceIssue[] }
   | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem }
   | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }
   | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; item: AgentMuxControlSettingsResourceItem; changed: boolean }

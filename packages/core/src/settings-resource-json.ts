@@ -31,10 +31,15 @@ function json(value: unknown, code: string, depth: number): AgentMuxControlSetti
   }))
 }
 
-export function settingsResourceRecord(value: unknown, code: string): AgentMuxControlSettingsResourceFields {
+export function settingsResourceValue(value: unknown, code: string): AgentMuxControlSettingsResourceJson {
   const parsed = json(value, code, 0)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return invalid(code)
   settingsResourceBudget(parsed, code)
+  return parsed
+}
+
+export function settingsResourceRecord(value: unknown, code: string): AgentMuxControlSettingsResourceFields {
+  const parsed = settingsResourceValue(value, code)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return invalid(code)
   return parsed
 }
 

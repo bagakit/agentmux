@@ -1,3 +1,4 @@
+import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import type { AgentMuxControlSettingEntry } from '@agentmux/core'
 import type { AppConfig } from '../../../shared/contracts.js'
 import { APP_APPEARANCE_IDS, APP_APPEARANCE_DEFAULT, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, TERMINAL_THEME_IDS, TERMINAL_FONT_SIZE_DEFAULT, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX } from '../../../shared/contracts.js'
@@ -6,6 +7,18 @@ import { enumSetting, invalid } from '../scalar-setting.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 
 export const appearanceSettings = [
+  {
+    key: 'appearance.themeId',
+    entry(config: AppConfig): AgentMuxControlSettingEntry { return {
+      key: this.key, kind: 'string', value: config.appearance.themeId ?? DEFAULT_THEME_ID, default: DEFAULT_THEME_ID,
+      enum: getThemeCatalog(config.appearance.customThemes).items.map(item => item.id)
+    } },
+    apply(config: AppConfig, value: string): AppConfig {
+      if (!getThemeCatalog(config.appearance.customThemes).items.some(item => item.id === value)) throw invalid(this.key, value)
+      if (this.entry(config).value === value) return config
+      return { ...config, appearance: { ...config.appearance, themeId: value } }
+    }
+  },
   enumSetting('appearance.appAppearance', APP_APPEARANCE_IDS, APP_APPEARANCE_DEFAULT,
     (config) => config.appearance.appAppearance ?? APP_APPEARANCE_DEFAULT,
     (config, appAppearance) => ({ ...config, appearance: { ...config.appearance, appAppearance } })),

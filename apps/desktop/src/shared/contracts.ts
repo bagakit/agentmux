@@ -434,6 +434,10 @@ export type AgentAvatarAppearance = { tint?: string; badge?: AgentAvatarBadge }
 export type AgentExecutorConfig = CoreAgentExecutorConfig & { avatar?: AgentAvatarAppearance }
 
 export type AppearanceConfig = {
+  /** Client theme identity; omitted retains the built-in default. */
+  themeId?: string
+  /** Original authored records are retained even when one theme is unsupported. */
+  customThemes?: Record<string, unknown>
   /** Main-owned authored Space choices; unreadable records are retained and diagnosed independently. */
   spaceObjectIcons?: Record<string, unknown>
   /** Executor-owned decoration, edited with its template; durable key stays stable. */

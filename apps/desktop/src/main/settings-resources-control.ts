@@ -1,3 +1,4 @@
+import { executeSettingsThemesControl } from './settings-themes-control.js'
 import { isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import type {
   AgentMuxControlErrorCode, AgentMuxControlSettingsResourceFields as Fields,
@@ -10,21 +11,23 @@ import { configValuesEqual, ConfigConflict } from '../shared/config-edit.js'
 import { composerShortcutSchema, executorIdSchema, executorSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
 
+type BasicKind = Exclude<Kind, 'themes'>
+
 const promptFields = composerShortcutSchema.omit({ id: true })
 const schemas = { executors: executorSchema, prompts: promptFields }
 function fail(code: AgentMuxControlErrorCode, message: string): never {
   throw Object.assign(new Error(message), { code })
 }
-function items(config: AppConfig, resource: Kind): Item[] {
+function items(config: AppConfig, resource: BasicKind): Item[] {
   return resource === 'executors'
     ? Object.entries(config.executors).map(([id, value]) => ({ id, value: structuredClone(value) as Fields }))
     : (config.composerShortcuts ?? []).map(({ id, ...value }) => ({ id, value: structuredClone(value) }))
 }
-function find(config: AppConfig, resource: Kind, id: string): Item {
+function find(config: AppConfig, resource: BasicKind, id: string): Item {
   const item = findOptional(config, resource, id)
   return item ?? fail('SETTING_RESOURCE_NOT_FOUND', `${resource} “${id}” does not exist.`)
 }
-function findOptional(config: AppConfig, resource: Kind, id: string): Item | undefined {
+function findOptional(config: AppConfig, resource: BasicKind, id: string): Item | undefined {
   if (resource === 'executors') return Object.hasOwn(config.executors, id)
     ? { id, value: structuredClone(config.executors[id]!) as Fields } : undefined
   const prompt = config.composerShortcuts?.find((candidate) => candidate.id === id)
@@ -32,13 +35,13 @@ function findOptional(config: AppConfig, resource: Kind, id: string): Item | und
   const { id: _identity, ...value } = prompt
   return { id, value: structuredClone(value) }
 }
-function validate(resource: Kind, value: Fields, partial: boolean): Fields {
+function validate(resource: BasicKind, value: Fields, partial: boolean): Fields {
   if (Object.hasOwn(value, 'id')) fail('SETTING_IDENTITY_IMMUTABLE', 'Resource identity belongs in the command, never in its editable value.')
   const result = (partial ? schemas[resource].partial() : schemas[resource]).safeParse(value)
   if (!result.success) invalidValue(resource, result.error)
   return result.data as Fields
 }
-function invalidValue(resource: Kind, error: ZodError): never {
+function invalidValue(resource: BasicKind, error: ZodError): never {
   fail('INVALID_SETTING_VALUE', `Invalid ${resource} value: ${error.issues.map((issue) => `${issue.path.join('.') || 'value'}: ${issue.code}`).join('; ')}.`)
 }
 function normalizePrompt(value: Fields): Fields {
@@ -50,17 +53,17 @@ function normalizePrompt(value: Fields): Fields {
   if (normalized.reactionIcon === null) delete normalized.reactionIcon
   return normalized
 }
-function validateExpected(resource: Kind, value: Fields): Fields {
+function validateExpected(resource: BasicKind, value: Fields): Fields {
   // Partial expectations can name an absent optional field explicitly with null.
   const absent = Object.entries(value).filter(([key, field]) => field === null && optionalField(resource, key))
   const fields = Object.fromEntries(Object.entries(value).filter(([key]) => !absent.some(([name]) => name === key)))
   return { ...validate(resource, fields, true), ...Object.fromEntries(absent) }
 }
-function optionalField(resource: Kind, key: string): boolean {
+function optionalField(resource: BasicKind, key: string): boolean {
   const shape = schemas[resource].shape as Record<string, { isOptional(): boolean }>
   return Object.hasOwn(shape, key) && shape[key]!.isOptional()
 }
-function replace(config: AppConfig, resource: Kind, id: string, value: Fields | undefined): AppConfig {
+function replace(config: AppConfig, resource: BasicKind, id: string, value: Fields | undefined): AppConfig {
   if (resource === 'executors') {
     const executors = { ...config.executors }
     if (value === undefined) delete executors[id]
@@ -87,6 +90,7 @@ function replace(config: AppConfig, resource: Kind, id: string, value: Fields | 
 
 /** Fixed resource operations consume the same typed Main schema and the same short owner transaction. */
 export async function executeSettingsResourcesControl(request: Request, owner: ConfigOwner): Promise<Result> {
+  if (request.resource === 'themes') return executeSettingsThemesControl(request, owner)
   const { resource } = request
   if (request.operation === 'settings.resource.list') return { operation: request.operation, resource, items: items(owner.current, resource), partial: true }
   if (request.operation === 'settings.resource.get') {
