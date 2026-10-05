@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, useRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -7,10 +8,11 @@ import { BrowserAddressInput, type BrowserAddressInputHandle } from '../src/rend
 import { api } from '../src/renderer/src/lib/api'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { readStyleSheet } from './helpers/styles'
 
 const target: BrowserInputHistoryTarget = { kind: 'browser', browserId: 'page', profileId: 'profile' }
 const snapshot: BrowserInputHistorySnapshot = { scope: { workspaceId: 'resource', profileId: 'profile' }, entries: [
-  { text: 'https://example.test/?q=original#part', submittedAt: 2 }, { text: 'original search', submittedAt: 1 }
+  { text: 'https://example.test/?q=original#part', submittedAt: _reshape_fixtureEpoch(0, 0, 2) }, { text: 'original search', submittedAt: _reshape_fixtureEpoch(0, 0, 1) }
 ] }
 let container: HTMLDivElement, root: Root
 const submitted = vi.fn(), notice = vi.fn(), deferredFailure = vi.fn(), regionContextMenu = vi.fn()
@@ -211,7 +213,7 @@ it('the actual nonempty popup rules style its mounted portal with an opaque prod
     const focusDeclarations = [...css.matchAll(/\.browser-address-history button:focus-visible\s*\{([^}]+)\}/g)]
     expect(focusDeclarations).toHaveLength(1); expect(focusDeclarations[0]![1]).toContain('outline: 1px solid var(--focus-line)')
     expect(popup()!.querySelectorAll('button').length).toBeGreaterThan(0)
-    const tokens = await readFile(resolve('apps/desktop/src/renderer/src/styles/tokens.css'), 'utf8')
+    const tokens = readStyleSheet('./tokens.css')
     const surface = [...tokens.matchAll(/--surface-2:\s*(#[0-9a-f]{6});/gi)]
     expect(surface).toHaveLength(1)
   } finally { style.remove() }
