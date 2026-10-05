@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from 'node:util'
+import { parseToolkitPerformanceFailure } from './toolkit-performance-failure.js'
+import { toolkitFailureEvidenceCode, TOOLKIT_FAILURE_EVIDENCE_SIGNALS } from './toolkit-failure-evidence-reader.js'
 import { diagnosticCauseCode, DELIVERY_EVIDENCE_STAGES } from './delivery-evidence-reader.js'
 import { DIAGNOSTIC_EVIDENCE_DEFAULT_BUDGET, DIAGNOSTIC_EVIDENCE_AVAILABILITIES,
   DIAGNOSTIC_EVIDENCE_ISSUE_CODES, DIAGNOSTIC_EVIDENCE_RELATION_KINDS, DIAGNOSTIC_EVIDENCE_BASIS_KINDS } from '@agentmux/diagnostic-evidence'
@@ -57,6 +60,8 @@ function parseTarget(v: unknown): AgentMuxDiagnosticEvidenceTarget {
   if (p.domain === 'delivery.client' || p.domain === 'delivery.core') {
     rpcRecord(p, ['domain', 'hostId', 'logId', 'authority']); text(p.hostId); validateDeliveryLogId(p.logId)
     if (p.authority !== undefined) { const a = object(p.authority, ['kind', 'id']); text(a.kind); text(a.id) }
+  } else if (p.domain === 'toolkit.performance-failure') {
+    object(p, ['domain', 'hostId', 'executionId']); text(p.hostId); text(p.executionId)
   } else if (p.domain === 'native-recorder-failure') {
     object(p, ['domain', 'hostId', 'agentSessionId', 'runId']); text(p.hostId); text(p.agentSessionId); text(p.runId)
   } else bad()
@@ -84,6 +89,25 @@ function delivery(v: unknown, includeRaw: boolean) {
   array(p.missingEvidence, 1, item => { const r = object(item, ['source', 'availability']); member(r.source, ['native-recorder-first-failure']); member(r.availability, ['not-exposed']) })
 }
 
+function toolkit(v: unknown, includeRaw: boolean, executionId: string) {
+  const p = object(v, ['kind', 'failure', 'diagnostics', 'original', 'coverage', 'omissions'])
+  member(p.kind, ['toolkit-performance-failure']); member(p.coverage, ['latest-only'])
+  array(p.omissions, 1, v => member(v, ['raw-query-budget']))
+  const failure = parseToolkitPerformanceFailure(p.failure), d = failure.details
+  if (failure.executionId !== executionId || d.error.message !== null || d.error.stack !== null || d.bytes !== null || (d.diagnosticOutput?.length ?? 0) !== 0 ||
+    (d.error.code !== null && toolkitFailureEvidenceCode(d.error.code) !== d.error.code)) bad()
+  if (d.exit?.signal !== null && d.exit?.signal !== undefined) member(d.exit.signal, TOOLKIT_FAILURE_EVIDENCE_SIGNALS)
+  if (p.original !== null) { if (!includeRaw || parseToolkitPerformanceFailure(p.original).executionId !== executionId) bad() }
+  const diagnostics = object(p.diagnostics, ['captureEnabled', 'failureEvidence', 'droppedWrites', 'persistence', 'issue', 'cleanupIssue'])
+  member(diagnostics.captureEnabled, [true, false]); member(diagnostics.failureEvidence, ['none', 'retained', 'included'])
+  number(diagnostics.droppedWrites); member(diagnostics.persistence, ['not-requested', 'pending', 'confirmed', 'unconfirmed', 'observed-on-disk'])
+  for (const key of ['issue', 'cleanupIssue']) if (diagnostics[key] !== null) {
+    const issue = object(diagnostics[key], ['operation', 'code', 'phase'])
+    member(issue.operation, ['read-failure', 'write-failure', 'open-run-port', 'stop', 'release', 'remove', 'clear-admission', 'close-result-channel'])
+    member(issue.phase, ['before-replace', 'after-replace', null]); if (issue.code !== null && toolkitFailureEvidenceCode(issue.code) !== issue.code) bad()
+  }
+}
+
 /** Only the actual JSON-RPC boundary needs runtime validation; readers remain ordinary typed code. */
 export function parseDiagnosticEvidenceResult(value: unknown, request: unknown): AgentMuxDiagnosticEvidenceResult {
   try {
@@ -107,13 +131,18 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
       member(raw.returned, ['included', 'withheld', 'unavailable']); member(raw.truncated, [true, false, null])
       if (!params.includeRaw && raw.returned === 'included') bad()
       if (r.availability === 'found') {
-        if (target.domain === 'native-recorder-failure' || r.recordRef === null) bad()
-        delivery(r.data, params.includeRaw === true)
-        if (rpcRecord(r.data).source !== (target.domain === 'delivery.core' ? 'core' : 'client')) bad()
+        if (target.domain === 'toolkit.performance-failure') {
+          if (r.recordRef !== null) bad()
+          toolkit(r.data, params.includeRaw === true, target.executionId)
+        } else {
+          if (target.domain === 'native-recorder-failure' || r.recordRef === null) bad()
+          delivery(r.data, params.includeRaw === true)
+          if (rpcRecord(r.data).source !== (target.domain === 'delivery.core' ? 'core' : 'client')) bad()
+        }
       } else if (r.data !== null || r.recordRef !== null) bad()
     })
     const reads = p.reads as Array<{ target: AgentMuxDiagnosticEvidenceTarget }>
-    if (params.target ? !reads[0] || JSON.stringify(reads[0].target) !== JSON.stringify(params.target) : reads.length) bad()
+    if (params.target ? !reads[0] || !isDeepStrictEqual(reads[0].target, params.target) : reads.length) bad()
     array(p.relations, limits.maxReads * 2, item => {
       const r = object(item, ['from', 'to', 'declaredBy', 'kind', 'verification', 'basis']); ref(r.from); ref(r.to); ref(r.declaredBy)
       member(r.kind, DIAGNOSTIC_EVIDENCE_RELATION_KINDS); member(r.verification, ['declared', 'target-matched', 'owner-confirmed', 'unverifiable', 'conflict'])
@@ -124,7 +153,7 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
     for (const key of Object.keys(limits)) if (b[key] !== limits[key as keyof typeof limits]) bad()
     for (const key of ['usedReads', 'usedBytes', 'elapsedMs']) number(b[key])
     if (b.usedReads !== reads.length || b.usedBytes !== Buffer.byteLength(JSON.stringify(p))) bad()
-    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure']); member(c.target, ['log-id', 'session-run']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed']) })
+    array(p.capabilities, 8, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure']); member(c.target, ['log-id', 'session-run', 'execution-id']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed']) })
     return p as AgentMuxDiagnosticEvidenceResult
   } catch { return bad() }
 }

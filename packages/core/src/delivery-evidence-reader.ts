@@ -1,4 +1,4 @@
-import { unavailableDiagnosticEvidence, type DiagnosticEvidenceReader, type DiagnosticEvidenceRelation,
+import { unavailableDiagnosticEvidence, type DiagnosticEvidenceRead, type DiagnosticEvidenceReader, type DiagnosticEvidenceRelation,
   type DiagnosticEvidenceRef } from '@agentmux/diagnostic-evidence'
 import type { DeliveryAttempt, DeliveryAttemptLookup, DeliveryFailure } from './delivery-attempt.js'
 import type { AgentMuxDeliveryEvidenceTarget, AgentMuxDeliveryEvidence, AgentMuxDiagnosticAuthorityObservation,
@@ -56,6 +56,7 @@ export function deliveryEvidenceReader(options: {
     let identity: AgentMuxDiagnosticAuthorityObservation
     try { identity = await options.authority(target) }
     catch (error) { identity = { authority: null, status: 'unavailable', causeCode: diagnosticCauseCode((error as { code?: unknown })?.code) } }
+    identity = { ...identity, causeCode: diagnosticCauseCode(identity.causeCode) }
     if (target.authority && (identity.status !== 'verified' || !identity.authority || identity.authority.kind !== target.authority.kind || identity.authority.id !== target.authority.id)) {
       const code = !identity.authority ? 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNAVAILABLE' : identity.status !== 'verified'
         ? 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE' : 'DIAGNOSTIC_EVIDENCE_AUTHORITY_MISMATCH'
@@ -72,7 +73,7 @@ export function deliveryEvidenceReader(options: {
     if (record.source !== (target.domain === 'delivery.client' ? 'client' : 'core') || record.logId !== target.logId) {
       return { ...unavailable(target, 'DIAGNOSTIC_EVIDENCE_SOURCE_CORRUPT', readAt), availability: 'corrupt' }
     }
-    return { target, recordRef: { domain: target.domain, logId: record.logId, authority: identity.authority, routeHostId: target.hostId },
+    const result: DiagnosticEvidenceRead<AgentMuxDeliveryEvidenceTarget, AgentMuxDeliveryEvidence> = { target, recordRef: { domain: target.domain, logId: record.logId, authority: identity.authority, routeHostId: target.hostId },
       readAuthority: identity.authority, authorityStatus: identity.status, availability: 'found',
       data: projectDeliveryEvidence(record, options.includeRaw), persistence: lookup.persistence, scope: 'record',
       observedAt: record.failedAt, readAt, completeness: truncatedFailure(record.error) ? 'partial' : 'complete',
@@ -80,22 +81,27 @@ export function deliveryEvidenceReader(options: {
       issue: !identity.authority ? { code: 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNAVAILABLE', stage: 'authority', causeCode: identity.causeCode }
         : identity.status !== 'verified' ? { code: 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE', stage: 'authority', causeCode: identity.causeCode }
         : lookup.issue ? { code: 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE', stage: 'read', causeCode: null } : null }
+    if (result.data!.original && Buffer.byteLength(JSON.stringify(result)) > bounds.maxBytes) {
+      result.data!.original = null; result.raw.returned = 'withheld'; result.completeness = 'partial'
+      result.issue = { code: 'DIAGNOSTIC_EVIDENCE_QUERY_BUDGET', stage: 'projection', causeCode: null }
+    }
+    return result
   } }
 }
 
 export function relatedDeliveryEvidence(read: AgentMuxDiagnosticEvidenceRead): AgentMuxDiagnosticEvidenceTarget[] {
-  if (read.target.domain !== 'delivery.client' || !read.data?.coreLogId || !read.data.hostId) return []
+  if (read.target.domain !== 'delivery.client' || read.data?.kind !== 'delivery' || !read.data.coreLogId || !read.data.hostId) return []
   return [{ domain: 'delivery.core', hostId: read.data.hostId, logId: read.data.coreLogId }]
 }
 export function deliveryEvidenceRelations(reads: readonly AgentMuxDiagnosticEvidenceRead[]): DiagnosticEvidenceRelation[] {
   const relations: DiagnosticEvidenceRelation[] = []
   for (const read of reads) {
-    if (read.target.domain !== 'delivery.client' || !read.recordRef || !read.data?.coreLogId || !read.data.hostId) continue
+    if (read.target.domain !== 'delivery.client' || !read.recordRef || read.data?.kind !== 'delivery' || !read.data.coreLogId || !read.data.hostId) continue
     const data = read.data
     const target = reads.find(candidate => candidate.target.domain === 'delivery.core' &&
       candidate.target.hostId === data.hostId && candidate.target.logId === data.coreLogId)
     const to: DiagnosticEvidenceRef = target?.recordRef ?? { domain: 'delivery.core', logId: data.coreLogId!, authority: null, routeHostId: data.hostId }
-    const original = target?.data
+    const original = target?.data?.kind === 'delivery' ? target.data : null
     const conflict = original && (['agentSessionId', 'operationId', 'expectedRunId', 'afterSubmissionId'] as const)
       .some(key => data[key] !== null && original[key] !== null && data[key] !== original[key])
     const verified = read.authorityStatus === 'verified' && target?.authorityStatus === 'verified' &&

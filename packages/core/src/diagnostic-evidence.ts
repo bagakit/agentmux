@@ -3,6 +3,7 @@ export * from '@agentmux/diagnostic-evidence'
 import type { DiagnosticEvidenceAuthority, DiagnosticEvidenceBudget, DiagnosticEvidenceRead,
   DiagnosticEvidenceReport } from '@agentmux/diagnostic-evidence'
 import type { DeliveryAttempt, DeliveryInputPhase } from './delivery-attempt.js'
+import type { ToolkitPerformanceFailure, ToolkitPerformanceDiagnostics, ToolkitPerformanceIssue } from './toolkit-performance-failure.js'
 
 export type AgentMuxDeliveryEvidenceTarget = {
   domain: 'delivery.client' | 'delivery.core'
@@ -17,7 +18,8 @@ export type AgentMuxNativeEvidenceTarget = {
   agentSessionId: string
   runId: string
 }
-export type AgentMuxDiagnosticEvidenceTarget = AgentMuxDeliveryEvidenceTarget | AgentMuxNativeEvidenceTarget
+export type AgentMuxToolkitFailureEvidenceTarget = { domain: 'toolkit.performance-failure'; hostId: string; executionId: string }
+export type AgentMuxDiagnosticEvidenceTarget = AgentMuxDeliveryEvidenceTarget | AgentMuxNativeEvidenceTarget | AgentMuxToolkitFailureEvidenceTarget
 export type AgentMuxDeliveryEvidence = {
   kind: 'delivery'
   source: 'client' | 'core'
@@ -41,7 +43,19 @@ export type AgentMuxDeliveryEvidence = {
   original: DeliveryAttempt | null
   missingEvidence: Array<{ source: 'native-recorder-first-failure'; availability: 'not-exposed' }>
 }
-export type AgentMuxDiagnosticEvidenceData = AgentMuxDeliveryEvidence
+export type AgentMuxToolkitFailureEvidence = {
+  kind: 'toolkit-performance-failure'
+  /** Original domain shape with text, stack and byte fragments withheld. */
+  failure: ToolkitPerformanceFailure
+  diagnostics: Pick<ToolkitPerformanceDiagnostics, 'captureEnabled' | 'failureEvidence' | 'droppedWrites' | 'persistence'> & {
+    issue: Omit<ToolkitPerformanceIssue, 'message'> | null
+    cleanupIssue: Omit<ToolkitPerformanceIssue, 'message'> | null
+  }
+  original: ToolkitPerformanceFailure | null
+  coverage: 'latest-only'
+  omissions: Array<'raw-query-budget'>
+}
+export type AgentMuxDiagnosticEvidenceData = AgentMuxDeliveryEvidence | AgentMuxToolkitFailureEvidence
 export type AgentMuxDiagnosticEvidenceRead = DiagnosticEvidenceRead<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData>
 export type AgentMuxDiagnosticEvidenceInspectParams = {
   /** Omit only to discover actual registered domain contracts, without reading any owner. */
@@ -51,7 +65,7 @@ export type AgentMuxDiagnosticEvidenceInspectParams = {
   budget?: Partial<DiagnosticEvidenceBudget>
 }
 export type AgentMuxDiagnosticEvidenceResult = DiagnosticEvidenceReport<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData> & {
-  capabilities: Array<{ domain: AgentMuxDiagnosticEvidenceTarget['domain']; target: 'log-id' | 'session-run'; raw: boolean; read: 'supported' | 'not-exposed' }>
+  capabilities: Array<{ domain: AgentMuxDiagnosticEvidenceTarget['domain']; target: 'log-id' | 'session-run' | 'execution-id'; raw: boolean; read: 'supported' | 'not-exposed' }>
 }
 export type AgentMuxDiagnosticAuthorityObservation = {
   authority: DiagnosticEvidenceAuthority | null

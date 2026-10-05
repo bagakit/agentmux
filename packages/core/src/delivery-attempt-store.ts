@@ -1,4 +1,3 @@
-import { diagnosticCauseCode } from './delivery-evidence-reader.js'
 import { link, mkdir, open, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -48,7 +47,7 @@ export class DeliveryAttemptStore {
     } catch (error) {
       const code = (error as { code?: unknown })?.code
       return { authority: null, status: code === 'ENOENT' ? 'unconfirmed' : 'unavailable',
-        causeCode: diagnosticCauseCode(code) }
+        causeCode: typeof code === 'string' && code.length <= 512 ? code : null }
     }
   }
 
