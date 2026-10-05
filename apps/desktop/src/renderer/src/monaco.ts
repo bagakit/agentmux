@@ -1,3 +1,4 @@
+import { mountMonacoIcons } from './lib/monaco-icons'
 import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 import { typescript as monacoTypeScript } from 'monaco-editor'
@@ -87,3 +88,6 @@ resourceWindow.__agentmuxFileEditingProbe = {
     model.setValue(value)
   }
 }
+
+const disposeMonacoIcons = mountMonacoIcons()
+if (import.meta.hot) import.meta.hot.dispose(disposeMonacoIcons)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import type { ExcalidrawProps, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import '@excalidraw/excalidraw/index.css'
+import { mountExcalidrawIcons } from '../../lib/excalidraw-icons'
 import { validateExcalidrawScene } from '../../lib/file-formats/excalidraw-scene'
 
 type Scene = Awaited<ReturnType<typeof import('@excalidraw/excalidraw')['loadFromBlob']>>
@@ -38,6 +39,7 @@ export function ExcalidrawFilePreview({ content, visible = true }: { content: st
 }
 
 function ReadOnlyScene({ loaded }: { loaded: Loaded }) {
+  useEffect(() => mountExcalidrawIcons(), [])
   const container = useRef<HTMLDivElement>(null), api = useRef<ExcalidrawImperativeAPI | null>(null), frame = useRef<number | null>(null)
   const fit = useCallback(() => {
     if (frame.current !== null) cancelAnimationFrame(frame.current)
