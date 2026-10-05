@@ -141,7 +141,8 @@ export class BrowserOperationJournal {
   private readonly makeId: () => string
   private readonly maxOperations: number
   private readonly maxEvents: number
-  private warning: string | undefined
+  private loadWarning: string | undefined
+  private saveWarning: string | undefined
   /** 序号属于实际事件引用；裁剪可从中间移除事件，不能从数组下标反推。重启后重新发号。 */
   private sequenced = 0
   private readonly eventEpoch = randomUUID()
@@ -365,7 +366,7 @@ export class BrowserOperationJournal {
 
   /** Useful for the Browser rail when the disk journal is unavailable. */
   getPersistenceWarning(): string | undefined {
-    return this.warning
+    return this.saveWarning ?? this.loadWarning
   }
 
   /**
@@ -421,11 +422,11 @@ export class BrowserOperationJournal {
         this.document = normalizeDocument(loaded)
       } else {
         this.document = emptyDocument()
-        this.warning = 'Browser activity history is unavailable because its journal is damaged or unreadable.'
+        this.loadWarning = 'Browser activity history is unavailable because its journal is damaged or unreadable.'
       }
     } catch (error) {
       this.document = emptyDocument()
-      this.warning = `Browser activity history is unavailable: ${error instanceof Error ? error.message : String(error)}`
+      this.loadWarning = `Browser activity history is unavailable: ${error instanceof Error ? error.message : String(error)}`
       // 这条早退臂不必补号：`emptyDocument()` 没有事件，而 `sequenced` 的初值本来就是 0，
       // 两者已经一致。写一句 `this.sequenced = 0` 只是把同一个事实说两遍。
       return
@@ -581,9 +582,13 @@ export class BrowserOperationJournal {
           if (related?.get(sequence) === event) related.delete(sequence)
           if (related?.size === 0) this.dirtyEvents.delete(event.operationId)
         }
+        if (this.dirtyOperations.size === 0 && this.dirtyEvents.size === 0) this.saveWarning = undefined
         return true
       } catch (error) {
-        this.warning = `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}`
+        // A late failure of an older snapshot cannot undo a newer exact ACK.
+        if (this.dirtyOperations.size > 0 || this.dirtyEvents.size > 0) {
+          this.saveWarning = `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}`
+        }
         return false
       }
     })()
