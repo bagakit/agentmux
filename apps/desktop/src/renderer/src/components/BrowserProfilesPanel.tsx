@@ -1,12 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import {
-  Download,
-  Globe2,
-  LoaderCircle,
-  Plus,
-  Trash2,
-  UserRound
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import type {
   BrowserProfileImportSourceSummary,
@@ -15,6 +8,14 @@ import type {
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeObjectUserIcon = semanticIconComponent('object.user')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionCreateProfileIcon = semanticIconComponent('action.create-profile')
+const ThemeActionDownloadIcon = semanticIconComponent('action.download')
+
 
 export type BrowserProfileSurface = Pick<
   BrowserWorkbenchSurface,
@@ -57,7 +58,7 @@ export function BrowserProfileCatalog({
         const confirming = confirmDeleteId === profile.id
         return (
           <article key={profile.id}>
-            <Globe2 size={13} />
+            <ThemeObjectBrowserIcon size={13} />
             <span>
               <strong>{profile.label}{profile.isDefault ? <em>Default</em> : null}</strong>
               <small>{importedProfileDescription(profile)}</small>
@@ -74,7 +75,7 @@ export function BrowserProfileCatalog({
                 aria-label={`Delete ${profile.label}`}
                 title={profile.isDefault ? 'The default Profile cannot be deleted' : 'Close or switch its open Browsers first'}
               >
-                <Trash2 size={12} />
+                <ThemeActionRemoveIcon size={12} />
               </button>
             ) : confirming ? (
               <span className="browser-profiles__delete-confirm">
@@ -88,7 +89,7 @@ export function BrowserProfileCatalog({
                 disabled={busy !== null}
                 onClick={() => onConfirmDelete(profile.id)}
               >
-                <Trash2 size={12} />
+                <ThemeActionRemoveIcon size={12} />
               </button>
             )}
           </article>
@@ -250,12 +251,12 @@ export function BrowserProfilesPanel({
   return (
     <section className="browser-profiles" aria-label="Browser Profiles">
       <header>
-        <UserRound size={14} />
+        <ThemeObjectUserIcon size={14} />
         <span><strong>Profiles</strong><small>Separate sign-ins</small></span>
       </header>
       {profiles === null ? (
         <div className="browser-profiles__loading" role="status">
-          {profilesLoading ? <><LoaderCircle className="spin" size={13} /> Loading Profiles…</> : 'Profiles unavailable'}
+          {profilesLoading ? <><ThemeStatusLoadingIcon className="spin" size={13} /> Loading Profiles…</> : 'Profiles unavailable'}
         </div>
       ) : (
         <BrowserProfileCatalog
@@ -282,13 +283,13 @@ export function BrowserProfilesPanel({
           onChange={(event) => setCreateLabel(event.target.value)}
         />
         <button type="submit" aria-label="Create Browser Profile" disabled={profiles === null || !createLabel.trim() || busy !== null}>
-          {busy === 'create' ? <LoaderCircle className="spin" size={12} /> : <Plus size={13} />}
+          {busy === 'create' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCreateProfileIcon size={13} />}
         </button>
       </form>
 
       {sources === null ? (
         <button className="small-button browser-profiles__import-open" type="button" disabled={profiles === null || busy !== null} onClick={() => void openImport()}>
-          {busy === 'detect' ? <LoaderCircle className="spin" size={12} /> : <Download size={12} />}
+          {busy === 'detect' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionDownloadIcon size={12} />}
           {busy === 'detect' ? 'Detecting…' : 'Import Profile…'}
         </button>
       ) : (
@@ -314,7 +315,7 @@ export function BrowserProfilesPanel({
             <button className="small-button" type="button" disabled={busy === 'import'} onClick={closeImport}>Cancel</button>
             {sources.length > 0 ? (
               <button className="primary-button" type="button" disabled={!sourceToken || !importLabel.trim() || busy !== null} onClick={() => void importProfile()}>
-                {busy === 'import' ? <LoaderCircle className="spin" size={12} /> : <Download size={12} />}
+                {busy === 'import' ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionDownloadIcon size={12} />}
                 {busy === 'import' ? 'Importing…' : 'Import'}
               </button>
             ) : null}

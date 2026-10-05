@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
-import { CircleAlert, LocateFixed, Play, Plus, Save, Square, Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserDemonstrationDraft } from '../../../shared/browser-demonstration'
 import type { BrowserDemonstrationSuggestion } from '../../../shared/browser-demonstration-semantics'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskContent, BrowserTaskBatchRun } from '../../../shared/browser-task-assets'
@@ -10,6 +10,19 @@ import { BrowserDemonstrationSuggestion as DemonstrationSuggestion } from './Bro
 import { browserTaskSegment } from '../../../shared/browser-task-path'
 import { BrowserTaskBranchEditor } from './BrowserTaskBranchEditor'
 import { BrowserTaskBatchEditor } from './BrowserTaskBatchEditor'
+const ThemeActionLocateIcon = semanticIconComponent('action.locate')
+
+
+const ThemeActionEditDemonstrationIcon = semanticIconComponent('action.edit-demonstration')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+const ThemeActionCreateCheckpointIcon = semanticIconComponent('action.create-checkpoint')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeActionCreateConditionIcon = semanticIconComponent('action.create-condition')
+const ThemeActionSaveIcon = semanticIconComponent('action.save')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+
 
 type ActionEvent = MouseEvent<HTMLButtonElement>
 type Props = {
@@ -94,14 +107,14 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, ren
   }
   if (!asset) return recording || warning || error ? <section className="browser-task-asset-entry" aria-label="Editable Browser task asset">
     {recording ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
-      disabled={busy || recording.status === 'recording'} onClick={onImport}><Plus size={11} aria-hidden="true" />Edit demonstration</button> : null}
-    {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{message}</p>)}
+      disabled={busy || recording.status === 'recording'} onClick={onImport}><ThemeActionEditDemonstrationIcon size={11} aria-hidden="true" />Edit demonstration</button> : null}
+    {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{message}</p>)}
   </section> : null
   return <section className="browser-rsi-replay browser-task-asset" aria-label="Editable Browser task asset" data-task-asset-id={asset.id}>
     <header className="browser-rsi-replay__header"><strong>{asset.draft.name || 'Reusable task'}</strong>
       <small>Draft</small>
     </header>
-    {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{message}</p>)}
+    {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{message}</p>)}
     {actualRun ? <div className="browser-task-asset__progress" role="status" data-run-id={actualRun.id} data-run-status={actualRun.status} data-run-version={actualRun.version}>
       <strong>{runningVersion?.name ?? 'Retained task run'} · v{actualRun.version}</strong>
       <span>{actualRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : actualRun.status === 'ready' ? 'Ready to continue' : actualRun.status}
@@ -120,7 +133,7 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, ren
       <span className="browser-task-asset__run-actions">
         {runningVersion && actualRun.version !== versionNumber && (actualRun.status === 'ready' || actualRun.status === 'waiting-human') ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
           onClick={() => { setVersionNumber(actualRun.version); setValues({}) }}>Review and continue v{actualRun.version}</button> : null}
-        {!selectedBatch && (actualRun.status === 'running' || actualRun.status === 'ready' || actualRun.status === 'waiting-human') ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={event => onStop(actualRun.id, event)}><Square size={11} aria-hidden="true" />Stop task</button> : null}
+        {!selectedBatch && (actualRun.status === 'running' || actualRun.status === 'ready' || actualRun.status === 'waiting-human') ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={event => onStop(actualRun.id, event)}><ThemeActionStopIcon size={11} aria-hidden="true" />Stop task</button> : null}
       </span>
     </div> : null}
     {draft ? <>
@@ -139,10 +152,10 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, ren
           {draft.steps.some(item => item.kind === 'branch') && step.kind !== 'checkpoint' && step.kind !== 'branch' ? <label className="browser-task-asset__field"><span>Then</span><select aria-label={`Task step ${index + 1} next path`} value={step.nextStepId === null ? 'finish' : step.nextStepId ?? 'ordered'} onChange={event => { const { nextStepId: previous, ...original } = step; void previous; change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...original, ...(event.target.value === 'ordered' ? {} : { nextStepId: event.target.value === 'finish' ? null : event.target.value }) } : item) }) }}><option value="ordered">Next ordered step</option><option value="finish">Finish this path</option>{draft.steps.slice(index + 1).map((item, offset) => <option key={item.id} value={item.id}>{index + offset + 2} · {item.label || item.target?.name || item.kind}</option>)}</select></label> : null}
           {step.kind !== 'checkpoint' ? <label className="browser-task-asset__check"><input type="checkbox" aria-label={`Review task step ${index + 1}`} checked={step.reviewed} disabled={step.kind === 'branch' ? !step.branch || (step.branch.condition.kind === 'page-url-is' ? !step.branch.condition.url : !step.branch.condition.target.role) : step.kind !== 'navigate' && (!step.target || step.target.count !== 1)} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, reviewed: event.target.checked } : item) })} />Reviewed</label> : <><small>Hands control to the person; never approves itself</small><TextInput aria-label={`Checkpoint ${index + 1} label`} value={step.label ?? ''} maxLength={240} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, label: event.target.value } : item) })} /></>}
         </span>
-        <span className="browser-task-asset__step-actions">{step.kind !== 'checkpoint' && (step.kind !== 'branch' || step.branch?.condition.kind === 'element-present') ? <button type="button" className="browser-rsi-icon-button" aria-label={`Locate task step ${index + 1}`} title={`Locate task step ${index + 1}`} onClick={event => onLocateStep(step.id, event)} disabled={busy}><LocateFixed size={11} aria-hidden="true" /></button> : null}<button type="button" className="browser-rsi-icon-button" aria-label={`Insert checkpoint after task step ${index + 1}`} title={`Insert checkpoint after task step ${index + 1}`} disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps.slice(0, index + 1), { id: mintObjectId(), kind: 'checkpoint', url: step.url, label: 'Human checkpoint', reviewed: true }, ...draft.steps.slice(index + 1)] })}><Plus size={11} aria-hidden="true" /></button><button type="button" className="browser-rsi-icon-button" aria-label={`Delete task step ${index + 1}`} title={`Delete task step ${index + 1}`} disabled={busy} onClick={() => change({ ...draft, steps: draft.steps.filter(item => item.id !== step.id) })}><Trash2 size={11} aria-hidden="true" /></button></span>
+        <span className="browser-task-asset__step-actions">{step.kind !== 'checkpoint' && (step.kind !== 'branch' || step.branch?.condition.kind === 'element-present') ? <button type="button" className="browser-rsi-icon-button" aria-label={`Locate task step ${index + 1}`} title={`Locate task step ${index + 1}`} onClick={event => onLocateStep(step.id, event)} disabled={busy}><ThemeActionLocateIcon size={11} aria-hidden="true" /></button> : null}<button type="button" className="browser-rsi-icon-button" aria-label={`Insert checkpoint after task step ${index + 1}`} title={`Insert checkpoint after task step ${index + 1}`} disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps.slice(0, index + 1), { id: mintObjectId(), kind: 'checkpoint', url: step.url, label: 'Human checkpoint', reviewed: true }, ...draft.steps.slice(index + 1)] })}><ThemeActionCreateCheckpointIcon size={11} aria-hidden="true" /></button><button type="button" className="browser-rsi-icon-button" aria-label={`Delete task step ${index + 1}`} title={`Delete task step ${index + 1}`} disabled={busy} onClick={() => change({ ...draft, steps: draft.steps.filter(item => item.id !== step.id) })}><ThemeActionRemoveIcon size={11} aria-hidden="true" /></button></span>
       </li>) : <li className="browser-rsi-timeline__empty">No steps · deleted steps stay deleted</li>}</ol>
-      <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128 || draft.steps.filter(step => step.kind === 'branch').length >= 16} onClick={() => change({ ...draft, steps: [{ id: mintObjectId(), kind: 'branch', url: draft.url, reviewed: false, branch: { condition: { kind: 'page-url-is', url: draft.url }, onTrue: draft.steps[0]?.id ?? null, onFalse: null } }, ...draft.steps] })}><Plus size={11} aria-hidden="true" />Add condition</button>
-      <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps, { id: mintObjectId(), kind: 'checkpoint', url: draft.url, label: 'Human checkpoint', reviewed: true }] })}><Plus size={11} aria-hidden="true" />Add checkpoint</button>
+      <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128 || draft.steps.filter(step => step.kind === 'branch').length >= 16} onClick={() => change({ ...draft, steps: [{ id: mintObjectId(), kind: 'branch', url: draft.url, reviewed: false, branch: { condition: { kind: 'page-url-is', url: draft.url }, onTrue: draft.steps[0]?.id ?? null, onFalse: null } }, ...draft.steps] })}><ThemeActionCreateConditionIcon size={11} aria-hidden="true" />Add condition</button>
+      <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps, { id: mintObjectId(), kind: 'checkpoint', url: draft.url, label: 'Human checkpoint', reviewed: true }] })}><ThemeActionCreateCheckpointIcon size={11} aria-hidden="true" />Add checkpoint</button>
       <details className="browser-task-asset__parameters"><summary>Completion conditions · {draft.completion?.criteria.length ?? 0}</summary>
         <small>Saved with the version before it runs. A file uses its declared click; confirmation uses the existing Continue action.</small>
         {draft.steps.filter(step => step.kind === 'click').map(step => <label key={step.id} className="browser-task-asset__field"><span>Download · {step.target?.name ?? 'Locate target'}</span>
@@ -160,14 +173,14 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, ren
         <label className="browser-task-asset__field"><span>Label</span><TextInput aria-label={`Parameter ${index + 1} label`} value={parameter.label} maxLength={240} onChange={event => change({ ...draft, parameters: draft.parameters.map((item, i) => i === index ? { ...item, label: event.target.value } : item) })} /></label>
         <label className="browser-task-asset__check"><input type="checkbox" checked={parameter.secret} onChange={event => change({ ...draft, parameters: draft.parameters.map((item, i) => i === index ? { ...item, secret: event.target.checked } : item) })} />Secret · ask again</label>
       </div>)}</details> : null}
-      <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={event => void save(event, false)}><Save size={11} aria-hidden="true" />Save draft</button><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || !draft.steps.length} onClick={event => void save(event, true)}>Save version</button></footer>
+      <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={event => void save(event, false)}><ThemeActionSaveIcon size={11} aria-hidden="true" />Save draft</button><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || !draft.steps.length} onClick={event => void save(event, true)}>Save version</button></footer>
       {asset.versions.length ? <div className="browser-task-asset__version">
         <label className="browser-task-asset__field"><span>Run saved version</span><select aria-label="Task asset version" value={versionNumber} onChange={event => { setVersionNumber(Number(event.target.value)); setValues({}) }}>{asset.versions.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.name}</option>)}</select></label>
         {version ? renderReliability?.(version.version) : null}
         {version && onRunBatch && onStopBatch ? <BrowserTaskBatchEditor version={version} batch={batch ?? null} runs={batchRuns} busy={busy} onRun={onRunBatch} onStop={onStopBatch} /> : null}
         <details><summary>Preview v{versionNumber} · {version?.steps.length ?? 0} steps</summary><ol className="browser-rsi-replay__steps">{version?.steps.map((step, index) => <li key={step.id}><span>{index + 1}</span><span><strong>{step.label ?? step.target?.name ?? step.kind}</strong><small>{step.reviewed ? step.parameterKey ? `Fresh ${step.parameterKey}` : step.kind : 'Needs review'}</small></span></li>)}</ol></details>
         {!selectedBatch ? <>{parameters.map(parameter => <label key={parameter.key} className="browser-task-asset__field"><span>{parameter.label}</span><TextInput type={parameter.secret ? 'password' : 'text'} autoComplete="off" aria-label={`Task parameter ${parameter.label}`} maxLength={16_384} value={values[parameter.key] ?? ''} onChange={event => setValues(current => ({ ...current, [parameter.key]: event.target.value }))} /></label>)}
-        <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={!canRun} onClick={event => void execute(event, 'step')}>Run next step</button><button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={!canRun} onClick={event => void execute(event, 'run')}><Play size={11} aria-hidden="true" />{continuing ? 'Return control and continue' : 'Run version'}</button></footer></> : null}
+        <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={!canRun} onClick={event => void execute(event, 'step')}>Run next step</button><button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={!canRun} onClick={event => void execute(event, 'run')}><ThemeActionStartIcon size={11} aria-hidden="true" />{continuing ? 'Return control and continue' : 'Run version'}</button></footer></> : null}
       </div> : <p className="browser-rsi-replay__origin">Save a reviewed version before running. Editing the draft never changes an existing version.</p>}
     </> : null}
   </section>

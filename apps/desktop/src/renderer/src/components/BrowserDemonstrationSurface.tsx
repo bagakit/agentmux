@@ -1,8 +1,13 @@
 import type { MouseEvent } from 'react'
-import { Circle, CircleAlert, Square } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserDemonstrationDraft } from '../../../shared/browser-demonstration'
 import type { BrowserDemonstrationSuggestion as Suggestion } from '../../../shared/browser-demonstration-semantics'
 import { BrowserDemonstrationSuggestion } from './BrowserDemonstrationSuggestion'
+
+const ThemeActionRecordIcon = semanticIconComponent('action.record')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionStopIcon = semanticIconComponent('action.stop')
+
 
 type Props = {
   draft: BrowserDemonstrationDraft | null
@@ -19,8 +24,8 @@ export function BrowserDemonstrationSurface({ draft, suggestions, warning, busy 
   const recording = draft?.status === 'recording'
   if (!draft) return <section className="browser-demonstration-entry" aria-label="Human demonstration draft">
     <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
-      aria-label="Start recording demonstration" onClick={onStart}><Circle size={11} aria-hidden="true" />Record demonstration</button>
-    {warning ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{warning}</p> : null}
+      aria-label="Start recording demonstration" onClick={onStart}><ThemeActionRecordIcon size={11} aria-hidden="true" />Record demonstration</button>
+    {warning ? <p className="browser-rsi-timeline__warning" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{warning}</p> : null}
   </section>
   return <section className="browser-rsi-replay" aria-label="Human demonstration draft" data-demonstration-id={draft?.id}>
     <header className="browser-rsi-replay__header">
@@ -28,14 +33,14 @@ export function BrowserDemonstrationSurface({ draft, suggestions, warning, busy 
       <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
         aria-label={recording ? 'Stop recording demonstration' : 'Start recording demonstration'}
         onClick={recording ? onStop : onStart}>
-        {recording ? <Square size={11} aria-hidden="true" /> : <Circle size={11} aria-hidden="true" />}
+        {recording ? <ThemeActionStopIcon size={11} aria-hidden="true" /> : <ThemeActionRecordIcon size={11} aria-hidden="true" />}
         {recording ? 'Stop' : 'Record'}
       </button>
     </header>
     <p className="browser-rsi-replay__origin" role="status">
       {recording ? 'Recording human input · main document' : draft?.status === 'interrupted' ? 'Interrupted · review before recording again' : draft ? 'Draft saved for review' : 'Record a demonstration to create a reviewable draft'}
     </p>
-    {warning || draft?.warning ? <p className="browser-rsi-timeline__warning" role="status"><CircleAlert size={12} aria-hidden="true" />{warning ?? draft?.warning}</p> : null}
+    {warning || draft?.warning ? <p className="browser-rsi-timeline__warning" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{warning ?? draft?.warning}</p> : null}
     {draft ? <details className="browser-demonstration__steps" open={recording || !collapseSteps}>
       <summary aria-label="Recorded demonstration steps">{draft.steps.length} recorded {draft.steps.length === 1 ? 'step' : 'steps'}</summary>
       <ol className="browser-rsi-replay__steps">
