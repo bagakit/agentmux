@@ -1286,8 +1286,12 @@ export function TerminalView({
       write: (data, source) => {
         if (!readOnlyRef.current) {
           const startedAt = rendererPerformance.start()
-          const request = api.sessions.write(session.control, data, source)
-          rendererPerformance.observeInputRequest(source === 'user' ? 'user' : 'protocol', request, startedAt)
+          const observation = rendererPerformance.beginInputRequest(source === 'user' ? 'user' : 'protocol', startedAt, {
+            hostId: session.control.hostId, sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : null, runId: session.control.run.runId })
+          let request: Promise<void>
+          try { request = api.sessions.write(session.control, data, source, observation.parent) }
+          catch (error) { observation.fail(); throw error }
+          observation.observe(request)
           if (source === 'user') interaction.observeWriteRequest(request, startedAt)
           void request.catch(reportError)
         }
@@ -1299,8 +1303,12 @@ export function TerminalView({
         write: () => {
           if (!readOnlyRef.current) {
             const startedAt = rendererPerformance.start()
-            const request = api.sessions.paste(session.control, text, terminalData)
-            rendererPerformance.observeInputRequest('paste', request, startedAt)
+            const observation = rendererPerformance.beginInputRequest('paste', startedAt, {
+              hostId: session.control.hostId, sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : null, runId: session.control.run.runId })
+            let request: Promise<void>
+            try { request = api.sessions.paste(session.control, text, terminalData, observation.parent) }
+            catch (error) { observation.fail(); throw error }
+            observation.observe(request)
             void request.catch(reportError)
           }
         }

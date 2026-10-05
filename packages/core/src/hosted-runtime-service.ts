@@ -1,3 +1,4 @@
+import { sanitizeHostedInputInvocation } from './performance-diagnostics.js'
 import { randomUUID } from 'node:crypto'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
@@ -157,7 +158,7 @@ export class AgentMuxHostedRuntimeService {
     if (method === 'runtime.bootstrap') return this.bootstrap()
     if (method === 'runtime.release-consumer') return { released: await this.releaseConsumer(id) }
     if (method !== 'runtime.invoke') throw new AgentMuxError('Unknown hosted public method.', 'RPC_METHOD_NOT_FOUND')
-    const input = record(decodeHostedValue(p.invocation))
+    const input = record(decodeHostedValue(sanitizeHostedInputInvocation(p.invocation)))
     if (typeof input.method !== 'string' || !(AGENTMUX_HOSTED_METHODS as readonly string[]).includes(input.method) || !Array.isArray(input.args) || input.args.length > 12) {
       throw new AgentMuxError('The method is outside the finite SDK surface.', 'INVALID_CONTROL_REQUEST')
     }

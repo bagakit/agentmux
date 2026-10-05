@@ -1,3 +1,4 @@
+import { createInputPerformanceRecorder, readInputObservation } from '@agentmux/core/control'
 import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererTerminalCost, RendererWorkTiming } from '@agentmux/core/control'
 import { tabSwitchObservation } from './tab-switch-observation'
 
@@ -18,8 +19,10 @@ const copyEpoch = (value: ReturnType<typeof epoch>): ReturnType<typeof epoch> =>
   ...value, timings: Object.fromEntries(timingKinds.map(kind => [kind, { ...value.timings[kind] }])) as ReturnType<typeof epoch>['timings']
 })
 /** No clock, subscription, payload or historical buffer scan on a selector check. */
-export function createRendererPerformance(now = () => performance.now(), wall = Date.now) {
+export function createRendererPerformance(now = () => performance.now(), wall = Date.now, nonce: () => string = () => globalThis.crypto.randomUUID()) {
   const startedAt = wall()
+  const observerId = (() => { try { return readInputObservation({ observerId: nonce(), source: 'user', sequence: 1 })?.observerId ?? null } catch { return null } })()
+  const inputDetails = createInputPerformanceRecorder(now, wall)
   const recordingSinceMonoMs = now()
   let currentEpoch = epoch(Math.floor(recordingSinceMonoMs / 10_000) * 10_000)
   let previousEpoch: ReturnType<typeof epoch> | null = null
@@ -69,14 +72,23 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     },
     commit(kind: keyof typeof consumers, visible: boolean) { consumers[kind][visible ? 'visible' : 'hidden'].commits++ },
     start: now,
-    observeInputRequest(kind: keyof typeof inputRequests, request: Promise<unknown>, start: number) {
+    beginInputRequest(kind: keyof typeof inputRequests, start: number, target: { hostId: string; sessionId: string | null; runId: string }) {
       const cost = inputRequests[kind]
       cost.started++; cost.pending++
+      const parent = observerId ? readInputObservation({ observerId, source: kind, sequence: cost.started }) : null
+      const diagnostic = inputDetails.begin({ ...target, kind, bytes: null, parent, stage: 'received' })
+      let observing = false, settled = false
       const settle = (ok: boolean) => {
+        if (settled) return
+        settled = true
         cost.pending--; if (ok) cost.completed++; else cost.failed++
-        add(cost.wall, now() - start)
+        add(cost.wall, now() - start); diagnostic.settle(ok)
       }
-      void request.then(() => settle(true), () => settle(false))
+      return { parent: parent ?? undefined, fail: () => settle(false), observe(request: Promise<unknown>) {
+        if (observing) return
+        observing = true
+        void request.then(() => settle(true), () => settle(false))
+      } }
     },
     observeOverlay(observation: RendererOverlayObservation) {
       overlay.triggers[observation.reason]++
@@ -186,6 +198,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         consumers: { composer: { visible: { ...consumers.composer.visible }, hidden: { ...consumers.composer.hidden } },
           sessionPane: { visible: { ...consumers.sessionPane.visible }, hidden: { ...consumers.sessionPane.hidden } } },
         inputRequests: { user: { ...inputRequests.user, wall: { ...inputRequests.user.wall } }, protocol: { ...inputRequests.protocol, wall: { ...inputRequests.protocol.wall } }, paste: { ...inputRequests.paste, wall: { ...inputRequests.paste.wall } } },
+        inputRequestDetails: inputDetails.snapshot(),
         overlay: { ...overlay, triggers: { ...overlay.triggers }, collect: { ...overlay.collect } },
         sessionEvents: { ...sessionEvents }, terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
         inputDelay: { ...inputDelay, timing: { ...inputDelay.timing } },

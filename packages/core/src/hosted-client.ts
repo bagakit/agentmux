@@ -1,3 +1,4 @@
+import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { randomClientRequestId } from './client-request-id.js'
 import { AgentMuxError } from './errors.js'
@@ -146,6 +147,7 @@ export async function connectHostedAgentMux(options: {
     return structuredClone(value)
   }
   const invoke = async (method: AgentMuxHostedMethod, args: unknown[]): Promise<unknown> => {
+    args = sanitizeInputObservationArguments(method, args)
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
     if (method === 'sessionHistoryResource') {
       const request = parseSessionHistoryResourceOptions(args[1])

@@ -1,3 +1,5 @@
+import type { InputPerformanceSnapshot } from './performance-diagnostics.js'
+
 /** Bounded renderer flight recorder. Durations are wall time, never CPU or input ACK. */
 export type RendererWorkTiming = { count: number; totalMs: number; maxMs: number }
 export type RendererOverlayObservation = {
@@ -76,6 +78,7 @@ export type RendererPerformanceSnapshot = {
   recording: 'bounded-lifetime'; selectorTiming: 'counts-only'; writeTiming: 'parser-callback-wall'
   consumers: { composer: RendererVisibilityCost; sessionPane: RendererVisibilityCost }
   inputRequests: Record<'user' | 'protocol' | 'paste', RendererInputRequestCost>
+  inputRequestDetails: InputPerformanceSnapshot
   overlay: RendererOverlayCost
   sessionEvents: RendererWorkTiming
   terminalWrites: { visible: RendererWorkTiming; hidden: RendererWorkTiming; stringCodeUnits: number; bytes: number }
