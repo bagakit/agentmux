@@ -7,7 +7,9 @@ export function FocusContextStateMark({ context }: { context: FocusContext }) {
   const [kind, Icon]: [string, LucideIcon] = context.bucket === 'attention' ? context.state === 'error' ? ['error', TriangleAlert] : ['attention', MessageSquare]
     : context.bucket === 'working' ? ['working', Activity]
       : context.bucket === 'results' ? ['results', Check]
-        : unknown ? ['unknown', CircleHelp]
+        : context.runUnobserved ? ['unknown', CircleHelp]
+          : context.processState === 'interrupted' ? ['interrupted', TriangleAlert]
+          : unknown ? ['unknown', CircleHelp]
           : context.processState !== 'running' ? ['recovery', Unplug] : ['idle', Pause]
   return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={12} strokeWidth={1.8} /></span>
 }

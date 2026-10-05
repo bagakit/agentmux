@@ -27,14 +27,12 @@
 .focus-project-lanes { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .focus-project-board { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .focus-project-board__live { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.focus-project-board__live[hidden] { display: none; }
 .focus-project-lanes__rows { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .focus-project-lanes__row { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line-soft); }
 .focus-project-lanes__title { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; }
 .focus-project-lanes__title > .focus-project-lanes__heading { flex: 1 1 180px; }
 .focus-project-lanes__status-rail { display: flex; align-items: center; flex: none; margin: 0 var(--sp-1) 0 auto; }
 .focus-project-lanes__status-rail > .focus-context-group__header { justify-content: center; width: 24px; padding: 0; color: var(--text-3); }
-.focus-project-lanes__status-rail > [data-bucket='disconnected'] { width: 32px; }
 .focus-project-lanes__status-rail > [data-visible-state='true'] { width: auto; padding: 0 var(--sp-2); }
 .focus-project-lanes__heading { display: flex; align-items: center; min-height: 26px; min-width: 0; gap: var(--sp-2); padding: 0 var(--sp-2); }
 .focus-project-lanes__row[data-focus-current='true'] .focus-project-lanes__heading { background: color-mix(in srgb, var(--text) 6%, transparent); box-shadow: inset 2px 0 var(--text-2); }
@@ -51,9 +49,8 @@
 .focus-project-lanes__track { min-width: 0; overflow: hidden; }
 .focus-project-lanes__groups { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
 .focus-context-group { min-width: min(100%, 180px); flex: 0 0 auto; width: min(100%, var(--focus-group-width, 180px)); }
-.focus-context-group__cards, .focus-disconnected-projects__cards { display: grid; align-content: start; gap: var(--sp-1); }
+.focus-context-group__cards { display: grid; align-content: start; gap: var(--sp-1); }
 .focus-context-group__cards { grid-template-columns: repeat(var(--focus-card-columns, 1), minmax(0, 1fr)); }
-.focus-disconnected-projects__cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
 .focus-context-group__cards > .focus-context { max-width: 320px; }
 .focus-context-group[data-focus-sparse='true'] { width: min(100%, 640px); }
 .focus-context-group[data-focus-sparse='true'] > .focus-context-group__cards > .focus-context { max-width: none; }
@@ -81,7 +78,7 @@
 .focus-state-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 5px; color: var(--text-3); background: color-mix(in srgb, currentColor 9%, transparent); }
 .focus-state-mark[data-focus-state-icon='working'] { color: var(--green); }
 .focus-state-mark[data-focus-state-icon='results'] { color: var(--status-ink); }
-.focus-state-mark[data-focus-state-icon='attention'] { color: var(--amber); }
+.focus-state-mark[data-focus-state-icon='interrupted'], .focus-state-mark[data-focus-state-icon='attention'] { color: var(--amber); }
 .focus-state-mark[data-focus-state-icon='error'] { color: var(--red); }
 .focus-context[data-bucket='idle'] .focus-context__state { color: var(--text-3); }
 .focus-context[data-bucket='results'] .focus-context__state { color: var(--status-ink); }
@@ -99,18 +96,6 @@
 .focus-context__open { flex: none; opacity: 0; color: var(--text-3); }
 .focus-context:hover .focus-context__open, .focus-context:focus-visible .focus-context__open { opacity: 1; }
 .focus-context.is-menu-open .focus-context__open { opacity: 1; }
-.focus-context--directory { align-items: flex-start; gap: 10px; min-height: 138px; padding: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
-.focus-context--directory .focus-context__avatar { margin-top: 2px; }
-.focus-context--directory .focus-context__copy { gap: 8px; }
-.focus-context--directory .focus-context__identity { align-items: center; }
-.focus-context--directory .focus-context__identity strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
-.focus-context__excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
-.focus-context__excerpt--unknown, .focus-context__excerpt-source { color: var(--text-3); }
-.focus-context__excerpt-source { font-size: var(--fs-micro); line-height: 1.4; }
-.focus-context__directory-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 5px 12px; margin-top: 2px; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.focus-context__last-activity { font-variant-numeric: tabular-nums; }
-.focus-context__directory-open { display: inline-flex; align-items: center; flex: none; gap: 3px; color: var(--text-2); }
-.focus-context--directory:hover .focus-context__directory-open, .focus-context--directory:focus-visible .focus-context__directory-open { color: var(--text); }
 .focus-context--renaming { background: var(--surface-3); }
 .focus-context__rename-mark { flex: none; color: var(--text-3); }
 .focus-context__rename { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: 600 var(--fs-meta)/1.4 var(--font-sans); outline: none; }
@@ -149,41 +134,7 @@
 .focus-context-hover footer strong, .focus-context-hover footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes focus-context-hover-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .focus-context-hover { animation: none; } }
-.focus-disconnected-entry { position: relative; width: 32px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; cursor: pointer; }
-.focus-disconnected-entry:has(.focus-context-group__count) > svg { position: absolute; left: 2px; bottom: 0; }
-.focus-disconnected-entry .focus-context-group__count { position: absolute; top: 0; right: 0; height: 12px; line-height: 12px; }
-.focus-disconnected-entry:hover { background: var(--surface-2); color: var(--text); }
-.focus-disconnected-entry:disabled { cursor: default; }
-.focus-disconnected-entry:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
-.focus-disconnected-summary { position: fixed; visibility: hidden; box-sizing: border-box; width: min(280px, calc(100vw - 16px)); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); color: var(--text-2); font-size: var(--fs-micro); pointer-events: none; }
-.focus-disconnected-summary > strong { color: var(--text); }
-.focus-disconnected-summary > div { display: flex; flex-direction: column; gap: 3px; margin-top: var(--sp-2); }
-.focus-disconnected-summary > div strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.focus-disconnected-summary > div span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: var(--text-3); }
-.focus-disconnected-summary > small { display: block; margin-top: var(--sp-2); color: var(--text-3); }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
-.focus-disconnected-projects { flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--line); }
-.focus-disconnected-projects[data-expanded='true'] { flex: 1 1 auto; }
-.focus-disconnected-projects__cards { gap: 10px; padding: 4px 12px 16px; }
-.focus-disconnected-projects .focus-project-lanes__heading { min-height: 38px; padding: 0 12px; }
-.focus-disconnected-projects .focus-project-lanes__axis { max-width: 100%; }
-.focus-disconnected-projects .focus-project-lanes__label strong { font-size: var(--fs-meta); }
-.focus-disconnected-projects__heading { display: flex; flex: none; align-items: center; min-height: 32px; gap: 8px; }
-.focus-disconnected-projects[data-expanded='true'] .focus-disconnected-projects__heading { min-height: 44px; }
-.focus-disconnected-projects__title, .focus-disconnected-projects__toggle { display: flex; flex: 1; align-items: center; flex-wrap: wrap; min-width: 0; gap: 6px; padding: 6px 12px; color: var(--text-2); font-size: var(--fs-meta); text-align: left; }
-.focus-disconnected-projects__title > svg, .focus-disconnected-projects__toggle > svg { flex: none; color: var(--text-3); }
-.focus-disconnected-projects__title > strong, .focus-disconnected-projects__toggle > strong { font-weight: 600; }
-.focus-disconnected-projects__toggle { border: 0; background: transparent; font-family: inherit; cursor: pointer; }
-.focus-disconnected-projects__toggle[aria-expanded='true'] > svg:first-child { transform: rotate(90deg); }
-.focus-disconnected-projects__toggle:hover { color: var(--text); }
-.focus-disconnected-projects__count { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.focus-disconnected-projects__return, .focus-disconnected-projects__empty > button { flex: none; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
-.focus-disconnected-projects__return { margin-right: 12px; }
-.focus-disconnected-projects__return:hover, .focus-disconnected-projects__empty > button:hover { background: var(--surface-3); }
-.focus-disconnected-projects__toggle:focus-visible, .focus-disconnected-projects__return:focus-visible, .focus-disconnected-projects__empty > button:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
-.focus-disconnected-projects__matches { flex: none; margin: 0; padding: 0 12px 8px; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-disconnected-projects__empty { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 10px; padding: 24px; color: var(--text-3); font-size: var(--fs-meta); }
-.focus-disconnected-projects__empty > strong { color: var(--text-2); font-weight: 500; }
 .focus-workspace-resize-handle { position: relative; z-index: 3; flex: 0 0 6px; min-width: 6px; cursor: col-resize; background: var(--surface-0); touch-action: none; }
 .focus-workspace-resize-handle::after { position: absolute; inset: 0 2px; background: transparent; content: ''; }
 .focus-workspace-resize-handle:hover, .focus-workspace-resize-handle:focus-visible { background: var(--line); outline: none; }

@@ -139,7 +139,6 @@
 .focus-navigation-preview__activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-micro); }
 .focus-navigation-preview__activity > span:first-child { color: var(--text-3); }
 .focus-navigation-preview__empty { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-navigation-preview__recovery { color: var(--text-3); }
 .focus-navigation-preview__hint { padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); color: var(--text-3); }
 .surface-navigation__slot--launcher { position: fixed; z-index: var(--layer-window-chrome); left: var(--sp-3); bottom: 4px; width: 34px; height: 34px; flex-basis: 34px; cursor: default; border-radius: 17px; }
 .surface-navigation__slot--launcher:hover { background: transparent; }
