@@ -145,7 +145,7 @@ export function ConversationMessage({
   const firstText = parts[0]?.kind === 'text' ? sessionHistoryTextForReading(parts[0]) : undefined
   const prefix = useMemo(() => inputMarkdown && firstText !== undefined ? parseAgentMuxMessagePrefix(firstText) : null,
     [inputMarkdown, firstText])
-  const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
+  const isDeclaredSender = prefix !== null && prefix.sourceLabel.length > 0 && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
   const agentReference = conversationAgentReference(recordedSpeaker, prefix)
@@ -274,7 +274,7 @@ export function ConversationMessage({
 
   const showOrigin = Boolean(inputOrigin && !isSystemContext && (showInputSource || inputSource?.kind === 'captured' && inputSource.device))
   const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
-    prefix && !prefix.declaredContexts && !isDeclaredSender || prefix?.packet && (!isDeclaredSender || !agentReference))
+    prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender || prefix?.packet && (!isDeclaredSender || !agentReference))
 
   return (
     <div
@@ -352,7 +352,7 @@ export function ConversationMessage({
         {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
           <CornerDownRight size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
         {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
-        {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
+        {prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? (
@@ -373,7 +373,7 @@ export function ConversationMessage({
                 <MemoizedAgentMarkdown className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown
               content={index === 0 && prefix
-                ? prefix.declaredContexts ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body
+                ? prefix.declaredContexts && !prefix.sourceLabel ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body
                 : sessionHistoryTextForReading(part)}
               inputMode={inputMarkdown}
               workspaceRoot={workspaceRoot}

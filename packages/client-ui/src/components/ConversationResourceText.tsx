@@ -59,6 +59,7 @@ export function ConversationResourceText({ part, partIndex, record, readResource
     </div>
     {error ? <p className="conversation-resource-text__error" role="alert">{error}</p> : null}
     {content?.kind === 'text' ? <div className="log-turn__text">
+      {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
       {prefix?.declaredContexts?.map((context, index) => <details key={index} className="log-turn__declared-context"><summary>Declared context</summary><pre>{context.raw}</pre></details>)}
       <AgentMarkdown content={prefix?.body ?? text} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
