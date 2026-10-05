@@ -1,3 +1,5 @@
+import { TextInput } from '@agentmux/client-ui/input'
+import './VegaFilePreview.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { VegaMode } from '../../lib/file-formats/vega-spec'
 import type { ChartBinding, ChartEvent, ChartSnapshot } from '../../lib/file-formats/vega-chart-protocol'
@@ -87,5 +89,8 @@ function ChartControl({ binding, onChange }: { binding: ChartBinding; onChange(v
     {binding.options.map((value, index) => <option key={index} value={index}>{binding.labels?.[index] ?? String(value)}</option>)}
   </select></label>
   if (binding.input === 'checkbox') return <label className="file-chart-control"><input type="checkbox" checked={Boolean(binding.value)} onChange={event => onChange(event.target.checked)} />{label}</label>
+  if (binding.input === 'text' || binding.input === 'number' || binding.input === 'date') {
+    return <label className="file-chart-control">{label}<TextInput aria-label={label} type={binding.input} min={binding.min} max={binding.max} step={binding.step} value={String(binding.value ?? '')} onChange={event => onChange(['range', 'number'].includes(binding.input) ? Number(event.target.value) : event.target.value)} /></label>
+  }
   return <label className="file-chart-control">{label}<input aria-label={label} type={binding.input} min={binding.min} max={binding.max} step={binding.step} value={String(binding.value ?? '')} onChange={event => onChange(['range', 'number'].includes(binding.input) ? Number(event.target.value) : event.target.value)} /></label>
 }
