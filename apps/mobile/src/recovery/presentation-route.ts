@@ -2,6 +2,8 @@ import type { AgentMuxMotePresentation, AgentMuxSpaceAddress, TopicKnowledgeSour
 import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
 import type { MobilePrimaryWorkface } from '../navigation/home-preference'
 import type { MobileTopicsContext } from '../topics/MobileTopicsSurface'
+import type { MobileSurveyContext } from '../survey/MobileSurveySurface'
+import type { MobileSpatialContext } from '../navigation/MobileSpatialNavigation'
 import { parseMobileKnowledgeDraftKey } from './knowledge-drafts'
 import { parseMobileTopicSourceContentReference, type MobileTopicSourceContentReference } from '../topics/source-reference'
 
@@ -13,6 +15,8 @@ export type MobilePresentationRoute = {
   identity: MobileObjectReference | null
   profile: { identity: MobileObjectReference; sourcePath: string | null } | null
   topics?: MobileTopicsRoute
+  survey?: MobileSurveyContext
+  spatial?: MobileSpatialContext
   goals?: MobileGoalsContext
 }
 export type MobileGoalsContext = { goalId: string | null; mode: 'detail' | 'edit';
@@ -48,6 +52,15 @@ function parseKnowledgeReference(value: unknown): void {
     const key = parseMobileKnowledgeDraftKey(v.draftKey)
     if (key.topicId !== v.topicId || key.entryId !== v.entryId) invalid()
   }
+}
+function parseContentContext(value: unknown, parent: 'spaceId' | 'zoneId'): void {
+  const v = object(value, [parent, 'tabId', 'regionId'])
+  for (const key of [parent, 'tabId', 'regionId']) {
+    const id = v[key]
+    if (id !== null && (typeof id !== 'string' || !id.trim() || id === 'self' || /[\0\r\n]/u.test(id)
+      || new TextEncoder().encode(id).byteLength > 16 * 1024)) invalid()
+  }
+  if (v.tabId !== null && v[parent] === null || v.regionId !== null && v.tabId === null) invalid()
 }
 function parseTopicSource(value: unknown): void {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid()
@@ -95,7 +108,7 @@ export function retainObjectReference(identity: MobileObjectIdentity | null): Mo
       ...(content ? { contentReference: content } : {}) } } : {}) }
 }
 export function parsePresentationRoute(value: unknown): MobilePresentationRoute {
-  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'goals'])
+  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'survey', 'spatial', 'goals'])
   if (!['goals', 'topics', 'mote', 'focus', 'space', 'survey'].includes(String(v.primary)) ||
     typeof v.showSession !== 'boolean' || typeof v.showGoalWork !== 'boolean' || v.showGoalWork && !v.showSession) invalid()
   if (v.identity !== null) parseIdentity(v.identity)
@@ -116,6 +129,8 @@ export function parsePresentationRoute(value: unknown): MobilePresentationRoute 
       if (frame.content !== undefined) parseMobileTopicSourceContentReference(frame.content, frame.source as TopicKnowledgeSource)
     }
   }
+  if (v.survey !== undefined) parseContentContext(v.survey, 'zoneId')
+  if (v.spatial !== undefined) parseContentContext(v.spatial, 'spaceId')
   if (v.goals !== undefined) {
     const goals = object(v.goals, ['goalId', 'mode', 'discussion'])
     if (!(goals.goalId === null || text(goals.goalId, 256)) || !['detail', 'edit'].includes(String(goals.mode))

@@ -5,7 +5,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledgeSource } from '@agentmux/core/control'
 import { MobileTopicSource } from './topics/MobileTopicSource'
 import { MobileTopicsSurface, type MobileTopicsContext } from './topics/MobileTopicsSurface'
-import { MobileSurveySurface } from './survey/MobileSurveySurface'
+import { MobileSurveySurface, type MobileSurveyContext } from './survey/MobileSurveySurface'
 import { MobileGoalsSurface } from './goals/MobileGoalsSurface'
 import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
@@ -21,7 +21,7 @@ import { exportNativeWorkfaceFile } from './platform/native/workface-file'
 import brandIcon from './assets/dragon.png'
 import { MobileIdentity, type MobileObjectIdentity } from './navigation/MobileIdentity'
 import { MobilePrimaryNavigation } from './navigation/MobilePrimaryNavigation'
-import { MobileSpatialNavigation } from './navigation/MobileSpatialNavigation'
+import { MobileSpatialNavigation, type MobileSpatialContext } from './navigation/MobileSpatialNavigation'
 import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWorkface } from './navigation/home-preference'
 import { MobileGoalWork } from './navigation/MobileGoalWork'
 import { MobileMoteProfile } from './navigation/MobileMoteProfile'
@@ -63,10 +63,18 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [secondary, setSecondary] = useState<'topics' | 'survey' | 'goals' | null>(initialPrimary === 'goals' || initialPrimary === 'topics' || initialPrimary === 'survey' ? initialPrimary : null)
   const [topicsRoute, setTopicsRoute] = useState<MobileTopicsRoute>(initial.current.presentation?.topics
     ?? { context: { categoryId: null, topicId: null, mode: 'discussion' }, sources: [] })
+  const [surveyContext, setSurveyContext] = useState<MobileSurveyContext>(initial.current.presentation?.survey
+    ?? { zoneId: null, tabId: null, regionId: null })
+  const [spatialContext, setSpatialContext] = useState<MobileSpatialContext>(initial.current.presentation?.spatial
+    ?? { spaceId: null, tabId: null, regionId: null })
   const [goalsContext, setGoalsContext] = useState<MobileGoalsContext>(initial.current.presentation?.goals
     ?? { goalId: null, mode: 'detail', discussion: null })
   const updateGoalsContext = useCallback((context: MobileGoalsContext) => setGoalsContext(value =>
     JSON.stringify(value) === JSON.stringify(context) ? value : context), [])
+  const updateSurveyContext = useCallback((context: MobileSurveyContext) => setSurveyContext(value =>
+    value.zoneId === context.zoneId && value.tabId === context.tabId && value.regionId === context.regionId ? value : context), [])
+  const updateSpatialContext = useCallback((context: MobileSpatialContext) => setSpatialContext(value =>
+    value.spaceId === context.spaceId && value.tabId === context.tabId && value.regionId === context.regionId ? value : context), [])
   const topicId = topicsRoute.context.topicId, source = topicsRoute.sources.at(-1)?.source ?? null
   const sourceReference = topicsRoute.sources.at(-1)?.content
   const sourceBytes = JSON.stringify(source)
@@ -143,13 +151,15 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [spatialBack, setSpatialBack] = useState<(() => void) | null>(null)
   const [topicsBack, setTopicsBack] = useState<(() => void) | null>(null)
   const [sourceBack, setSourceBack] = useState<(() => void) | null>(null)
+  const [surveyBack, setSurveyBack] = useState<(() => void) | null>(null)
   const [goalsBack, setGoalsBack] = useState<(() => void) | null>(null)
   const registerProfileBack = useCallback((back: (() => void) | null) => setProfileBack(() => back), [])
   const registerSpatialBack = useCallback((back: (() => void) | null) => setSpatialBack(() => back), [])
   const registerTopicsBack = useCallback((back: (() => void) | null) => setTopicsBack(() => back), [])
   const registerSourceBack = useCallback((back: (() => void) | null) => setSourceBack(() => back), [])
+  const registerSurveyBack = useCallback((back: (() => void) | null) => setSurveyBack(() => back), [])
   const registerGoalsBack = useCallback((back: (() => void) | null) => setGoalsBack(() => back), [])
-  const familyBack = secondary === 'topics' ? topicsBack : secondary === 'goals' ? goalsBack : secondary === null ? spatialBack : null
+  const familyBack = secondary === 'topics' ? topicsBack : secondary === 'goals' ? goalsBack : secondary === 'survey' ? surveyBack : spatialBack
   const hasBack = sheet !== null || showSession || secondary === 'topics' && source !== null || familyBack !== null
   const requestBack = useMobileBack(hasBack, () => {
     navigationRevision.current += 1
@@ -199,6 +209,8 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
   const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
     ...(initial.current.presentation?.goals || goalsContext.goalId !== null ? { goals: goalsContext } : {}),
+    ...(initial.current.presentation?.survey !== undefined || surveyContext.zoneId !== null ? { survey: surveyContext } : {}),
+    ...(initial.current.presentation?.spatial !== undefined || spatialContext.spaceId !== null ? { spatial: spatialContext } : {}),
     identity: retainObjectReference(objectIdentity), profile: sheet === 'identity' && profileIdentity
       ? { identity: retainObjectReference(profileIdentity)!, sourcePath: profileSourcePath } : null }
   const presentationBytes = JSON.stringify(presentation)
@@ -250,7 +262,8 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><Link2 size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <>
-        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openProfile={openProfile} onBackChange={registerSpatialBack} /></div>
+        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openProfile={openProfile} onBackChange={registerSpatialBack}
+          initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
           initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
@@ -259,7 +272,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           renderWorkface={(topic, visible) => <MobileZoneWorkface key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible}
             {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
         <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
-          openTopic={openSurveyTopic} /></div>
+          openTopic={openSurveyTopic} initialContext={surveyContext} onContextChange={updateSurveyContext} onBackChange={registerSurveyBack} openHttpLink={openBrowserHttpLink} /></div>
         {source && source.kind !== 'topic' && <div hidden={showSession || secondary !== 'topics'}>
           {source.kind === 'space' || source.kind === 'survey' ? <>
             <button className="mobile-text-button" onClick={leaveSource}><ArrowLeft size={16} />返回知识</button>
