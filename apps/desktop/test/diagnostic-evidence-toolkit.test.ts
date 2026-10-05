@@ -1,4 +1,5 @@
 import { parseToolkitPerformanceFailure } from '../../../packages/core/src/toolkit-performance-failure.js'
+import { ToolkitFailureCapture } from '../../../packages/core/src/toolkit-performance-failure.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('electron', async () => {
   const { fixturePath } = await import('../scripts/lib/fixture-values.mjs')
@@ -22,6 +23,43 @@ const close: Array<() => Promise<void>> = []
 afterEach(async () => { for (const fn of close.splice(0).reverse()) await fn(); vi.restoreAllMocks() })
 
 describe('independent Toolkit source through unified diagnostic query', () => {
+  it('keeps withheld fragment truncation unknown through original owner, public RPC and compiled CLI', async () => {
+    const root = await mkdtemp(join(sep, 'tmp', 'amx-tool-truncation-')); close.push(() => rm(root, { recursive: true, force: true }))
+    const failures = new PerformanceFailureStore(join(root, 'failure.json')), receipts = new ToolkitReceiptStore(join(root, 'receipts.json'), () => ['performance'])
+    const capture = new ToolkitFailureCapture('toolkit-output', 0); capture.append(Buffer.alloc(8193, 65))
+    const original = { schema: 'agentmux.performance.failure.v1' as const, executionId: 'fragment-execution', run: null, recordedAt: 100,
+      details: { stage: 'toolkit-json' as const, error: { message: 'original primary', code: 'EIO', stack: null,
+        messageTruncated: false, stackTruncated: false }, bytes: capture.value, exit: null } }
+    expect(original.details.bytes.omittedBytes).toBe(1); await failures.save(original)
+    const openRunPort = vi.fn(async () => { throw Error('Diagnostic query cannot start a Run') })
+    const owner = new PerformanceToolkitOwner({ failures, receipts, openRunPort, enabled: () => true,
+      launch: () => ({ runner: process.execPath, cli: join(root, 'unused'), script: join(root, 'unused'), cwd: root, env: {} }) }); close.push(() => owner.dispose())
+    const execute = vi.spyOn(owner, 'execute'), subscribe = vi.spyOn(owner, 'subscribe')
+    const socketPath = join(root, 'rpc.sock'), server = new AgentMuxControlServer({ socketPath, coreClients: () => [], toolkit: owner })
+    await server.start(); close.push(() => server.stop())
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); close.push(() => rpc.dispose())
+    const target = { domain: 'toolkit.performance-failure' as const, hostId: 'local', executionId: original.executionId }
+    const ordinary = await rpc.call('system.diagnostics.inspect', { target })
+    expect(ordinary.reads[0]).toMatchObject({ availability: 'found', completeness: 'complete', raw: { returned: 'withheld', truncated: null },
+      data: { original: null, failure: { details: { bytes: null } } } })
+    expect(execute.mock.calls).toHaveLength(1); expect(execute.mock.calls[0]?.[0]).not.toHaveProperty('includeFailureEvidence')
+    const explicit = await rpc.call('system.diagnostics.inspect', { target, includeRaw: true })
+    expect(explicit.reads[0]).toMatchObject({ completeness: 'partial', raw: { returned: 'included', truncated: true }, data: { original } })
+    const cli = await runCompiledObjectCli(['--endpoint', `unix://${socketPath}`, 'system', 'diagnostics', 'inspect', '--domain', target.domain,
+      '--host-id', target.hostId, '--execution-id', target.executionId], objectCliEnvironment(root))
+    expect(cli.code, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).result.reads[0].raw.truncated).toBeNull()
+    expect(execute.mock.calls.filter(([r]) => r.operation === 'toolkit.get' && r.includeFailureEvidence === true)).toHaveLength(1)
+    expect(execute.mock.calls).toHaveLength(3); expect(subscribe).not.toHaveBeenCalled(); expect(openRunPort).not.toHaveBeenCalled()
+    const diagnostics = { captureEnabled: true, failureEvidence: 'retained' as const, droppedWrites: 0, persistence: 'observed-on-disk' as const,
+      issue: null, cleanupIssue: null, lastFailure: { ...original, details: { ...original.details, bytes: null,
+        error: { ...original.details.error, message: null, messageTruncated: true } } } }
+    const reader = toolkitFailureEvidenceReader(async () => diagnostics, false)
+    expect((await reader.read(target, { maxBytes: 4096, signal: new AbortController().signal })).raw.truncated).toBe(true)
+    const full = { ...diagnostics, failureEvidence: 'included' as const, lastFailure: { ...original, details: { ...original.details, bytes: null } } }
+    expect((await toolkitFailureEvidenceReader(async () => full, true).read(target, { maxBytes: 4096, signal: new AbortController().signal })).raw.truncated).toBe(false)
+    const proof = process.env.AGENTMUX_TRUNCATION_RECEIPT
+    if (proof) { await writeFile(proof, JSON.stringify({ ordinary, explicit, cli, ownerOperations: execute.mock.calls.map(([r]) => r.operation), nativeRuns: 0 }, null, 2)); expect(JSON.parse(await readFile(proof, 'utf8')).cli.code).toBe(0) }
+  }, 20_000)
   it('reads the real owner failure before any Run, preserves it across owner reload, and never starts collection during query', async () => {
     const root = await mkdtemp(join(sep, 'tmp', 'amx-tool-evidence-')); close.push(() => rm(root, { recursive: true, force: true }))
     const failures = new PerformanceFailureStore(join(root, 'failure.json')), receipts = new ToolkitReceiptStore(join(root, 'receipts.json'), () => ['performance'])
