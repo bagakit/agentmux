@@ -1,4 +1,10 @@
-/** Native composition mirror; callers retain their draft and business actions. */
+/**
+ * Native composition mirror; callers retain their draft and business actions.
+ *
+ * The mirror protects the DOM value during IME composition. It does not queue or replay external
+ * draft writes: compositionEnd writes the final DOM value upstream, which can replace an external
+ * write made during composition. Callers must coordinate external draft updates themselves.
+ */
 /**
  * 组字状态。`null` 表示此刻没有组字。
  *
@@ -11,7 +17,7 @@ export type ComposerCompositionState = { domValue: string } | null
  * 一次组字相关的输入事件。四种，对应 textarea 上那四个处理器。
  *
  * `input` 是 React 的 `onChange`（底下是 DOM 的 `input`）。刻意**不**带 `isComposing`：那个位在
- * 「哪些步会派发」这件事上本来就不可靠（见文件头），而这层已经有 `compositionstart` 给的状态，
+ * 「哪些步会派发」这件事上本来就不可靠，而这层已经有 `compositionstart` 给的状态，
  * 不需要再问事件一次。
  */
 export type ComposerCompositionEvent = {
@@ -25,8 +31,8 @@ export type ComposerCompositionEvent = {
  * - `start` → 进入组字，记下镜像。这是唯一一条**开始**组字的入口。
  * - `update` → 刷新镜像，且**也会**在没有组字时进入组字。为什么不忽略：`compositionupdate` 按规范
  *   总跟在 `compositionstart` 之后，所以「没有组字却收到 update」本不该发生；两种处置的代价不对称
- *   ——忽略它的代价是数据被改坏（正是本缺陷），进入组字的代价只是「这次外部写入被压到下一次
- *   非组字 `input` 或 `end`」，而那两条都会立刻把状态清掉。取有界且自愈的那一侧。
+ *   ——忽略它会让受控渲染覆盖在途 DOM；进入组字则继续保护 DOM，直到 `end` 退出组字。
+ *   这不是外部写入队列：`end` 会把最终 DOM 值写回上游，调用方仍须协调组字期间的外部更新。
  * - `end` → 退出组字。调用方在同一个处理器里把 `domValue` 推给 store，所以这一帧渲染出来的
  *   `props.value` 已经是最终文本，React 那句赋值照旧不会发生。
  * - `input` → **只刷新已有的**组字镜像，绝不开启组字。没在组字时它把状态清成 `null`，让普通受控
