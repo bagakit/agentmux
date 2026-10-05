@@ -1,3 +1,4 @@
+import './mobile-lan-crypto.setup'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MobileGoalWork } from '../src/navigation/MobileGoalWork'

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { tmpdir as fixtureTmpdir } from 'node:os'
+import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
+const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import { closeSync, mkdirSync, openSync, realpathSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 const args = process.argv.slice(2)
@@ -36,7 +39,7 @@ if (
 if (
   process.env.AGENTMUX_ENV !== '1' ||
   !process.env.AGENTMUX_CLI?.endsWith('/bin/amux') ||
-  !process.env.PATH?.split(':').includes(process.env.AGENTMUX_CLI.slice(0, -'/amux'.length))
+  !process.env.PATH?.split(':').includes(process.env.AGENTMUX_CLI.slice(0, -"/amux".length))
 ) {
   throw new Error('AgentMux did not provide its managed CLI environment')
 }
@@ -55,7 +58,7 @@ const writeNativeBoundary = (type) => {
   })}\n`)
 }
 if (process.env.AGENTMUX_FAKE_NATIVE_RECORD === '1' && process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
-  const directory = join(process.env.HOME, '.codex', 'sessions')
+  const directory = process.env.AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY ?? join(process.env.HOME, '.codex', 'sessions')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   nativeRecordPath = join(realpathSync(directory), `rollout-${agentSessionId}.jsonl`)
   nativeRecordDescriptor = openSync(nativeRecordPath, 'w', 0o600)
@@ -81,7 +84,7 @@ if (process.env.AGENTMUX_FAKE_NATIVE_RECORD === '1' && process.env.AGENTMUX_FAKE
  *
  * 挂钟/次数预算适合"对端可能永不回答"；这里对端是同一次测试自己起的进程，它一定会答，只是可能慢。
  *
- * 但**去掉上限不等于可以沉默**：实测有一轮 `handshake race controlled composer pending`
+ * 但**去掉上限不等于可以沉默**：实测  有一轮 `handshake race controlled composer pending`
  * 一路等到 80 秒被外层掐掉，而这一侧一个字都没留——因为这个假 CLI 跑在 PTY 里，stderr 不经
  * packed-consumer 转发，一次永等就是完全无痕的。所以这里跟 packed-consumer 的 `waitFor` 同一处置：
  * 不设上限，但周期性点名自己卡在哪一次投递上，让真的卡死指得到位点。
@@ -179,7 +182,7 @@ const writeComposerNearMiss = (value) => {
 const writeReadyFrame = () => {
   tuiReady = true
   controlledReadyPending = false
-  process.stdout.write('codex-composer-ready-frame\n')
+  writeDiagnostic('codex-composer-ready-frame')
   const footer = nativeRecordPath ? '\u001b[23;1H? for shortcuts\u001b[K\u001b[24;1H\u001b[K' : ''
   process.stdout.write(`\u001b[?2026h\u001b[22;1H\u001b[1m›\u001b[0m \u001b[K${footer}\u001b[22;3H\u001b[?25h\u001b[?2026l`)
 }
@@ -296,7 +299,7 @@ process.stdin.on('data', (data) => {
       composer = ''
       composerReady = false
       renderGeneration += 1
-      process.stdout.write(`codex-submit:${submitted}:accepted\n`)
+      writeDiagnostic(`codex-submit:${submitted}:accepted`)
       if (submitted === 'exit') process.exit(0)
       tuiReady = false
       nativeTurnGeneration += 1

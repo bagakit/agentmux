@@ -1,0 +1,11 @@
+# Mobile product Renderer scene
+
+Run `node apps/mobile/scripts/fixtures/mobile-product-redesign/capture-ui.mjs` from the repository root. `--baseline` records missing current-product actions while retaining the actual fallback selection as a baseline; it never signs candidate completion. The command prints a private receipt beneath `.tmp/mobile-product-redesign/`.
+
+The scene consumes the original `MobileApp`, shared Composer/Conversation/Interaction and DeviceWorkface. It provides controlled public SDK/catalog/Goal facts for three original Sessions. The same main SID is first presented outside the Mote and then at the exact saved Mote tuple. The Mote has more than one distinct SID, so its default conversation must be read from the original owner facts rather than inferred from cardinality or first location.
+
+Actions tap actual visible controls using Chromium CDP touch events and type into the original shared editor with `insertText`. The scene does not navigate React state, replace the editor or operate live user Sessions. Its owner-state controls only simulate connection and acknowledgement facts. Captures cover 390×844, 320×760 and 390×480, Mote overview/conversation/Profile/result, Focus groups, original permission response, original result reading, unknown input, offline retention and later draft. The receipt records Source and compiled hashes, complete PNGs, actual parameters/call counts, selected original SID/Run and durable device record. Nonempty App, Conversation, DeviceWorkface and shared Composer Source inputs are required.
+
+Owning contracts: [mobile behavior](../../../../../docs/design/behavior/public-control.md#手机版-relay-连接), [mobile presentation](../../../../../docs/design/presentation/public-control.md#手机版-relay-连接的呈现), and [independent visual review](../../../../../docs/guides/agent-visual-e2e-review.md). This fixture supplies scene/actions/facts, not an aesthetic score or independent verdict.
+
+Controlled Chromium is not physical phone validation. It does not prove iOS/Android IME, OS keyboard, native back/safe areas, background/resume, actual Relay/private Host owner, real model input or live Run recovery. Real phone and actual Host evidence remain separate version requirements.

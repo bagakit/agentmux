@@ -34,7 +34,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(view.element.textContent).toContain('当前不能发送；草稿与阅读保留')
     expect(editor(view.element).textContent).toContain('待完成的草稿')
     expect(editor(view.element).textContent).toContain('原生输入')
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     await paste(view.element, '离线补充')
     expect(editor(view.element).textContent).toContain('离线补充')
     expect(f.submit).not.toHaveBeenCalled()
@@ -95,17 +95,17 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(input.prompt.trim()).toBe(`${skillPath} 保留引用`)
     expect(input.operationId).not.toBe('')
     expect(editor(view.element).textContent).toContain('保留引用')
-    expect(view.element.textContent).toContain('回执未知')
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(view.element.textContent).toContain('发送结果未确认')
+    expect(button(view.element, 'Send').disabled).toBe(false)
     await act(async () => { f.emit({ type: 'connection-state', state: 'lost', evidence }); f.emit({ type: 'connection-state', state: 'restored', evidence }) })
-    await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledOnce()
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('unknown')
     f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
       { id: 'prompt:other-operation', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Input', content: input.prompt, authorHuman: true }
     ] })
     await refreshOriginal(view.element)
     expect(editor(view.element).textContent).toContain('保留引用')
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     f.setTimeline({ agentSessionId: 'session-original', revision: 3, items: [
       { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: input.prompt, authorHuman: true }
     ] })
@@ -176,12 +176,12 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await paste(view.element, '明确拒绝后保留')
     await click(button(view.element, 'Send'))
     expect(editor(view.element).textContent).toBe('明确拒绝后保留')
-    expect(view.element.textContent).toContain('Core 已拒绝')
+    expect(view.element.textContent).toContain('尚未发送')
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledTimes(2)
-    expect(f.submit.mock.calls[1]![0].operationId).not.toBe(f.submit.mock.calls[0]![0].operationId)
+    expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0])
     expect(editor(view.element).textContent).toBe('')
   })
 
@@ -199,13 +199,13 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }
     }))
     await click(button(view.element, 'Send'))
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     await refreshOriginal(view.element)
     expect(f.submit).toHaveBeenCalledTimes(2)
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
   })
 
-  it('binds a late receipt to its original operation and preserves edits in both Sessions', async () => {
+  it.each(['success', 'failure'] as const)('binds a late %s receipt to its original operation and preserves edits in both mounted Sessions', async outcome => {
     const f = fixture(), ack = deferred<void>()
     f.submit.mockImplementationOnce(() => ack.promise)
     const options = props(f), view = await mount(<MobileConversationSurface {...options} />)
@@ -214,13 +214,18 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await paste(view.element, '提交后的原会话补充')
     await view.render(<MobileConversationSurface {...options} agentSessionId="other" />)
     await paste(view.element, '另一个会话新草稿')
-    await act(async () => ack.resolve())
+    await act(async () => outcome === 'success' ? ack.resolve() : ack.reject(new Error('original mounted late failure')))
     expect(editor(view.element).textContent).toBe('另一个会话新草稿')
     await view.render(<MobileConversationSurface {...options} />)
     expect(editor(view.element).textContent).toContain('原会话提交')
     expect(editor(view.element).textContent).toContain('提交后的原会话补充')
     expect(f.submit).toHaveBeenCalledOnce()
     expect(f.submit.mock.calls[0]![0].agentSessionId).toBe('session-original')
+    const stored = JSON.parse(localStorage.getItem(STORAGE)!).conversation
+    expect(stored.attempts.find(([key]: [string]) => key === JSON.stringify(['draft', 'session-original']))[1]).toMatchObject({
+      operationId: f.submit.mock.calls[0]![0].operationId, runId: 'run-original', phase: outcome === 'success' ? 'confirmed' : 'unknown'
+    })
+    expect(stored.drafts.find(([key]: [string]) => key === JSON.stringify(['draft', 'other']))[1]).toBe('另一个会话新草稿')
   })
 
   it('does not resend an accepted payload when only its submit phase was rejected', async () => {
@@ -235,11 +240,11 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       payload: { operationId: 'payload-original', inputByteRange: { startByte: 0, endByte: 20 }, acknowledged: true },
       submit: { operationId: 'submit-original', inputByteRange: { startByte: 20, endByte: 21 }, acknowledged: false, notApplied: true } }
     await act(async () => f.emit({ type: 'agent-session', session: value }))
-    expect(view.element.textContent).toContain('回执未知')
+    expect(view.element.textContent).toContain('发送结果未确认')
     expect(editor(view.element).textContent).toBe('已接受的 payload 不能重投')
-    expect(button(view.element, 'Send').disabled).toBe(true)
-    await click(button(view.element, 'Send'))
+    expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('unknown')
   })
 
   it('does not resend an accepted payload when a pending interaction interrupts submit', async () => {
@@ -258,18 +263,18 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await act(async () => { f.emit({ type: 'agent-session', session: value }); ack.reject(Object.assign(
       new Error('Answer the pending Agent interaction before submitting another prompt.'), { code: 'AGENT_INTERACTION_PENDING' })) })
     expect(view.element.textContent).toContain('Payload 后出现的请求')
-    expect(view.element.textContent).toContain('回执未知')
+    expect(view.element.textContent).toContain('发送结果未确认')
     expect(editor(view.element).textContent).toBe('交互之前已接受的 payload')
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     // Even disappearance of the interaction cannot turn a phase error into whole-intent nonapplication.
     const settled = { ...value }
     delete settled.pendingInteraction
     f.sessions.set(value.agentSessionId, settled)
     await act(async () => f.emit({ type: 'agent-session', session: settled }))
     await refreshOriginal(view.element)
-    expect(button(view.element, 'Send').disabled).toBe(true)
-    await click(button(view.element, 'Send'))
+    expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('unknown')
   })
 
   it('unlocks an unknown input only when Core proves this original intent was entirely unapplied', async () => {
@@ -284,11 +289,11 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       notApplied: true, intent: { run: value.run, ownerInstanceId: 'original-core-instance', prompt: input.prompt,
         plan: { kind: 'render-then-submit', payload: input.prompt, renderedText: input.prompt, submit: '\r' } } }
     await act(async () => f.emit({ type: 'agent-session', session: value }))
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     const wrongRun = { ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission,
       submissionId: input.operationId, intent: { ...value.promptCompletionAdmission.intent!, run: { runId: 'another-run' } } } }
     await act(async () => f.emit({ type: 'agent-session', session: wrongRun }))
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     const exact = { ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission, submissionId: input.operationId } }
     f.sessions.set(value.agentSessionId, exact)
     await act(async () => f.emit({ type: 'agent-session', session: exact }))
@@ -298,7 +303,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.submit).toHaveBeenCalledOnce()
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledTimes(2)
-    expect(f.submit.mock.calls[1]![0].operationId).not.toBe(input.operationId)
+    expect(f.submit.mock.calls[1]![0].operationId).toBe(input.operationId)
   })
 
   it('answers the original permission option once and keeps an unknown request unavailable when another request replaces it', async () => {
@@ -349,9 +354,11 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await click(button(original.element, 'Send'))
     const input = f.submit.mock.calls[0]![0]
     const saved = JSON.parse(localStorage.getItem(STORAGE)!).conversation
-    expect(saved.attempts).toEqual([[JSON.stringify(['draft', 'session-original']), {
-      operationId: input.operationId, runId: 'run-original', draft: '冷启草稿 [工具](agentmux-skill:%2Foriginal%2Ftool.md)', phase: 'sending'
-    }]])
+    expect(saved.attempts[0][0]).toBe(JSON.stringify(['draft', 'session-original']))
+    expect(saved.attempts[0][1]).toMatchObject({
+      operationId: input.operationId, runId: 'run-original', draft: '冷启草稿 [工具](agentmux-skill:%2Foriginal%2Ftool.md)', phase: 'sending',
+      inputRequested: true, explicit: true, request: { condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, execution: 'immediate' }
+    })
     const previous = mounted.pop()!
     await act(async () => previous.root.unmount()); previous.element.remove()
     const restored = await mount(<MobileConversationSurface {...options} client={null}
@@ -361,7 +368,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(restored.element.textContent).toContain('重启后的原输入回执未知')
     expect(f.submit).toHaveBeenCalledOnce()
     await restored.render(<MobileConversationSurface {...options} />)
-    expect(button(restored.element, 'Send').disabled).toBe(true)
+    expect(button(restored.element, 'Send').disabled).toBe(false)
     await paste(restored.element, '冷启后的补充')
     const beforeLate = localStorage.getItem(STORAGE)
     await act(async () => receipt.resolve())

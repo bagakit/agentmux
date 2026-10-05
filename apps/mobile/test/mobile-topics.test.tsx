@@ -35,6 +35,84 @@ const knowledge: TopicKnowledge = { topicId: topic.topicId, entryId: 'entry-orig
 function rpcMock(implementation: (method: string, params: any) => Promise<unknown>) { return vi.fn(implementation) as unknown as TopicsRpc }
 
 describe('original Topic mobile consumers', () => {
+  it('returns editor → reader → knowledge list → discussion → category → directory while retaining its draft and stable callback', async () => {
+    const rpc = rpcMock(async method => method === 'topic.category.ls' ? { categories: [category], unavailable: [] }
+      : method === 'topic.ls' ? { topics: [topic], unavailable: [] }
+      : method === 'topic.knowledge.ls' ? { entries: [knowledge], unavailable: [] } : { entry: knowledge })
+    const back = vi.fn(), open = vi.fn(), workface = vi.fn(() => <div>原讨论工作面</div>), source = vi.fn()
+    const renderTopics = (visible = true) => <MobileTopicsSurface rpc={rpc} visible={visible} onOpenTopic={open} renderWorkface={workface} openSource={source} onBackChange={back} />
+    const view = await mount(renderTopics())
+    const visibleButton = (text: string) => [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text && !value.closest('[hidden]'))!
+    const goBack = async () => { const handler = back.mock.calls.at(-1)![0]; expect(handler).toBeTypeOf('function'); await act(async () => handler()) }
+    expect(back).toHaveBeenLastCalledWith(null)
+    await click(visibleButton('原分类')); await click(visibleButton('同名 Topic原一句说明')); await click(visibleButton('知识'))
+    await click(visibleButton('原知识事实')); await click(visibleButton('编辑知识'))
+    const draft = view.element.querySelector<HTMLTextAreaElement>('[aria-label="知识正文"]')!
+    const editorBack = back.mock.calls.at(-1)![0], registrations = back.mock.calls.length
+    await input(draft, '原知识未保存草稿'); await view.render(renderTopics())
+    expect(back.mock.calls).toHaveLength(registrations)
+    await goBack()
+    expect(draft.closest('[hidden]')).not.toBeNull()
+    expect(view.element.querySelector('.mobile-topic-reading')?.textContent).toContain('完整内容')
+    expect(back.mock.calls.at(-1)![0]).not.toBe(editorBack)
+    await goBack()
+    expect(view.element.querySelector('.mobile-topic-reading')).toBeNull()
+    await goBack()
+    expect(workface).toHaveBeenLastCalledWith(topic, true)
+    await goBack()
+    expect(view.element.querySelector('header h1')?.textContent).toBe('原分类')
+    await goBack()
+    expect(back).toHaveBeenLastCalledWith(null)
+    expect(view.element.querySelector('header h1')?.textContent).toBe('Topics')
+    await click(visibleButton('原分类')); await click(visibleButton('同名 Topic原一句说明')); await click(visibleButton('知识')); await click(visibleButton('继续编辑草稿'))
+    expect(view.element.querySelector('[aria-label="知识正文"]')).toBe(draft)
+    expect(draft.value).toBe('原知识未保存草稿')
+    await view.render(renderTopics(false)); const hiddenRegistrations = back.mock.calls.length
+    await view.render(renderTopics(false))
+    expect(back.mock.calls).toHaveLength(hiddenRegistrations)
+    expect(vi.mocked(rpc).mock.calls.some(([method]) => method === 'topic.knowledge.write')).toBe(false)
+  })
+
+  it('keeps the currently visible retained Topic reader back handler when another scope becomes hidden', async () => {
+    const other = { ...topic, topicId: 'view:other', title: '第二 Topic' }, secondKnowledge = { ...knowledge, topicId: other.topicId, entryId: 'second-entry', title: '第二知识' }
+    const rpc = rpcMock(async (method, params) => method === 'topic.category.ls' ? { categories: [category], unavailable: [] }
+      : method === 'topic.ls' ? { topics: [topic, other], unavailable: [] }
+      : method === 'topic.knowledge.ls' ? { entries: [params.topicId === topic.topicId ? knowledge : secondKnowledge], unavailable: [] }
+      : { entry: params.topicId === topic.topicId ? knowledge : secondKnowledge })
+    const back = vi.fn(), view = await mount(<MobileTopicsSurface rpc={rpc} onOpenTopic={vi.fn()} renderWorkface={() => null} openSource={vi.fn()} onBackChange={back} />)
+    const visibleButton = (text: string) => [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text && !value.closest('[hidden]'))!
+    await click(visibleButton('原分类')); await click(visibleButton('同名 Topic原一句说明')); await click(visibleButton('知识')); await click(visibleButton('原知识事实')); await click(visibleButton('编辑知识'))
+    await click(view.element.querySelector<HTMLButtonElement>('[aria-label="返回分类目录"]')!)
+    await click(visibleButton('第二 Topic原一句说明')); await click(visibleButton('知识')); await click(visibleButton('第二知识事实')); await click(visibleButton('编辑知识'))
+    const firstDraft = view.element.querySelectorAll<HTMLTextAreaElement>('[aria-label="知识正文"]')[0]!
+    const secondDraft = view.element.querySelectorAll<HTMLTextAreaElement>('[aria-label="知识正文"]')[1]!
+    expect(firstDraft.closest('[hidden]')).not.toBeNull(); expect(secondDraft.closest('[hidden]')).toBeNull()
+    await act(async () => back.mock.calls.at(-1)![0]())
+    expect(secondDraft.closest('[hidden]')).not.toBeNull()
+    expect(view.element.querySelector('header h1')?.textContent).toBe('第二 Topic')
+    await act(async () => back.mock.calls.at(-1)![0]())
+    expect(view.element.querySelectorAll('.mobile-topic-reading')).toHaveLength(1)
+    expect(view.element.querySelector('.mobile-topic-reading')?.closest('[hidden]')).not.toBeNull()
+  })
+
+  it('cancels an original knowledge body read when back leaves the visible knowledge layer', async () => {
+    let resolve!: (value: unknown) => void
+    const rpc = rpcMock(async method => method === 'topic.category.ls' ? { categories: [category], unavailable: [] }
+      : method === 'topic.ls' ? { topics: [topic], unavailable: [] }
+      : method === 'topic.knowledge.ls' ? { entries: [knowledge], unavailable: [] }
+      : await new Promise(done => { resolve = done }))
+    const back = vi.fn(), workface = vi.fn(() => null)
+    const { element } = await mount(<MobileTopicsSurface rpc={rpc} onOpenTopic={vi.fn()} renderWorkface={workface} openSource={vi.fn()} onBackChange={back} />)
+    await click(button(element, '原分类')); await click(button(element, '同名 Topic原一句说明')); await click(button(element, '知识')); await click(button(element, '原知识事实'))
+    await act(async () => back.mock.calls.at(-1)![0]())
+    await act(async () => resolve({ entry: knowledge }))
+    expect(workface).toHaveBeenLastCalledWith(topic, true)
+    expect(element.querySelector('.mobile-topic-reading')).toBeNull()
+    await click(button(element, '知识'))
+    expect(element.querySelector('.mobile-topic-reading')).toBeNull()
+    expect(vi.mocked(rpc).mock.calls.filter(([method]) => method === 'topic.knowledge.read')).toHaveLength(1)
+  })
+
   it('uses category ID and immediately delegates the exact Topic, Zone and original Tab IDs without choosing a Session', async () => {
     const rpc = rpcMock(async method => method === 'topic.category.ls' ? { categories: [category], unavailable: [] } : { topics: [topic], unavailable: [] })
     const open = vi.fn(), workface = vi.fn(() => <div>原工作面</div>)

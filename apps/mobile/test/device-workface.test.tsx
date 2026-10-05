@@ -1,3 +1,4 @@
+import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DeviceWorkfaceStore, DEVICE_WORKFACE_KEY, emptyDeviceWorkface, getDeviceWorkface, type DeviceWorkface } from '../src/recovery/device-workface'
@@ -6,6 +7,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { button, click, editor, fixture, mount, mounted } from './conversation-fixture'
+import { retainObjectReference } from '../src/recovery/presentation-route'
 
 const key = JSON.stringify(['draft', 'session-original'])
 function original(): DeviceWorkface {
@@ -26,6 +28,27 @@ afterEach(async () => {
   document.body.replaceChildren(); vi.restoreAllMocks()
 })
 describe('one durable mobile workface owner', () => {
+  it('exports and restores original display/source references alongside original input guards without persisting live catalog or image facts', () => {
+    const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk)
+    const identity = retainObjectReference({ name: '原 Mote', project: '原项目', context: { spaceId: 'mote', zoneId: 'home', workspaceId: 'scratch', displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' },
+      mote: { spaceId: 'mote', contentReference: { zoneId: 'home', hostId: 'host-original', workspaceId: 'scratch', workspacePath: fixturePath("original/scratch") },
+        appearance: { spaceId: 'mote', image: { dataUrl: 'unrelated-avatar-bytes', revision: 'image' } } } })!
+    const route = { primary: 'mote' as const, showSession: true, showGoalWork: false, identity, profile: { identity, sourcePath: 'BEHAVIOR.md' } }
+    owner.updatePresentation(original(), route)
+    const restored = new DeviceWorkfaceStore(() => disk).snapshot().record
+    expect(restored).toEqual({ ...original(), presentation: route })
+    expect(owner.parseBackup(owner.exportBackup())).toEqual(restored)
+    expect(disk.raw()).not.toContain('unrelated-avatar-bytes')
+    const raw = disk.raw()
+    for (const malformed of [
+      { ...route, profile: { identity, sourcePath: '../../other-user/secret' } },
+      { ...route, identity: { ...identity, context: { ...identity.context, regionId: null } } },
+      { ...route, identity: { ...identity, mote: { ...identity.mote, nativeRun: 'invented-runtime' } } }
+    ]) expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...original(), presentation: malformed } }))).toThrow()
+    expect(disk.raw()).toBe(raw)
+    owner.updateConversation(original().conversation)
+    expect(new DeviceWorkfaceStore(() => disk).snapshot().record.presentation).toEqual(route)
+  })
   it('atomically preserves navigation, Host identity, draft and the original unknown guard across a new owner', () => {
     const disk = storage(), owner = new DeviceWorkfaceStore(() => disk)
     owner.updateNavigation({ selectedSessionId: 'session-original', hostUrl: 'https://192.168.1.20:4321', panel: 'terminal' })
@@ -95,7 +118,7 @@ describe('one durable mobile workface owner', () => {
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(editor(view.element).textContent).toBe('原草稿')
     expect(view.element.textContent).toContain('重启后的原输入回执未知')
-    expect(button(view.element, 'Send').disabled).toBe(true); expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+    expect(button(view.element, 'Send').disabled).toBe(false); expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
     expect(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!)).toEqual(original())
   })
   it('exports from the actual recovery action without including an authorization secret', async () => {

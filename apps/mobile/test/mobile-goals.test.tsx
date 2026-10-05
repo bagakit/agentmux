@@ -1,9 +1,11 @@
+import './mobile-lan-crypto.setup'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getDeviceWorkface, emptyDeviceWorkface } from '../src/recovery/device-workface'
 import { MobileGoalsSurface } from '../src/goals/MobileGoalsSurface'
 import type { AgentMuxRpcGoal } from '@agentmux/core'
+import { isObjectId } from '@agentmux/core/object-id'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const mounts: { root: Root; element: HTMLDivElement }[] = []
@@ -15,7 +17,7 @@ const original: AgentMuxRpcGoal = {
   alignment: { summary: '当前提案', criteria: [{ id: 'criterion-original', text: '真实成功标准' }, { id: 'missing', text: '未核对标准' }], openQuestions: ['重要未决问题'], revision: 3, confirmedAt: null },
   grounding: { alignmentRevision: 2, summary: '原结果报告', checks: [{ criterionId: 'criterion-original', outcome: 'unknown', evidence: ['src/result.ts:42'], note: '尚未查证' }], submissionId: 'report-original', acceptedAt: null }
 }
-async function mount(initial = [original]) {
+async function mount(initial = [original], onBackChange?: (back: (() => void) | null) => void) {
   let goals = structuredClone(initial)
   const forwardRpc = vi.fn(async (method: string, params: any) => {
     if (method === 'goal.ls') return { goals: goals.filter(goal => !params.status || goal.status === params.status).slice(0, params.limit ?? 100) }
@@ -36,7 +38,7 @@ async function mount(initial = [original]) {
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
   const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', availability: 'connected' }) } as any
-  const render = async (visible = true, connected = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} connected={connected} visible={visible} openSession={openSession} />)) }
+  const render = async (visible = true, connected = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} connected={connected} visible={visible} openSession={openSession} {...(onBackChange ? { onBackChange } : {})} />)) }
   await render()
   const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => button.textContent === text && !button.closest('[hidden]')); expect(button).toBeDefined(); await act(async () => button!.click()) }
   const text = async (input: HTMLInputElement | HTMLTextAreaElement, value: string) => { await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }) }
@@ -45,6 +47,47 @@ async function mount(initial = [original]) {
 }
 
 describe('Mobile Goals original owner slice', () => {
+  it('reports stable visible edit → detail → list back handlers and keeps drafts in retained Goal details', async () => {
+    const back = vi.fn(), view = await mount([original, { ...original, id: 'second', title: '第二目标' }], back)
+    expect(back).toHaveBeenLastCalledWith(null)
+    await view.click('原目标原项目 · 已完成原用户意图'); await view.click('编辑目标正文')
+    const editBack = back.mock.calls.at(-1)![0], registrations = back.mock.calls.length
+    const draft = view.element.querySelector('article textarea')!
+    await view.text(draft, '逐层返回保留的原目标草稿'); await view.render()
+    expect(back.mock.calls).toHaveLength(registrations)
+    await act(async () => editBack())
+    expect(view.element.querySelector('article textarea')).toBeNull()
+    const detailBack = back.mock.calls.at(-1)![0]
+    expect(detailBack).not.toBe(editBack)
+    await act(async () => detailBack())
+    expect(back).toHaveBeenLastCalledWith(null)
+    await view.click('第二目标原项目 · 已完成原用户意图'); await view.click('编辑目标正文')
+    const secondBack = back.mock.calls.at(-1)![0]
+    await act(async () => secondBack())
+    expect(view.element.querySelector('article[aria-label="目标详情"]:not([hidden]) h2')?.textContent).toBe('第二目标')
+    await act(async () => back.mock.calls.at(-1)![0]())
+    await view.click('原目标原项目 · 已完成原用户意图'); await view.click('编辑目标正文')
+    expect(view.element.querySelector<HTMLTextAreaElement>('article textarea')?.value).toBe('逐层返回保留的原目标草稿')
+    await view.render(false); const hiddenRegistrations = back.mock.calls.length
+    await view.render(false)
+    expect(back.mock.calls).toHaveLength(hiddenRegistrations)
+    expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.update')).toBe(false)
+  })
+  it('does not open a late exact-ID lookup after leaving the visible Goal list', async () => {
+    const back = vi.fn(), view = await mount([original], back)
+    let resolve!: (value: any) => void
+    view.forwardRpc.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    await view.text(view.element.querySelector<HTMLInputElement>('[aria-label="打开 Goal ID"]')!, 'outside-current-list')
+    const form = view.element.querySelector('[aria-label="打开 Goal ID"]')!.closest('form')!
+    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(view.forwardRpc).toHaveBeenLastCalledWith('goal.inspect', { goalId: 'outside-current-list' })
+    await view.render(false)
+    await act(async () => resolve({ goal: { ...original, id: 'outside-current-list', title: '迟到外部目标' } }))
+    await view.render(true)
+    expect(back).toHaveBeenLastCalledWith(null)
+    expect(view.element.querySelector('article[aria-label="目标详情"]')).toBeNull()
+    expect(view.element.querySelector<HTMLInputElement>('[aria-label="打开 Goal ID"]')?.value).toBe('outside-current-list')
+  })
   it('reads original identity, proposal, unresolved questions, old results, evidence and decisions', async () => {
     const view = await mount()
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.ls', { limit: 1000 })
@@ -340,7 +383,8 @@ it('one click saves the pending original Goal and opens its discussion with the 
   await view.change('新目标项目', 'project-original')
   await view.click('新建目标')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  expect(input).toEqual({ goalId: expect.stringMatching(/^demand_/), title: 'Untitled goal', description: '', status: 'backlog', projectId: 'project-original', risk: 'low', confirmation: 'user', operationId: expect.any(String) })
+  expect(isObjectId(input.goalId)).toBe(true)
+  expect(input).toEqual({ goalId: input.goalId, title: 'Untitled goal', description: '', status: 'backlog', projectId: 'project-original', risk: 'low', confirmation: 'user', operationId: expect.any(String) })
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'open', operationId: expect.any(String) })
   expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
