@@ -1,5 +1,5 @@
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
-import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
+import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
 export type PromptAttempt = {
   operationId: string
@@ -91,10 +91,10 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       }
     }
     baseline = captured
-    let operation: Promise<void>
+    let operation: Promise<ConversationCommit>
     try { operation = owner.editConversation(edits, recordId) } catch (error) { operation = Promise.reject(error) }
-    return operation.then(() => {
-      const snapshot = owner.snapshot(), saved = snapshot.record.conversation
+    return operation.then(committed => {
+      const saved = committed.conversation
       state.conflicts = saved.conflicts ?? []
       // Do not erase edits made while saving. Replace a conflicted attempt object,
       // so its pending callback cannot mistake it for the canonical original.
@@ -118,7 +118,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
         }
       }
       durableBaseline = saved
-      if (revision === saveRevision) { baseline = saved; recordId = snapshot.record.recordId ?? null }
+      if (revision === saveRevision) { baseline = saved; recordId = committed.recordId }
       state.canSave = true
       state.recordChanged = false
       state.notice = state.conflicts.length ? '另一页面已更新同一条记录；原请求和两份正文均保留。请核对保全内容，不会自动重投。' : null
