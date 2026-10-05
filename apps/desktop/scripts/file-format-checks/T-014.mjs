@@ -6,5 +6,6 @@ export const mutations = [
   { label: 'vega-view-finalize-removed', file: sources[2], before: 'view?.finalize()', after: 'void view' },
   { label: 'vega-original-workspace-check-removed', file: sources[5], before: 'invalidated || binding(workspaceId) !== original', after: 'false' },
   { label: 'vega-dom-event-bridge-removed', file: sources[4], before: 'chart.current?.event(packet)', after: 'void packet' },
-  { label: 'vega-typed-signal-bridge-removed', file: sources[4], before: 'chart.current?.setSignal(binding.signal, value)', after: 'void value' }
+  { label: 'vega-typed-signal-bridge-removed', file: sources[4], before: 'chart.current?.setSignal(binding.signal, value)', after: 'void value' },
+  { label: 'vega-explicit-width-overwritten', file: sources[2], before: 'if (responsiveWidth) view.width(containerWidth)', after: 'view.width(containerWidth)' }
 ]

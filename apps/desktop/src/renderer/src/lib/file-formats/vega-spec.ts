@@ -4,7 +4,7 @@ import { compile, type TopLevelSpec } from 'vega-lite'
 export type VegaMode = 'vega' | 'vega-lite'
 
 /** This CPU work runs in a terminatable Worker, never in the App Renderer. */
-export function compileVegaRuntime(content: string, mode: VegaMode): Runtime {
+export function compileVegaRuntime(content: string, mode: VegaMode): { runtime: Runtime; responsiveWidth: boolean; responsiveHeight: boolean } {
   const input = JSON.parse(content)
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected a Vega chart specification.')
   if (typeof input.$schema === 'string') {
@@ -13,5 +13,6 @@ export function compileVegaRuntime(content: string, mode: VegaMode): Runtime {
     if (schemaMode !== mode) throw new Error('The chart schema does not match this file format.')
   }
   const spec = mode === 'vega-lite' ? compile(input as TopLevelSpec).spec : input as Spec
-  return parse(spec, undefined, { ast: true })
+  const responsive = (dimension: 'width' | 'height') => input[dimension] === 'container' || Boolean(spec.signals?.some(signal => signal.name === dimension && /containerSize\s*\(/.test(JSON.stringify(signal))))
+  return { runtime: parse(spec, undefined, { ast: true }), responsiveWidth: responsive('width'), responsiveHeight: responsive('height') }
 }
