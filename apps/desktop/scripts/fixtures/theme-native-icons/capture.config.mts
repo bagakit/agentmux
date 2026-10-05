@@ -20,5 +20,5 @@ export default mergeConfig(config, defineConfig({ worker: { format: 'es' }, plug
       source: createHash('sha256').update(original).digest('hex'), transformed: createHash('sha256').update(code).digest('hex') }
     return { code, map: null }
   }, generateBundle() { this.emitFile({type: 'asset', fileName: 'candidate-inputs.json', source: JSON.stringify({mutant: mutant ?? null, capturedAt: new Date().toISOString(), preview: true, inputs}, null, 2)}) }
-}], build: {target: 'esnext', outDir: resolve(resolve(import.meta.dirname, "../../../../../.tmp/theme-system/native-icons"), mutant ? `site-${mutant}-mutant` : 'site'), emptyOutDir: true,
+}], build: {target: 'esnext', outDir: resolve(process.env.NATIVE_ICON_PROOF_DIR ?? resolve(import.meta.dirname, '../../../../../.tmp/theme-system/native-icons'), mutant ? `site-${mutant}-mutant` : 'site'), emptyOutDir: true,
   rollupOptions: {input: {native: resolve(import.meta.dirname, 'index.html'), mobile: resolve(import.meta.dirname, 'mobile.html')}}} }))
