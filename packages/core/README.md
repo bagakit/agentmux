@@ -181,6 +181,12 @@ HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，
 
 JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。
 
+## Diagnostic Evidence
+
+通用强类型机制为 `@agentmux/diagnostic-evidence`，Core 领域类型从 `@agentmux/core/diagnostic-evidence` 导入。沿既有公共 RPC 调用 `system.diagnostics.inspect`，CLI 使用 `amux system diagnostics inspect --list` 发现本服务组装的 reader，再以准确 Host/logId 或原 Toolkit executionId 查询。默认安全摘要，`--include-raw` 显式读取实际保留原件；查询不启采样或恢复执行。
+
+接口与证据语义见[唯一协议](../../docs/specs/diagnostic-evidence-protocol.md)，模块接入见[指南](../../docs/guides/diagnostic-evidence-integration.md)。Client/Core 投递及 Toolkit 原失败已接入；Native 内部来源当前 not-exposed，历史、artifact 和采样由对应 owner 按真实能力另行贡献。
+
 ## Durable spatial graph
 
 `@agentmux/core/spatial-state` exports the filesystem spatial owner and its typed graph. Stable Space/Zone/Tab/Region identities, all bindings, Group/Region topology and selection are available without Electron or a graphical frontend. `@agentmux/core/spatial-layout` exports the existing UI-independent split-tree algebra; `@agentmux/layout` consumes this same implementation.
