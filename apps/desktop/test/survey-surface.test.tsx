@@ -335,7 +335,7 @@ async function browserMenuAction(label: string) {
 
 it.runIf(process.env.SURVEY_RESTART_PHASE === 'write')('writes new Survey browser identities and Topic bindings for a separate restart process', async () => {
   await renderApp(); await enterSurvey()
-  const input = dom.container.querySelector<HTMLInputElement>('.survey-start-input input')!
+  const input = dom.container.querySelector<HTMLInputElement>('.browser-start-page__input input')!
   await fill(input, 'https://example.test/restart'); await submit(input.form!)
   await dom.click('.global-survey-surface [title="New tab"]')
   const state = useAppStore.getState(), selected = state.surveyZoneSelection!, target = selected.active!
@@ -642,8 +642,8 @@ it('controls Tab and Region selection without moving Space focus or the original
 it('creates an original temporary Zone from raw central input and navigates the same Browser in Survey', async () => {
   await renderApp(); await enterSurvey()
   const before = useAppStore.getState(), createZone = vi.spyOn(before, 'createWorkbenchZone')
-  await fill(dom.container.querySelector<HTMLInputElement>('.survey-start-input input')!, '  protocol notes  ')
-  await submit(dom.container.querySelector<HTMLFormElement>('.survey-start-input')!)
+  await fill(dom.container.querySelector<HTMLInputElement>('.browser-start-page__input input')!, '  protocol notes  ')
+  await submit(dom.container.querySelector<HTMLFormElement>('.browser-start-page__input')!)
   const selection = useAppStore.getState().surveyZoneSelection!, reference = selection.active!
   expect(createZone).toHaveBeenCalledExactlyOnceWith({ workspaceId: SCRATCH_WORKSPACE_ID, spaceIds: [] })
   expect(selection.zoneId).not.toBe(originalZoneId())
@@ -662,7 +662,7 @@ it('retries an attached Browser after a late reply failure without creating anot
   const create = vi.fn(async (...args: Parameters<typeof realCreate>) => { await realCreate(...args); throw new Error('Late attachment receipt failed') })
   useAppStore.setState({ createBrowser: create })
   await renderApp(); await enterSurvey()
-  const field = dom.container.querySelector<HTMLInputElement>('.survey-start-input input')!
+  const field = dom.container.querySelector<HTMLInputElement>('.browser-start-page__input input')!
   await fill(field, 'Retain this query'); await submit(field.form!)
   expect(createZone).toHaveBeenCalledTimes(1); expect(api.browser.create).toHaveBeenCalledTimes(1)
   const attachedTabs = useAppStore.getState().tabs
@@ -679,7 +679,7 @@ it('keeps the same failed exact preparation and refuses to reclaim it after anot
   vi.mocked(api.browser.create).mockRejectedValueOnce(new Error('Native create failed')).mockRejectedValueOnce(new Error('Retry failed'))
   const createZone = vi.spyOn(useAppStore.getState(), 'createWorkbenchZone')
   await renderApp(); await enterSurvey()
-  const field = dom.container.querySelector<HTMLInputElement>('.survey-start-input input')!
+  const field = dom.container.querySelector<HTMLInputElement>('.browser-start-page__input input')!
   await fill(field, 'Keep query'); await submit(field.form!)
   const launcher = Object.values(useAppStore.getState().tabs).find(tab => tab.id !== mixed.id)!
   await submit(field.form!)
@@ -1246,14 +1246,15 @@ it('keeps later navigation when independent project research finishes late', asy
 it('starts ordinary browsing with only Scratch and no selected project', async () => {
   useAppStore.setState({ config: { ...composerConfig, workspaces: [scratchWorkspace] }, activeWorkspaceId: null })
   await renderApp(); await enterSurvey()
-  const field = dom.container.querySelector<HTMLInputElement>('.survey-start-input input')!
+  const field = dom.container.querySelector<HTMLInputElement>('.browser-start-page__input input')!
   expect(field.disabled).toBe(false)
-  expect(dom.container.querySelector('.survey-start')!.textContent).not.toContain('Choose a resource workspace')
+  expect(dom.container.querySelector('.browser-start-page')!.textContent).not.toContain('Choose a resource workspace')
   await fill(field, 'https://example.test/daily'); await submit(field.form!)
   const state = useAppStore.getState(), reference = state.surveyZoneSelection!.active!
   expect(state.tabs[reference.tabId]!.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
   expect(api.browser.create).toHaveBeenCalledExactlyOnceWith(reference.regionId, 'https://example.test/daily', SCRATCH_WORKSPACE_ID)
-  expect(state.activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID); expect(state.tabs[mixed.id]).toBe(mixed)
+  // Survey's resource workspace does not replace the original Work selection.
+  expect(state.activeWorkspaceId).toBeNull(); expect(state.tabs[mixed.id]).toBe(mixed)
   expect(api.sessions.stop).not.toHaveBeenCalled()
 })
 
@@ -1449,13 +1450,22 @@ it('saves a note from the clicked unselected item through the real capture and f
   healthy()
 })
 
-it('shares the product brand between the default Survey and its real blank Browser page', async () => {
+it('shares configurable start-page presentation between the default Survey and its real blank Browser page', async () => {
   await renderApp(); await enterSurvey()
-  expect(dom.container.querySelector('.global-survey-surface .survey-start-brand h1')?.textContent).toBe('AgentMux')
-  expect(dom.container.querySelector('.global-survey-surface .survey-start-brand img')?.getAttribute('src')).toContain('icon-128.png')
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-page__brand h1')?.textContent).toBe('AMUX - Survey')
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-page__icon')).toBeNull()
   await dom.click('[aria-label="New webpage"]')
-  await vi.waitFor(() => expect(dom.container.querySelector('.global-survey-surface .browser-empty .survey-start-brand h1')?.textContent).toBe('AgentMux'))
+  await vi.waitFor(() => expect(dom.container.querySelector('.global-survey-surface .browser-start-page .browser-start-page__brand h1')?.textContent).toBe('AMUX - Survey'))
   expect(dom.container.querySelector('.global-survey-surface [aria-label="Search or enter a web address"]')).not.toBeNull()
+  const original = useAppStore.getState().surveyZoneSelection
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, browser: { ...state.config!.browser, startPage: {
+    title: 'Personal research', subtitle: 'Keep useful sources', icon: 'https://images.example.test/icon.png', backgroundImage: 'https://images.example.test/background.jpg', showHistory: false
+  } } } })))
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-page__brand h1')?.textContent).toBe('Personal research')
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-page__icon')?.getAttribute('src')).toBe('https://images.example.test/icon.png')
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-page__background')?.getAttribute('src')).toBe('https://images.example.test/background.jpg')
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-history')).toBeNull()
+  expect(useAppStore.getState().surveyZoneSelection).toBe(original)
   healthy()
 })
 
