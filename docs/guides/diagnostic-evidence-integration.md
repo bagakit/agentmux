@@ -44,6 +44,7 @@ amux system diagnostics inspect --domain delivery.core --host-id HOST --logid LO
 amux system diagnostics inspect --domain toolkit.performance-failure --host-id local --execution-id EXECUTION_ID
 amux system diagnostics inspect --domain toolkit.performance-failure --host-id local --execution-id EXECUTION_ID --include-raw
 amux system diagnostics inspect --domain native-recorder-failure --host-id HOST --session-id SID --run-id RUN
+amux system diagnostics inspect --input mote-context-query.json
 ```
 
 跨进程使用原 `connectAgentMuxRpc` 的 `call('system.diagnostics.inspect', {target,...})`，结果严格解析为 [Core 类型](../../packages/core/src/diagnostic-evidence.ts)。`--no-related` 只读取 root；预算参数只收紧。原领域 CLI 可以负责发现 logId/executionId、专属恢复或 artifact 内容，通用查询不直接读本地文件。
@@ -66,3 +67,17 @@ amux system diagnostics inspect --domain native-recorder-failure --host-id HOST 
 用两种不同的实际触发检查新机制的通用边界。必需反例包括：可读原件但身份缺证、显式限定不放宽、主失败后诊断/cleanup 失败、部分来源不可达、取消/慢读者/真实 pending IO、raw 和总封套预算、未知码与私密原文、原记录跨 owner reload。测试必须消费真实产品 owner 和公共 CLI，改坏关键接线/投影应 AssertionRED，不能只测手写模拟结果或导出符号。
 
 原 owner 无 history/capture/artifact 能力时保持 unsupported/缺证，先闭合普通 reader；不为接入新建万能插件库或统一状态 DB。源级通过不代表安装包已加载，也不替 Native 根因、性能收益或原 Session 恢复验收。
+
+## Mote 原 action 观察
+
+实际注入 `mote.context.client` 的 client 用原 AppStore action map，不增加 journal。先用 `app snapshot --include workspaces` 冻结 resource Workspace 的 hostId/path，用 Mote discovery 取 topicId，用 `app inspect` / `space ls` 取原 Tab/reference。`include motes` 没有 workspaces 是显式筛选，不是资源不可发现；Mote physical/HomeZone/logical topic path 不代替原 Workspace.path。当前发现不回填旧 failure 的 captured target。
+
+完整查询通过既有 CLI `--input FILE|-` 或 typed RPC 传入，字段以 [领域类型](../../packages/core/src/mote-context-observation.ts) 为准，例如：
+
+```json
+{"target":{"domain":"mote.context.client","hostId":"local","scope":{"hostId":"RESOURCE_HOST","directoryPath":"RESOURCE_WORKSPACE_PATH","topicId":"TOPIC_ID","tabId":"TAB_ID"},"action":"prepare"},"includeRaw":false,"includeRelated":false}
+```
+
+外层 hostId 是 client reader route；scope.hostId 是资源 Host。prepare 不限定显示 reference；open-space 必须另传原完整 reference 或真实 null。读回 operation/failure 保实际目标、步骤和时刻；另一 scope/occurrence 不代替原 record。原材料只是实际 retained cause 文本。默认不跨 IPC 请求原文，显式 includeRaw 仍受原可信来源权限与预算；不足时保安全事实与 withheld/partial，不返回剪短却标完整的原因。安全封套自身也超预算时返回 QUERY_BUDGET。
+
+这个读面不保证历史留存或原 Session 健康；没有 scope key/reload 后缺源，保 not-found/unknown。完整 Main 与 Renderer 匹配更新后才组装 capability；Renderer-only 更新继续使用不变的 inspect.client v1，不向旧 Main 广告新 domain。读取不重试、focus、ensure 或启动 Run；取消等候不提前释放仍在途 IPC 的真实成本。

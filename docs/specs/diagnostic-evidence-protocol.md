@@ -72,6 +72,11 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 | delivery.client | hostId、logId，可选 authority | receiving client journal；默认安全投影、显式原件 |
 | delivery.core | hostId、logId，可选 authority | 已有 Core client 的原 DeliveryAttempt；路由与语义 runtime 分开 |
 | toolkit.performance-failure | hostId、executionId | 原 Toolkit get 的 latest failure；无 logId，不提供 archive/采样 |
+| mote.context.client | client route hostId、原 resource scope、prepare/open-space action；open-space 另含完整 reference | 原 client action owner 的 latest-per-scope-action 事实；无 logId、持久化或健康结论 |
 | native-recorder-failure | hostId、agentSessionId、runId | 当前缺原 producer，not-exposed/null 原引用；不冒根因已取得 |
 
 managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借 user/device 或 Runtime 私有权限读其他 Host。局部拒绝不关闭原健康 Agent。GUI 继续沿原领域消费事实，既有 message.delivery.inspect、toolkit.inspect/watch 语义和原件能力不被替换。
+
+Mote scope 的 host/path 来自原 action 捕获的 resource Workspace，不能用 Mote 的 physical/HomeZone/logical topic 目录替代。客户端路由和资源 Host 可以不同；读取不连接资源 Runtime。原 pending attempt 与保留 failure 的 target/time 分开，后来的发现不改写它们。该 point observation 的 recordRef/readAuthority/persistence 为 null，envelope observedAt 为 null；实际 action/failure 时刻留在 data，readAt 只表示本次读取。source absent 的 not-found/unknown 不签历史无错误。
+
+Mote 默认 safe 投影在 Renderer/IPC 原边界就移除任意 cause；显式 raw 只返回实际 retained 原字符串，不重建 Error/stack/cause chain。原字符串无截断元数据时 raw.truncated 仍为 null。原独立 `inspect.mote-context` envelope 与 loaded Renderer/navigation owner 一致，旧严格 `inspect.client` v1 不添加字段。查询期限或取消结束等候时，实际 IPC 成本仍占原槽直到回复或原 owner disposal。
