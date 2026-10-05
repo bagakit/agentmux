@@ -555,3 +555,24 @@ it('does not settle a retained intent whose native source matches but its exact 
   expect(useAppStore.getState().questionReplies['question-session']![foreignKey]).toBe(attempt)
   expect(attempt.phase).toBe('unknown')
 })
+
+it.each([1, 100])('builds one answer index for %i related original intents in one real Desktop observation', async count => {
+  seed()
+  const source = { providerId: 'codex', nativeSessionId: 'native-question-session' }
+  const replies = Object.fromEntries(Array.from({ length: count }, (_, index) => {
+    const input = { source, turnId: 'original-turn', recordId: 'question-' + index, operationId: 'operation-' + index,
+      expectedRun: control.run, afterSubmissionId: null, answers: [{ questionId: 'unrecorded-' + index, answer: 'Exact answer' }] }
+    return [questionReplyKey(control.agentSessionId, input), { hostId: control.hostId, input, phase: 'unknown' as const }]
+  }))
+  useAppStore.setState({ questionReplies: { [control.agentSessionId]: replies } })
+  let pageVisits = 0, contextVisits = 0
+  const items = [{ id: 'native-user-answer', kind: 'user-message' as const, contentParts: [], questionAnswers: [{ questionId: 'unrelated-answer', answer: 'Native' }] }]
+  const page: AgentSessionHistoryPage = { agentSessionId: control.agentSessionId, source, nextCursor: null, get items() { pageVisits++; return items } }
+  const context: AgentSessionHistoryPage = { ...page, get items() { contextVisits++; return items } }
+  pageVisits = 0
+  observeConversationQuestionAnswers(control, page, context)
+  expect({ pageVisits, contextVisits }).toEqual({ pageVisits: 1, contextVisits: 1 })
+  console.info('QUESTION_COST_DESKTOP ' + JSON.stringify({ relatedCount: count, pageVisits, contextVisits }))
+  expect(Object.values(useAppStore.getState().questionReplies[control.agentSessionId]!)).toHaveLength(count)
+  expect(Object.values(useAppStore.getState().questionReplies[control.agentSessionId]!).every(attempt => attempt.phase === 'unknown')).toBe(true)
+})
