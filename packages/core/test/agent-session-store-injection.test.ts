@@ -98,7 +98,7 @@ describe('the Client tells spawned processes where its store lives', () => {
     expect(env.AGENTMUX_AGENT_SESSION_STORE).toBe(fixturePath("durable/userData/agent-sessions.json"))
     // The managed CLI hop still has to work, so its two companions must ride along in the same environment.
     expect(env.AGENTMUX_ENV).toBe('1')
-    expect(env.AGENTMUX_CLI).toMatch(/\/bin\/agentmux$/u)
+    expect(env.AGENTMUX_CLI).toMatch(/\/bin\/amux$/u)
   })
 
   it('omits the variable entirely when there is no durable path (a memory-store Client)', () => {

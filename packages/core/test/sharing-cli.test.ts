@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,6 +55,7 @@ describe('public amux sharing consumption', () => {
   it('publishes one node-free export for both browser and Node consumers', async () => {
     const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
     expect(manifest.bin.amux).toBe('./bin/amux')
+    expect(manifest.bin).not.toHaveProperty('agentmux')
     expect(manifest.exports['./sharing']).toEqual({
       types: './dist/sharing.d.ts', import: './dist/sharing.js'
     })
@@ -84,6 +85,12 @@ describe('public amux sharing consumption', () => {
       const shortName = files.find(file => file.path === 'bin/amux')
       expect(shortName).toBeDefined()
       expect(shortName!.mode & 0o111).not.toBe(0)
+      expect(files.map(file => file.path)).not.toContain('bin/agentmux')
+      await exec('tar', ['-xzf', join(directory, archives[0].filename), '-C', directory])
+      // Reuse the locked dependency closure; execute the archive's own bin and dist.
+      await symlink(join(packageRoot, 'node_modules'), join(directory, 'package', 'node_modules'))
+      const invoked = await exec(join(directory, 'package', 'bin', 'amux'), ['system', 'endpoint'])
+      expect(JSON.parse(invoked.stdout)).toMatchObject({ ok: true, operation: 'system.endpoint' })
       expect(files.map(file => file.path)).toEqual(expect.arrayContaining(['dist/sharing.js', 'dist/sharing.d.ts']))
     } finally {
       await rm(directory, { recursive: true, force: true })
