@@ -65,10 +65,6 @@
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
 }
-.workbench-tab-create { flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 128px; height: 24px; margin-inline: var(--sp-2); padding: 0 var(--sp-3); border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); white-space: nowrap; }
-.workbench-tab-create span { overflow: hidden; text-overflow: ellipsis; }
-.workbench-tab-create:hover:not(:disabled) { color: var(--text); background: var(--wash-2); }
-.workbench-tab-create:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .workbench-empty-state { flex: 1; min-width: 0; min-height: 0; height: 100%; display: grid; place-items: center; padding: clamp(20px, 5%, 48px); overflow: auto; }
 .workbench-empty-state__content { width: min(100%, 360px); display: flex; align-items: center; flex-direction: column; text-align: center; padding-block: var(--sp-5); }
 .workbench-empty-state__identity { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: var(--sp-4); }
@@ -213,6 +209,9 @@
 }
 .workbench-tab__close:hover { opacity: 1; background: var(--surface-3); }
 .pane-action {
+  -webkit-app-region: no-drag;
+  flex: 0 0 auto;
+  align-self: center;
   width: 24px;
   height: 24px;
   display: inline-flex;
