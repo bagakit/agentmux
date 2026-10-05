@@ -43,9 +43,6 @@ export type MoteAvatarSeriesResultMap = {
   'space.mote.avatar.preview': MoteAvatarSeriesPrepared
 }
 export type MoteAvatarSeriesMethod = keyof MoteAvatarSeriesParameterMap
-export interface AgentMuxRpcMoteAvatarsOwner {
-  call<M extends MoteAvatarSeriesMethod>(method: M, params: MoteAvatarSeriesParameterMap[M]): Promise<MoteAvatarSeriesResultMap[M]>
-}
 export const AGENTMUX_RPC_MOTE_AVATAR_METHODS = {
   'space.mote.avatar.list': 'long', 'space.mote.avatar.preview': 'long'
 } as const

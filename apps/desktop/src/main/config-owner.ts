@@ -1,6 +1,7 @@
 import type { AppConfig } from '../shared/contracts.js'
 import { validateThemeConfigEdit } from './theme-config.js'
-import { applyConfigEdit } from '../shared/config-edit.js'
+import { randomUUID } from 'node:crypto'
+import { applyConfigEdit, configValuesEqual } from '../shared/config-edit.js'
 import { configNameChanges, configNameValue, type NamedChange, type NameChangeAudit } from './name-change-audit.js'
 
 /** One commit queue around the existing Main fact; long host/Git/dialog work is never an updater. */
@@ -48,6 +49,18 @@ export class ConfigOwner {
         const requested = apply(current)
         validateThemeConfigEdit(current, requested)
         next = this.ports.prepare ? await this.ports.prepare(current, requested) : requested
+        // Choices returning to their earlier value are still later publications. Keep deletion
+        // tombstones, foreign keys and unchanged versions with this sole durable owner.
+        const previousIcons=current.appearance.spaceObjectIcons ?? {}, nextIcons=next.appearance.spaceObjectIcons ?? {}
+        const versions={...current.appearance.spaceObjectIconRevisions}
+        let changed=false
+        for (const key of new Set([...Object.keys(previousIcons),...Object.keys(nextIcons)])) {
+          if (Object.hasOwn(previousIcons,key)===Object.hasOwn(nextIcons,key) && configValuesEqual(previousIcons[key],nextIcons[key])) continue
+          Object.defineProperty(versions,key,{value:randomUUID(),enumerable:true,writable:true,configurable:true});changed=true
+        }
+        const {spaceObjectIconRevisions:_callerVersions,...appearance}=next.appearance
+        next={...next,appearance:{...appearance,...(changed || current.appearance.spaceObjectIconRevisions!==undefined ? {spaceObjectIconRevisions:versions}: {})}}
+        if (configValuesEqual(current, next)) next = current
       } catch (cause) {
         if (this.ports.nameAudit && intended.length) return await this.ports.nameAudit.run(intended,
           async () => { throw cause }, undefined, () => 'failed')

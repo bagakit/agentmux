@@ -1,9 +1,10 @@
+import { isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
 import { isSpaceIconId, type SpaceIconId } from '@agentmux/client-ui/space-icon-ids'
 import { isMoteAvatarRef, isMoteFace, type MoteAvatarRef, type MoteFace } from './mote-avatars'
 import { directoryIdentity } from './space-addresses'
 
 export { isSpaceIconId, type SpaceIconId } from '@agentmux/client-ui/space-icon-ids'
-export type SpaceIconChoice = SpaceIconId | MoteAvatarRef | MoteFace
+export type SpaceIconChoice = SpaceIconId | MoteAvatarRef | MoteFace | MoteAvatarSeriesChoice
 export type SpaceIconOverrides = Record<string, SpaceIconChoice>
 
 export function isSpaceObjectIdentityKey(key: string): boolean {
@@ -17,7 +18,7 @@ export function isSpaceObjectIdentityKey(key: string): boolean {
 }
 
 export function isSpaceIconChoice(value: unknown): value is SpaceIconChoice {
-  return isSpaceIconId(value) || isMoteAvatarRef(value) || isMoteFace(value)
+  return isMoteAvatarSeriesChoice(value) || isSpaceIconId(value) || isMoteAvatarRef(value) || isMoteFace(value)
 }
 
 /** Raw records remain with the durable owner; one unreadable record cannot erase another. */

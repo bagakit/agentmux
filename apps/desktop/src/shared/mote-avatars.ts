@@ -5,7 +5,7 @@ export const MOTE_AVATAR_MAX_PIXELS = 16 * 1024 * 1024
 export const MOTE_AVATAR_EDGE = 256
 export const MOTE_AVATAR_OUTPUT_MAX_BYTES = 512 * 1024
 export const MOTE_AVATAR_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
-export type MoteAvatarTarget = { workspaceId: string; topicId: string; objectKey: string }
+export type { MoteAvatarTarget } from '@agentmux/core/mote-avatar-write'
 export type MoteAvatarRef = { kind: 'image'; fileName: string }
 export type MoteAvatarInput = { mimeType: 'image/png' | 'image/jpeg'; dataUrl: string }
 export type MoteAvatarImage = { dataUrl: string; width: number; height: number }

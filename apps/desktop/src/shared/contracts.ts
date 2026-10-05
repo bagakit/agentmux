@@ -441,6 +441,8 @@ export type AppearanceConfig = {
   customThemes?: Record<string, unknown>
   /** Main-owned authored Space choices; unreadable records are retained and diagnosed independently. */
   spaceObjectIcons?: Record<string, unknown>
+  /** Original ConfigOwner conflict metadata; callers cannot publish or roll back these nonces. */
+  spaceObjectIconRevisions?: Record<string, unknown>
   /** Executor-owned decoration, edited with its template; durable key stays stable. */
   agentAvatars?: Record<string, AgentAvatarAppearance>
   appAppearance?: AppAppearanceId
@@ -1640,6 +1642,8 @@ export type AgentMuxDesktopApi = {
   moteAvatars: {
     list(): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCatalog>
     preview(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPreviewParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPrepared>
+    read(params: import('@agentmux/core/mote-avatar-write').MoteAvatarWriteParameterMap['space.mote.avatar.read']): Promise<import('@agentmux/core/mote-avatar-write').MoteAvatarRead>
+    save(params: import('@agentmux/core/mote-avatar-write').MoteAvatarSave): Promise<import('@agentmux/core/mote-avatar-write').MoteAvatarSaveResult>
   }
   topics: {
     call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>

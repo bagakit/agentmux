@@ -103,3 +103,5 @@ export type { ClientPerformanceDiagnostics, InputPerformanceSnapshot, HostedCarr
 
 export type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
 export * from './mote-avatar-series.js'
+
+export * from './mote-avatar-write.js'

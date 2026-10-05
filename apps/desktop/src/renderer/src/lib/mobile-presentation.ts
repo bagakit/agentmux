@@ -65,14 +65,15 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
     const motion = space.kind === 'mote' ? { expression, activities: matching.map(session => ({ agentSessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id, runId: session.control.run.runId, expression: moteExpression(session, 'static', state.timelines[session.id]?.liveTool) })) } : {}
     if (typeof choice === 'string') return { spaceId: space.spaceId, glyph: choice, ...motion }
     if (choice?.kind === 'face') return { spaceId: space.spaceId, parts: { ...choice }, ...motion }
-    if (choice?.kind === 'image') {
-      if (space.spaceId !== imageSpaceId) return { spaceId: space.spaceId, image: { dataUrl: null, revision: choice.fileName }, ...motion }
+    const imageChoice = choice?.kind === 'series' ? choice.image : choice?.kind === 'image' ? choice : null
+    if (imageChoice) {
+      if (space.spaceId !== imageSpaceId) return { spaceId: space.spaceId, image: { dataUrl: null, revision: imageChoice.fileName }, ...motion }
       const workspace = target?.avatarTarget ? scratch : undefined
       try {
         if (!workspace || !space.topicId) throw new Error('The original Mote avatar target is unavailable.')
-        const image = await readAvatar({ workspaceId: workspace.id, topicId: space.topicId, objectKey: key }, choice)
-        return { spaceId: space.spaceId, image: { dataUrl: image.dataUrl, revision: choice.fileName }, ...motion }
-      } catch (error) { return { spaceId: space.spaceId, image: { dataUrl: null, revision: choice.fileName }, issue: presentError(error), ...motion } }
+        const image = await readAvatar({ workspaceId: workspace.id, topicId: space.topicId, objectKey: key }, imageChoice)
+        return { spaceId: space.spaceId, image: { dataUrl: image.dataUrl, revision: imageChoice.fileName }, ...motion }
+      } catch (error) { return { spaceId: space.spaceId, image: { dataUrl: null, revision: imageChoice.fileName }, issue: presentError(error), ...motion } }
     }
     return { spaceId: space.spaceId, ...(space.topicId === PMO_TEAMS_TOPIC_ID ? { preset: 'primary-mote' } : {}), ...motion }
   }))
