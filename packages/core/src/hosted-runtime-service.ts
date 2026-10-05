@@ -4,6 +4,7 @@ import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
+import { rpcString } from './rpc-business-codec.js'
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedMethod, type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
@@ -167,7 +168,7 @@ export class AgentMuxHostedRuntimeService {
       const trust = parseAgentMuxCreationTrustInput(record(input.args[0], ['sourceRuntimeId', 'publicKey', 'targetRuntimeId', 'targetKeyFingerprint']))
       context.signal?.throwIfAborted()
       return { value: encodeHostedValue(await this.client.trustCreationSource(trust,
-        { kind: 'user', id: identifier(context.principal.id) })) }
+        { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
