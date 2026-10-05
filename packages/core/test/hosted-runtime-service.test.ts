@@ -542,6 +542,23 @@ describe('semantic Host observation consumers', () => {
     expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
     observer.dispose(); await client.dispose(); await f.service.dispose()
   })
+  it('ends only a confirmed changed history source and never resumes it on general reconnect', async () => {
+    const f = fixture(), bridge = rpcPort(f.service), release = vi.fn()
+    f.core.observeSessionHistory.mockResolvedValue({ source: { providerId: 'codex', nativeSessionId: 'original-native' }, dispose: release })
+    const client = await connectHostedAgentMux({ rpc: bridge.port }), observations: AgentSessionHistoryObservation[] = []
+    const observer = await client.observeSessionHistory('a123456789012345', value => observations.push(value), {})
+    const notify = f.core.observeSessionHistory.mock.calls[0]![1]
+    notify({ kind: 'unavailable', agentSessionId: 'a123456789012345', source: observer.source,
+      code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', message: 'Private original source was replaced.' })
+    await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1))
+    await bridge.connections.find(value => value.method === 'runtime.events')!.close()
+    await client.connect()
+    expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(1)
+    notify({ kind: 'invalidated', agentSessionId: 'a123456789012345', source: observer.source! })
+    expect(observations.map(value => value.kind)).toEqual(['unavailable'])
+    expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
+    observer.dispose(); await client.dispose(); await f.service.dispose()
+  })
   it('retains the original history identity and window when a reconnect offers a different native source', async () => {
     const f = fixture(), bridge = rpcPort(f.service), released = [vi.fn(), vi.fn()]
     let opened = 0
