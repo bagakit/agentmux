@@ -1,3 +1,4 @@
+import { Textarea } from '@agentmux/client-ui/input'
 import { Copy, LoaderCircle, RefreshCw, Smartphone } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
@@ -61,7 +62,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       {list && <p className="settings-group-note" role="status">{list.mobileAccess.state === 'connected' ? 'Ready to connect' : list.mobileAccess.state === 'starting' ? 'Connection service is starting. Try again shortly.' : 'Connection service unavailable'}</p>}
       {list && list.mobileAccess.state !== 'connected' && <details><summary>Connection details</summary><p className="settings-group-note">{list.mobileAccess.message}</p></details>}
       {notice && <p className="device-management__feedback" role="status">{notice}</p>}
-      {url && <details className="device-management__link"><summary>View full connection link</summary><textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details>}
+      {url && <details className="device-management__link"><summary>View full connection link</summary><Textarea aria-label="Phone connection link" rows={3} readOnly value={url} onFocus={event => event.target.select()} /></details>}
     </div>
     <div className="device-management__devices">
       <div className="settings-pane-toolbar"><h3>Connected devices</h3><button className="small-button" disabled={refreshing} onClick={() => { void read() }}>{refreshing ? <LoaderCircle size={16} className="device-management__spinner" /> : <RefreshCw size={16} />}{refreshing ? 'Checking…' : 'Refresh'}</button></div>

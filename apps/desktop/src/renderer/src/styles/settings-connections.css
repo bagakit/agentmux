@@ -98,7 +98,6 @@
   background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.6 var(--font-mono);
   overflow-wrap: anywhere; resize: vertical;
 }
-.device-management__link textarea:focus { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .device-management__devices { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
 .device-management__devices > .settings-pane-toolbar { flex-wrap: wrap; gap: var(--sp-3); }
 .device-management__devices > .settings-pane-toolbar h3 { margin: 0; }
