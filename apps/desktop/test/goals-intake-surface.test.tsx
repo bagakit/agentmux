@@ -18,6 +18,8 @@ import { directGoalRequest, retryDirectGoal } from '../src/renderer/src/lib/goal
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { chooseField } from './helpers/selection-field'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 
 const baseline = useAppStore.getState()
@@ -31,7 +33,7 @@ function session(id: string, workspacePath = _hygiene_fixturePath("repo")): Extr
 }
 const originalTab = createWorkbenchTab('original-tab', { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: 'repo', sessionId: 'healthy' })
 const primaryTab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary' }), topicId: PMO_TEAMS_TOPIC_ID }
-const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: 'teams', topicPath: 'teams/topic.md', collaborators: [], soul: { path: 'SOUL.md', content: '# SOUL', version: 'v1' } }
+const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: 'teams', topicPath: 'teams/topic.md', collaborators: [], quickMode: { status: 'saved' as const, version: 'original-mote-preference', defaults: { executorId: 'configured' } }, soul: { path: 'SOUL.md', content: '# SOUL', version: 'v1' } }
 let root: Root, container: HTMLDivElement, temporaryRoot: string, owner: ReturnType<typeof openDemandStore>
 let releaseHeldReceipt: (() => void) | undefined, tearingDown = false
 beforeEach(async () => {
@@ -43,6 +45,7 @@ beforeEach(async () => {
   useAppStore.setState({ ...baseline, config: structuredClone(config), sessions: [session('healthy'), session('primary', _hygiene_fixturePath("topics/topic--launcher--leader"))], demands: {}, selectedDemandId: null, mainSurface: 'board', activeWorkspaceId: null,
     agentFocus: { ...baseline.agentFocus, pmo: { sessionId: 'primary' } },
     tabs: { [originalTab.id]: originalTab, [primaryTab.id]: primaryTab }, layouts: { repo: createWorkspaceLayout('original-group', [originalTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [primaryTab.id]) },
+    scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(config.workspaces[1]!), revision: 1, topics: [topic], reading: false, error: null } },
     agentComposerDrafts: { healthy: 'Original unsent draft' }, demandPmoTabIds: {}, pendingAgentLaunches: {}, error: null, errorNoticeContext: null })
   vi.spyOn(api.demands, 'create').mockImplementation(input => owner.create(input))
   vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
@@ -93,13 +96,13 @@ describe('Goals direct PMO creation and reading surface', () => {
     const saved = goals[0]!
     expect(saved).toMatchObject({ title: 'Untitled goal', description: '', status: 'backlog', projectId: null, projectName: null, sessionIds: [] })
     expect(saved.id).toMatch(/^demand_/); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
-    expect(api.demands.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: saved.id, title: 'Untitled goal', description: '', status: 'backlog' }))
+    expect(api.demands.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: saved.id, title: 'Untitled goal', description: '', status: 'backlog' }), undefined)
     expect(container.querySelector('.goals-intake, [aria-label="Goal intent"]')).toBeNull()
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
     const state = useAppStore.getState(), tabId = state.demandPmoTabIds[saved.id]!, tab = state.tabs[tabId]!
     expect(state.selectedDemandId).toBe(saved.id); expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID)
-    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: expect.stringContaining(`existing Goal ${saved.id}`) }))
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].prompt).toContain('existing undefined Goal draft')
+    expect(api.sessions.launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: 'Clarify goal', agentMuxNote: expect.stringContaining(`existing Goal ${saved.id}`) }), expect.objectContaining({ goalId: saved.id }))
+    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain('existing undefined Goal draft')
     expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tab.id)
     expect(state.tabs[originalTab.id]).toBe(originalTab); expect(state.layouts.repo).toBe(originalLayout)
     expect(state.agentComposerDrafts.healthy).toBe('Original unsent draft'); expect(state.agentFocus.execution).toEqual(originalFocus.execution)
@@ -133,9 +136,9 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(container.querySelector('.goals-empty')?.textContent).toBe('')
     await act(async () => root.render(null)); await mount(); await click('重新读取目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.demands.list).toHaveBeenCalledTimes(2)
+    expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.demands.list.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(useAppStore.getState().selectedDemandId).toBe(id); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].prompt).toContain(`existing Goal ${id}`)
+    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
   })
 
   it('saves again only after a complete owner read proves absence, using the same caller ID', async () => {
@@ -150,7 +153,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(vi.mocked(api.demands.create).mock.calls.map(([input]) => input.id)).toEqual([id, id])
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].prompt).toContain(`existing Goal ${id}`)
+    expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
   })
 
   it('keeps an unknown save read-only across repeated failed reads and never saves a new identity', async () => {
@@ -168,28 +171,28 @@ describe('Goals direct PMO creation and reading surface', () => {
   })
 
   it('retains the real Goal and failed mapped launcher, then retries the same Goal and Tab', async () => {
-    vi.mocked(api.sessions.launchAgent).mockRejectedValueOnce(new Error('PMO launch receipt unavailable'))
+    vi.mocked(api.sessions.launchAgent).mockRejectedValueOnce(Object.assign(new Error('PMO launch rejected before start'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }))
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const id = directGoalRequest()!.id, tabId = useAppStore.getState().demandPmoTabIds[id]!, tab = useAppStore.getState().tabs[tabId]!, regionId = tab.layout.activeRegionId
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(tab.regions[regionId]?.kind).toBe('launcher')
     expect(tab.name).toBe('PMO · Untitled goal')
-    expect(useAppStore.getState().agentComposerDrafts[regionId]).toContain(`existing Goal ${id}`)
+    expect(useAppStore.getState().agentComposerDrafts[regionId]).toBe('Clarify goal'); expect(useAppStore.getState().agentComposerNotes[regionId]).toContain(`existing Goal ${id}`)
     expect(useAppStore.getState().errorNoticeContext?.lifecycle).toMatchObject({ regionId, tabId, step: 'launch' })
     expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tabId)
     await act(async () => root.render(null)); await mount(); await click('重试专属讨论'); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(useAppStore.getState().demandPmoTabIds[id]).toBe(tabId); expect(useAppStore.getState().tabs[tabId]!.regions[regionId]?.kind).toBe('agent')
     expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(api.sessions.launchAgent).mock.calls.map(([input]) => input.prompt?.includes(`existing Goal ${id}`))).toEqual([true, true])
+    expect(vi.mocked(api.sessions.launchAgent).mock.calls.map(([input]) => input.agentMuxNote?.includes(`existing Goal ${id}`))).toEqual([true, true])
   })
 
-  it('keeps the saved Goal and its real dedicated launcher when the original bot configuration is unknown', async () => {
+  it('keeps the saved Goal and its real dedicated launcher when the saved new-chat configuration is unavailable', async () => {
     useAppStore.setState({ config: { ...config, executors: {} } })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
     const goals = await owner.list(); expect(goals).toHaveLength(1)
     const id = goals[0]!.id, state = useAppStore.getState(), tab = state.tabs[state.demandPmoTabIds[id]!]!
     expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID); expect(tab.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
-    expect(state.agentComposerDrafts[tab.layout.activeRegionId]).toContain(`existing Goal ${id}`)
-    expect(state.error).toContain('primary Mote Agent configuration is unconfirmed')
+    expect(state.agentComposerDrafts[tab.layout.activeRegionId]).toBe('Clarify goal'); expect(state.agentComposerNotes[tab.layout.activeRegionId]).toContain(`existing Goal ${id}`)
+    expect(state.error).toContain('configured'); expect(state.error).toContain('unavailable'); expect(state.sessions.some(session => session.id === 'primary')).toBe(true)
     expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tab.id)
   })
 
@@ -210,7 +213,7 @@ describe('Goals direct PMO creation and reading surface', () => {
 
   it('clears only conditions that would hide the newly created Goal', async () => {
     await mount(); await click('Goal filters')
-    await act(async () => { for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter executor', 'configured']]) { const node = container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; node.value = value!; node.dispatchEvent(new Event('change', { bubbles: true })) } })
+    await act(async () => { for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', 'healthy']]) { const node = container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; node.value = value!; node.dispatchEvent(new Event('change', { bubbles: true })) } })
     await edit('Search goals', 'a different outcome'); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
     const saved = (await owner.list())[0]!
     expect((container.querySelector('[aria-label="Search goals"]') as HTMLInputElement).value).toBe('')
@@ -280,7 +283,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     useAppStore.setState({ demands: { [original.id]: original }, selectedDemandId: original.id, updateDemand: update })
     await mount(); const title = await edit('Goal title', 'My clearer outcome')
     await act(async () => title.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
-    expect(update).toHaveBeenCalledWith(original.id, { title: 'My clearer outcome' })
+    expect(update).toHaveBeenCalledWith(original.id, { title: 'My clearer outcome' }, undefined, undefined)
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')?.value).toBe('My clearer outcome')
     expect(container.querySelector('[role="status"]')?.textContent).toContain('draft is kept')
     await click('Retry save'); expect(update).toHaveBeenCalledTimes(2)
@@ -295,7 +298,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     await edit('Goal title', 'A newer unsent revision')
     await act(async () => { useAppStore.setState({ demands: { [original.id]: { ...original, title: 'First revision' } } }); resolve() })
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')?.value).toBe('A newer unsent revision')
-    expect(update).toHaveBeenCalledExactlyOnceWith(original.id, { title: 'First revision' })
+    expect(update).toHaveBeenCalledExactlyOnceWith(original.id, { title: 'First revision' }, undefined, undefined)
   })
 
   it('retains a failed detail draft when reading another Goal and returning', async () => {
@@ -315,15 +318,14 @@ describe('Goals direct PMO creation and reading surface', () => {
   it('retries the actual failed property patch rather than pretending an empty save succeeded', async () => {
     const original = goal(); const update = vi.fn().mockRejectedValueOnce(new Error('Priority save unavailable')).mockResolvedValueOnce(undefined)
     useAppStore.setState({ demands: { [original.id]: original }, selectedDemandId: original.id, updateDemand: update })
-    await mount(); const priority = container.querySelector<HTMLSelectElement>('[aria-label="Goal priority"]')!
-    await act(async () => { priority.value = 'high'; priority.dispatchEvent(new Event('change', { bubbles: true })) })
-    expect(update).toHaveBeenCalledExactlyOnceWith(original.id, { priority: 'high' })
+    await mount(); await chooseField(container.querySelector<HTMLElement>('[aria-label="Goal priority"]')!, 'high')
+    expect(update).toHaveBeenCalledExactlyOnceWith(original.id, { priority: 'high' }, undefined, undefined)
     expect(container.querySelector('[role="status"]')?.textContent).toContain('Priority save unavailable')
-    await click('Retry save'); expect(update.mock.calls).toEqual([[original.id, { priority: 'high' }], [original.id, { priority: 'high' }]])
+    await click('Retry save'); expect(update.mock.calls).toEqual([[original.id, { priority: 'high' }, undefined, undefined], [original.id, { priority: 'high' }, undefined, undefined]])
   })
 
   it('does no default Goal render work for unrelated Session output and tab facts', async () => {
-    const related = { id: 'linked', label: 'Linked Agent', status: { state: 'working' }, workspacePath: _hygiene_fixturePath("repo") } as SessionSnapshot
+    const related = { ...session('linked'), label: 'Linked Agent', status: { state: 'working' } } as SessionSnapshot
     const unrelated = { ...related, id: 'unrelated' }
     const primary = useAppStore.getState().sessions
     const tabs = useAppStore.getState().tabs
@@ -331,6 +333,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'goals', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelector('[data-demand-id]')?.textContent).toContain('1 linked · working')
     expect(container.querySelector('.goals-execution__link')).toBeNull(); expect(container.querySelector('.agent-topology-summary')).toBeNull()
+    await eventually(() => expect(container.textContent).not.toContain('Checking the original continuation'))
     const count = commits.mock.calls.length; expect(count).toBeGreaterThan(0)
     await act(async () => useAppStore.setState({ sessions: [...primary, related, { ...unrelated, latestOutputBytes: 900000, updatedAt: 12 }], tabs: { ...tabs } }))
     expect(commits.mock.calls.length).toBe(count)

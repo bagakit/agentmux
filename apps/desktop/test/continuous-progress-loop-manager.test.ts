@@ -135,7 +135,7 @@ it('retains one original Goal start through durable Manager reload and reconcile
   const { openDemandStore } = await import('@agentmux/demand')
   const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-goal-loop-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json')), goals = openDemandStore({ root: join(dir, 'goals') })
-  await goals.create({ id: 'original-goal', title: 'Original work', sessionIds: ['a'] })
+  await goals.create({ id: 'original-goal', title: 'Original work', sessionIds: ['a'], assigneeSessionIds: ['a'], supervisorSessionId: 'a' })
   await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
   await goals.confirmAlignment('original-goal', 1)
   let receipt: 'confirmed' | 'pending' | 'unconfirmed' = 'unconfirmed', sends = 0
@@ -163,7 +163,7 @@ it('cancels original Goal initial admission when its real source owner becomes b
   const { openDemandStore } = await import('@agentmux/demand')
   const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-goal-source-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json')), goals = openDemandStore({ root: join(dir, 'goals') })
-  await goals.create({ id: 'original-goal', title: 'Original work', sessionIds: ['a'] })
+  await goals.create({ id: 'original-goal', title: 'Original work', sessionIds: ['a'], assigneeSessionIds: ['a'], supervisorSessionId: 'a' })
   await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
   await goals.confirmAlignment('original-goal', 1)
   const manager = new ContinuousProgressLoopManager(store, async () => 'sent', () => 0, observedDone, undefined, {
