@@ -27,7 +27,7 @@ async function owners() {
   vi.spyOn(f.client, 'connect').mockResolvedValue()
   const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'remote', client: f.client }] })
   cleanups.push(() => service.dispose())
-  return { ...f, source, target, service, input: { sourceRuntimeId: 'source-runtime', publicKey: (await source.identity()).publicKey } }
+  return { ...f, source, target, service, input: { sourceRuntimeId: 'source-runtime', publicKey: (await source.identity()).publicKey, targetRuntimeId: 'target-runtime', targetKeyFingerprint: (await target.identity()).fingerprint } }
 }
 it('routes explicit user trust to the exact Host and reads the same durable authority without exposing private keys', async () => {
   const f = await owners()
@@ -40,6 +40,15 @@ it('routes explicit user trust to the exact Host and reads the same durable auth
   expect(JSON.stringify(after)).not.toMatch(/privateKey|BEGIN PRIVATE/)
   await expect(f.service.call('settings.hosts.trust-source', { hostId: 'unknown', input: f.input }, user)).rejects.toMatchObject({ code: 'UNKNOWN_HOST' })
   expect(await f.target.listTrusted()).toEqual([configured.source])
+})
+it('refuses a route rebound after review at the target owner before any pin is persisted', async () => {
+  const f = await owners()
+  const replacement = new AgentMuxCreationAuthority({ stateDirectory: join(f.root, 'replacement'), runtimeId: 'replacement-runtime' })
+  Object.assign(f.client, { creationAuthority: replacement })
+  await expect(f.service.call('settings.hosts.trust-source', { hostId: 'remote', input: f.input }, user))
+    .rejects.toMatchObject({ code: 'AGENT_CREATION_TARGET_MISMATCH' })
+  expect(await replacement.listTrusted()).toEqual([])
+  expect(await f.target.listTrusted()).toEqual([])
 })
 it('refuses Agent, device, missing and self-reported user principals before a trust write', async () => {
   const f = await owners(), trust = vi.spyOn(f.client, 'trustCreationSource')
@@ -79,9 +88,10 @@ it('strict CLI/help and result consumers retain exact Host and source identities
   const f = await owners(), authority = await f.target.identity(), source = await f.target.trust(f.input, user.principal)
   expect(await parseSettingsCommand(['hosts', 'trusted-sources', '--host', '--help'])).toEqual({ method: 'settings.hosts.trusted-sources', params: { hostId: '--help' } })
   expect(agentMuxCommandHelp('settings.hosts.trust-source')).toContain('--host <id> --input <file|->')
+  expect(agentMuxCommandHelp('settings.hosts.trust-source')).toContain('targetKeyFingerprint')
   const input = { hostId: 'remote', input: f.input }, result = { routeHostId: 'remote', authority, source }
   expect(parseHostSettingsResult('settings.hosts.trust-source', result, input)).toEqual(result)
-  for (const malformed of [{ ...result, routeHostId: 'local' }, { ...result, source: { ...source, targetRuntimeId: 'another' } },
+  for (const malformed of [{ ...result, routeHostId: 'local' }, { ...result, authority: { ...authority, fingerprint: '0'.repeat(64) } }, { ...result, source: { ...source, targetRuntimeId: 'another' } },
     { ...result, source: { ...source, sourceRuntimeId: 'forged' } }, { ...result, source: { ...source, publicKey: 'forged' } }]) {
     expect(() => parseHostSettingsResult('settings.hosts.trust-source', malformed, input)).toThrow()
   }

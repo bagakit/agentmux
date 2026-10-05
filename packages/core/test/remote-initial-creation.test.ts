@@ -1,4 +1,3 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, symlink } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
@@ -63,7 +62,8 @@ async function fixture() {
   vi.spyOn(target, 'probeAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
     capabilities: target.providers.get(providerId).catalog.capabilities }))
   const identity = await source.agentCreationAuthority()
-  const pin = () => target.trustCreationSource({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey }, { kind: 'user', id: 'configured-user' })
+  const targetIdentity = await target.agentCreationAuthority()
+  const pin = () => target.trustCreationSource({ sourceRuntimeId: identity.runtimeId, publicKey: identity.publicKey, targetRuntimeId: targetIdentity.runtimeId, targetKeyFingerprint: targetIdentity.fingerprint }, { kind: 'user', id: 'configured-user' })
   const input: AgentMuxHostAgentCreateInput = { agentSessionId: 'target-session', createOperationId: 'remote-create-original',
     executorId: 'target-executor', executorRevision: registered.executor.configRevision, workspacePath: root, prompt: '  exact first task\n正文  ' }
   const attest = async (value = input) => source.attestAgentCreation({ caller: { agentSessionId: 'source-session', capability },
@@ -104,7 +104,7 @@ describe('remote initial creation admission', () => {
     const request = { ...f.input, initialMessageAdmission: await f.attest() }
     if (variant === 'body') request.prompt += 'tampered'
     if (variant === 'operation') request.createOperationId = 'another-operation'
-    if (variant === 'cwd') request.workspacePath += upstreamFixturePath("another")
+    if (variant === 'cwd') request.workspacePath += '/another'
     if (variant === 'executorRevision') request.executorRevision = '0'.repeat(64)
     if (variant === 'signature') request.initialMessageAdmission.signature = 'A'.repeat(86)
     if (variant === 'runtime') request.initialMessageAdmission.target.runtimeId = 'other-target'
