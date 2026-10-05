@@ -13,6 +13,19 @@ export interface TrustedDevice {
   readonly lastSeenAt?: number
   readonly operationIssue?: string
   readonly operations?: readonly DeviceOperation[]
+  /** SHA256 of the authenticated peer's base64-encoded public key text. */
+  readonly keyFingerprint?: string
+  readonly connection?: DeviceConnection
+  readonly connectionIssue?: string
+}
+/** Latest authenticated connected interval; identification never grants permission. */
+export interface DeviceConnection {
+  readonly connectedAt: number
+  readonly observedAt?: number
+  readonly disconnectedAt?: number
+  readonly address?: string
+  /** HTTP client declaration, not a verified device model or browser identity. */
+  readonly userAgent?: string
 }
 export interface DeviceOperation { readonly id: string; readonly method: string; readonly target: string; readonly at: number; readonly result: 'confirmed' | 'failed' | 'unknown' }
 export type AgentMuxRpcMobileAccessState = { readonly state: 'starting' | 'connected' | 'disconnected' | 'unavailable'; readonly message: string; readonly origin?: string }
@@ -39,6 +52,18 @@ export function isAgentMuxRpcDeviceMethod(value: unknown): value is AgentMuxRpcD
 function identifier(value: unknown, code: string): void {
   if (typeof value !== 'string' || !value || value.length > 160 || /[\0\r\n]/u.test(value)) throw new AgentMuxError('Device identity is invalid.', code)
 }
+export function parseDeviceConnection(value: unknown): DeviceConnection {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const c = rpcRecord(value, ['connectedAt', 'observedAt', 'disconnectedAt', 'address', 'userAgent'], code)
+  if (!Number.isSafeInteger(c.connectedAt) || (c.connectedAt as number) < 0
+    || (c.observedAt !== undefined && (!Number.isSafeInteger(c.observedAt) || (c.observedAt as number) < (c.connectedAt as number)))
+    || (c.disconnectedAt !== undefined && (!Number.isSafeInteger(c.disconnectedAt) || (c.disconnectedAt as number) < (c.connectedAt as number)))
+    || (c.address !== undefined && (typeof c.address !== 'string' || !c.address || c.address.length > 128 || /[\0\r\n]/u.test(c.address)))
+    || (c.userAgent !== undefined && (typeof c.userAgent !== 'string' || !c.userAgent || /[\0\r\n]/u.test(c.userAgent)))) {
+    throw new AgentMuxError('Device connection result is malformed.', code)
+  }
+  return c as unknown as DeviceConnection
+}
 export function parseAgentMuxRpcDeviceParams<M extends AgentMuxRpcDeviceMethod>(method: M, value: unknown): AgentMuxRpcDeviceParams<M> {
   const keys = method === 'device.revoke' ? ['deviceId'] : method === 'device.hello' ? ['name'] : []
   const p = rpcRecord(value, keys)
@@ -52,7 +77,7 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
   const fail = (): never => { throw new AgentMuxError('Device result is malformed.', code) }
   const time = (v: unknown): number => { if (!Number.isSafeInteger(v) || (v as number) < 0) fail(); return v as number }
   const device = (v: unknown): TrustedDevice => {
-    const d = rpcRecord(v, ['deviceId', 'name', 'createdAt', 'revokedAt', 'online', 'lastSeenAt', 'operationIssue', 'operations'], code)
+    const d = rpcRecord(v, ['deviceId', 'name', 'createdAt', 'revokedAt', 'online', 'lastSeenAt', 'operationIssue', 'operations', 'keyFingerprint', 'connection', 'connectionIssue'], code)
     identifier(d.deviceId, code)
     if (typeof d.name !== 'string' || !d.name || d.name.length > 128) fail()
     const createdAt = time(d.createdAt)
@@ -60,6 +85,9 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     if (d.operationIssue !== undefined && (typeof d.operationIssue !== 'string' || d.operationIssue.length > 4096)) fail()
     if (d.online !== undefined && typeof d.online !== 'boolean') fail()
     if (d.lastSeenAt !== undefined) time(d.lastSeenAt)
+    if (d.keyFingerprint !== undefined && (typeof d.keyFingerprint !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(d.keyFingerprint))) fail()
+    if (d.connection !== undefined) parseDeviceConnection(d.connection)
+    if (d.connectionIssue !== undefined && (typeof d.connectionIssue !== 'string' || !d.connectionIssue || d.connectionIssue.length > 4096)) fail()
     if (d.operations !== undefined) {
       if (!Array.isArray(d.operations) || d.operations.length > 100) fail()
       for (const value of d.operations as unknown[]) {

@@ -210,7 +210,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('space.resolve', '--tab ID --region ID --direction left|right|up|down', 'Resolve relative positions from the original durable split tree.',
     {'--tab':'data','--region':'data','--direction':'value'}, f => ({tabId:id(f,'--tab'),regionId:id(f,'--region'),direction:value(f,'--direction',true)})),
   empty('whoami', 'Read your verified Session, Run, presentation and available capabilities.'),
-  empty('device.ls', 'Read the original Host devices and mobile connection state.'),
+  empty('device.ls', 'Read original Host devices, authenticated key fingerprints, latest connection times and peer IP/HTTP User-Agent. Unrecorded identification remains unknown.'),
   empty('device.link', 'Read the complete connection offer URL from the local Host.'),
   command('device.hello', '--name NAME', 'Name this authenticated encrypted device.',
     { '--name': 'data' }, f => ({ name: value(f, '--name', true)! } satisfies AgentMuxRpcParams<'device.hello'>)),
