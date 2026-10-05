@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ListTree, Minus, Plus, Search, X } from 'lucide-react'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
@@ -242,7 +243,7 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
           setReading(previous => previous?.owner === data ? { ...previous, phase: 'loading', message: undefined } : previous)
           form.reset(); unlock(value)
         }}>
-          <label>Password<input name="password" type="password" autoComplete="off" required aria-label="PDF password" /></label>
+          <label>Password<TextInput name="password" type="password" autoComplete="off" required aria-label="PDF password" /></label>
           <div className="file-preview__controls"><button type="submit" className="small-button">Unlock PDF</button><button type="button" className="small-button" onClick={() => cancel.current?.()}>Cancel</button></div>
         </form></FilePreviewState>
         : phase === 'error' ? <FilePreviewState title="PDF preview unavailable" detail={current?.message || ''} error />
@@ -254,7 +255,7 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
       <div className="file-preview__controls" role="group" aria-label="PDF pages">
         <button ref={outlineButton} className="icon-button" aria-label="PDF contents" title="Show PDF contents" aria-expanded={outlineOpen} disabled={!readable} onClick={() => setOutlineOpen(value => !value)}><ListTree size={13} /></button>
         <button className="icon-button" aria-label="Previous PDF page" title="Previous page (Page Up)" disabled={!readable || current!.page <= 1} onClick={() => page(current!.page - 1)}><ChevronLeft size={13} /></button>
-        <input key={`${phase}:${current?.page}`} className="pdf-content__page" aria-label="PDF page" type="number" min={1} max={current?.pages || undefined} defaultValue={readable ? current!.page : ''} disabled={!readable}
+        <TextInput key={`${phase}:${current?.page}`} className="pdf-content__page" aria-label="PDF page" type="number" min={1} max={current?.pages || undefined} defaultValue={readable ? current!.page : ''} disabled={!readable}
           onBlur={event => { page(event.currentTarget.valueAsNumber); event.currentTarget.value = String(viewer.current?.currentPageNumber ?? '') }}
           onKeyDown={event => { if (event.key === 'Enter') { page(event.currentTarget.valueAsNumber); event.currentTarget.blur() } }} />
         <span className="file-preview__metadata">/ {current?.pages || '—'}</span>
