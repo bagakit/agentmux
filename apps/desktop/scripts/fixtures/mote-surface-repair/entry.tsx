@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { moteWorkbenchProjection } from '../../../src/renderer/src/lib/mote-workbench-projection'
@@ -28,6 +29,7 @@ import '../../../src/renderer/src/styles/index.css'
 import './scene.css'
 
 const terminalRestartOnly = new URLSearchParams(location.search).get('terminalRestartOnly') === '1'
+const contextProof = new URLSearchParams(location.search).get('contextProof') === '1'
 const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath) throw Error('An isolated original workspace is required.')
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' as const }
@@ -39,8 +41,8 @@ const topic: ScratchTopicSnapshot = { id: moteId, title: moteId === PMO_TEAMS_TO
 const secondTopic = { ...topic, id: 'launcher:analyst', title: 'Analyst', directoryPath: workspace.path + '/' + scratchTopicDirectoryName('launcher:analyst') }
 const topics = [topic, secondTopic], spaceId = directoryIdentity('local', topic.directoryPath), zoneId = homeZoneId(spaceId)
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: 'original-display-session', kind: 'agent', providerId: 'fixture', executorId: 'fixture', hostId: 'local',
-  workspacePath: topic.directoryPath, label: 'Our ongoing discussion', createdAt: 1, updatedAt: 2, agentSessionUpdatedAt: 2, processState: 'running', latestOutputBytes: 0,
-  status: { state: 'waiting', source: 'native-hook', observedAt: 2 }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+  workspacePath: topic.directoryPath, label: 'Our ongoing discussion', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 2), processState: 'running', latestOutputBytes: 0,
+  status: { state: 'waiting', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 2) }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'original-core-session', run: { runId: 'original-controlled-run' } } }
 const tab = { ...createWorkbenchTab('original-discussion', { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: workspace.id, sessionId: session.id }, 'Our ongoing discussion'), topicId: topic.id, space: { spaceId, zoneId } }
 const launcher = { ...createWorkbenchTab('original-launcher', { kind: 'launcher', regionId: 'launcher-region', workspaceId: workspace.id }, 'New discussion'), topicId: topic.id, space: { spaceId, zoneId } }
@@ -50,9 +52,10 @@ const initialQuick = serializeMoteQuickMode('', { executorId: 'fixture', convers
 let disk: Record<string,string> = { [rootPath + '/MOTE.md']: initialQuick, [rootPath + '/SOUL.md']: soul, [rootPath + '/BEHAVIOR.md']: DEFAULT_MOTE_BEHAVIOR }
 const calls: { operation: string; path?: string }[] = []
 let unknown = false
+let contextFailure = false, contextReadFailure = false, contextPending: (() => void) | null = null
 const revision = async (value: string) => 'sha256:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2,'0')).join('')
 const quickTopic = () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); return { ...topic, quickMode: parsed.status === 'valid' ? { status: 'saved' as const, defaults: parsed.defaults, version: disk[rootPath + '/MOTE.md']! } : parsed } }
-api.files.readDirectory = async (_workspace, directory) => Object.keys(disk).filter(path => path.startsWith(directory + '/')).map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false, mtimeMs: 1 }))
+api.files.readDirectory = async (_workspace, directory) => Object.keys(disk).filter(path => path.startsWith(directory + '/')).map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false, mtimeMs: _reshape_fixtureEpoch(0, 0, 1) }))
 api.files.read = async (_workspace, path) => { calls.push({ operation: 'read', path }); return disk[path] === undefined ? { status: 'deleted' } : { status: 'read', document: { path, content: disk[path]!, revision: await revision(disk[path]!) } } }
 api.files.readPublic = async (params: FileReadParams): Promise<FileReadResult> => {
   calls.push({ operation: 'file.read', path: params.path })
@@ -62,11 +65,20 @@ api.files.readPublic = async (params: FileReadParams): Promise<FileReadResult> =
 }
 api.files.write = async (_workspace, input) => { calls.push({ operation: 'write', path: input.path }); if (await revision(disk[input.path] ?? '') !== input.expectedRevision) return { status: 'conflict', observedRevision: await revision(disk[input.path] ?? '') }; disk[input.path] = input.content; return { status: 'written', revision: await revision(input.content) } }
 api.files.observe = async () => {}; api.files.unobserve = async () => {}; api.files.onInvalidated = () => () => {}
-api.scratch.listTopics = async () => [quickTopic(), secondTopic]; api.scratch.readTopic = async (_workspace, id) => id === topic.id ? quickTopic() : secondTopic; api.scratch.ensureMote = async () => quickTopic()
+api.scratch.listTopics = async () => [quickTopic(), secondTopic]
+api.scratch.readTopic = async (_workspace, id) => {
+  if (contextReadFailure) throw Error('Original discussion read rejected (controlled source failure).')
+  return id === topic.id ? quickTopic() : secondTopic
+}
+api.scratch.ensureMote = async () => {
+  if (contextFailure) throw Error('Original Mote metadata read failed (controlled source failure).')
+  if (contextPending) await new Promise<void>(resolve => { contextPending = resolve })
+  return quickTopic()
+}
 const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
   title: index ? 'Compare the evidence before choosing our next experiment' : 'Explore a small useful experiment',
   description: '', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
-  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: 1, updatedAt: 2, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [] }))
+  sessionIds: [session.control.agentSessionId], contentRefs: [{ hostId: workspace.hostId, workspaceId: workspace.id, zoneId }], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, activities: [], decisions: [] }))
 api.demands.list = async () => goals
 api.continuousProgress.goals = async () => []
 api.sessions.attach = async () => ({attachmentId: 'controlled-original-attachment', session, currentSize: null, terminal: {type: 'unknown', reason: 'origin_unknown'}, resizeRevision: 0, replay: [], gap: null})
@@ -94,7 +106,7 @@ function reset() {
     loading: false, tabs: { [launcher.id]: launcher, [tab.id]: tab, [other.id]: other }, layouts: { [workspace.id]: createWorkspaceLayout('mote-group', [launcher.id, tab.id, other.id]) }, sessions: [session], documents: {}, dirtyDocuments: {}, documentIssues: {},
     activeWorkspaceId: workspace.id, mainSurface: terminalRestartOnly ? 'survey' : 'workbench', viewModes: { [session.id]: 'activity' }, agentComposerDrafts: { [session.id]: 'An original unsent question stays here.', 'launcher-region': 'Another original question.', 'analyst-region': 'Analyst draft.' }, scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), topics: [quickTopic(), secondTopic], revision: 0, error: null, reading: false } }, workspaceFileRevisions: {},
     workbenchSpaceSelection: { workspaceId: workspace.id, groupId: 'mote-group', tabId: tab.id, regionId: 'original-region', topicId: topic.id, spaceId, zoneId },
-    prewarmTerminal: async () => {}, detectExecutors: async () => {}, launchAgent: async () => { throw Error('No Run may be launched by this Renderer proof') }, reportError: error => { calls.push({ operation: 'error' }); console.warn(String(error)) } })
+    moteContextOperations: {}, prewarmTerminal: async () => {}, detectExecutors: async () => {}, launchAgent: async () => { throw Error('No Run may be launched by this Renderer proof') }, reportError: error => { calls.push({ operation: 'error' }); console.warn(String(error)) } })
   const config = useAppStore.getState().config!
   useAppStore.setState({ executorDetections: Object.fromEntries(Object.entries(config.executors).map(([id, executor]) => ['local\0'+id, { state: id === 'fixture' ? 'ready' : id === 'missing' ? 'missing' : 'error', input: { executorId: id, providerId: executor.providerId, command: executor.command, host: config.hosts[0]! } }])) })
 }
@@ -126,6 +138,20 @@ function Scene() {
   const reference = selection?.tabId && selection.regionId && selection.groupId ? { displayWorkspaceId: selection.workspaceId, groupId: selection.groupId, tabId: selection.tabId, regionId: selection.regionId } : null
   const materials = useMoteMaterialsActions(scope, { reference })
   Object.assign(window, { moteQuick: {
+    contextScenario: async (scenario: 'normal' | 'prepare-failure' | 'read-failure' | 'parent-available' | 'location-choice') => {
+      requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+      await new Promise(resolve => setTimeout(resolve, 30))
+      reset(); contextPending = null; contextFailure = scenario === 'prepare-failure'; contextReadFailure = scenario === 'read-failure'
+      const reference = { displayWorkspaceId: workspace.id, groupId: 'mote-group', tabId: tab.id, regionId: 'original-region' }
+      if (scenario === 'location-choice') useAppStore.setState({ layouts: { [workspace.id]: {
+        root: { type: 'split', direction: 'horizontal', ratio: 0.5, first: { type: 'leaf', groupId: 'mote-group' }, second: { type: 'leaf', groupId: 'other-display' } }, activeGroupId: 'mote-group',
+        groups: [{ id: 'mote-group', activeTabId: tab.id, tabOrder: [tab.id], recentTabIds: [tab.id] }, { id: 'other-display', activeTabId: tab.id, tabOrder: [tab.id], recentTabIds: [tab.id] }] } } })
+      if (scenario === 'location-choice') setFloating({ reference: undefined, targetAgent: undefined })
+      requestPmoTeamsTopicFloatingOpen({ targetTopicId: topic.id, targetTabId: tab.id,
+        ...(scenario === 'location-choice' ? {} : { reference: scenario === 'parent-available' ? { ...reference, regionId: 'retained-old-region' } : reference }) })
+    },
+    contextPending: () => { contextFailure = false; contextPending = () => {} },
+    contextConfirm: () => { const finish = contextPending; contextPending = null; finish?.() },
     seedAvatar: (choice: unknown) => { const state = useAppStore.getState(); state.setConfig({...state.config!, appearance: {...state.config!.appearance, spaceObjectIcons: {[spaceId]: choice}}}) },
     retarget: (otherMote: boolean) => setFloating(otherMote ? {targetTopicId: secondTopic.id, targetTabId: other.id, reference: {displayWorkspaceId: workspace.id, groupId: 'mote-group', tabId: other.id, regionId: 'analyst-region'}} : {targetTopicId: topic.id, targetTabId: tab.id, reference: conversation}),
     open: () => requestPmoTeamsTopicFloatingOpen({targetTopicId: topic.id, targetTabId: tab.id, reference: conversation}), close: () => requestPmoTeamsTopicFloatingClose({restoreFocus: false}),
@@ -135,12 +161,12 @@ function Scene() {
     missingExecutor: () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); if (parsed.status !== 'valid') throw Error('Original config unavailable'); disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, { ...parsed.defaults, executorId: 'saved-unavailable-executor' }); useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[workspace.id]!, topics: [quickTopic(), secondTopic], revision: 1 } } }) },
     reset: () => { reset(); setEpoch(value => value + 1) }, unknown: () => { unknown = true },
     enter: () => useAppStore.getState().openScratchTopic(topic.id, workspace.id),
-    facts: () => { const state = useAppStore.getState(); return { projection: {issue: projection.issue, selections: projection.projection?.selection ?? [], entity: projection.projection?.entity ?? null, resolvedTabId: floatingTabId, rejectedWrongOriginalAgent: wrongOriginalAgentProjection ? wrongOriginalAgentProjection.projection === null && wrongOriginalAgentProjection.issue !== null : null}, viewModes: state.viewModes, floating, defaults: quickTopic().quickMode, disk, sessions: state.sessions, drafts: state.agentComposerDrafts, tabs: state.tabs, layouts: state.layouts, selection: state.workbenchSpaceSelection, calls } },
+    facts: () => { const state = useAppStore.getState(); return { contextOperations: state.moteContextOperations, projection: {issue: projection.issue, issueKind: projection.issueKind, selections: projection.projection?.selection ?? [], entity: projection.projection?.entity ?? null, resolvedTabId: floatingTabId, rejectedWrongOriginalAgent: wrongOriginalAgentProjection ? wrongOriginalAgentProjection.projection === null && wrongOriginalAgentProjection.issue !== null : null}, viewModes: state.viewModes, floating, defaults: quickTopic().quickMode, disk, sessions: state.sessions, drafts: state.agentComposerDrafts, tabs: state.tabs, layouts: state.layouts, selection: state.workbenchSpaceSelection, calls } },
     restartInput: () => { const state = useAppStore.getState(); return { config: state.config, sessions: [session], tabs: state.tabs, layouts: state.layouts, spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests, topics: [quickTopic(), secondTopic], selection: state.workbenchSpaceSelection, agentComposerDrafts: state.agentComposerDrafts,
       launcherState: useLauncherState.persist.getOptions().partialize!(useLauncherState.getState()), disk, viewModes: state.viewModes, quickMode: { path: rootPath + '/MOTE.md', content: disk[rootPath + '/MOTE.md'], conversation } } }
   } })
   return <DesktopClientUiProvider><WindowOverlayHost /><main className="persona-scene">
-    <aside className="persona-scene__profile"><MoteDetailsPanel key={epoch} scope={scope} reference={reference} onOpenPath={materials.open} onCreateNote={() => {}} /></aside>
+    {contextProof ? null : <aside className="persona-scene__profile"><MoteDetailsPanel key={epoch} scope={scope} reference={reference} onOpenPath={materials.open} onCreateNote={() => {}} /></aside>}
     <section className={"persona-scene__work" + (terminalRestartOnly ? " workspace-workbench-slot--parked" : "")} aria-hidden={terminalRestartOnly || undefined} inert={terminalRestartOnly}><MoteWorkface workspaceId={workspace.id} visible={backgroundVisible}><WorkspaceWorkbench workspaceId={workspace.id} visible={backgroundVisible} viewTargets={targets} topicId={topic.id} topicIsolation="bound-only" /></MoteWorkface></section>
     <div data-pmo-teams-topic-launcher className="surface-proof-invoker"><button type="button" aria-label="Open Mote" onClick={() => requestPmoTeamsTopicFloatingOpen({targetTopicId: topic.id, targetTabId: tab.id, reference: conversation})}>Mote</button></div>
     <PmoTeamsTopicFloatingPanel floating={floating} setFloating={setFloating} projectionState={projection} />

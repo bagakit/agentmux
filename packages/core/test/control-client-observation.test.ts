@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import {
   AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxControlReceipt,
-  connectAgentMuxRpc, type AgentMuxControlInspectClientRequest
+  connectAgentMuxRpc, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlInspectClientRequest
 } from '../src/index.js'
 
 const request: AgentMuxControlInspectClientRequest = { schemaVersion: 5, requestId: 'private-client-observation', operation: 'inspect.client' }
@@ -60,7 +60,7 @@ it('returns an explicit error when a complete observation exceeds the existing f
   const root = await mkdtemp(fixturePath("tmp/amx-client-budget-")); roots.push(root)
   const socket = join(root, 'control.sock')
   const server = new AgentMuxControlServer({ coreClients: () => [], execute: async () => ({ operation: 'inspect.client',
-    observation: { originalRegions: ['retained'], metadata: 'x'.repeat(256 * 1024) } }) }, socket)
+    observation: { originalRegions: ['retained'], metadata: 'x'.repeat(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES + 1) } }) }, socket)
   servers.push(server); await server.start()
   await expect(inspect(socket)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR',
     message: 'RPC message exceeds its bounded frame budget.' })
