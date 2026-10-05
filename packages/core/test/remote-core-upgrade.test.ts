@@ -23,6 +23,7 @@ async function fixture() {
     stateDirectory: fixturePath("scope/state"), runtimeDirectory: fixturePath("scope/runtime"), storePath: fixturePath("scope/state/sessions.json"), nativeSha256: nativeDigest, nativeProcessId: 202, nativeStartTicks: '4321', platform: 'linux-x64', deploymentDigest: null as string | null }
   const sessions = [{ agentSessionId: 'original-session', run: { runId: 'original-run' } }] as AgentMuxAgentSession[]
   let shutdownUnknown = false, startUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false
+  let stageCommand = fixturePath("scope/state/core-releases/") + digest + '/launcher/amux'
   let stagePause: Promise<void> | undefined, resumeStage: (() => void) | undefined
   const maintenance = vi.fn(async (_host, method, params) => {
     if (method === 'runtime.owner.identity') { expect(params.expectedRuntimeId).toBe('runtime'); return { owner } }
@@ -47,7 +48,7 @@ async function fixture() {
       effects.push('stage-offline-candidate'); expect(p.stateDirectory).toBe(fixturePath("scope/state")); expect(p.node).toBe(fixturePath("original/bin/node"))
       await stagePause
       if (changedWhileStaging) owner = { ...owner, ownerInstanceId: 'replacement' }
-      output = { releaseDirectory: fixturePath("scope/state/core-releases/") + digest, remoteCommand: fixturePath("scope/state/core-releases/") + digest + '/bin/agentmux-public', digest }
+      output = { releaseDirectory: fixturePath("scope/state/core-releases/") + digest, remoteCommand: stageCommand, digest }
     } else if (args[1] === START_CORE) {
       effects.push('start-new-core'); expect(p.env).toEqual(launch.env); expect(p.cwd).toBe(fixturePath("original/work"))
       owner = { ...owner, ownerInstanceId: 'updated', processId: 303 }
@@ -62,6 +63,7 @@ async function fixture() {
     executionHost: () => ({ id: 'original', kind: 'ssh' as const, label: 'Original', run, dispose: async () => {} }) }
   const manager = new RemoteCoreUpgradeManager(options)
   return { root, manager, options, effects, native, run, maintenance, sessions,
+    setStageCommand: (command: string) => { stageCommand = command },
     setShutdownUnknown: () => { shutdownUnknown = true }, setStartUnknown: () => { startUnknown = true }, setChangedWhileStaging: () => { changedWhileStaging = true },
     setChangedTerminal: () => { changedTerminal = true }, setNaturalExit: () => { naturalExit = true },
     pauseStage: () => { stagePause = new Promise(resolve => { resumeStage = resolve }) }, resumeStage: () => resumeStage?.() }
@@ -72,10 +74,40 @@ it('performs one fenced Core update and preserves the original namespace, Sessio
   expect(check.eligible).toBe(true); expect(check.expected).toBeDefined(); expect(f.effects).toEqual([])
   const receipt = await f.manager.upgrade(host, check.expected!, 'once')
   expect(receipt.status).toBe('completed'); expect(receipt.operationId).toBe('once')
+  expect(receipt.remoteCommand).toBe(fixturePath("scope/state/core-releases/") + digest + '/launcher/amux')
+  expect(receipt.input).toEqual(host)
   expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
   const again = await f.manager.upgrade(host, check.expected!, 'once')
   expect(again).toEqual(receipt); expect(f.effects).toHaveLength(3)
   expect((await f.manager.inspect({ ...host, remoteCommand: receipt.remoteCommand! }, 'once'))?.status).toBe('completed')
+})
+
+it('rejects a staging command outside the exact new launcher before stopping the owner', async () => {
+  const f = await fixture(), check = await f.manager.check(host)
+  f.setStageCommand(fixturePath("scope/state/core-releases/") + digest + '/bin/agentmux-public')
+  const receipt = await f.manager.upgrade(host, check.expected!, 'wrong-launcher')
+  expect(receipt).toMatchObject({ status: 'failed', stage: 'preparing' })
+  expect(receipt.detail).toContain('staging receipt belongs to another artifact')
+  expect(f.effects).toEqual(['stage-offline-candidate'])
+})
+
+it('inspects an old retained launcher path without migrating its receipt or repeating lifecycle', async () => {
+  const f = await fixture(), check = await f.manager.check(host)
+  await f.manager.upgrade(host, check.expected!, 'legacy-receipt')
+  const path = join(f.root, 'operations', 'legacy-receipt.json')
+  const retained = JSON.parse(await readFile(path, 'utf8'))
+  const legacyCommand = fixturePath("scope/state/core-releases/") + digest + '/bin/agentmux-public'
+  retained.receipt.remoteCommand = legacyCommand
+  retained.receipt.status = 'unknown'
+  await writeFile(path, JSON.stringify(retained))
+  f.maintenance.mockClear()
+  const restarted = new RemoteCoreUpgradeManager(f.options)
+  const observed = await restarted.inspect(host, 'legacy-receipt')
+  expect(observed).toMatchObject({ status: 'completed', remoteCommand: legacyCommand, input: host })
+  expect(f.maintenance.mock.calls.length).toBeGreaterThan(0)
+  expect(f.maintenance.mock.calls.every(([target]) => target.remoteCommand === legacyCommand)).toBe(true)
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  expect(JSON.parse(await readFile(path, 'utf8')).receipt.remoteCommand).toBe(legacyCommand)
 })
 
 it('allows an explicit check after local artifact assembly failed and retains the successful candidate', async () => {
