@@ -261,6 +261,17 @@ function startPrimaryInstance(): void {
         : process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
           ? { 'agentmux-resource-probe': '1' }
           : undefined
+      const loadPackagedRenderer = async (file: string) => {
+        const token = randomUUID()
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const ready = new Promise<void>((resolve, reject) => {
+          updateReady = { token, resolve }
+          timer = setTimeout(() => reject(new Error('Interface did not load or respond')), 20_000)
+        })
+        appOrigin = topFrameOrigin({ rendererDevServerUrl: undefined, packagedRendererFilePath: file })
+        try { await Promise.all([window.loadFile(file, { query: { ...probeQuery, 'renderer-update': token } }), ready]) }
+        finally { clearTimeout(timer); updateReady = null }
+      }
       rendererUpdates = new RendererUpdates({
         directory: join(app.getPath('userData'), 'renderer-updates'),
         bundled: join(import.meta.dirname, '../renderer'),
@@ -268,17 +279,7 @@ function startPrimaryInstance(): void {
           await window.webContents.executeJavaScript('window.agentmuxPrepareRendererUpdate()')
           window.webContents.session.flushStorageData()
         },
-        load: async (file) => {
-          const token = randomUUID()
-          let timer: ReturnType<typeof setTimeout> | undefined
-          const ready = new Promise<void>((resolve, reject) => {
-            updateReady = { token, resolve }
-            timer = setTimeout(() => reject(new Error('Interface did not load or respond')), 20_000)
-          })
-          appOrigin = topFrameOrigin({ rendererDevServerUrl: undefined, packagedRendererFilePath: file })
-          try { await Promise.all([window.loadFile(file, { query: { ...probeQuery, 'renderer-update': token } }), ready]) }
-          finally { clearTimeout(timer); updateReady = null }
-        },
+        load: loadPackagedRenderer,
         report: (error) => {
           const message = error instanceof Error ? error.message : String(error)
           process.stderr.write(`Frontend update: ${message}\n`)
@@ -291,9 +292,9 @@ function startPrimaryInstance(): void {
       // a persisted hot-update candidate can otherwise wait for an update-ready token that
       // the isolated verification page never emits.
       if (process.env.AGENTMUX_DESKTOP_READY_FILE) {
-        // The smoke harness intentionally bypasses RendererUpdates because its page does not
-        // emit the renderer-update ready token. Normal startup lets RendererUpdates.initialize()
-        // perform the one navigation it awaits; loading the bundled file again here would
+        // Smoke uses the bundled release and the same actual Renderer-ready handshake.
+        // Normal startup lets RendererUpdates.initialize() perform the one navigation it
+        // awaits; loading the bundled file again here would
         // advance the renderer generation and reject healthy Session Attachments that are
         // already in flight, leaving their Regions stuck on Connecting.
         reportStartupStage('before-load-file')
@@ -303,7 +304,7 @@ function startPrimaryInstance(): void {
         const releaseSeed = recoverySeed
           ? await installRecoverySeedBeforeLoad(window.webContents, packagedRendererPath, recoverySeed)
           : undefined
-        try { await window.loadFile(packagedRendererPath, probeQuery ? { query: probeQuery } : undefined) }
+        try { await loadPackagedRenderer(packagedRendererPath) }
         finally { await releaseSeed?.() }
         reportStartupStage('after-load-file')
       } else {
