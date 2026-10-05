@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
@@ -166,7 +167,7 @@ describe('Toolkit visible reader and shared selection',()=> {
     vi.useRealTimers()
   })
   it('runs the visible saved target with captured revision and last result, and stops only its exact admitted execution',async()=> {
-    const saved=definition('__proto__'),previous={executionId:'previous-a',invocationId:'previous-invocation',definition:saved,expectedLatestExecutionId:null,target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'previous-run'},startedAt:1,endedAt:2,exitCode:0,state:'succeeded' as const,reason:null,text:'Confirmed before'}
+    const saved=definition('__proto__'),previous={executionId:'previous-a',invocationId:'previous-invocation',definition:saved,expectedLatestExecutionId:null,target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'previous-run'},startedAt:_reshape_fixtureEpoch(0, 0, 1),endedAt:_reshape_fixtureEpoch(0, 0, 2),exitCode:0,state:'succeeded' as const,reason:null,text:'Confirmed before'}
     let current:ToolkitScriptSnapshot={...snapshot(saved.id),state:'succeeded',latestConfirmed:previous}
     let publish!:(value:ToolkitScriptSnapshot)=>void
     const release=vi.fn(),get=vi.spyOn(api.toolkit,'get').mockImplementation(async()=>current)
@@ -180,7 +181,7 @@ describe('Toolkit visible reader and shared selection',()=> {
     expect(run).toHaveBeenCalledTimes(1)
     expect(run.mock.calls[0]![0]).toBe('__proto__')
     expect(run.mock.calls[0]![1]).toEqual({invocationId:expect.any(String),expectedRevision:saved.revision,expectedLatestExecutionId:'previous-a'})
-    const running={executionId:'admitted-a',invocationId:'invocation-a',definition:saved,expectedLatestExecutionId:'previous-a',target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'running-a'},startedAt:3,state:'unknown' as const,reason:'Reply unconfirmed',text:'Current text'}
+    const running={executionId:'admitted-a',invocationId:'invocation-a',definition:saved,expectedLatestExecutionId:'previous-a',target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'running-a'},startedAt:_reshape_fixtureEpoch(0, 0, 3),state:'unknown' as const,reason:'Reply unconfirmed',text:'Current text'}
     current={...current,sequence:2,state:'unknown',admission:running,reason:running.reason}
     await act(async()=>publish(current))
     expect(runButton.disabled).toBe(true)
@@ -196,7 +197,7 @@ describe('Toolkit visible reader and shared selection',()=> {
     expect(release).toHaveBeenCalledOnce();expect(stop).toHaveBeenCalledTimes(1)
   })
   it('appends current execution text without replacing a selected range, then resets text for a different execution',async()=> {
-    const saved=definition('a'),result={executionId:'result-a',invocationId:'invocation-a',definition:saved,expectedLatestExecutionId:null,target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'run-a'},startedAt:1,endedAt:2,exitCode:0,state:'succeeded' as const,reason:null,text:'Keep this selected text'}
+    const saved=definition('a'),result={executionId:'result-a',invocationId:'invocation-a',definition:saved,expectedLatestExecutionId:null,target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'run-a'},startedAt:_reshape_fixtureEpoch(0, 0, 1),endedAt:_reshape_fixtureEpoch(0, 0, 2),exitCode:0,state:'succeeded' as const,reason:null,text:'Keep this selected text'}
     let current:ToolkitScriptSnapshot={...snapshot('a'),state:'succeeded',latestConfirmed:result},publish!:(value:ToolkitScriptSnapshot)=>void
     vi.spyOn(api.toolkit,'observe').mockImplementation((_id,read)=> { publish=read;read(current);return{dispose:vi.fn()} })
     await dom.render(<SettingsNavigation.Provider value={{open:vi.fn(),openToolkit:vi.fn()}}><UserToolkitResult definition={saved} active close={vi.fn()}/></SettingsNavigation.Provider>)
@@ -239,9 +240,30 @@ describe('Toolkit visible reader and shared selection',()=> {
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-script-tool]')!.value).toBe(saved.script)
     expect(dom.container.querySelector<HTMLButtonElement>('.toolkit-editor .primary-button')!.disabled).toBe(false)
   })
+  it('authors a separate display script in the single editor and saves without running or overwriting the main script', async () => {
+    const saved=definition('a'),update=vi.fn(async(_id:string,changes:Partial<ToolkitToolDefinition>)=>({...saved,...changes,revision:'saved-display'})),onRunTool=vi.fn()
+    await dom.render(<ToolkitSettingsPane tools={[saved]} toolId={saved.id} active performance={{enabled:true,statusBar:'icon'}} writer={{add:vi.fn(),update}} onSave={vi.fn()} onRemoveTool={vi.fn()} onRunTool={onRunTool}/>)
+    const button=(text:string)=>Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-editor button')).find(node=>node.textContent?.trim()===text)!
+    await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Evaluate when displayed"]')!.click())
+    await act(async()=>button('Edit display script').click())
+    expect(dom.container.querySelectorAll('[data-script-tool]')).toHaveLength(1)
+    expect(dom.container.textContent).toContain('safe to repeat')
+    const input=(node:HTMLInputElement|HTMLTextAreaElement,value:string)=>{Object.getOwnPropertyDescriptor(node instanceof HTMLInputElement?HTMLInputElement.prototype:HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}))}
+    await act(async()=>input(dom.container.querySelector<HTMLTextAreaElement>('[data-script-tool]')!,'console.log("Display current facts")'))
+    await act(async()=>button('Add argument').click())
+    await act(async()=>input(dom.container.querySelector<HTMLInputElement>('.toolkit-argument input')!,'literal $VALUE'))
+    await act(async()=>button('Save tool').click())
+    const display={script:'console.log("Display current facts")',args:['literal $VALUE']}
+    expect(update).toHaveBeenCalledWith('a',{display},{display:null});expect(onRunTool).not.toHaveBeenCalled()
+    await act(async()=>button('Main script').click())
+    expect(dom.container.querySelector<HTMLTextAreaElement>('[data-script-tool]')!.value).toBe(saved.script)
+    await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Evaluate when displayed"]')!.click())
+    await act(async()=>button('Save tool').click())
+    expect(update).toHaveBeenLastCalledWith('a',{display:null},{display})
+  })
   it('shows only configured result actions and sends their captured revision, source result and admission baseline without retargeting',async()=> {
     const action={id:'__proto__',label:'Refresh identity',script:"console.log('Action captured')",args:['literal argument']},saved={...definition('__proto__'),actions:[action]}
-    const previous={executionId:'source-a',invocationId:'source-invocation',definition:saved,expectedLatestExecutionId:null,target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'source-run'},startedAt:1,endedAt:2,exitCode:0,state:'succeeded' as const,reason:null,text:'{"buttons":[{"label":"Injected from output"}]}'}
+    const previous={executionId:'source-a',invocationId:'source-invocation',definition:saved,expectedLatestExecutionId:null,target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'source-run'},startedAt:_reshape_fixtureEpoch(0, 0, 1),endedAt:_reshape_fixtureEpoch(0, 0, 2),exitCode:0,state:'succeeded' as const,reason:null,text:'{"buttons":[{"label":"Injected from output"}]}'}
     let current:ToolkitScriptSnapshot={...snapshot(saved.id),definition:{...saved,revision:'new-owner-revision',workspacePath:_hygiene_fixturePath("new-target"),actions:[{...action,label:'New action label',script:'New script'}]},state:'succeeded',latestConfirmed:previous},publish!:(value:ToolkitScriptSnapshot)=>void
     vi.spyOn(api.toolkit,'observe').mockImplementation((_id,read)=>{publish=read;read(current);return{dispose:vi.fn()}})
     const invoke=vi.spyOn(api.toolkit,'action').mockRejectedValue(new Error('CONFIG_CONFLICT: tool configuration changed'))
@@ -265,7 +287,7 @@ describe('Toolkit visible reader and shared selection',()=> {
   })
   it('reads the actual captured action script and arguments instead of the main entry script',async()=> {
     const action={id:'refresh',label:'Refresh identity',script:'Captured action source',args:['captured argument']},saved={...definition('a'),actions:[action]}
-    const result={executionId:'action-result',invocationId:'action-invocation',definition:saved,expectedLatestExecutionId:'source-a',target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'action-run'},startedAt:3,endedAt:4,exitCode:0,state:'succeeded' as const,reason:null,text:'Action output',action:{id:'refresh',sourceExecutionId:'source-a',expectedAdmissionExecutionId:null}}
+    const result={executionId:'action-result',invocationId:'action-invocation',definition:saved,expectedLatestExecutionId:'source-a',target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'action-run'},startedAt:_reshape_fixtureEpoch(0, 0, 3),endedAt:_reshape_fixtureEpoch(0, 0, 4),exitCode:0,state:'succeeded' as const,reason:null,text:'Action output',action:{id:'refresh',sourceExecutionId:'source-a',expectedAdmissionExecutionId:null}}
     const current:ToolkitScriptSnapshot={...snapshot('a'),definition:saved,state:'succeeded',latestConfirmed:result}
     vi.spyOn(api.toolkit,'observe').mockImplementation((_id,read)=>{read(current);return{dispose:vi.fn()}})
     await dom.render(<SettingsNavigation.Provider value={{open:vi.fn(),openToolkit:vi.fn()}}><UserToolkitResult definition={saved} active close={vi.fn()}/></SettingsNavigation.Provider>)
