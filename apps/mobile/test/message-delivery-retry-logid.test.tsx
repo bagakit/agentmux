@@ -112,6 +112,17 @@ it.each(['preparation', 'lost-ack'] as const)('continues the same %s request thr
   expect(firstAttempt.request).toBeDefined()
   expect(view.element.textContent).toContain(firstError.message)
   expect(view.element.textContent).toContain(firstId)
+  const diagnosis = view.element.querySelector<HTMLDetailsElement>('.mobile-send-status__diagnosis')!
+  expect(diagnosis.open).toBe(false)
+  expect(diagnosis.querySelector('summary')?.textContent).toBe('发送详情')
+  expect(diagnosis.textContent).toContain(firstAttempt.operationId)
+  expect(diagnosis.textContent).toContain(firstAttempt.runId)
+  expect(diagnosis.textContent).toContain(firstError.message)
+  expect(diagnosis.textContent).toContain(firstId)
+  const summary = view.element.querySelector('.mobile-send-status__summary')!
+  expect(summary.textContent).not.toContain(firstError.message)
+  expect(summary.textContent).toContain('草稿已保留')
+  expect(button(view.element, '重试原请求').closest('details')).toBeNull()
   expect(button(view.element, 'Send').disabled).toBe(false)
   await click(button(view.element, '重试原请求'))
   await settled(() => expect(storedAttempt().logId).not.toBe(firstId))
@@ -332,6 +343,48 @@ it('reopens an offline plain Enter intent and binds its first condition without 
   expect(request.execution).toBe('default')
   expect(storedAttempt().request).toMatchObject({ execution: 'default', explicit: false })
   expect(log(original.logId!).record.operationId).toBe(original.operationId)
+})
+
+it.each(['default', 'immediate'] as const)('binds a proven never-requested %s intent to the current Run only after a new explicit Send in the original Runtime/Host/Session', async execution => {
+  const f = consumer(), view = await mount(<MobileConversationSurface {...f.options} />)
+  await paste(view.element, body)
+  await view.render(<MobileConversationSurface {...f.options} connection={{ state: 'disconnected', message: 'original connection lost before input' }} />)
+  if (execution === 'default') await act(async () => editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+  else await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().inputRequested).toBe(false))
+  const original = structuredClone(storedAttempt())
+  expect(original).toMatchObject({ runId: 'run-original', originalHostId: 'host-original', originalRuntimeId: 'original-runtime' })
+  expect(original.request).toBeUndefined(); expect(f.submit).not.toHaveBeenCalled()
+  const current = session(); current.run = { runId: 'replacement-original-run' }
+  f.sessions.set(current.agentSessionId, current)
+  await view.render(<MobileConversationSurface {...f.options} />)
+  await act(async () => f.emit({ type: 'agent-session', session: current }))
+  expect(f.submit).not.toHaveBeenCalled()
+  expect(storedAttempt()).toEqual(original)
+  await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
+  expect(f.submit).toHaveBeenCalledExactlyOnceWith({ agentSessionId: current.agentSessionId, operationId: original.operationId,
+    prompt: body, authorHuman: true, expectedRun: current.run, afterSubmissionId: null, execution,
+    ...(execution === 'immediate' ? { allowUncertainTurn: true } : {}) })
+  expect(storedAttempt().request).toMatchObject({ condition: { expectedRun: current.run }, execution, explicit: execution === 'immediate' })
+})
+
+it.each(['host', 'missing-host', 'runtime'] as const)('refuses never-requested Run rebinding when original %s cannot be confirmed', async reason => {
+  const key = JSON.stringify(['draft', 'session-original'])
+  getDeviceWorkface().updateConversation({ version: 1, drafts: [[key, body]], responses: [], attempts: [[key, {
+    operationId: 'original-never-requested', runId: 'run-original', draft: body, phase: 'rejected', inputRequested: false,
+    originalRuntimeId: 'original-runtime', ...(reason === 'missing-host' ? {} : { originalHostId: 'host-original' }), explicit: true
+  }]] })
+  const f = consumer(), current = session(); current.run = { runId: 'replacement-run' }
+  if (reason === 'host') current.hostId = 'another-host'
+  if (reason === 'runtime') f.replaceRuntime('another-runtime')
+  f.sessions.set(current.agentSessionId, current)
+  const view = await mount(<MobileConversationSurface {...f.options} />)
+  await click(button(view.element, 'Send'))
+  await settled(() => expect(storedAttempt().logId).toBeDefined())
+  expect(f.submit).not.toHaveBeenCalled()
+  expect(storedAttempt()).toMatchObject({ operationId: 'original-never-requested', runId: 'run-original', draft: body, inputRequested: false })
+  expect(storedAttempt().request).toBeUndefined()
 })
 
 

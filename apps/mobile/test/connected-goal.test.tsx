@@ -1,4 +1,5 @@
 import { fixturePath } from '../../../test/fixture-values.mjs'
+import './mobile-lan-crypto.setup'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult, ContinuousProgressLoop } from '@agentmux/core'

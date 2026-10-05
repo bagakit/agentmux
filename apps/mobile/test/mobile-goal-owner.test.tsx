@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fixturePath } from '../../../test/fixture-values.mjs'
+import './mobile-lan-crypto.setup'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'

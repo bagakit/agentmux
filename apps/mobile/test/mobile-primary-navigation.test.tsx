@@ -5,6 +5,9 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
+vi.mock('../src/platform/native/device', async importOriginal => ({ ...await importOriginal<Record<string, unknown>>(),
+  bindNativeDevice: vi.fn((options: { onBack(): void }) => { native.back = options.onBack; return { dispose: async () => { native.back = null } } }) }))
 
 const connected = { state: 'connected' as const, message: 'Connected to the original Host' }
 const order = ['Goals', 'Topics', 'Mote', 'Focus', 'Space']
@@ -15,10 +18,14 @@ function originalClient() {
     zones: [{ zoneId: 'original-zone', workspaceId: 'original-workspace', hostId: 'host-original', directoryPath: fixturePath("workspace"), kind: 'home', branch: null }],
     tabs: [{ tabId: 'original-tab', zoneId: 'original-zone', workspaceId: 'original-workspace', name: 'Original Agent', regionIds: ['original-region'] }],
     regions: [{ regionId: 'original-region', tabId: 'original-tab', kind: 'agent', agentSessionId: 'session-original', runId: 'run-original', execution: { hostId: 'host-original', cwd: fixturePath("workspace") } }],
-    bindings: [{ spaceId: 'original-mote', zoneId: 'original-zone' }], locations: [],
-    agentPresentation: [{ agentSessionId: 'session-original', name: 'Original Agent', project: 'Original Project', group: 'working', state: 'working', detail: 'Working', providerId: 'codex', recap: null }]
+    bindings: [{ spaceId: 'original-mote', zoneId: 'original-zone' }], locations: [{ spaceId: 'original-mote', zoneId: 'original-zone', workspaceId: 'original-workspace', displayWorkspaceId: 'original-workspace', groupId: 'original-zone', tabId: 'original-tab', regionId: 'original-region' }],
+    agentPresentation: [{ agentSessionId: 'session-original', name: 'Original Agent', project: 'Original Project', group: 'working', state: 'working', detail: 'Working', providerId: 'codex', recap: null }],
+    motePresentation: [{ spaceId: 'original-mote', content: { zoneId: 'original-zone', hostId: 'host-original', workspaceId: 'original-workspace', workspacePath: fixturePath("workspace") },
+      quickMode: { status: 'saved', version: 'source-original', defaults: { conversation: { hostId: 'host-original', sessionId: 'session-original', displayWorkspaceId: 'original-workspace', groupId: 'original-zone', tabId: 'original-tab', regionId: 'original-region' } } },
+      conversation: { hostId: 'host-original', sessionId: 'session-original', displayWorkspaceId: 'original-workspace', groupId: 'original-zone', tabId: 'original-tab', regionId: 'original-region' } }]
   }
-  f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => {
+  f.client.forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => {
+    if (method === 'file.read') return { resource: params.expectedResource, result: { status: 'read', document: { path: params.path, content: '# 原合作方式\n原依据保留。', revision: 'sha256:' + 'a'.repeat(64) } } }
     if (method === 'goal.ls') return { goals: [], unavailable: [] }
     if (method === 'topic.category.ls') return { categories: [], unavailable: [] }
     if (method === 'topic.ls') return { topics: [], unavailable: [] }
@@ -85,11 +92,44 @@ describe('actual phone primary workfaces', () => {
     expect(f.submit).not.toHaveBeenCalled()
   })
 
+  it('releases original conversation reading behind a sheet and resumes that owner only after closing it', async () => {
+    const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
+    await click(button(nav(view.element), 'Mote'))
+    await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    const original = editor(view.element)
+    await paste(view.element, '被面板遮住的原草稿')
+    const releases = f.disposeHistory.mock.calls.length
+    await click(view.element.querySelector('.mobile-mote-heading')!)
+    expect(f.disposeHistory.mock.calls.length).toBe(releases + 1)
+    const reads = f.readHistory.mock.calls.length
+    await act(async () => f.emit({ type: 'agent-timeline', agentSessionId: 'session-original', revision: 9 } as any))
+    expect(f.readHistory.mock.calls).toHaveLength(reads)
+    expect(editor(view.element)).toBe(original)
+    expect(original.textContent).toBe('被面板遮住的原草稿')
+    await click(button(overlay, '关闭面板'))
+    expect(f.readHistory.mock.calls.length).toBeGreaterThan(reads)
+    expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+  })
+
   it.each(['goals', 'topics', 'mote', 'focus', 'space'])('opens the saved %s home without changing its original record', async home => {
     localStorage.setItem('agentmux-mobile-home', home)
     const view = await mount(<MobileApp client={originalClient().client} connection={connected} platform={createBrowserPlatform()} />)
     expect(current(view.element)?.toLowerCase()).toBe(home)
     expect(localStorage.getItem('agentmux-mobile-home')).toBe(home)
+  })
+
+  it('keeps the Focus return context for a Mote member instead of applying the Mote-only conversation heading', async () => {
+    const f = originalClient()
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    await click(button(nav(view.element), 'Focus'))
+    await click(view.element.querySelector('.mobile-session-list button')!)
+    expect(view.element.querySelector('.mobile-app')?.getAttribute('data-mobile-workface')).toBe('workspace')
+    const toolbar = view.element.querySelector<HTMLElement>('.mobile-session-toolbar')!
+    expect(toolbar.textContent).toContain('Focus')
+    expect(toolbar.textContent).toContain('Original Agent')
+    expect(view.element.querySelector('.mobile-mote-heading')).not.toBeNull()
+    expect(f.submit).not.toHaveBeenCalled()
   })
 
   it('keeps the exact unknown input across the five workfaces without generating another dispatch', async () => {
@@ -104,7 +144,8 @@ describe('actual phone primary workfaces', () => {
     for (const label of order) await click(button(nav(view.element), label))
     await click(button(nav(view.element), 'Mote'))
     await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    // The original-request retry remains reachable; navigation never authorizes it.
+    expect(button(view.element, 'Send').disabled).toBe(false)
     expect(editor(view.element).textContent).toBe('不能因为切换而重发的原输入')
     expect(f.submit).toHaveBeenCalledTimes(1)
     const durable = getDeviceWorkface().snapshot().record.conversation!.attempts[0]![1]
@@ -139,5 +180,68 @@ describe('actual phone primary workfaces', () => {
     expect(view.element.querySelector('.mobile-goals')?.closest('[hidden]')).toBeNull()
     expect(f.client.forwardRpc).not.toHaveBeenCalledWith('topic.inspect', { topicId: 'original-topic' })
     expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(['browser', 'native'])('%s Back exits the original source, Profile, result and chat one layer at a time while keeping the same editor and input guard', async mode => {
+    const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
+    const view = await mount(<MobileApp client={f.client} connection={connected} native={mode === 'native'} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
+    await click(button(nav(view.element), 'Mote')); await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    const originalEditor = editor(view.element)
+    await paste(view.element, '逐层返回保留的原草稿')
+    f.submit.mockRejectedValueOnce(new Error('original acknowledgement unknown'))
+    await click(button(view.element, 'Send'))
+    const original = f.submit.mock.calls[0]![0]
+    await click(button(view.element, '当前对话操作')); await click(button(overlay, '目标与结果'))
+    await click(view.element.querySelector('.mobile-mote-heading')!)
+    await click(button(overlay, '合作方式 · BEHAVIOR.md'))
+    expect(overlay.textContent).toContain('原依据保留')
+    const back = async () => { await act(async () => {
+      if (mode === 'native') native.back!(); else window.history.back()
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }) }
+    await back()
+    expect(overlay.querySelector('.mobile-mote-source')).toBeNull()
+    expect(overlay.querySelector('.mobile-mote-profile')).not.toBeNull()
+    expect(view.element.querySelector('.mobile-goal-panel')?.hasAttribute('hidden')).toBe(false)
+    await back()
+    expect(overlay.querySelector('[role="dialog"]')).toBeNull()
+    expect(view.element.querySelector('.mobile-goal-panel')?.hasAttribute('hidden')).toBe(false)
+    await back()
+    expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+    expect(editor(view.element)).toBe(originalEditor)
+    expect(originalEditor.textContent).toBe('逐层返回保留的原草稿')
+    await back()
+    expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
+    expect(current(view.element)).toBe('Mote')
+    expect(editor(view.element)).toBe(originalEditor)
+    expect(getDeviceWorkface().snapshot().record.conversation.attempts[0]![1]).toMatchObject({ operationId: original.operationId, runId: 'run-original', phase: 'unknown' })
+    expect(f.submit).toHaveBeenCalledTimes(1); expect(f.respond).not.toHaveBeenCalled()
+  })
+
+  it('restores the original Profile source and exact occurrence while offline, then reconnects its pinned original file owner without automatic input', async () => {
+    const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
+    const platform = createBrowserPlatform({ overlayContainer: () => overlay })
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
+    await click(button(nav(view.element), 'Mote')); await click(view.element.querySelector('.mobile-spatial-panel > .mobile-session-list button')!)
+    await paste(view.element, '刷新之前的原草稿')
+    await click(view.element.querySelector('.mobile-mote-heading')!); await click(button(overlay, '合作方式 · BEHAVIOR.md'))
+    const original = getDeviceWorkface().snapshot().record
+    expect(original.presentation).toMatchObject({ primary: 'mote', showSession: true, profile: { sourcePath: 'BEHAVIOR.md' },
+      identity: { context: { displayWorkspaceId: 'original-workspace', groupId: 'original-zone', tabId: 'original-tab', regionId: 'original-region' } } })
+    expect(JSON.stringify(original.presentation)).not.toContain('quickMode')
+    expect(JSON.stringify(original.presentation)).not.toContain('原依据保留')
+    const prior = mounted.findIndex(item => item.element === view.element)
+    await act(async () => mounted.splice(prior, 1)[0]!.root.unmount()); view.element.remove()
+    // A new app instance reads the same device record, not a reseeded route.
+    const restored = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Host 未连接' }} platform={platform} />)
+    expect(current(restored.element)).toBe('Mote')
+    expect(overlay.querySelector('.mobile-mote-source h3')?.textContent).toBe('BEHAVIOR.md')
+    expect(editor(restored.element).textContent).toBe('刷新之前的原草稿')
+    const rpc = f.client.forwardRpc as ReturnType<typeof vi.fn>; rpc.mockClear()
+    await restored.render(<MobileApp client={f.client} connection={connected} platform={platform} />)
+    expect(rpc).toHaveBeenCalledWith('file.read', { spaceId: 'original-mote', zoneId: 'original-zone', path: 'BEHAVIOR.md',
+      expectedResource: { hostId: 'host-original', workspaceId: 'original-workspace', workspacePath: fixturePath("workspace") } })
+    expect(overlay.textContent).toContain('原依据保留')
+    expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
   })
 })

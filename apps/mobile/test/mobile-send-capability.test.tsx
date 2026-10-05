@@ -51,11 +51,11 @@ async function hostedFixture(protocol: 'ordinary' | 'interrupt' | 'stale-adverti
   await draw('', working)
   let native: AgentPromptExecutionEvidence = { sourceId: 'private-native', id: 'started', nativeTurnId: 'turn-1', state: working ? 'working' : 'ended', ...(!working ? { endReason: 'completed' as const } : {}) }
   const template = new AgentProviderRegistry().get('codex').catalog
-  const { promptExecution: _unused, ...ordinaryCapabilities } = template.capabilities
+  const { promptExecution: _unused, providerFork: _fork, ...ordinaryCapabilities } = template.capabilities
   const provider = defineAgentProvider({ catalog: { ...template, id: providerId, label: 'Private native protocol',
     capabilities: { ...ordinaryCapabilities, ...(protocol === 'ordinary' ? {} : { promptExecution: { immediate: 'interrupt-before-input' as const } }) },
     hookStrategy: { kind: 'native', installation: 'unmanaged' } }, buildArgs: (_, args) => [...args], hook: { rules: [] },
-    ...(protocol === 'interrupt' ? {
+    ...(protocol !== 'ordinary' ? {
       terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
       planPromptInput: (prompt: string, context?: { execution?: string }) => ({ kind: 'render-then-submit' as const,
         payload: prompt, renderedText: prompt, submit: '\r', ...(context?.execution === 'immediate' ? { prepare: { interrupt, endEvent: 'native-ended' } } : {}) }),
@@ -64,6 +64,11 @@ async function hostedFixture(protocol: 'ordinary' | 'interrupt' | 'stale-adverti
       inspectPromptExecution: (snapshot: ReturnType<AgentTerminalScreen['snapshot']>) => snapshot.lines[snapshot.cursor.row]?.text.trimEnd() !== '>'
         ? 'unavailable' as const : snapshot.lines[9]?.text === 'working' ? 'interruptible' as const : 'idle' as const
     } : {}) })
+  // A previously valid owner can become stale; definition itself must satisfy
+  // the public capability/contribution contract before exercising that refusal.
+  if (protocol === 'stale-advertisement') provider.planPromptInput = () => {
+    throw new AgentMuxError('The original provider cannot currently apply immediate input.', 'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
+  }
   const core = new AgentMuxClient({ store, providers: [provider] })
   const inner = core as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown>; screenEvidence: AgentScreenEvidenceStore }
   await inner.registry.load('local'); inner.connected = true
@@ -160,7 +165,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
   it('keeps a typed actual Provider pre-input unsupported rejection rejected without replaying or disabling fresh Send', async () => {
     const f = await hostedFixture('stale-advertisement'), view = await originalSurface(f)
     await paste(view.element, 'UNAPPLIED_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, 'Core 已拒绝这条输入', f)
+    await settle(view, '尚未发送', f)
     expect(view.element.querySelector('[data-phase="rejected"]')).not.toBeNull()
     expect(editor(view.element).textContent).toContain('UNAPPLIED_MESSAGE')
     expect(button(view.element, 'Send').disabled).toBe(false)
@@ -183,7 +188,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     expect(view.element.textContent).not.toContain('原会话仍连接，可继续发送')
     expect(view.element.textContent).toContain('原 Host 连接暂未确认')
     expect(view.element.textContent).toContain('本次选择普通输入，未尝试立即执行')
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
     expect(editor(view.element).textContent).toContain('NEXT_MANUAL_MESSAGE')
     await view.render(<MobileConversationSurface client={f.client} agentSessionId="original" connection={connected} platform={platform()} />)
     read.mockReturnValue(original); await click(button(view.element, '重新读取能力目录'))
@@ -202,7 +207,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     const f = await hostedFixture('ordinary'), view = await originalSurface(f)
     f.loseAck()
     await paste(view.element, 'PARTIAL_ORIGINAL_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, '回执未知', f)
+    await settle(view, '发送结果未确认', f)
     expect(f.writes).toEqual(['PARTIAL_ORIGINAL_MESSAGE\r'])
     expect(view.element.querySelector('[data-phase="unknown"]')).not.toBeNull()
     expect(editor(view.element).textContent).toContain('PARTIAL_ORIGINAL_MESSAGE')
@@ -210,9 +215,8 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     expect(JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')!).conversation.attempts[0][1]).toMatchObject({ operationId, phase: 'unknown' })
     vi.spyOn(f.client, 'catalog').mockImplementation(() => { throw new Error('later capability failure') })
     await view.render(<MobileConversationSurface client={f.client} agentSessionId="original" connection={connected} platform={platform()} />)
-    await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledOnce(); expect(f.writes).toHaveLength(1)
-    expect(button(view.element, 'Send').disabled).toBe(true)
+    expect(button(view.element, 'Send').disabled).toBe(false)
   })
 
   it('retains the original capability service window after an unrelated Session sends successfully', async () => {
@@ -243,7 +247,8 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     await paste(view.element, 'OLD_UNKNOWN_MESSAGE'); await click(button(view.element, 'Send'))
     expect(view.element.querySelector('[data-phase="unknown"]')).not.toBeNull()
     catalog.mockReturnValue([])
-    await click(button(view.element, 'Send')); expect(f.submit).toHaveBeenCalledOnce()
+    await view.render(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform()} />)
+    expect(f.submit).toHaveBeenCalledOnce()
     expect(editor(view.element).textContent).toContain('OLD_UNKNOWN_MESSAGE')
     expect(catalog).toHaveBeenCalledOnce()
   })

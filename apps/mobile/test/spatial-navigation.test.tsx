@@ -41,7 +41,10 @@ describe('mobile production workspace navigation', () => {
     Object.assign(f.client.agentSession('session-original'), { semanticStatus: { state: 'working' } })
     const originalCatalog = { ...catalog, spaces: [{ ...catalog.spaces[0], kind: 'mote', name: 'Original Mote' }],
       agentPresentation: [{ agentSessionId: 'session-original', name: 'Chosen Agent', project: 'Original Project', group: 'working', state: 'working', detail: '执行中', providerId: 'codex', recap: { text: '原回复摘要', source: 'native-hook' } }],
-      appearance: [{ spaceId: 'space', parts: { kind: 'face', shape: 'soft', palette: 'mint', eyes: 'round', brows: 'soft', mouth: 'smile', accessory: 'tuft' } }] }
+      appearance: [{ spaceId: 'space', parts: { kind: 'face', shape: 'soft', palette: 'mint', eyes: 'round', brows: 'soft', mouth: 'smile', accessory: 'tuft' } }],
+      motePresentation: [{ spaceId: 'space', content: null,
+        quickMode: { status: 'saved', version: 'original-preferences', defaults: { conversation: { hostId: 'host-original', sessionId: 'session-original', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' } } },
+        conversation: { hostId: 'host-original', sessionId: 'session-original', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' } }] }
     f.client.forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => method === 'app.snapshot'
       ? { agents: [{ agentSessionId: 'session-original', projectName: 'Original Project' }] }
       : method === 'agent.inspect' ? { session: f.client.agentSession(params.target.agentSessionId), displayName: { override: 'Chosen Agent', availability: 'observed' } }
