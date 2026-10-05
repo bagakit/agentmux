@@ -32,7 +32,7 @@ export const themeVariantSchema = z.object({
 
 // Paths are normalized to a fixed 24×24 viewBox. Active SVG content is unrepresentable.
 const pathSchema = z.object({
-  d: z.string().min(1).max(4096).refine(validIconPath, 'Use a valid, finite SVG path with at most 256 commands and coordinates within ±96 of its fixed 24-unit viewBox.'),
+  d: z.string().min(1).max(4096).refine(validIconPath, 'Use a valid, finite SVG path with at most 256 commands, coordinates within ±96, and bounds intersecting its fixed 24-unit viewBox.'),
   fill: z.enum(['none', 'currentColor']).optional()
 }).strict()
 export const iconAssetSchema = z.discriminatedUnion('kind', [
