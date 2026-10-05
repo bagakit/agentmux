@@ -272,7 +272,7 @@ export function AgentSessionComposer({
           id: entry.operationId,
           text: entry.text,
           ...(entry.archived ? { archived: true as const } : {}),
-          confirmed: Boolean(confirmedSteerDelivery(timeline, sessionId, entry.operationId)),
+          confirmed: Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
           editable: agentSteerCanEdit(entry, sendingId),

@@ -411,6 +411,8 @@ const mockApi: AgentMuxDesktopApi = {
     revoke: async () => { throw new Error('Revoking a device requires confirmation on the original desktop.') }
   },
   demands: {
+    reconcilePmoCreation: async () => { throw new Error('PMO creation reconciliation requires the original Desktop and Core owners.') },
+    reconcilePmoInput: async () => { throw new Error('PMO input reconciliation requires the original Desktop and Core owners.') },
     list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
     confirmAlignment: async () => { throw new Error('Goal confirmation requires the Desktop durable owner. This preview does not record acknowledgement.') },
     acceptGrounding: async () => { throw new Error('Result acceptance requires the Desktop durable owner. This preview does not record acknowledgement.') },
@@ -869,6 +871,7 @@ const mockApi: AgentMuxDesktopApi = {
       message: 'The web preview has no Runtime storage owner. Storage capacity and persistence state are unknown.'
     }),
     creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
+    resolveCreationSessionId: async () => { throw new Error('A Core creation binding requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]

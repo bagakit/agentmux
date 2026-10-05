@@ -1,4 +1,6 @@
 import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from './demand-participation.js'
+import { resolveGoalsPreferences } from '../shared/goals-preferences.js'
+import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '../shared/goal-pmo-origin.js'
 import { NotesStorageOwner } from './notes-storage-owner.js'
 import { NOTES_WORKSPACE_ID } from '../shared/notes-library.js'
 import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
@@ -826,11 +828,49 @@ export async function registerIpc(args: {
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
   handle('demands:list', async () => await demands.list())
+  const pmoGoal = async (intent: GoalPmoIntent) => {
+    assertGoalPmoIntent(intent)
+    const goal = await demands.get(intent.goalId)
+    if (!goal || intent.creationOperationId !== undefined && goal.creationOrigin?.operationId !== intent.creationOperationId)
+      throw new AgentMuxError('The exact original PMO Goal creation is unconfirmed. Keep the Goal and original request.', 'CONTROL_REQUEST_CONFLICT')
+    return goal
+  }
+  const confirmedPmoSource = async (intent: GoalPmoIntent, session: import('@agentmux/core').AgentMuxAgentSession, operationId: string) => {
+    const goal = await pmoGoal(intent)
+    const context = unknownNameContext('desktop.goal-pmo')
+    context.actor = { kind: 'agent', id: session.agentSessionId, verified: true }
+    context.location = { ...context.location, hostId: session.hostId, callerSessionId: session.agentSessionId, callerCwd: session.workspacePath }
+    const source = (await admittedDemandParticipation(context, 'discussion', config, args.scratchTopics))!
+    if (intent.creationOperationId === undefined) return demands.recordParticipation(goal.id, source, { operationId })
+    const loops = args.progressLoops ? await args.progressLoops.listGoals(goal.id) : []
+    return demands.resolveCreationOrigin(goal.id, { creationOperationId: intent.creationOperationId, source, sourceOperationId: operationId },
+      { expectedUpdatedAt: goal.updatedAt, allowSupervisorDefault: !loops.some(loop => loop.status !== 'stopped') })
+  }
   handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string) => {
+    const requesterAsSupervisor = resolveGoalsPreferences(config.goals).requesterAsSupervisor
     const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
       request => admittedDemandCreateMatches(request, input))
     const participation = await admittedDemandParticipation(admitted.context, 'create', config, args.scratchTopics)
-    return demands.create(input, { context: admitted.context, operationId: admitted.operationId, ...(participation ? { participation } : {}) })
+    return demands.create(input, { context: admitted.context, operationId: admitted.operationId,
+      creationOrigin: { requesterAsSupervisor }, ...(participation ? { participation } : {}) })
+  })
+  handleWithEvent('demands:reconcilePmoCreation', async (event, intent: GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string) => {
+    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    await pmoGoal(intent)
+    if (intent.creationOperationId === undefined || createOperationId !== await goalPmoOperation(intent, 'create')) throw new AgentMuxError('The original PMO creation operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
+    const created = await args.runtime.agentCreation(hostId, agentSessionId)
+    if (created.agentSessionId !== agentSessionId || created.creation?.createOperationId !== createOperationId || created.creation.initialPrompt !== 'confirmed')
+      throw new AgentMuxError('The original PMO creation or its initial request is still unconfirmed. Inspect the same operation without starting or sending again.', 'CONTROL_UNAVAILABLE')
+    return confirmedPmoSource(intent, created, createOperationId)
+  })
+  handleWithEvent('demands:reconcilePmoInput', async (event, intent: GoalPmoIntent, session: AgentSessionControl, operationId: string) => {
+    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    await pmoGoal(intent)
+    if (intent.creationOperationId === undefined || operationId !== await goalPmoOperation(intent, 'discussion')) throw new AgentMuxError('The original PMO discussion operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
+    const timeline = await args.runtime.sessionTimeline(session)
+    if (timeline.agentSessionId !== session.agentSessionId || !timeline.items.some(item => item.agentSessionId === session.agentSessionId && item.kind === 'user_message' && item.status === 'complete' && item.id === `prompt:${operationId}`))
+      throw new AgentMuxError('The original PMO request remains unconfirmed. Inspect the same operation without sending again.', 'CONTROL_UNAVAILABLE')
+    return confirmedPmoSource(intent, await args.runtime.agentCreation(session.hostId, session.agentSessionId), operationId)
   })
   handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number) => {
     const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
@@ -1065,15 +1105,25 @@ export async function registerIpc(args: {
     return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
       args.environmentWarning, app.getPath('home'))
   })
-  handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => sessionAgentLaunchResult(input, async () => {
+  handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
     try {
       if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      if (goalPmo) {
+        assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+        await pmoGoal(goalPmo)
+        if (goalPmo.creationOperationId !== undefined && input.createOperationId !== await goalPmoOperation(goalPmo, 'create')) throw new AgentMuxError('The original PMO creation operation changed.', 'CONTROL_REQUEST_CONFLICT')
+      }
     } catch (error) {
       // This local sender check runs before entering Runtime or any launch dispatch.
       throw Object.assign(error instanceof Error ? error : new Error(String(error)),
         { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
     }
     const result = await args.runtime.launchAgent(input, config)
+    const creation = result.creation
+    if (goalPmo && creation && result.created.agentSessionId === input.agentSessionId && creation.createOperationId === input.createOperationId && creation.initialPrompt === 'confirmed') {
+      try { await confirmedPmoSource(goalPmo, result.created, creation.createOperationId) }
+      catch (error) { throw Object.assign(error instanceof Error ? error : new Error(String(error)), { agentSessionId: result.created.agentSessionId, createOperationId: creation.createOperationId, controlFailure: { disposition: 'unknown', confirmedInputBytes: null } }) }
+    }
     if (!event.sender.isDestroyed()) return result
     // The observer disappearing does not authorize stopping an already-created Agent.
     // Its durable Session and operation remain queryable when the caller reconnects.
@@ -1084,6 +1134,7 @@ export async function registerIpc(args: {
   handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => sessionLaunchResult(() => args.runtime.launchTerminal(input, config)))
   handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
+  handle('sessions:resolveCreationSessionId', async (hostId: string, createOperationId: string) => args.runtime.resolveCreationSessionId(hostId, createOperationId))
   handle('sessions:historySources', async (options?: { observation: true }) => {
     if (options === undefined) return await args.runtime.sessionHistorySources()
     if (!options || options.observation !== true || Object.keys(options).some(key => key !== 'observation')) {
@@ -1239,9 +1290,15 @@ export async function registerIpc(args: {
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8],
-    goalContinuation?: { goalId: string; loopId: string }
+    goalContinuation?: { goalId: string; loopId: string },
+    goalPmo?: GoalPmoIntent
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
+    if (goalPmo) {
+      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      await pmoGoal(goalPmo)
+      if (goalPmo.creationOperationId !== undefined && operationId !== await goalPmoOperation(goalPmo, 'discussion')) throw new AgentMuxError('The original PMO discussion operation changed.', 'CONTROL_REQUEST_CONFLICT')
+    }
     if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     if (authorHuman === true) {
       assertManualPromptSenderTrusted(event.sender, args.window.webContents)
@@ -1256,6 +1313,11 @@ export async function registerIpc(args: {
     } else {
       pauseUserProgress(session, 'Paused for your message.')
       await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
+    }
+    if (goalPmo) {
+      const original = await args.runtime.agentCreation(session.hostId, session.agentSessionId)
+      if (original.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The confirmed PMO recipient changed.', 'CONTROL_REQUEST_CONFLICT')
+      await confirmedPmoSource(goalPmo, original, operationId)
     }
   }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,

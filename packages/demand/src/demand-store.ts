@@ -367,6 +367,7 @@ export class DemandStore {
         updatedAt: now,
       }
       if (options.participation) appendParticipation(demand, options.participation, operationId, now)
+      if (options.participation?.kind === 'create' && demand.creationOrigin) resolveCreationRequester(demand, options.participation, operationId, true)
       validateNewDemand(demand, this.storePath)
       snapshot.demands.push(demand)
       return demand
@@ -451,6 +452,28 @@ export class DemandStore {
       validateNewDemand(demand, this.storePath)
       return demand
     }, undefined, options.operationId)
+  }
+
+  /** Only the trusted host may confirm the source of this exact original creation. */
+  async resolveCreationOrigin(id: string, input: { creationOperationId: string; source: DemandParticipationSource; sourceOperationId: string },
+    options: { expectedUpdatedAt: number; allowSupervisorDefault: boolean }): Promise<DemandReceipt> {
+    const source = parseDemandParticipationSource(input.source)
+    if (source.kind === 'requirements') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Later requirements cannot resolve the original creation source.')
+    return this.mutate('creation-origin', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      if (!demand.creationOrigin || demand.creationOrigin.operationId !== input.creationOperationId)
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation operation is unconfirmed. Existing Goal and Agent are retained.')
+      const previous = demand.participations.find(item => item.id === demand.creationOrigin!.requesterParticipationId)
+      if (previous && (previous.operationId !== input.sourceOperationId || previous.agentSessionId !== source.agentSessionId || previous.kind !== source.kind))
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'This creation already has a different confirmed original requester.')
+      if (!previous && demand.updatedAt !== options.expectedUpdatedAt)
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed before its original requester was confirmed. Inspect the same creation operation.')
+      appendParticipation(demand, source, input.sourceOperationId, Date.now())
+      resolveCreationRequester(demand, source, input.sourceOperationId, options.allowSupervisorDefault)
+      if (!previous) demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, input.sourceOperationId)
   }
 
   async proposeAlignment(id: string, proposal: DemandAlignmentProposal): Promise<DemandReceipt> {
@@ -834,4 +857,16 @@ function appendParticipation(demand: Demand, source: DemandParticipationSource, 
     return
   }
   demand.participations.push({ ...parsed, id: `participation_${randomUUID()}`, operationId, recordedAt })
+}
+
+function resolveCreationRequester(demand: Demand, source: DemandParticipationSource, operationId: string, allowSupervisorDefault: boolean): void {
+  const origin = demand.creationOrigin!
+  const participation = demand.participations.find(item => item.operationId === operationId && item.kind === source.kind && item.agentSessionId === source.agentSessionId)!
+  origin.requesterParticipationId = participation.id
+  if (origin.supervisorDefaultPending && origin.requesterAsSupervisor && allowSupervisorDefault && demand.supervisorSessionId === null) {
+    demand.supervisorSessionId = source.agentSessionId
+    demand.assigneeSessionIds = [...new Set([...demand.assigneeSessionIds, source.agentSessionId])]
+    demand.sessionIds = [...new Set([...demand.sessionIds, source.agentSessionId])]
+  }
+  origin.supervisorDefaultPending = false
 }

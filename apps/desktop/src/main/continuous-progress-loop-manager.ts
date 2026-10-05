@@ -79,14 +79,9 @@ export class ContinuousProgressLoopManager {
   list(): ContinuousProgressLoop[] { return this.scheduler.list() }
   /** Initial Goal input and continuation share this original durable loop, never a second journal. */
   async prepareGoal(input: GoalProgressStart, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressLoop> {
-    return this.serialize(`goal-start-operation:${input.operationId}`, () => this.serialize(`goal-target:${input.hostId}:${input.agentSessionId}`, async () => {
+    return this.serialize(`goal-start-operation:${input.operationId}`, () => this.serialize(`goal-start-goal:${input.goalId}`, () => this.serialize(`goal-target:${input.hostId}:${input.agentSessionId}`, async () => {
       await this.start()
       await this.authorizeCaller(input, context)
-      const goal = await this.goals?.read(input.goalId)
-      if (!goal || goal.id !== input.goalId || !goal.sessionIds.includes(input.agentSessionId)) throw new AgentMuxError('Choose an exact Session associated with this original Goal.', 'INVALID_CONTROL_REQUEST')
-      const source: ContinuousProgressTaskSource = { kind: 'goal', goalId: input.goalId, alignmentRevision: input.alignmentRevision }
-      const decision = await readContinuousProgressTaskSource(source, new AbortController().signal, this.goals?.read)
-      if (decision.action !== 'continue') throw new AgentMuxError(decision.reason, 'CONTROL_REQUEST_CONFLICT')
       const matches = this.list().filter(loop => loop.creationOperationId === input.operationId)
       if (matches.length > 1) throw new AgentMuxError('This original start has ambiguous saved loop facts. Its operations and Agents are retained.', 'CONTROL_REQUEST_CONFLICT')
       const existing = matches[0]
@@ -96,6 +91,14 @@ export class ContinuousProgressLoopManager {
             ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== input[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('The original start operation belongs to different Goal content or target.', 'CONTROL_REQUEST_CONFLICT')
         return existing
       }
+      // Reconciliation above belongs to the frozen original operation. Only a new loop
+      // consumes today's Supervisor selection; changing it never retargets the old loop.
+      const goal = await this.goals?.read(input.goalId)
+      if (!goal || goal.id !== input.goalId || !goal.assigneeSessionIds.includes(input.agentSessionId) || goal.supervisorSessionId !== input.agentSessionId) throw new AgentMuxError('Choose and save this exact responsible Session as the Goal Supervisor before starting Continue.', 'INVALID_CONTROL_REQUEST')
+      if (this.list().some(loop => loop.taskSource?.kind === 'goal' && loop.taskSource.goalId === input.goalId && loop.status !== 'stopped')) throw new AgentMuxError('A continuation already exists for this Goal. Inspect and explicitly stop the original loop before starting a new Supervisor.', 'CONTROL_REQUEST_CONFLICT')
+      const source: ContinuousProgressTaskSource = { kind: 'goal', goalId: input.goalId, alignmentRevision: input.alignmentRevision }
+      const decision = await readContinuousProgressTaskSource(source, new AbortController().signal, this.goals?.read)
+      if (decision.action !== 'continue') throw new AgentMuxError(decision.reason, 'CONTROL_REQUEST_CONFLICT')
       if (input.prompt !== (goal.description.trim() || goal.title)) throw new AgentMuxError('The Goal content changed before its start was saved. Inspect and explicitly start its current scope.', 'CONTROL_REQUEST_CONFLICT')
       const observation = await this.observe({ ...input, loopId: input.operationId, prompt: input.prompt, nextCheckAt: this.now(), status: 'paused' }, input.operationId, this.now(), new AbortController().signal)
       if (observation.session.agentSessionId !== input.agentSessionId || observation.session.hostId !== input.hostId || observation.session.providerId !== input.providerId || observation.session.workspacePath !== input.workspacePath) throw new AgentMuxError('The exact original Agent target is unconfirmed.', 'STALE_AGENT_SESSION')
@@ -105,7 +108,7 @@ export class ContinuousProgressLoopManager {
       const loop = this.scheduler.create({ ...input, prompt, taskSource: source, operationId: input.operationId, initialDelivery })
       await this.persist(loop.loopId)
       return this.require(loop.loopId)
-    }))
+    })))
   }
   async listGoals(goalId: string): Promise<ContinuousProgressLoop[]> {
     await this.start()

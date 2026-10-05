@@ -47,7 +47,7 @@ export async function readContinuousProgressTaskSource(source: ContinuousProgres
   throw new Error('Task source lifecycle is unconfirmed; manual input remains available.')
 }
 
-export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> } }
+export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; assigneeSessionIds: string[]; supervisorSessionId: string | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> } }
 export type GoalProgressReader = (goalId: string) => Promise<GoalProgressRecord | null>
 
 /** Main interprets the original Goal snapshot; this does not live in Core's scheduler. */

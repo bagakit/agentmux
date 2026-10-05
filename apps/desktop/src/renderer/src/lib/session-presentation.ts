@@ -9,6 +9,8 @@ import type { SessionViewMode } from './session-state'
 
 let indexedSessions: readonly SessionSnapshot[] | undefined
 let index: ReadonlyMap<string, SessionSnapshot> = new Map()
+let indexedAgentSessions: readonly SessionSnapshot[] | undefined
+let agentIndex: ReadonlyMap<string, readonly Extract<SessionSnapshot, { kind: 'agent' }>[]> = new Map()
 let indexedPathSessions: readonly SessionSnapshot[] | undefined
 let paths: ReadonlyMap<string, ReadonlyMap<string, readonly SessionSnapshot[]>> = new Map()
 const NO_SESSIONS: readonly SessionSnapshot[] = []
@@ -20,6 +22,18 @@ export function sessionPresentationById(sessions: readonly SessionSnapshot[]): R
     indexedSessions = sessions
   }
   return index
+}
+
+/** Canonical references may have multiple Host-qualified presentations; callers qualify the exact target. */
+export function agentSessionPresentationIndex(sessions: readonly SessionSnapshot[]) {
+  if (sessions !== indexedAgentSessions) {
+    const next = new Map<string, Extract<SessionSnapshot, { kind: 'agent' }>[]>(); indexedAgentSessions = sessions
+    for (const session of sessions) if (session.kind === 'agent' && session.control.kind === 'agent') {
+      for (const id of new Set([session.id, session.control.agentSessionId])) next.set(id, [...next.get(id) ?? [], session])
+    }
+    agentIndex = next
+  }
+  return agentIndex
 }
 
 /** Directory consumers lazily share one path projection per immutable Session snapshot. */

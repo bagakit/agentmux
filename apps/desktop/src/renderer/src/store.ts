@@ -4,6 +4,8 @@ import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparatio
 import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
 import { moteDefaultExecutor, moteDefaultConversation } from './lib/mote-quick-preferences'
 import { showMoteConversation } from './lib/mote-conversation-mode'
+import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '../../shared/goal-pmo-origin'
+import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
 import { describeError } from '@agentmux/client-ui/error-presentation'
@@ -66,7 +68,7 @@ import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
-import { sessionPresentationById } from './lib/session-presentation'
+import { sessionPresentationById, agentSessionPresentationIndex } from './lib/session-presentation'
 import { observeFocusHistoryIdentity } from './lib/focus-history-identity'
 import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/focus-timeline-height'
 import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from './lib/focus-timeline-name-width'
@@ -103,7 +105,7 @@ import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
-import { primaryMoteExecutorId } from './lib/primary-mote-executor'
+import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
@@ -265,6 +267,7 @@ import {
   discardPendingAgentLaunch,
   projectRuntimeEvent,
   runtimeDiagnosticNotice,
+  runtimeEventSession,
   removeSessionProjection,
   reduceAgentMembershipSnapshot,
   runtimeSnapshotHostUnavailable,
@@ -448,7 +451,7 @@ const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
-export type AgentSteerOptions = { execution?: AgentPromptExecution; reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
+export type AgentSteerOptions = { goalPmo?: GoalPmoIntent; execution?: AgentPromptExecution; reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
 
 export type AgentSteerQueueEntry = {
   operationId: string
@@ -464,6 +467,7 @@ export type AgentSteerQueueEntry = {
   reaction?: AgentSteerReaction
   sourceChannel?: import('@agentmux/core').AgentMessageChannel
   goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition }
+  goalPmo?: GoalPmoIntent
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
@@ -531,6 +535,9 @@ type AppState = {
   dissolveProjectGroup(groupId: string): Promise<AgentMuxSpatialSave>
   spaceZoneBindings: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
+  /** UI intent only; original Core/spatial creation still owns the reserved Session. */
+  goalAgentSelectionDrafts: Record<string, GoalAgentSelectionDraft>
+  goalAgentCreationDrafts: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
@@ -676,8 +683,8 @@ type AppState = {
   demandArrangement: DemandArrangement
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
-  openDemandPmo(demandId: string): Promise<string>
-  requestDemandPmoTask(demandId: string, mode: 'grill' | 'grounding'): Promise<string>
+  openDemandPmo(demandId: string, onReceipt?: (receipt: GoalPmoReceipt) => void): Promise<string>
+  requestDemandPmoTask(demandId: string, mode: 'grill' | 'grounding', options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string>
   refreshDemand(demandId: string): Promise<void>
   confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
   acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean): Promise<void>
@@ -1049,7 +1056,8 @@ type AppState = {
      * 与 tabId 都在本函数内部生成，从不出参。
      */
     names?: { agentName?: string | undefined; tabName?: string | undefined },
-    agentMuxNote?: string
+    agentMuxNote?: string,
+    pmo?: { intent: GoalPmoIntent; onCreated: (result: AgentLaunchResult) => void }
   ): Promise<void>
   launchTerminal(
     tabGroupId: string,
@@ -2401,6 +2409,8 @@ type PersistedAppState = {
   projectGroups?: AgentMuxProjectGroupFact[]
   spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
+  goalAgentSelectionDrafts?: Record<string, GoalAgentSelectionDraft>
+  goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   agentComposerDrafts?: Record<string, string>
@@ -2635,6 +2645,8 @@ function selectPersistedInputs(state: AppState) {
     projectGroups: state.projectGroups,
     spaceZoneBindings: state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
+    goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
+    goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     agentComposerDrafts: state.agentComposerDrafts,
     agentComposerHistory: state.agentComposerHistory,
@@ -2930,6 +2942,32 @@ export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding
   useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [binding.requestId]: binding } }))
   return await saveWorkbenchSelection(false)
 }
+/** Retain the chosen Goal and original operation before dispatch; this never creates or sends. */
+export async function retainGoalAgentSelectionDraft(draft: GoalAgentSelectionDraft): Promise<AgentMuxSpatialSave> {
+  const key = goalCreationDraftKey(draft.goalId, draft.role)
+  useAppStore.setState(state => ({ goalAgentSelectionDrafts: { ...state.goalAgentSelectionDrafts, [key]: draft } }))
+  return await saveWorkbenchSelection(false)
+}
+export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAgentSelectionDraft['role']): Promise<void> {
+  const key = goalCreationDraftKey(goalId, role)
+  useAppStore.setState(state => { const goalAgentSelectionDrafts = { ...state.goalAgentSelectionDrafts }; delete goalAgentSelectionDrafts[key]; return { goalAgentSelectionDrafts } })
+  await saveWorkbenchSelection(false)
+}
+export async function retainGoalAgentCreationDraft(draft: GoalAgentCreationDraft): Promise<AgentMuxSpatialSave> {
+  const key = goalCreationDraftKey(draft.goalId, draft.role), original = useAppStore.getState().goalAgentCreationDrafts[key]
+  if (original && original.operationId !== draft.operationId) throw new Error('An original creation is retained. Inspect that operation before creating another Agent for this selection.')
+  useAppStore.setState(state => ({ goalAgentCreationDrafts: { ...state.goalAgentCreationDrafts, [key]: draft } }))
+  return await saveWorkbenchSelection(false)
+}
+export async function clearGoalAgentCreationDraft(goalId: string, role: 'assignees' | 'related', operationId: string): Promise<void> {
+  const key = goalCreationDraftKey(goalId, role)
+  useAppStore.setState(state => {
+    if (state.goalAgentCreationDrafts[key]?.operationId !== operationId) return state
+    const goalAgentCreationDrafts = { ...state.goalAgentCreationDrafts }; delete goalAgentCreationDrafts[key]
+    return { goalAgentCreationDrafts }
+  })
+  await saveWorkbenchSelection(false)
+}
 function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
 }
@@ -3032,7 +3070,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   if (!session || session.kind !== 'agent') return false
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content or an earlier execution choice. Your original message and draft are kept.'))
     return false
   }
@@ -3052,6 +3090,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
     ...(options?.execution === undefined ? {} : { execution: options.execution }),
     ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
+    ...(options?.goalPmo ? { goalPmo: structuredClone(options.goalPmo) } : {}),
     enqueuedAt: Date.now(),
     ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
       ? { runId: session.control.run.runId } : {}),
@@ -3121,7 +3160,7 @@ export function fileNavigationSelection(state: AppState): string {
     state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
 
-async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string): Promise<string> {
+async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
   const get = useAppStore.getState
   const set = useAppStore.setState
   const state = get()
@@ -3130,8 +3169,12 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   const projectContext = goalProjectContextText(goalProjectContext(state.config, demand.projectId, state.activeWorkspaceId), demand.projectId)
   const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
   if (!workspace) throw new Error('Scratch workspace is unavailable')
-  const executorId = primaryMoteExecutorId(state)
   const body = userRequest ?? ''
+  const intent: GoalPmoIntent = { goalId: demandId, ...(options?.creationOperationId === undefined ? {} : { creationOperationId: options.creationOperationId }) }
+  let receiptSessionId: string | null = null
+  const done = (tabId: string, agentSessionId: string | null = receiptSessionId): string => { options?.onReceipt?.({ tabId, agentSessionId }); return tabId }
+  const launchedReceipt = (result: AgentLaunchResult): void => { receiptSessionId = result.created.agentSessionId; options?.onReceipt?.({ tabId: mappedTabId ?? pmoTabId!, agentSessionId: result.created.agentSessionId }) }
+  let pmoTabId: string | undefined
   const executionContext = executionFocusContextText(
     state.agentFocus,
     state.sessions,
@@ -3161,7 +3204,28 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   const mappedTabId = state.demandPmoTabIds[demandId]
   const mappedTab = mappedTabId ? state.tabs[mappedTabId] : undefined
   const layout = state.layouts[workspace.id]
-  const mappedRegion = mappedTab?.layout.activeRegionId ? mappedTab.regions[mappedTab.layout.activeRegionId] : undefined
+  const originalSource = intent.creationOperationId === undefined ? undefined : demand.participations?.find(source => source.id === demand.creationOrigin?.requesterParticipationId && source.kind === 'discussion')
+  let originalPmoSessionId: string | undefined
+  if (originalSource) {
+    const presentations = (agentSessionPresentationIndex(state.sessions).get(originalSource.agentSessionId) ?? []).filter(session =>
+      session.control.agentSessionId === originalSource.agentSessionId && session.control.hostId === originalSource.hostId && session.hostId === originalSource.hostId)
+    const originalPending = state.pendingAgentLaunches[originalSource.agentSessionId]?.request
+    const pendingOriginalSource = presentations.length === 0 && originalPending?.hostId === originalSource.hostId &&
+      originalPending.goalPmo?.goalId === demandId && originalPending.goalPmo.creationOperationId === intent.creationOperationId
+    if (presentations.length !== 1 && !pendingOriginalSource) throw new Error('The original PMO Session presentation is unconfirmed or ambiguous on its recorded Host. The Goal, Tab and healthy Session are kept; refresh the original observation before retrying.')
+    originalPmoSessionId = pendingOriginalSource ? originalSource.agentSessionId : presentations[0]!.id
+  } else if (intent.creationOperationId !== undefined) {
+    const originalRecipients = new Set([
+      ...Object.entries(state.pendingAgentLaunches).filter(([, launch]) => launch.request?.goalPmo?.goalId === demandId && launch.request.goalPmo.creationOperationId === intent.creationOperationId).map(([id]) => id),
+      ...Object.entries(state.agentSteerQueues).filter(([, queue]) => queue.some(entry => entry.goalPmo?.goalId === demandId && entry.goalPmo.creationOperationId === intent.creationOperationId)).map(([id]) => id)
+    ])
+    if (originalRecipients.size > 1) throw new Error('The original PMO request has ambiguous retained recipients. The Goal and original requests are kept; inspect the same operation before retrying.')
+    originalPmoSessionId = [...originalRecipients][0]
+  }
+  const originalRegions = originalPmoSessionId && mappedTab ? Object.values(mappedTab.regions).filter(surface => surface.kind === 'agent' && surface.sessionId === originalPmoSessionId) : []
+  if (originalPmoSessionId && originalRegions.length !== 1) throw new Error('The original PMO Region is unconfirmed or ambiguous. The Goal, original Tab and Session are kept; restore that exact workface before retrying.')
+  const mappedRegion = originalPmoSessionId ? originalRegions[0] :
+    mappedTab?.layout.activeRegionId ? mappedTab.regions[mappedTab.layout.activeRegionId] : undefined
   const mappedTabIsUsable = Boolean(
     mappedTab &&
     mappedTab.workspaceId === workspace.id &&
@@ -3170,12 +3234,67 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     tabGroupForTab(layout, mappedTab.id) !== null &&
     mappedRegion !== undefined && isAgentOrLauncherSurface(mappedRegion)
   )
+  if (originalPmoSessionId && !mappedTabIsUsable) throw new Error('The original PMO workface placement is unconfirmed. The Goal and Session are kept; restore the same Tab before retrying.')
   if (mappedTabIsUsable && mappedTab) {
+    const recipient = mappedRegion?.kind === 'agent' ? sessionPresentationById(state.sessions).get(mappedRegion.sessionId) : undefined
+    const pending = mappedRegion?.kind === 'agent' ? state.pendingAgentLaunches[mappedRegion.sessionId]?.request : undefined
+    let canonicalRecipientId = recipient?.kind === 'agent' && recipient.control?.kind === 'agent' ? recipient.control.agentSessionId : undefined
+    if (!canonicalRecipientId && intent.creationOperationId !== undefined && pending?.hostId && pending.createOperationId && pending.goalPmo?.goalId === demandId && pending.goalPmo.creationOperationId === intent.creationOperationId) {
+      canonicalRecipientId = await api.sessions.resolveCreationSessionId(pending.hostId, pending.createOperationId)
+    }
+    receiptSessionId = canonicalRecipientId ?? null
     if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
       // The live recipient already has its exact owner. Topic file preparation cannot gate input.
-      if (!get().send(mappedRegion.sessionId, body, undefined, undefined, pmoNote())) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
+      const recipientId = mappedRegion.sessionId
+      if (intent.creationOperationId === undefined) {
+        if (get().send(recipientId, body, undefined, undefined, pmoNote(), { goalPmo: intent }) === false) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
+        focusPmoTabSession(mappedTab.id)
+        return done(mappedTab.id)
+      }
+      if (!canonicalRecipientId) throw new Error('The original PMO canonical Session is unconfirmed. The Goal and original Region are kept; refresh its exact control before retrying.')
+      if (intent.creationOperationId !== undefined && demand.creationOrigin?.requesterParticipationId) return done(mappedTab.id)
+      if (intent.creationOperationId !== undefined) {
+        const hostId = recipient?.kind === 'agent' ? recipient.control.hostId : pending?.hostId
+        if (!hostId) throw new Error('The original PMO Host is unconfirmed. Keep this Session and inspect the original operation without starting again.')
+        const createOperationId = await goalPmoOperation(intent, 'create')
+        const reserved = await api.sessions.resolveCreationSessionId(hostId, createOperationId)
+        if (canonicalRecipientId === reserved) {
+          await api.demands.reconcilePmoCreation(intent, hostId, canonicalRecipientId, createOperationId)
+          await get().refreshDemand(demandId)
+          if (get().pendingAgentLaunches[recipientId]) {
+            const created = await api.sessions.creation(hostId, canonicalRecipientId)
+            const snapshot = await api.sessions.snapshot()
+            const session = snapshot.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.control.agentSessionId === canonicalRecipientId && item.control.hostId === hostId && item.control.run.runId === created.run.runId)
+            const timeline = snapshot.timelines[canonicalRecipientId]
+            const result = await get().canonicalizeAgentLaunch({ created, projectionFailures: [], ...(session ? { session } : {}), ...(timeline ? { timeline } : {}) })
+            if (!result) throw new Error('The original PMO display remains unconfirmed. Its confirmed Session is kept; inspect the same creation.')
+            let gap: string | undefined
+            set(current => {
+              const owner = findWorkbenchRegion(current.tabs, mappedRegion.regionId)
+              const attached = ownsSessionLaunch(owner?.surface, 'agent', recipientId)
+                ? reduceAgentSessionLaunchAttached(current, mappedRegion.regionId, result)
+                : reduceDetachedAgentLaunch(current, result)
+              gap = attached.timelineGapSessionId
+              return attached.state
+            })
+            if (gap) void get().resyncTimeline(gap)
+          }
+          return done(mappedTab.id)
+        }
+      }
+      const operationId = intent.creationOperationId === undefined ? crypto.randomUUID() : await goalPmoOperation(intent, 'discussion')
+      const previous = get().agentSteerQueues[recipientId]?.find(entry => entry.operationId === operationId)
+      if (previous && recipient?.kind === 'agent') {
+        await api.demands.reconcilePmoInput(intent, recipient.control, operationId)
+        await get().refreshDemand(demandId)
+        set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+          [recipientId]: (current.agentSteerQueues[recipientId] ?? []).filter(entry => entry.operationId !== operationId) } }))
+        return done(mappedTab.id)
+      }
+      if (admitAgentSteer(recipientId, body, undefined, operationId, undefined, pmoNote(), { goalPmo: intent }) === false) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
+      void get().sendQueuedAgentSteer(recipientId, operationId).catch(error => get().reportError(error))
       focusPmoTabSession(mappedTab.id)
-      return mappedTab.id
+      return done(mappedTab.id)
     }
     if (mappedRegion?.kind === 'launcher') {
       const note = pmoNote(true)
@@ -3186,27 +3305,30 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
       try { await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id }) }
       catch (cause) {
         get().reportError(cause, { kind: 'indeterminate', summary: 'PMO Topic preparation is unconfirmed. The Goal, dedicated Tab and original request are kept; retry Start agent here.' })
-        return mappedTab.id
+        return done(mappedTab.id)
       }
       const liveLayout = get().layouts[workspace.id]
       const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
       if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
+      const choice = primaryMoteExecutorChoice(get())
+      const executorId = choice.executorId
       if (!executorId) {
-        get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
-        return mappedTab.id
+        get().reportError(new Error(choice.issue ?? 'The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
+        return done(mappedTab.id)
       }
       await get().launchAgent(executorId, body, groupId, {
         tabId: mappedTab.id,
         regionId: mappedTab.layout.activeRegionId
-      }, undefined, { tabName: `PMO · ${demand.title}` }, note)
+      }, undefined, { tabName: `PMO · ${demand.title}` }, note, { intent, onCreated: launchedReceipt })
     } else await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
     focusPmoTabSession(mappedTab.id)
-    return mappedTab.id
+    return done(mappedTab.id)
   }
 
   const current = get()
   const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
   const tab = { ...newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID), name: `PMO · ${demand.title}` }
+  pmoTabId = tab.id
   const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
   if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
   const note = pmoNote(true)
@@ -3217,21 +3339,29 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: body },
     agentComposerNotes: { ...next.agentComposerNotes, [tab.layout.activeRegionId]: note }
   }))
-  try { await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID) }
+  let preparedTopic: ScratchTopicSnapshot
+  try { preparedTopic = await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID) }
   catch (cause) {
     get().reportError(cause, { kind: 'indeterminate', summary: 'PMO Topic preparation is unconfirmed. The Goal, dedicated Tab and original request are kept; retry Start agent here.' })
-    return tab.id
+    return done(tab.id)
   }
+  const liveWorkspace = get().config?.workspaces.find(item => item.id === workspace.id)
+  // This request's new Launcher cannot erase its original unique primary target.
+  // The prepared file and current Host configuration still decide explicit new-chat defaults.
+  const choice = liveWorkspace?.hostId === workspace.hostId && liveWorkspace.path === workspace.path && preparedTopic.id === PMO_TEAMS_TOPIC_ID
+    ? primaryMoteExecutorChoice({ ...state, config: get().config, executorDetections: get().executorDetections, hostExecutorInventories: get().hostExecutorInventories }, undefined, preparedTopic)
+    : { executorId: undefined, issue: 'The original Mote directory or Host changed during preparation. The Goal and request are kept; inspect this target before starting.' }
+  const executorId = choice.executorId
   if (!executorId) {
-    get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
-    return tab.id
+    get().reportError(new Error(choice.issue ?? 'The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
+    return done(tab.id)
   }
   await get().launchAgent(executorId, body, currentLayout.activeGroupId, {
     tabId: tab.id,
     regionId: tab.layout.activeRegionId
-  }, undefined, { tabName: `PMO · ${demand.title}` }, note)
+  }, undefined, { tabName: `PMO · ${demand.title}` }, note, { intent, onCreated: launchedReceipt })
   focusPmoTabSession(tab.id)
-  return tab.id
+  return done(tab.id)
 }
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
@@ -3242,6 +3372,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   projectGroups: [],
   spaceZoneBindings: {},
   spatialRequests: {},
+  goalAgentSelectionDrafts: {},
+  goalAgentCreationDrafts: {},
   retainedSpatialFocus: null,
   config: null,
   providerCatalog: [],
@@ -4422,7 +4554,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const current = reconcileDeliveredSteers(state, session.id)
         return (current.agentSteerQueues[session.id] ?? []).map(entry =>
           pendingSteerRecord(entry, state.agentSteerInFlight[session.id], state.agentSteerInFlightPhase[session.id],
-            Boolean(confirmedSteerDelivery(state.timelines[session.id], session.id, entry.operationId))))
+            Boolean(confirmedSteerDelivery(state.timelines[session.id], session.control, entry.operationId))))
       }
       if (request.operation === 'message.pending.ls') return { operation: request.operation, agentSessionId: session.id, messages: records() }
       const before = records().find(item => item.pendingId === request.pendingId)
@@ -4445,7 +4577,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Capture the successful mutation itself. A later delivery event can remove restored
         // Pending before a reader inspects it; that event cannot erase this business result.
         const facts = { agentSessionId: session.id, message: pendingSteerRecord(result.entry, undefined, undefined,
-          Boolean(confirmedSteerDelivery(get().timelines[session.id], session.id, result.entry.operationId))), changed: result.changed }
+          Boolean(confirmedSteerDelivery(get().timelines[session.id], session.control, result.entry.operationId))), changed: result.changed }
         if (request.operation === 'message.pending.archive') return { operation: request.operation, ...facts }
         return { operation: request.operation, ...facts }
       }
@@ -4646,9 +4778,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'demand.discuss') {
       await get().refreshDemand(request.demandId)
-      const tabId = request.mode === 'open' ? await get().openDemandPmo(request.demandId) : await get().requestDemandPmoTask(request.demandId, request.mode)
-      const tab = get().tabs[tabId], region = tab?.regions[tab.layout.activeRegionId]
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, requestId: request.requestId, mode: request.mode, tabId, agentSessionId: region?.kind === 'agent' ? region.sessionId : null } }
+      let receipt: GoalPmoReceipt | undefined
+      const capture = (value: GoalPmoReceipt): void => { receipt = value }
+      const tabId = request.mode === 'open' ? await get().openDemandPmo(request.demandId, capture) : await get().requestDemandPmoTask(request.demandId, request.mode, { onReceipt: capture })
+      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, requestId: request.requestId, mode: request.mode, tabId, agentSessionId: receipt?.agentSessionId ?? null } }
     }
     if (request.operation === 'demand.confirm') {
       await get().confirmDemandGoal(request.demandId, request.expectedRevision)
@@ -4705,45 +4838,55 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
     }
     const startDemand = async (demandId: string, sessionId?: string, continuation?: { intervalMs: number; alignmentRevision: number }, businessOperationId?: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
-      if (continuation) {
-        const facts = await api.demands.list()
-        const fresh = facts.find(goal => goal.id === demandId)
-        if (!fresh || !sessionId || !fresh.sessionIds.includes(sessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact associated Session for this original Goal.')
-        set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(fresh, state.demands[demandId]) } }))
-      }
-      const current = demandRecord(demandId)
       let savedContinuation: import('@agentmux/core').ContinuousProgressLoop | undefined
+      const sourceForStart = (canonicalSessionId: string, hostId?: string) => {
+        const matches = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && candidate.control.agentSessionId === canonicalSessionId && (hostId === undefined || candidate.control.hostId === hostId))
+        if (matches.length !== 1) throw controlFailure(matches.length > 1 ? 'CONTROL_REQUEST_CONFLICT' : 'UNKNOWN_AGENT_SESSION', `The exact responsible Agent Session has ${matches.length > 1 ? 'ambiguous' : 'unconfirmed'} presentation: ${canonicalSessionId}. Its saved identity and manual input are retained.`)
+        const source = matches[0]!
+        if (source.hostId !== source.control.hostId) throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session Host mapping is unconfirmed. Manual input is retained.')
+        return source
+      }
       if (continuation) {
         if (!sessionId || !businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Continuation needs an exact Session and stable business operation.')
-        const selected = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.control.agentSessionId === sessionId)
-        if (!selected || selected.kind !== 'agent' || selected.id !== sessionId || selected.hostId !== selected.control.hostId || selected.processState !== 'running') throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session mapping or running target is unconfirmed.')
         const originalStarts = (await api.continuousProgress.goals(demandId)).filter(loop => loop.creationOperationId === businessOperationId)
         if (originalStarts.length > 1) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original start has ambiguous durable loop facts. Your Agent and input are retained.')
         const originalStart = originalStarts[0]
-        savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: selected.control.agentSessionId, hostId: selected.control.hostId, providerId: selected.providerId, workspacePath: selected.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: originalStart?.initialDelivery?.prompt ?? (current.description.trim() || current.title) }, caller)
-        const live = get().sessions.find(candidate => candidate.id === sessionId)
-        if (!live || live.kind !== 'agent' || live.control.agentSessionId !== savedContinuation.agentSessionId || live.control.hostId !== savedContinuation.hostId || live.control.run.runId !== savedContinuation.initialDelivery?.condition.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed after its start was saved. Its loop and healthy Agent are retained.')
+        if (originalStart) {
+          savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: sessionId, hostId: originalStart.hostId, providerId: originalStart.providerId, workspacePath: originalStart.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: originalStart.initialDelivery?.prompt ?? '' }, caller)
+          if (savedContinuation.initialDelivery?.state === 'confirmed') {
+            try { await get().refreshDemand(demandId) }
+            catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'The original start is confirmed. Reading the current Goal is unconfirmed; its saved view and original receipt are retained. Refresh this same Goal to reconnect its latest state.' }) }
+            return { sessionId: savedContinuation.agentSessionId, demand: demandRecord(demandId), continuation: savedContinuation }
+          }
+        }
       }
-      let attachedSessionId = sessionId ?? current.sessionIds.at(-1) ?? null
-      if (attachedSessionId) {
-        const session = get().sessions.find((candidate) => candidate.id === attachedSessionId)
-        if (!session || session.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${attachedSessionId}`)
-        const original = savedContinuation?.initialDelivery
-        let operationId: string | false = original?.state === 'confirmed' ? original.operationId : admitAgentSteer(session.id, original?.prompt ?? (current.description.trim() || current.title), undefined, businessOperationId, undefined, undefined,
-          original && savedContinuation ? { goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : { execution: 'default' })
-        if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
-        if (original?.state !== 'confirmed') await get().flushAgentSteerQueue(session.id, operationId)
-        const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
-        if (retained) throw controlFailure('CONTROL_FAILED', retained.error ?? 'The execution message is queued; delivery is not yet confirmed.')
-      } else {
-        if (!current.projectId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to a Project before starting.')
-        if (!current.assigneeExecutorId) throw controlFailure('CONTROL_FAILED', 'Demand must be assigned to an Agent before starting.')
-        const before = new Set(get().sessions.map((candidate) => candidate.id))
-        await get().launchBoardAgent(controlProject(current.projectId)?.preferredWorkspaceId ?? current.projectId, current.assigneeExecutorId, current.description.trim() || current.title)
-        const created = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && !before.has(candidate.id) && candidate.executorId === current.assigneeExecutorId).at(-1)
-        attachedSessionId = created?.id ?? null
-        if (attachedSessionId) await get().updateDemand(demandId, { sessionIds: [...current.sessionIds, attachedSessionId] })
+      const facts = await api.demands.list()
+      const fresh = facts.find(goal => goal.id === demandId)
+      if (!fresh) throw controlFailure('CONTROL_UNAVAILABLE', 'The original Goal is unavailable. Its Agent, input and saved continuation are retained.')
+      set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(fresh, state.demands[demandId]) } }))
+      const current = demandRecord(demandId)
+      const assigneeSessionIds = current.assigneeSessionIds ?? []
+      if (continuation) {
+        if (!sessionId || !businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Continuation needs an exact Session and stable business operation.')
+        if (!savedContinuation) {
+          if (!assigneeSessionIds.includes(sessionId) || current.supervisorSessionId !== sessionId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose and save this exact responsible Session as the Goal Supervisor before starting Continue.')
+          const selected = sourceForStart(sessionId)
+          if (selected.processState !== 'running') throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session running target is unconfirmed. Manual input is retained.')
+          savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: selected.control.agentSessionId, hostId: selected.control.hostId, providerId: selected.providerId, workspacePath: selected.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: current.description.trim() || current.title }, caller)
+        }
+        const live = sourceForStart(sessionId, savedContinuation.hostId)
+        if (live.control.agentSessionId !== savedContinuation.agentSessionId || live.providerId !== savedContinuation.providerId || live.workspacePath !== savedContinuation.workspacePath || live.control.run.runId !== savedContinuation.initialDelivery?.condition.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed after its start was saved. Its loop and healthy Agent are retained.')
       }
+      const attachedSessionId = sessionId ?? (assigneeSessionIds.length === 1 ? assigneeSessionIds[0] : null)
+      if (!attachedSessionId || !savedContinuation && !assigneeSessionIds.includes(attachedSessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact responsible Session before starting. With multiple assignees, select this start’s Agent explicitly; creating or saving an Agent does not start work.')
+      const session = sourceForStart(attachedSessionId, savedContinuation?.hostId)
+      const original = savedContinuation?.initialDelivery
+      const operationId = admitAgentSteer(session.id, original?.prompt ?? (current.description.trim() || current.title), undefined, businessOperationId, undefined, undefined,
+        original && savedContinuation ? { goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : { execution: 'default' })
+      if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
+      await get().sendQueuedAgentSteer(session.id, operationId)
+      const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
+      if (retained) throw controlFailure('CONTROL_FAILED', retained.error ?? 'The execution message is queued; delivery is not yet confirmed.')
       await get().updateDemand(demandId, { status: 'in_progress' })
       await appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
       if (savedContinuation && attachedSessionId) savedContinuation = await api.continuousProgress.initialGoalInput(savedContinuation, savedContinuation.loopId, businessOperationId!, 'confirm')
@@ -6133,10 +6276,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setDemandArrangement(arrangement) {
     set({ demandArrangement: arrangement })
   },
-  async openDemandPmo(demandId) {
-    return openGoalPmo(demandId)
+  async openDemandPmo(demandId, onReceipt) {
+    return openGoalPmo(demandId, undefined, undefined, onReceipt === undefined ? undefined : { onReceipt })
   },
-  async requestDemandPmoTask(demandId, mode) {
+  async requestDemandPmoTask(demandId, mode, options) {
     const demand = get().demands[demandId]
     if (!demand) throw new Error(`Goal ${demandId} is unavailable`)
     const quote = (value: string): string => "'" + value.replaceAll("'", "'\"'\"'") + "'"
@@ -6155,7 +6298,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       `"$AGENTMUX_CLI" goal inspect --goal ${quote(demand.id)}`,
       `"$AGENTMUX_CLI" goal update --goal ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
     ].join('\n\n')
-    return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work')
+    return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work', options)
   },
   async createDemand(input, controlRequestId) {
     const presentation = get()
@@ -7825,7 +7968,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : undefined
     await get().launchAgent(executorId, prompt, layout.activeGroupId, launcher)
   },
-  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names, agentMuxNote) {
+  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names, agentMuxNote, pmo) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -7875,8 +8018,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
     const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
     const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
-    const sessionId = mintObjectId()
-    const createOperationId = crypto.randomUUID()
+    const createOperationId = pmo?.intent.creationOperationId === undefined ? crypto.randomUUID() : await goalPmoOperation(pmo.intent, 'create')
+    const sessionId = pmo?.intent.creationOperationId === undefined ? mintObjectId() : await api.sessions.resolveCreationSessionId(workspace.hostId, createOperationId)
+    const live = get(), liveTargetTab = launcher ? live.tabs[tabId] : targetTab
+    const liveLayout = live.layouts[displayWorkspaceId!]
+    if (pmo && (!liveTargetTab || launcher && liveTargetTab.regions[regionId] !== launcherSurface ||
+      !liveLayout || !findGroup(liveLayout, tabGroupId) || launcher && !findGroup(liveLayout, tabGroupId)!.tabOrder.includes(tabId) ||
+      !workbenchViewCloseAllowsView(live.closingWorkbenchViews, tabId))) {
+      throw new Error('The original PMO display position changed before creation. The Goal and original request are kept.')
+    }
     const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
       ? state.errorNoticeContext : null
     const pendingSurface: AgentWorkbenchSurface = {
@@ -7886,12 +8036,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       workspaceId: workspace.id,
       sessionId
     }
-    const replacedTab = replaceWorkbenchRegion(targetTab, regionId, pendingSurface)
+    const replacedTab = replaceWorkbenchRegion(pmo ? liveTargetTab! : targetTab, regionId, pendingSurface)
     const pendingTab = scratchTopicId ? { ...replacedTab, topicId: scratchTopicId } : replacedTab
     // 没有 launcher 归属时这条 Tab 是新建的，必须真的挂进某个分组。挂不上就抛：原先用 addTab
     // 的静默回落，Tab 记录进了 state.tabs 而不在任何 tabOrder 里——永不显示、永不可关，且用户
     // 点了「启动」看不到任何反馈（实测抛出的是 null，多出一条孤儿记录）。
-    const nextLayout = launcher ? layout : addTabOrThrow(layout, tabGroupId, tabId)
+    const nextLayout = launcher ? pmo ? liveLayout! : layout : addTabOrThrow(pmo ? liveLayout! : layout, tabGroupId, tabId)
     set((current) => ({
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
@@ -7901,7 +8051,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
         [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
-          ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }) } }
+          ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }), ...(pmo ? { goalPmo: pmo.intent } : {}) } }
       }
     }))
     let dispatchStarted = false
@@ -7932,7 +8082,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }),
         agentSessionId: sessionId,
         createOperationId
-      })
+      }, pmo?.intent)
       creationObserved = true
       if (launched.created.agentSessionId !== sessionId) {
         let timelineGapSessionId: string | undefined
@@ -7946,6 +8096,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           code: 'AGENT_LAUNCH_IDENTITY_MISMATCH'
         })
       }
+      pmo?.onCreated(launched)
+      if (pmo) await get().refreshDemand(pmo.intent.goalId)
       const canonical = await get().canonicalizeAgentLaunch(launched)
       const result = canonical ?? launched
       const launchOwner = findWorkbenchRegion(get().tabs, regionId)
@@ -8779,7 +8931,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is no longer available. No replacement was created.')
       if (entry.text !== expectedText) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message changed. Read its current text before archiving or restoring it.')
       if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is preparing or submitting. Archiving cannot recall Provider input; its original facts are kept.')
-      if (!archived && confirmedSteerDelivery(state.timelines[sessionId], sessionId, operationId)) {
+      if (!archived && confirmedSteerDelivery(state.timelines[sessionId], state.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.id === sessionId)?.control, operationId)) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record is kept; read the confirmed History instead of restoring it to Pending.')
       }
       if (!archived && entry.archived && queue!.filter(item => !item.archived).length >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
@@ -8887,7 +9039,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const pending = get().flushAgentSteerQueue(sessionId, operationId)
       const originalDrain = agentSteerDrains.get(sessionId)
       await pending
-      if (originalDrain?.submitted.has(operationId) || confirmedSteerDelivery(get().timelines[sessionId], sessionId, operationId)) return 'submitted'
+      if (originalDrain?.submitted.has(operationId) || confirmedSteerDelivery(get().timelines[sessionId], session?.kind === 'agent' ? session.control : undefined, operationId)) return 'submitted'
       if (originalDrain?.failures.has(operationId)) throw originalDrain.failures.get(operationId)
       if (originalDrain?.waitingForInteraction.has(operationId)) return 'unconfirmed'
       throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original selection left the ordered consumer without a confirmed submission. No new operation was created; inspect the original queue and retry this message.')
@@ -8980,6 +9132,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ??
             pendingEntries?.find(item => item.promptCondition === null && item.execution !== undefined) ?? pendingEntries?.[0]
           if (!entry) { refuseSelections('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived, paused or belongs to a different Run before dispatch.'); return }
+          if (entry.goalPmo?.creationOperationId !== undefined && confirmedSteerDelivery(state.timelines[sessionId], session.control, entry.operationId)) {
+            try {
+              await api.demands.reconcilePmoInput(entry.goalPmo, session.control, entry.operationId)
+              await get().refreshDemand(entry.goalPmo.goalId)
+              set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: (current.agentSteerQueues[sessionId] ?? []).filter(item => item.operationId !== entry.operationId) } }))
+              drain.submitted.add(entry.operationId)
+              continue
+            } catch (error) {
+              drain.failures.set(entry.operationId, error)
+              set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item => item.operationId === entry.operationId
+                  ? { ...item, status: 'deferred', awaitingExplicitSend: true, error: presentError(error) } : item) } }))
+              throw error
+            }
+          }
           if (entry.runId === currentRunId && entry.promptCondition === null && entry.execution !== undefined && session.pendingInteraction) {
             retainWaitingSelections(currentRunId)
             return
@@ -9019,7 +9187,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
             !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
             item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
-            item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) &&
+            item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) && JSON.stringify(item.goalPmo) === JSON.stringify(entry.goalPmo) &&
             (!dispatchStarted || item.execution === attemptExecution) &&
             (item.promptCondition === null) === (attemptCondition === null) &&
             item.promptCondition?.expectedRun.runId === attemptCondition?.expectedRun.runId &&
@@ -9133,7 +9301,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               return target?.kind === 'agent' && target.processState === 'running' && !target.pendingInteraction &&
                 target.hostId === attemptHostId && target.control.hostId === attemptHostId && target.control.agentSessionId === attemptSessionId &&
                 target.control.run.runId === attemptRunId && Boolean(original && matchesAttempt(original)) &&
-                !confirmedSteerDelivery(current.timelines[sessionId], sessionId, entry.operationId)
+                !confirmedSteerDelivery(current.timelines[sessionId], target?.kind === 'agent' ? target.control : undefined, entry.operationId)
             }
             try {
               await submitWithPreparationRetry({ agentSessionId: attemptSessionId, runId: attemptRunId!, operationId: entry.operationId,
@@ -9151,11 +9319,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     ...(retryMessage.execution === 'immediate' ? { execution: 'immediate' as const } : {}), ...(preparationRetry ? { preparationRetry } : {}) }
                     : retryMessage.execution === 'immediate' ? { execution: 'immediate' } : undefined,
                   retryMessage.origin === 'manual', retryMessage.agentMuxNote, retryMessage.sourceChannel,
-                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined)
+                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined, retryMessage.goalPmo)
               })
             } finally { if (preparationRetryCalls.get(retryKey) === retryCall) preparationRetryCalls.delete(retryKey) }
             deliveryAttempt.stage = 'receipt-confirmation'
             if (pending.goalContinuation) await api.continuousProgress.initialGoalInput({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, pending.goalContinuation.loopId, pending.operationId, 'confirm')
+            if (pending.goalPmo) await get().refreshDemand(pending.goalPmo.goalId)
             drain.submitted.add(entry.operationId)
             set((current) => {
               const target = current.sessions.find(item => item.id === sessionId)
@@ -9588,14 +9757,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           entry.reconcileRequested = false
           try {
             const snapshot = await api.sessions.timeline(session.control)
-            if (snapshot.agentSessionId !== sessionId) throw new Error('Work history returned a different Session. The original work surface is retained.')
+            if (snapshot.agentSessionId !== session.control.agentSessionId) throw new Error('Work history returned a different Session. The original work surface is retained.')
             // History belongs to the durable Session, so a new Run is allowed;
             // a different Host must never receive the old request's late page.
             const current = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.id === sessionId)
             if (!current || current.control.hostId !== session.control.hostId) continue
             const pendingBefore = get().agentSteerQueues[sessionId]
             set((state) => {
-              const next = { ...state, ...reduceTimelineSnapshot(state, snapshot) }
+              const next = { ...state, ...reduceTimelineSnapshot(state, snapshot, sessionId) }
               return reconcile ? reconcileDeliveredSteers(next, sessionId) : next
             })
             if (reconcile && get().agentSteerQueues[sessionId] !== pendingBefore && !agentSteerDrains.has(sessionId)) {
@@ -9658,11 +9827,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       enqueueSessionMembershipEvent(sessionMembershipResync, event)
       return
     }
-    const previous = core.type === 'agent-session' || core.type === 'agent-status'
-      ? get().sessions.find((session) => session.id === (core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId)) : undefined
+    const eventSource = runtimeEventSession(get().sessions, event)
+    const eventSourceId = eventSource?.id
+    const previous = core.type === 'agent-session' || core.type === 'agent-status' ? eventSource : undefined
     const interactionCleared = core.type === 'agent-session' && !core.session.pendingInteraction &&
       previous?.kind === 'agent' && Boolean(previous.pendingInteraction)
-    const pendingBefore = core.type === 'agent-timeline' ? get().agentSteerQueues[core.agentSessionId] : undefined
+    const pendingBefore = core.type === 'agent-timeline' && eventSourceId ? get().agentSteerQueues[eventSourceId] : undefined
     let timelineGapSessionId: string | undefined
     let sessionMembershipGap = false
     set((state) => {
@@ -9671,12 +9841,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionMembershipGap = reduced.sessionMembershipGap === true
       const projected = reduced.state.sessions === state.sessions ? reduced.state
         : { ...reduced.state, sessions: projectRuntimeEndpointSessions(reduced.state.sessions, state.runtimeEndpointWarnings) }
-      return core.type === 'agent-timeline'
-        ? reconcileDeliveredSteers({ ...state, ...projected }, core.agentSessionId)
+      return core.type === 'agent-timeline' && eventSourceId
+        ? reconcileDeliveredSteers({ ...state, ...projected }, eventSourceId)
         : projected
     })
-    if (core.type === 'agent-timeline' && get().agentSteerQueues[core.agentSessionId] !== pendingBefore &&
-      !observationRefresh && !agentSteerDrains.has(core.agentSessionId)) void get().flushAgentSteerQueue(core.agentSessionId)
+    if (core.type === 'agent-timeline' && eventSourceId && get().agentSteerQueues[eventSourceId] !== pendingBefore &&
+      !observationRefresh && !agentSteerDrains.has(eventSourceId)) void get().flushAgentSteerQueue(eventSourceId)
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
     if (observationRefresh) return
@@ -9686,13 +9856,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const completed = core.type === 'agent-session' ? core.session.semanticStatus
         : core.type === 'agent-status' ? { state: core.state, observedAt: core.evidence.observedAt } : undefined
       const projected = core.type === 'agent-session' || core.type === 'agent-status'
-        ? get().sessions.find((session) => session.id === (core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId)) : undefined
+        ? get().sessions.find((session) => session.id === eventSourceId) : undefined
       const freshCompletion = completed?.state === 'done' &&
         projected?.status.state === 'done' && projected.status.observedAt === completed.observedAt &&
         (previous?.status.state !== 'done' || previous.status.observedAt !== completed.observedAt)
       const sessionId = core.type === 'agent-session' && (interactionCleared || freshCompletion)
-        ? core.session.agentSessionId
-        : core.type === 'agent-status' && freshCompletion ? core.agentSessionId : undefined
+        ? eventSourceId
+        : core.type === 'agent-status' && freshCompletion ? eventSourceId : undefined
       if (sessionId && get().agentSteerQueues[sessionId]?.length) void get().flushAgentSteerQueue(sessionId)
     }
     } finally { rendererPerformance.sessionEvent(event.event.type, observationStarted) }
@@ -9835,7 +10005,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

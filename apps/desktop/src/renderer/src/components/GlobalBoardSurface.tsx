@@ -2,7 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowUpRight, Check, ChevronRight, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { goalNextStep } from '../lib/goal-presentation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -46,10 +46,6 @@ export function GlobalBoardSurface() {
   const creation = useSyncExternalStore(subscribeDirectGoalRequest, directGoalRequest, directGoalRequest)
   const requestDemandPmoTask = useAppStore((state) => state.requestDemandPmoTask)
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)
-  const sessions = useAppStore(state => state.sessions)
-  const names = useAppStore(state => state.agentNames)
-  const assigneeIds = [...new Set([...sessions.filter(session => session.kind === 'agent').flatMap(session => session.control?.agentSessionId ? [session.control.agentSessionId] : []), ...Object.values(demands).flatMap(demand => demand.assigneeSessionIds ?? [])])].sort()
-  const assigneeName = (id: string) => { const session = sessions.find(session => session.id === id || session.kind === 'agent' && session.control?.agentSessionId === id); return names[session?.id ?? id] ?? session?.label ?? `${id} · Unavailable` }
   const [query, setQuery] = useState('')
   const [view, setView] = useState(() => resolveGoalsPreferences(config?.goals).defaultView)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -57,6 +53,14 @@ export function GlobalBoardSurface() {
   const [projectFilter, setProjectFilter] = useState('all')
   const [routingFilter, setRoutingFilter] = useState<'all' | 'unassigned' | 'assigned'>('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
+  const assigneeEntries = useAppStore(useShallow(state => {
+    if (!filtersOpen && assigneeFilter === 'all') return [] as string[]
+    const index = agentSessionPresentationIndex(state.sessions)
+    const ids = [...new Set([...state.sessions.filter(session => session.kind === 'agent').map(session => session.control.agentSessionId), ...Object.values(state.demands).flatMap(demand => demand.assigneeSessionIds ?? [])])].sort()
+    return ids.flatMap(id => { const candidates = index.get(id), session = candidates?.length === 1 ? candidates[0] : undefined; return [id, session ? state.agentNames[session.id] ?? session.label : `${id} · Unavailable`] })
+  }))
+  const assigneeIds = assigneeEntries.filter((_value, index) => index % 2 === 0)
+  const assigneeName = (id: string) => { const index = assigneeIds.indexOf(id); return index < 0 ? `${id} · Unavailable` : assigneeEntries[index * 2 + 1]! }
   const [showHistory, setShowHistory] = useState(() => resolveGoalsPreferences(config?.goals).showFinished)
   const [moteErrors, setMoteErrors] = useState<Record<string, { message: string; mode: 'open' | 'grill' | 'grounding' }>>({})
   const [motePending, setMotePending] = useState<Record<string, 'open' | 'grill' | 'grounding'>>({})

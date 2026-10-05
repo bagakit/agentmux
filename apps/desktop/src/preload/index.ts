@@ -251,6 +251,8 @@ const api: AgentMuxPreloadApi = {
   demands: {
     list: () => ipcRenderer.invoke('demands:list'),
     create: (input, controlRequestId) => ipcRenderer.invoke('demands:create', input, controlRequestId),
+    reconcilePmoCreation: (intent, hostId, agentSessionId, createOperationId) => ipcRenderer.invoke('demands:reconcilePmoCreation', intent, hostId, agentSessionId, createOperationId),
+    reconcilePmoInput: (intent, session, operationId) => ipcRenderer.invoke('demands:reconcilePmoInput', intent, session, operationId),
     update: (id, patch, controlRequestId, expectedUpdatedAt) => ipcRenderer.invoke('demands:update', id, patch, controlRequestId, expectedUpdatedAt),
     confirmAlignment: (id, expectedRevision) => ipcRenderer.invoke('demands:confirmAlignment', id, expectedRevision),
     acceptGrounding: (id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps) => ipcRenderer.invoke('demands:acceptGrounding', id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps),
@@ -375,10 +377,11 @@ const api: AgentMuxPreloadApi = {
   },
   sessions: {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
+    resolveCreationSessionId: (hostId, createOperationId) => ipcRenderer.invoke('sessions:resolveCreationSessionId', hostId, createOperationId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
-    launchAgent: async (input: AgentLaunchInput) => {
+    launchAgent: async (input: AgentLaunchInput, goalPmo?: import('../shared/goal-pmo-origin').GoalPmoIntent) => {
       let result: import('../shared/contracts').SessionAgentLaunchResult
-      try { result = await ipcRenderer.invoke('sessions:launchAgent', input) }
+      try { result = await (goalPmo === undefined ? ipcRenderer.invoke('sessions:launchAgent', input) : ipcRenderer.invoke('sessions:launchAgent', input, goalPmo)) }
       catch (error) { throw unconfirmedSessionAgentLaunch(input, error) }
       return unwrapSessionAgentLaunchResult(result)
     },
@@ -429,8 +432,8 @@ const api: AgentMuxPreloadApi = {
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
     recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>

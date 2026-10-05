@@ -250,3 +250,41 @@
 .goals-continuation input { max-width: 100%; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-body); }
 .goals-continuation .selection-field { width: 220px; max-width: 100%; }
 .goals-continuation input { width: 72px; }
+
+.goals-common-properties { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-6); margin: var(--sp-3) 0 var(--sp-6); }
+.goals-common-properties label { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); min-width: 0; white-space: nowrap; }
+.goals-common-properties .selection-field { width: auto; max-width: 260px; }
+.goals-properties__groups { display: grid; gap: var(--sp-5); margin-top: var(--sp-5); }
+.goals-properties__groups fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.goals-properties__groups legend { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; padding: 0; }
+.goals-properties__groups .goals-properties__fields { margin-top: var(--sp-3); gap: var(--sp-3) var(--sp-6); }
+.goals-properties__references { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); overflow-wrap: anywhere; }
+.goals-properties__references > div { display: grid; gap: var(--sp-1); padding: var(--sp-3) 0; }
+.goals-properties__references strong { color: var(--text-2); font-weight: 500; }
+.goal-collaboration { padding: var(--sp-5) 0; border-top: 1px solid var(--line-soft); }
+.goal-collaboration .goals-section-heading { margin-bottom: var(--sp-4); }
+.goal-collaboration .goals-section-heading h2 { align-items: center; font-size: var(--fs-body); margin: 0; }
+.goal-collaboration__line { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; align-items: start; gap: var(--sp-4); margin-bottom: var(--sp-3); }
+.goal-collaboration__line > strong { padding-top: var(--sp-3); font-size: var(--fs-meta); font-weight: 500; color: var(--text-3); }
+.goal-collaboration__line > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); min-height: 28px; }
+.goal-collaboration__member { display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); max-width: 100%; color: var(--text-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; font: inherit; font-size: var(--fs-body); text-align: left; cursor: pointer; }
+.goal-collaboration__member:hover { background: var(--surface-1); border-color: var(--line-soft); }
+.goal-collaboration__member:disabled { opacity: 1; cursor: default; }
+.goal-collaboration__member > span:not(.goal-agent-face) { min-width: 0; overflow-wrap: anywhere; }
+.goal-collaboration__member small { display: block; color: var(--text-3); font-size: var(--fs-meta); }
+.goal-agent-face { display: inline-flex; flex: none; }
+.goal-collaboration__recommendations { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: var(--sp-3) 0 var(--sp-5) 84px; }
+.goal-collaboration__recommendations .goals-button { gap: var(--sp-3); }
+.goal-collaboration__assign { color: var(--text-2); font-size: var(--fs-meta); }
+.goals-topology { padding-top: var(--sp-4); }
+@media (max-width: 520px) {
+  .goals-common-properties { align-items: flex-start; gap: var(--sp-3); }
+  .goals-common-properties label:last-child { flex-basis: 100%; }
+  .goal-collaboration__line { grid-template-columns: 70px minmax(0, 1fr) auto; gap: var(--sp-2); }
+  .goal-collaboration__recommendations { margin-left: 0; }
+  .goal-collaboration .goals-section-heading { align-items: flex-start; flex-direction: column; gap: var(--sp-2); }
+}
+
+.goals-properties__groups .goals-properties__fields label { display: grid; grid-template-columns: 90px minmax(0, 1fr); justify-content: start; }
+.goals-properties__groups .goals-properties__fields input { max-width: 100%; width: 100%; box-sizing: border-box; }
+.goals-properties__groups .goals-properties__fields input[type=number] { width: 72px; }
