@@ -89,7 +89,7 @@ function startCli(directory: string, command: 'get' | 'watch') {
     frames, snapshots: () => frames().filter(frame => frame.method === 'system.subscription.event' && frame.params.event.type === 'snapshot'),
     errors: () => stderr.split('\n').filter(Boolean).map(line => JSON.parse(line)) }
 }
-async function registered() {
+async function registered(options: { rendererFailure?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'agentmux-metrics-main-'))
   fixture.directory = directory; fixture.handlers.clear(); fixture.ipc.listeners.clear()
   fixture.controlOptions = undefined
@@ -138,7 +138,15 @@ async function registered() {
     isLoadingMainFrame() { return this.loading }
     getOSProcessId() { return 300 }
     send(channel: string, value: unknown) {
-      if (channel === CONTROL_REQUEST_CHANNEL) { rendererReads++; fixture.rendererRequest?.(value) }
+      if (channel === CONTROL_REQUEST_CHANNEL) {
+        rendererReads++
+        if (options.rendererFailure) {
+          for (const accept of fixture.ipc.listeners.get(CONTROL_RESPONSE_CHANNEL) ?? []) accept({ sender }, {
+            requestId: (value as { requestId: string }).requestId, ok: false,
+            error: { code: 'CONTROL_UNAVAILABLE', message: 'Registered Renderer reader failed' }
+          })
+        } else fixture.rendererRequest?.(value)
+      }
       if (channel === CONTROL_CANCEL_CHANNEL) fixture.rendererCancel?.(value)
     }
   }()
@@ -165,6 +173,23 @@ async function registered() {
 }
 
 describe('registered Main metrics and actual CLI', () => {
+  it('binds an actual registered Renderer failure to its captured window through compiled CLI watch', async () => {
+    const f = await registered({ rendererFailure: true })
+    const watch = startCli(f.directory, 'watch')
+    await waitFor(() => {
+      const frames = watch.frames()
+      expect(frames.length).toBeGreaterThan(0)
+      const observations = frames.flatMap(frame => frame.result?.initial?.observation ? [frame.result.initial.observation]
+        : frame.params?.event?.type === 'snapshot' ? [frame.params.event.data] : [])
+      expect(observations.some(value => value.renderer.state === 'unavailable' && value.renderer.reason === 'Registered Renderer reader failed')).toBe(true)
+    })
+    expect(f.rendererReads).toBeGreaterThan(0)
+    expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+    watch.child.kill('SIGTERM')
+    await waitFor(() => expect(watch.closed).toBe(true))
+    await waitFor(() => expect(samplerState(f.sampler)).toEqual({ consumers: 0, timer: false }))
+    await record({ case: 'registered-renderer-failure-window', raw: watch.stdout, finalOwner: samplerState(f.sampler) })
+  })
   it('shares one nonempty sampler for two CLI watches, get and a later CLI watcher through two periods and releases to zero', async () => {
     const f = await registered()
     vi.useFakeTimers({ toFake: ['setInterval','clearInterval'] })
