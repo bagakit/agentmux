@@ -52,6 +52,7 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
+import { issueAgentCapability, hashAgentCapability } from '../../../packages/core/src/agent-capability'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { readFile } from 'node:fs/promises'
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
@@ -72,6 +73,8 @@ import { deliverContinuousProgress } from '../src/main/continuous-progress-deliv
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { GoalContinuationControl } from '../src/renderer/src/components/GoalContinuationControl'
+import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
+import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalAlignment'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/contracts'
@@ -85,9 +88,17 @@ beforeAll(async () => {
   cliRoot = await mkdtemp(join(tmpdir(), 'ag-goal-cli-')); sourceCli = join(cliRoot, 'agentmux.mjs')
   const repository = process.env.AGENTMUX_DAILY_GOAL_REPOSITORY!, proof = process.env.AGENTMUX_DAILY_GOAL_PROOF ?? process.env.AGENTMUX_GOAL_CONTENT_PROOF
   expect(repository).toBeTruthy()
-  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
-    plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {
+  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
+    plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => { contents: string; loader: 'ts' } | null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {
       if (proof && (args.path.startsWith(resolve(repository, 'packages/core/src') + '/') || args.path.startsWith(resolve(repository, 'packages/demand/src') + '/'))) appendFileSync(proof, JSON.stringify({ file: relative(repository, args.path), sha256: createHash('sha256').update(readFileSync(args.path)).digest('hex'), consumer: 'actual-source-cli' }) + '\n')
+      const mutant = process.env.AGENTMUX_DAILY_GOAL_MUTANT ? JSON.parse(process.env.AGENTMUX_DAILY_GOAL_MUTANT) : null
+      if (mutant && relative(repository, args.path) === mutant.file) {
+        const code = readFileSync(args.path, 'utf8')
+        if (code.split(mutant.before).length !== 2) throw new Error('One exact Source CLI mutant anchor is required')
+        const changed = code.replace(mutant.before, mutant.after)
+        if (proof) appendFileSync(proof, JSON.stringify({ file: mutant.file, beforeSha256: createHash('sha256').update(code).digest('hex'), afterSha256: createHash('sha256').update(changed).digest('hex'), consumer: 'actual-source-cli-mutant' }) + '\n')
+        return { contents: changed, loader: 'ts' }
+      }
       return null
     }) } }] })
 })
@@ -97,6 +108,7 @@ let demands: ReturnType<typeof openDemandStore>
 let directory: string, client: AgentMuxClient, runtime: RuntimeController, manager: ContinuousProgressLoopManager
 let disposeIpc: (() => Promise<void>) | undefined, disposeStore: (() => void) | undefined
 let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxStoredAgentSession
+let activityCapability: string
 let writes: string[], cursor: number | null, requests: any[], observations: string[], now: number
 let afterInputObservation: (() => Promise<void>) | undefined, corruptReply: boolean, dropReply: boolean
 let snapshot: Extract<SessionSnapshot, { kind: 'agent' }>, ended: boolean
@@ -113,9 +125,10 @@ beforeEach(async () => {
   writes = []; requests = []; observations = []; cursor = 0; now = 0; ended = false
   corruptReply = false; dropReply = false; afterInputObservation = undefined
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()
+  activityCapability = issueAgentCapability()
   session = { kind: 'agent', agentSessionId: 'progress-agent', hostId: 'local', providerId: 'codex', executorId: 'codex',
     workspacePath: scratchRoot, run: { runId: 'progress-run' }, retiredRuns: [], createdAt: timestamp, updatedAt: timestamp,
-    hookBindingId: 'owned-binding', hookToken: 'owned-token', semanticStatus: { state: 'done', source: 'native-hook',
+    hookBindingId: 'owned-binding', hookToken: 'owned-token', capabilityHash: hashAgentCapability(activityCapability), semanticStatus: { state: 'done', source: 'native-hook',
       observedAt: timestamp, stateEnteredAt: timestamp } }
   await store.compareAndSwap(null, session)
   client = new AgentMuxClient({ store }); const inner = client as any
@@ -165,7 +178,7 @@ beforeEach(async () => {
   }
   disposeIpc = await registerIpc({ window: { webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, progressLoops: manager, demands, configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: new ScratchTopics(), workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
@@ -194,6 +207,83 @@ afterEach(async () => {
 })
 
 const request = (operationId = 'original-start') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.start' as const, demandId: 'goal', sessionId: session.agentSessionId, continuation: { intervalMs: 60_000, alignmentRevision: 1 } })
+it('original activity public Source CLI authenticates the author and reaches Main owner and the same GoalDetail with recoverable operations', async () => {
+  await demands.addActivity('goal', { kind: 'note', message: 'Retained prior evidence', actorId: null, id: 'old-activity', createdAt: 1 })
+  const server = new PublicServer({ socketPath: join(directory, 'activity.sock'), coreClients: () => [{ hostId: 'local', client }], execute: (...args) => bridge.controlOptions.execute(...args) })
+  await server.start()
+  const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
+  const human = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  const execute = promisify(execFile), environment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
+    AGENTMUX_AGENT_SESSION_ID: session.agentSessionId, AGENTMUX_AGENT_CAPABILITY: activityCapability }
+  const run = async (args: string[]) => {
+    let response: any
+    await act(async () => {
+      try { response = JSON.parse((await execute(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, ...args], { env: environment, timeout: 15000 })).stdout) }
+      catch (error) { const output = (error as { stdout?: string; stderr?: string }).stdout || (error as { stderr?: string }).stderr; if (!output) throw error; response = JSON.parse(output) }
+    })
+    return response
+  }
+  const body = { goalId: 'goal', kind: 'review', message: 'The original public activity reaches the same Goal.', operationId: 'activity-original' }
+  function Consumer() {
+    const demand = useAppStore(state => state.demands.goal)!
+    return <GoalDetail demand={{ ...demand, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}}
+      acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />
+  }
+  try {
+    const help = (await execute(process.execPath, [sourceCli, 'goal', 'activity', 'append', '--help'], { env: environment })).stdout
+    expect(help).toContain('--operation-id'); expect(help).toContain('--message')
+    expect((await execute(process.execPath, [sourceCli, '--skill'], { env: environment })).stdout).toContain('goal activity inspect')
+    await act(async () => {
+      await useAppStore.getState().refreshDemand('goal')
+      root.render(<Consumer />)
+    })
+    let appended: any
+    await act(async () => { appended = await run(['goal', 'activity', 'append', '--goal', body.goalId, '--kind', body.kind, '--message', body.message, '--operation-id', body.operationId]) })
+    expect(appended.ok).toBe(true)
+    expect(appended.result.receipt).toMatchObject({ goalId: body.goalId, operationId: body.operationId, diskDurability: 'confirmed', replayed: false })
+    const activity = appended.result.activity
+    expect(activity).toMatchObject({ actorId: session.agentSessionId, operationId: body.operationId, kind: body.kind, message: body.message })
+    expect(activity.id).toBeTruthy(); expect(activity.createdAt).toBeGreaterThan(1)
+    expect(container.querySelector('.goals-activity')?.textContent).toContain(body.message)
+    expect(container.querySelector('.goals-activity')?.textContent).toContain('Retained prior evidence')
+    const revision = (await demands.snapshot()).revision
+    let replayed: any
+    await act(async () => { replayed = await typed.call('goal.activity.append', body) })
+    expect(replayed.activity).toEqual(activity); expect(replayed.receipt.replayed).toBe(true)
+    expect((await demands.snapshot()).revision).toBe(revision)
+    const inspected = await run(['goal', 'activity', 'inspect', '--goal', 'goal', '--operation-id', body.operationId])
+    expect(inspected.result).toEqual({ goalId: 'goal', operationId: body.operationId, activity, diskDurability: 'confirmed' })
+    const read = await run(['goal', 'activity', '--goal', 'goal'])
+    expect(read.result.diskDurability).toBe('confirmed')
+    expect(read.result.activity).toContainEqual({ goalId: 'goal', ...activity })
+    expect(read.result.activity).toContainEqual({ goalId: 'goal', id: 'old-activity', kind: 'note', message: 'Retained prior evidence', actorId: null, createdAt: 1 })
+    expect((await run(['goal', 'activity', '--goal', 'goal', '--since', String(activity.createdAt)])).result.activity).not.toContainEqual(expect.objectContaining({ id: 'old-activity' }))
+    expect((await typed.call('goal.inspect', { goalId: 'goal' })).goal?.activities).toContainEqual(activity)
+    await expect(typed.call('goal.activity.append', { ...body, message: 'Different payload' })).rejects.toThrow('different Goal, payload or authenticated author')
+    await expect(human.call('goal.activity.append', body)).rejects.toThrow('different Goal, payload or authenticated author')
+    await expect(typed.call('goal.activity.append', { ...body, actorId: 'another-agent' } as any)).rejects.toThrow('unsupported business field')
+    await expect(typed.call('goal.activity.append', { ...body, operationId: undefined } as any)).rejects.toThrow('explicit operationId')
+    expect((await typed.call('goal.activity.inspect', { goalId: 'goal', operationId: 'not-yet-recorded' })).activity).toBeNull()
+    const actualActivity = api.demands.activity
+    const lost = vi.spyOn(api.demands, 'activity').mockImplementationOnce(async (...args) => { await actualActivity(...args); throw new Error('Original activity receipt was lost') })
+    await expect(typed.call('goal.activity.append', { ...body, operationId: 'activity-lost', kind: 'test', message: 'Saved test evidence before receipt loss.' })).rejects.toThrow('receipt was lost')
+    lost.mockRestore()
+    const recovered = await typed.call('goal.activity.inspect', { goalId: 'goal', operationId: 'activity-lost' })
+    expect(recovered.activity).toMatchObject({ operationId: 'activity-lost', actorId: session.agentSessionId, kind: 'test' })
+    expect((await demands.get('goal'))?.activities.filter(row => row.operationId === 'activity-lost')).toHaveLength(1)
+    const reopened = openDemandStore({ root: join(directory, 'goals') })
+    expect(await reopened.inspectActivity('goal', body.operationId)).toMatchObject({ activity, diskDurability: 'confirmed' })
+    expect((await reopened.get('goal'))?.activities.some(row => row.id === 'old-activity')).toBe(true)
+    expect((await typed.call('app.snapshot', { include: ['goals', 'activity'] })).activity).toContainEqual({ goalId: 'goal', ...activity })
+    const failedDiskObservation = vi.spyOn(demands as any, 'confirmSnapshot').mockRejectedValue(new Error('Original activity disk confirmation is unavailable'))
+    await expect(typed.call('goal.activity', { goalId: 'goal' })).rejects.toThrow('disk confirmation is unavailable')
+    expect((await typed.call('goal.inspect', { goalId: 'goal' })).goal?.activities).toContainEqual(activity)
+    expect((await typed.call('goal.ls', {})).goals.find(row => row.id === 'goal')?.id).toBe('goal')
+    failedDiskObservation.mockRestore()
+    expect(writes).toEqual([]); expect(manager.list()).toEqual([])
+    expect(useAppStore.getState().sessions.find(row => row.id === session.agentSessionId)?.control.run).toEqual(session.run)
+  } finally { await typed.dispose(); await human.dispose(); await server.stop() }
+})
 async function start() { return useAppStore.getState().executeControl(request()) }
 function refuseImmediatePreparation() {
   return vi.spyOn((client as any).promptSubmission, 'qualifyInputTransport')
