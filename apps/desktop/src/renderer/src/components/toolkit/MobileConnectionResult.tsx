@@ -96,7 +96,7 @@ export function MobileConnectionResult({ active, close }: { active: boolean; clo
       <section className="phone-connection__devices" aria-label="Device status">
         <header><h3>Devices</h3><button type="button" className="performance-icon-button" aria-label="Refresh devices" title="Refresh devices" disabled={!canEvaluate} onClick={() => void refresh()}>{evaluating || refreshing ? <LoaderCircle size={14} className="toolkit-result__spinner" /> : <RefreshCw size={14} />}</button></header>
         {devices ? <><p className="phone-connection__device-summary">{devices.document.summary}<time dateTime={new Date(devices.at).toISOString()}>Checked {new Date(devices.at).toLocaleTimeString()}</time></p>
-          {devices.document.items.length ? <ul>{devices.document.items.map((device, index) => <li key={index}><Smartphone size={15} aria-hidden="true" /><span>{device.label}</span><small data-online={device.value === 'Online'}>{device.value}</small></li>)}</ul> : <p className="phone-connection__hint">No devices yet. Your phone will appear after connecting.</p>}
+          {devices.document.items.length ? <ul>{devices.document.items.map((device, index) => <li key={index}><Smartphone size={15} aria-hidden="true" /><span>{device.label}</span><small>{device.value}</small></li>)}</ul> : <p className="phone-connection__hint">Your phone appears here while connected.</p>}
           {devices.document.notice ? <details className="phone-connection__device-details"><summary>Connection information</summary><p>{devices.document.notice}</p></details> : null}
         </> : <p className="phone-connection__hint">{evaluating || reading.pending ? 'Checking connected devices…' : 'Refresh to check your connected devices.'}</p>}
       </section>

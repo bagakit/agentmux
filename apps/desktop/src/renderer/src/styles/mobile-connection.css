@@ -28,8 +28,7 @@
 .phone-connection__devices li { display:flex; align-items:center; gap:9px; padding:8px 0; }
 .phone-connection__devices li > svg { flex:none; color:var(--text-3); }
 .phone-connection__devices li > span { min-width:0; flex:1; overflow-wrap:anywhere; font-size:var(--fs-meta); line-height:1.4; }
-.phone-connection__devices li > small { flex:none; color:var(--text-3); font-size:var(--fs-meta); }
-.phone-connection__devices li > small[data-online=true] { color:var(--green); }
+.phone-connection__devices li > small { flex:none; max-width:52%; color:var(--text-2); font-size:var(--fs-meta); overflow-wrap:anywhere; text-align:right; }
 .phone-connection__device-details { margin:6px 0 0; color:var(--text-3); font-size:var(--fs-meta); line-height:1.5; }
 .phone-connection__device-details summary { padding:4px 0; cursor:pointer; }
 .phone-connection__service { margin:0 0 12px; padding:12px; border-radius:var(--radius-sm); background:color-mix(in srgb,var(--amber-text) 7%,var(--surface-2)); color:var(--text-2); font-size:var(--fs-meta); line-height:1.5; overflow-wrap:anywhere; }
