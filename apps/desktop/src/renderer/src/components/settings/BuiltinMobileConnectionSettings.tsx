@@ -1,3 +1,4 @@
+import { Textarea } from '@agentmux/client-ui/input'
 import { LockKeyhole, Smartphone } from 'lucide-react'
 import { useContext, useId, useState } from 'react'
 import { MOBILE_CONNECTION_STATUS_BAR_IDS, type MobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
@@ -39,6 +40,6 @@ export function BuiltinMobileConnectionSettings({ preferences, active, onSave }:
       <p className="toolkit-settings__locked"><LockKeyhole size={13} /><span>Official tool · Access is managed by this computer.</span></p>
     </section>
     <SettingsSaveBar save={save} dirty={draft.dirty} label="Save display preferences" onSave={() => void submit()} />
-    <section className="settings-group"><h3>Tool source</h3><p className="settings-hint">Read-only script bundled with the app. It uses the public API and keeps results in the Toolkit record.</p><div className="settings-pane-toolbar"><button className="small-button" onClick={() => { void api.toolkit.script(MOBILE_CONNECTION_TOOL_ID).then(value => { setSource(value.text); setSourceError('') }).catch(cause => setSourceError(presentError(cause))) }}>View script</button><button className="small-button" onClick={() => navigation?.open('devices')}>Manage phone and devices</button></div>{source && <textarea className="toolkit-result__script" aria-label="Official phone connection script" value={source} readOnly />}{sourceError && <p role="status">{sourceError}</p>}</section>
+    <section className="settings-group"><h3>Tool source</h3><p className="settings-hint">Read-only script bundled with the app. It uses the public API and keeps results in the Toolkit record.</p><div className="settings-pane-toolbar"><button className="small-button" onClick={() => { void api.toolkit.script(MOBILE_CONNECTION_TOOL_ID).then(value => { setSource(value.text); setSourceError('') }).catch(cause => setSourceError(presentError(cause))) }}>View script</button><button className="small-button" onClick={() => navigation?.open('devices')}>Manage phone and devices</button></div>{source && <Textarea className="toolkit-result__script" aria-label="Official phone connection script" value={source} readOnly />}{sourceError && <p role="status">{sourceError}</p>}</section>
   </div>
 }
