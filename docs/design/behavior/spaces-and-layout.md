@@ -280,6 +280,8 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 
 - Topic 条目的改名是对 `topic.md` 一级标题的语义编辑；`topic--*` 目录、`topicId`、Agent cwd 和 View 绑定保持稳定，Explorer 不向这些顶层目录暴露通用 Rename。
 
+- Topic 的「Reveal in Files」明确展开二级栏的 Files，并显示被操作 Topic 的原目录；从当前 Topic 定位另一 Topic 的文件时，只改变文件辅助区的范围，不切换当前讨论、Tab、Region、Session 或草稿。随后显式选择 Topic 时，文件区重新随该 Topic 显示。折叠只收起文件呈现，原目录能力与用户显式偏好仍保留。
+
 - **切 Topic 就换它的 Chat/Tab 工作面，和项目里选 Branch 是同一种体验。** Topic 是 Zone，选择具体 Topic 即打开该 Zone 的成员 Tabs；不能把 Topic 当成 Tab Group，或只切换共享 Scratch 的一个 Group。Group 只组织成员 Tabs 的展示布局，不决定 Topic 身份或成员；Tab 列表沿准确 Zone 成员筛选，同一 Zone 分布在不同 Group 的 Tabs 仍属于该 Topic，原准确展示绑定保留。当前 Topic 的原 Zone 成员、布局和全部合法绑定是投影来源，不建每 Topic 一份 UI Tab 状态。活动 Tab 要属于所选 Topic，不能以未绑定 Tab 仍可见为理由让切换无效。未绑定内容在 Scratch／Topics 总览的明确入口继续可达，不默认混入具体 Topic 或 Mote，也不因对象范围变化而删除、关闭或改绑。
 
 - **对象选择不能被局部落焦清掉。** 树、总览、恢复及公共导航进入具体 Topic/Mote 时都确认准确对象与原 Zone/Tab/Region 引用；在其工作面选择 Tab、Group、Region、编辑文件或继续输入，仍保当前对象范围。已有显式对象选择不被活动 Tab 的旧字段、资源 Workspace 或 cwd 覆盖；无显式范围的通用入口可由准确空间绑定定位，多个绑定返回候选。未绑定、失效或暂未知位置不等于用户选择了全局 Topics；保原对象、内容和服务窗，不退回全部 Scratch。
@@ -291,6 +293,7 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 - 二级菜单顶部提供 Topics／Knowledge 切换：Topics 为分类 Topic 目录，Knowledge 复用现有知识搜索与内容 owner：已选 Topic 时检索该 Topic，仅选 Category 且未选 Topic 时复用全局搜索并明确标为 All Topics。未输入查询不把全库搜索冒充知识列表，结果保准确来源 Topic；不声称未实现的分类检索范围。切换二级功能本身保检索输入和已确认结果、原 Topic、右侧工作面、草稿与执行焦点，不启动 Agent。层级、入口和密度只见[知识库呈现合同](../presentation/spaces-and-layout.md#topics-知识库的导航与内容层级)。
 - 一次点击只建立被点中 Topic 的这一次导航。首次显示可以复用该 Topic 原已选 Chat／Tab／Region；后续元数据读取、后台准备和恢复回执不能再把工作面切到另一个 Topic、Chat、Agent 或其他对象。Chat／Agent 的独立入口只响应自己的显式动作，不冒泡叠加 Topic 行的导航。
 - 已有持久化工作面应先可见；读取 Topic 元数据的流程不能挡住已存在 Tabs。读取失败或分类归属、准确工作面位置尚未确认时，保留原内容、工作面与健康 Run，明确说明失败或未知及恢复动作，不能清空 Tabs、猜另一个对象或另建 Session。
+- 分类描述的显式刷新复用原分类只读能力，只更新准确原分类的描述；不改变 Core 分类归属、当前选择或工作面。读取仍未知时保留原描述、目录及真实原因，迟到结果不能重放导航。
 - 用户随后选择 Category、Topic、Tab、Region 或其他工作面时，新导航优先；迟到的读取、准备或恢复结果可以更新同一对象已确认的事实，不能重放旧导航、夺回焦点。仍在同一 Workspace 不代表旧导航仍有效。
 - Leader Topic 浮层的后台准备不能抢普通 Topic 的导航焦点，也不能重复挂载其他 Topic 的终端；重启后保留原工作面。
 
