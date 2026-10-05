@@ -185,6 +185,18 @@
     "./toolkit-result-channel": {
       "types": "./dist/toolkit-result-channel.d.ts",
       "import": "./dist/toolkit-result-channel.js"
+    },
+    "./toolkit-performance-failure": {
+      "types": "./dist/toolkit-performance-failure.d.ts",
+      "import": "./dist/toolkit-performance-failure.js"
+    },
+    "./toolkit": {
+      "types": "./dist/toolkit.d.ts",
+      "import": "./dist/toolkit.js"
+    },
+    "./toolkit-result-document": {
+      "types": "./dist/toolkit-result-document.d.ts",
+      "import": "./dist/toolkit-result-document.js"
     }
   },
   "bin": {
