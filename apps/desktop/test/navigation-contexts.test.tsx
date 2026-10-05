@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { act, createElement } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '@agentmux/core'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => createElement('div', { 'data-navigation-agent-paint': '' }) }))
@@ -94,7 +95,7 @@ it('a floating Agent selection never changes the shared active Region or Work re
 it('selects a Goal only through a unique confirmed Work association and retains the previous Goal for missing or ambiguous links', async () => {
   choose('mixed', 'agent'); const id = useAppStore.getState().sessions[0]!.id
   const sample = (await api.demands.list())[0]!
-  const goal = { ...sample, id: 'linked', sessionIds: [id] }, second = { ...goal, id: 'other' }
+  const goal = { ...sample, source: 'default-topic' as const, id: 'linked', sessionIds: [id] }, second = { ...goal, id: 'other' }
   useAppStore.setState({ demands: { linked: goal } }); useAppStore.getState().setMainSurface('board')
   expect(useAppStore.getState().selectedDemandId).toBe('linked')
   useAppStore.setState({ selectedDemandId: 'original-goal', demands: { linked: goal, other: second } })
@@ -126,6 +127,51 @@ it('keeps Survey selection and semantic Agent history local through the actual S
   expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe('file')
 })
 
+it('keeps a real Survey Tab click local while retaining the original Work occurrence', async () => {
+  choose('mixed', 'file')
+  const before = useAppStore.getState(), work = before.workbenchSpaceSelection!
+  before.setSurveyZoneSelection({ zoneId: work.zoneId!, selection: [{ tabId: 'mixed', regionId: 'file' }], active: { tabId: 'mixed', regionId: 'file' } })
+  useAppStore.setState({ surveyCollectedZones: { [work.zoneId!]: true } })
+  before.setMainSurface('survey'); await mount()
+  const tab = host.querySelector<HTMLButtonElement>('.global-survey-surface button[data-workbench-tab-id="browser"]')
+  expect(tab).not.toBeNull()
+  await act(async () => tab!.click())
+  const after = useAppStore.getState()
+  expect(after.surveyZoneSelection?.active).toEqual({ tabId: 'browser', regionId: 'page' })
+  expect(after.workbenchSpaceSelection).toBe(work)
+  expect(after.mainSurface).toBe('survey')
+  expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts)
+  expect(after.agentFocus).toBe(before.agentFocus); expect(after.sessions).toBe(before.sessions)
+})
+
+it('keeps explicit public focus reachable from Survey without overwriting its local selection', async () => {
+  choose('mixed', 'file')
+  const before = useAppStore.getState(), work = before.workbenchSpaceSelection!
+  before.setSurveyZoneSelection({ zoneId: work.zoneId!, selection: [{ tabId: 'mixed', regionId: 'agent' }], active: { tabId: 'mixed', regionId: 'agent' } })
+  const survey = useAppStore.getState().surveyZoneSelection
+  before.setMainSurface('survey'); await mount()
+  let pending!: ReturnType<typeof before.executeControl>
+  await act(async () => {
+    pending = useAppStore.getState().executeControl(parseAgentMuxControlRequest({
+      schemaVersion: 5, requestId: 'survey-explicit-focus', operation: 'focus', inputPolicy: 'preserve',
+      target: { kind: 'space', tabId: 'launcher', regionId: 'start',
+        displayWorkspaceId: work.workspaceId, groupId: work.groupId! }
+    }))
+    await Promise.resolve()
+  })
+  const result = await pending
+  expect(result.operation).toBe('focus')
+  if (result.operation !== 'focus') throw new Error('Expected the original public focus result')
+  const { operation, ...body } = result
+  expect(parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: 'survey-explicit-focus', operation, ok: true, result: body })).toMatchObject({ result: body })
+  expect(result.navigation.state).toBe('applied')
+  expect(useAppStore.getState().mainSurface).toBe('workbench')
+  expect(useAppStore.getState().workbenchSpaceSelection).toEqual(expect.objectContaining({
+    workspaceId: work.workspaceId, groupId: work.groupId, tabId: 'launcher', regionId: 'start' }))
+  expect(useAppStore.getState().surveyZoneSelection).toBe(survey)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+})
+
 it.each(['survey', 'mote'] as const)('opens a directional HTTP link through the original %s owner without moving Work', async surface => {
   if (surface === 'mote') {
     seedMoteWorkface()
@@ -137,7 +183,8 @@ it.each(['survey', 'mote'] as const)('opens a directional HTTP link through the 
     : { workspaceId: before.activeWorkspaceId!, tabGroupId: 'exact-group', tabId: 'mixed', regionId: 'agent' }
   const reference = { displayWorkspaceId: origin.workspaceId, groupId: origin.tabGroupId, tabId: origin.tabId, regionId: origin.regionId }
   const tab = before.tabs[origin.tabId]!
-  const survey = { zoneId: work!.zoneId, selection: [{ tabId: origin.tabId, regionId: origin.regionId }], active: { tabId: origin.tabId, regionId: origin.regionId } }
+  expect(work?.zoneId).toBeTruthy()
+  const survey = { zoneId: work!.zoneId!, selection: [{ tabId: origin.tabId, regionId: origin.regionId }], active: { tabId: origin.tabId, regionId: origin.regionId } }
   useAppStore.setState({ mainSurface: surface === 'survey' ? 'survey' : 'agents', surveyZoneSelection: survey })
   const releaseMote = surface === 'mote' ? subscribePmoTeamsTopicFloatingState(() => {}) : () => {}
   if (surface === 'mote') requestPmoTeamsTopicFloatingOpen({ targetTabId: origin.tabId, reference })
@@ -158,7 +205,8 @@ it.each(['survey', 'mote'] as const)('opens a directional HTTP link through the 
 })
 it('keeps a later Survey selection even when it returns to the old Region before a Browser result', async () => {
   choose('mixed', 'file'); const state = useAppStore.getState(), work = state.workbenchSpaceSelection
-  const survey = { zoneId: work!.zoneId, selection: [{ tabId: 'mixed', regionId: 'agent' }], active: { tabId: 'mixed', regionId: 'agent' } }
+  expect(work?.zoneId).toBeTruthy()
+  const survey = { zoneId: work!.zoneId!, selection: [{ tabId: 'mixed', regionId: 'agent' }], active: { tabId: 'mixed', regionId: 'agent' } }
   useAppStore.setState({ mainSurface: 'survey', surveyZoneSelection: survey })
   let release!: () => void
   const wait = new Promise<void>(resolve => { release = resolve }), original = api.browser.create
