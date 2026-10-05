@@ -133,6 +133,6 @@ describe('File opening public CLI wire', () => {
     expect(help.stdout).toContain('actual File Region'); expect(help.stdout).toContain('default is background')
     const registered = AGENTMUX_CLI_COMMANDS.filter(command => command.method === 'file.open')
     expect(registered).toHaveLength(1); expect(registered[0]!.flags).toMatchObject({ '--tab': 'data', '--region': 'data', '--split': 'value' })
-    expect(AGENTMUX_CLI_SKILL).toContain('agentmux file open --path PATH --zone ZONE --tab TAB --region REGION --split right')
+    expect(AGENTMUX_CLI_SKILL).toContain('amux file open --path PATH --zone ZONE --tab TAB --region REGION --split right')
   })
 })

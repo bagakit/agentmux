@@ -53,6 +53,6 @@ describe('Executed search observations remain exact and separate from persistenc
       expect(() => parseTopicParams('topic.knowledge.history', p)).toThrow()
     expect(agentMuxCommandHelp('topic.knowledge.history')).toContain('--search UUID')
     expect(agentMuxCommandHelp('topic.knowledge.history')).toContain('No search or Agent execution')
-    expect(AGENTMUX_CLI_SKILL).toContain('agentmux topic knowledge history')
+    expect(AGENTMUX_CLI_SKILL).toContain('amux topic knowledge history')
   })
 })

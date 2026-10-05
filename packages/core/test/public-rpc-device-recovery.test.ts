@@ -35,7 +35,7 @@ describe('device recovery advice at the public client and CLI boundary', () => {
     expect(failure.code).toBe('CONTROL_UNAVAILABLE')
     expect(failure.message).toContain("Check this device's connection state")
     expect(failure.message).toContain('ask a local user')
-    expect(failure.message).not.toContain('Read agentmux device ls')
+    expect(failure.message).not.toContain('Read amux device ls')
     expect(failure.message).toContain('Never automatically replay a write')
     expect(requests).toBe(1)
   })
@@ -44,7 +44,7 @@ describe('device recovery advice at the public client and CLI boundary', () => {
     cleanup.push(() => rm(directory, { recursive: true }))
     const failure = await (await client({ transport: 'unix', path: join(directory, 'missing.sock') })).call('device.ls', {}).catch(error => error)
     expect(failure.code).toBe('CONTROL_UNAVAILABLE')
-    expect(failure.message).toContain('Read agentmux device ls')
+    expect(failure.message).toContain('Read amux device ls')
     expect(failure.message).toContain('Never automatically replay a write')
   })
   it('keeps remote device management rejected before any connection or submission', async () => {
@@ -90,12 +90,12 @@ describe('device recovery advice at the public client and CLI boundary', () => {
     const env: NodeJS.ProcessEnv = { ...process.env, AGENTMUX_RPC_HTTP_TOKEN: 'private-device-advice-fixture' }
     delete env.AGENTMUX_AGENT_SESSION_ID; delete env.AGENTMUX_AGENT_CAPABILITY
     const failure = await promisify(execFile)(process.execPath,
-      [new URL('../bin/agentmux', import.meta.url).pathname, '--endpoint', endpoint.url, 'device', 'hello', '--name', 'Device'], { env }).catch(error => error)
+      [new URL('../bin/amux', import.meta.url).pathname, '--endpoint', endpoint.url, 'device', 'hello', '--name', 'Device'], { env }).catch(error => error)
     expect(failure.code).toBe(1)
     const receipt = JSON.parse(failure.stderr)
     expect(receipt).toMatchObject({ ok: false, operation: 'device.hello', error: { code: 'CONTROL_UNAVAILABLE' } })
     expect(receipt.error.message).toContain('ask a local user')
-    expect(receipt.error.message).not.toContain('Read agentmux device ls')
+    expect(receipt.error.message).not.toContain('Read amux device ls')
     expect(requests).toBe(1)
   })
 })

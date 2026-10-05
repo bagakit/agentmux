@@ -58,7 +58,7 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
    return await executeSettingsResourcesControl(request, fixture.owner)
   }})
   await server.start()
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI',resolve('packages/core/bin/agentmux'))
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI',resolve('packages/core/bin/amux'))
   const found = await runCompiledObjectCli(['settings','prompts','inspect','--keyword','ok'],objectCliEnvironment(cliRoot))
   expect(found.code,found.stderr).toBe(0)
   expect(JSON.parse(found.stdout).result.item).toEqual({id:definition.id,value: expect.objectContaining({keyword:'ok',body:definition.body,reactionIcon:'message-circle'})})

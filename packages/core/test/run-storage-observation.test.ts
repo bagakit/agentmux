@@ -256,7 +256,7 @@ describe('exact storage owner through public Core, Hosted, RPC and compiled CLI'
     const parsed = await parseAgentMuxCliInvocation(args)
     expect(parsed.command.method).toBe('system.storage')
     expect(parsed.params).toEqual({ hostId: 'right', runId: originalRun })
-    for (const text of [AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL]) expect(text).toContain('agentmux system storage --host HOST --run RUN')
+    for (const text of [AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL]) expect(text).toContain('amux system storage --host HOST --run RUN')
     const cli = await runCompiledObjectCli(args, objectCliEnvironment(endpoint.root))
     expect(cli.code, cli.stderr).toBe(0)
     const receipt = objectCliReceipt(JSON.parse(cli.stdout.trim()))

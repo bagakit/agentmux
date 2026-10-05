@@ -33,11 +33,11 @@ describe('Topic typed public contract', () => {
     expect(() => parseTopicResult('topic.migrate.apply', { spatialRevision: 1, backupPath: null, migratedTopicIds: ['self'], diskDurability: 'confirmed' }, { expectedRevision: 0 })).toThrow()
   })
   it('discovers actual executable commands in help and skill without replacing Notebook capabilities', () => {
-    expect(AGENTMUX_CLI_SKILL).toContain('agentmux topic category create')
-    expect(AGENTMUX_CLI_SKILL).toContain('agentmux topic migrate preview')
-    expect(AGENTMUX_CLI_SKILL).toContain('agentmux notebook ls')
+    expect(AGENTMUX_CLI_SKILL).toContain('amux topic category create')
+    expect(AGENTMUX_CLI_SKILL).toContain('amux topic migrate preview')
+    expect(AGENTMUX_CLI_SKILL).toContain('amux notebook ls')
     expect(agentMuxCommandHelp('topic.move')).toContain('--revision NUMBER')
-    expect(AGENTMUX_CLI_SKILL).toContain('agentmux topic knowledge search')
+    expect(AGENTMUX_CLI_SKILL).toContain('amux topic knowledge search')
     expect(agentMuxCommandHelp('topic.knowledge.write')).toContain('--input FILE|-')
   })
   it('requires typed original sources, exact revisions and bounded scopes for knowledge writes and results', () => {
