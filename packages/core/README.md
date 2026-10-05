@@ -150,7 +150,7 @@ console.log(session.agentSessionId, creation.initialPrompt)
 
 空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的稳定身份与持久布局由 Core 的 Spatial owner 持有，client 持有可见表面与焦点；实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
 
-Agent 生命周期通过公开 Core API 和 `agentmux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 的退役事实与原恢复身份继续保留，不能因累计数量裁剪，也不能把旧 Run 再操作或投影成 Raw Terminal。
+Agent 生命周期通过公开 Core API 和 `amux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 的退役事实与原恢复身份继续保留，不能因累计数量裁剪，也不能把旧 Run 再操作或投影成 Raw Terminal。
 
 浏览器侧只需要 View 投影和 focus resolver 时，从 `@agentmux/core/runtime` 导入。只需要合并 Session Timeline snapshot 与 committed revision 时，从 `@agentmux/core/timeline` 导入。结构化回答的可用性判断从 `@agentmux/core/agent-interaction-state` 导入。这些子路径都不会加载 Agent Client、Hook Server、File Store 或 CtxMux Adapter 等 Node-only Runtime 模块。
 
@@ -173,7 +173,7 @@ await server.stop()
 await core.dispose()
 ```
 
-HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，每次 HTTP 请求都验证这个 token。Agent 的 Session capability 在所有传输中继续按同一业务合同验证，HTTP token不替代 Agent 身份。SSH 通过远端 `agentmux system endpoint --stdio` 转发到已有本地服务，不另起 Agent Run。
+HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，每次 HTTP 请求都验证这个 token。Agent 的 Session capability 在所有传输中继续按同一业务合同验证，HTTP token不替代 Agent 身份。SSH 通过远端 `amux system endpoint --stdio` 转发到已有本地服务，不另起 Agent Run。
 
 JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。
 

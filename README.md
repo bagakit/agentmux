@@ -82,24 +82,24 @@ try {
 
 ## CLI 使用
 
-CLI 按对象组织命令，与 client 消费同一 typed JSON-RPC 业务服务。先运行桌面或自己的服务宿主，确保 `agentmux` 可执行文件已进入当前环境，再发现实际资源：
+CLI 按对象组织命令，与 client 消费同一 typed JSON-RPC 业务服务。先运行桌面或自己的服务宿主，确保 `amux` 可执行文件已进入当前环境，再发现实际资源：
 
 ```sh
-agentmux --help
-agentmux --skill
-agentmux settings executors ls
-agentmux space ls
-agentmux agent ls
-agentmux app snapshot
+amux --help
+amux --skill
+amux settings executors ls
+amux space ls
+amux agent ls
+amux app snapshot
 ```
 
 下例中的 ID 用发现结果替换；`operation-id` 由调用者为这次操作生成并保留：
 
 ```sh
-agentmux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab \
+amux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab \
   --prompt '检查当前项目并给出修改建议' --operation-id '<operation-id>'
-agentmux agent inspect --session '<session-id>'
-agentmux agent send --to-session '<session-id>' --text '继续验证这项修改'
+amux agent inspect --session '<session-id>'
+amux agent send --to-session '<session-id>' --text '继续验证这项修改'
 ```
 
 使用创建回执返回的 Session 与空间地址，避免从名称或焦点猜目标。回执丢失时先查询原业务操作，不自动重建 Agent 或重发首任务。完整对象命令、错误与保存边界见[对象操作指南](docs/guides/agentmux-cli-object-control.md)，准确参数以执行版本的 `--help` / `--skill` 为准。
