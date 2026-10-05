@@ -19,8 +19,6 @@ import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAd
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
 import { SurveyStartBrand } from './SurveyStartBrand'
-import { SurveyPanelChoices } from './SurveyPanelChoices'
-import { groupIds, regionIds } from '@agentmux/layout'
 import { resolveWorkbenchZone } from '../lib/workbench-projection'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { SurveyItemOptions } from './SurveyItemOptions'
@@ -266,52 +264,27 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     return resolveWorkbenchZone(zoneId, catalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
   }
 
-  function itemReferences(zoneId: string) {
+  function newItemNote(zoneId: string) {
     const original = itemProjection(zoneId), state = useAppStore.getState()
-    const members = new Set(catalog?.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId))
-    const layout = original?.composition
-    const groups = new Set(layout ? groupIds(layout.root) : [])
-    return layout?.groups.filter(group => groups.has(group.id)).flatMap(group => group.tabOrder.filter(id => members.has(id)).flatMap(tabId => {
-      const tab = state.tabs[tabId]
-      return tab ? regionIds(tab.layout.root).filter(regionId => !!tab.regions[regionId]).map(regionId => ({ displayWorkspaceId: original!.displayWorkspaceId, groupId: group.id, tabId, regionId })) : []
-    })) ?? []
-  }
-
-  function newItemNote(zoneId: string, chosen?: WorkbenchProjectionSelection) {
-    const state = useAppStore.getState()
-    const candidates = itemReferences(zoneId).filter(reference => state.tabs[reference.tabId]?.regions[reference.regionId]?.kind === 'browser')
-    const active = selection?.zoneId === zoneId ? selection.active : null
-    const exact = chosen ?? active
-    const confirmed = exact ? candidates.find(reference => reference.displayWorkspaceId === exact.displayWorkspaceId && reference.groupId === exact.groupId && reference.tabId === exact.tabId && reference.regionId === exact.regionId) : undefined
-    const reference = confirmed ?? (!chosen && candidates.length === 1 ? candidates[0] : undefined)
-    if (!reference && !chosen && candidates.length > 1) { setLocationChoice({ kind: 'note', zoneId, choices: candidates }); return }
+    const active = state.surveyZoneSelection?.zoneId === zoneId ? state.surveyZoneSelection.active : null
+    const candidates = original?.selection.filter(reference => state.tabs[reference.tabId]?.regions[reference.regionId]?.kind === 'browser') ?? []
+    const reference = candidates.find(reference => reference.tabId === active?.tabId && reference.regionId === active.regionId) ?? candidates[0]
     const browser = reference ? state.tabs[reference.tabId]?.regions[reference.regionId] : null
-    if (!reference || browser?.kind !== 'browser') {
-      // An active Agent/File is not a Browser source; offer the original Browser choices instead.
-      if (!chosen && candidates.length) { setLocationChoice({ kind: 'note', zoneId, choices: candidates }); return }
-      setError('This item’s original browser source is not confirmed. Its work surface is kept; open the original page and retry.'); return
-    }
-    setLocationChoice(null)
+    if (!reference || browser?.kind !== 'browser') { setError('This item’s original browser source is not confirmed. Its work surface is kept; open the original page and retry.'); return }
     setRecallCapture({ draftId: `survey-new-note:${zoneId}:${browser.browserId}:${encodeURIComponent(browser.url)}`,
-      source: { sourceId: mintObjectId(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
+      source: { sourceId: crypto.randomUUID(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
         position: { zoneId, tabId: reference.tabId, regionId: reference.regionId } } })
   }
 
-  function newItemAgent(zoneId: string, chosen?: WorkbenchProjectionSelection) {
-    const before = useAppStore.getState(), zone = catalog?.zones.find(zone => zone.zoneId === zoneId)
-    const candidates = itemReferences(zoneId).filter(reference => before.layouts[reference.displayWorkspaceId]?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId)))
-    const groups = new Set(candidates.map(reference => JSON.stringify([reference.displayWorkspaceId, reference.groupId])))
-    const active = selection?.zoneId === zoneId ? selection.active : null
-    const exact = chosen ?? active
-    const confirmed = exact ? candidates.find(reference => reference.displayWorkspaceId === exact.displayWorkspaceId && reference.groupId === exact.groupId && reference.tabId === exact.tabId && reference.regionId === exact.regionId) : undefined
-    const reference = confirmed ?? (!chosen && groups.size === 1 ? candidates[0] : undefined)
-    if (!reference && !chosen && candidates.length) { setLocationChoice({ kind: 'agent', zoneId, choices: candidates }); return }
-    if (!zone || !reference) { setError('This item’s original display location is not confirmed. Its content is kept; restore that item and retry.'); return }
+  function newItemAgent(zoneId: string) {
+    const original = itemProjection(zoneId), before = useAppStore.getState()
+    const zone = catalog?.zones.find(zone => zone.zoneId === zoneId)
+    const reference = original?.selection.find(reference => reference.groupId === original.composition?.activeGroupId) ?? original?.selection[0]
+    if (!original || !zone || !reference) { setError('This item’s original display location is not confirmed. Its content is kept; restore that item and retry.'); return }
     const id = before.openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: reference.displayWorkspaceId,
       tabGroupId: reference.groupId, zoneId, reveal: false })
     const tab = id ? useAppStore.getState().tabs[id] : null
     if (!tab) { setError('The original Agent location is still restoring. Existing content is kept.'); return }
-    setLocationChoice(null)
     useLauncherState.getState().setSection(zone.workspaceId, 'agents', 'expanded')
     intent.current += 1
     setError(null)
@@ -369,8 +342,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           })}
         </div>
       </aside>
-      {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
-        onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : newItemAgent(locationChoice.zoneId, reference)} /> : null}
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><Plus size={16} /><span>New browser</span></button></div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}
         {currentBrowser && currentBrowser.url !== 'about:blank' && currentPanel ? <button type="button" className="survey-tab-view" aria-label="Save to Recall" title="Save this finding to Recall" onClick={saveToRecall}>
