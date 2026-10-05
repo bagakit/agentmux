@@ -45,4 +45,3 @@ export async function hookClientFixture(records: AgentMuxStoredAgentSession[]) {
   const events: AgentMuxClientEvent[] = []; client.onEvent(event => { events.push(event) })
   return { client, inner, store, events, replaceRuns: (value: CtxmuxAdapterRun[]) => { runs = value } }
 }
-
