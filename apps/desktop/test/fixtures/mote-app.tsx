@@ -53,6 +53,8 @@ export function createMoteApp() {
     prewarmTerminal: warm, detectExecutors: vi.fn(async () => {}), launchAgent: launch,
     send, stopSession: stop, enqueueAgentSteer: enqueue, reportError: vi.fn() })
   useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id)
+  // Fixture setup is not a human visit; tests explicitly admit navigation below.
+  useAppStore.setState({ recentMoteAgents: {} })
   const listTopics = vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(moteTopics)
   const ensureMote = vi.spyOn(api.scratch, 'ensureMote').mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id)!)
   vi.spyOn(api.scratch, 'readTopic').mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id) ?? null)
