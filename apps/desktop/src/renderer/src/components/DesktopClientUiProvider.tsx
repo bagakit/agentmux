@@ -55,7 +55,7 @@ const desktopPlatform: ClientUiPlatform = {
   renderMessageAvatar: input => <ConversationMessageAvatar {...input} />,
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
   renderProjectLabel: project => <SenderProject project={project} />,
-  renderIcon: (name, size) => <SemanticIcon name={name} size={size} />,
+  renderIcon: (name, size) => <SemanticIcon name={`status.${name}`} size={size} />,
   renderObjectLink: reference => <InlineObjectLink {...reference} />,
   renderMarkdownDiagram: ({ code, language, visible }) => <Suspense fallback={<span role="status">Preparing diagram…</span>}>
     {language === 'dot' || language === 'gv' ? <DotFilePreview content={code} visible={visible} />

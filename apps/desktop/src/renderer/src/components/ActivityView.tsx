@@ -1,6 +1,6 @@
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
-import { ArrowDown, ArrowLeft, ChevronRight, ChevronUp, FileText, Info, Pencil, Search } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
@@ -48,24 +48,33 @@ import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-m
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'
 
+const ThemeFileTextIcon = semanticIconComponent('file.text')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
+const ThemeActionCurrentIcon = semanticIconComponent('action.current')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+
+
 /**
  * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
  * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见 {@link ConversationMessage}），
  * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
  */
 function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind']; toolName?: string; size?: number }) {
-  if (kind === 'user_message') return <SemanticIcon name="user-message" size={size} />
-  if (kind === 'assistant_message') return <SemanticIcon name="assistant-message" size={size} />
+  if (kind === 'user_message') return <SemanticIcon name="conversation.user-message" size={size} />
+  if (kind === 'assistant_message') return <SemanticIcon name="conversation.assistant-message" size={size} />
   if (kind === 'tool_call') {
     const name = toolName?.toLowerCase()
-    if (name === 'bash' || name === 'shell' || name === 'exec_command' || name === 'run_command') return <SemanticIcon name="terminal" size={size} />
-    if (name === 'read' || name === 'read_file') return <FileText size={size} />
-    if (name === 'edit' || name === 'write' || name === 'write_file' || name === 'apply_patch') return <Pencil size={size} />
-    if (name === 'grep' || name === 'glob' || name === 'search') return <Search size={size} />
-    return <SemanticIcon name="tool-call" size={size} />
+    if (name === 'bash' || name === 'shell' || name === 'exec_command' || name === 'run_command') return <SemanticIcon name="object.terminal" size={size} />
+    if (name === 'read' || name === 'read_file') return <ThemeFileTextIcon size={size} />
+    if (name === 'edit' || name === 'write' || name === 'write_file' || name === 'apply_patch') return <ThemeActionEditIcon size={size} />
+    if (name === 'grep' || name === 'glob' || name === 'search') return <ThemeActionSearchIcon size={size} />
+    return <SemanticIcon name="conversation.tool-call" size={size} />
   }
-  if (kind === 'permission') return <SemanticIcon name="permission" size={size} />
-  return <SemanticIcon name="neutral" size={size} />
+  if (kind === 'permission') return <SemanticIcon name="status.permission" size={size} />
+  return <SemanticIcon name="status.neutral" size={size} />
 }
 
 /**
@@ -289,7 +298,7 @@ function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; ori
     ...(elapsed > 0 ? { elapsed: formatDuration(elapsed) } : {})
   }} expanded={open} onExpandedChange={setOpen}>
     {hiddenCount > 0 ? <button type="button" className="wf-observation__more" onClick={() => setShowAll(true)}>
-      <ChevronRight size={12} aria-hidden="true" />Show {hiddenCount} more recorded steps
+      <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />Show {hiddenCount} more recorded steps
     </button> : null}
     {items.map((item, index) => visible(item, index) ? <Row key={item.id} item={item} origin={origin}
       showSource={index === 0} workspaceRoot={workspaceRoot} /> : null)}
@@ -841,12 +850,12 @@ export function ActivityView({
       <div className="activity-feed__reading-entry">
         {readingWindow.hasMore ? (
           <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
-            onClick={readingWindow.readEarlier}><ChevronUp size={12} aria-hidden="true" />Earlier</button>
+            onClick={readingWindow.readEarlier}><ThemeNavigationUpIcon size={12} aria-hidden="true" />Earlier</button>
         ) : null}
         {readingWindow.hasEarlierNavigation || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? (
           <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
             aria-label="Current" title="Return to latest messages" onClick={readingWindow.showCurrent}>
-            <ArrowDown size={12} aria-hidden="true" />Current</button>
+            <ThemeActionCurrentIcon size={12} aria-hidden="true" />Current</button>
         ) : null}
         {conversationReading.nativeSourceFacts?.nativeConfirmation ? <>
           <span className="activity-feed__reading-status">{readingWindow.previousSource ? 'Previous native source' : 'Current native source'}</span>
@@ -857,7 +866,7 @@ export function ActivityView({
         </> : null}
         {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
           className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
-          onClick={conversationReading.onClose}><ArrowLeft size={12} aria-hidden="true" />Return</button> : null}
+          onClick={conversationReading.onClose}><ThemeNavigationBackIcon size={12} aria-hidden="true" />Return</button> : null}
         {readingAction}
       </div>
     </div>
@@ -1041,7 +1050,7 @@ export function ActivityView({
           if (event.currentTarget === observationRef.current) setObservationDisclosure({ sessionId, open: event.currentTarget.open })
         }}>
         <summary className="activity-feed__observation-source">
-          <ChevronRight size={12} aria-hidden="true" />
+          <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />
           <span>投递与运行详情</span>
           <span className="activity-feed__observation-count">· {observations.count} 项</span>
           {observations.failed > 0 ? <span className="activity-feed__observation-issue">{observations.failed} failed records</span> : null}

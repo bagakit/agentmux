@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Settings2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { autoUpdate, computePosition, offset, shift, size as floatingSize, type VirtualElement } from '@floating-ui/dom'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { AgentAvatarAppearance, AppConfig } from '../../../shared/contracts'
@@ -16,6 +16,10 @@ import { SettingsNavigation } from './SettingsNavigation'
 import { SemanticIcon } from './semantic-icons'
 import { describeAgentDisplayState } from '../../../shared/agent-state-presentation'
 import { getWindowOverlayHost } from './WindowOverlayHost'
+
+const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** Desktop presentation only; Core continues to own the Session and Provider facts. */
 export const ExecutorIdentityContext = createContext<{
@@ -52,7 +56,7 @@ function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, ti
         : <span className="agent-avatar__mark">{artwork}</span>}
     </span>
     {displayState === 'working'
-      ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
+      ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="status.working" size={10} strokeWidth={2.4} /></span>
       : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
     {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
   </>
@@ -352,7 +356,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       onPointerDown={() => { if (actionDisclosure) pinned.current = true }}
       onClick={(event) => event.stopPropagation()}>
       {disclosure ? disclosure.content : <><header><strong>{name}</strong><span className="agent-identity-popover__controls">{navigation && resolvedExecutorId ? <button type="button" className="icon-button" aria-label={`Edit ${executor?.label ?? name} executor`} title="Executor settings"
-        onClick={() => { closeNow(); navigation.open('agents', resolvedExecutorId) }}><Settings2 size={13} /></button> : null}{actionDisclosure ? <button type="button" className="icon-button" aria-label="Close Agent status" onClick={closeToTrigger}><X size={13} /></button> : null}</span></header>
+        onClick={() => { closeNow(); navigation.open('agents', resolvedExecutorId) }}><ThemeObjectSettingsIcon size={13} /></button> : null}{actionDisclosure ? <button type="button" className="icon-button" aria-label="Close Agent status" onClick={closeToTrigger}><ThemeActionCloseIcon size={13} /></button> : null}</span></header>
       {actionDisclosure ? actionDisclosure({ close: closeNow }) : <><dl><dt>Provider</dt><dd>{agentProviderLabel(provider ?? '')}</dd>
         {resolvedExecutorId ? <><dt>Executor</dt><dd>{executor?.label ?? resolvedExecutorId} · {resolvedExecutorId}</dd></> : null}
         {statusLabel ? <><dt>Status</dt><dd>{statusLabel}</dd></> : null}</dl>
