@@ -4935,8 +4935,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             // of its original Core input; failure cannot revoke that confirmed delivery.
             try {
               const reference = { goalId: demandId, operationId: businessOperationId }
-              const dispatch = await api.demands.inspectDispatch(reference)
-              if (dispatch && dispatch.stage !== 'confirmed') await api.demands.reconcileDispatch(reference)
+              let dispatch = await api.demands.inspectDispatch(reference)
+              if (dispatch && dispatch.stage !== 'confirmed') {
+                const receipt = await api.demands.reconcileDispatch(reference)
+                dispatch = receipt.demand.id === demandId ? receipt.demand.dispatches?.find(entry => entry.operationId === businessOperationId) ?? null : null
+              }
+              if (dispatch?.stage === 'confirmed') {
+                set(state => ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues).map(([id, queue]) => [id,
+                  queue.filter(entry => entry.goalDispatch?.goalId !== demandId || entry.goalDispatch.operationId !== businessOperationId)])) }))
+              }
             } catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'The original Loop input is confirmed. Its Goal dispatch record is unconfirmed; inspect the same operation without sending again.' }) }
             try { await get().refreshDemand(demandId) }
             catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'The original start is confirmed. Reading the current Goal is unconfirmed; its saved view and original receipt are retained. Refresh this same Goal to reconnect its latest state.' }) }

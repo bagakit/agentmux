@@ -13,7 +13,7 @@ import '../styles/goal-continuation.css'
 
 /** A thin original Goal caller, shared by Goal details and the Mote current-work surface. */
 export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor, active = true }: {
-  demand: DemandRecord; initialSessionId?: string; onRefresh?: () => void; onChooseSupervisor?: () => void; active?: boolean
+  demand: DemandRecord; onRefresh?: () => void; onChooseSupervisor?: () => void; active?: boolean
 }) {
   const execute = useAppStore(state => state.executeControl)
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
