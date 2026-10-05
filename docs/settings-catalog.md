@@ -9,10 +9,10 @@ Settings 的 Overview 是导航和已保存摘要，不另存配置。侧栏、�
 CLI 先发现实际支持的键，再按精确键修改：
 
 ```sh
-agentmux settings inspect
-agentmux settings inspect notes
-agentmux settings inspect goals.defaultView
-agentmux settings set goals.defaultView board
+amux settings inspect
+amux settings inspect notes
+amux settings inspect goals.defaultView
+amux settings set goals.defaultView board
 ```
 
 `settings inspect` 返回字段的当前有效值、默认值及适用的合法值，结果保持 `partial: true`：它是 scalar 偏好目录，不是整个 AppConfig 导出，也不包括全部资源或权限操作。表中的 **inspect / set** 均指这一对命令。领域前缀是否可查询由 [Main dispatcher](../apps/desktop/src/main/settings-control.ts) 明确接受；页面名称不能自动当作 CLI target，例如 Space 的密度键是 `projectRailDensity`，Prompts 使用资源命令。
