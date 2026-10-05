@@ -23,6 +23,7 @@ const observation: MetricsObservation = {
     { role: 'main', processCount: 1, cpuPercent: 3.1, rssKib: 131072 }, { role: 'renderer', processCount: 2, cpuPercent: 12.8, rssKib: 327680 },
     { role: 'gpu', processCount: 1, cpuPercent: 2.5, rssKib: 131072 }, { role: 'utility', processCount: 3, cpuPercent: 0, rssKib: 65536 }
   ] }), process: available(runs),
+  runTotals: { coverage: { trackedRuns: 8, observedRoots: 7, missingRoots: 1 }, processCount: null, cpuPercent: null, rssKib: null },
   runtime: available([{ hostId: 'local', resources: { observedAt: at - 60000, runCount: 11, runningRuns: 7, terminatedRuns: 4, terminatedUnattachedRuns: 2, attachments: 8, retainedOutputBytes: 3145728 },
     unavailable: null, process: { cpuPercent: null, rssKib: null, unavailable: 'Runtime does not publish its process identity.' },
     runtimeStorage: { path: _hygiene_fixturePath("Users/fixture/workspaces/editor/.runtime/history"), bytes: 1572864000 }, runtimeStorageUnavailable: null, runtimeStorageObservedAt: at - 60000 }], at - 60000),
@@ -32,7 +33,7 @@ const observation: MetricsObservation = {
 }
 export const performanceSnapshot: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
   startedAt: at - 47000, manual: false, consumerCount: 1, sequence: 1,
-  observation, trend: Array.from({ length: 48 }, (_, i) => ({ observedAt: at - (47 - i) * 1000,
+  document: null, observation, trend: Array.from({ length: 48 }, (_, i) => ({ observedAt: at - (47 - i) * 1000,
     appCpuPercent: i < 12 ? 3.2 + i % 4 : i < 24 ? 22 + i % 5 : i < 36 ? 11 + i % 3 : 18.4,
     appRssKib: 540672 + Math.floor(i / 6) * 16384 })) }
 export const performanceContexts = Object.fromEntries(runs.slice(0, 7).map((run, i) => [runKey(run), {

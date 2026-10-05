@@ -188,7 +188,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const observation = { schema: 'agentmux.metrics.v1', observedAt: 1,
       scope: { kind: 'unix-host', hostId: 'local', hostname: 'private-host', mainPid: 1 }, window: null,
       units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
-      diagnostics: pending, process: pending, app: pending, runtime: pending, main: pending, renderer: pending }
+      diagnostics: pending, process: pending, runTotals: null, app: pending, runtime: pending, main: pending, renderer: pending }
     const tool = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: 'TOOL',
       definition: { id: 'TOOL', revision: 'r', name: 'Fixture', icon: 'terminal', enabled: true,
         statusBar: 'icon', workspacePath: fixturePath("fixture"), script: "console.log('fixture')", args: [], actions: [] },

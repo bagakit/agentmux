@@ -20,6 +20,7 @@ function observation(): MetricsObservation {
     process: { state: 'available', observedAt: 900, lastSuccessAt: 900, reason: null,
       data: [{ runId: 'healthy-run', hostId: 'local', rootPid: 100, processCount: 1, cpuPercent: 2,
         rssKib: 42, rootRssKib: 42, descendantsRssKib: 0, descendantProcessCount: 0 }] },
+    runTotals: { coverage: { trackedRuns: 1, observedRoots: 1, missingRoots: 0 }, processCount: 1, cpuPercent: 2, rssKib: 42 },
     app: pending, runtime: pending, main: pending, diagnostics: pending, renderer: pending }
 }
 const cleanups: (() => Promise<void> | void)[] = []
@@ -275,6 +276,7 @@ describe('public metrics Control owner', () => {
     const tooLarge = observation()
     tooLarge.process.data = Array.from({ length: 4096 }, (_, i) => ({ ...observation().process.data![0]!,
       runId: `run-${i}-${'界'.repeat(4000)}`, hostId: `host-${'界'.repeat(2000)}` }))
+    tooLarge.runTotals = { coverage: { trackedRuns: 4096, observedRoots: 4096, missingRoots: 0 }, processCount: 4096, cpuPercent: 0, rssKib: 4096 }
     expect(parseMetricsObservation(tooLarge)).toBe(tooLarge)
     expect(Buffer.byteLength(JSON.stringify(tooLarge))).toBeGreaterThan(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
     const dispose = vi.fn()
