@@ -1,20 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
-import {
-  Check,
-  ChevronDown,
-  GitBranch,
-  FolderGit2,
-  GitCompareArrows,
-  LoaderCircle,
-  Pin,
-  Plus,
-  RefreshCw,
-  Search,
-  Unlink,
-  Workflow,
-  X
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   WorkspaceBranchesSnapshot,
@@ -48,6 +34,22 @@ import { BranchContextMenu } from './BranchContextMenu'
 import { BranchComparisonPanel } from './BranchComparisonPanel'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionPinIcon = semanticIconComponent('action.pin')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
+const ThemeActionUnlinkIcon = semanticIconComponent('action.unlink')
+const ThemeGitCompareIcon = semanticIconComponent('git.compare')
+const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionCreateWorktreeIcon = semanticIconComponent('action.create-worktree')
+
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -420,7 +422,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             onClick={() => void openBranch(branch)}
           >
             <SelectorRow
-              leading={busyBranch === branch.name ? <LoaderCircle className="spin" size={12} /> : pinned ? <Pin size={12} aria-label="Pinned branch" /> : <GitBranch size={12} />}
+              leading={busyBranch === branch.name ? <ThemeStatusLoadingIcon className="spin" size={12} /> : pinned ? <ThemeActionPinIcon size={12} aria-label="Pinned branch" /> : <ThemeObjectBranchIcon size={12} />}
               title={branch.name}
               titleTooltip={worktree ? `${branch.name} · ${displayPath(worktree, workspace.hostId)}` : branch.name}
               subtitle={worktree && worktree !== workspace.path ? pathSummary(worktree) : null}
@@ -445,7 +447,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                     aria-label={statusLabel}
                     title={statusLabel}
                   >
-                    {branch.isCurrent ? <Check size={12} aria-hidden="true" /> : worktree !== null ? <FolderGit2 size={13} aria-hidden="true" /> : <Unlink size={12} aria-hidden="true" />}
+                    {branch.isCurrent ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : worktree !== null ? <ThemeObjectRepositoryIcon size={13} aria-hidden="true" /> : <ThemeActionUnlinkIcon size={12} aria-hidden="true" />}
                   </span>
                 </>
               }
@@ -460,7 +462,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
             title={pinned ? 'Unpin branch' : 'Pin branch'}
             onClick={() => togglePinnedItem(pinScope, branch.name)}
           >
-            <Pin size={11} />
+            <ThemeActionPinIcon size={11} />
           </button>
         </div>
       </BranchContextMenu>
@@ -474,7 +476,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
         <div className="source-control-actions">
             {snapshot?.kind === 'git-repository' ? (
               <button type="button" title="Compare two local branches" aria-label="Compare two local branches" aria-pressed={comparisonOpen} onClick={() => setComparisonOpen((open) => !open)}>
-                <GitCompareArrows size={13} />
+                <ThemeGitCompareIcon size={13} />
               </button>
             ) : null}
             {/* Absent outside a git repository: a fan-out needs branches, and a button that could only fail
@@ -486,18 +488,18 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 aria-label="Fan out a prompt"
                 onClick={() => { setActionError(null); setFanOutOpen(true) }}
               >
-                <Workflow size={13} />
+                <ThemeObjectWorkflowIcon size={13} />
               </button>
             ) : null}
             <button type="button" title="Refresh branches" onClick={() => void refresh()} disabled={loading}>
-              {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+              {loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
             </button>
         </div>
       </header>
       {snapshot?.kind === 'git-repository' && !comparisonOpen ? (
         <div className="branch-search">
           <div className="branch-search__field">
-            <Search size={12} aria-hidden="true" />
+            <ThemeActionSearchIcon size={12} aria-hidden="true" />
             <TextInput
               ref={searchInput}
               type="search"
@@ -511,7 +513,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 else if (event.key === 'Escape' && (search.query.length > 0 || search.filter !== 'all')) { event.preventDefault(); clearSearch() }
               }}
             />
-            {search.query.length > 0 || search.filter !== 'all' ? <button type="button" aria-label="Clear branch search and filter" title="Clear search and filter" onClick={clearSearch}><X size={12} /></button> : null}
+            {search.query.length > 0 || search.filter !== 'all' ? <button type="button" aria-label="Clear branch search and filter" title="Clear search and filter" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}
           </div>
           <select aria-label="Filter branches" value={search.filter} onChange={event => updateSearch({ ...search, filter: event.target.value as BranchFilter })}>
             <option value="all">All branches</option>
@@ -527,13 +529,13 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
       <div ref={list} className="branches-scroll" hidden={comparisonOpen && snapshot?.kind === 'git-repository'} onKeyDown={navigateRows}>
         {bound.length > 0 ? <div className={`branch-group${worktreesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="worktrees">
           <button className="branch-group__heading" type="button" aria-expanded={worktreesExpanded} onClick={() => setWorktreesExpanded(expanded => !expanded)}>
-            <ChevronDown size={12} /><span>Worktrees</span><span className="branch-group__count">{bound.length}</span>
+            <ThemeNavigationDownIcon size={12} /><span>Worktrees</span><span className="branch-group__count">{bound.length}</span>
           </button>
           {worktreesExpanded && <div ref={worktreeRows} className="branch-group__rows">{pinFirst(bound).map(branchRow)}</div>}
         </div> : null}
         {unbound.length > 0 ? <div className={`branch-group${branchesExpanded ? ' branch-group--expanded' : ''}`} data-branch-group="branches">
           <button className="branch-group__heading" type="button" aria-expanded={branchesExpanded} title="Branches without a worktree" onClick={() => setBranchesExpanded(expanded => !expanded)}>
-            <ChevronDown size={12} /><span>Branches</span><span className="branch-group__count">{unbound.length}</span>
+            <ThemeNavigationDownIcon size={12} /><span>Branches</span><span className="branch-group__count">{unbound.length}</span>
           </button>
           {branchesExpanded && <div ref={branchRows} className="branch-group__rows">{pinFirst(unbound).map(branchRow)}</div>}
         </div> : null}
@@ -568,19 +570,19 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           >
             <form onSubmit={(event) => void createWorktree(event)}>
               <header>
-                <span><GitBranch size={16} /></span>
+                <span><ThemeObjectBranchIcon size={16} /></span>
                 <div>
                   <Dialog.Title>Create worktree</Dialog.Title>
                   <Dialog.Description>Bind this Branch to an isolated working directory.</Dialog.Description>
                 </div>
                 <Dialog.Close asChild>
                   <button type="button" className="icon-button" aria-label="Close create worktree dialog" disabled={busyBranch !== null}>
-                    <X size={14} />
+                    <ThemeActionCloseIcon size={14} />
                   </button>
                 </Dialog.Close>
               </header>
               <section className="branch-create-dialog__context">
-                <GitBranch size={13} />
+                <ThemeObjectBranchIcon size={13} />
                 <span><small>Branch</small><strong>{createBranch?.name}</strong></span>
               </section>
               <label>
@@ -598,7 +600,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                   <button className="small-button" type="button" disabled={busyBranch !== null}>Cancel</button>
                 </Dialog.Close>
                 <button className="primary-button" type="submit" disabled={!worktreePath.trim() || busyBranch !== null}>
-                  {busyBranch ? <LoaderCircle className="spin" size={12} /> : <Plus size={12} />}
+                  {busyBranch ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeActionCreateWorktreeIcon size={12} />}
                   {busyBranch ? 'Creating…' : 'Create Worktree'}
                 </button>
               </footer>
@@ -624,7 +626,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
           >
             <form onSubmit={(event) => void startFanOut(event)}>
               <header>
-                <span><GitCompareArrows size={16} /></span>
+                <span><ThemeGitCompareIcon size={16} /></span>
                 <div>
                   <Dialog.Title>Fan out a prompt</Dialog.Title>
                   <Dialog.Description>
@@ -633,7 +635,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                 </div>
                 <Dialog.Close asChild>
                   <button type="button" className="icon-button" aria-label="Close fan-out dialog" disabled={fanningOut}>
-                    <X size={14} />
+                    <ThemeActionCloseIcon size={14} />
                   </button>
                 </Dialog.Close>
               </header>
@@ -663,7 +665,7 @@ export function BranchesPanel({ workspace }: { workspace: WorkspaceRecord }) {
                   <button className="small-button" type="button" disabled={fanningOut}>Cancel</button>
                 </Dialog.Close>
                 <button className="primary-button" type="submit" disabled={!fanOutPrompt.trim() || fanningOut}>
-                  {fanningOut ? <LoaderCircle className="spin" size={12} /> : <GitCompareArrows size={12} />}
+                  {fanningOut ? <ThemeStatusLoadingIcon className="spin" size={12} /> : <ThemeGitCompareIcon size={12} />}
                   {fanningOut ? 'Starting…' : `Fan out ${fanOutCount} lanes`}
                 </button>
               </footer>

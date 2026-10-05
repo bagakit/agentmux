@@ -1,12 +1,16 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type RefObject } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { PanelRightOpen, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkspaceRecord } from '../../../../../shared/contracts'
 import type { GitHistoryCommit, GitHistoryRef, GitCommitSnapshot } from '../../../../../shared/git-contracts'
 import type { useGitHistory } from './useGitHistory'
 import { usePathDisplay } from '../../../hooks/usePathDisplay'
 import { speakerColorHue } from '../../../lib/conversation-avatar-color'
 import { useGitHistoryDetails } from './GitHistoryDetails'
+
+const ThemeLayoutOpenRightIcon = semanticIconComponent('layout.open-right')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 const ROW_HEIGHT = 24
 const LANE_WIDTH = 14
@@ -123,9 +127,9 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, onOpenRepo
         {history.reference && !history.refs.some(ref => ref.name === history.reference) && <option value={history.reference}>{history.reference.replace(/^refs\/(heads|remotes)\//u, '')}</option>}
       </select>
       {onOpenRepository && <button className="small-button git-history-open-repository" title="Open repository history" aria-label="Open repository history"
-        onClick={() => onOpenRepository()}><PanelRightOpen size={13} /><span>Repository history</span></button>}
+        onClick={() => onOpenRepository()}><ThemeLayoutOpenRightIcon size={13} /><span>Repository history</span></button>}
       <button className="icon-button" title="Refresh history" aria-label="Refresh history" disabled={!history.enabled || history.loading}
-        onClick={() => { void history.refresh() }}><RefreshCw size={13} /></button>
+        onClick={() => { void history.refresh() }}><ThemeActionRefreshIcon size={13} /></button>
     </div>
     {history.error && <div className="git-history-error" role="alert"><span>{history.error}</span>
       <button disabled={!history.enabled || history.loading} onClick={() => { void (ready?.nextCursor ? history.loadMore() : history.refresh()) }}>Retry</button>

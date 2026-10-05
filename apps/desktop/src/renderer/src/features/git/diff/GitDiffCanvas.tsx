@@ -1,7 +1,7 @@
 import '../../../monaco'
 import { useEffect, useId, useRef } from 'react'
 import * as monaco from 'monaco-editor'
-import { AlertTriangle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { GitFileDiff } from '../../../../../shared/git-contracts'
 
 export type GitDiffViewState = { loading: boolean; diff: GitFileDiff | null; error: string | null }
@@ -9,6 +9,9 @@ import type { MonacoThemeId } from '../../../lib/monaco-theme'
 import { diffEditorSides, wordWrapOption } from '../../../lib/editor-diff'
 import { FullPageLoadingSurface } from '../../../components/FullPageLoadingSurface'
 import { useEditorTypography } from '../../../hooks/useEditorTypography'
+
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+
 
 // Shared readonly canvas for worktree and fixed-commit diffs. Main owns the old/new sides; Monaco
 // owns diff rendering. Binary or oversized blobs never masquerade as two empty text documents.
@@ -37,7 +40,7 @@ export function GitDiffCanvas({
   if (diff.error && !diff.diff) {
     return (
       <section className="pane-state pane-state--error">
-        <AlertTriangle size={14} />
+        <ThemeStatusWarningIcon size={14} />
         <strong>Could not load diff</strong>
         <span>{diff.error}</span>
       </section>

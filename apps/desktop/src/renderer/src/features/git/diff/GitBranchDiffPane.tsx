@@ -1,4 +1,4 @@
-import { RefreshCw, WrapText } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect } from 'react'
 import { useMonacoTheme } from '../../../hooks/useMonacoTheme'
 import { detectLanguage } from '../../../lib/language-detect'
@@ -6,6 +6,10 @@ import type { GitDiffWorkbenchSurface } from '../../../lib/workbench-tabs'
 import { useAppStore } from '../../../store'
 import { EditorReleasedState } from '../../../components/EditorReleasedState'
 import { GitDiffCanvas } from './GitDiffCanvas'
+
+const ThemeActionWrapTextIcon = semanticIconComponent('action.wrap-text')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 export function GitBranchDiffPane({ surface, released = false, visible = true }: {
   surface: GitDiffWorkbenchSurface
@@ -41,10 +45,10 @@ export function GitBranchDiffPane({ surface, released = false, visible = true }:
         </span>
         <div className="editor-header__actions">
           <button className="small-button" aria-label="Toggle diff word wrap" aria-pressed={wordWrap} title="Toggle word wrap (Alt+Z)" onClick={toggleWordWrap}>
-            <WrapText size={13} /><span className="editor-header__label">Wrap</span>
+            <ThemeActionWrapTextIcon size={13} /><span className="editor-header__label">Wrap</span>
           </button>
           <button className="small-button" aria-label="Reload fixed diff" disabled={Boolean(diff?.loading)} title="Reread these fixed commits" onClick={() => void load(surface.regionId)}>
-            <RefreshCw size={13} /><span className="editor-header__label">{diff?.loading ? 'Loading…' : 'Reload'}</span>
+            <ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{diff?.loading ? 'Loading…' : 'Reload'}</span>
           </button>
         </div>
       </header>
