@@ -68,7 +68,16 @@ An empty scheme and option-looking scheme are literal values; use JSON for a sto
 that argv cannot represent, such as NUL. Forget removes the current choice, not a choice
 captured by an earlier list. An absent choice is unchanged and the next link asks again.
 Forgetting a remembered choice never expands browser access. There is no choice setter
-or bypass of a person's application-link choice. It does not establish human approval.`
+or bypass of a person's application-link choice. It does not establish human approval.
+
+Theme resources use settings themes ls / inspect / create / update / delete. The catalog includes
+readonly built-ins and issues for unsupported saved records; those records are retained. Choose an
+available ID using settings set appearance.themeId ID. A theme value is the complete versioned data
+without its envelope ID. Editing a built-in requires a custom. copy. Custom update requires
+{changes, expected: completeOriginalValue}; custom delete requires {expected: originalValue},
+including the original raw JSON for an unsupported record. Deleting the active custom theme
+returns atomically to the default and preserves application brightness and explicit Terminal colors.
+`
 
 export const AGENTMUX_TOOLKIT_GUIDE = `Create a saved local JavaScript ESM tool with a complete input such as:
   {"name":"Daily summary","icon":"terminal","workspacePath":"<WORKSPACE_DIRECTORY>",

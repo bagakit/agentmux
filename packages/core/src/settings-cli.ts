@@ -17,7 +17,7 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (args.length === 5 && !args[4]?.trim()) invalid('The original operation ID is required.')
     return { method: 'settings.set', params: { key: action, value: id, ...(args.length === 5 ? { operationId: args[4] } : {}) } }
   }
-  if (resource === 'executors' || resource === 'prompts') {
+  if (resource === 'executors' || resource === 'prompts' || resource === 'themes') {
     const method = `settings.${resource}.${action}`
     if (resource === 'executors' && action === 'discover' && args.length === 4 && id === '--host' && args[3]?.length) {
       return { method, params: { hostId: args[3], refresh: true } }
@@ -30,12 +30,12 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
       if (!args[3]?.length) invalid('An exact Prompt keyword is required.')
       return { method, params: { keyword: args[3] } }
     }
-    if (!id?.length) invalid('An exact resource ID is required.')
+    if (!(resource === 'themes' && action === 'delete' && typeof id === 'string') && !id?.length) invalid('An exact resource ID is required.')
     if (resource === 'executors' && action === 'refresh' && args.length === 5 && args[3] === '--host' && args[4]?.length) {
       return { method, params: { executorId: id, hostId: args[4] } }
     }
     if (action === 'inspect' && args.length === 3) return { method, params: { id } }
-    if (action === 'delete' && args.length === 3) return { method, params: { id } }
+    if (resource !== 'themes' && action === 'delete' && args.length === 3) return { method, params: { id } }
     if (!['create', 'update', 'delete'].includes(action ?? '') || args.length !== 5 || args[3] !== '--input') invalid('Use create/update/delete <id> --input <file|->.')
     const value = await input(args[4]!)
     if (action === 'create') return { method, params: { id, value } }

@@ -64,7 +64,7 @@ import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBro
 import { parseBrowserTargetsResult } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
-import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
+import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord, settingsResourceValue } from './settings-resource-json.js'
 import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote-context-observation.js'
@@ -939,7 +939,7 @@ function settingsFields(source: Record<string, unknown>, allowed: readonly strin
 }
 
 function resourceKind(value: unknown, code: string): AgentMuxControlSettingsResourceKind {
-  if (value !== 'executors' && value !== 'prompts') throw new AgentMuxError('Settings resource is invalid.', code)
+  if (value !== 'executors' && value !== 'prompts' && value !== 'themes') throw new AgentMuxError('Settings resource is invalid.', code)
   return value
 }
 
@@ -964,19 +964,28 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
       'A Prompt lookup requires either its exact ID or its keyword, never both.', code)
     request = { ...base, resource: 'prompts', operation, keyword: id(source.keyword, 'Prompt keyword is invalid.', code) }
   } else {
-    const resourceId = id(source.id, 'Settings resource ID is invalid.', code)
+    // A retained invalid record still needs an exact deletion target. No other action widens identities.
+    const rawRemoval = base.resource === 'themes' && operation === 'settings.resource.remove'
+    if (rawRemoval && (typeof source.id !== 'string' || Buffer.byteLength(source.id) > MAX_ID_BYTES)) throw new AgentMuxError('Retained resource identity is invalid.', code)
+    const resourceId = rawRemoval ? source.id as string : id(source.id, 'Settings resource ID is invalid.', code)
     if (operation === 'settings.resource.get') request = { ...base, operation, id: resourceId }
     else if (operation === 'settings.resource.add') {
       const value = settingsResourceRecord(source.value, code)
       if (Object.hasOwn(value, 'id')) throw new AgentMuxError('Resource ID must occur only in the envelope.', code)
       request = { ...base, operation, id: resourceId, value }
     } else {
-      const expected = Object.hasOwn(source, 'expected') ? { expected: settingsResourceRecord(source.expected, code) } : {}
-      if (operation === 'settings.resource.remove') request = { ...base, operation, id: resourceId, ...expected }
+      const expected = Object.hasOwn(source, 'expected') ? { expected: operation === 'settings.resource.remove' && base.resource === 'themes'
+        ? settingsResourceValue(source.expected, code) : settingsResourceRecord(source.expected, code) } : {}
+      if (operation === 'settings.resource.remove') {
+        if (base.resource === 'themes') request = { ...base, resource: 'themes', operation, id: resourceId, ...expected }
+        else request = { ...base, resource: base.resource, operation, id: resourceId,
+          ...(Object.hasOwn(source, 'expected') ? { expected: settingsResourceRecord(source.expected, code) } : {}) }
+      }
       else {
         const changes = settingsResourceRecord(source.changes, code)
         if (Object.keys(changes).length === 0) throw new AgentMuxError('Resource changes are empty.', code)
-        request = { ...base, operation: 'settings.resource.update', id: resourceId, changes, ...expected }
+        request = { ...base, operation: 'settings.resource.update', id: resourceId, changes,
+          ...(Object.hasOwn(source, 'expected') ? { expected: settingsResourceRecord(source.expected, code) } : {}) }
       }
     }
   }
@@ -985,10 +994,23 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
 }
 
 function resourceItem(value: unknown): AgentMuxControlSettingsResourceItem {
-  const code = 'CONTROL_PROTOCOL_ERROR', source = settingsResourceEnvelope(value, ['id', 'value'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', source = settingsResourceEnvelope(value, ['id', 'value', 'readonly'], code)
   const fields = settingsResourceRecord(source.value, code)
   if (Object.hasOwn(fields, 'id')) throw new AgentMuxError('Resource ID must occur only in the item envelope.', code)
-  return { id: id(source.id, 'Settings resource item ID is invalid.', code), value: fields }
+  if (source.readonly !== undefined && typeof source.readonly !== 'boolean') throw new AgentMuxError('Resource readonly metadata is invalid.', code)
+  return { id: id(source.id, 'Settings resource item ID is invalid.', code), value: fields,
+    ...(source.readonly === undefined ? {} : { readonly: source.readonly }) }
+}
+
+function resourceIssues(value: unknown): { id: string; message: string }[] {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const issues = settingsResourceValue(value, code)
+  if (!Array.isArray(issues)) throw new AgentMuxError('Resource issues are invalid.', code)
+  return issues.map(issue => {
+    const source = settingsResourceEnvelope(issue, ['id', 'message'], code)
+    if (typeof source.id !== 'string') throw new AgentMuxError('Resource issue identity is invalid.', code)
+    return { id: source.id, message: text(source.message, 'Resource issue message', code) }
+  })
 }
 
 function resourceReceipt(receipt: AgentMuxControlSuccessReceipt): AgentMuxControlSuccessReceipt {
@@ -1190,7 +1212,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], 'CONTROL_PROTOCOL_ERROR')
     const code = 'CONTROL_PROTOCOL_ERROR', resource = resourceKind(result.resource, code)
     if (operation === 'settings.resource.list') {
-      settingsResourceEnvelope(result, ['resource', 'items', 'partial'], code)
+      settingsResourceEnvelope(result, ['resource', 'items', 'partial', 'issues'], code)
       if (result.partial !== true || !Array.isArray(result.items) || Object.getPrototypeOf(result.items) !== Array.prototype ||
         Reflect.ownKeys(result.items).length !== result.items.length + 1) throw new AgentMuxError('Resource list is invalid.', code)
       const items = Array.from({ length: result.items.length }, (_, index) => {
@@ -1199,13 +1221,16 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
         return resourceItem(descriptor.value)
       })
       if (new Set(items.map(item => item.id)).size !== items.length) throw new AgentMuxError('Resource item IDs are not unique.', code)
-      return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { resource, items, partial: true } })
+      const issues = result.issues === undefined ? undefined : resourceIssues(result.issues)
+      return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+        result: { resource, items, partial: true, ...(issues === undefined ? {} : { issues }) } })
     }
     if (operation === 'settings.resource.remove') {
       settingsResourceEnvelope(result, ['resource', 'id', 'removed'], code)
       if (result.removed !== true) throw new AgentMuxError('Resource removal is invalid.', code)
       return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
-        result: { resource, id: id(result.id, 'Resource ID is invalid.', code), removed: true } })
+        result: { resource, id: resource === 'themes' && typeof result.id === 'string' && Buffer.byteLength(result.id) <= MAX_ID_BYTES
+          ? result.id : id(result.id, 'Resource ID is invalid.', code), removed: true } })
     }
     if (operation === 'settings.resource.get') {
       settingsResourceEnvelope(result, ['resource', 'item'], code)

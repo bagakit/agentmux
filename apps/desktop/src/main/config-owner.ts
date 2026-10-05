@@ -1,4 +1,5 @@
 import type { AppConfig } from '../shared/contracts.js'
+import { validateThemeConfigEdit } from './theme-config.js'
 import { applyConfigEdit } from '../shared/config-edit.js'
 import { configNameChanges, configNameValue, type NamedChange, type NameChangeAudit } from './name-change-audit.js'
 
@@ -38,6 +39,7 @@ export class ConfigOwner {
       let next: AppConfig
       try {
         const requested = apply(current)
+        validateThemeConfigEdit(current, requested)
         next = this.ports.prepare ? await this.ports.prepare(current, requested) : requested
       } catch (cause) {
         if (this.ports.nameAudit && intended.length) return await this.ports.nameAudit.run(intended,
