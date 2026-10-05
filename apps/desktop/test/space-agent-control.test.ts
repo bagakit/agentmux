@@ -44,7 +44,7 @@ beforeEach(async () => {
   localStorage.clear()
   useAppStore.setState({ ...initial, config: null, restoredWorkbench: null, spaceZoneBindings: {}, spatialRequests: {}, retainedSpatialFocus: null }, true)
   vi.spyOn(api.config, 'get').mockResolvedValue(structuredClone(config))
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
@@ -57,6 +57,7 @@ beforeEach(async () => {
   })
   vi.spyOn(api.spatial, 'onChange').mockImplementation(() => () => {})
   dispose = await useAppStore.getState().initialize()
+  expect(useAppStore.getState().config, useAppStore.getState().error ?? 'Store initialized without its configuration').not.toBeNull()
 })
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
 
@@ -382,19 +383,22 @@ describe('public Desktop spatial Control owner', () => {
     expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
   })
 
-  it('launches a selected remote Workspace below a local Region and retains its resource through display moves and operation readback', async () => {
+  it.each(['Group', 'Tab', 'Zone'] as const)('reads a remote split creation after reload and reports a later display move to another %s without replaying', async destination => {
     const local = createWorkbenchTab('local-tab', { kind: 'agent', phase: 'attached', regionId: 'local-region', workspaceId: 'repo', sessionId: 'local-agent' })
+    const sibling = createWorkbenchTab('sibling-tab', { kind: 'agent', phase: 'attached', regionId: 'sibling-region', workspaceId: 'repo', sessionId: 'sibling-agent' })
     useAppStore.setState({ config: { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'fixture.invalid' }],
       workspaces: [...config.workspaces, { id: 'remote-workspace', hostId: 'remote', name: 'Remote', path: _hygiene_fixturePath("remote/repo"), kind: 'folder' }] },
-      sessions: [agent('local-agent')], tabs: { [local.id]: local }, layouts: { repo: createWorkspaceLayout('local-group', [local.id]) } })
+      sessions: [agent('local-agent'), agent('sibling-agent')], tabs: { [local.id]: local, [sibling.id]: sibling },
+      layouts: { repo: createWorkspaceLayout('local-group', [local.id, sibling.id]) } })
+    const remoteAgent = (id: string): Extract<SessionSnapshot, { kind: 'agent' }> => ({ ...agent(id, _hygiene_fixturePath("remote/repo")), executorId: 'remote-only', hostId: 'remote',
+      control: { kind: 'agent', hostId: 'remote', agentSessionId: id, run: { runId: 'remote-run' } } })
     const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
-      const session = { ...agent(input.agentSessionId!, input.workspacePath), hostId: input.hostId,
-        control: { kind: 'agent' as const, hostId: input.hostId, agentSessionId: input.agentSessionId!, run: { runId: 'remote-run' } } }
-      return launch(session, input.createOperationId!)
+      return launch(remoteAgent(input.agentSessionId!), input.createOperationId!)
     })
-    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (hostId, id) => ({
-      ...agentCreationFixture({ ...agent(id, _hygiene_fixturePath("remote/repo")), hostId }), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' }
+    const creation = vi.spyOn(api.sessions, 'creation').mockImplementation(async (_hostId, id) => ({
+      ...agentCreationFixture(remoteAgent(id)), creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' }
     }))
+    const stop = vi.spyOn(api.sessions, 'stop'), write = vi.spyOn(api.sessions, 'write'), submit = vi.spyOn(api.sessions, 'submitPrompt')
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'remote-only', executionWorkspaceId: 'remote-workspace', prompt: 'once' },
       destination: { regionId: 'local-region', split: 'down' }, focus: false })
     const result = await useAppStore.getState().executeControl(input)
@@ -405,15 +409,57 @@ describe('public Desktop spatial Control owner', () => {
     expect(created.mock.calls[0]![0]).toMatchObject({ hostId: 'remote', workspacePath: _hygiene_fixturePath("remote/repo"), executorId: 'remote-only', prompt: 'once' })
     expect(created.mock.calls[0]![0]).not.toHaveProperty('forkSource')
     expect(useAppStore.getState().tabs[local.id]!.regions[result.to!.regionId]).toMatchObject({ workspaceId: 'remote-workspace' })
-    await control({ operation: 'space.mv', fromRegionId: result.to!.regionId, expectedAgentSessionId: result.agent!.agentSessionId,
-      destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other'), newTab: true }, focus: false })
+    const expectedAgent = { agentSessionId: result.agent!.agentSessionId, runId: 'remote-run', hostId: 'remote', cwd: _hygiene_fixturePath("remote/repo"),
+      executorId: 'remote-only', createOperationId: input.requestId, initialPrompt: 'confirmed' }
+    const before = { tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts }
+    const inspect = () => control({ operation: 'space.inspect', target: { requestId: input.requestId } })
+    expect(await inspect()).toMatchObject({ request: { known: true, report: { outcome: 'opened', to: result.to, agent: expectedAgent, issues: [] } } })
+    expect(await useAppStore.getState().executeControl(input)).toMatchObject({ outcome: 'opened', to: result.to, agent: expectedAgent, issues: [] })
+    expect(useAppStore.getState()).toMatchObject(before)
+
+    // Rehydrate the original operation and restore its real layout from the Core spatial owner.
+    const persisted = localStorage.getItem('agentmux-workbench-v1')!
+    const savedBinding = JSON.parse(persisted).state.spatialRequests[input.requestId]
+    expect(savedBinding).toMatchObject({ regionId: result.to!.regionId, target: { regionId: 'local-region', tabId: local.id, groupId: 'local-group' } })
+    expect(persisted).not.toContain('"prompt":"once"')
+    vi.mocked(api.config.get).mockResolvedValue(structuredClone(useAppStore.getState().config!))
+    vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: useAppStore.getState().sessions, timelines: {}, recoveryCandidates: [] })
+    dispose?.(); dispose = undefined
+    useAppStore.setState({ ...initial, config: null, restoredWorkbench: null, spatialRequests: {}, spaceZoneBindings: {}, retainedSpatialFocus: null }, true)
+    localStorage.setItem('agentmux-workbench-v1', persisted)
+    await useAppStore.persist.rehydrate()
+    dispose = await useAppStore.getState().initialize()
+    expect(useAppStore.getState().spatialRequests[input.requestId]).toEqual(savedBinding)
+    expect(useAppStore.getState().tabs[local.id]!.regions[result.to!.regionId]).toMatchObject({ workspaceId: 'remote-workspace', sessionId: result.agent!.agentSessionId })
+    expect(await inspect()).toMatchObject({ request: { known: true, report: { outcome: 'opened', to: result.to, agent: expectedAgent, issues: [] } } })
+    expect(await useAppStore.getState().executeControl(input)).toMatchObject({ outcome: 'opened', to: result.to, agent: expectedAgent, issues: [] })
+
+    if (destination === 'Group') useAppStore.getState().moveTabToNewGroup('repo', local.id, 'local-group', 'local-group', 'right')
+    else await control({ operation: 'space.mv', fromRegionId: result.to!.regionId, expectedAgentSessionId: result.agent!.agentSessionId,
+      destination: { zoneId: workspaceZoneId(directoryIdentity('local', destination === 'Tab' ? _hygiene_fixturePath("repo") : _hygiene_fixturePath("other")), destination === 'Tab' ? 'repo' : 'other'),
+        ...(destination === 'Tab' ? { groupId: 'local-group' } : {}), newTab: true }, focus: false })
     const moved = Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).find(surface => surface.kind === 'agent' && surface.sessionId === result.agent!.agentSessionId)
     expect(moved).toMatchObject({ workspaceId: 'remote-workspace' })
     useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace => workspace.id === 'remote-workspace' ? { ...workspace, path: _hygiene_fixturePath("later/changed") } : workspace) } }))
     useAppStore.setState({ sessions: [agent(result.agent!.agentSessionId, _hygiene_fixturePath("wrong-local-projection"))] })
-    await useAppStore.getState().executeControl(input)
+    const inspected = await inspect()
+    expect(inspected).toMatchObject({ request: { known: true, report: { outcome: 'unknown', agent: expectedAgent,
+      to: { regionId: result.to!.regionId }, issues: [{ code: 'SPACE_PLACEMENT_UNKNOWN' }] } } })
+    if (inspected.operation !== 'space.inspect') throw new Error('Wrong operation')
+    const current = inspected.request!.report!.to!
+    if (destination === 'Group') {
+      expect(current).toMatchObject({ ...result.to, groupId: expect.any(String) })
+      expect(current.groupId).not.toBe('local-group')
+    } else if (destination === 'Tab') {
+      expect(current).toMatchObject({ ...result.to, tabId: expect.any(String) })
+      expect(current.tabId).not.toBe(local.id)
+    } else expect(current).toMatchObject({ workspaceId: 'other', displayWorkspaceId: 'other' })
+    expect(await useAppStore.getState().executeControl(input)).toMatchObject({ outcome: 'unknown', to: current, agent: expectedAgent,
+      issues: [{ code: 'SPACE_PLACEMENT_UNKNOWN' }] })
     expect(creation).toHaveBeenCalledWith('remote', result.agent!.agentSessionId)
+    expect(creation.mock.calls.every(([hostId]) => hostId === 'remote')).toBe(true)
     expect(created).toHaveBeenCalledTimes(1)
+    expect(stop).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled()
   })
 
   it('refuses an unknown execution Workspace before layout, resource or creation side effects', async () => {
