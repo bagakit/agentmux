@@ -12,7 +12,7 @@ it('Vega and Vega-Lite use real parsers and CSP-safe headless runtime expression
   for (const [spec, mode] of [[vega, 'vega'], [lite, 'vega-lite']] as const) {
     let view: View | undefined, failure: unknown
     try {
-      view = new View(compileVegaRuntime(JSON.stringify(spec), mode), { expr: expressionInterpreter, renderer: 'none' })
+      view = new View(compileVegaRuntime(JSON.stringify(spec), mode).runtime, { expr: expressionInterpreter, renderer: 'none' })
       await view.runAsync()
       if (mode === 'vega') expect(view.signal('answer')).toBe(42)
       else expect(view.data('source_0')).toHaveLength(2)
@@ -23,6 +23,9 @@ it('Vega and Vega-Lite use real parsers and CSP-safe headless runtime expression
   }
   expect(() => compileVegaRuntime(JSON.stringify(lite), 'vega')).toThrow('schema')
   expect(() => compileVegaRuntime('{', 'vega')).toThrow()
+  expect(compileVegaRuntime(JSON.stringify({ ...vega, width: 420 }), 'vega').responsiveWidth).toBe(false)
+  expect(compileVegaRuntime(JSON.stringify({ ...lite, width: 'container' }), 'vega-lite').responsiveWidth).toBe(true)
+  expect(compileVegaRuntime(JSON.stringify({ ...vega, signals: [{ name: 'width', update: 'containerSize()[0]' }] }), 'vega').responsiveWidth).toBe(true)
 })
 
 it('owns persistent, terminatable dataflow workers and bridges only original loader requests and ordered input', async () => {
@@ -80,14 +83,16 @@ it('the actual worker runs official dataflow, emits SVG and finalizes the owned 
   vi.stubGlobal('OffscreenCanvas', class { getContext() { return { pixelRatio: 1, setTransform() {} } } })
   const engine = await import('vega'), finalize = vi.spyOn(engine.View.prototype, 'finalize')
   await import('../src/renderer/src/lib/file-formats/vega-chart.worker')
-  port.onmessage!({ data: { action: 'start', content: JSON.stringify({ $schema: 'https://vega.github.io/schema/vega/v6.json', signals: [{ name: 'answer', update: '40+2' }, { name: 'level', value: 2, bind: { input: 'range', min: 0, max: 5 } }, { name: 'measured', value: 0, on: [{ events: 'container:resize', update: 'containerSize()[0]' }] }], marks: [{ type: 'text', encode: { update: { text: { signal: "answer + ':' + level + ':' + measured" } } } }] }), mode: 'vega', serial: 1 } })
+  port.onmessage!({ data: { action: 'start', content: JSON.stringify({ $schema: 'https://vega.github.io/schema/vega/v6.json', width: 420, height: 220, signals: [{ name: 'answer', update: '40+2' }, { name: 'level', value: 2, bind: { input: 'range', min: 0, max: 5 } }, { name: 'measured', value: 0, on: [{ events: 'container:resize', update: 'containerSize()[0]' }] }], marks: [{ type: 'text', encode: { update: { text: { signal: "answer + ':' + level + ':' + measured" } } } }] }), mode: 'vega', serial: 1 } })
   for (let i = 0; i < 100 && !messages.some(message => message.snapshot || message.error); i++) await new Promise(resolve => setTimeout(resolve, 2))
   expect(messages.find(message => message.error)).toBeUndefined()
   expect(messages.find(message => message.snapshot)?.snapshot.svg).toContain('42:2:0')
+  expect(messages.find(message => message.snapshot)?.snapshot.width).toBe(420)
   port.onmessage!({ data: { action: 'signal', name: 'level', value: 4, serial: 2 } })
   await expect.poll(() => messages.some(message => message.snapshot?.svg.includes('42:4:0'))).toBe(true)
   port.onmessage!({ data: { action: 'resize', width: 333, height: 222, serial: 3 } })
   await expect.poll(() => messages.some(message => message.snapshot?.svg.includes('42:4:333'))).toBe(true)
+  expect(messages.filter(message => message.snapshot).at(-1)?.snapshot.width).toBe(420)
   port.onmessage!({ data: { action: 'signal', name: 'unknown', value: 1, serial: 4 } })
   await expect.poll(() => messages.some(message => message.error === 'Unknown chart signal binding.')).toBe(true)
   port.onmessage!({ data: { action: 'dispose', serial: 5 } })
