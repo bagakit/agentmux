@@ -49,7 +49,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         })
       } catch (error) {
         if (controller.signal.aborted) return
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '此设备授权已撤销；原会话和草稿保留。' }); return }
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '此设备的授权未通过确认；原会话和草稿保留。请重新确认设备授权后连接。' }); return }
         setConnection({ state: 'disconnected', message: `暂时无法连接，自动重试中；原会话与草稿保留。${error instanceof Error ? error.message : String(error)}` })
         timer = setTimeout(() => { void connect() }, Math.min(30000, 1000 * 2 ** Math.min(attempt++, 5)))
       } finally { working = false }

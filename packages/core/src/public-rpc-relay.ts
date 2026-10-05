@@ -46,7 +46,9 @@ export async function openAgentMuxRpcRelayRequest(options: AgentMuxRpcRelayOptio
     transport.onmessage?.({ data: event.data, isBinary: typeof event.data !== 'string' })
   })
   socket.addEventListener('close', event => {
-    finish(new AgentMuxError(event.code === 4003 ? '此设备的授权已撤销；原 Agent 会话保留。' : `Relay disconnected (${event.code}); original Sessions retained.`, event.code === 4003 ? 'AGENT_CAPABILITY_INVALID' : 'CONTROL_UNAVAILABLE'))
+    // A carrier close describes this connection, not the Host's durable
+    // capability state. Only an authenticated Host RPC reply can assert that.
+    finish(new AgentMuxError(`Relay disconnected (${event.code}); original Sessions retained.`, 'CONTROL_UNAVAILABLE'))
     transport.onclose?.(event.code, event.reason)
   })
   socket.addEventListener('error', () => finish(new AgentMuxError('Relay connection is unavailable. Original Sessions retained.', 'CONTROL_UNAVAILABLE')))

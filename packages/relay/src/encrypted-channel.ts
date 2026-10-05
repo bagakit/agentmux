@@ -391,34 +391,31 @@ export class EncryptedChannel {
     try {
       const ciphertext = await (async () => {
         // Handle (or ignore) any stray plaintext handshake traffic.
-        try {
-          if (message.isBinary) throw new Error("not plaintext handshake traffic");
-          const text = decodeTransportText(message.data);
-          if (text.trim().startsWith("{")) {
-            const parsed: unknown = JSON.parse(text);
-
-            if (isE2EEHelloMessage(parsed)) {
-              if (this.options.daemonKeyPair) {
-                await this.handleDaemonRehello(parsed);
-              }
-              return null;
-            }
-
-            if (isE2EEReadyMessage(parsed)) {
-              return null;
-            }
-
-            // Any other JSON-looking payload is plaintext app traffic, which
-            // means the peer is not encrypting (or we are out of sync).
-            throw new Error("Received plaintext frame on encrypted channel");
+        let parsed: unknown;
+        if (!message.isBinary) {
+          try {
+            const text = decodeTransportText(message.data);
+            if (text.trim().startsWith("{")) parsed = JSON.parse(text);
+          } catch {
+            // A decode/JSON failure can still be valid encoded ciphertext.
+            // Protocol rejection below is deliberately outside this catch.
           }
-        } catch (error) {
-          // If we detected plaintext protocol mismatch, fail hard.
-          if (error instanceof Error && error.message.includes("plaintext frame")) {
-            throw error;
+        }
+        if (parsed !== undefined) {
+          if (isE2EEHelloMessage(parsed)) {
+            if (this.options.daemonKeyPair) {
+              await this.handleDaemonRehello(parsed);
+            }
+            return null;
           }
-          // Otherwise ignore JSON parse/TextDecoder failures and fall back to
-          // decoding ciphertext below.
+
+          if (isE2EEReadyMessage(parsed)) {
+            return null;
+          }
+
+          // Any other JSON-looking payload is plaintext app traffic, which
+          // means the peer is not encrypting (or we are out of sync).
+          throw new Error("Received plaintext frame on encrypted channel");
         }
 
         if (this.options.binaryCiphertext) {
