@@ -303,14 +303,14 @@ describe('original immediate transport preparation', () => {
 
   it('keeps a claim already entering CAS frozen when protocol arrives before its persistence returns', async () => {
     const f = await fixture()
-    const cas = f.store.compareAndSwap.bind(f.store)
+    const cas = f.store.compareAndSwapMetadata.bind(f.store)
     let protocol: Promise<unknown> | undefined, frozen: unknown
-    f.store.compareAndSwap = async (expected, next) => {
+    f.store.compareAndSwapMetadata = async (expected, next, ...scope) => {
       if (!protocol && next?.agentSessionId === 'prepare' && next.promptCompletionAdmission?.frameRefresh) {
         frozen = structuredClone(next.promptCompletionAdmission)
         protocol = f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' })
       }
-      return await cas(expected, next)
+      return await cas(expected, next, ...scope)
     }
     try {
       const sent = f.submit().then(() => null, error => error)

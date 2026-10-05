@@ -363,9 +363,9 @@ describe('native asynchronous question facts and normal user replies', () => {
     expect(h.writes).toEqual([])
   })
   it('rejects a same-Run source replacement at the durable admission CAS and keeps manual input usable', async () => {
-    const h = await fixture(), original = h.store.compareAndSwap.bind(h.store)
+    const h = await fixture(), original = h.store.compareAndSwapMetadata.bind(h.store)
     let replaced = false
-    vi.spyOn(h.store, 'compareAndSwap').mockImplementation(async (...args) => {
+    vi.spyOn(h.store, 'compareAndSwapMetadata').mockImplementation(async (...args) => {
       if (!replaced && args[1]?.terminalPromptSubmission) {
         replaced = true
         const previous = (await loadAgentSessions(h.store))[0]!

@@ -16,7 +16,7 @@ import { ackDeliveryBatch, checkDeliveries, type DeliveryQueue } from '../src/ag
  * T-002 gate: typed prompt ingress has ONE delivery owner in Core, and the two facts the plan forbids
  * merging stay two facts.
  *
- * This file drives the REAL client (only ctxmux I/O faked) so the assertions are about behaviour, not a
+ * This file drives the REAL client (Runtime/Provider I/O faked) so the assertions are about behaviour, not a
  * source scan. The single-phase provider (TraeX) is enough for the ingress properties; the two-facts
  * separation is proven directly against the two owning modules.
  *
@@ -134,6 +134,32 @@ async function ingressClient(
   vi.spyOn(state.screenEvidence, 'wait').mockResolvedValue(0)
   ;(client as unknown as { connected: boolean }).connected = true
   return { ...daemon, client, store }
+}
+
+/** This ingress fixture supplies native target/completion facts; Core still owns the typed input. */
+function supplyTypedTarget(client: AgentMuxClient): void {
+  const provider = client.providers.get(client.agentSession(AGENT_SESSION_ID).providerId)
+  provider.discoverNativeSession = async () => ({ handle: { kind: 'provider', providerId: 'codex', sessionId: 'ingress-native-source' },
+    assertCurrent: async () => {} })
+  provider.prepareInteractionResponse = async (context, request, response) => ({
+    plan: provider.planInteractionResponse(request, response),
+    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
+      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'ingress-native-source', inputByte: context.inputByte,
+      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
+    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
+  })
+  ;(client as unknown as { screenEvidence: { currentCompleteFrame: () => unknown } }).screenEvidence.currentCompleteFrame = () => ({
+    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] }, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 })
+}
+
+async function completeTypedAnswer(client: AgentMuxClient): Promise<void> {
+  const pending = client.agentSession(AGENT_SESSION_ID).pendingInteraction!
+  expect(pending.response?.acknowledged).toBe(true)
+  await (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
+    receiptId: `completed-${pending.request.id}`, agentSessionId: AGENT_SESSION_ID, providerId: 'codex', runId: RUN_ID,
+    payload: { hook_event_name: 'PostToolUse', session_id: 'ingress-native-source', tool_name: 'exec_command', tool_call_id: pending.request.nativeToolCallId }
+  }, new AbortController().signal)
+  expect(client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
 }
 
 describe('typed prompt ingress has one delivery owner in Core', () => {
@@ -306,24 +332,36 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
     expect(fixture.writes).toEqual(['next\r'])
   })
 
-  it('revokes an old not_applied disposition before retry dispatch, preserving a later unknown intent', async () => {
-    const fixture = await ingressClient(), inner = fixture.client as unknown as Internals
-    const original = {...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'retry-disposition', prompt: 'kept input' }
-    inner.kernel.input = vi.fn()
-      .mockRejectedValueOnce(new AgentMuxError('Before dispatch', 'CTXMUX_INPUT_NOT_APPLIED', 'not_applied'))
-      .mockImplementationOnce(async () => {
-        expect(((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission)
-          .toMatchObject({ submissionId: original.operationId, notApplied: false })
-        throw new AgentMuxError('Native is still pending', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown')
-      })
-    await expect(fixture.client.submitAgentPrompt(original)).rejects.toThrow('Before dispatch')
-    await expect(fixture.client.submitAgentPrompt(original)).rejects.toThrow('Native is still pending')
+  it.each(['traex', 'codex'])('keeps a whole-input refusal final across same-operation and cold retries while new explicit input remains available (%s)', async providerId => {
+    const fixture = await ingressClient({ providerId, executorId: providerId }), inner = fixture.client as unknown as Internals
+    const original = { ...agentPromptCondition(fixture.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'refused-original', prompt: 'kept original input' }
+    const nativeInput = vi.fn().mockRejectedValueOnce(new AgentMuxError('Original Native refused before applying input', 'CTXMUX_INPUT_NOT_APPLIED', 'not_applied'))
+      .mockImplementation(fixture.input)
+    inner.kernel.input = nativeInput
+    await expect(fixture.client.submitAgentPrompt(original)).rejects.toThrow('Original Native refused')
+    const refused = await fixture.store.load()
+    await expect(fixture.client.submitAgentPrompt(original)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' })
+    expect(nativeInput).toHaveBeenCalledOnce(); expect(fixture.writes).toEqual([])
+    expect(await fixture.store.load()).toEqual(refused)
     expect(((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission)
-      .toMatchObject({ submissionId: original.operationId, acknowledged: false, notApplied: false })
-    const successor = await ingressClient({}, fixture.store, fixture)
-    await successor.client.submitAgentPrompt({ ...agentPromptCondition(successor.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
-      operationId: 'after-pending-retry', prompt: 'next', allowUncertainTurn: true })
-    expect(fixture.writes).toEqual(['kept input\r', 'next\r'])
+      .toMatchObject({ submissionId: original.operationId, acknowledged: false, notApplied: true })
+    const successor = await ingressClient({}, fixture.store, fixture), successorInput = vi.fn(fixture.input)
+    ;(successor.client as unknown as Internals).kernel.input = successorInput
+    await expect(successor.client.submitAgentPrompt(original)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' })
+    expect(successorInput).not.toHaveBeenCalled(); expect(fixture.writes).toEqual([])
+    // The next explicit intent is independent. Its lost ACK must stay unknown;
+    // the old negative cannot authorize a replacement or suppress receipt recovery.
+    const next = { ...agentPromptCondition(successor.client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'new-explicit-input', prompt: 'new explicit input', allowUncertainTurn: true }
+    expect(next.afterSubmissionId).toBe(original.operationId)
+    fixture.loseNextAck()
+    await expect(successor.client.submitAgentPrompt(next)).rejects.toThrow('Input response lost')
+    expect(((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission)
+      .toMatchObject({ submissionId: next.operationId, acknowledged: false })
+    expect(((await fixture.store.load())[0] as AgentMuxStoredAgentSession).promptCompletionAdmission?.notApplied).not.toBe(true)
+    await successor.client.submitAgentPrompt(next)
+    expect(fixture.writes).toEqual(providerId === 'codex' ? ['new explicit input', '\r'] : ['new explicit input\r'])
   })
 
   it('allows a second Core raw input and Hook while the first Core owns a Prompt', async () => {
@@ -532,6 +570,7 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
 
   it('lets an exact typed answer end the optional Prompt render observation in the same Core', async () => {
     const fixture = await ingressClient({ providerId: 'codex', executorId: 'codex' })
+    supplyTypedTarget(fixture.client)
     const inner = fixture.client as unknown as Internals
     let release!: () => void, started!: () => void, observation!: AbortSignal
     const entered = new Promise<void>(resolve => { started = resolve })
@@ -549,7 +588,7 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
       operationId: 'render-before-typed-answer', prompt: 'ordinary prompt' }).then(() => null, error => error)
     await entered
     const pending: AgentMuxPendingInteraction = { request: {
-      kind: 'permission', id: 'exact-typed-answer', agentSessionId: AGENT_SESSION_ID, title: 'Exact decision',
+      kind: 'permission', id: 'exact-typed-answer', nativeToolCallId: 'native-exact-typed-answer', agentSessionId: AGENT_SESSION_ID, title: 'Exact decision',
       options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }],
       evidence: { source: 'native-hook', observedAt: 200, run: { runId: RUN_ID }, hookReceiptId: 'exact-typed-answer' }
     } }
@@ -558,12 +597,12 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
     const answer = fixture.client.respondAgentInteraction({ agentSessionId: AGENT_SESSION_ID,
       expectedRun: { runId: RUN_ID }, response: { kind: 'permission', requestId: pending.request.id,
         decision: { outcome: 'selected', optionId: 'allow-once' } } }).then(() => null, error => error)
-    try { expect(observation.aborted).toBe(true) }
+    try { await vi.waitFor(() => expect(observation.aborted).toBe(true)) }
     finally { release(); await Promise.all([prompt, answer]) }
     expect(await prompt).toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
     expect(await answer).toBeNull()
     expect(fixture.writes).toEqual(['ordinary prompt', '1'])
-    expect(fixture.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    await completeTypedAnswer(fixture.client)
     expect((await fixture.status()).state).toEqual({ type: 'running' })
   })
 
@@ -573,9 +612,10 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
       const store = source === 'new message joins' ? new AgentMuxMemoryAgentSessionStore()
         : new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
       const fixture = await ingressClient({ providerId: 'codex', executorId: 'codex' }, store)
+      supplyTypedTarget(fixture.client)
       const inner = fixture.client as unknown as Internals
       const pending: AgentMuxPendingInteraction = { request: {
-        kind: 'permission', id: 'human-before-submit', agentSessionId: AGENT_SESSION_ID, title: 'Exact decision',
+        kind: 'permission', id: 'human-before-submit', nativeToolCallId: 'native-human-before-submit', agentSessionId: AGENT_SESSION_ID, title: 'Exact decision',
         options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }],
         evidence: { source: 'native-hook', observedAt: 200, run: { runId: RUN_ID }, hookReceiptId: 'human-before-submit' }
       } }
@@ -593,6 +633,7 @@ describe('typed prompt ingress has one delivery owner in Core', () => {
         expectedRun: { runId: RUN_ID }, response: { kind: 'permission', requestId: pending.request.id,
           decision: { outcome: 'selected', optionId: 'allow-once' } } })
       expect(fixture.writes).toEqual(['original payload', '1'])
+      await completeTypedAnswer(fixture.client)
       let rejectedSubmit = 0
       inner.kernel.input = async (runId: string, operation: Parameters<CtxmuxRunAdapter['input']>[1]) => {
         // The original submit has never entered Native. Its immutable range is now
