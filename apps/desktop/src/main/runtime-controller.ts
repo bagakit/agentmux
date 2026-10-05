@@ -768,28 +768,37 @@ export class RuntimeController {
         const agentSubjects = projection.subjects.filter((subject): subject is Extract<AgentMuxRuntimeSubject, { kind: 'agent' }> => (
           subject.kind === 'agent'
         ))
-        const timelineResults = await Promise.allSettled(agentSubjects.map(async (subject) => (
-          await client.sessionTimeline(subject.agentSession.agentSessionId)
-        )))
+        const timelineResults = await Promise.allSettled(agentSubjects.map(async (subject) => {
+          const timeline = await client.sessionTimeline(subject.agentSession.agentSessionId)
+          if (timeline.agentSessionId !== subject.agentSession.agentSessionId) {
+            throw new AgentMuxError(`Runtime snapshot returned a Timeline for another Session: ${timeline.agentSessionId}`, 'TIMELINE_IDENTITY_MISMATCH')
+          }
+          return timeline
+        }))
         const timelineEntries = timelineResults.flatMap((result, index) => {
           if (result.status === 'rejected') return []
           const agentSessionId = agentSubjects[index]!.agentSession.agentSessionId
-          if (result.value.agentSessionId !== agentSessionId) {
-            throw new Error(`Runtime snapshot returned a Timeline for another Session: ${result.value.agentSessionId}`)
-          }
           return [[agentSessionId, result.value] as const]
         })
         const failures = timelineResults.flatMap((result, index) => result.status === 'rejected'
           ? [{ agentSessionId: agentSubjects[index]!.agentSession.agentSessionId, reason: result.reason }]
           : [])
-        if (failures.length === 0) return { hostId, client, projection, timelineEntries }
+        if (failures.length === 0) return { hostId, client, projection, timelineEntries, timelineFailures: [] }
 
-        const refreshed = await client.runtimeProjection()
+        // Membership was already observed independently of these optional display reads.
+        // Recheck a possible removal, but another failed observation cannot revoke that cut.
+        let refreshed: Awaited<ReturnType<AgentMuxClient['runtimeProjection']>>
+        try {
+          refreshed = await client.runtimeProjection()
+        } catch {
+          return { hostId, client, projection, timelineEntries, timelineFailures: failures }
+        }
         const refreshedAgentIds = new Set(refreshed.subjects.flatMap((subject) => (
           subject.kind === 'agent' ? [subject.agentSession.agentSessionId] : []
         )))
-        const persistentFailure = failures.find((failure) => refreshedAgentIds.has(failure.agentSessionId))
-        if (persistentFailure) throw persistentFailure.reason
+        if (failures.every((failure) => refreshedAgentIds.has(failure.agentSessionId))) {
+          return { hostId, client, projection, timelineEntries, timelineFailures: failures }
+        }
         projection = refreshed
       }
     }))
@@ -815,9 +824,19 @@ export class RuntimeController {
         )
       }
     }
-    const sessions = projections.flatMap(({ hostId, client, projection }) => projection.subjects.map((subject) => (
-      projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client))
-    )))
+    const sessions = projections.flatMap(({ hostId, client, projection, timelineFailures }) => {
+      const failures = new Map(timelineFailures.map(failure => [failure.agentSessionId, failure.reason]))
+      return projection.subjects.map((subject) => {
+        const session = projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client))
+        if (session.kind !== 'agent' || !failures.has(session.id)) return session
+        const error = failures.get(session.id)
+        return { ...session, timelineObservation: {
+          run: { ...session.control.run },
+          code: error instanceof AgentMuxError ? error.code : 'TIMELINE_OBSERVATION_FAILED',
+          message: error instanceof Error ? error.message : String(error)
+        } }
+      })
+    })
     const recoveryCandidates = projections.flatMap(({ hostId, client, projection }) => {
       // 与 sessions 同一个取值口。这条出口此前自己抄了一遍那句 registry 查询——两个都在投影
       // `capabilities`、都该按 Session 自己的 providerId 取，却是两份各自可漂移的表达式。

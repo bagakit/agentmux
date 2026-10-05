@@ -1005,6 +1005,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
+      /** Desktop display-read failure on this exact Session/Run; never a Runtime availability fact. */
+      timelineObservation?: { run: AgentMuxRunRef; code: string; message: string }
       creation?: NonNullable<AgentMuxAgentSession['creation']>
       forkedFrom?: AgentMuxAgentSession['forkedFrom']
       /** Core-owned admission identity. null is confirmed empty; undefined is unknown. */

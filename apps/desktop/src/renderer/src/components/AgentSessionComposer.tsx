@@ -257,7 +257,9 @@ export function AgentSessionComposer({
   }
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
-    { message: lifecycleMessage, failure: lifecycleFailure })
+    { message: lifecycleMessage, failure: lifecycleFailure }).map(notice => notice.id === 'timeline-observation'
+      ? { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
+      : notice)
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
     step: 'A message tool action did not complete', mode: feedback.failure.message,
     restore: 'Your draft is kept. You can try the action again.'
