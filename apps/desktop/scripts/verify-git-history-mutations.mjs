@@ -2,8 +2,8 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 
 const main = 'packages/git/src/git-repository.ts'
 const preload = 'apps/desktop/src/preload/index.ts'
-const hook = 'apps/desktop/src/renderer/src/hooks/useGitHistory.ts'
-const panel = 'apps/desktop/src/renderer/src/components/GitHistoryPanel.tsx'
+const hook = 'apps/desktop/src/renderer/src/features/git/history/useGitHistory.ts'
+const panel = 'apps/desktop/src/renderer/src/features/git/history/GitHistoryPanel.tsx'
 
 // Import is the router's execution boundary, just like its other owned scopes.
 await verifyRendererSourceMutations({

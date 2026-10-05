@@ -1,7 +1,7 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
-const panel = 'apps/desktop/src/renderer/src/components/GitHistoryPanel.tsx'
-const details = 'apps/desktop/src/renderer/src/components/GitHistoryDetails.tsx'
-const hook = 'apps/desktop/src/renderer/src/hooks/useGitHistory.ts'
+const panel = 'apps/desktop/src/renderer/src/features/git/history/GitHistoryPanel.tsx'
+const details = 'apps/desktop/src/renderer/src/features/git/history/GitHistoryDetails.tsx'
+const hook = 'apps/desktop/src/renderer/src/features/git/history/useGitHistory.ts'
 await verifyRendererSourceMutations({
   name: ("git-history-scroll-hover-" + (globalThis.crypto.randomUUID()) + ""),
   tests: ['apps/desktop/test/git-history-scroll-hover.test.tsx'],
@@ -14,11 +14,12 @@ await verifyRendererSourceMutations({
     'apps/desktop/test/helpers/client-ui-render.tsx'],
   mutations: [
     { label: 'scroll-production-consumer', file: panel,
-      before: 'ready.nextCursor) void history.loadMore()', after: 'ready.nextCursor) void 0' },
+      before: 'ROW_HEIGHT * 8)) void history.loadMore()', after: 'ROW_HEIGHT * 8)) void 0' },
     { label: 'automatic-failure-retry', file: panel,
-      before: '!history.loading && !history.error && ready.nextCursor', after: '!history.loading && ready.nextCursor' },
+      before: 'history.loading || history.error || !ready?.nextCursor) return\n    if (view.scrollHeight',
+      after: 'history.loading || !ready?.nextCursor) return\n    if (view.scrollHeight' },
     { label: 'visible-owner-consumer', file: hook,
-      before: '    reference, enabled,\n    selectReference:', after: '    reference, enabled: true,\n    selectReference:' },
+      before: 'const enabled = visible && documentVisible', after: 'const enabled = true' },
     { label: 'explicit-retry-pinned-cursor', file: panel,
       before: 'ready?.nextCursor ? history.loadMore() : history.refresh()', after: 'history.refresh()' },
     { label: 'complete-parents', file: details,
