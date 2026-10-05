@@ -42,6 +42,38 @@ function element<T extends HTMLElement = HTMLElement>(selector: string, scope: P
 }
 
 describe('file Markdown outline', () => {
+  it('generates repeated heading anchors with linear membership work', () => {
+    const count = 2048
+    const originalHas = Set.prototype.has
+    let anchorChecks = 0
+    const membership = vi.spyOn(Set.prototype, 'has').mockImplementation(function (this: Set<unknown>, value: unknown) {
+      if (typeof value === 'string' && value.startsWith('headingperf')) anchorChecks++
+      return originalHas.call(this, value)
+    })
+    let parsed: markdown.MarkdownDocument
+    try { parsed = markdown.parseAgentMarkdownDocument('# headingperf\n'.repeat(count)) }
+    finally { membership.mockRestore() }
+    expect(parsed.headings).toHaveLength(count)
+    expect(parsed.headings[0]!.anchor).toBe('headingperf')
+    expect(parsed.headings[count - 1]!.anchor).toBe(`headingperf-${count - 1}`)
+    expect(anchorChecks).toBeGreaterThanOrEqual(count)
+    expect(anchorChecks).toBeLessThan(count * 4)
+  })
+
+  it('retains literal suffix collisions and outline navigation across fresh drafts', async () => {
+    const content = '# A\n# A\n# A-1\n# A\n# A-2\n# A-1\n# A\n\n[Last](#a-3)'
+    const anchors = ['a', 'a-1', 'a-1-1', 'a-2', 'a-2-1', 'a-1-2', 'a-3']
+    expect(markdown.parseAgentMarkdownDocument(content).headings.map(heading => heading.anchor)).toEqual(anchors)
+    await render(<AgentMarkdown documentMode outline content={content} />)
+    expect([...container.querySelectorAll('[data-md-anchor]')].map(node => node.getAttribute('data-md-anchor'))).toEqual(anchors)
+    await click(element('.md-outline__trigger'))
+    expect([...container.querySelectorAll('[data-md-outline-anchor]')].map(node => node.getAttribute('data-md-outline-anchor'))).toEqual(anchors)
+    await click(element('[data-md-outline-anchor="a-3"]'))
+    expect(document.activeElement).toBe(element('[data-md-anchor="a-3"]'))
+    await render(<AgentMarkdown documentMode outline content={'# A-1\n# A\n# A'} />)
+    expect([...container.querySelectorAll('[data-md-anchor]')].map(node => node.getAttribute('data-md-anchor'))).toEqual(['a-1', 'a', 'a-2'])
+  })
+
   it('reuses one document parse and projects labels only while open', async () => {
     const parse = vi.spyOn(markdown, 'parseAgentMarkdownDocument')
     const labels = vi.spyOn(markdown, 'markdownHeadingText')
