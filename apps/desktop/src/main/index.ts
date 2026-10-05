@@ -13,6 +13,7 @@ import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { CrashLog } from './crash-log.js'
 import { crashReporterOptions, registerCrashCapture } from './crash-capture-wiring.js'
+import { registerWorkbenchStartupCapture } from './workbench-startup-capture.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from './login-shell-environment.js'
@@ -248,10 +249,19 @@ function startPrimaryInstance(): void {
     }
     let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
+    const packageIdentity = await loadedPackage
+    const startupCapture = registerWorkbenchStartupCapture({
+      contents: window.webContents, preloadPath: join(import.meta.dirname, '../preload/index.cjs'),
+      origin: () => appOrigin, activeAttempt: () => updateReady?.token ?? null,
+      startupAttemptId, pid: process.pid, appVersion: app.getVersion(), packageIdentity,
+      sink: record => crashLog.append(record)
+    })
+    window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks,
-      loadedPackage: await loadedPackage, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
-      onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
+      loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
+      onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
+      onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')
     if (process.env.ELECTRON_RENDERER_URL) { reportStartupStage('before-load-url'); await window.loadURL(process.env.ELECTRON_RENDERER_URL); reportStartupStage('after-load-url') }
     else {

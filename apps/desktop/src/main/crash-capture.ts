@@ -11,12 +11,16 @@
  */
 
 /** 四类事后可见的崩溃来源。渲染进程与子进程崩溃走 Electron 的 app 事件，未捕获异常/拒绝走 process。 */
+import type { DesktopPackageIdentity } from '../shared/client-observation.js'
+import type { WorkbenchStartupError } from '../shared/workbench-startup-failure.js'
+
 export type CrashKind =
   | 'uncaught-exception'
   | 'unhandled-rejection'
   | 'render-process-gone'
   | 'child-process-gone'
   | 'startup-failure'
+  | 'workbench-startup-failure'
   | 'quit-disposal-failure'
 
 /**
@@ -54,6 +58,9 @@ export type CrashEventInput =
       pid: number
     }
   | { kind: 'quit-disposal-failure'; error: unknown; appVersion: string; pid: number }
+  | { kind: 'workbench-startup-failure'; event: string; error: WorkbenchStartupError;
+      phase: 'preload' | 'document' | 'renderer-bootstrap'; attemptId: string; startupAttemptId: string;
+      appVersion: string; pid: number; rendererPid: number | null; packageIdentity: DesktopPackageIdentity | null }
 
 /**
  * 归一后的崩溃记录。summary 是一眼能读懂的一句话，detail 承载栈或 URL 这种可能很长、也可能没有的补充。
@@ -70,6 +77,11 @@ export type CrashRecord = {
   appVersion?: string
   pid?: number
   recoverable?: boolean
+  sourceEvent?: string
+  startupAttemptId?: string
+  rendererPid?: number | null
+  packageIdentity?: DesktopPackageIdentity | null
+  errorCode?: string
 }
 
 function messageOf(value: unknown): string {
@@ -167,6 +179,17 @@ export function crashRecordFrom(input: CrashEventInput, nowMs: number): CrashRec
         appVersion: input.appVersion,
         pid: input.pid
       }
+    case 'workbench-startup-failure': {
+      // Do not serialize cause/reason objects or navigation query/hash values.
+      const safeText = (text: string): string => text.replace(/(?:file|https?):\/\/[^\s)]+/g, url => url.split(/[?#]/, 1)[0] ?? '')
+      const record = buildRecord(at, input.kind, `${input.event}: ${input.error.name}: ${safeText(input.error.message)}`,
+        input.error.stack === undefined ? undefined : safeText(input.error.stack))
+      return { ...record, sourceEvent: input.event, phase: input.phase, attemptId: input.attemptId,
+        startupAttemptId: input.startupAttemptId, appVersion: input.appVersion, pid: input.pid,
+        rendererPid: input.rendererPid,
+        packageIdentity: input.packageIdentity && Buffer.byteLength(JSON.stringify(input.packageIdentity)) <= SUMMARY_MAX_BYTES ? input.packageIdentity : null,
+        ...(input.error.code ? { errorCode: clampField(input.error.code, 256) } : {}) }
+    }
     case 'startup-failure': {
       const record = buildRecord(at, input.kind, `startup ${input.phase}: ${messageOf(input.error)}`, stackOf(input.error))
       return {

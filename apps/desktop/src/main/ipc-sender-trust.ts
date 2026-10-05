@@ -82,6 +82,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:requestStorageFlush': 'storage flush',
   'ui:writeClipboardImage': 'clipboard image',
   'ui:rendererUpdateReady': 'renderer update',
+  'ui:recordStartupFailure': 'Workbench startup diagnostic',
   'ui:spatialLinksReady': 'spatial link readiness',
   'ui:openObjectLink': 'object link navigation',
   'ui:captureScreenshot': 'screenshot',

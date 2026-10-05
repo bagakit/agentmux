@@ -1648,6 +1648,8 @@ export type AgentMuxDesktopApi = {
     /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
+    /** Best-effort observation of this Workbench's original startup error; no lifecycle effect. */
+    recordStartupFailure(input: import('./workbench-startup-failure').WorkbenchRendererStartupFailure): Promise<boolean>
     spatialLinksReady(): Promise<void>
     /** Submit an internal object-link intent; later navigation issues use onSpatialLinkIssue. */
     openObjectLink(url: string): Promise<void>
