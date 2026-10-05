@@ -369,7 +369,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 - 原日志的持久化形态切换沿原跨进程排他进行，保留完整原始字节的内容寻址归档及全部消息、条件、游标与监督事实；确认完整事务后才原子发布到原路径。切换或提交失去确认时保留实际阶段与未知结果，重开在原身份对账，不重复导入、双写或静默忽略切换后原路径的替换。历史归档不成为另一套当前读写来源。
 - **身份授权必须在 Core 里完成，不能把 `AGENTMUX_AGENT_SESSION_ID` 或 Control caller 字段当凭证。** 受管 Agent 的 send 必须携带当前 Run 的 invocation capability，由 Core 核对 capability hash、Session 和 Run；没有 capability 或 capability 属于旧 Run 的请求必须拒绝，健康 Agent 仍可继续工作。
 - **队列写入必须能从写入者崩溃中恢复，且回收不能碰掉新写入者。** 同一路径的跨进程排他性以系统可随进程退出释放的事务锁为准；遗留的孤儿 `.lock` 文件不得阻断新写入。并发恢复后每条消息仍只能占一个唯一、连续的顺序号，健康 Agent 不能永久收到 backpressure。
-- **相同 `messageId` 是重试的幂等身份，跨新的 Control request/operation 与 createdAt 仍返回原 receipt；冲突正文、目标或来源必须拒绝。** Region/Tab 只是寻址输入，落盘 envelope 和收件信封必须写入解析后的真实 recipient Session/Run。
+- **相同 `messageId` 是重试的幂等身份，跨新的 Control request/operation 与 createdAt 仍返回原 receipt；冲突正文、目标或来源必须拒绝。** A2A 的 Prompt 投递身份沿原 `messageId`，只换 Control `operationId` 不构成新消息；整条逻辑操作完全未应用的终局判定沿上文[跨重启的 Prompt 投递凭据](#跨重启的-prompt-投递凭据)。对这条已拒绝消息的新明确重投使用新的 `operationId` 与 `messageId`，按真实目标建立首次条件，保留原消息与回执；普通 CLI 未指定这两项时由原入口生成，不另设恢复命令。unknown/partial 不能借新 ID 重投，不限制独立的新消息。Region/Tab 只是寻址输入，落盘 envelope 和收件信封必须写入解析后的真实 recipient Session/Run。
 - `amux agent send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
 - 全局消息队列由 AgentMux Core 独占持有。消息记录 append-only 且不可变，至少保留 `messageId`、版本化 A2A envelope、`createdAt`、sender/recipient、workspace/session/run 关联、thread/correlation/replyTo、顺序号，以及独立的投递状态变更和失败原因；消息本体和投递状态不能因空快照、握手超时或重启被清空。
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
