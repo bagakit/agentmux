@@ -3,6 +3,8 @@ import {
   Folder, Gem, Layers, Library, Lightbulb, NotebookText, Package, Puzzle,
   Rocket, Shapes, SquareTerminal, Wrench
 } from 'lucide-react'
+import type { SpaceIconId } from './space-icon-ids'
+export type { SpaceIconId } from './space-icon-ids'
 export const SPACE_ICON_CATALOG = {
   bot: { label: 'Agent', Icon: Bot },
   book: { label: 'Book', Icon: BookOpen },
@@ -25,6 +27,4 @@ export const SPACE_ICON_CATALOG = {
   shapes: { label: 'Shapes', Icon: Shapes },
   terminal: { label: 'Terminal', Icon: SquareTerminal },
   wrench: { label: 'Tools', Icon: Wrench }
-} as const
-
-export type SpaceIconId = keyof typeof SPACE_ICON_CATALOG
+} as const satisfies Record<SpaceIconId, { label: string; Icon: typeof Bot }>

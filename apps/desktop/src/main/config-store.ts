@@ -140,6 +140,7 @@ const notificationModeIds = NOTIFICATION_TIERS.map((tier) => tier.id) as [string
 // renderer. `.transform` runs after `z.number()` accepts the value, so a non-number still fails the
 // field (and the preference falls back to default) rather than being coerced.
 const appearanceSchema = z.object({
+  spaceObjectIcons: z.record(z.string(), z.unknown()).optional(),
   agentAvatars: z.record(z.string().min(1), z.object({
     tint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
     badge: z.enum(AGENT_AVATAR_BADGE_IDS).optional()

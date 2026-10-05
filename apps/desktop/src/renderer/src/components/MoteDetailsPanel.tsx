@@ -11,6 +11,7 @@ import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { confirmedMoteReference } from '../lib/mote-materials-actions'
 import { documentKey } from '../lib/workbench-tabs'
 import { readMoteMaterial, readMoteBehavior, type SavedMoteBehavior } from '../lib/mote-cooperation'
 import { MOTE_BEHAVIOR_AXES, MOTE_BEHAVIOR_PATH, moteBehaviorIntroduction } from '../lib/mote-behavior'
@@ -32,7 +33,7 @@ type MoteSection = 'profile' | 'ideas'
 /** Object content in the shared tools frame. Files and conversations keep their original owners. */
 export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, active = true }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active?: boolean
-  onOpenPath(path: string): Promise<unknown>; onCreateNote(): void
+  onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
   const [section, setSection] = useState<MoteSection>('profile')
   const [rename, setRename] = useState<Pick<MoteWorkfaceScope, 'topic' | 'workspace'> | null>(null)
@@ -42,12 +43,20 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const iconTarget = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic, bindings), [scope.workspace, scope.topic, bindings])
   const icon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
-  const sessionId = useAppStore(state => {
-    const layout = state.layouts[scope.workspace.id], group = layout?.groups.find(item => item.id === layout.activeGroupId)
-    const tab = state.tabs[reference ? reference.tabId : reference === null ? '' : group?.activeTabId ?? '']
-    const region = tab?.topicId === scope.topic.id ? tab.regions[reference?.regionId ?? tab.layout.activeRegionId] : undefined
+  const location = useAppStore(useShallow(state => {
+    const choice = reference === undefined ? state.workbenchSpaceSelection : null
+    const display = reference?.displayWorkspaceId ?? choice?.workspaceId ?? state.activeWorkspaceId
+    const layout = display ? state.layouts[display] : undefined
+    const group = layout?.groups.find(item => item.id === layout.activeGroupId)
+    return { tab: state.tabs[reference?.tabId ?? choice?.tabId ?? group?.activeTabId ?? ''], layout, choice,
+      workspace: state.config?.workspaces.find(item => item.id === scope.workspace.id),
+      topics: state.scratchTopicSnapshots[scope.workspace.id], bindings: state.spaceZoneBindings }
+  }))
+  const sessionId = useMemo(() => {
+    const state = useAppStore.getState(), confirmed = confirmedMoteReference(state, scope, { reference })
+    const region = confirmed ? state.tabs[confirmed.tabId]?.regions[confirmed.regionId] : undefined
     return region?.kind === 'agent' ? region.sessionId : undefined
-  })
+  }, [scope, reference, location])
   const heldStatus = useRef<{ sessionId: string | undefined; status: Pick<SessionSnapshot['status'], 'state' | 'source'> | undefined } | null>(null)
   const observedStatus = useAppStore(useShallow(state => {
     if (!active || section !== 'profile') return null
@@ -91,7 +100,7 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
 
 function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPath, onCreateNote, active }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: MoteSection; profile: ReactNode; active: boolean; onShowIdeas(): void
-  onOpenPath(path: string): Promise<unknown>; onCreateNote(): void
+  onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
   const tree = useWorkspaceFileTree(scope.workspace.id, NO_EXPANDED_PATHS, scope.rootPath, active)
   const revision = useMoteFileRevision(scope.workspace.id, active)
@@ -154,7 +163,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
       <MoteFirstCooperation scope={scope} reference={reference} />
     </> : <>
       <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} />
-      <div className="mote-details__section-actions"><span>Notes in this folder</span><button type="button" className="small-button" onClick={onCreateNote}><Plus size={12} /> New note</button></div>
+      <div className="mote-details__section-actions"><span>Notes in this folder</span>{onCreateNote ? <button type="button" className="small-button" onClick={onCreateNote}><Plus size={12} /> New note</button> : null}</div>
       {notesIssue}
       {!tree.rootCache?.loading && !notes.length && !tree.rootError ? <p className="mote-details__hint">No notes here yet. Capture a thought in a file, then continue the discussion.</p> : null}
       <div className="mote-details__notes">{notes.map(entry => <button type="button" key={entry.path} aria-pressed={selected === entry.path}
