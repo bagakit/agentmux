@@ -1,9 +1,14 @@
+import { parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES } from '@agentmux/core/toolkit-result-document'
+import { connectToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
+import { ToolkitFailureCapture, toolkitFailureError } from '@agentmux/core/toolkit-performance-failure'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { parseMetricsObservation, parseToolkitResultDocument, TOOLKIT_RESULT_DOCUMENT_MAX_BYTES, ToolkitFailureCapture, toolkitFailureError } from '@agentmux/core/control'
+import { parseMetricsObservation } from '@agentmux/core/control'
 import { AgentMuxRpcLines, rpcEncode, parseRpcRequest, parseRpcResponse, rpcRecord, rpcResponseError } from '@agentmux/core/public-rpc-http'
 const cli = process.argv[2]
 if (!cli) throw new Error('Performance requires the packaged public CLI path.')
+const resultChannel = await connectToolkitResultChannel()
+// Native startup/stdout/stderr remain terminal diagnostics, never result frames.
 let sequence = 0, ended = false, failed = false, abandoned = false
 let subscriptionId, eventSequence = 0
 const frames = new AgentMuxRpcLines(), cancelled = new AbortController()
@@ -12,6 +17,7 @@ const closed = new Promise(resolve => child.once('close', (code, signal) => reso
 const utf8 = new TextEncoder()
 const captureFailure = process.env.AGENTMUX_PERFORMANCE_CAPTURE_FAILURE === '1'
 let stage = 'cli-spawn', frame, stdoutCursor = 0, stderrCursor = 0
+const stderrCapture = captureFailure ? new ToolkitFailureCapture('metrics-rpc-stderr', 0) : null
 function documentFor(observation) {
   const totals = observation.runTotals, runs = observation.process.data ?? []
   const document = { schema: 'agentmux.toolkit.result.v1', summary: 'Runs',
@@ -43,30 +49,29 @@ async function result(value) {
   const document = documentFor(observation)
   stage = 'cli-output'
   await output({ schema: 'agentmux.toolkit.result.v1', event: 'result', sequence: ++sequence,
-    payload: observation, document })
+    payload: observation, document, diagnostics: { stderrBytes: stderrCursor, stderr: stderrCursor ? stderrCapture?.value ?? null : null } })
 }
 async function output(value) {
   if (ended) return
   // write(false) has admitted this frame. Wait before consuming another one.
-  if (!process.stdout.write(rpcEncode(value))) await once(process.stdout, 'drain', { signal: cancelled.signal })
+  if (!resultChannel.write(rpcEncode(value))) await once(resultChannel, 'drain', { signal: cancelled.signal })
 }
 function stop(error, details) {
   if (ended) return
   ended = true; cancelled.abort(); child.kill('SIGTERM')
   if (error !== undefined) {
     failed = true
-    const failure = details ?? { stage, error: toolkitFailureError(error, captureFailure), bytes: frame?.value ?? null, exit: null }
-    process.stdout.write(rpcEncode({ schema: 'agentmux.toolkit.result.v1', event: 'error', reason: failure.error.message, failure }))
+    const failure = details ?? { stage, error: toolkitFailureError(error, captureFailure), bytes: frame?.value ?? null, diagnosticOutput: stderrCursor && stderrCapture ? [stderrCapture.value] : [], exit: null }
+    resultChannel.write(rpcEncode({ schema: 'agentmux.toolkit.result.v1', event: 'error', reason: failure.error.message, failure }))
   }
 }
 function cancel() { abandoned = true; stop() }
 process.once('SIGINT', cancel); process.once('SIGTERM', cancel)
-process.stdout.once('error', () => stop()); process.stdout.once('close', () => stop())
+resultChannel.once('error', () => stop()); resultChannel.once('close', () => stop())
 child.stderr.on('data', bytes => {
-  const capture = captureFailure ? new ToolkitFailureCapture('metrics-rpc-stderr', stderrCursor) : null
-  capture?.append(bytes); stderrCursor += bytes.length
-  const error = new Error(bytes.toString('utf8'))
-  stop(error, { stage: 'cli-stderr', error: toolkitFailureError(error, captureFailure), bytes: capture?.value ?? null, exit: null })
+  // Stderr is diagnostic output, not the typed RPC failure channel. Drain without
+  // building a queue; retain only the original bounded head/tail on explicit capture.
+  stderrCapture?.append(bytes); stderrCursor += bytes.length
 })
 child.once('error', error => stop(error, { stage: 'cli-spawn', error: toolkitFailureError(error, captureFailure), bytes: null, exit: null }))
 async function accept(value) {
@@ -128,9 +133,10 @@ try {
 const exit = await closed
 if (!ended && (exit.code !== 0 || exit.signal !== null)) {
   const error = new Error('Metrics CLI exited unsuccessfully.')
-  stop(error, { stage: 'cli-eof', error: toolkitFailureError(error, captureFailure), bytes: frame?.value ?? null, exit })
+  stop(error, { stage: 'cli-eof', error: toolkitFailureError(error, captureFailure), bytes: frame?.value ?? (stderrCursor ? stderrCapture?.value ?? null : null), diagnosticOutput: stderrCursor && stderrCapture ? [stderrCapture.value] : [], exit })
 }
 process.exitCode = failed || (exit.code !== 0 && exit.code !== null) ? 1 : 0
 // Explicit cancellation discards this reader's pending output, after the
 // original CLI child has closed. Normal end/EOF still flushes every frame.
-if (abandoned) process.exit(process.exitCode)
+if (abandoned) { resultChannel.destroy(); process.exit(process.exitCode) }
+else resultChannel.end()
