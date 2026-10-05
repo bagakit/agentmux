@@ -92,7 +92,7 @@ it('F1 refuses an unsupported fresh immediate capability while preserving null o
  await expect(send()).rejects.toThrow('original immediate-send capability is unconfirmed')
  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
  expect(selected()).toMatchObject({...entry('selected'),runId:newRun,execution:'immediate',promptCondition:null,status:'deferred',awaitingExplicitSend:true})
- expect(selected().logId).toMatch(/^delivery-/)
+ expect(selected().logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
  expect(useAppStore.getState().sessions.find(item=>item.id===sid)?.control.run.runId).toBe(newRun)
  expectRetained(before)
  await useAppStore.getState().flushAgentSteerQueue(sid)
@@ -114,7 +114,7 @@ it('F2 restores known null only when fresh condition was saved locally and stora
  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
  expect(selected()).toMatchObject({...entry('selected'),runId:newRun,execution:'immediate',promptCondition:null,
   status:'deferred',awaitingExplicitSend:true,error:expect.stringContaining('Exact local save failed')})
- expect(selected().logId).toMatch(/^delivery-/);expectRetained(before)
+ expect(selected().logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/);expectRetained(before)
  await useAppStore.getState().flushAgentSteerQueue(sid)
  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
 })
@@ -135,7 +135,7 @@ it('F2 preserves the original nonnull condition and operation once submit starts
  expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1)
  expect(selected()).toMatchObject({...entry('selected'),runId:newRun,execution:'immediate',promptCondition:freshCondition,
   status:'deferred',awaitingExplicitSend:true,error:expect.stringContaining('Original submit reply was lost')})
- expect(selected().logId).toMatch(/^delivery-/);expectRetained(before)
+ expect(selected().logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/);expectRetained(before)
  await useAppStore.getState().flushAgentSteerQueue(sid)
  expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1)
  expect(selected().promptCondition).toEqual(freshCondition)

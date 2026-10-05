@@ -145,7 +145,7 @@ it('preserves an unknown invalidation cause and logid through SDK, Unix RPC and 
     await f.client.resizeAgent(f.record.agentSessionId, f.record.run, 80, 24)
     f.owner.screenEvidence.discard(f.record.agentSessionId); f.release.resolve()
     const error = await sent; expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-    expect(error.logId).toMatch(/^delivery-/u)
+    expect(error.logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
     const cause = JSON.parse(error.detail); expect(cause.code).toBe('AGENT_PROMPT_READINESS_CANCELLED')
     expect(JSON.parse(cause.detail)).toMatchObject({ source: 'discard', runId: 'original-run', phase: 'handshake', recoverableFromGeneration: null })
     const sdk = await f.client.readDeliveryAttempt(error.logId)
@@ -250,7 +250,7 @@ it('keeps an open current checkpoint failure and logid truthful through the orig
   try {
     const original = structuredClone(f.request), error = await f.send().then(() => null, failure => failure)
     expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-    expect(error.logId).toMatch(/^delivery-/u)
+    expect(error.logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
     const cause = JSON.parse(error.detail)
     // The original preparation signal and screen timer share the same 8s budget.
     if (cause.code === 'AGENT_PROMPT_READINESS_CANCELLED') expect(JSON.parse(cause.detail)).toMatchObject({ code: 'TimeoutError' })

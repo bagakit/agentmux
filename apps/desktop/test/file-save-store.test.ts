@@ -190,7 +190,7 @@ describe('revision-aware file save Store', () => {
 
     const nextKey = documentKey(workspace.id, 'src/renamed.ts')
     expect(fileApi.writes).toHaveLength(1)
-    expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
+    expect(useAppStore.getState().tabs[tab.id]!.regions[tab.titleRegionId]).toMatchObject({ path: 'src/renamed.ts' })
     expect(useAppStore.getState().documents[nextKey]).toMatchObject({ content: 'charlie' })
     expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(true)
   })

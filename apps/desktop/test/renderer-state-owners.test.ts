@@ -18,6 +18,7 @@ import {
   addWorkbenchRegion,
   createWorkbenchTab,
   documentKey,
+  fileTabId,
   initialWorkbenchRegionId,
   titleWorkbenchSurface,
   workbenchSurfaces
@@ -675,7 +676,7 @@ describe('Renderer resource state owners', () => {
       'src/app.ts',
       { path: 'src/app.ts', content: 'before', revision: 'revision-before' }
     )
-    const tabId = `file:${workspaceId}:src/app.ts`
+    const tabId = fileTabId(workspaceId, 'src/app.ts')
     state = reduceDocumentContent(state, tabId, 'after')
     expect(state.documents[documentKey(workspaceId, 'src/app.ts')]).toEqual({
       path: 'src/app.ts',

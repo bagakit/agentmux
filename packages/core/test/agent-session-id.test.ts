@@ -52,28 +52,12 @@ describe('canonical Agent Session identity', () => {
   })
 
   it.each([
-    { bytes: Array(9).fill(0), expected: '111111111111' },
-    { bytes: [78, 144, 10, 187, 83, 230, 183, 15, 255], expected: 'zzzzzzzzzzzz' }
-  ])('keeps deterministic IDs equally wide at accepted digest boundaries: $expected', async ({ bytes, expected }) => {
-    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest').mockResolvedValue(new Uint8Array([...bytes, ...Array(23).fill(0)]).buffer)
-    try { expect(await deriveAgentSessionId('boundary-operation')).toBe(expected) }
-    finally { digest.mockRestore() }
-  })
-
-  it('retries deterministic overflow with a distinct nonce while keeping the original operation', async () => {
-    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest')
-      .mockResolvedValueOnce(new Uint8Array([78, 144, 10, 187, 83, 230, 183, 16, 0, ...Array(23).fill(0)]).buffer)
-      .mockResolvedValueOnce(new Uint8Array(32).fill(255).buffer)
-      .mockResolvedValueOnce(new Uint8Array(32).buffer)
-    try {
-      await expect(deriveAgentSessionId('overflow-operation')).resolves.toBe('111111111111')
-      expect(digest).toHaveBeenCalledTimes(3)
-      expect(digest.mock.calls.map(([algorithm, input]) => [algorithm, new TextDecoder().decode(input as Uint8Array)])).toEqual([
-        ['SHA-256', 'agentmux.initial-session.v3:0:overflow-operation'],
-        ['SHA-256', 'agentmux.initial-session.v3:1:overflow-operation'],
-        ['SHA-256', 'agentmux.initial-session.v3:2:overflow-operation']
-      ])
-    } finally { digest.mockRestore() }
+    ['operation-a', 'WghaaF5eKf5W'], // accepted at nonce 3
+    ['operation-b', 'QV4Cd8cHwZFG'], // accepted at nonce 0
+    ['Operation-a', '3b97Wn4jvtrg'], // case and original bytes matter
+    ['overflow-operation', '5Q6KGc1F8U66'] // accepted at nonce 5
+  ])('preserves the original v3 deterministic identity for %s', async (operation, expected) => {
+    expect(await deriveAgentSessionId(operation)).toBe(expected)
   })
 
   it('mints distinct short canonical IDs', () => {

@@ -36,6 +36,43 @@ async function fixture() {
 }
 
 describe('Topic knowledge content owner uses original files and Core membership', () => {
+  it('round trips new short Category, Topic and entry IDs through original files, public RPC and the shipping CLI beside old IDs', async () => {
+    const f = await fixture(), socketPath = join(f.root, 'short-ids.sock')
+    const server = new AgentMuxControlServer({ socketPath, spatialState: f.state, coreClients: () => [], topics: f.owner })
+    servers.push(server); await server.start()
+    const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath })
+    const categoryId = 'AbCdEfGh1234', topicId = 'BcDeFgHi2345', entryId = 'CdEfGhJk3456'
+    await f.owner.call('topic.category.create', { categoryId: CATEGORY, title: 'Original UUID category' })
+    await f.owner.call('topic.create', { topicId: 'view:original-topic', title: 'Original prefixed topic' })
+    const category = await runCompiledObjectCli(['topic', 'category', 'create', '--category', categoryId, '--title', 'Short category'], env)
+    expect(category.code, category.stderr).toBe(0)
+    const created = await runCompiledObjectCli(['topic', 'create', '--topic', topicId, '--category', categoryId, '--title', 'Short topic'], env)
+    expect(created.code, created.stderr).toBe(0)
+    const topic = JSON.parse(created.stdout).result.topic
+    expect(topic.directoryPath).toContain('topic--' + topicId)
+    const input = join(f.root, 'entry.json')
+    await writeFile(input, JSON.stringify({ topicId, entryId, title: 'Saved short entry', content: 'retained identity finding',
+      form: 'derived', certainty: 'fact', sources: [{ kind: 'topic', topicId: 'view:original-topic' }], expectedRevision: null }))
+    const write = await runCompiledObjectCli(['topic', 'knowledge', 'write', '--input', input], env)
+    expect(write.code, write.stderr).toBe(0)
+    const read = await runCompiledObjectCli(['topic', 'knowledge', 'read', '--topic', topicId, '--entry', entryId], env)
+    expect(read.code, read.stderr).toBe(0)
+    expect(JSON.parse(read.stdout).result.entry).toEqual(JSON.parse(write.stdout).result.entry)
+    const categories = (await f.owner.call('topic.category.ls', {})).categories
+    expect(categories.map(item => item.categoryId)).toEqual(expect.arrayContaining([CATEGORY, categoryId]))
+    const listed = await f.owner.call('topic.knowledge.ls', { topicId })
+    expect(listed.entries.map(item => item.entryId)).toEqual([entryId])
+    expect((await f.owner.call('topic.ls', {})).topics.map(item => item.topicId)).toEqual(expect.arrayContaining(['view:original-topic', topicId]))
+    const disk = await readFile(join(topic.directoryPath, 'knowledge', entryId + '.json'), 'utf8')
+    expect(JSON.parse(disk).entryId).toBe(entryId)
+    const repeat = await runCompiledObjectCli(['topic', 'create', '--topic', topicId, '--title', 'Do not replace'], env)
+    expect(repeat.code, repeat.stderr).toBe(0)
+    expect(JSON.parse(repeat.stdout).result.topic.directoryPath).toBe(topic.directoryPath)
+    expect(await readFile(join(topic.directoryPath, 'knowledge', entryId + '.json'), 'utf8')).toBe(disk)
+    for (const invalid of ['../escape', 'AbCdEfGh123/', 'AbCdEfGh1230'])
+      await expect(f.owner.call('topic.knowledge.read', { topicId, entryId: invalid })).rejects.toThrow()
+  }, 30000)
+
   it('resumes the same public CLI Topic identity after content was written but the Core CAS conflicted', async () => {
     const f = await fixture(), topicId = 'view:interrupted-create', socketPath = join(f.root, 'rpc.sock')
     const commit = f.state.commit.bind(f.state)

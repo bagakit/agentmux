@@ -46,6 +46,7 @@ describe('Toolkit observation owner', () => {
     const one = vi.fn(), two = vi.fn()
     const s1 = await f.owner.subscribe('performance', one, vi.fn(), a.signal)
     const s2 = await f.owner.subscribe('performance', two, vi.fn(), b.signal)
+    expect(f.owner.current.executionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(f.port.create).toHaveBeenCalledTimes(1); expect(f.owner.current.consumerCount).toBe(2)
     f.bytes(Buffer.from(f.frame()))
     expect(one.mock.calls.at(-1)?.[0].observation.process.data).toHaveLength(1)

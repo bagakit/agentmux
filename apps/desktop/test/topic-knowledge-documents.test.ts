@@ -38,7 +38,7 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
-async function fixture() {
+async function fixture(topicId = 'view:documents') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-topic-documents-'))); roots.push(root)
   const path = join(root, 'scratch'); await mkdir(path)
   const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path, kind: 'folder' }
@@ -51,7 +51,7 @@ async function fixture() {
     topicForDirectory: (w, directory) => scratch.readForDirectory(w, directory),
     catalog: async () => { const current = await state.read(); return current ? spatialCatalog(current.graph) : null } })
   owner.setFileReadPort(publicFiles)
-  const { topic } = await owner.call('topic.create', { topicId: 'view:documents', title: '原资料' })
+  const { topic } = await owner.call('topic.create', { topicId, title: '原资料' })
   const expectedResource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path }
   return { root, workspace, scratch, files, publicFiles, state, owner, topic, expectedResource }
 }
@@ -61,6 +61,24 @@ function exact(documents: TopicKnowledgeDocument[], path: string): TopicKnowledg
   return document!
 }
 describe('Topic search consumes bounded original Files instead of a second knowledge index', () => {
+  it('keeps a new short knowledge entry classified once through original file discovery and the shipping CLI', async () => {
+    const f = await fixture('DfGhJkMn4567'), entryId = 'EfGhJkMn5678'
+    const saved = await f.owner.call('topic.knowledge.write', { topicId: f.topic.topicId, entryId, title: 'Original classified entry',
+      content: 'unique-classified-body-identity', form: 'derived', certainty: 'fact', sources: [{ kind: 'topic', topicId: f.topic.topicId }], expectedRevision: null })
+    const socketPath = join(f.root, 'short-entry.sock'), server = new AgentMuxControlServer({ socketPath, spatialState: f.state, coreClients: () => [], topics: f.owner, files: f.publicFiles })
+    servers.push(server); await server.start()
+    const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath })
+    const listing = await f.owner.call('topic.knowledge.ls', { topicId: f.topic.topicId })
+    expect(listing.entries).toEqual([saved.entry])
+    expect(listing.documents.map(item => item.target.path)).not.toContain(`knowledge/${entryId}.json`)
+    const search = await runCompiledObjectCli(['topic', 'knowledge', 'search', '--topic', f.topic.topicId, '--query', 'unique-classified-body-identity'], env)
+    expect(search.code, search.stderr).toBe(0)
+    const result = JSON.parse(search.stdout).result
+    expect(result.entries).toEqual([saved.entry]); expect(result.documents).toEqual([])
+    expect(result.observation.record.searchId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+    expect(result.observation.record.counters).toMatchObject({ entryMatches: 1, documentMatches: 0 })
+  })
+
   it('lists names without reading bodies and finds Chinese body-only text with zero saved UUID entries through RPC and shipping CLI', async () => {
     const f = await fixture(), body = '# 原始文件\n本文讨论挂载磁盘权限与安全清理。\n'
     await expect(lstat(join(f.topic.directoryPath, 'knowledge'))).rejects.toMatchObject({ code: 'ENOENT' })

@@ -1,5 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
@@ -92,6 +92,8 @@ async function fixture() {
     const reply = await popup({ type: 'share', tabId })
     expect(reply.ok).toBe(true)
     const binding = bridge.require(reply.value.bindingId)
+    expect(binding.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+    expect(binding.connection?.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(binding.tabId).toBe(tabId)
     return binding
   }
@@ -435,6 +437,14 @@ describe('person-shared external Browser transport', () => {
     await restarted.ready()
     expect(restarted.list()).toHaveLength(1)
     expect(restarted.require(binding.id).status).toBe('disconnected')
+    const legacyPath = f.path + '.uuid', legacyId = '11111111-1111-4111-8111-111111111111'
+    const document = JSON.parse(stored); document.targets[0].id = legacyId
+    await writeFile(legacyPath, JSON.stringify(document))
+    const legacy = new ExternalBrowserBridge(legacyPath); cleanups.push(() => legacy.dispose())
+    await legacy.ready(); expect(legacy.list().map(item => item.id)).toEqual([legacyId])
+    expect(legacy.require(legacyId).status).toBe('disconnected')
+    expect(JSON.parse(await readFile(legacyPath, 'utf8')).targets[0].id).toBe(legacyId)
+
     await expect(attachExternalBrowserTarget(restarted, restarted.require(binding.id), owner)).rejects.toThrow(/reconnect/i)
     expect(f.api.debugger.attach).not.toHaveBeenCalled()
   })

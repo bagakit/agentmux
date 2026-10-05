@@ -260,7 +260,7 @@ it('continues via real Hosted Unix RPC and queries a rejected mixed-input attemp
     // This second current-pane wait observes the already rendered original body.
     await vi.waitFor(() => expect([...f.owner.agentInputTails.get(f.record.agentSessionId)?.renderObservations ?? []].length).toBeGreaterThan(0))
     await remote.writeAgent({ agentSessionId: f.record.agentSessionId, expectedRun: f.record.run, data: mouse + 'BODY', source: 'user' })
-    const error = await failed; expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED' }); expect(error.logId).toMatch(/^delivery-/)
+    const error = await failed; expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED' }); expect(error.logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     const sdk = await f.client.readDeliveryAttempt(error.logId)
     const rpcLookup = await rpc.call('message.delivery.inspect', { hostId: 'local', logId: error.logId }); expect(rpcLookup).toEqual(sdk)
     const cli = await runCompiledObjectCli(['message', 'delivery', 'inspect', '--logid', error.logId], objectCliEnvironment(f.root))
