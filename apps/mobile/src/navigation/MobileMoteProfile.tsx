@@ -116,7 +116,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       copyText={copyText ?? createBrowserPlatform().copyText} onClose={backToReading}
       onRead={() => { void loadSource(selected) }}
       onSaved={() => { void loadSource(selected); setRefresh(value => value + 1) }} /> : selected ? <section className="mobile-mote-source" aria-label="原 Mote 文件阅读">
-      <button type="button" className="mobile-text-button" onClick={backToProfile}>返回 Profile</button>
+      <button type="button" className="mobile-text-button" onClick={backToProfile}>返回资料</button>
       <h3>{selected}</h3>
       <button type="button" className="mobile-text-button" onClick={() => { void loadSource(selected) }}>刷新原文件</button>
       {reading && <p role="status">正在读取原文件…</p>}
@@ -125,10 +125,10 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       {document && <><AgentMarkdown content={document.content} sourcePath={document.path} {...(read?.resource?.workspacePath ? { workspaceRoot: read.resource.workspacePath } : {})} />
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
     </section> : <>
-      {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置</span><small>Agent、原主对话与接回时机</small></button>}
-      <dl className="mobile-mote-profile__defaults"><dt>原主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的原主对话'}</span><small>{facts?.conversation ? '原展示位置已确认' : '保存引用尚未确认；原会话保留'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '原配置未确认'}</dd>
-        <dt>新对话 Executor</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '原配置未确认')}</dd>
-        {saved?.defaults.recovery && <><dt>保存的接回时机</dt><dd>{saved.defaults.recovery === 'startup' ? '启动时' : '打开时'}</dd></>}
+      {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置<small>Agent、主对话与接回时机</small></span></button>}
+      <dl className="mobile-mote-profile__defaults"><dt>主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的主对话'}</span><small>{facts?.conversation ? '原展示位置已确认' : '保存引用尚未确认；原会话保留'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '原配置未确认'}</dd>
+        <dt>新对话 Agent</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '原配置未确认')}</dd>
+        {saved?.defaults.recovery && <><dt>接回原对话</dt><dd>{saved.defaults.recovery === 'startup' ? '启动时' : '打开时'}</dd></>}
       </dl>
       {main && <details><summary>主对话原引用</summary><dl>{Object.entries(main).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
       {facts?.quickMode.status === 'unconfirmed' && <p role="status">{facts.quickMode.message}</p>}

@@ -341,7 +341,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }
   return <ClientUiProvider platform={platform}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
-      {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前不能发送；草稿与阅读保留。' : ''}</p> : null}
+      {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</p> : null}
       {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
       {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
         {local.canSave ? <button type="button" onClick={() => { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }}>重试保存</button> : null}
@@ -412,7 +412,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       </div> : null}
       <div className="mobile-conversation__composer">
         {inputCapability?.sessionId === agentSessionId && inputCapability.runId === session?.run.runId ?
-          <aside className="mobile-conversation__notice" role="status">
+          <aside className="mobile-conversation__input-state" data-issue={Boolean(inputCapability.issue)} role="status">
             {inputCapability.execution === 'immediate' ? '立即执行输入' : inputCapability.issue ? '普通输入 · 立即执行能力未确认' : inputCapability.supported === false ? '普通输入 · 不支持立即执行' : '普通输入'}
             {attempt?.phase === 'confirmed' ? <span> · {attempt.message}</span> : null}
             {inputCapability.issue ? <><p>{inputCapability.issue} 原会话与当前草稿保留；本次选择普通输入，未尝试立即执行。</p>

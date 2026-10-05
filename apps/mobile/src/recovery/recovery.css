@@ -2,5 +2,5 @@
 .mobile-workface-recovery h3 { margin: 0 0 6px; font-size: 13px; font-weight: 550; }
 .mobile-workface-recovery > p { margin: 8px 0 12px; }
 .mobile-workface-file { margin: 10px 0; }
-.mobile-workface-candidate { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--mobile-surface, #f3f4f0); }
+.mobile-workface-candidate { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--surface-1); }
 .mobile-workface-candidate p { overflow-wrap: anywhere; }
