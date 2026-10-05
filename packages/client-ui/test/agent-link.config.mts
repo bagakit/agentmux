@@ -5,13 +5,12 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations = {
-  'drop-bare': ['packages/client-ui/src/components/AgentMarkdown.tsx', 'if (context.renderAgentLink) return', 'if (false && context.renderAgentLink) return'],
-  'drop-markdown': ['packages/client-ui/src/components/AgentMarkdown.tsx', 'const agent = context.renderAgentLink ?', 'const agent = false && context.renderAgentLink ?'],
-  'wrong-identity': ['packages/client-ui/src/lib/agent-link-reference.ts', 'agentSessionId: target.agentSessionId', "agentSessionId: 'wrong-session'"],
-  'drop-host': ['apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx', 'renderAgentLink: reference => <InlineAgentLink {...reference} />', 'renderAgentLink: reference => reference.uri'],
-  'wrong-open': ['apps/desktop/src/renderer/src/components/InlineAgentLink.tsx', 'api.ui.openObjectLink(uri)', 'api.ui.openObjectLink(agentSessionId)'],
-  'wrong-copy': ['apps/desktop/src/renderer/src/components/InlineAgentLink.tsx', 'copyTextToClipboard(uri,', 'copyTextToClipboard(agentSessionId,'],
-  'drop-motion': ['apps/desktop/src/renderer/src/components/InlineAgentLink.tsx', 'setVisible(inView && !document.hidden)', 'setVisible(true)']
+ 'drop-spatial': ['packages/client-ui/src/lib/object-link-reference.ts','return { uri, target, ...(label ? { label } : {}) }',"return target.kind === 'agent' ? { uri, target, ...(label ? { label } : {}) } : null"],
+ 'wrong-open': ['apps/desktop/src/renderer/src/components/InlineObjectLink.tsx','api.ui.openObjectLink(uri)','api.ui.openObjectLink(id)'],
+ 'wrong-copy': ['apps/desktop/src/renderer/src/components/InlineObjectLink.tsx','copyTextToClipboard(uri,','copyTextToClipboard(id,'],
+ 'drop-document-gate': ['packages/client-ui/src/components/AgentMarkdown.tsx','!readOnly && !documentMode && renderObjectLink','!readOnly && renderObjectLink'],
+ 'unbound-copy': ['apps/desktop/src/renderer/src/components/InlineObjectLink.tsx','const copied = copiedUri === uri','const copied = copiedUri !== null'],
+ 'drop-host': ['apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx','renderObjectLink: reference => <InlineObjectLink {...reference} />','renderObjectLink: reference => reference.uri']
 } as const
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const alias = ['core', 'client-ui'].flatMap(pkg => Object.entries(JSON.parse(readFileSync(resolve(root, `packages/${pkg}/package.json`), 'utf8')).exports).flatMap(([key, value]) => {
@@ -25,7 +24,7 @@ const alias = ['core', 'client-ui'].flatMap(pkg => Object.entries(JSON.parse(rea
 export default defineConfig({ root, esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   cacheDir: resolve(root, '.local/inline-agent-link-cache'), resolve: { alias, conditions: ['browser'] },
   plugins: [{ name: 'actual-input-markdown', enforce: 'pre', transform(source, id) {
-    const path = relative(root, id.split('?')[0]!), mutation = process.env.AGENT_LINK_MUTATION as keyof typeof mutations | undefined
+    const path = relative(root, id.split('?')[0]!), mutation = process.env.OBJECT_LINK_MUTATION as keyof typeof mutations | undefined
     let code = source
     if (mutation) {
       const change = mutations[mutation]; assert.ok(change)
@@ -35,7 +34,7 @@ export default defineConfig({ root, esbuild: { jsx: 'automatic' }, define: { __A
         code = source.replaceAll(change[1], change[2])
       }
     }
-    const log = process.env.AGENT_LINK_LOADED
+    const log = process.env.OBJECT_LINK_LOADED
     if (log && (path.startsWith('packages/') || path.startsWith('apps/desktop/src/'))) appendFileSync(log, JSON.stringify({ path,
       sourceSHA: createHash('sha256').update(source).digest('hex'), loadedSHA: createHash('sha256').update(code).digest('hex'), mutation, transformed: source !== code }) + '\n')
     if (code !== source) return { code, map: null }
