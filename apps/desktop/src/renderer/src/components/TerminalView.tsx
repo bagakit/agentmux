@@ -773,8 +773,7 @@ export function TerminalView({
     const acceptsCurrentInput = (): boolean =>
       !readOnlyRef.current && terminalAcceptsInput({
         canControlRun: canControlRunRef.current,
-        acceptsInput: acceptsInputRef.current,
-        liveReady: readyForLiveOutput
+        acceptsInput: acceptsInputRef.current
       })
     const interaction = createTerminalInteractionObservation({
       host: terminalRoot,
@@ -1776,7 +1775,7 @@ export function TerminalView({
     id: 'history-read', cause: runtimeHistoryGap ? 'read-failed-after-runtime-gap' : 'retained-history-read-failed',
     notice: { kind: 'indeterminate' as const, notice: {
       step: 'Retained history read unconfirmed',
-      mode: `${runtimeHistoryGap ? 'Runtime reported a history gap. A later retained-history read failed.' : 'Retained history could not be read; earlier Runtime bytes may still exist.'} ${!readOnly && terminalAcceptsInput({ canControlRun, acceptsInput, liveReady: liveOutputReady }) ? 'Live input remains available.' : 'This terminal is not currently accepting input.'}`,
+      mode: `${runtimeHistoryGap ? 'Runtime reported a history gap. A later retained-history read failed.' : 'Retained history could not be read; earlier Runtime bytes may still exist.'} ${!readOnly && terminalAcceptsInput({ canControlRun, acceptsInput }) ? 'Live input remains available.' : 'This terminal is not currently accepting input.'}`,
       restore: 'Reopen this session to replay retained output.'
     } }
   } : replayGap || runtimeHistoryGap ? {

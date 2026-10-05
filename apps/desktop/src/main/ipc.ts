@@ -33,6 +33,7 @@ import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
+import { sessionObservationResult } from '../shared/session-observation-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
@@ -1255,21 +1256,21 @@ export async function registerIpc(args: {
     requireTrustedSender('sessions:releaseHistoryObservation', event)
     historyObservations.release(event.sender.id, token)
   })
-  handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => {
+  handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => sessionObservationResult(async () => {
     const result = await args.runtime.attachSession(event.sender.id, session, afterSequence, config)
     if (!event.sender.isDestroyed()) return result
     await args.runtime.detachSession(event.sender.id, result.attachmentId)
     throw new Error('The Desktop View disappeared before its Session Attachment was delivered.')
-  })
-  handleWithEvent('sessions:replay', async (event, attachmentId: string, afterByte: number) => (
+  }))
+  handleWithEvent('sessions:replay', async (event, attachmentId: string, afterByte: number) => sessionObservationResult(async () => (
     args.runtime.readSessionReplay(event.sender.id, attachmentId, afterByte)
-  ))
-  handleWithEvent('sessions:refreshAttachment', async (event, session: SessionControl, attachmentId: string | null, afterByte: number) => {
+  )))
+  handleWithEvent('sessions:refreshAttachment', async (event, session: SessionControl, attachmentId: string | null, afterByte: number) => sessionObservationResult(async () => {
     const result = await args.runtime.refreshSessionAttachment(event.sender.id, session, attachmentId, afterByte, config)
     if (!event.sender.isDestroyed()) return result
     if (attachmentId === null) await args.runtime.detachSession(event.sender.id, result.attachmentId)
     throw new Error('The Desktop View disappeared before its observation refresh was delivered.')
-  })
+  }))
   handleWithEvent('sessions:detach', async (event, attachmentId: string) => {
     await args.runtime.detachSession(event.sender.id, attachmentId)
   })

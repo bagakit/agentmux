@@ -40,26 +40,16 @@ export function terminalRevealDecision(input: {
 }
 
 /**
- * 揭示之后输入是否已经接通。
- *
- * 这是"放行"里最容易出错的半句：画布交还用户 ≠ 什么都通了。强制揭示发生时 replay→live 的交接
- * 可能还没完成（`releaseLiveOutput` 未跑到），此刻键盘敲下去会写进一个还没接上的 attachment。
- * 所以三条输入通路（`onData`、粘贴、Shift+Enter）都必须等这一位为真——**三条一致**，
- * 少卡一条就等于没卡：用户总会找到那一条。
- *
- * 拎成纯函数是因为那三个 gate 长在 attach effect 里，本仓跑不了 effect（renderToStaticMarkup），
- * 写在那儿的取舍没有断言够得着——它们此前确实一条测试都没有，三个 gate 一起删掉全仓 1512 个
- * 测试照样全绿（变异实测）。
+ * 原 Run 和视图控制资格决定用户输入。输出 Attachment/replay 只拥有阅读，
+ * 键盘、paste 和 binary 通过 Main/Core 写原 Run，不写输出 Attachment。
  */
 export function terminalAcceptsInput(input: {
   /** Run 还能不能被控制（进程在跑）。 */
   canControlRun: boolean
   /** 当前视图是否允许控制输入。待答请求不禁用原生终端。 */
   acceptsInput: boolean
-  /** replay→live 交接是否已完成。 */
-  liveReady: boolean
 }): boolean {
-  return input.canControlRun && input.acceptsInput && input.liveReady
+  return input.canControlRun && input.acceptsInput
 }
 
 /**
@@ -107,9 +97,7 @@ export function terminalInputSender(input: {
  * 退了才是第 1 类（交给既有恢复横幅），既非在跑也非退出就如实说分不清。
  * 没到点则返回"走通了"——一次正常完成的恢复不该留下任何降级痕迹。
  *
- * `liveReady` 必填且无默认值。它曾是 `liveReady?: boolean` 配 `=== false` 判断，即"没告诉我
- * 就当输入已通"——那正是原则 11 明令不许的「把未知当成好的」，且默认的那一侧恰好是会撒谎的
- * 那一侧（宣称 usable now 而键盘其实是哑的）。由类型强制每个调用方交代这件事。
+ * `liveReady` 只描述输出读取进度，不拥有输入资格。
  */
 export function terminalRevealServiceOutcome(input: {
   overdue: boolean
@@ -118,12 +106,10 @@ export function terminalRevealServiceOutcome(input: {
 }): StepOutcome {
   if (!input.overdue) return { completed: true }
   const step = {
-    // 揭示了但输入还没通时，绝不说"现在可用了"——那是拿谎报换安静。如实说画面已回来、
-    // 输入还在等交接，用户才不会对着一个哑掉的键盘以为自己没按对。
     label: 'Restoring this terminal',
     degradedMode: input.liveReady
       ? 'The terminal is usable now; its scrollback may be incomplete'
-      : 'The terminal is visible, but input will unlock when its attachment catches up',
+      : 'The terminal is visible; its output is still catching up. Live input does not wait for output attachment',
     restore: 'Reopen or resume this session to replay it again'
   }
   // 判据是这个 Run 还能干活吗（进程），不是揭示步骤过了吗：running 放行提醒、exited 交给恢复

@@ -490,28 +490,7 @@ export function removeSessionProjection(
   }
 }
 
-/**
- * 用一份 canonical 快照对齐 agent 成员：快照里没有的 agent 就是已经不在了，摘掉它的面。
- *
- * **一份空快照不能当作「一个 agent 都没有」。**它同样可能是 Core 尚未就绪、连接刚建立、或根目录
- * 接错时的回答——而此刻本地还记着好几个正在跑的 agent。把这一份回答当权威，就会把用户离开时留下的
- * 格子在他不看着的时候删掉：切走再切回来，几个 agent 格没了，同 tab 的终端和文件却还在。
- *
- * 启动那条路已经有这道守卫（见 store 里 `retainUnknownSessionViews` 那段，它的注释写着这正是
- * 「重启抹掉布局」的历史成因）。**同一个判断此前只装在一侧出口**：运行时的成员对齐没有等价保护，
- * 也没有测试。删除是不可逆的，而多留一格只是等下一份快照来纠正——所以这里 fail open：一份 session
- * 与恢复候选双双为空的快照不作为退役依据，原样返回。
- *
- * 非空联邦快照也只对完整读取成功的 endpoint 有成员权威。某个 endpoint 失联时保留它的旧投影，
- * 其它 endpoint 返回 Session 不构成删除依据。恢复候选同样表示「还在，只是要重连」。
- *
- * 而正因为一个候选的含义是「还在，只是要重连」，**被点名为候选的那个 agent 自己必须免于删除**。
- * Runtime 保留的已结束 Run 仍可出现在 `sessions`；Run 已缺失但 durable Session 还在时，
- * Session 则只出现在 `recoveryCandidates`。若只拿 `sessions` 建 canonical 集合，这个**恰恰可以恢复**的
- * agent 会在下一次成员对齐里被连 tab 带 layout 摘掉，而 partialize 随后把删剩的投影落盘——不可逆，
- * 且没有任何理由显示。那正是这个 Feature 要消灭的失败本身（用户原话：「有些 Region 会消失」）。
- * 启动那侧对同一个候选是「保留 + 恢复」，两侧必须对同一个 Core 概念给出同一个语义。
- */
+/** An endpoint's availability describes this read; it cannot retire an absent Session. */
 export function runtimeSnapshotHostUnavailable(snapshot: RuntimeSnapshot, hostId: string): boolean {
   return (snapshot.runtimeEndpointWarnings ?? []).some((warning) => warning.scope !== 'observation' && warning.hostId === hostId && warning.availability !== 'connected')
 }
@@ -533,41 +512,26 @@ export function projectRuntimeEndpointSessions(
   return changed ? projected : sessions
 }
 
+/** Merge positive membership facts; exact removal/retirement receipts own deletion. */
 export function reduceAgentMembershipSnapshot(
   state: SessionProjectionState,
-  snapshot: RuntimeSnapshot,
-  protectedAgentSessionIds: ReadonlySet<string>
+  snapshot: RuntimeSnapshot
 ): SessionProjectionState {
   const pendingIds = new Set(Object.keys(state.pendingAgentLaunches))
-  // 被 Core 点名为恢复候选的 agent 免于删除：候选的含义就是「还在，只是要重连」。见函数注释。
-  const recoverableIds = new Set(snapshot.recoveryCandidates.map((candidate) => candidate.agentSessionId))
-  const removalProtectedIds = new Set([...pendingIds, ...protectedAgentSessionIds, ...recoverableIds])
   const canonicalAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => (
     session.kind === 'agent' && !pendingIds.has(session.id) && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)
   ))
-  const canonicalIds = new Set(canonicalAgents.map((session) => session.id))
-  // 空快照不作为退役依据——见上面的函数注释。判据只需要"这一份说不出话"：一份空快照里没有 canonical
-  // agent 可合并，所以再检查一遍"本地是否还记着 agent"不会改变任何结果，那个条件是多余的。
   if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) {
     const sessions = projectRuntimeEndpointSessions(state.sessions, snapshot.runtimeEndpointWarnings)
     return sessions === state.sessions ? state : { ...state, sessions }
   }
-  let projected = state
-  for (const session of state.sessions) {
-    if (session.kind === 'agent' && !runtimeSnapshotHostUnavailable(snapshot, session.hostId) &&
-      !removalProtectedIds.has(session.id) && !canonicalIds.has(session.id)) {
-      projected = removeSessionProjection(projected, session.id)
-    }
-  }
-
   const canonicalById = new Map(canonicalAgents.map((session) => [session.id, session]))
-  const existingIds = new Set(projected.sessions.map((session) => session.id))
-  const sessions = projected.sessions.map((session) => canonicalById.get(session.id) ?? session)
+  const existingIds = new Set(state.sessions.map((session) => session.id))
+  const sessions = state.sessions.map((session) => canonicalById.get(session.id) ?? session)
   for (const session of canonicalAgents) {
     if (!existingIds.has(session.id)) sessions.push(session)
   }
-
-  const timelines = { ...projected.timelines }
+  const timelines = { ...state.timelines }
   for (const session of canonicalAgents) {
     const incoming = snapshot.timelines[session.id]
     if (!incoming && session.timelineObservation && sameRun(session.timelineObservation.run, session.control.run)) continue
@@ -577,57 +541,38 @@ export function reduceAgentMembershipSnapshot(
     const current = timelines[session.id]
     if (!current || incoming.revision >= current.revision) timelines[session.id] = incoming
   }
-  return { ...projected, sessions: projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings), timelines }
+  return { ...state, sessions: projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings), timelines }
 }
 
 /**
- * Reconcile Terminal projections against an authoritative Runtime snapshot.
- *
- * Terminal Sessions have no semantic continuity record: once Core gives us a non-empty
- * snapshot from the confirmed owner that does not contain a terminal run, the old PTY is gone and its saved Region
- * must not remain as a title-only shell. An empty snapshot is deliberately fail-open — it
- * can still mean that Runtime is connecting or rooted at the wrong state directory.
- * Unlike Agent membership, this reducer never creates Tabs for unrepresented terminal runs;
- * it only updates or removes terminal Sessions that are already projected in the Workbench.
+ * Merge positive Terminal facts into original Workbench references. Absence in a
+ * catalogue is not an exact removal receipt; explicit removal and user close keep
+ * their existing owners. Unrepresented inventory never creates a Tab.
  */
 export function reduceTerminalMembershipSnapshot(
   state: SessionProjectionState,
-  snapshot: RuntimeSnapshot,
-  protectedSessionIds: ReadonlySet<string> = new Set()
+  snapshot: RuntimeSnapshot
 ): SessionProjectionState {
   if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) return state
-
   const canonicalTerminals = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'terminal' }> => (
     session.kind === 'terminal' && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)
   ))
-  const canonicalIds = new Set(canonicalTerminals.map((session) => session.id))
   const projectedTerminalIds = new Set([
     ...state.sessions.flatMap((session) => session.kind === 'terminal' ? [session.id] : []),
     ...Object.values(state.tabs).flatMap((tab) => workbenchSurfaces(tab).flatMap((surface) => (
       surface.kind === 'terminal' ? [surface.sessionId] : []
     )))
   ])
-  const previousById = new Map(state.sessions.map((session) => [session.id, session]))
-  let projected = state
-  for (const sessionId of projectedTerminalIds) {
-    const previous = previousById.get(sessionId)
-    // A saved surface without Session facts has no confirmed owner. An unavailable endpoint
-    // cannot authorize its removal merely because an unrelated local snapshot is nonempty.
-    const ownerUnconfirmed = previous ? runtimeSnapshotHostUnavailable(snapshot, previous.hostId)
-      : (snapshot.runtimeEndpointWarnings ?? []).some(warning => warning.availability !== 'connected')
-    if (!ownerUnconfirmed && !protectedSessionIds.has(sessionId) && !canonicalIds.has(sessionId)) projected = removeSessionProjection(projected, sessionId)
-  }
-
   const canonicalById = new Map(canonicalTerminals.map((session) => [session.id, session]))
-  const sessions = projected.sessions.map((session) => canonicalById.get(session.id) ?? session)
-  // A persisted Terminal Region can precede its first verified endpoint snapshot. Adopt the
-  // original referenced Run when it becomes known; unrelated inventory never creates a View.
+  const sessions = state.sessions.map((session) => canonicalById.get(session.id) ?? session)
+  // Saved Regions can precede their first verified endpoint read. Adopt only their
+  // original referenced Runs; unrelated inventory does not create a View.
   const existingIds = new Set(sessions.map(session => session.id))
   for (const session of canonicalTerminals) {
     if (projectedTerminalIds.has(session.id) && !existingIds.has(session.id)) sessions.push(session)
   }
-  if (sessions.every((session, index) => session === projected.sessions[index])) return projected
-  return { ...projected, sessions }
+  if (sessions.length === state.sessions.length && sessions.every((session, index) => session === state.sessions[index])) return state
+  return { ...state, sessions }
 }
 
 export function reduceSessionLaunchFailed(
