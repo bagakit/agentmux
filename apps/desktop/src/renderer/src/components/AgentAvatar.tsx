@@ -23,6 +23,41 @@ export const ExecutorIdentityContext = createContext<{
   onPanelVisibilityChange?: (visible: boolean) => void
 }>({ config: null })
 
+/** The same face for an already resolved, read-only identity; no Store reader or disclosure. */
+export function ResolvedAgentAvatar({ label, providerId, state, appearance, executorId, size = 18 }: {
+  label: string; providerId: AgentProviderId; state?: AgentDisplayState | undefined
+  appearance?: AgentAvatarAppearance | undefined; executorId?: string | undefined; size?: number
+}) {
+  const attention = state ? attentionAccentFor(state) : null
+  return <span className={`agent-avatar${state ? ` status status--${state}` : ''}`} role="img" aria-label={label}
+    data-executor-id={executorId} style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}
+    {...(attention ? { 'data-attention': attention } : {})}>
+    <AgentAvatarFace provider={providerId} displayState={state} avatar={appearance} size={size} />
+  </span>
+}
+
+function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, tintMark = true }: {
+  provider?: AgentProviderId | undefined; displayState?: AgentDisplayState | undefined
+  avatar?: AgentAvatarAppearance | undefined; count?: number | undefined; size: number; mark?: ReactNode; tintMark?: boolean
+}) {
+  const filterId = useId().replace(/:/g, '')
+  const attention = displayState ? attentionAccentFor(displayState) : null
+  const artwork = <>{mark ?? <AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />}
+    {avatar?.badge ? <span className="agent-avatar__badge" data-corner={PRESENCE_MARK_CORNERS.badge} data-avatar-badge={avatar.badge}>
+      <AgentAvatarBadgeIcon badge={avatar.badge} size={6} />
+    </span> : null}</>
+  return <>
+    <span className="agent-avatar__contour" aria-hidden="true">
+      {avatar?.tint && tintMark ? <AgentEnamelFilter id={filterId} tint={avatar.tint} className="agent-avatar__mark" filterClassName="agent-avatar__filters">{artwork}</AgentEnamelFilter>
+        : <span className="agent-avatar__mark">{artwork}</span>}
+    </span>
+    {displayState === 'working'
+      ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
+      : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
+    {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
+  </>
+}
+
 /** Every Executor surface shares its artwork, state marker and hover/focus disclosure here. */
 export function AgentAvatar({ label, onOpen, providerId, state, appearance, count, executorId, sessionId, size = 18, detail, onPanelVisibilityChange, actionDisclosure, disclosure, visible = true, inlineLabel, details, mark: identityMark }: {
   label?: string | undefined
@@ -69,7 +104,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const displayState = state ?? session?.state
   const name = label ?? session?.label ?? executor?.label ?? agentProviderLabel(provider ?? '')
   const statusDetail = detail ?? session?.detail
-  const filterId = useId().replace(/:/g, '')
   const panelId = useId()
   const navigation = useContext(SettingsNavigation)
   const trigger = useRef<HTMLButtonElement & HTMLSpanElement>(null)
@@ -278,20 +312,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     return () => observer.disconnect()
   }, [Boolean(position), Boolean(actionDisclosure)])
 
-  const mark = <>{identityMark ?? disclosure?.mark ?? <AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />}
-    {avatar?.badge ? <span className="agent-avatar__badge" data-corner={PRESENCE_MARK_CORNERS.badge} data-avatar-badge={avatar.badge}>
-      <AgentAvatarBadgeIcon badge={avatar.badge} size={6} />
-    </span> : null}</>
-  const face = <>
-      <span className="agent-avatar__contour" aria-hidden="true">
-        {avatar?.tint && identityMark === undefined ? <AgentEnamelFilter id={filterId} tint={avatar.tint} className="agent-avatar__mark" filterClassName="agent-avatar__filters">{mark}</AgentEnamelFilter>
-          : <span className="agent-avatar__mark">{mark}</span>}
-      </span>
-      {displayState === 'working'
-        ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="working" size={10} strokeWidth={2.4} /></span>
-        : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
-      {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
-  </>
+  const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} />
   const overlayHost = getWindowOverlayHost()
   return <>
     <Element ref={trigger} className={`agent-avatar${inlineLabel !== undefined ? ' agent-avatar--inline' : ''}${displayState ? ` status status--${displayState}` : ''}`}
