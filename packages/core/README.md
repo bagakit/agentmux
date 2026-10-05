@@ -110,6 +110,10 @@ recoverable Input claim 收敛。
 `agentPromptCondition(await client.refreshAgentSession(agentSessionId, expectedRun))`
 读取精确 Session 的 admission 条件，并与 operationId、正文和 Run 一起保存到调用方已有的发送意图。
 队列尾部到真正派发时才读取；重试和丢回执恢复复用原条件，不按最新状态重新绑定。
+`agentPromptNotApplied(session)` 从原 Core admission 与分阶段受据确认整个逻辑输入完全未应用；
+该原 operation 是稳定终局，同 ID 的恢复返回 `AGENT_PROMPT_INPUT_NOT_APPLIED`／`not_applied`，不会再次输入。
+用户下一次明确发送使用新 operationId 和当前 `agentPromptCondition`，保留原正文与拒绝记录。
+仅本次调用零字节、准备失败、独立重绘拒绝或正文已接受而提交未完成均不构成整操作终局；unknown／partial 仍续原请求。
 `afterSubmissionId: null` 表示已确认没有前序 admission，缺少该字段表示未知。
 如果后续消息已经替换原 admission 且原 tuple 不在，旧消息返回
 `AGENT_PROMPT_INPUT_UNCONFIRMED`，保留后续事实与原生终端输入；这不代表 Agent 失效。

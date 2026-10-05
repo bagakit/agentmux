@@ -211,6 +211,8 @@ Project／Zone 的真实资源决定 `agent open` 的执行机器；展示 Space
 
 订阅取消只释放该 reader，保留原 Agent/Run。持续输出携带完整帧、原始 bytes 的 base64 与 cursor；丢失回执后读原操作号，不盲目再发送首任务。
 
+Prompt 的原 operation 若已由 Core 确认整条输入完全未应用，同 ID 不再重新执行，原拒绝与 Session 事实仍可查询。直接 SDK Prompt 恢复返回稳定 `not_applied`；`agent.send` RPC／CLI 仍沿原消息回执及查询合同报告，不能用其单次错误码代替整操作事实。下一次明确发送原拒绝消息使用新的 operation／message ID，沿当前条件建立新意图；原 unknown／partial 仍恢复原请求。公共事实及 SDK 判定见[Core Prompt 合同](../../packages/core/README.md#agent-调用与输入)。
+
 ## Answer native asynchronous questions
 
 Read original records with `agent history --host <host-id> --session <session-id> --source native`. Question IDs are opaque Provider values; never construct them. A missing answer means unknown, not proof that the Agent is waiting. `agent question reply --input FILE|-` answers through the same public business owner; its `--help` and [public types](../../packages/core/src/public-rpc.ts) define the input and original Run condition. A trusted user or device is required; managed Agents cannot impersonate human confirmation.
