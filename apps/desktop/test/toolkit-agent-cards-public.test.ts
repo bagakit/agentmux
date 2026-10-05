@@ -1,4 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/src/control'
+import * as resultChannel from '../../../packages/core/src/toolkit-result-channel.js'
+const openResultChannel = resultChannel.openToolkitResultChannel
 import { afterEach, expect, it, vi } from 'vitest'
 import { randomUUID, createHash } from 'node:crypto'
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
@@ -10,7 +13,6 @@ vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), 
 import { parseToolkitResultDocument, type ToolkitResultDocument } from '../../../packages/core/src/toolkit-result-document'
 import { parseMetricsObservation } from '../../../packages/core/src/metrics'
 import { parseToolkitSnapshot } from '../../../packages/core/src/toolkit'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/src/control'
 import { AgentMuxControlServer } from '../../../packages/core/src/control-host'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
@@ -182,8 +184,18 @@ async function publicLoop(count: number, id: (i: number) => string = i => 'run-'
       launches.push(input); listener = onEvent
       child = spawn(input.command, input.args, { cwd: input.workspacePath, env: input.env, stdio: ['ignore', 'pipe', 'pipe'] })
       child.stderr!.on('data', bytes => { stderr += bytes })
-      child.stdout!.on('data', bytes => {
-        const startByte = cursor; cursor += bytes.length
+      child.stdout!.on('data',bytes=>{ const startByte=cursor;cursor+=bytes.length;listener({type:'terminal-output',dataBytes:new Uint8Array(bytes),evidence:{outputByteRange:{startByte,endByte:cursor}}}) })
+      exited = new Promise(done => child!.once('close', done))
+      return { runId: 'owned-toolkit', pid: child.pid, kind: 'terminal' } as any
+    },
+    async attach() { return { replay: [], gap: null } as any }, async replay() { return { replay: [], gap: null } as any },
+    async stop() { if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); await exited },
+    async release() {}, async remove() {}
+  }
+  let resultBytes: (bytes:Uint8Array)=>Promise<void>|void=()=>{}
+  vi.spyOn(resultChannel,'openToolkitResultChannel').mockImplementation(args=>{
+    resultBytes=async bytes=>{try{await args.onBytes(bytes)}catch(error){args.onError(error)}}
+    return openResultChannel({...args,onBytes:async bytes=>{
         buffer += bytes.toString()
         while (buffer.includes('\n')) { const n = buffer.indexOf('\n'); frames.push(JSON.parse(buffer.slice(0, n))); buffer = buffer.slice(n + 1) }
         const evidence = process.env.AGENTMUX_TERMINAL_INPUT_LOADED
@@ -196,16 +208,9 @@ async function publicLoop(count: number, id: (i: number) => string = i => 'run-'
             childPid: child!.pid, frames: frames.length, launchArgs: launches[0].args,
             boundary: 'actual frozen official script -> compiled CLI -> Unix Metrics owner -> ordered Main Toolkit owner' }) + '\n')
         }
-        listener({ type: 'terminal-output', run: { runId: 'owned-toolkit' }, dataBytes: new Uint8Array(bytes),
-          evidence: { outputByteRange: { startByte, endByte: cursor } } })
-      })
-      exited = new Promise(done => child!.once('close', done))
-      return { runId: 'owned-toolkit', pid: child.pid, kind: 'terminal' } as any
-    },
-    async attach() { return { replay: [], gap: null } as any }, async replay() { return { replay: [], gap: null } as any },
-    async stop() { if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); await exited },
-    async release() {}, async remove() {}
-  }
+      await args.onBytes(bytes)
+    }})
+  })
   const owner = new PerformanceToolkitOwner({ openRunPort: async () => runPort, launch: () => ({ runner: process.execPath,
     script: file, cli: resolve('packages/core/bin/amux'), cwd: root, env: objectCliEnvironment(root) as Record<string, string> }),
     enabled: () => true, receipts: { read: async () => null, save: async () => {} } })
@@ -216,8 +221,8 @@ async function publicLoop(count: number, id: (i: number) => string = i => 'run-'
   closes.push(() => rpc.dispose())
   const lease = await rpc.subscribe('toolkit.watch', { toolId: 'performance' }, { onInitial() {}, onEvent() {}, onEnd() {} })
   closes.push(() => lease.dispose())
-  await vi.waitFor(() => { expect(owner.current.sequence, JSON.stringify({ stderr, frames })).toBeGreaterThan(0) }, { timeout: 5000 })
-  return { f, owner, rpc, root, launches, frames, listener, get cursor() { return cursor } }
+  await vi.waitFor(() => { expect(owner.current.sequence, JSON.stringify({ stderr, reason:owner.current.reason,state:owner.current.state,frames })).toBeGreaterThan(0) }, { timeout: 5000 })
+  return { f, owner, rpc, root, launches, frames, listener, resultBytes, get cursor() { return cursor } }
 }
 
 it('runs actual official script -> one compiled CLI watch -> Unix sampler -> Main Toolkit -> public inspect/watch', async () => {
@@ -257,7 +262,7 @@ it('runs actual official script -> one compiled CLI watch -> Unix sampler -> Mai
   const framesBefore = f.frames.length
   const bytes = Buffer.from(JSON.stringify({ ...f.frames.at(-1), sequence: f.owner.current.sequence + 1,
     document: { ...document(), agentCards: { ...document().agentCards!, fields: ['execute'] } } }) + '\n')
-  f.listener({ type: 'terminal-output', dataBytes: bytes, evidence: { outputByteRange: { startByte: f.cursor, endByte: f.cursor + bytes.length } } })
+  await f.resultBytes(bytes)
   await vi.waitFor(()=>expect(f.owner.current.state).toBe('failed'))
   expect(f.owner.current.observation).not.toBeNull(); expect(f.owner.current.document!.agentCards!.fields).not.toContain('execute')
   expect(framesBefore).toBeGreaterThan(0)
