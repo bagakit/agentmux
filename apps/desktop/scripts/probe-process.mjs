@@ -26,20 +26,14 @@ export async function listProbeProcesses(groupId, temporaryRoot) {
   })
 }
 
-function signal(pid, name) {
-  try { process.kill(pid, name) } catch (error) {
-    if (error.code !== 'ESRCH') throw error
-  }
-}
-
 // Recheck this invocation's root immediately before signalling a discovered
 // PID. A child can become a zombie after the discovery snapshot; its command
 // becomes <defunct>, but it no longer needs a signal.
-export async function signalOwnedProbeProcess(pid, temporaryRoot, name) {
+export async function signalOwnedProbeProcess(pid, temporaryRoot, name, groupId) {
   let stdout
   let observationError
   try {
-    const observation = await execFileAsync('/bin/ps', ['-p', String(pid), '-o', 'stat=,command='], {
+    const observation = await execFileAsync('/bin/ps', ['-p', String(pid), '-o', groupId === undefined ? 'stat=,command=' : 'pgid=,stat=,command='], {
       timeout: 5_000, maxBuffer: 64 * 1024
     })
     stdout = observation.stdout
@@ -58,12 +52,19 @@ export async function signalOwnedProbeProcess(pid, temporaryRoot, name) {
     }
     if (observationError) throw observationError
   }
-  const state = /^\s*(\S+)/.exec(stdout)?.[1]
+  let identityText = stdout, observedGroupId
+  if (groupId !== undefined) {
+    const grouped = /^\s*(\d+)\s+([\s\S]*)$/.exec(stdout)
+    assert.ok(grouped, 'Private process group could not be observed')
+    observedGroupId = Number(grouped[1])
+    identityText = grouped[2]
+  }
+  const state = /^\s*(\S+)/.exec(identityText)?.[1]
   if (state?.startsWith('Z')) return false
-  const identity = /^\s*(\S+)\s+(.+)\s*$/.exec(stdout)
+  const identity = /^\s*(\S+)\s+(.+)\s*$/.exec(identityText)
   assert.ok(identity && /^[RSDTIUWZ]/.test(identity[1]),
     `Private process state could not be observed (state=${JSON.stringify(state ?? null)}, chars=${stdout.length})`)
-  assert.ok(ownsProbePath(identity[2], temporaryRoot), 'Private process identity changed')
+  assert.ok(ownsProbePath(identity[2], temporaryRoot) || (groupId !== undefined && observedGroupId === groupId), 'Private process identity changed')
   try { process.kill(pid, name) } catch (error) {
     if (error.code === 'ESRCH') return false
     throw error
@@ -72,16 +73,19 @@ export async function signalOwnedProbeProcess(pid, temporaryRoot, name) {
 }
 
 export async function stopProbeProcesses(groupId, temporaryRoot, graceMs = 1_000) {
-  signal(-groupId, 'SIGTERM')
-  for (const pid of await listProbeProcesses(groupId, temporaryRoot)) signal(pid, 'SIGTERM')
-  const deadline = Date.now() + graceMs
   let remaining = await listProbeProcesses(groupId, temporaryRoot)
+  if (!remaining.length) return
+  // The leader may have already exited while a detached temporary-root observer
+  // remains. Signal the observed owners, never an empty or unrelated old group.
+  for (const pid of remaining) await signalOwnedProbeProcess(pid, temporaryRoot, 'SIGTERM', groupId)
+  const deadline = Date.now() + graceMs
+  remaining = await listProbeProcesses(groupId, temporaryRoot)
   while (remaining.length && Date.now() < deadline) {
     await delay(50)
     remaining = await listProbeProcesses(groupId, temporaryRoot)
   }
-  signal(-groupId, 'SIGKILL')
-  for (const pid of remaining) signal(pid, 'SIGKILL')
+  if (!remaining.length) return
+  for (const pid of remaining) await signalOwnedProbeProcess(pid, temporaryRoot, 'SIGKILL', groupId)
   const killedDeadline = Date.now() + 2_000
   do {
     remaining = await listProbeProcesses(groupId, temporaryRoot)
@@ -98,13 +102,19 @@ export async function runProbeProcess(executable, args, {
 }) {
   const child = spawn(executable, args, { cwd, env, detached: true, stdio: ['ignore', 'inherit', 'pipe'] })
   let cleanupPromise
-  const cleanup = () => cleanupPromise ??= child.pid
+  const cleanup = () => cleanupPromise ??= (child.pid
     ? stopProbeProcesses(child.pid, temporaryRoot, graceMs)
-    : Promise.resolve()
+    : Promise.resolve()).catch(cause => {
+      const error = new Error(`Private probe cleanup failed; remaining owners are unknown. ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+      error.code = cause?.code
+      error.probe = { leaderPid: child.pid ?? null, temporaryRoot, cleanup: 'unknown' }
+      throw error
+    })
   let timedOut = false
   let interruption = null
-  let abortError
-  const abort = () => { void cleanup().catch((error) => { abortError = error }) }
+  let rejectCleanupFailure
+  const cleanupFailure = new Promise((_resolve, reject) => { rejectCleanupFailure = reject })
+  const abort = () => { void cleanup().catch(rejectCleanupFailure) }
   const onInterrupt = (name) => { interruption = name; abort() }
   const onSigint = () => onInterrupt('SIGINT')
   const onSigterm = () => onInterrupt('SIGTERM')
@@ -119,12 +129,12 @@ export async function runProbeProcess(executable, args, {
     if (line.startsWith('file_editing_probe_failed=')) abort()
   })
   try {
-    const exitCode = await new Promise((resolve, reject) => {
+    const childExit = new Promise((resolve, reject) => {
       child.once('error', reject)
       child.once('exit', (code, signal) => resolve(signal ? 1 : code ?? 1))
     })
+    const exitCode = await Promise.race([childExit, cleanupFailure])
     await cleanup()
-    if (abortError) throw abortError
     return { exitCode, timedOut, interruption }
   } finally {
     clearTimeout(timer)
