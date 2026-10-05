@@ -62,6 +62,12 @@ app.whenReady().then(async () => {
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
   await until('!!document.querySelector(".mobile-spatial-panel .mobile-session-list button")')
+  result.palette = await read(`(()=>{const s=getComputedStyle(document.documentElement);return Object.fromEntries(['--surface-0','--surface-1','--green','--amber','--red','--fs-body'].map(k=>[k,s.getPropertyValue(k).trim()]))})()`)
+  if (!baseline) {
+    assert.equal(result.palette['--surface-1'], '#171b21', 'Original MobileApp consumes the shared Graphite palette')
+    assert.equal(result.palette['--green'], '#8de3ae', 'Original MobileApp consumes the shared Mint action color')
+    assert.equal(result.palette['--fs-body'], '13px', 'Mobile typography remains client-owned')
+  }
   await capture('mote-overview-phone')
   await openMote()
   await read('window.originalCaptureEditor=document.querySelector("[contenteditable=true]")')
@@ -122,10 +128,20 @@ app.whenReady().then(async () => {
     await tap('.mobile-mote-heading', 'Mote avatar Profile')
     await capture('mote-profile-phone')
     await resize(320, 760); await capture('mote-profile-narrow')
+    const profile = await read(`(()=>{const n=document.querySelector('.mobile-sheet');return {background:getComputedStyle(n).backgroundColor,minActionHeight:Math.min(...[...n.querySelectorAll('button')].filter(n=>n.getClientRects().length).map(n=>n.getBoundingClientRect().height))}})()`)
+    if (!baseline) {
+      assert.equal(profile.background, 'rgb(23, 27, 33)', 'Profile uses the shared neutral sheet material')
+      assert.ok(profile.minActionHeight >= 44, 'Profile actions preserve touch targets')
+    }
+    result.operations.push({ action: 'profile-material', ...profile })
+    await read('document.documentElement.dataset.appearance="light"')
+    await capture('mote-profile-light-narrow')
+    if (!baseline) assert.equal(await read('getComputedStyle(document.querySelector(".mobile-sheet")).backgroundColor'), 'rgb(238, 241, 239)', 'Profile reads the same light appearance role')
+    await read('document.documentElement.dataset.appearance="dark"')
     await button('合作方式 · BEHAVIOR.md')
     await until('document.querySelector(".mobile-mote-source").textContent.includes("我们围绕你的原始目标")')
     await capture('mote-original-source-narrow')
-    await button('返回 Profile')
+    await button('返回资料')
     await button('关闭面板')
     assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
   } else gap('Mote main-conversation entry lost its original Mote context; avatar/Profile unavailable.')
@@ -186,13 +202,28 @@ app.whenReady().then(async () => {
   assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
   await read('mobileProductScene.unknownNext()')
   await button('Send')
-  await until('!!document.querySelector(".mobile-send-status[data-phase=unknown]")')
+  await pause(120)
+  assert.equal(await visible('.mobile-send-status[data-phase=unknown]'), true, 'Unknown delivery remains independently visible')
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Continue later draft')
   win.webContents.insertText(' 后来补充的文字也保留。')
   await capture('unknown-receipt-narrow')
   await resize(390, 480); await capture('unknown-short-viewport')
+  await tap('.mobile-send-status__diagnosis > summary', '发送详情')
+  await capture('unknown-details-short-viewport')
+  const diagnostic = await read(`(()=>{const n=document.querySelector('.mobile-send-status__diagnosis'),e=document.querySelector('[contenteditable=true]'),r=e.getBoundingClientRect();return {text:n.innerText,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight,overflow:getComputedStyle(n).overflowY,editor:r.toJSON(),editorFont:getComputedStyle(e).fontSize,readingHeight:document.querySelector('.mobile-conversation__reading').getBoundingClientRect().height}})()`)
+  assert.ok(diagnostic.text.includes('原 Host 已受理输入') && diagnostic.text.includes('后来补充的草稿也保留'), 'Unknown diagnosis retains the full original explanation')
+  assert.ok(diagnostic.scrollHeight <= diagnostic.clientHeight || diagnostic.overflow === 'auto', 'Long unknown diagnosis remains scrollable')
+  assert.ok(diagnostic.editor.height > 0 && diagnostic.editor.top >= 0 && diagnostic.editor.bottom <= 480, 'Short-screen editor remains within the viewport while diagnosis is open')
+  assert.equal(diagnostic.editorFont, '16px', 'Mobile editor preserves the non-zooming touch type size')
+  result.operations.push({ action: 'short-unknown-diagnosis', ...diagnostic })
+  await tap('.mobile-send-status__diagnosis > summary', '收起发送详情')
   await read('mobileProductScene.offline()')
   await capture('offline-retained-short')
+  if (!baseline) {
+    assert.equal(await visible('.mobile-conversation__connection'), true, 'Connection loss remains visible in the active conversation')
+    assert.equal(await visible('.mobile-service-notice'), false, 'Same connection fact is not repeated in the shell')
+    assert.equal(await visible('.mobile-send-status[data-phase=unknown]'), true, 'Connection loss does not erase unknown delivery')
+  }
   assert.equal(await read('document.querySelector("[contenteditable=true]").getAttribute("contenteditable")'), 'true')
   await read('mobileProductScene.reconnect()')
   await resize(390, 844)
@@ -202,7 +233,7 @@ app.whenReady().then(async () => {
   assert.equal(calls.filter(call => call.method === 'sdk.respondAgentInteraction').length, 1)
   result.passed = true
  } catch (error) {
-  result.error = { message: error.message, stack: error.stack }
+  result.error = { name: error.name, message: error.message, stack: error.stack }
   if (win) { await fs.writeFile(path.join(evidence, 'failed.png'), (await win.webContents.capturePage()).toPNG()); result.images.push('failed.png') }
  } finally {
   await fs.writeFile(path.join(evidence, 'renderer-result.json'), JSON.stringify(result, null, 2) + '\n')

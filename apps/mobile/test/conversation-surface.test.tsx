@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -31,7 +32,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(editor(view.element).textContent).toContain('原生输入')
     await view.render(<MobileConversationSurface {...options} client={null}
       connection={{ state: 'unavailable', message: '尚未授权' }} onAttach={attach} />)
-    expect(view.element.textContent).toContain('当前不能发送；草稿与阅读保留')
+    expect(view.element.textContent).toContain('当前发送暂不可用')
     expect(editor(view.element).textContent).toContain('待完成的草稿')
     expect(editor(view.element).textContent).toContain('原生输入')
     expect(button(view.element, 'Send').disabled).toBe(false)
@@ -48,9 +49,9 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
   it('retains native source order and recorded human/peer/unknown authorship; delegates copy and web links', async () => {
     const f = fixture(), copy = vi.fn().mockResolvedValue(undefined), open = vi.fn()
     f.setTimeline({ agentSessionId: 'session-original', revision: 1, items: [
-      { id: 'captured-peer', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 1, updatedAt: 1, title: 'Input', content: '来自同事', authorAgentSessionId: 'peer' },
-      { id: 'captured-human', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Input', content: '来自本人', authorHuman: true },
-      { id: 'captured-unknown', agentSessionId: 'session-original', kind: 'user_message', status: 'failed', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: '未记录作者' }
+      { id: 'captured-peer', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), title: 'Input', content: '来自同事', authorAgentSessionId: 'peer' },
+      { id: 'captured-human', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 2), updatedAt: _reshape_fixtureEpoch(0, 0, 2), title: 'Input', content: '来自本人', authorHuman: true },
+      { id: 'captured-unknown', agentSessionId: 'session-original', kind: 'user_message', status: 'failed', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 3), updatedAt: _reshape_fixtureEpoch(0, 0, 3), title: 'Input', content: '未记录作者' }
     ] })
     const view = await mount(<MobileConversationSurface {...props(f)} openHttpLink={open}
       platform={createBrowserPlatform({ clipboard: { writeText: copy } })} />)
@@ -101,13 +102,13 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.submit).toHaveBeenCalledOnce()
     expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('unknown')
     f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
-      { id: 'prompt:other-operation', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Input', content: input.prompt, authorHuman: true }
+      { id: 'prompt:other-operation', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 2), updatedAt: _reshape_fixtureEpoch(0, 0, 2), title: 'Input', content: input.prompt, authorHuman: true }
     ] })
     await refreshOriginal(view.element)
     expect(editor(view.element).textContent).toContain('保留引用')
     expect(button(view.element, 'Send').disabled).toBe(false)
     f.setTimeline({ agentSessionId: 'session-original', revision: 3, items: [
-      { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: input.prompt, authorHuman: true }
+      { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: _reshape_fixtureEpoch(0, 0, 3), updatedAt: _reshape_fixtureEpoch(0, 0, 3), title: 'Input', content: input.prompt, authorHuman: true }
     ] })
     await refreshOriginal(view.element)
     expect(editor(view.element).textContent).toBe('')
@@ -118,7 +119,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
 
   it.each(['done', 'working'] as const)('explicitly sends two messages against the original %s Run without waiting for a completion probe', async state => {
     const f = fixture(), original = session()
-    original.semanticStatus = { state, source: 'native-hook', observedAt: 1 }
+    original.semanticStatus = { state, source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }
     f.sessions.set(original.agentSessionId, original)
     f.submit.mockImplementationOnce(async input => {
       const admitted = { ...original, promptCompletionAdmission: { submissionId: input.operationId, operationId: 'native-phase', startByte: 0, endByte: 8, acknowledged: true } }
@@ -403,7 +404,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(localStorage.getItem(STORAGE)).toBe(beforeLate)
     expect(f.submit).toHaveBeenCalledOnce()
     f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
-      { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'user', createdAt: 2, updatedAt: 2, title: 'Prompt', content: input.prompt, authorHuman: true }
+      { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'user', createdAt: _reshape_fixtureEpoch(0, 0, 2), updatedAt: _reshape_fixtureEpoch(0, 0, 2), title: 'Prompt', content: input.prompt, authorHuman: true }
     ] })
     await refreshOriginal(restored.element)
     expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('confirmed')

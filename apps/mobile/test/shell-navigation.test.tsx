@@ -80,6 +80,39 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.textContent).toContain('Mac 上的原会话保持不变')
   })
 
+  it('shows one connection notice at the visible workface while retaining independent unknown delivery and the original draft', async () => {
+    getDeviceWorkface().updateNavigation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
+    const f = clientFixture(), platform = createBrowserPlatform()
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('Receipt lost after dispatch'), { code: 'STALE_AGENT_SESSION' }))
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
+    const originalEditor = editor(view.element)
+    await paste(view.element, '原请求与草稿都保留')
+    await click(button(view.element, 'Send'))
+    const originalRequest = f.submit.mock.calls[0]![0]
+    const offline = { state: 'disconnected' as const, message: '连接中断，自动重连中；原会话与草稿保留。' }
+    await view.render(<MobileApp client={f.client} connection={offline} platform={platform} />)
+    const connectionNotice = view.element.querySelector('.mobile-conversation-panel:not([hidden]) .mobile-conversation__connection')
+    expect(connectionNotice?.textContent).toContain(offline.message)
+    expect(view.element.querySelector('.mobile-service-notice')).toBeNull()
+    expect(view.element.querySelector('.mobile-send-status[data-phase="unknown"]')).not.toBeNull()
+    expect(editor(view.element)).toBe(originalEditor)
+    expect(originalEditor.textContent).toBe('原请求与草稿都保留')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+
+    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
+    expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
+    expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain(offline.message)
+    await view.render(<MobileApp client={f.client} connection={connected} platform={platform} />)
+    expect(view.element.querySelector('.mobile-service-notice')).toBeNull()
+    await click(view.element.querySelector('.mobile-session-list button')!)
+    expect(editor(view.element)).toBe(originalEditor)
+    expect(view.element.querySelector('.mobile-send-status[data-phase="unknown"]')).not.toBeNull()
+    const retained = getDeviceWorkface().snapshot().record.conversation.attempts
+    expect(retained).toHaveLength(1)
+    expect(retained[0]![1].operationId).toBe(originalRequest.operationId)
+    expect(f.submit).toHaveBeenCalledOnce()
+  })
+
   it('uses the current public offer boundary: LAN plaintext is supported, remote plaintext and credential/path/token destinations are rejected', () => {
     const offer = { v: 2 as const, serverId: 'original-host', daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint: '192.168.1.20:43123', useTls: false } }
     expect(parseConnectionOffer(offer)).toEqual(offer)
@@ -111,5 +144,8 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.textContent).toContain('仅临时采用')
     expect(localStorage.getItem(STORAGE)).toBe(original)
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+    await view.render(<MobileApp client={f.client} connection={unavailable} platform={createBrowserPlatform()} />)
+    expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('仅临时采用')
+    expect(view.element.querySelector('.mobile-conversation__connection')?.textContent).toContain(unavailable.message)
   })
 })

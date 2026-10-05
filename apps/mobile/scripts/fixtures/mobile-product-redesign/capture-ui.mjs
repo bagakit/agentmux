@@ -14,6 +14,25 @@ const receipt = { passed: false, captureOnly: true, captureSubset: 'mobile-produ
   boundary: 'Actual MobileApp, DeviceWorkface, original ConversationSurface and shared Composer in private Electron Chromium; controlled original SDK/Space/Mote/Goal facts and acknowledgements. Real CDP touch events and browser insertText are simulation, not a physical phone, OS keyboard, live Relay/Host/model/Run, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
+  const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
+  const variants = {
+    'duplicate-connection': { file: 'apps/mobile/src/MobileApp.tsx', before: '!conversationVisible ? connection.issue', after: 'true ? connection.issue' },
+    'hide-unknown': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && attempt.phase !== 'confirmed' ? <aside", after: "{attempt && attempt.phase === 'sending' ? <aside" },
+    'missing-palette': { file: 'apps/mobile/src/mobile.css', before: "@import '@agentmux/client-ui/styles/palette.css';", after: '' }
+  }
+  const variant = mutationId ? variants[mutationId] : null
+  if (mutationId) assert.ok(variant, 'Known bounded Mobile presentation mutation is required')
+  const overrides = []
+  if (variant) {
+    const original = await fs.readFile(path.join(root, variant.file), 'utf8')
+    assert.equal(original.split(variant.before).length - 1, 1, 'Actual production mutation anchor is unique')
+    const source = original.replace(variant.before, variant.after)
+    receipt.sourceOverride = { id: mutationId, file: variant.file, originalSha256: sha(original), sha256: sha(source) }
+    overrides.push({ name: 'bounded-mobile-presentation-mutation', setup(plugin) {
+      plugin.onLoad({ filter: /\.(?:tsx|css)$/ }, args => args.path === path.join(root, variant.file)
+        ? { contents: source, loader: variant.file.endsWith('.css') ? 'css' : 'tsx', resolveDir: path.dirname(args.path) } : undefined)
+    } })
+  }
   const alias = {}
   const clientFolder = path.join(root, 'packages/client-ui')
   const clientExports = Object.entries(JSON.parse(await fs.readFile(path.join(clientFolder, 'package.json'), 'utf8')).exports)
@@ -53,9 +72,13 @@ try {
     }
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workers],
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('(disabled):'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
+  if (receipt.sourceOverride) {
+    assert.equal(receipt.source[receipt.sourceOverride.file], receipt.sourceOverride.originalSha256, 'Mutation targets an actual nonempty production input')
+    receipt.source[receipt.sourceOverride.file] = receipt.sourceOverride.sha256
+  }
   receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):')))
   for (const name of ['capture-ui.mjs', 'product-main.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
@@ -66,6 +89,7 @@ try {
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
+  if (receipt.sourceOverride) assert.equal(sha(await fs.readFile(path.join(root, receipt.sourceOverride.file))), receipt.sourceOverride.originalSha256, 'Private mutation never changes the shared source')
   for (const file of receipt.renderer.images) receipt.images[path.relative(root, path.join(directory, file))] = sha(await fs.readFile(path.join(directory, file)))
   await fs.writeFile(path.join(directory, 'review.md'), '# Mobile product Renderer capture\n\nCapture only; independent aesthetic review has not run. Controlled Chromium is not physical phone validation.\n\nRenderer scenario: ' + (receipt.renderer.passed ? 'completed' : 'failed: ' + receipt.renderer.error?.message) + '\n\n' + receipt.renderer.images.map(file => '- [' + file + '](' + file + ')').join('\n') + '\n')
   assert.equal(receipt.renderer.passed, true, receipt.renderer.error?.message)
