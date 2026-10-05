@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { GitHistoryResult } from '../../../../../shared/git-contracts'
+import type { GitHistoryRef, GitHistoryResult } from '../../../../../shared/git-contracts'
 import type { WorkspaceRecord } from '../../../../../shared/contracts'
 import { gitBridge } from '../../../lib/git-bridge'
 
@@ -7,12 +7,13 @@ type HistoryState = {
   key: string
   reference: string | null
   result: GitHistoryResult | null
+  refs: GitHistoryRef[]
   loading: boolean
   error: string | null
 }
 
 /** An explicit handoff of completed facts; pending requests never move between owners. */
-export type GitHistoryWindow = Readonly<Pick<HistoryState, 'key' | 'reference' | 'result' | 'error'>>
+export type GitHistoryWindow = Readonly<Pick<HistoryState, 'key' | 'reference' | 'result' | 'refs' | 'error'>>
 
 /** Component-owned read window. Hidden tabs keep completed pages and reject pending reads. */
 export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, visible: boolean) {
@@ -47,7 +48,9 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     if (more && !cursor) return false
     const id = ++generation.current
     const lookup = gitBridge()
-    const base: HistoryState = { key, reference, result: previous?.result ?? null, loading: false, error: null }
+    // Available ranges belong to this exact Workspace, independently of the selected commit page.
+    const base: HistoryState = { key, reference, result: previous?.result ?? null,
+      refs: latest.current?.key === key ? latest.current.refs : [], loading: false, error: null }
     if (!lookup.available) { publish({ ...base, error: lookup.reason }); return false }
     busy.current = true
     publish({ ...base, loading: true })
@@ -64,7 +67,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
         result = { ...next, commits }
       }
       busy.current = false
-      publish({ ...base, result, loading: false })
+      publish({ ...base, result, refs: next.kind === 'ready' ? next.snapshot.refs : [], loading: false })
       return true
     } catch (error) {
       if (!current()) return false
@@ -91,7 +94,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     const value = latest.current
     if (scope.current.key !== key || value?.key !== key || value.reference !== scope.current.reference ||
       (!value.result && !value.error)) return null
-    return { key, reference: value.reference, result: value.result, error: value.error }
+    return { key, reference: value.reference, result: value.result, refs: value.refs, error: value.error }
   }, [key])
   const adoptWindow = useCallback((window: GitHistoryWindow): void => {
     if (scope.current.key !== key || window.key !== key) return
@@ -115,7 +118,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
   const owned = state?.key === key && state.reference === reference ? state : null
   return useMemo(() => ({
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
-    refs: state?.key === key && state.result?.kind === 'ready' ? state.result.snapshot.refs : [],
+    refs: state?.key === key ? state.refs : [],
     reference, enabled,
     selectReference, refresh, loadMore, captureWindow, adoptWindow
   }), [owned, state, key, reference, enabled, selectReference, refresh, loadMore, captureWindow, adoptWindow])
