@@ -940,6 +940,8 @@ type AppState = {
   openGitWorkbench(workspaceId: string, snapshot: GitCommitSnapshot): { tabId: string; regionId: string }
   selectGitCommit(regionId: string, snapshot: GitCommitSnapshot): void
   loadBranchDiff(regionId: string): Promise<void>
+  /** Release a budgeted Git Diff payload; its durable Region and fixed descriptor stay intact. */
+  releaseBranchDiff(regionId: string): void
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
@@ -6015,6 +6017,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? bridge.commitDiff(surface.workspaceId, surface.comparison)
         : bridge.branchDiff(surface.workspaceId, surface.comparison)
     )
+  },
+  releaseBranchDiff(regionId) {
+    if (findWorkbenchRegion(get().tabs, regionId)?.surface.kind !== 'git-diff') return
+    regionDiffRequestIds.delete(regionId)
+    set(state => {
+      if (!Object.hasOwn(state.editorRegionDiffs, regionId)) return state
+      const diffs = { ...state.editorRegionDiffs }
+      delete diffs[regionId]
+      return { editorRegionDiffs: diffs }
+    })
   },
   async renameAgent(sessionId, name, expectedNameRevision) {
     try { const result = await commitDisplayName({ kind: 'agent-session', id: sessionId }, name, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }

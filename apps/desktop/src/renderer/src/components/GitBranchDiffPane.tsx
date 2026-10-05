@@ -14,13 +14,16 @@ export function GitBranchDiffPane({ surface, released = false, visible = true }:
 }) {
   const diff = useAppStore((state) => state.editorRegionDiffs[surface.regionId])
   const load = useAppStore((state) => state.loadBranchDiff)
+  const release = useAppStore((state) => state.releaseBranchDiff)
   const wordWrap = useAppStore((state) => state.editorWordWrap)
   const toggleWordWrap = useAppStore((state) => state.toggleEditorWordWrap)
   const theme = useMonacoTheme()
   useEffect(() => {
     // The durable descriptor is the only rebuild input. Hidden panes don't eagerly read every blob.
-    if (visible && !released && !useAppStore.getState().editorRegionDiffs[surface.regionId]) void load(surface.regionId)
-  }, [visible, released, surface.regionId, load])
+    // The existing budget releases the transient bytes as well as the Monaco owner.
+    if (released) release(surface.regionId)
+    else if (visible && !useAppStore.getState().editorRegionDiffs[surface.regionId]) void load(surface.regionId)
+  }, [visible, released, surface.regionId, load, release])
   if (released) return <EditorReleasedState />
   const { file } = surface.comparison
   const commit = 'kind' in surface.comparison && surface.comparison.kind === 'commit' ? surface.comparison : null
