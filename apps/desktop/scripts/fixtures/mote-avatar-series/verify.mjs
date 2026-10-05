@@ -31,6 +31,8 @@ if (scope==='sources') {
     receipts.push({mutation,path:output})
   }
   console.log(JSON.stringify({scope,passed:true,receipts}))
+} else if (scope==='editor') {
+  console.log(await run(process.execPath,['apps/desktop/scripts/fixtures/mote-avatar-series/verify-editor-evidence.mjs']))
 } else {
   throw new Error('This scope has not yet closed its actual consumer and review evidence: '+scope)
 }
