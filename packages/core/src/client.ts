@@ -773,7 +773,7 @@ export class AgentMuxClient {
     const origin = input.initialMessageAdmission ? await authority.verify(input.initialMessageAdmission, { runtimeId, intentDigest }) : undefined
     // Resolve an existing intent before reading a possibly changed Executor configuration. Never
     // restart or re-input an operation whose original delivery is unknown.
-    const existing = (await this.readAgentSessions()).find(session => session.agentSessionId === input.agentSessionId)
+    const existing = await this.readCreationSession(input.agentSessionId)
     if (existing) {
       if (existing.creation?.createOperationId !== input.createOperationId || existing.creation.intentDigest !== intentDigest ||
         JSON.stringify(existing.creation.initialMessageOrigin) !== JSON.stringify(origin)) {
@@ -1801,6 +1801,14 @@ export class AgentMuxClient {
       !durable.some(current => current.agentSessionId === session.agentSessionId))].map(cloneSession)
   }
 
+  /** Exact creation facts; only a genuinely started, unconfirmed projection may supplement the Store. */
+  private async readCreationSession(agentSessionId: string): Promise<AgentMuxAgentSession | undefined> {
+    const durable = await this.store.readMetadata(agentSessionId)
+    if (durable) return cloneSession(durable)
+    const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
+    return started?.creation?.persistence === 'unconfirmed' ? cloneSession(started) : undefined
+  }
+
   /** Retained body by exact identity; absence is explicit, never inferred from a control projection. */
   async readAgentFuturePromptIntent(agentSessionId: string, intentId: string): Promise<import('./types.js').AgentFuturePromptIntent | null> {
     safeId(intentId, 'Future message intent id')
@@ -1834,7 +1842,7 @@ export class AgentMuxClient {
 
   /** Reconcile only the original prepared operation with authoritative Runs, never start or input. */
   async inspectAgentCreation(agentSessionId: string): Promise<AgentMuxAgentSession> {
-    const existing = (await this.readAgentSessions()).find(session => session.agentSessionId === agentSessionId)
+    const existing = await this.readCreationSession(agentSessionId)
     if (existing && existing.creation?.persistence !== 'unconfirmed') return existing
     const correlation = await this.store.loadCreationCorrelation(agentSessionId)
     if (!correlation?.preparedCreation?.creation?.intentDigest) {
@@ -3360,7 +3368,7 @@ export class AgentMuxClient {
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
     if (durableCreate) {
-      const existing = (await this.readAgentSessions()).find(session => session.agentSessionId === agentSessionId)
+      const existing = await this.readCreationSession(agentSessionId)
       if (existing && existing.creation?.persistence !== 'unconfirmed') {
         if (existing.creation?.createOperationId !== createOperationId || existing.providerId !== input.providerId ||
           existing.executorId !== executorId || existing.workspacePath !== input.workspacePath ||
