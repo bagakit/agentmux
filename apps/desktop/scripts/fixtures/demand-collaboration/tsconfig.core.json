@@ -1,0 +1,23 @@
+{
+  "extends": "../../../../../packages/core/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../../../../..",
+    "baseUrl": "../../../../..",
+    "paths": {
+      "@agentmux/demand": [
+        "packages/demand/src/index.ts"
+      ],
+      "@agentmux/demand/goals": [
+        "packages/demand/src/goals.ts"
+      ],
+      "@scure/base": [
+        "node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../../../../packages/core/src/**/*.ts",
+    "../../../../../packages/core/src/**/*.json"
+  ]
+}

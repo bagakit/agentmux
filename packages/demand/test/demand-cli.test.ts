@@ -45,15 +45,15 @@ describe('agentmux-demand CLI', () => {
   it('keeps assignment, explicit start, no-start, and handoff as auditable Demand operations', async () => {
     const root = await tempRoot()
     await invoke(['--root', root, 'create', '--id', 'd-route', '--title', 'Route me'])
-    const assigned = await invoke(['--root', root, 'assign', '--id', 'd-route', '--project-id', 'project-a', '--executor-id', 'agent-a', '--no-start'])
+    const assigned = await invoke(['--root', root, 'assign', '--id', 'd-route', '--project-id', 'project-a', '--assignee-session-id', 'session-a', '--no-start'])
     expect(assigned.code).toBe(0)
-    expect(assigned.out[0]).toMatchObject({ startRequested: false, demand: { status: 'backlog', projectId: 'project-a', executorId: 'agent-a' } })
+    expect(assigned.out[0]).toMatchObject({ startRequested: false, demand: { status: 'backlog', projectId: 'project-a', assigneeSessionIds: ['session-a'] } })
     const started = await invoke(['--root', root, 'start', '--id', 'd-route', '--session-id', 'session-a'])
     expect(started.code).toBe(0)
-    expect(started.out[0]).toMatchObject({ demand: { status: 'in_progress', sessionIds: ['session-a'] } })
-    const handedOff = await invoke(['--root', root, 'handoff', '--id', 'd-route', '--from-executor', 'agent-a', '--to-executor', 'agent-b', '--to-session', 'session-b'])
+    expect(started.out[0]).toMatchObject({ submitted: false, demand: { status: 'in_progress', sessionIds: ['session-a'] } })
+    const handedOff = await invoke(['--root', root, 'handoff', '--id', 'd-route', '--to-session', 'session-b'])
     expect(handedOff.code).toBe(0)
-    expect(handedOff.out[0]).toMatchObject({ demand: { executorId: 'agent-b', sessionIds: ['session-a', 'session-b'] } })
+    expect(handedOff.out[0]).toMatchObject({ demand: { assigneeSessionIds: ['session-b'], sessionIds: ['session-a', 'session-b'] } })
   })
 
   it('accepts the explicit environment root and emits typed JSON failures', async () => {
