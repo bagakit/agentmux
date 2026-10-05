@@ -56,13 +56,35 @@ it('reuses the explicitly saved exact local identity under native codesigning po
   expect(run).toHaveBeenCalledExactlyOnceWith('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'])
   await expect(preflightMacosSigning({ argv: [], env: {}, loadLocal, run: vi.fn(async () => ({ stdout: `1) ${'B'.repeat(40)} "AgentMux Local UUID"`, stderr: '' })) })).rejects.toThrow(/not uniquely available and valid/)
 })
+it('retains an exact saved local valid identity with the observed certificate-policy warning', async () => {
+  const run = vi.fn(async () => ({ stdout: `  1) ${identity} "AgentMux Local UUID" (CSSMERR_TP_NOT_TRUSTED)\n     1 valid identities found\n`, stderr: '' }))
+  expect(await preflightMacosSigning({ argv: [], env: {}, run, loadLocal: async () => localPlan })).toEqual(localPlan)
+  expect(run).toHaveBeenCalledExactlyOnceWith('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'])
+})
+it.each([' (CSSMERR_TP_CERT_EXPIRED)', ' (unknown warning)', ' trailing garbage'])('rejects an unknown local selected-row suffix %s', async suffix => {
+  const run = vi.fn(async () => ({ stdout: `1) ${identity} "AgentMux Local UUID"${suffix}\n`, stderr: '' }))
+  await expect(preflightMacosSigning({ argv: [], env: {}, run, loadLocal: async () => localPlan })).rejects.toThrow(/not uniquely available and valid/)
+})
+it.each([
+  ['', ''], ['', ' (CSSMERR_TP_NOT_TRUSTED)'], [' (CSSMERR_TP_NOT_TRUSTED)', ''],
+  [' (CSSMERR_TP_NOT_TRUSTED)', ' (CSSMERR_TP_NOT_TRUSTED)'],
+  ['', ' (unknown warning)'], [' (unknown warning)', ''],
+  [' (CSSMERR_TP_NOT_TRUSTED)', ' (unknown warning)'], [' (unknown warning)', ' (CSSMERR_TP_NOT_TRUSTED)']
+])('counts every same-certificate row before considering permitted local suffixes (%s, %s)', async (first, second) => {
+  const run = vi.fn(async () => ({ stdout: `1) ${identity} "AgentMux Local UUID"${first}\n2) ${identity} "AgentMux Local UUID"${second}\n`, stderr: '' }))
+  await expect(preflightMacosSigning({ argv: [], env: {}, run, loadLocal: async () => localPlan })).rejects.toThrow(/not uniquely available and valid/)
+})
+it('keeps Developer ID parsing strict when a certificate-policy warning is present', async () => {
+  const run = vi.fn(async () => ({ stdout: inventory.replace('"\n', '" (CSSMERR_TP_NOT_TRUSTED)\n'), stderr: '' }))
+  await expect(preflightMacosSigning({ argv: [], env, run })).rejects.toThrow(/not uniquely available and valid/)
+})
 it('does not replace an unreadable or missing original local Keychain identity', async () => {
   const run = vi.fn()
   await expect(preflightMacosSigning({ argv: [], env: {}, run, loadLocal: async () => { throw new Error('record damaged') } })).rejects.toThrow(/record damaged.*never regenerates/)
   expect(run).not.toHaveBeenCalled()
   await expect(preflightMacosSigning({ argv: [], env: {}, loadLocal: async () => localPlan, run: vi.fn(async () => ({ stdout: '0 valid identities found', stderr: '' })) })).rejects.toThrow(/not uniquely available.*Restore the original/)
 })
-it('uses local codeSign qualification without broadening trust to satisfy the signer basic policy', async () => {
+it.each(['anchor', 'certificate leaf ='])('uses local codeSign qualification with native original %s DR without broadening trust', async binding => {
   const signer = vi.fn(async options => {
     expect(options.identity).toBe(identity)
     expect(options.identityValidation).toBe(false)
@@ -71,10 +93,10 @@ it('uses local codeSign qualification without broadening trust to satisfy the si
     expect(options.optionsForFile(app)).not.toHaveProperty('requirements')
   })
   await signMacosApplication(app, localPlan, { signer })
-  const dr = `designated => identifier "dev.agentmux.desktop" and anchor H"${identity.toLowerCase()}"`
+  const dr = `designated => identifier "dev.agentmux.desktop" and ${binding} H"${identity.toLowerCase()}"`
   const run = runner('Identifier=dev.agentmux.desktop\nAuthority=AgentMux Local UUID\nTeamIdentifier=not set', dr)
   expect(await verifyMacosSigning(app, localPlan, { run })).toMatchObject({ profile: 'local', identity, designatedRequirement: dr, authorizationContinuity: 'unverified' })
-  expect(run.mock.calls[0][1]).toContain(`=identifier "dev.agentmux.desktop" and certificate leaf = H"${identity}"`)
+  expect(run.mock.calls[0][1]).toContain(`=identifier "dev.agentmux.desktop" and certificate leaf = H"${identity}" and certificate leaf trusted`)
   await expect(verifyMacosSigning(app, localPlan, { run: runner('Identifier=dev.agentmux.desktop', dr.replace(identity.toLowerCase(), 'b'.repeat(40))) })).rejects.toThrow(/original certificate anchor/)
 })
 it.each([undefined, { kind: 'unknown' }, { kind: 'certificate', identity: '-', teamId }])('rejects an invalid plan before it can silently become development signing', async (invalid) => {
