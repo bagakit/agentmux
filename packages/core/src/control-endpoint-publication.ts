@@ -1,15 +1,15 @@
-import { fork } from 'node:child_process'
+import { fork, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { chmod, link, lstat, mkdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { Server, type Socket } from 'node:net'
+import { Socket } from 'node:net'
 import { findPackageJSON } from 'node:module'
 import { AgentMuxError } from './errors.js'
 import { probeSocketLiveness } from './socket-liveness.js'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 
 type Identity = { dev: number; ino: number }
-type Listener = { server: Server; path: string; identity: Identity }
+type Listener = { child: ChildProcess; path: string; identity: Identity; alive: boolean; admitting: boolean; capacityBlocked: boolean; closed: Promise<void>; close(): Promise<void> }
 const same = (a: Identity, b: Identity) => a.dev === b.dev && a.ino === b.ino
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const code = (error: unknown) => error instanceof AgentMuxError ? error.code : (error as NodeJS.ErrnoException).code ?? 'CONTROL_UNAVAILABLE'
@@ -25,6 +25,7 @@ export class ControlEndpointPublication {
   private active = false
   private timer?: NodeJS.Timeout
   private pending: Promise<void> | undefined
+  private starting: Promise<void> | undefined
   private uncertain: { path: string; identity?: Identity } | undefined
   private firstFailure: { code: string; message: string } | undefined
   private observation: AgentMuxControlEndpointState = { state: 'unavailable', diagnostic: { code: 'CONTROL_UNAVAILABLE', message: 'Control endpoint has not been published.' } }
@@ -60,10 +61,12 @@ export class ControlEndpointPublication {
     catch (error) { if (missing(error)) return false; throw error }
   }
   private async cleanup(listener: Listener, canonical = false): Promise<void> {
-    for (const path of canonical ? [this.path, listener.path] : [listener.path]) if (await this.owns(path, listener.identity)) await rm(path)
+    for (const path of canonical ? [this.path, listener.path] : [listener.path]) if (await this.owns(path, listener.identity)) {
+      try { await rm(path) } catch (error) { if (!missing(error)) throw error }
+    }
   }
   private async discard(listener: Listener, canonical = false): Promise<void> {
-    listener.server.close()
+    await listener.close()
     const candidate = { path: listener.path, identity: listener.identity }
     this.uncertain = candidate
     await this.cleanup(listener, canonical)
@@ -91,6 +94,15 @@ export class ControlEndpointPublication {
     return await new Promise<Listener>((resolve, reject) => {
       const child = fork(worker, [path], { execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
       let adopted: Listener | undefined, failure: unknown, settled = false, unboundConfirmed = false
+      // stdio is ignored; join actual process exit and IPC release separately.
+      // Node's close event need not arrive after an explicit child.disconnect().
+      const exited = new Promise<void>(done => {
+        child.once('exit', () => done()); child.once('error', () => { if (!child.pid) done() })
+      })
+      const disconnected = new Promise<void>(done => {
+        child.once('disconnect', () => done()); child.once('error', () => { if (!child.pid) done() })
+      })
+      const closed = Promise.all([exited, disconnected]).then(() => {})
       const finish = (error?: unknown) => {
         if (settled) return
         settled = true
@@ -102,63 +114,100 @@ export class ControlEndpointPublication {
           else reject(failure)
         } else resolve(adopted)
       }
-      const abort = () => { failure = new AgentMuxError('Control endpoint publication was stopped.', 'CONTROL_CANCELLED'); child.kill('SIGKILL') }
+      const abort = () => { failure = new AgentMuxError('Control endpoint publication was stopped.', 'CONTROL_CANCELLED'); child.kill('SIGTERM') }
       this.cancellation.signal.addEventListener('abort', abort, { once: true })
       if (this.cancellation.signal.aborted) abort()
       child.on('message', (message: unknown, handle: unknown) => {
-        if (settled) { if (handle instanceof Server) handle.close(); return }
+        if (failure) { if (handle instanceof Socket) handle.destroy(); return }
         if (!message || typeof message !== 'object') { failure = new AgentMuxError('Listener worker returned invalid transport facts.', 'CONTROL_PROTOCOL_ERROR'); child.kill('SIGKILL'); return }
-        const value = message as { bound?: boolean; identity?: Identity; error?: { code?: string; message?: string } }
+        const value = message as { bound?: boolean; identity?: Identity; connection?: number; pending?: number; error?: { code?: string; message?: string } }
+        // Node may deliver no handle when this particular Socket closed in transit.
+        // Acknowledge its retirement without taking away healthy listener admission.
+        if (adopted && Number.isSafeInteger(value.connection) && (handle instanceof Socket || handle == null)) {
+          try {
+            if (handle instanceof Socket) {
+              if (this.active && adopted.admitting) { this.accept(handle); handle.resume() }
+              else handle.destroy()
+            }
+          } catch (error) {
+            if (handle instanceof Socket) handle.destroy()
+            this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_UNAVAILABLE', message: `Control connection admission failed: ${error instanceof Error ? error.message : String(error)}` } })
+          }
+          if (child.connected) child.send({ admitted: value.connection }, error => { if (error) child.kill('SIGTERM') })
+          return
+        }
+        if (adopted && Number.isSafeInteger(value.pending) && value.pending! >= 0 && value.pending! <= 64) {
+          adopted.capacityBlocked = value.pending === 64
+          if (this.current === adopted && adopted.capacityBlocked) this.capacityFailure()
+          return
+        }
+        if (handle instanceof Socket) handle.destroy()
         if (value.error) {
           unboundConfirmed = value.bound === false
           if (value.bound === true) this.uncertain = { path, ...(value.identity && Number.isSafeInteger(value.identity.dev) && Number.isSafeInteger(value.identity.ino) ? { identity: value.identity } : {}) }
           failure = new AgentMuxError(value.error.message ?? 'Listener creation failed.', value.error.code ?? 'CONTROL_UNAVAILABLE'); return
         }
-        if (adopted || !(handle instanceof Server) || !value.identity || !Number.isSafeInteger(value.identity.dev) || !Number.isSafeInteger(value.identity.ino)) {
+        if (adopted || handle || !value.identity || !Number.isSafeInteger(value.identity.dev) || !Number.isSafeInteger(value.identity.ino)) {
           failure = new AgentMuxError('Listener worker returned invalid ownership facts.', 'CONTROL_PROTOCOL_ERROR'); child.kill('SIGKILL'); return
         }
-        adopted = { server: handle, path, identity: value.identity }
-        handle.on('connection', socket => { if (this.active) this.accept(socket); else socket.destroy() })
-        handle.on('error', error => { if (this.active) this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_UNAVAILABLE', message: error.message } }) })
-        child.send('adopted', error => { if (error) { failure = error; child.kill('SIGKILL') } })
+        adopted = { child, path, identity: value.identity, alive: true, admitting: true, capacityBlocked: false, closed,
+          close: async () => { adopted!.admitting = false; if (adopted!.alive) child.kill('SIGTERM'); await closed } }
+        finish()
       })
       child.once('error', error => { failure = error; child.kill('SIGKILL'); if (!child.pid) finish(error) })
-      child.once('close', () => { if (failure) finish(failure) })
       child.once('exit', (code, signal) => {
-        finish(failure ?? (code !== 0 || signal ? new AgentMuxError('Listener worker failed before confirming ownership.', 'CONTROL_UNAVAILABLE') : undefined))
+        if (adopted) { adopted.alive = false; adopted.admitting = false }
+        failure ??= new AgentMuxError(`Control listener worker exited (${signal ?? code}); existing accepted connections and Runs are retained. Publication will retry.`, 'CONTROL_UNAVAILABLE')
+        if (adopted && this.current === adopted) this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_UNAVAILABLE', message: (failure as Error).message } })
       })
+      child.once('disconnect', () => { if (adopted) { adopted.alive = false; adopted.admitting = false }; child.kill('SIGTERM') })
+      void closed.then(() => { if (!settled) finish(failure) })
     })
+  }
+  private capacityFailure(): void {
+    this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_CAPACITY', message: 'Control listener has 64 pending connection handoffs. Only new connections are refused; existing connections and Runs remain available. Retry the connection after admission catches up.' } })
   }
   private async reconcile(): Promise<void> {
     try {
       try {
         const target = await lstat(this.path)
         if (this.current && target.isSocket() && same(target, this.current.identity) && target.uid === (process.getuid?.() ?? target.uid)) {
-          this.publish({ state: 'available' }); return
+          if (this.current.alive) {
+            if (this.current.capacityBlocked) this.capacityFailure()
+            else this.publish({ state: 'available' })
+            return
+          }
+          await this.discard(this.current, true)
+          this.current = undefined
+        } else {
+          throw new AgentMuxError('Another or unconfirmed owner occupies the control endpoint. Existing connections and Runs remain available.', 'CONTROL_OWNER_BUSY')
         }
-        throw new AgentMuxError('Another or unconfirmed owner occupies the control endpoint. Existing connections and Runs remain available.', 'CONTROL_OWNER_BUSY')
       } catch (error) { if (!missing(error)) throw error }
       await this.parent()
       if (!this.active) return
       let listener = this.current
-      if (!listener || !await this.owns(listener.path, listener.identity)) listener = await this.create()
+      if (!listener?.alive || !await this.owns(listener.path, listener.identity)) listener = await this.create()
       if (!this.active) { if (listener !== this.current) await this.discard(listener); return }
       try {
         await link(listener.path, this.path)
         if (!await this.owns(this.path, listener.identity)) throw new AgentMuxError('Control endpoint changed during publication.', 'CONTROL_OWNER_BUSY')
+        if (!listener.alive) throw new AgentMuxError('Control listener exited during publication; existing connections and Runs are retained.', 'CONTROL_UNAVAILABLE')
         if (!this.active) {
           if (listener !== this.current) await this.discard(listener, true)
           return
         }
       } catch (error) {
-        if (listener !== this.current) try { await this.discard(listener) } catch (cleanup) { throw cleanupFailure(error, cleanup) }
+        if (listener !== this.current) try { await this.discard(listener, true) } catch (cleanup) { throw cleanupFailure(error, cleanup) }
         throw error
       }
       const previous = this.current; this.current = listener
       if (previous && previous !== listener) {
         this.retired.add(previous)
-        // Closing a listener stops admission; accepted connections continue.
-        previous.server.close(() => { this.retired.delete(previous); void this.cleanup(previous).catch(() => {}) })
+        // Only the child's admission ends; transferred connections belong to Core.
+        void previous.close().then(() => this.cleanup(previous)).catch(error => {
+          this.uncertain ??= { path: previous.path, identity: previous.identity }
+          this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_UNAVAILABLE', message: `Retired listener cleanup failed: ${error instanceof Error ? error.message : String(error)}` } })
+        }).finally(() => this.retired.delete(previous))
       }
       this.publish({ state: 'available' })
     } catch (error) {
@@ -177,8 +226,15 @@ export class ControlEndpointPublication {
     this.timer.unref()
   }
   async start(): Promise<void> {
+    if (this.starting) return this.starting
     if (this.active) return
+    const starting = this.initialize()
+    this.starting = starting
+    try { await starting } finally { if (this.starting === starting) this.starting = undefined }
+  }
+  private async initialize(): Promise<void> {
     await this.parent()
+    if (this.cancellation.signal.aborted) throw new AgentMuxError('Control endpoint startup was stopped.', 'CONTROL_CANCELLED')
     try {
       const stat = await lstat(this.path), uid = process.getuid?.() ?? stat.uid
       if (!stat.isSocket() || stat.uid !== uid) throw new AgentMuxError('Another owner occupies the RPC endpoint.', 'CONTROL_OWNER_BUSY')
@@ -191,18 +247,25 @@ export class ControlEndpointPublication {
     this.active = true
     const pending = this.reconcile(); this.pending = pending
     try { await pending }
-    catch (error) { this.pending = undefined; await this.stop(); throw error }
+    catch (error) {
+      this.pending = undefined; this.active = false; clearTimeout(this.timer); this.cancellation.abort()
+      await this.releaseListeners(); throw error
+    }
     this.pending = undefined
     if (!this.active || this.cancellation.signal.aborted) throw new AgentMuxError('Control endpoint startup was stopped.', 'CONTROL_CANCELLED')
     this.schedule()
   }
   async stop(): Promise<void> {
     this.active = false; clearTimeout(this.timer); this.cancellation.abort()
-    await this.pending
+    await this.starting?.catch(() => {})
+    await this.pending?.catch(() => {})
+    await this.releaseListeners()
+  }
+  private async releaseListeners(): Promise<void> {
     const listeners = [...this.retired, ...(this.current ? [this.current] : [])]
     this.current = undefined; this.retired.clear()
     await Promise.all(listeners.map(async listener => {
-      await new Promise<void>(resolve => listener.server.close(() => resolve()))
+      await listener.close()
       await this.cleanup(listener, true)
     }))
     if (this.uncertain?.identity && await this.owns(this.uncertain.path, this.uncertain.identity)) await rm(this.uncertain.path)
