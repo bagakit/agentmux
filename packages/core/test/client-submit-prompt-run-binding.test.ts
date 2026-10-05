@@ -122,6 +122,34 @@ async function fixture(singlePhase = false, durable = false) {
 }
 
 describe('conditional exact Run prompt admission', () => {
+  it('carries the original signal Run through Hosted and leaves a replacement Run available', async () => {
+    const h = await fixture()
+    h.inner.kernel.identity = () => ({ daemonInstanceId: 'bound-daemon', protocolVersion: 18, buildIdentity: 'private-signal-host' })
+    const interrupt = vi.fn(async () => {})
+    Object.assign(h.inner.kernel, { interrupt })
+    vi.spyOn(h.client, 'connect').mockResolvedValue()
+    const service = new AgentMuxHostedRuntimeService(h.client, null, () => hostedTestOwner(h.client))
+    const port = {
+      call: async (method: string, params: unknown) => JSON.parse(JSON.stringify(await service.call(method, JSON.parse(JSON.stringify(params))))),
+      subscribe: async (method: string, params: unknown, handlers: any) => {
+        const stream = await service.subscribe(method, params, event => handlers.onEvent(JSON.parse(JSON.stringify(event))))
+        handlers.onInitial(JSON.parse(JSON.stringify(stream.initial))); await stream.start?.()
+        return { dispose: async () => await stream.dispose() }
+      }
+    } as unknown as AgentMuxHostedRpcPort
+    const borrowed = await connectHostedAgentMux({ rpc: port })
+    try {
+      await h.replace()
+      await expect(borrowed.signalAgent('bound-agent', { runId: 'original-run' }, 'SIGINT'))
+        .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+      expect(interrupt).not.toHaveBeenCalled()
+      // A failed semantic observation is not a prerequisite for physical Interrupt.
+      vi.spyOn(h.client, 'sessionTimeline').mockRejectedValue(new Error('history temporarily unavailable'))
+      await borrowed.signalAgent('bound-agent', { runId: 'replacement-run' }, 'SIGINT')
+      expect(interrupt).toHaveBeenCalledExactlyOnceWith('replacement-run')
+      expect(h.writes).toEqual([])
+    } finally { await borrowed.dispose(); await service.dispose() }
+  })
   it.each([false, true])('rejects a stale bound target before planning, claim or input (single phase=%s)', async (singlePhase) => {
     const h = await fixture(singlePhase)
     await h.replace()

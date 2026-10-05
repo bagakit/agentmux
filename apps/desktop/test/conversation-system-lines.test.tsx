@@ -46,7 +46,7 @@ it('actual registered Hosted resize preserves Runtime receipt and Host activity 
  expect(f.activity.mock.calls.slice(-2).map(c=>c[3])).toEqual(['unknown','unknown'])
  expect(await f.core.sessionTimeline(sessionId)).toEqual(before)
  expect(await f.client.resizeAgent(sessionId,run,90,30)).toEqual({runId:run.runId,cols:90,rows:30})
- await f.client.signalAgent(sessionId,'SIGINT')
+ await f.client.signalAgent(sessionId,f.client.agentSession(sessionId).run,'SIGINT')
  const after=await f.core.sessionTimeline(sessionId)
  expect(after.items).toHaveLength(before.items.length+1)
  expect(after.items[0]).toEqual(before.items[0]);expect(after.items.at(-1)).toMatchObject({kind:'system_message',source:'agentmux',content:'signalAgent · 已提交'})
