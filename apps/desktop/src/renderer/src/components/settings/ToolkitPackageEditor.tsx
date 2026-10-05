@@ -1,3 +1,4 @@
+import { Textarea } from '@agentmux/client-ui/input'
 import { ArrowLeft, Code2, Copy, Folder, Package, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import type { ToolkitPackageConfiguration, ToolkitPackageFields, ToolkitScript } from '@agentmux/core/control'
@@ -59,7 +60,7 @@ export function ToolkitPackageEditor({ id, entry, fact, active, pathInput, save,
       <p>Edit files in this directory with your editor. Changes apply to the next explicit run; an existing execution keeps its captured files.</p>
       <code>{entry.expected.packagePath}/manifest.json</code>
       <div className="toolkit-package__source-actions"><button type="button" className="small-button" onClick={() => void operate(async () => { await api.ui.writeClipboardText(entry.expected!.packagePath); return 'Package directory copied.' })}><Copy size={13} /> Copy directory</button><button type="button" className="small-button" onClick={() => { setSourceOpen(value => !value); if (!sourceOpen) void readSource() }}><Code2 size={13} /> {sourceOpen ? 'Hide entry script' : 'View entry script'}</button></div>
-      {sourceOpen && active ? <div className="toolkit-package__preview">{sourceError ? <p className="settings-inline-error" role="status">{sourceError}</p> : source ? <><code>{source.path}</code><textarea className="toolkit-result__script" aria-label="Current local entry script" value={source.text} readOnly /><small>Current file · read only here. Edit the file in your package directory.</small></> : <p className="settings-hint">Reading entry script…</p>}</div> : null}
+      {sourceOpen && active ? <div className="toolkit-package__preview">{sourceError ? <p className="settings-inline-error" role="status">{sourceError}</p> : source ? <><code>{source.path}</code><Textarea className="toolkit-result__script" aria-label="Current local entry script" value={source.text} readOnly /><small>Current file · read only here. Edit the file in your package directory.</small></> : <p className="settings-hint">Reading entry script…</p>}</div> : null}
     </section> : null}
     <div className="toolkit-editor__fields">
       <label><span><Folder size={13} /> Fixed working directory</span><input aria-label="Fixed working directory" value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Absolute local working directory" /><small>Does not follow the current Agent or focused workspace.</small></label>
