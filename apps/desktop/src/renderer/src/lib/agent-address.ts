@@ -38,7 +38,7 @@ export function addressingRecovery(error: {
     return formatTargetNotUnique(error.candidates ?? [])
   }
   if (error.code === 'MESSAGE_TARGET_NOT_AGENT') {
-    // 这里**故意不给命令**。想给的那条是 `agentmux space inspect --region=<regionId>`——这个码只在
+    // 这里**故意不给命令**。想给的那条是 `amux space inspect --region=<regionId>`——这个码只在
     // Region 分支抛（store.ts 里 `region.kind !== 'agent'` 那一处，全仓仅此一处），所以丢掉的是
     // regionId 而不是 tabId。但抛出点只带 code 与 message 过来，恢复层拿不到它。凑一条跑不了的
     // 命令比不给更糟：它看起来像出路，粘贴过去却只会撞 INVALID_CLI_ARGUMENT，把人引向第二次失败。
