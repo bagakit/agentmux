@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -107,14 +108,14 @@ describe('workbenchTabMarks：画出来不一样的都要在', () => {
     const marks = workbenchTabMarks(
       tab,
       agentsBySession({
-        'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } },
-        'session-b': { providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+        'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } },
+        'session-b': { providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
       })
     )
     // 不用 length 判：计数地板会把「画了两个但都是同一个 Provider」这种错吃掉。
     expect(marks).toEqual([
-      { kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'region-0' },
-      { kind: 'agent', providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'region-1' }
+      { kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'region-0' },
+      { kind: 'agent', providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'region-1' }
     ])
   })
 
@@ -123,8 +124,8 @@ describe('workbenchTabMarks：画出来不一样的都要在', () => {
     const marks = workbenchTabMarks(
       tab,
       agentsBySession({
-        'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } },
-        'session-b': { providerId: 'codex', status: { state: 'waiting', source: 'native-hook', observedAt: 1 } }
+        'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } },
+        'session-b': { providerId: 'codex', status: { state: 'waiting', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
       })
     )
     expect(marks.map((mark) => mark.kind === 'agent' && mark.status.state)).toEqual([
@@ -137,9 +138,9 @@ describe('workbenchTabMarks：画出来不一样的都要在', () => {
     // 渲染现场那条链就是这么判的：surface.kind 过了闸之后还要看 session 是不是 Agent。
     const tab = tabWith(terminalSurface('region-0', 'session-a'))
     expect(workbenchTabMarks(tab, agentsBySession({
-      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
     }))).toEqual([
-      { kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'region-0' }
+      { kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'region-0' }
     ])
   })
 
@@ -174,20 +175,20 @@ describe('workbenchTabMarks：画出来一样的只留一个', () => {
     const marks = workbenchTabMarks(
       tab,
       agentsBySession({
-        'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } },
-        'session-b': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+        'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } },
+        'session-b': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
       })
     )
     expect(marks).toEqual([
-      { kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'region-0' }
+      { kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'region-0' }
     ])
   })
 
   it('同 Provider、同状态但 Executor 外观不同仍各画一个', () => {
     const tab = tabWith(agentSurface('region-0', 'session-a'), agentSurface('region-1', 'session-b'))
     const marks = workbenchTabMarks(tab, agentsBySession({
-      'session-a': { providerId: 'codex', executorId: 'default', appearance: { tint: '#ee7755', badge: 'spark' }, status: { state: 'working', source: 'native-hook', observedAt: 1 } },
-      'session-b': { providerId: 'codex', executorId: 'review', appearance: { tint: '#6688dd', badge: 'shield' }, status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+      'session-a': { providerId: 'codex', executorId: 'default', appearance: { tint: '#ee7755', badge: 'spark' }, status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } },
+      'session-b': { providerId: 'codex', executorId: 'review', appearance: { tint: '#6688dd', badge: 'shield' }, status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
     }))
     expect(marks).toHaveLength(2)
     expect(marks.map((mark) => mark.kind === 'agent' ? mark.appearance?.badge : null)).toEqual(['spark', 'shield'])
@@ -249,7 +250,7 @@ describe('workbenchTabMarks：上限', () => {
       agentSurface('region-3', 'session-a')
     )
     const marks = workbenchTabMarks(tab, agentsBySession({
-      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
     }))
     expect(marks).toHaveLength(WORKBENCH_TAB_MARK_LIMIT)
     // 头部必须是标题 Region：截断从尾部发生，不能把身份挤掉。
@@ -280,11 +281,10 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
         fileSurface('region-2', 'src/main.ts')
       )
     )
-    // lucide 每个图标带自己的 class，用它数「画了几个、都是哪几个」。类名取自实际渲染产物，不靠组件名猜
-    // （`Globe2` 渲染出的是 `lucide-earth`，`FileCode2` 是 `lucide-file-code2`）。
-    expect(html).toContain('lucide-square-terminal')
-    expect(html).toContain('lucide-earth')
-    expect(html).toContain('lucide-file-code2')
+    // 稳定产品语义与数量同时核对，主题可替换图形而不改 Region 标记含义。
+    expect(html).toContain('data-semantic-icon="object.terminal"')
+    expect(html).toContain('data-semantic-icon="object.browser"')
+    expect(html).toContain('data-semantic-icon="file.code"')
     // 三个 <svg> 恰好，多一个少一个都红：既守「都画了」也守「没多画」。
     expect(html.match(/<svg/g)).toHaveLength(3)
   })
@@ -298,7 +298,7 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
       )
     )
     expect(html.match(/<svg/g)).toHaveLength(1)
-    expect(html).toContain('lucide-square-terminal')
+    expect(html).toContain('data-semantic-icon="object.terminal"')
   })
 
   it('Agent 标记画出 Provider 图标与状态点，而不是终端图标', () => {
@@ -307,7 +307,7 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
       agentsBySession({
         'session-a': {
           providerId: 'codex',
-          status: { state: 'working', source: 'native-hook', observedAt: 1 }
+          status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }
         }
       })
     )
@@ -315,7 +315,7 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     expect(html).toContain('agent-avatar__status--working')
     expect(html).not.toContain('status__dot')
     // Provider 图标在场：codex 走的是内置 Provider 那一支，画的不是那个兜底的机器人。
-    expect(html).not.toContain('lucide-square-terminal')
+    expect(html).not.toContain('data-semantic-icon="object.terminal"')
   })
 
   it('外层容器带 .workbench-tab__marks——间距与状态点底座色全挂在这个类上', () => {
@@ -331,8 +331,8 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     // 此前这一支两侧都无人守——把渲染兜底的 Sparkles 换成终端图标、或让纯函数把 launcher 归成
     // terminal 标记，两种变异都在 20 条全绿下存活。
     const html = render(tabWith(launcherSurface('region-0'), terminalSurface('region-1', 'session-a')))
-    expect(html).toContain('lucide-panels-top-left')
-    expect(html).toContain('lucide-square-terminal')
+    expect(html).toContain('data-semantic-icon="object.launcher"')
+    expect(html).toContain('data-semantic-icon="object.terminal"')
     // 两个：launcher 与终端画出来不一样，都要在（若被折成一种，这里只剩一个）。
     expect(html.match(/<svg/g)).toHaveLength(2)
   })
@@ -341,8 +341,8 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     // 纯函数那一族只能证「算出来是两个标记」。这一条证**画出来真的不一样**：让渲染对 driving
     // 视而不见（两支都返回 Globe2），纯函数那边照样全绿，而用户看到的是两个一模一样的地球。
     const html = render(tabWith(browserSurface('region-0', true), browserSurface('region-1', false)))
-    expect(html).toContain('lucide-bot')
-    expect(html).toContain('lucide-earth')
+    expect(html).toContain('data-semantic-icon="object.agent"')
+    expect(html).toContain('data-semantic-icon="object.browser"')
     expect(html.match(/<svg/g)).toHaveLength(2)
     // 悬停也要说得出来：图标本身不自带含义，标签上没有别的地方能解释这只 Bot 是什么意思。
     expect(html).toContain('Agent driving')
@@ -352,8 +352,8 @@ describe('WorkbenchTabMarks：算出来的标记真被画出来', () => {
     // 少了这一半，一个「browser 一律画 Bot」的实现会让上面那条绿——而那等于每个浏览器看起来
     // 都在被 Agent 操作。
     const html = render(tabWith(browserSurface('region-0', false)))
-    expect(html).toContain('lucide-earth')
-    expect(html).not.toContain('lucide-bot')
+    expect(html).toContain('data-semantic-icon="object.browser"')
+    expect(html).not.toContain('data-semantic-icon="object.agent"')
   })
 })
 
@@ -362,7 +362,7 @@ describe('tabMarkAgentFactsFor：从 Session 解析「谁是 Agent」', () => {
   // import 不了（经 api.ts 的一个 vite define），所以**没有任何测试能执行到它**。实测把回调第一行改成
   // `return null`——标签上所有 Agent 标记退化成终端图标，用户再也分不清 codex/claude、也看不到状态点——
   // 而这个文件里那 20 条照旧全绿。搬进 lib 之后下面这几条才守得住它。
-  const working = { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 }
+  const working = { state: 'working' as const, source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 1) }
 
   function sessions(...items: TabMarkSession[]): TabMarkSession[] {
     return items
@@ -474,7 +474,7 @@ describe('tabRegionSummary：折掉的种类必须还能被找到', () => {
       agentSurface('region-3', 'session-a')
     )
     const facts = agentsBySession({
-      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
     })
     // 先坐实前提：它真的被标签截掉了，所以这条 tooltip 不是多余的。
     expect(workbenchTabMarks(tab, facts).map((mark) => mark.kind)).not.toContain('agent')
@@ -488,7 +488,7 @@ describe('tabRegionSummary：折掉的种类必须还能被找到', () => {
       tabRegionSummary(
         tab,
         agentsBySession({
-          'session-a': { providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+          'session-a': { providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
         })
       )
     ).toBe('Regions: File, claude')
@@ -520,7 +520,7 @@ describe('tabRegionSummary：折掉的种类必须还能被找到', () => {
       agentSurface('region-4', 'session-a')
     )
     const facts = agentsBySession({
-      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } }
+      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
     })
     expect(workbenchTabMarks(tab, facts)).toHaveLength(WORKBENCH_TAB_MARK_LIMIT)
     expect(tabRegionSummary(tab, facts)?.split(', ')).toHaveLength(5)
@@ -531,8 +531,8 @@ describe('tabRegionSummary：折掉的种类必须还能被找到', () => {
     // 词。把 working/waiting 写进这句话，它就会在下一秒变成谎，而 tooltip 不随状态重算措辞。
     const tab = tabWith(agentSurface('region-0', 'session-a'), agentSurface('region-1', 'session-b'))
     const facts = agentsBySession({
-      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 } },
-      'session-b': { providerId: 'codex', status: { state: 'waiting', source: 'native-hook', observedAt: 1 } }
+      'session-a': { providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } },
+      'session-b': { providerId: 'codex', status: { state: 'waiting', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
     })
     expect(workbenchTabMarks(tab, facts)).toHaveLength(2)
     // 说出来一样，所以只说一次——于是整句只剩一个词，按「不重复」规矩退回 null。
@@ -542,22 +542,22 @@ describe('tabRegionSummary：折掉的种类必须还能被找到', () => {
 
 describe('markAppearance：去重键就是「画出来长什么样」', () => {
   it('Provider 不同则 appearance 不同', () => {
-    const a = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'r0' })
-    const b = markAppearance({ kind: 'agent', providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'r1' })
+    const a = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'r0' })
+    const b = markAppearance({ kind: 'agent', providerId: 'claude', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'r1' })
     expect(a).not.toBe(b)
   })
 
   it('状态不同则 appearance 不同', () => {
-    const a = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'r0' })
-    const b = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'waiting', source: 'native-hook', observedAt: 1 }, regionId: 'r1' })
+    const a = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'r0' })
+    const b = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'waiting', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'r1' })
     expect(a).not.toBe(b)
   })
 
   it('status.source 不进 appearance：它只在 tooltip 里，并排画出来看不出差别', () => {
     // source 是指过去才看得到的文字。若它掺进 appearance，同一个 Provider 同一个状态、只因为状态来源
     // 不同（hook / 采样）就会在标签上堆两个逐像素相同的图标。
-    const a = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'r0' })
-    const b = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'run-process', observedAt: 1 }, regionId: 'r1' })
+    const a = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'r0' })
+    const b = markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'r1' })
     expect(a).toBe(b)
   })
 
@@ -571,7 +571,7 @@ describe('markAppearance：去重键就是「画出来长什么样」', () => {
     // 这条把上面那条的理由钉死在取值上，而不是靠两个例子恰好相等；agent 那一支也一并守住。
     expect(markAppearance({ kind: 'file', regionId: 'region-nine' })).not.toContain('region-nine')
     expect(
-      markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: 1 }, regionId: 'region-nine' })
+      markAppearance({ kind: 'agent', providerId: 'codex', status: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, regionId: 'region-nine' })
     ).not.toContain('region-nine')
   })
 })
