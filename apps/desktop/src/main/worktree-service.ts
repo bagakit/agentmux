@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { posix } from 'node:path'
 import type { ExecutionHost } from '@agentmux/core'
-import { gitFailureError, GIT_NONINTERACTIVE_ENV, isNotAGitRepositoryStderr, isNotAWorkingTreeStderr } from '@agentmux/git'
+import { gitFailureError, GIT_NONINTERACTIVE_ENV, resolveGitWorktreeRoot, isNotAWorkingTreeStderr } from '@agentmux/git'
 import type {
   AppConfig,
   CreateWorktreeForBranchInput,
@@ -536,31 +536,7 @@ export class WorktreeService {
   }
 
   private async resolveRepoPath(host: ExecutionHost, path: string): Promise<string | null> {
-    const result = await host.run(
-      'git',
-      ['-C', path, 'rev-parse', '--show-toplevel'],
-      GIT_DISCOVERY_OPTIONS
-    )
-    if (
-      result.exitCode !== 0 &&
-      isNotAGitRepositoryStderr(result.stderr) &&
-      !await this.hasGitMetadataInAncestry(host, path)
-    ) return null
-    this.assertGit(result, 'Workspace is not a Git repository')
-    const repoPath = result.stdout.trim()
-    if (!repoPath) throw new Error('Git returned an empty repository path')
-    return repoPath
-  }
-
-  private async hasGitMetadataInAncestry(host: ExecutionHost, path: string): Promise<boolean> {
-    let directory = posix.normalize(path)
-    while (true) {
-      const metadataPath = posix.join(directory, '.git')
-      if (await this.pathPresent(host, metadataPath)) return true
-      const parent = posix.dirname(directory)
-      if (parent === directory) return false
-      directory = parent
-    }
+    return resolveGitWorktreeRoot(host, path)
   }
 
   /**
