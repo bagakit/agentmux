@@ -7,7 +7,7 @@ import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
 import { COMPOSER_PROMPT_STATES, resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
@@ -146,7 +146,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       </div>
       <div className="prompt-workbench__body">
         <section className="prompt-library" aria-label="Prompt library">
-          <label className="prompt-library__search"><Search size={14} aria-hidden="true" /><input ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
+          <label className="prompt-library__search"><Search size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
           <div ref={library} className="prompt-library__items">
             <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => (

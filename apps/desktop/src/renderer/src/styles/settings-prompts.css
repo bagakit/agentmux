@@ -5,9 +5,10 @@
 .prompt-workbench__toolbar { padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
 .prompt-workbench__body { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--sp-7); align-items: start; }
 .prompt-library, .prompt-editor { min-width: 0; background: var(--surface-0); }
-.prompt-library__search { display: flex; align-items: center; gap: var(--sp-3); min-height: 34px; margin-bottom: var(--sp-4); color: var(--text-3); }
+.prompt-library__search { display: flex; align-items: center; padding-inline: var(--sp-3); gap: var(--sp-3); min-height: 34px; margin-bottom: var(--sp-4); color: var(--text-3); }
 .prompt-library__search input { flex: 1; min-width: 0; width: 100%; padding: var(--sp-3) 0; border: 0; outline: none; background: transparent; color: var(--text); font: var(--fs-body)/1.5 var(--font-sans); }
-.prompt-library__search:focus-within { outline: 1px solid var(--focus-line); outline-offset: var(--sp-2); border-radius: var(--radius-sm); }
+.prompt-library__search:focus-within { outline: 1px solid var(--focus-line); outline-offset: -1px; border-radius: var(--radius-sm); }
+.prompt-library__search input:focus-visible { outline: none; }
 .prompt-library__search button { display: flex; flex: none; padding: var(--sp-2); border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .prompt-library__items { position: relative; isolation: isolate; display: grid; gap: var(--sp-1); max-height: 65vh; overflow: auto; }
 .prompt-library__item { position: relative; z-index: 1; display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-5); border: 0; border-radius: var(--radius); text-align: left; background: transparent; color: var(--text-2); cursor: pointer; font: var(--fs-body)/1.5 var(--font-sans); }
@@ -81,3 +82,5 @@
 }
 @media (max-width: 700px) { .settings-content__scroll[data-settings-pane='prompts'] { padding-inline: var(--sp-4); } }
 @media (prefers-reduced-motion: reduce) { .prompt-workbench { animation: none; } }
+
+@media (forced-colors: active) { .prompt-library__search:focus-within { outline-color: Highlight; } }
