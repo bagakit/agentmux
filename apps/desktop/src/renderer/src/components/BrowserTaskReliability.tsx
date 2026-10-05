@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CircleAlert, LoaderCircle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserTaskReliability as Reliability, BrowserTaskReliabilityResult } from '../../../shared/browser-task-reliability'
 import type { BrowserOutcomeEvaluation } from '../../../shared/browser-outcome-criteria'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+
 
 const LABELS: Record<BrowserTaskReliabilityResult, string> = {
   passed: 'Outcome passed', 'not-met': 'Not satisfied', unavailable: 'Evidence unavailable', unknown: 'Outcome unknown',
@@ -48,8 +52,8 @@ export function BrowserTaskReliability({ browserId, assetId, version, refreshKey
   const current = state.key === key ? state : undefined
   const result = current?.result
   return <div className="browser-task-reliability" aria-label={`Reliability of saved version ${version}`} data-reliability-version={version}>
-    {!current ? <small role="status"><LoaderCircle size={11} aria-hidden="true" />Reading v{version} outcomes…</small>
-      : current.error ? <p role="status"><CircleAlert size={11} aria-hidden="true" />{current.error}</p>
+    {!current ? <small role="status"><ThemeStatusLoadingIcon size={11} aria-hidden="true" />Reading v{version} outcomes…</small>
+      : current.error ? <p role="status"><ThemeStatusWarningIcon size={11} aria-hidden="true" />{current.error}</p>
         : result ? <>
           <span>v{version} · {result.population.terminalRuns === 0 ? 'No terminal samples' :
             `${result.counts.passed}/${result.population.terminalRuns} outcomes passed`}
@@ -65,7 +69,7 @@ export function BrowserTaskReliability({ browserId, assetId, version, refreshKey
             </li>)}</ul> : null}
             {result.selectedRunId ? <p>Owner-selected run: {result.selectedRunId.slice(0, 8)} · {result.selectedRunStatus}</p> : null}
           </details>
-          {result.warning ? <p role="status"><CircleAlert size={11} aria-hidden="true" />{result.warning}</p> : null}
+          {result.warning ? <p role="status"><ThemeStatusWarningIcon size={11} aria-hidden="true" />{result.warning}</p> : null}
         </> : null}
   </div>
 }

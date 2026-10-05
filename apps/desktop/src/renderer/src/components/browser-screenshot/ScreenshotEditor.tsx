@@ -3,19 +3,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 // Portions adapted from a third-party MIT-licensed implementation (commit 4fd93ead1999dc34e13ac5915693ad8467a39a6e).
 // Copyright (c) 2026 Lovecast Inc., MIT License. See THIRD_PARTY_NOTICES.md.
 
-import {
-  ArrowUpRight,
-  Circle,
-  Clipboard,
-  Highlighter,
-  Pencil,
-  Redo2,
-  Square,
-  Trash2,
-  Type,
-  Undo2,
-  X
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { BrowserPng } from '../../../../shared/contracts'
 import { WindowOverlayPortal } from '../WindowOverlayHost'
@@ -45,20 +33,33 @@ import { SCREENSHOT_TEXT_FONT } from './drawing-renderer'
 import { isImeCompositionKeyDown } from '../../lib/ime-composition-keyboard-event'
 import { isMacPlatform } from '../../lib/host-platform'
 
+const ThemeDrawingFreehandIcon = semanticIconComponent('drawing.freehand')
+const ThemeDrawingHighlightIcon = semanticIconComponent('drawing.highlight')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeDrawingRectangleIcon = semanticIconComponent('drawing.rectangle')
+const ThemeDrawingCircleIcon = semanticIconComponent('drawing.circle')
+const ThemeDrawingTextIcon = semanticIconComponent('drawing.text')
+const ThemeActionUndoIcon = semanticIconComponent('action.undo')
+const ThemeActionRedoIcon = semanticIconComponent('action.redo')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
+const ThemeObjectClipboardIcon = semanticIconComponent('object.clipboard')
+
+
 type EditorSize = { width: number; height: number; dpr: number }
 type PendingText = ScreenshotPoint
 
 const TOOLS: Array<{
   id: ScreenshotTool
   label: string
-  icon: typeof Pencil
+  icon: typeof ThemeDrawingFreehandIcon
 }> = [
-  { id: 'pen', label: 'Pen', icon: Pencil },
-  { id: 'highlight', label: 'Highlighter', icon: Highlighter },
-  { id: 'arrow', label: 'Arrow', icon: ArrowUpRight },
-  { id: 'rect', label: 'Rectangle', icon: Square },
-  { id: 'ellipse', label: 'Ellipse', icon: Circle },
-  { id: 'text', label: 'Text', icon: Type }
+  { id: 'pen', label: 'Pen', icon: ThemeDrawingFreehandIcon },
+  { id: 'highlight', label: 'Highlighter', icon: ThemeDrawingHighlightIcon },
+  { id: 'arrow', label: 'Arrow', icon: ThemeActionOpenExternalIcon },
+  { id: 'rect', label: 'Rectangle', icon: ThemeDrawingRectangleIcon },
+  { id: 'ellipse', label: 'Ellipse', icon: ThemeDrawingCircleIcon },
+  { id: 'text', label: 'Text', icon: ThemeDrawingTextIcon }
 ]
 
 export type ScreenshotCompleteInput = {
@@ -363,8 +364,8 @@ export function ScreenshotEditor({
             </select>
           ) : null}
           <span className="browser-screenshot-toolbar__divider" />
-          <button type="button" aria-label="Undo" disabled={busy || !canUndo(documentState)} onClick={undo}><Undo2 size={14} /></button>
-          <button type="button" aria-label="Redo" disabled={busy || !canRedo(documentState)} onClick={redo}><Redo2 size={14} /></button>
+          <button type="button" aria-label="Undo" disabled={busy || !canUndo(documentState)} onClick={undo}><ThemeActionUndoIcon size={14} /></button>
+          <button type="button" aria-label="Redo" disabled={busy || !canRedo(documentState)} onClick={redo}><ThemeActionRedoIcon size={14} /></button>
           <button
             type="button"
             aria-label="Clear all"
@@ -376,13 +377,13 @@ export function ScreenshotEditor({
               setDocumentState((current) => clearShapes(current))
             }}
           >
-            <Trash2 size={14} />
+            <ThemeActionRemoveIcon size={14} />
           </button>
         </div>
         <div className="browser-screenshot-toolbar__actions">
-          <button type="button" disabled={busy} onClick={onCancel}><X size={13} /> Cancel</button>
+          <button type="button" disabled={busy} onClick={onCancel}><ThemeActionCancelIcon size={13} /> Cancel</button>
           <button className="primary-button" type="button" disabled={busy || !loaded} onClick={complete}>
-            <Clipboard size={13} /> {busy ? 'Copying…' : 'Copy PNG'}
+            <ThemeObjectClipboardIcon size={13} /> {busy ? 'Copying…' : 'Copy PNG'}
           </button>
         </div>
       </div>

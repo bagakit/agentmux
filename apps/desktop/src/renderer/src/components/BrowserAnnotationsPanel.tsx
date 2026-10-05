@@ -1,8 +1,13 @@
-import { MessageSquarePlus, Send, Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { browserAnnotationDisplayNumber, type BrowserAnnotation } from '../lib/browser-annotations'
 import { agentComposerAvailability } from './AgentSessionComposer'
+
+const ThemeActionCreateConversationIcon = semanticIconComponent('action.create-conversation')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeActionSendIcon = semanticIconComponent('action.send')
+
 
 export function BrowserAnnotationsPanel({
   annotations,
@@ -32,7 +37,7 @@ export function BrowserAnnotationsPanel({
 
   return (
     <section className="browser-annotations" aria-label="Browser annotations">
-      <header><MessageSquarePlus size={14} /><span><strong>Element annotations</strong><small>Send current-page notes to an Agent.</small></span></header>
+      <header><ThemeActionCreateConversationIcon size={14} /><span><strong>Element annotations</strong><small>Send current-page notes to an Agent.</small></span></header>
       {annotations.length === 0 ? (
         <p>Select an element in a Browser tab, then add an annotation.</p>
       ) : (
@@ -46,7 +51,7 @@ export function BrowserAnnotationsPanel({
                   <strong>{annotation.selection.accessibleName || `<${annotation.selection.tagName}>`}</strong>
                   <small>{current ? annotation.note || annotation.selection.selector : 'Page changed · annotation is stale'}</small>
                 </span>
-                <button type="button" aria-label="Delete annotation" onClick={() => onDelete(annotation.browserId, annotation.id)}><Trash2 size={12} /></button>
+                <button type="button" aria-label="Delete annotation" onClick={() => onDelete(annotation.browserId, annotation.id)}><ThemeActionRemoveIcon size={12} /></button>
               </article>
             )
           })}
@@ -69,7 +74,7 @@ export function BrowserAnnotationsPanel({
               disabled={!targetSessionId || currentAnnotations.length === 0}
               onClick={() => onAddToComposer(targetSessionId, currentAnnotations)}
             >
-              <Send size={12} /> Add to Composer
+              <ThemeActionSendIcon size={12} /> Add to Composer
             </button>
           </div>
         </div>

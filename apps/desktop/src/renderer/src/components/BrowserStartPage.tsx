@@ -1,10 +1,15 @@
-import { Globe2, Search, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { BrowserInputHistoryEntry, BrowserInputHistoryTarget } from '../../../shared/browser-input-history'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import { resolveBrowserInput } from '../../../shared/browser-address'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+
 
 /** Generic renderer start page. Its caller supplies identity, input and navigation. */
 export function BrowserStartPage({ config, historyTarget, historyRevision = 0, visible = true, onChooseHistory, children }: {
@@ -61,11 +66,11 @@ function StartPageHistory({ historyTarget, revision, onChoose }: { historyTarget
   return <section className="browser-start-history" aria-label="Recent addresses and searches">
     <header><h2>Recent input</h2><span>Addresses &amp; searches</span></header>
     {failure ? <p className="browser-start-page__notice" role="status">Recent input could not be read: {failure}. You can still browse.
-      <button type="button" onClick={() => setAttempt(value => value + 1)}><RefreshCw size={12} /> Retry history</button></p>
+      <button type="button" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={12} /> Retry history</button></p>
       : !current ? <p className="browser-start-page__notice" role="status">Reading recent input…</p> : null}
     {entries.length ? <div className="browser-start-history__grid">{entries.map(entry => {
       const label = historyLabel(entry.text)
-      const Icon = label.kind === 'address' ? Globe2 : Search
+      const Icon = label.kind === 'address' ? ThemeObjectBrowserIcon : ThemeActionSearchIcon
       const date = new Date(entry.submittedAt), validDate = Number.isFinite(date.getTime())
       return <button key={entry.text} type="button" className="browser-start-history__card" title={entry.text} aria-label={`Open recent input ${entry.text}`} onClick={() => onChoose(entry.text)}>
         <span className="browser-start-history__cover"><Icon size={24} /><span>{label.domain}</span></span>

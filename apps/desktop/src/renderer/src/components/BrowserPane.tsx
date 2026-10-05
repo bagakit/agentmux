@@ -4,27 +4,7 @@ import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
 import { workbenchSplitDirectionIcon } from './workbench-split-menu-icons'
 import * as DropdownMenu from './HoverDropdownMenu'
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUpRight,
-  Bookmark,
-  Camera,
-  Check,
-  Copy,
-  Ellipsis,
-  FileCode2,
-  Globe2,
-  History,
-  LoaderCircle,
-  Monitor,
-  RefreshCw,
-  ScanSearch,
-  SlidersHorizontal,
-  Wrench,
-  X
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
@@ -86,6 +66,27 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
+
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeActionInspectIcon = semanticIconComponent('action.inspect')
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionCaptureIcon = semanticIconComponent('action.capture')
+const ThemeObjectToolsIcon = semanticIconComponent('object.tools')
+const ThemeObjectDisplayIcon = semanticIconComponent('object.display')
+const ThemeObjectBookmarkIcon = semanticIconComponent('object.bookmark')
+const ThemeFileCodeIcon = semanticIconComponent('file.code')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+
 
 const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
   responsive: 'Responsive',
@@ -874,7 +875,7 @@ function BrowserPaneContent({
         const size = BROWSER_VIEWPORT_PRESETS[viewport]
         return (
           <DropdownMenu.RadioItem key={viewport} value={viewport} className="browser-menu__item" disabled={busy}>
-            <span className="browser-menu__indicator"><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></span>
+            <span className="browser-menu__indicator"><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></span>
             <span>{VIEWPORT_LABELS[viewport]}</span>
             <small>{size ? `${size.width} × ${size.height}` : 'Fit pane'}</small>
           </DropdownMenu.RadioItem>
@@ -887,7 +888,7 @@ function BrowserPaneContent({
     type="button" className="browser-toolbar__close" title="Close split" aria-label="Close split"
     onPointerDown={event => event.stopPropagation()}
     onClick={event => { event.stopPropagation(); onRegionClose() }}
-  ><X size={12} /></button> : null
+  ><ThemeActionCloseIcon size={12} /></button> : null
 
   const defaultPresentationVisible = visible
   const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
@@ -915,7 +916,7 @@ function BrowserPaneContent({
     const stageContent = <>
 
         {connectionUnavailable ? <div className="pane-state" role="status" aria-live="polite">
-          <Globe2 size={23} />
+          <ThemeObjectBrowserIcon size={23} />
           <strong>{restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}</strong>
           <span>{restoreError ?? (restoring ? 'Waiting for the original page connection. Your page, address and other work are kept.' : 'Switch back to this tab to restore the original page.')}</span>
           <span>You can edit the address or open it in your external browser while the connection is unavailable.</span>
@@ -932,7 +933,7 @@ function BrowserPaneContent({
           /> : null
         ) : elementSelection ? (
           <section className="browser-selection-result" aria-label="Selected element context">
-            <header><ScanSearch size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
+            <header><ThemeActionInspectIcon size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
             <dl>
               <div><dt>Element</dt><dd>{`<${elementSelection.tagName}>${elementSelection.role ? ` · ${elementSelection.role}` : ''}`}</dd></div>
               <div><dt>Selector</dt><dd>{elementSelection.selector || 'No stable selector'}</dd></div>
@@ -950,13 +951,13 @@ function BrowserPaneContent({
             </label>
             <footer>
               <button className="small-button" type="button" onClick={cancelElementSelection}>Cancel</button>
-              <button className="small-button" type="button" onClick={() => void copyElementContext()}><Copy size={12} /> Copy context</button>
-              <button className="primary-button" type="button" onClick={addElementAnnotation}><Check size={12} /> Add annotation</button>
+              <button className="small-button" type="button" onClick={() => void copyElementContext()}><ThemeActionCopyIcon size={12} /> Copy context</button>
+              <button className="primary-button" type="button" onClick={addElementAnnotation}><ThemeStatusSelectedIcon size={12} /> Add annotation</button>
             </footer>
           </section>
         ) : tab.appLinkPrompt ? (
           <div className="pane-state browser-app-link-prompt">
-            <ArrowUpRight size={20} />
+            <ThemeActionOpenExternalIcon size={20} />
             <strong>Open this link in another app?</strong>
             <span>
               This page wants to hand <code>{tab.appLinkPrompt.scheme}:</code> links to an app on your
@@ -986,13 +987,13 @@ function BrowserPaneContent({
           </div>
         ) : tab.error ? (
           <div className="pane-state pane-state--error">
-            <AlertTriangle size={20} />
+            <ThemeStatusWarningIcon size={20} />
             <strong>Page could not be loaded</strong>
             <span>{tab.error}</span>
             <button className="small-button" type="button" onClick={() => void run(async () => {
               const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId, tab.profileId || undefined)
               return browser.error ? await api.browser.reload(tab.browserId) : browser
-            })}><RefreshCw size={12} /> Retry</button>
+            })}><ThemeActionRefreshIcon size={12} /> Retry</button>
           </div>
         ) : tab.url === 'about:blank' ? (
           startPageConfig ? <BrowserStartPage config={startPageConfig} visible={visible} historyRevision={historyRevision}
@@ -1003,11 +1004,11 @@ function BrowserPaneContent({
                 onHistoryChange={() => setHistoryRevision(value => value + 1)}
                 historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
-              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ArrowUpRight size={16} /></button>
+              <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ThemeActionOpenExternalIcon size={16} /></button>
             </form>
-          </BrowserStartPage> : <div className="browser-empty"><Globe2 size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
+          </BrowserStartPage> : <div className="browser-empty"><ThemeObjectBrowserIcon size={25} /><strong>New browser tab</strong><span>Search or enter an address above to begin.</span></div>
         ) : __AGENTMUX_WEB_PREVIEW__ ? (
-          <div className="browser-preview"><Globe2 size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
+          <div className="browser-preview"><ThemeObjectBrowserIcon size={25} /><strong>{tab.title || tab.url}</strong><span>{tab.url}</span><small>Web Preview represents the Main-owned WebContentsView here.</small></div>
         ) : null}
     </>
     return (
@@ -1026,18 +1027,18 @@ function BrowserPaneContent({
           disabled={tab.url === 'about:blank' || busy}
           onClick={() => void runCommand(async () => await api.ui.openExternal(tab.url))}
         >
-          <ArrowUpRight size={14} />
+          <ThemeActionOpenExternalIcon size={14} />
         </button>
-        <button type="button" className="browser-toolbar__navigation" aria-label="Back" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ArrowLeft size={13} /></button>
-        <button type="button" className="browser-toolbar__navigation" aria-label="Forward" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ArrowRight size={13} /></button>
+        <button type="button" className="browser-toolbar__navigation" aria-label="Back" title="Back" disabled={!tab.canGoBack || busy} onClick={() => void run(() => api.browser.back(tab.browserId))}><ThemeNavigationBackIcon size={13} /></button>
+        <button type="button" className="browser-toolbar__navigation" aria-label="Forward" title="Forward" disabled={!tab.canGoForward || busy} onClick={() => void run(() => api.browser.forward(tab.browserId))}><ThemeNavigationForwardIcon size={13} /></button>
         <button type="button" className="browser-toolbar__reload" aria-label={connectionUnavailable ? 'Retry browser connection' : 'Reload'}
           title={connectionUnavailable ? restoring ? 'Waiting for the original page connection' : 'Retry the original page connection' : 'Reload'}
           disabled={busy || released || restoring}
           onClick={() => { if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId)) }}>
-          {tab.loading || busy ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+          {tab.loading || busy ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         </button>
         {startPageConfig && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
-          <Globe2 size={13} />
+          <ThemeObjectBrowserIcon size={13} />
           <BrowserAddressInput
             onHistoryChange={() => setHistoryRevision(value => value + 1)}
             ref={addressInput} aria-label="Browser address" value={address} placeholder="Search or enter an address"
@@ -1066,7 +1067,7 @@ function BrowserPaneContent({
             disabled={selectElementDisabled}
             onClick={selectElement}
           >
-            {selectionBusy ? <LoaderCircle className="spin" size={14} /> : <ScanSearch size={14} />}
+            {selectionBusy ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionInspectIcon size={14} />}
           </button>
         ) : null}
         {toolbar?.screenshot ? (
@@ -1078,7 +1079,7 @@ function BrowserPaneContent({
             disabled={screenshotDisabled}
             onClick={() => void beginScreenshot()}
           >
-            {screenshotBusy && !screenshot ? <LoaderCircle className="spin" size={14} /> : <Camera size={14} />}
+            {screenshotBusy && !screenshot ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionCaptureIcon size={14} />}
           </button>
         ) : null}
         {toolbar?.devTools ? (
@@ -1090,14 +1091,14 @@ function BrowserPaneContent({
             disabled={pageToolDisabled}
             onClick={openDevTools}
           >
-            <Wrench size={14} />
+            <ThemeObjectToolsIcon size={14} />
           </button>
         ) : null}
         {toolbar?.viewport ? (
           <DropdownMenu.Root onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
               <button type="button" className="browser-toolbar__secondary" aria-label="Viewport" title="Viewport" disabled={busy}>
-                <Monitor size={14} />
+                <ThemeObjectDisplayIcon size={14} />
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -1117,7 +1118,7 @@ function BrowserPaneContent({
             disabled={pageToolDisabled}
             onClick={saveBookmark}
           >
-            <Bookmark size={14} />
+            <ThemeObjectBookmarkIcon size={14} />
           </button>
         ) : null}
         {tab.bookmarkOrigin ? (
@@ -1133,51 +1134,51 @@ function BrowserPaneContent({
             disabled={tab.bookmarkOrigin.binary || busy}
             onClick={() => viewBookmarkSource(presentation?.target)}
           >
-            <FileCode2 size={14} />
+            <ThemeFileCodeIcon size={14} />
           </button>
         ) : null}
           <DropdownMenu.Root onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
+              <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><ThemeActionMoreIcon size={14} /></button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
                 {regionSplitItems ? <>{regionSplitItems}<DropdownMenu.Separator className="browser-menu__separator" /></> : null}
                 <DropdownMenu.Label className="browser-menu__label">Page</DropdownMenu.Label>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Back" disabled={!tab.canGoBack || busy} onSelect={() => void run(() => api.browser.back(tab.browserId))}>
-                  <ArrowLeft size={12} /><span>Back</span>
+                  <ThemeNavigationBackIcon size={12} /><span>Back</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Forward" disabled={!tab.canGoForward || busy} onSelect={() => void run(() => api.browser.forward(tab.browserId))}>
-                  <ArrowRight size={12} /><span>Forward</span>
+                  <ThemeNavigationForwardIcon size={12} /><span>Forward</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" disabled={busy} onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
-                  <RefreshCw size={12} /><span>Reload page</span>
+                  <ThemeActionRefreshIcon size={12} /><span>Reload page</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={openOperationTimeline}>
-                  <History size={12} /><span>Demonstration</span>
+                  <ThemeObjectHistoryIcon size={12} /><span>Demonstration</span>
                 </DropdownMenu.Item>
                 {toolbar?.selectElement ? <DropdownMenu.Item className="browser-menu__item" aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'} disabled={selectElementDisabled} onSelect={selectElement}>
-                  <ScanSearch size={12} /><span>{selectionBusy ? 'Cancel element selection' : 'Select element'}</span>
+                  <ThemeActionInspectIcon size={12} /><span>{selectionBusy ? 'Cancel element selection' : 'Select element'}</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.screenshot ? <DropdownMenu.Item className="browser-menu__item" aria-label="Screenshot" disabled={screenshotDisabled} onSelect={() => void beginScreenshot()}>
-                  <Camera size={12} /><span>Screenshot</span>
+                  <ThemeActionCaptureIcon size={12} /><span>Screenshot</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.devTools ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open DevTools" disabled={pageToolDisabled} onSelect={openDevTools}>
-                  <Wrench size={12} /><span>Open DevTools</span>
+                  <ThemeObjectToolsIcon size={12} /><span>Open DevTools</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.saveBookmark ? <DropdownMenu.Item className="browser-menu__item" aria-label="Save this page as a bookmark" disabled={pageToolDisabled} onSelect={saveBookmark}>
-                  <Bookmark size={12} /><span>Save bookmark</span>
+                  <ThemeObjectBookmarkIcon size={12} /><span>Save bookmark</span>
                 </DropdownMenu.Item> : null}
                 {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={() => viewBookmarkSource(presentation?.target)}>
-                  <FileCode2 size={12} /><span>View bookmark source</span>
+                  <ThemeFileCodeIcon size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.viewport ? <><DropdownMenu.Separator className="browser-menu__separator" /><DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
                 <DropdownMenu.Separator className="browser-menu__separator" />
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
-                  <SlidersHorizontal size={12} /><span>Browser tools…</span>
+                  <ThemeActionAdjustIcon size={12} /><span>Browser tools…</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Research in Survey" disabled={busy} onSelect={() => void startResearch()}>
-                  <Globe2 size={12} /><span>{research.current ? 'Resume research creation' : 'Research in Survey…'}</span>
+                  <ThemeObjectBrowserIcon size={12} /><span>{research.current ? 'Resume research creation' : 'Research in Survey…'}</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -1185,7 +1186,7 @@ function BrowserPaneContent({
         {regionCloseButton}
       </form>
       {currentBookmark ? <p className="browser-bookmark-result" role="status">
-        <Check size={12} aria-hidden="true" /><span>Saved</span>
+        <ThemeStatusSelectedIcon size={12} aria-hidden="true" /><span>Saved</span>
         <code title={currentBookmark.path}>{currentBookmark.path}</code>
         <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
       </p> : null}
@@ -1206,7 +1207,7 @@ function BrowserPaneContent({
         : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}
 
       {managementVisited ? <aside className="browser-trace-rail browser-management-rail" aria-label="Browser management controls" hidden={!managementOpen} inert={!managementOpen || !visible}>
-        <header><strong>Browser tools</strong><button type="button" className="icon-button" aria-label="Close browser tools" onClick={() => setManagementOpen(false)}><X size={14} /></button></header>
+        <header><strong>Browser tools</strong><button type="button" className="icon-button" aria-label="Close browser tools" onClick={() => setManagementOpen(false)}><ThemeActionCloseIcon size={14} /></button></header>
         {resourceWorkspace ? <BrowserToolsPanel workspace={resourceWorkspace} visible={visible && managementOpen} /> : <p role="status">The browser resource is still restoring. Your page remains available.</p>}
       </aside> : null}
       {timelineOpen ? (

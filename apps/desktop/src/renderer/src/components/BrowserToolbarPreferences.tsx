@@ -1,9 +1,14 @@
-import { ChevronRight, LoaderCircle, SlidersHorizontal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserToolbarConfig } from '../../../shared/contracts'
 import { BROWSER_TOOLBAR_ITEM_ORDER, type BrowserToolbarItem } from '../../../shared/browser-toolbar'
 import { BROWSER_TOOLBAR_ITEM_LABELS } from '../lib/browser-toolbar'
 import { useSettingDraftRecord } from './settings/use-setting-draft'
 import { useSettingsSave } from './settings/SettingsSaveBar'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 export function BrowserToolbarPreferences({
   toolbar,
@@ -31,8 +36,8 @@ export function BrowserToolbarPreferences({
     <section className="browser-tools-preferences" aria-label="Browser bar visibility">
       <details>
         <summary aria-label="Browser bar settings">
-          {busy ? <LoaderCircle className="spin" size={14} /> : <SlidersHorizontal size={14} />}
-          <strong>Browser bar</strong>{draft.dirty ? <small>Unsaved</small> : null}<ChevronRight size={13} />
+          {busy ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionAdjustIcon size={14} />}
+          <strong>Browser bar</strong>{draft.dirty ? <small>Unsaved</small> : null}<ThemeNavigationDisclosureIcon size={13} />
         </summary>
         <div className="browser-tools-preferences__body">
           <p>External open is always visible. Narrow panes keep More available.</p>
@@ -55,7 +60,7 @@ export function BrowserToolbarPreferences({
             disabled={!draft.dirty || busy}
             onClick={() => void save()}
           >
-            {busy ? <LoaderCircle className="spin" size={12} /> : null}
+            {busy ? <ThemeStatusLoadingIcon className="spin" size={12} /> : null}
             {busy ? 'Saving…' : 'Save Browser bar'}
           </button>
         </div>

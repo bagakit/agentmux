@@ -1,12 +1,15 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ComponentPropsWithoutRef, type Ref } from 'react'
-import { X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserInputHistorySnapshot, BrowserInputHistoryTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { composerCompositionHandlers, composerRenderValue, type ComposerCompositionState } from '@agentmux/client-ui/composer-composition'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
+
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+
 
 export type BrowserAddressInputHandle = { submit(text?: string): void }
 type Props = Omit<ComponentPropsWithoutRef<typeof TextInput>, 'value' | 'onChange' | 'onSubmit' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'> & {
@@ -150,7 +153,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
       {loading ? <p>Reading input history…</p> : null}
       <ul id={id} role="listbox" aria-label="Recent addresses and searches">{entries.map((entry, index) => <li id={`${id}-${index}`} role="option" aria-selected={selected === index} key={entry.text}>
         <button type="button" className="browser-address-history__choose" onPointerDown={event => event.preventDefault()} onClick={() => { onValueChange(entry.text); submit(entry.text) }}>{entry.text}</button>
-        <button type="button" className="browser-address-history__delete" aria-label={`Remove input ${entry.text}`} onPointerDown={event => event.preventDefault()} onClick={() => void remove(entry.text)}><X size={12} /></button>
+        <button type="button" className="browser-address-history__delete" aria-label={`Remove input ${entry.text}`} onPointerDown={event => event.preventDefault()} onClick={() => void remove(entry.text)}><ThemeActionRemoveIcon size={12} /></button>
       </li>)}</ul>
       {!loading && entries.length === 0 ? <p>{!history ? 'Input history is not loaded.' : history.entries.length ? 'No matching recent input.' : 'No saved input yet.'}</p> : null}
     </div></WindowOverlayPortal> : null}
