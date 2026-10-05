@@ -1,11 +1,16 @@
-import { CircleHelp, Monitor, Server } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
+
+const ThemeObjectDisplayIcon = semanticIconComponent('object.display')
+const ThemeObjectHostIcon = semanticIconComponent('object.host')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
+
 
 type HostIdentity = Pick<RegionExecutionHost, 'id' | 'label' | 'kind' | 'configured'>
 
 /** Machine type only; neither platform branding nor connection/Run status. */
 export function HostIcon({ kind, size = 12 }: { kind: HostIdentity['kind']; size?: number }) {
-  const Icon = kind === 'local' ? Monitor : kind === 'ssh' ? Server : CircleHelp
+  const Icon = kind === 'local' ? ThemeObjectDisplayIcon : kind === 'ssh' ? ThemeObjectHostIcon : ThemeStatusUnknownIcon
   return <Icon size={size} aria-hidden="true" />
 }
 

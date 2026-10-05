@@ -1,6 +1,9 @@
-import { Keyboard } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext, type ReactNode } from 'react'
 import { SettingsNavigation } from './SettingsNavigation'
+
+const ThemeObjectKeyboardIcon = semanticIconComponent('object.keyboard')
+
 export function WindowUtilityBar({ toolkit }: {
   toolkit?: ReactNode
 }) {
@@ -15,7 +18,7 @@ export function WindowUtilityBar({ toolkit }: {
         data-shortcut-help-open
         onClick={() => settings.open('keyboard-shortcuts')}
       >
-        <Keyboard size={14} aria-hidden="true" />
+        <ThemeObjectKeyboardIcon size={14} aria-hidden="true" />
       </button>
       <div className="window-status-bar__toolkits" role="group" aria-label="Toolkit">{toolkit}</div>
     </div>

@@ -1,13 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  ExternalLink,
-  PanelBottomClose,
-  PanelLeftClose,
-  PanelRightClose,
-  PanelTopClose,
-  SquarePlus
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import {
   OPEN_DESTINATIONS,
   openDestinationNeedsRegion,
@@ -15,6 +8,14 @@ import {
 } from '../lib/open-destination'
 import { getWindowOverlayHost } from './WindowOverlayHost'
 import { useAppStore } from '../store'
+
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
+const ThemeLayoutCloseRightIcon = semanticIconComponent('layout.close-right')
+const ThemeLayoutCloseTopIcon = semanticIconComponent('layout.close-top')
+const ThemeLayoutCloseBottomIcon = semanticIconComponent('layout.close-bottom')
+
 
 export type OpenDestinationRequest = Readonly<{
   id: number
@@ -50,15 +51,15 @@ export type OpenDestinationRequest = Readonly<{
 // wrong way with nothing going red. `nextFocusedDestination` below navigates off this same table, so
 // moving a button moves both its pixels and its keyboard neighbours.
 const DESTINATION_META = {
-  system: { icon: ExternalLink, label: 'Open in system browser', column: 1, row: 1 },
-  tab: { icon: SquarePlus, label: 'Open in a new tab', column: 2, row: 2 },
-  left: { icon: PanelLeftClose, label: 'Open in a split on the left', column: 1, row: 2 },
-  right: { icon: PanelRightClose, label: 'Open in a split on the right', column: 3, row: 2 },
-  up: { icon: PanelTopClose, label: 'Open in a split above', column: 2, row: 1 },
-  down: { icon: PanelBottomClose, label: 'Open in a split below', column: 2, row: 3 }
+  system: { icon: ThemeActionOpenExternalIcon, label: 'Open in system browser', column: 1, row: 1 },
+  tab: { icon: ThemeActionCreateIcon, label: 'Open in a new tab', column: 2, row: 2 },
+  left: { icon: ThemeLayoutCloseLeftIcon, label: 'Open in a split on the left', column: 1, row: 2 },
+  right: { icon: ThemeLayoutCloseRightIcon, label: 'Open in a split on the right', column: 3, row: 2 },
+  up: { icon: ThemeLayoutCloseTopIcon, label: 'Open in a split above', column: 2, row: 1 },
+  down: { icon: ThemeLayoutCloseBottomIcon, label: 'Open in a split below', column: 2, row: 3 }
 } satisfies Record<
   OpenDestination,
-  { icon: typeof ExternalLink; label: string; column: number; row: number }
+  { icon: typeof ThemeActionOpenExternalIcon; label: string; column: number; row: number }
 >
 
 // Icons stand in for words in the wordless form, so every button still needs a spoken name (aria-label)
@@ -70,7 +71,7 @@ export const OPEN_DESTINATION_BAR_ITEMS = OPEN_DESTINATIONS.map((destination) =>
   ...DESTINATION_META[destination]
 })) as ReadonlyArray<{
   destination: OpenDestination
-  icon: typeof ExternalLink
+  icon: typeof ThemeActionOpenExternalIcon
   label: string
   column: number
   row: number
@@ -301,7 +302,7 @@ export function OpenDestinationPopover({
       style={{ position: 'fixed', left: request.x, top: request.y }}
     >
       <div className="open-destination-bar__url">
-        <ExternalLink size={13} aria-hidden="true" />
+        <ThemeActionOpenExternalIcon size={13} aria-hidden="true" />
         <span title={request.url}>{request.url}</span>
       </div>
       <OpenDestinationBar canSplit={canSplit} onSelect={onSelect} />

@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { Search } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FileNameListing } from '@agentmux/core'
 import { api } from '../lib/api'
@@ -8,6 +8,9 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { FilePathLabel } from './FilePathLabel'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { quickFileQuery, rankQuickFiles } from '../lib/quick-open-files'
+
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+
 
 /** A reader in the existing QuickSwitcher. It owns neither file contents nor navigation state. */
 export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
@@ -49,7 +52,7 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
     })
   }
   return <div className="quick-file-picker">
-    <div className="quick-switch__input"><Search size={15} /><TextInput autoFocus value={query} placeholder="Find project files…  path:line:column"
+    <div className="quick-switch__input"><ThemeActionSearchIcon size={15} /><TextInput autoFocus value={query} placeholder="Find project files…  path:line:column"
       aria-label="Find project files" aria-controls="quick-file-list" onChange={event => setQuery(event.target.value)} onKeyDown={event => {
     if (isImeCompositionKeyDown(event)) return
     if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex(index => Math.min(index + 1, Math.max(0, results.length - 1))) }

@@ -3,7 +3,7 @@ import { scratchTopicsForWorkspace, scratchTopicKind } from '../lib/scratch-topi
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
-import { ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { useAppStore, warmTerminalKey } from '../store'
@@ -42,6 +42,15 @@ import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useContext } from 'react'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 export function NewTabSurface({
   tabGroupId,
@@ -381,13 +390,13 @@ export function NewTabSurface({
 
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
         {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
-          <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ChevronRight size={14} />
+          <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} disabled={busy !== null} /> : null}
-          <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!workspace || detecting} onClick={() => workspace && void detectExecutors(workspace.hostId)}>{detecting ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />}</button>
-          {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><Minus size={13} /></button> : null}
-          <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><X size={13} /></button>
+          <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!workspace || detecting} onClick={() => workspace && void detectExecutors(workspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
+          {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></button> : null}
+          <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></button>
         </span>
       </div> : null}
 
@@ -417,7 +426,7 @@ export function NewTabSurface({
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} disabled={busy !== null} />
-          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
+          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={13} className="spin" /> : <ThemeActionStartIcon size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
         </div>
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
       </div> : null}
@@ -433,7 +442,7 @@ export function NewTabSurface({
         sections={sections} onSectionChange={setSection} warmPreview={warmPreview}
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
         onRun={run} />
-      {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}
+      {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ThemeNavigationDownIcon size={12} /></button></div> : null}
     </section>
   )
 }

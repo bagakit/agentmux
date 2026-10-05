@@ -1,7 +1,7 @@
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import { createContext, useContext, useEffect, useState } from 'react'
-import { PanelLeft, PanelsTopLeft, Settings2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -9,6 +9,11 @@ import { FocusNavigationPreview } from './FocusNavigationPreview'
 import { SURFACE_NAVIGATION_PLUGINS } from './SurfaceNavigation'
 import { OVERLAY_LAYER_BANDS, WindowOverlayPortal } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+
+const ThemeLayoutActiveFirstIcon = semanticIconComponent('layout.active-first')
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
+
 
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
@@ -84,7 +89,7 @@ function ProjectRailToggle() {
       data-project-rail-toggle
       onClick={toggleProjectRail}
     >
-      <PanelLeft size={15} />
+      <ThemeLayoutActiveFirstIcon size={15} />
     </button>
   )
 }
@@ -111,7 +116,7 @@ export function ToolsToggle() {
       disabled={!toolsAvailable}
       onClick={toggleTools}
     >
-      <PanelsTopLeft size={15} />
+      <ThemeObjectLauncherIcon size={15} />
     </button>
   )
 }
@@ -257,7 +262,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
             data-settings-section="overview"
             onClick={() => settingsOpen ? onCloseSettings?.() : settings.open('overview')}
           >
-            <Settings2 className="surface-navigation__icon" size={14} aria-hidden="true" />
+            <ThemeObjectSettingsIcon className="surface-navigation__icon" size={14} aria-hidden="true" />
           </button>
         </div>
       </nav>
