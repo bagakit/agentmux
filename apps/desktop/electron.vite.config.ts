@@ -17,8 +17,9 @@ export default defineConfig({
     build: { rollupOptions: { input: { index: resolve(import.meta.dirname, 'src/main/index.ts'), 'agentmux-host': resolve(import.meta.dirname, '../host/src/index.ts') } } }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      // Sandboxed preload can load Electron, but not external workspace packages.
+      externalizeDeps: false,
       rollupOptions: {
         input: resolve(import.meta.dirname, 'src/preload/index.ts'),
         output: { format: 'cjs', entryFileNames: 'index.cjs' }
