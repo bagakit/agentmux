@@ -129,8 +129,15 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       const settled = await retain({ ...latestDraft, baseline: confirmed ? resolved.result!.source : latestDraft.baseline,
         attempts: latestDraft.attempts.map(a => a.input.operationId === input.operationId ? resolved : a), blockedAttemptId: resolved.phase === 'unknown' ? input.operationId : null })
       const afterSettle = connection(original, owner, target)
-      if (!settled.committed || !mounted.current || !latest.current.visible || latest.current.client !== original || owner.recordIdentity() !== recordId ||
-        !afterSettle || afterSettle.ownerInstanceId !== source.ownerInstanceId || moteQuickDraftKey(afterSettle.scope) !== moteQuickDraftKey(source.scope)) {
+      const originalScope = mounted.current && latest.current.visible && latest.current.client === original && owner.recordIdentity() === recordId &&
+        !!afterSettle && afterSettle.ownerInstanceId === source.ownerInstanceId && moteQuickDraftKey(afterSettle.scope) === moteQuickDraftKey(source.scope)
+      if (!settled.committed && settled.canForward && confirmed && originalScope && !conflicted.current) {
+        // Host's exact receipt is authoritative even when this device cannot back it up.
+        // Keep its baseline for a later explicit Save; never claim a Device commit ACK.
+        setNotice('原 Host 已确认保存；尚未进入设备备份。本页选择与完整请求保留，可继续明确保存或复制。')
+        return
+      }
+      if (!settled.committed || !originalScope) {
         const held = { ...current.current, baseline: latestDraft.baseline, blockedAttemptId: input.operationId,
           attempts: current.current.attempts.map(a => a.input.operationId === input.operationId ? { ...resolved, phase: 'unknown' as const,
             issue: '原 Host 已回应；设备回执或原页面归属尚未持久确认。' } : a) }
