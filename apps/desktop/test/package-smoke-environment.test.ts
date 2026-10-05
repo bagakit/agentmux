@@ -24,6 +24,10 @@ it.each([undefined, '1'])('LaunchServices smoke uses GUI environment when caller
   const caller = { KEEP_ORIGINAL_VALUE: 'retained', ...(nodeMode ? { ELECTRON_RUN_AS_NODE: nodeMode } : {}) }
   const run = vi.fn(async (command: string) => ({ stdout: '', stderr: '' }))
   const boundaries = {
+    createPrivateRuntimeScope: async () => ({ directory: runtime, socketPath: path.join(runtime, 'ctxmux.sock'),
+      daemonPath: path.join(app, 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),
+      observeOwner: async () => ({}), cleanup: async () => ({ status: 'exited', signals: ['SIGTERM'], exitConfirmed: true }) }),
+    writeFile: async () => {},
     sep: path.sep,
     realpath: async (p: string) => p, join: path.join, mkdir: async () => {}, mkdtemp: async () => runtime,
     process: { env: caller, getuid: () => 501, stdout: { write: () => {} } }, PRODUCT_NAME: 'AgentMux', manifest: { version: '0.1.0' },
