@@ -35,11 +35,18 @@ assert.ok(mainSource.includes('load: loadPackagedRenderer') && mainSource.includ
   'Normal startup and package smoke must consume the same loader')
 const loaderSource = join(output, 'renderer-loader.ts')
 await writeFile(loaderSource, `import { randomUUID } from 'node:crypto'
-import { topFrameOrigin } from ${JSON.stringify(join(desktop, 'src/main/top-frame-navigation.ts'))}
+import { app } from 'electron'
+import { registerWorkbenchStartupCapture } from ${JSON.stringify(join(desktop, 'src/main/workbench-startup-capture.ts'))}
+import { topFrameOrigin, type TopFrameOrigin } from ${JSON.stringify(join(desktop, 'src/main/top-frame-navigation.ts'))}
 export function rendererLoader(window: any) {
   let updateReady: { token: string; resolve: () => void } | null = null
-  let appOrigin: unknown
+  let appOrigin: TopFrameOrigin
   const probeQuery = undefined
+  const startupCapture = registerWorkbenchStartupCapture({
+    contents: window.webContents, preloadPath: window.webContents.getLastWebPreferences().preload,
+    origin: () => appOrigin, activeAttempt: () => updateReady?.token ?? null,
+    startupAttemptId: randomUUID(), pid: process.pid, appVersion: app.getVersion(), packageIdentity: null, sink: () => {}
+  })
   const loadPackagedRenderer = ${loaderBody}
   return { load: loadPackagedRenderer, onReady: ${readyBody} }
 }\n`)
