@@ -190,7 +190,7 @@ describe('Grok provider', () => {
       expect(target).not.toContain('.claude')
       expect(target).not.toContain('.cursor')
       // 只按自有 marker 合并，保留用户其他 hooks。
-      expect(plan!.mutations[0]!.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
+      expect(plan!.mutations[0]!.merge).toEqual({ kind: 'json-managed-events' })
       expect(plan!.mutations[0]!.mode).toBe(0o600)
     })
 

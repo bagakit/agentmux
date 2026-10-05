@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -26,7 +27,7 @@ beforeEach(async () => {
 afterEach(async () => { scope.growPath = ''; scope.unreadable = ''; vi.useRealTimers(); await rm(root, { recursive: true, force: true }) })
 const plan = (): AgentManagedHookPlan => ({ providerId: 'claude', mutations: [{ path: join(root, 'config.json'),
   content: JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node agentmux-hook.js', timeout: 10 }] }] } }),
-  mode: 0o600, merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' } }] })
+  mode: 0o600, merge: { kind: 'json-managed-events' } }] })
 
 async function snapshot(path: string) { const metadata = await stat(path); return { bytes: await readFile(path), mode: metadata.mode, mtime: metadata.mtimeMs } }
 
@@ -54,7 +55,7 @@ describe('fresh managed Hook disk observations', () => {
     }
   })
 
-  it('reads live semantic ownership, ignoring formatting/foreign secrets but catching changed and stale managed commands', async () => {
+  it('reads exact current declarations without guessing historical ownership', async () => {
     const resolved = plan(), path = resolved.mutations[0]!.path
     await writeFile(path, JSON.stringify({ secret: 'DO-NOT-REPORT', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'foreign-audit', timeout: 10 }] }] } }))
     expect((await installer.inspect(resolved)).status).toBe('not_installed')
@@ -69,14 +70,14 @@ describe('fresh managed Hook disk observations', () => {
     expect(JSON.stringify(inspected)).not.toMatch(/DO-NOT-REPORT|foreign-audit|node agentmux-hook/)
     parsed.hooks.Stop[1].hooks[0].command = 'node moved/agentmux-hook.js'
     await writeFile(path, JSON.stringify(parsed))
-    expect((await installer.inspect(resolved)).status).toBe('partial')
+    expect((await installer.inspect(resolved)).status).toBe('not_installed')
     await installer.ensure(resolved)
     const repaired = JSON.parse(await readFile(path, 'utf8'))
     repaired.hooks.Obsolete = [{ command: 'stale agentmux-hook.js' }]
     await writeFile(path, JSON.stringify(repaired))
-    expect((await installer.inspect(resolved)).status).toBe('partial')
-    await installer.ensure(resolved)
     expect((await installer.inspect(resolved)).status).toBe('installed')
+    expect(await installer.ensure(resolved)).toBeNull()
+    expect(JSON.parse(await readFile(path, 'utf8')).hooks.Obsolete).toEqual(repaired.hooks.Obsolete)
     // Observations never consume preview slots or create receipts.
     const previews = await Promise.all([0, 1, 2, 3].map(() => installer.preview(resolved)))
     expect(previews.length).toBe(4)
@@ -155,12 +156,12 @@ describe('fresh managed Hook disk observations', () => {
 
   it('fresh reads and checkedAt change with disk edits, never returning an old cached installation result', async () => {
     const resolved = plan()
-    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(1000)
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(reshapeFixtureEpoch(0, 0, 1000))
     const absent = await installer.inspect(resolved)
     await mkdir(join(root, 'extra'))
     await writeFile(resolved.mutations[0]!.path, resolved.mutations[0]!.content)
-    vi.setSystemTime(2000)
+    vi.setSystemTime(reshapeFixtureEpoch(0, 0, 2000))
     const current = await installer.inspect(resolved)
-    expect([absent.status, absent.checkedAt, current.status, current.checkedAt]).toEqual(['not_installed', 1000, 'installed', 2000])
+    expect([absent.status, absent.checkedAt, current.status, current.checkedAt]).toEqual(['not_installed', reshapeFixtureEpoch(0, 0, 1000), 'installed', reshapeFixtureEpoch(0, 0, 2000)])
   })
 })

@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { renderMergedHookContent } from '../src/hook-config-merge.js'
 
 const OWNED_KEY = { kind: 'json-owned-key', key: 'agentmux-status' } as const
-const MANAGED = { kind: 'json-managed-events', marker: 'agentmux-hook.js' } as const
-const ROOT_MANAGED = { kind: 'json-root-managed-events', marker: 'agentmux-hook.js' } as const
-const YAML_MANAGED = { kind: 'yaml-managed-events', marker: 'agentmux-hook.js' } as const
-const APPROVALS = { kind: 'json-managed-approvals', marker: 'agentmux-hook.js' } as const
+const MANAGED = { kind: 'json-managed-events' } as const
+const ROOT_MANAGED = { kind: 'json-root-managed-events' } as const
+const YAML_MANAGED = { kind: 'yaml-managed-events' } as const
+const APPROVALS = { kind: 'json-managed-approvals' } as const
 
 describe('hook config merge — json-owned-key (antigravity shared ~/.gemini)', () => {
   const owned = JSON.stringify({ 'agentmux-status': { PreToolUse: [{ command: 'agentmux-hook.js' }] } })
@@ -63,13 +63,13 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
     expect(result.hooks.Stop[0].hooks[0].command).toBe(fixturePath("repo/notify.sh"))
     expect(result.hooks.Stop[1].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
     // Our SessionStart bucket is added.
-    expect(result.hooks.SessionStart[0].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
-    // We own the description label.
+    expect(result.hooks.SessionStart.at(-1).hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
+    // A missing metadata label is seeded; existing user metadata is not owned.
     expect(result.description).toBe('AgentMux Codex lifecycle bridge.')
   })
 
-  it('sweeps stale AgentMux entries by filename marker rather than duplicating on reinstall', () => {
-    // A previous install wrote our command under a different absolute execPath.
+  it('preserves unknown old paths while adding current declarations once', () => {
+    // An old path alone cannot prove historical ownership.
     const current = JSON.stringify({
       hooks: {
         SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: fixturePath("old/path/agentmux-hook.js") }] }],
@@ -77,18 +77,18 @@ describe('hook config merge — json-managed-events (codex .codex/hooks.json)', 
       }
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, MANAGED))
-    expect(result.hooks.SessionStart).toHaveLength(1)
-    expect(result.hooks.SessionStart[0].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
-    expect(result.hooks.Stop).toHaveLength(1)
+    expect(result.hooks.SessionStart).toHaveLength(2)
+    expect(result.hooks.SessionStart.at(-1).hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
+    expect(result.hooks.Stop).toHaveLength(2)
   })
 
-  it('drops a bucket that becomes foreign-empty after the sweep', () => {
-    // The user only ever had our stale entry in a bucket we no longer target.
+  it('preserves an unknown old event bucket', () => {
+    // No current declaration grants ownership of a historical bucket.
     const current = JSON.stringify({
       hooks: { LegacyEvent: [{ hooks: [{ type: 'command', command: fixturePath("old/agentmux-hook.js") }] }] }
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, MANAGED))
-    expect(result.hooks.LegacyEvent).toBeUndefined()
+    expect(result.hooks.LegacyEvent).toEqual(JSON.parse(current).hooks.LegacyEvent)
   })
 
   it('is idempotent across repeated installs', () => {
@@ -138,15 +138,15 @@ describe('hook config merge — json-root-managed-events (droid ~/.factory/hooks
     expect(result.Notification).toEqual([{ hooks: [{ type: 'command', command: fixturePath("home/me/notify.sh") }] }])
   })
 
-  it('sweeps our stale entry by marker rather than duplicating, and drops a bucket left empty', () => {
+  it('preserves old root buckets and adds current declarations once', () => {
     const current = JSON.stringify({
       PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: fixturePath("old/agentmux-hook.js") }] }],
       LegacyEvent: [{ hooks: [{ type: 'command', command: fixturePath("old/agentmux-hook.js") }] }]
     })
     const result = JSON.parse(renderMergedHookContent(current, owned, ROOT_MANAGED))
-    expect(result.PreToolUse).toHaveLength(1)
-    expect(result.PreToolUse[0].hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
-    expect(result.LegacyEvent).toBeUndefined()
+    expect(result.PreToolUse).toHaveLength(2)
+    expect(result.PreToolUse.at(-1).hooks[0].command).toBe(fixturePath("abs/agentmux-hook.js"))
+    expect(result.LegacyEvent).toEqual(JSON.parse(current).LegacyEvent)
   })
 
   it('is idempotent across repeated installs', () => {
@@ -190,8 +190,8 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
     expect(result).toContain('on_session_end:')
   })
 
-  it('sweeps a stale AgentMux entry by marker instead of duplicating on reinstall, and is idempotent', () => {
-    // A previous install wrote our command under a different execPath.
+  it('preserves old YAML commands while adding current declarations idempotently', () => {
+    // Preserve the unknown historical command.
     const stale = [
       'model: claude-opus-5',
       'hooks:',
@@ -201,14 +201,14 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
       ''
     ].join('\n')
     const first = renderMergedHookContent(stale, owned, YAML_MANAGED)
-    // Exactly one agentmux entry remains under pre_tool_call (the fresh one), not two.
-    expect(first.match(/agentmux-hook\.js/g)?.length).toBe(2) // pre_tool_call + on_session_end, one each
-    expect(first).not.toContain(fixturePath("old/path/agentmux-hook.js"))
+    // The old command remains; the current declaration is added once.
+    expect(first.match(/agentmux-hook\.js/g)?.length).toBe(3) // pre_tool_call + on_session_end, one each
+    expect(first).toContain(fixturePath("old/path/agentmux-hook.js"))
     // Rendering again over our own output changes nothing — required for the installer's unchanged-hash guard.
     expect(renderMergedHookContent(first, owned, YAML_MANAGED)).toBe(first)
   })
 
-  it('drops a bucket left empty after sweeping our only entry, keeping foreign-only buckets', () => {
+  it('preserves unknown old YAML buckets and foreign-only buckets', () => {
     const current = [
       'hooks:',
       '  legacy_event:', // only ever held our stale entry
@@ -219,7 +219,7 @@ describe('hook config merge — yaml-managed-events (hermes ~/.hermes/config.yam
     ].join('\n')
     const ownedElsewhere = JSON.stringify({ hooks: { on_session_end: [{ command: 'x/agentmux-hook.js' }] } })
     const result = renderMergedHookContent(current, ownedElsewhere, YAML_MANAGED)
-    expect(result).not.toContain('legacy_event')
+    expect(result).toContain('legacy_event')
     expect(result).toContain('post_tool_call:')
     expect(result).toContain(fixturePath("home/me/keep.sh"))
   })
@@ -262,14 +262,14 @@ describe('hook config merge — json-managed-approvals (hermes shell-hooks-allow
     expect(result.approvals[1]).toEqual({ event: 'pre_tool_call', command: '/usr/bin/env … agentmux-hook.js' })
   })
 
-  it('sweeps stale AgentMux approvals by marker instead of duplicating, and is idempotent', () => {
+  it('preserves old approval pairs and adds missing current pairs once', () => {
     const current = JSON.stringify({
       approvals: [{ event: 'pre_tool_call', command: fixturePath("old/path/agentmux-hook.js"), approved_at: 'stale' }]
     })
     const first = renderMergedHookContent(current, owned, APPROVALS)
     const parsed = JSON.parse(first)
-    expect(parsed.approvals).toHaveLength(2) // stale one dropped, our two added
-    expect(first).not.toContain(fixturePath("old/path/agentmux-hook.js"))
+    expect(parsed.approvals).toHaveLength(3) // old pair retained, two current pairs added
+    expect(first).toContain(fixturePath("old/path/agentmux-hook.js"))
     expect(renderMergedHookContent(first, owned, APPROVALS)).toBe(first)
   })
 
