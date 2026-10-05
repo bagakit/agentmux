@@ -9,7 +9,7 @@ import { parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitMetricsSnap
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'toolkit-owning', toolId: 'performance' } as const
 const snapshot = (): ToolkitMetricsSnapshot => ({ schema:'agentmux.toolkit.v1',kind:'metrics',toolId:'performance',executionId:null,run:null,
-  state:'idle',reason:null,startedAt:null,observedAt:null,observation:null,document:null,manual:false,consumerCount:0,sequence:0,trend:[] })
+  diagnostics:{captureEnabled:false,failureEvidence:'none',droppedWrites:0,lastFailure:null,persistence:'not-requested',issue:null,cleanupIssue:null},state:'idle',reason:null,startedAt:null,observedAt:null,observation:null,document:null,manual:false,consumerCount:0,sequence:0,trend:[] })
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function endpoint() {
