@@ -11,6 +11,7 @@ import {
   type AgentMuxHostAgentCreateInput,
   AGENTMUX_AGENT_MESSAGING_GUIDANCE,
   agentPromptPredecessor,
+  agentPromptNotApplied,
   validateAgentPromptCondition,
   type AgentPromptCondition,
   type AgentPromptExecution,
@@ -315,6 +316,7 @@ function projectSession(
       ...(subject.agentSession.creation ? { creation: structuredClone(subject.agentSession.creation) } : {}),
       ...(subject.agentSession.forkedFrom ? { forkedFrom: structuredClone(subject.agentSession.forkedFrom) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(subject.agentSession),
+      promptInputNotApplied: agentPromptNotApplied(subject.agentSession),
       ...(subject.agentSession.terminalOutputChannel
         ? { terminalOutputChannel: structuredClone(subject.agentSession.terminalOutputChannel) }
         : {}),

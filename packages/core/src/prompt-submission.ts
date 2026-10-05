@@ -11,7 +11,7 @@ import {
   type CtxmuxAdapterRun
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError, agentMuxCancellationError } from './errors.js'
-import type { AgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptNotApplied, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import type {
   AgentMuxAgentSession,
@@ -328,6 +328,10 @@ export class AgentPromptSubmissionCoordinator {
                   promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message) ||
                   (previous.intent.execution ?? 'default') !== execution)) {
                 throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+              }
+              if (previous.submissionId === submissionId && agentPromptNotApplied(current)?.submissionId === submissionId) {
+                throw new AgentMuxError('Core confirmed this whole prompt Input was not applied. This original operation is final; submit a new explicit message to try again. The Agent remains available.',
+                  'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
               }
               if (unfinished) await this.publishDeliveryDegrade(current, {
                 state: 'unverified', mode: 'degraded', reason: 'input-unconfirmed',
@@ -1274,8 +1278,8 @@ export class AgentPromptSubmissionCoordinator {
   ): ReturnType<CtxmuxRunAdapter['input']> {
     const admission = this.deps.requireAgentSession(session.agentSessionId).promptCompletionAdmission
     if (admission?.submissionId === submissionId && admission.operationId === operation.operationId && admission.notApplied) {
-      // A retry has future dispatch eligibility again. Clear the old negative disposition
-      // durably BEFORE Native receives it, so a cold successor cannot take over this retry.
+      // Only partial-plan retries reach here; the serializer keeps a whole-input refusal final.
+      // Clear the partial phase's old disposition durably before Native receives its recovery.
       await this.deps.updateExactAgentSession(session.agentSessionId, session.run, current => {
         if (current.promptCompletionAdmission?.submissionId !== submissionId) {
           throw new AgentMuxError('Prompt admission changed before retry.', 'STALE_AGENT_SESSION')

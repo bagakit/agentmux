@@ -31,3 +31,27 @@ export function agentPromptCondition(
 export function agentPromptPredecessor(session: Pick<AgentMuxAgentSession, 'promptCompletionAdmission'>): string | null | undefined {
   return session.promptCompletionAdmission === undefined ? null : session.promptCompletionAdmission.submissionId
 }
+
+/** Original whole-input refusal, interpreted by Core rather than by a client error callback. */
+export type AgentPromptNotApplied = { submissionId: string; run: AgentMuxRunRef }
+
+export function agentPromptNotApplied(
+  session: Pick<AgentMuxAgentSession, 'run' | 'promptCompletionAdmission' | 'terminalPromptSubmission'>
+): AgentPromptNotApplied | undefined {
+  const admission = session.promptCompletionAdmission
+  if (!admission?.submissionId || !admission.notApplied || admission.acknowledged ||
+      admission.intent?.run.runId !== session.run.runId || admission.frameRefresh?.notApplied) return undefined
+  const submission = session.terminalPromptSubmission
+  if (admission.intent.plan.kind === 'single-phase') {
+    if (submission) return undefined
+  } else {
+    if (!submission || submission.submissionId !== admission.submissionId || submission.run.runId !== session.run.runId) return undefined
+    const first = submission.prepare?.interrupt ?? submission.payload
+    // A refusal of the final submit cannot undo an accepted payload. Nor does an
+    // independent redraw refusal prove what happened to the original prompt bytes.
+    if (admission.operationId !== first.operationId || admission.startByte !== first.inputByteRange.startByte ||
+        admission.endByte !== submission.submit.inputByteRange.endByte || submission.prepare?.interrupt?.acknowledged ||
+        submission.payload.acknowledged || submission.submit.acknowledged) return undefined
+  }
+  return { submissionId: admission.submissionId, run: { ...session.run } }
+}
