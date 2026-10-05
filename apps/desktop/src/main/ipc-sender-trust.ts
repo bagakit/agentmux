@@ -204,3 +204,11 @@ export function assertManualPromptSenderTrusted(sender: unknown, trustedFrame: u
     throw new Error('Untrusted manual prompt sender')
   }
 }
+
+/** Toolkit IPC is the Workbench's local-user transport, including display evaluation. */
+export function assertToolkitSenderTrusted(sender: unknown, frame: unknown, workbench: unknown, mainFrame: unknown): void {
+  if (sender == null || frame == null || workbench == null || mainFrame == null ||
+      !Object.is(sender, workbench) || !Object.is(frame, mainFrame)) {
+    throw new Error('Toolkit requires the original Workbench sender and main frame')
+  }
+}
