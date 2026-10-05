@@ -1032,16 +1032,20 @@ export type SessionSnapshot = SessionSnapshotBase & (
   | { kind: 'terminal'; providerId: null; control: TerminalSessionControl }
 )
 
+export const CONTROL_ENDPOINT_PUBLICATION_STEP = 'Publishing control endpoint'
+
 export type RuntimeEvent = {
   type: 'core'
   hostId: string
   event: AgentMuxClientEvent
   /** Present only when this endpoint's observation availability changes. */
   endpointWarning?: RuntimeEndpointWarning | null
+  /** An observation owner clears only its own Host and step, including during startup. */
+  endpointObservation?: { step: string; warning: RuntimeEndpointWarning | null }
 }
 
 export type RuntimeEndpointWarning = {
-  /** A failed catalog/metadata observation does not declare this Host's Runtime unavailable. */
+  /** A failed observation does not declare this Host's Runtime unavailable. */
   scope?: 'observation'
   /** A configuration workflow failure can coexist with a connected healthy Runtime. */
   availability?: 'connected' | 'unverified'

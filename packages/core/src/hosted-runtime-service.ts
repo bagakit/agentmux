@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
 import { AgentMuxError } from './errors.js'
@@ -85,9 +86,14 @@ export class AgentMuxHostedRuntimeService {
   private readonly runs = new Map<string, RunReaders>()
   private readonly unsubscribe: () => void
   private disposed = false
+  private endpointState?: Extract<AgentMuxClientEvent, { type: 'control-endpoint-state' }>
   constructor(readonly client: AgentMuxClient, private readonly storePath: string | null,
     private readonly identity: () => AgentMuxRuntimeOwnerIdentity, private readonly shutdown?: () => void | Promise<void>) {
     this.unsubscribe = client.onEvent(event => this.publish(event))
+  }
+  publishControlEndpointState(state: AgentMuxControlEndpointState): void {
+    this.endpointState = { ...state, type: 'control-endpoint-state', evidence: { source: 'agentmux', observedAt: Date.now() } }
+    this.publish(this.endpointState)
   }
   private owner(expectedRuntimeId?: unknown): AgentMuxRuntimeOwnerIdentity {
     if (this.disposed) throw new AgentMuxError('The original semantic owner is unavailable.', 'RUNTIME_UNAVAILABLE')
@@ -283,6 +289,7 @@ export class AgentMuxHostedRuntimeService {
       try { events = reader(emit, this.bootstrap(), () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }) }
       catch (error) { this.pruneConsumer(id, consumer); throw error }
       consumer.events = events
+      if (this.endpointState) events.enqueue(hostedTransfer({ kind: 'event', event: this.endpointState }, randomUUID()))
       const abort = () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }
       context.signal?.addEventListener('abort', abort, { once: true })
       if (context.signal?.aborted) { await dispose(); throw new AgentMuxError('Host subscription was cancelled.', 'CONTROL_CANCELLED') }

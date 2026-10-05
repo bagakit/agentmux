@@ -73,7 +73,7 @@ import type {
   SessionQuestionReplyInput,
   TerminalLaunchInput
 } from '../shared/contracts.js'
-import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
+import { CONTROL_ENDPOINT_PUBLICATION_STEP, runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
 import { projectNativeSourceFacts } from '../shared/agent-native-source.js'
 import {
   scanTerminalOscColorQueries,
@@ -2329,6 +2329,19 @@ export class RuntimeController {
     }
     if (toolkit) { toolkit(event); return }
     let warningChange: RuntimeEndpointWarning | null | undefined
+    let endpointObservation: RuntimeEvent['endpointObservation']
+    if (event.type === 'control-endpoint-state') {
+      const step = CONTROL_ENDPOINT_PUBLICATION_STEP
+      const key = JSON.stringify([hostId, step])
+      const warning: RuntimeEndpointWarning | null = event.state === 'unavailable' ? {
+        hostId, step, scope: 'observation', availability: 'connected',
+        code: event.diagnostic.code, message: event.diagnostic.message,
+        recovery: 'The original Core owner retries publication automatically. Existing Sessions and accepted connections are retained; new connections may be unavailable until publication is restored.'
+      } : null
+      if (warning) this.observationWarnings.set(key, warning)
+      else this.observationWarnings.delete(key)
+      endpointObservation = { step, warning }
+    }
     if (event.type === 'connection-state') {
       const recoveryWarningKey = JSON.stringify([hostId, 'Observing Runtime'])
       if (event.state === 'restored' && !event.diagnostic) {
@@ -2351,6 +2364,7 @@ export class RuntimeController {
     }
     const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId } } : event
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event: projectedEvent,
+      ...(endpointObservation ? { endpointObservation } : {}),
       ...(warningChange !== undefined ? { endpointWarning: warningChange } : {}) }
     for (const client of this.clients) {
       if (client.isDestroyed()) continue

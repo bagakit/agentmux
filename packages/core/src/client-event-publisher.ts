@@ -44,8 +44,14 @@ export class AgentMuxClientEventPublisher {
     return () => { this.statusListeners.delete(listener) }
   }
 
-  onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}): () => void {
-    this.listeners.set(listener, options)
+  onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}, initial?: () => AgentMuxClientEvent | undefined): () => void {
+    const registration = { ...options }
+    this.listeners.set(listener, registration)
+    if (initial) queueMicrotask(() => {
+      if (this.listeners.get(listener) !== registration) return
+      const event = initial()
+      if (event) this.deliver(event, [[listener, registration]])
+    })
     return () => { this.listeners.delete(listener) }
   }
 
@@ -57,6 +63,10 @@ export class AgentMuxClientEventPublisher {
   publish(event: AgentMuxClientEvent): void {
     const listeners = event.type === 'agent-error' || event.type === 'connection-state'
       ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
+    this.deliver(event, listeners)
+  }
+
+  private deliver(event: AgentMuxClientEvent, listeners: Array<[(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions]>): void {
     const failures: AgentMuxError[] = []
     for (const [listener, options] of listeners) {
       let failure: AgentMuxError | undefined

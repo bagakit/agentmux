@@ -4,13 +4,15 @@ import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { SettingsNavigation } from './SettingsNavigation'
+import { CONTROL_ENDPOINT_PUBLICATION_STEP } from '../../../shared/contracts'
 
 /** Automatic connection facts stay visible without opening the notification inbox. */
 export function RemoteCoreUpgradeNotices() {
   const warnings = useAppStore(state => state.runtimeEndpointWarnings)
   const config = useAppStore(state => state.config)
   const settings = useContext(SettingsNavigation)
-  const upgrades = (warnings ?? []).filter(warning => warning.code === 'REMOTE_CORE_UPGRADE_REQUIRED').map(warning => ({ warning, item: runtimeEndpointNotice(warning,
+  const upgrades = (warnings ?? []).filter(warning => warning.code === 'REMOTE_CORE_UPGRADE_REQUIRED' ||
+    warning.scope === 'observation' && warning.step === CONTROL_ENDPOINT_PUBLICATION_STEP).map(warning => ({ warning, item: runtimeEndpointNotice(warning,
     config?.hosts.find(host => host.id === warning.hostId)?.label ?? warning.hostId, hostId => settings?.openHost(hostId)) }))
   if (!upgrades.length) return null
   return <div className="remote-core-upgrade-notices">

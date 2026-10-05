@@ -81,7 +81,8 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts')) },
       coreClients: async () => [{ hostId: 'local', client: await ready }],
-      hostedRuntime: async () => { await ready; return hosted! } })
+      hostedRuntime: async () => { await ready; return hosted! },
+      onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
     await server.start()
     client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
       hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
@@ -90,6 +91,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
     await client.connect()
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop)
+    hosted.publishControlEndpointState(server.controlEndpointState())
     resolveOwner(client)
     return { client, hosted, server, socketPath, ownerIdentity, stop }
   } catch (error) {
