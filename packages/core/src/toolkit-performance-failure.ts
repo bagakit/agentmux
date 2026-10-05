@@ -6,10 +6,10 @@ export const TOOLKIT_PERFORMANCE_FAILURE_STAGES = ['launch', 'admission', 'run-p
   'run-output-order', 'run-output-decode', 'run-output-lf', 'toolkit-json', 'toolkit-envelope',
   'metrics-payload', 'toolkit-document', 'metrics-scope', 'process-exit', 'cli-spawn', 'cli-stderr',
   'cli-rpc-json', 'cli-rpc-opening', 'cli-rpc-notification', 'cli-metrics-payload', 'cli-document',
-  'cli-output', 'cli-eof'] as const
+  'cli-output', 'cli-eof', 'result-channel'] as const
 export type ToolkitPerformanceFailureStage = typeof TOOLKIT_PERFORMANCE_FAILURE_STAGES[number]
 export type ToolkitFailureBytes = {
-  source: 'toolkit-output' | 'metrics-rpc-stdout' | 'metrics-rpc-stderr'
+  source: 'toolkit-output' | 'metrics-rpc-stdout' | 'metrics-rpc-stderr' | 'toolkit-terminal'
   startByte: number; endByte: number; prefixBase64: string; suffixBase64: string; omittedBytes: number
 }
 export type ToolkitPerformanceFailureDetails = {
@@ -18,6 +18,7 @@ export type ToolkitPerformanceFailureDetails = {
   eventOrigin?: { source: import('./types.js').AgentMuxEvidenceSource; observedAt: number; run: { runId: string } | null }
   error: { message: string | null; code: string | null; stack: string | null; messageTruncated: boolean; stackTruncated: boolean }
   bytes: ToolkitFailureBytes | null
+  diagnosticOutput?: ToolkitFailureBytes[]
   exit: { code: number | null; signal: string | null } | null
 }
 export type ToolkitPerformanceFailure = {
@@ -26,17 +27,19 @@ export type ToolkitPerformanceFailure = {
   details: ToolkitPerformanceFailureDetails
 }
 export type ToolkitPerformanceIssue = {
-  operation: 'read-failure' | 'write-failure' | 'open-run-port' | 'stop' | 'release' | 'remove' | 'clear-admission'
+  operation: 'read-failure' | 'write-failure' | 'open-run-port' | 'stop' | 'release' | 'remove' | 'clear-admission' | 'close-result-channel'
   message: string | null; code: string | null; phase: 'before-replace' | 'after-replace' | null
 }
 export type ToolkitPerformanceDiagnostics = {
   captureEnabled: boolean; failureEvidence: 'none' | 'retained' | 'included'; droppedWrites: number; lastFailure: ToolkitPerformanceFailure | null
   persistence: 'not-requested' | 'pending' | 'confirmed' | 'unconfirmed' | 'observed-on-disk'
   issue: ToolkitPerformanceIssue | null; cleanupIssue: ToolkitPerformanceIssue | null
+  output?: { executionId: string; run: { hostId: string; runId: string } | null; terminalBytes: number; stderrBytes: number; terminalGap: boolean; terminal: ToolkitFailureBytes | null; stderr: ToolkitFailureBytes | null }
 }
 // Worst legal JSON escaping: 6*(4096 message +8192 stack +128 code +128 signal)
-// + two 5464-byte base64 fragments + identities/keys/numeric ranges stays below96KiB.
-export const TOOLKIT_PERFORMANCE_FAILURE_MAX_BYTES = 96 * 1024
+// + three independently bounded 8KiB fragments (primary/terminal/stderr), their base64
+// expansion, and identities/keys/numeric ranges stay below128KiB.
+export const TOOLKIT_PERFORMANCE_FAILURE_MAX_BYTES = 128 * 1024
 const FRAGMENT_BYTES = 4096
 const fail = (): never => { throw new AgentMuxError('Performance failure evidence is invalid or exceeds its budget.', 'CONTROL_PROTOCOL_ERROR') }
 const text = (v: unknown, max: number) => { if (typeof v !== 'string' || Buffer.byteLength(v) > max) fail() }
@@ -46,9 +49,26 @@ const record = (v: unknown, keys: string[]) => {
   if (Object.keys(r).length !== keys.length || keys.some(key => !Object.hasOwn(r, key))) fail()
   return r
 }
+function parseBytes(value: unknown): ToolkitFailureBytes {
+    const bytes = record(value, ['source', 'startByte', 'endByte', 'prefixBase64', 'suffixBase64', 'omittedBytes'])
+    if (!['toolkit-output', 'metrics-rpc-stdout', 'metrics-rpc-stderr', 'toolkit-terminal'].includes(bytes.source as string)) fail()
+    count(bytes.startByte); count(bytes.endByte); count(bytes.omittedBytes)
+    const lengths = ['prefixBase64', 'suffixBase64'].map(key => {
+      text(bytes[key], 5464)
+      const encoded = bytes[key] as string, raw = Buffer.from(encoded, 'base64')
+      if (raw.length > FRAGMENT_BYTES || raw.toString('base64') !== encoded) fail()
+      return raw.length
+    })
+    const total = (bytes.endByte as number) - (bytes.startByte as number)
+    if (total < 0 || lengths[0]! !== Math.min(total, FRAGMENT_BYTES) ||
+      lengths[1]! !== Math.min(Math.max(total - FRAGMENT_BYTES, 0), FRAGMENT_BYTES) ||
+      total !== lengths[0]! + lengths[1]! + (bytes.omittedBytes as number)) fail()
+    return bytes as ToolkitFailureBytes
+}
+
 export function parseToolkitPerformanceFailureDetails(value: unknown): ToolkitPerformanceFailureDetails {
   const r = settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR')
-  if (Object.keys(r).some(key => !['stage', 'error', 'bytes', 'exit', 'eventOrigin'].includes(key)) ||
+  if (Object.keys(r).some(key => !['stage', 'error', 'bytes', 'exit', 'eventOrigin', 'diagnosticOutput'].includes(key)) ||
       ['stage', 'error', 'bytes', 'exit'].some(key => !Object.hasOwn(r, key))) fail()
   if (r.eventOrigin !== undefined) {
     if (r.stage !== 'run-event') fail()
@@ -61,20 +81,10 @@ export function parseToolkitPerformanceFailureDetails(value: unknown): ToolkitPe
   const error = record(r.error, ['message', 'code', 'stack', 'messageTruncated', 'stackTruncated'])
   if (typeof error.messageTruncated !== 'boolean' || typeof error.stackTruncated !== 'boolean') fail()
   if (error.message !== null) text(error.message, 4096); if (error.code !== null) text(error.code, 128); if (error.stack !== null) text(error.stack, 8192)
-  if (r.bytes !== null) {
-    const bytes = record(r.bytes, ['source', 'startByte', 'endByte', 'prefixBase64', 'suffixBase64', 'omittedBytes'])
-    if (!['toolkit-output', 'metrics-rpc-stdout', 'metrics-rpc-stderr'].includes(bytes.source as string)) fail()
-    count(bytes.startByte); count(bytes.endByte); count(bytes.omittedBytes)
-    const lengths = ['prefixBase64', 'suffixBase64'].map(key => {
-      text(bytes[key], 5464)
-      const encoded = bytes[key] as string, raw = Buffer.from(encoded, 'base64')
-      if (raw.length > FRAGMENT_BYTES || raw.toString('base64') !== encoded) fail()
-      return raw.length
-    })
-    const total = (bytes.endByte as number) - (bytes.startByte as number)
-    if (total < 0 || lengths[0]! !== Math.min(total, FRAGMENT_BYTES) ||
-      lengths[1]! !== Math.min(Math.max(total - FRAGMENT_BYTES, 0), FRAGMENT_BYTES) ||
-      total !== lengths[0]! + lengths[1]! + (bytes.omittedBytes as number)) fail()
+  if (r.bytes !== null) parseBytes(r.bytes)
+  if (r.diagnosticOutput !== undefined) {
+    if (!Array.isArray(r.diagnosticOutput) || r.diagnosticOutput.length > 2) fail()
+    for (const bytes of r.diagnosticOutput as unknown[]) parseBytes(bytes)
   }
   if (r.exit !== null) {
     const exit = record(r.exit, ['code', 'signal'])
@@ -99,18 +109,27 @@ export function parseToolkitPerformanceFailure(value: unknown): ToolkitPerforman
   return r as ToolkitPerformanceFailure
 }
 export function parseToolkitPerformanceDiagnostics(value: unknown): ToolkitPerformanceDiagnostics {
-  const r = record(value, ['captureEnabled', 'failureEvidence', 'droppedWrites', 'lastFailure', 'persistence', 'issue', 'cleanupIssue'])
+  const r = settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR')
+  record(r, ['captureEnabled', 'failureEvidence', 'droppedWrites', 'lastFailure', 'persistence', 'issue', 'cleanupIssue', ...(Object.hasOwn(r, 'output') ? ['output'] : [])])
   if (typeof r.captureEnabled !== 'boolean' || !['not-requested', 'pending', 'confirmed', 'unconfirmed', 'observed-on-disk'].includes(r.persistence as string)) fail()
   count(r.droppedWrites)
   if (!['none', 'retained', 'included'].includes(r.failureEvidence as string)) fail()
   const failure = r.lastFailure === null ? null : parseToolkitPerformanceFailure(r.lastFailure)
-  const raw = failure !== null && (failure.details.bytes !== null || failure.details.error.stack !== null || failure.details.error.message !== null) ||
+  let outputRaw = false
+  if (r.output !== undefined) {
+    const output = record(r.output, ['executionId', 'run', 'terminalBytes', 'stderrBytes', 'terminalGap', 'terminal', 'stderr'])
+    if (typeof output.terminalGap !== 'boolean') fail()
+    text(output.executionId, 128); count(output.terminalBytes); count(output.stderrBytes)
+    if (output.run !== null) { const run = record(output.run, ['hostId', 'runId']); text(run.hostId,128); text(run.runId,128) }
+    for (const key of ['terminal', 'stderr']) if (output[key] !== null) { parseBytes(output[key]); outputRaw = true }
+  }
+  const raw = outputRaw || failure !== null && (failure.details.bytes !== null || failure.details.error.stack !== null || failure.details.error.message !== null || (failure.details.diagnosticOutput?.length ?? 0) > 0) ||
     [r.issue, r.cleanupIssue].some(value => value !== null && settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR').message !== null)
-  if (raw !== (r.failureEvidence === 'included') || (failure === null && r.issue === null && r.cleanupIssue === null && r.failureEvidence !== 'none')) fail()
+  if (raw !== (r.failureEvidence === 'included') || (failure === null && r.output === undefined && r.issue === null && r.cleanupIssue === null && r.failureEvidence !== 'none')) fail()
   if (r.lastFailure === null && ['pending', 'confirmed', 'observed-on-disk'].includes(r.persistence as string)) fail()
   for (const key of ['issue', 'cleanupIssue']) if (r[key] !== null) {
     const issue = record(r[key], ['operation', 'message', 'code', 'phase'])
-    if (!['read-failure', 'write-failure', 'open-run-port', 'stop', 'release', 'remove', 'clear-admission'].includes(issue.operation as string) ||
+    if (!['read-failure', 'write-failure', 'open-run-port', 'stop', 'release', 'remove', 'clear-admission', 'close-result-channel'].includes(issue.operation as string) ||
         ![null, 'before-replace', 'after-replace'].includes(issue.phase as null | string)) fail()
     if (issue.message !== null) text(issue.message, 4096); if (issue.code !== null) text(issue.code, 128)
   }
