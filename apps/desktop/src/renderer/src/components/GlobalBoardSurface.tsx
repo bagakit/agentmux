@@ -1,8 +1,9 @@
+import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowUpRight, Check, ChevronRight, CirclePlus, Columns3, List, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
+import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import { goalNextStep } from '../lib/goal-presentation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -20,19 +21,28 @@ export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
 }
 
-function GoalRow({ demand, selected, sessionContext, acknowledgementFailed, onSelect }: { demand: DemandProjection; selected: boolean; sessionContext: boolean; acknowledgementFailed: boolean; onSelect: () => void }) {
+function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, onSelect }: { demand: DemandProjection; selected: boolean; selectedSessionId: string | null; acknowledgementFailed: boolean; onSelect: () => void }) {
   const execution = useAppStore(useShallow((state) => {
-    const byId = sessionPresentationById(state.sessions)
-    let count = 0; const statuses = new Set<string>()
-    for (const id of demand.sessionIds) { const session = byId.get(id); if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } }
-    return { count, status: [...statuses].join(' / ') }
+    const byId = agentSessionPresentationIndex(state.sessions)
+    let count = 0, unconfirmed = 0; const statuses = new Set<string>()
+    for (const id of demand.sessionIds) {
+      const matches = byId.get(id), session = matches?.length === 1 ? matches[0] : undefined
+      if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } else unconfirmed++
+    }
+    const focused = selectedSessionId ? byId.get(selectedSessionId) : undefined
+    const source = focused?.length === 1 && focused[0]?.kind === 'agent' ? focused[0] : undefined
+    const work = source ? currentDemandIndex(state.demands).get(currentDemandKey(source.control.hostId, source.control.agentSessionId)) : undefined
+    const fact = work?.goals.find(goal => goal.goalId === demand.id)
+    const context = !fact ? null : work?.state === 'current' && fact.confirmed ? 'Current execution'
+      : fact.confirmed ? work?.state === 'ambiguous' ? 'Multiple confirmed Goals' : 'Last confirmed input · input unconfirmed' : 'Input unconfirmed'
+    return { count, unconfirmed, status: [...statuses].join(' / '), context }
   }))
   const nextStep = acknowledgementFailed ? 'Acknowledgement unconfirmed' : goalNextStep(demand)
-  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(sessionContext ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
+  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
-    <span className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{sessionContext ? <span>Current execution</span> : null}</span></span>
+    <span className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span></span>
     {selected ? <Check className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ChevronRight className="goals-row__open" size={14} aria-hidden="true" />}
   </div>
 }
@@ -114,7 +124,7 @@ export function GlobalBoardSurface() {
     if (projectFilter !== 'all' && !project) setProjectFilter('all')
     void startDirectGoal(project)
   }
-  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={Boolean(acknowledgementFeedback[demand.id]?.failure)} sessionContext={Boolean(selectedSessionId && demand.sessionIds.includes(selectedSessionId))} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
+  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={Boolean(acknowledgementFeedback[demand.id]?.failure)} selectedSessionId={selectedSessionId} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
   return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
     if (event.key !== 'Escape' || event.nativeEvent.isComposing) return

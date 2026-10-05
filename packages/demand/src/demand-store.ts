@@ -1,3 +1,4 @@
+import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
@@ -156,13 +157,14 @@ function parseDemand(value: unknown, label: string): Demand {
     'participations',
     'creationOrigin',
     'contentRefs',
+    'dispatches',
     'activities',
     'decisions',
     'alignment',
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'dispatches'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -197,6 +199,7 @@ function parseDemand(value: unknown, label: string): Demand {
     sessionIds, assigneeSessionIds, supervisorSessionId, participations,
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
+    dispatches: parseDemandDispatches(record.dispatches ?? []),
     activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
@@ -330,6 +333,7 @@ export class DemandStore {
 
   async create(input: CreateDemandInput, options: DemandCreateOptions = {}): Promise<DemandReceipt> {
     rejectProvenanceInput(input)
+    if (Object.hasOwn(input, 'dispatches')) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Only the actual Goal Start input owner records dispatch facts.')
     const operationId = options.operationId ?? `demand-create-${randomUUID()}`
     return this.mutate('create', (snapshot) => {
       const title = inputString(input.title, 'title')
@@ -374,8 +378,55 @@ export class DemandStore {
     }, undefined, operationId)
   }
 
+  /** Only the explicit business Start owner calls this; ordinary updates cannot write it. */
+  async prepareDispatch(id: string, input: DemandDispatchIntent): Promise<DemandReceipt> {
+    const intent = parseDemandDispatchIntent(input)
+    return this.mutate('dispatch.prepare', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      const owner = snapshot.demands.find(item => item.dispatches?.some(dispatch => dispatch.operationId === intent.operationId))
+      const original = owner?.dispatches?.find(dispatch => dispatch.operationId === intent.operationId)
+      if (original) {
+        if (owner!.id !== id || !sameDemandDispatchIntent(original, intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start operation belongs to another Goal, Session, Run or input. Inspect it without resending.')
+        return { unchanged: demand }
+      }
+      demand.dispatches = [...(demand.dispatches ?? []), { ...intent, stage: 'prepared', preparedAt: Date.now() }]
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, intent.operationId)
+  }
+
+  async inspectDispatch(id: string, operationId: string): Promise<DemandDispatch | null> {
+    nonEmptyString(operationId, 'dispatch.operationId')
+    return enqueue(this.root, async () => {
+      const release = await this.acquireLock()
+      try {
+        const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
+        await this.confirmSnapshot()
+        return clone(demand.dispatches?.find(dispatch => dispatch.operationId === operationId) ?? null)
+      } finally { await release() }
+    })
+  }
+
+  /** A confirmed native input never regresses because a later reply or observation fails. */
+  async recordDispatchPhase(id: string, operationId: string, phase: { stage: 'submitted' | 'unknown'; issue?: string } | { stage: 'confirmed'; receipt: NonNullable<DemandDispatch['receipt']> }): Promise<DemandReceipt> {
+    return this.mutate('dispatch.' + phase.stage, snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      const dispatches = demand.dispatches ?? [], index = dispatches.findIndex(dispatch => dispatch.operationId === operationId), original = dispatches[index]
+      if (!original) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start has not been prepared. Preserve the Agent and inspect its exact operation.')
+      if (original.stage === 'confirmed') return { unchanged: demand }
+      const { issue: _issue, ...frozen } = original
+      const next: DemandDispatch = { ...frozen, stage: phase.stage, submittedAt: original.submittedAt ?? Date.now(), ...(phase.stage === 'confirmed' ? { receipt: phase.receipt } : phase.issue ? { issue: phase.issue } : {}) }
+      parseDemandDispatches([next])
+      if (JSON.stringify(original) === JSON.stringify(next)) return { unchanged: demand }
+      demand.dispatches = dispatches.map((dispatch, at) => at === index ? next : dispatch)
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, operationId)
+  }
+
   async update(id: string, patch: UpdateDemandInput, options: DemandTitleMutationOptions = {}): Promise<DemandReceipt> {
     rejectProvenanceInput(patch)
+    if (Object.hasOwn(patch, 'dispatches')) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Only the actual Goal Start input owner records dispatch facts.')
     patch = structuredClone(patch)
     return this.mutate('update', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
@@ -634,7 +685,7 @@ export class DemandStore {
     return this.addDecision(id, input)
   }
 
-  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand, titleAttempt?: TitleAttempt, requestedOperationId?: string, activityAttempt?: ActivityAttempt): Promise<DemandReceipt> {
+  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand | { unchanged: Demand }, titleAttempt?: TitleAttempt, requestedOperationId?: string, activityAttempt?: ActivityAttempt): Promise<DemandReceipt> {
     if (requestedOperationId !== undefined && (typeof requestedOperationId !== 'string' || !requestedOperationId.trim() || requestedOperationId.length > 4096 || requestedOperationId.includes('\0')))
       throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'A Goal operation ID must be a non-empty string.')
     let context: DemandNameChangeRecord['context'] | undefined
@@ -691,14 +742,21 @@ export class DemandStore {
             if (titleAttempt.expectedRevision !== undefined && titleAttempt.expectedRevision !== snapshot.revision) {
               throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, `Demand revision conflict: expected ${titleAttempt.expectedRevision}, actual ${snapshot.revision}.`)
             }
-            demand = fn(candidate)
+            demand = fn(candidate) as Demand
             snapshot = candidate
           } catch (error) {
             if (!(error instanceof DemandStoreError)) throw error
             failure = error
             demand = original!
           }
-        } else demand = fn(snapshot)
+        } else {
+          const updated = fn(snapshot)
+          if ('unchanged' in updated) {
+            await this.confirmSnapshot()
+            return { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: snapshot.revision, demand: clone(updated.unchanged), replayed: true }
+          }
+          demand = updated
+        }
         snapshot.revision += 1
         snapshot.updatedAt = Date.now()
         let nameChange: DemandNameChangeRecord | undefined

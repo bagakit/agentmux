@@ -1,0 +1,10 @@
+.region-current-demand { display: inline-flex; min-width: 0; max-width: 180px; flex-shrink: 2; pointer-events: auto; }
+.region-current-demand > button { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 100%; padding: 0 var(--sp-1); color: var(--text-3); background: transparent; border: 0; font-size: var(--fs-meta); line-height: 14px; text-align: left; }
+.region-current-demand > button > svg { flex-shrink: 0; }
+.region-current-demand > button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.region-current-demand > button:is(:hover, :focus-visible) { color: var(--text-1); background: var(--surface-3); border-radius: var(--radius-sm); }
+.region-current-demand-menu { max-width: min(400px, calc(100vw - var(--sp-6))); }
+.region-current-demand-menu .tab-context-menu__item > span { display: grid; min-width: 0; gap: var(--sp-1); }
+.region-current-demand-menu strong { font-weight: 500; overflow-wrap: anywhere; white-space: normal; }
+.region-current-demand-menu .tab-context-menu__item > span > span { font-size: var(--fs-meta); color: var(--text-3); }
+.region-current-demand__failure { position: absolute; top: 100%; right: 0; max-width: 280px; padding: var(--sp-2); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }

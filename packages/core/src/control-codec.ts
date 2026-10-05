@@ -1,3 +1,4 @@
+import { parseDemandDispatches } from '@agentmux/demand'
 import { parseDemandParticipations, parseDemandCreationOrigin } from '@agentmux/demand/goals'
 import { parseDemandContentReferences } from '@agentmux/demand'
 import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
@@ -857,12 +858,13 @@ function parseDemand(value: unknown): AgentMuxDemand {
   const supervisorSessionId = source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Control Goal Supervisor is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (new Set(assigneeSessionIds).size !== assigneeSessionIds.length || assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId)) throw new AgentMuxError('Control Goal collaboration relations are inconsistent.', 'CONTROL_PROTOCOL_ERROR')
   let participations: AgentMuxDemand['participations'], creationOrigin: AgentMuxDemand['creationOrigin']
-  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding'> = {}
+  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding' | 'dispatches'> = {}
   try {
     participations = parseDemandParticipations(source.participations)
     creationOrigin = source.creationOrigin === undefined ? undefined : parseDemandCreationOrigin(source.creationOrigin)
     if (creationOrigin?.requesterParticipationId && !participations.some(item => item.id === creationOrigin!.requesterParticipationId)) throw new Error('Control Goal original requester is absent.')
     goalFacts = {
+      ...(source.dispatches === undefined ? {} : { dispatches: parseDemandDispatches(source.dispatches) }),
       ...(source.alignment === undefined ? {} : { alignment: parseAlignment(source.alignment) }),
       ...(source.grounding === undefined ? {} : { grounding: parseGrounding(source.grounding) })
     }
