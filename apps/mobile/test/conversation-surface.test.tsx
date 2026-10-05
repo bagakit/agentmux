@@ -3,7 +3,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileConversationSurface, type MobileConversationSurfaceProps } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
-import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
+import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, evidence, fixture, history, mount, mounted, paste, session } from './conversation-fixture'
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
@@ -279,31 +279,58 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
 
   it('unlocks an unknown input only when Core proves this original intent was entirely unapplied', async () => {
     const f = fixture()
+    f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'runtime-original', ownerInstanceId: 'original-core-instance', availability: 'connected' })
     f.submit.mockRejectedValueOnce(Object.assign(new Error('The original prompt phase was not applied.'),
       { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' }))
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await paste(view.element, '原意图的未应用事实')
     await click(button(view.element, 'Send'))
     const input = f.submit.mock.calls[0]![0], value = session()
-    value.promptCompletionAdmission = { submissionId: 'another-operation', operationId: 'native-phase-original', startByte: 0, endByte: 20,
+    const payloadEnd = new TextEncoder().encode(input.prompt).byteLength, submitEnd = payloadEnd + new TextEncoder().encode('\r').byteLength
+    value.promptCompletionAdmission = { submissionId: input.operationId, operationId: 'native-phase-original', startByte: 0, endByte: submitEnd,
       notApplied: true, intent: { run: value.run, ownerInstanceId: 'original-core-instance', prompt: input.prompt,
         plan: { kind: 'render-then-submit', payload: input.prompt, renderedText: input.prompt, submit: '\r' } } }
-    await act(async () => f.emit({ type: 'agent-session', session: value }))
-    expect(button(view.element, 'Send').disabled).toBe(false)
+    value.terminalPromptSubmission = { run: value.run, submissionId: input.operationId, promptDigest: 'controlled-original-digest', outputCursorBytes: 0,
+      payload: { operationId: 'native-phase-original', inputByteRange: { startByte: 0, endByte: payloadEnd }, acknowledged: false },
+      submit: { operationId: 'submit-original', inputByteRange: { startByte: payloadEnd, endByte: submitEnd }, acknowledged: false } }
+    const draftKey = JSON.stringify(['draft', value.agentSessionId])
+    const attempts = () => new Map(new DeviceWorkfaceStore(() => localStorage).snapshot().record.conversation.attempts)
+    await vi.waitFor(() => expect(attempts().get(draftKey)?.phase).toBe('unknown'))
+    const originalRequest = structuredClone(attempts().get(draftKey)!.request)
+    expect(originalRequest).toMatchObject({ runtimeId: 'runtime-original', condition: { expectedRun: value.run, afterSubmissionId: null } })
+    const unknown = async (candidate: ReturnType<typeof session>) => {
+      f.sessions.set(candidate.agentSessionId, candidate)
+      await act(async () => f.emit({ type: 'agent-session', session: candidate }))
+      expect(view.element.textContent).not.toContain('Core 已确认原输入未应用')
+      expect(attempts().get(draftKey)).toMatchObject({ operationId: input.operationId, phase: 'unknown', request: originalRequest })
+      expect(editor(view.element).textContent).toBe('原意图的未应用事实')
+      expect(button(view.element, 'Send').disabled).toBe(false)
+      expect(f.submit).toHaveBeenCalledOnce()
+    }
+    const missingSubmission = { ...value }; delete missingSubmission.terminalPromptSubmission
+    await unknown(missingSubmission)
+    await unknown({ ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission, submissionId: 'another-operation' },
+      terminalPromptSubmission: { ...value.terminalPromptSubmission, submissionId: 'another-operation' } })
     const wrongRun = { ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission,
       submissionId: input.operationId, intent: { ...value.promptCompletionAdmission.intent!, run: { runId: 'another-run' } } } }
-    await act(async () => f.emit({ type: 'agent-session', session: wrongRun }))
-    expect(button(view.element, 'Send').disabled).toBe(false)
-    const exact = { ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission, submissionId: input.operationId } }
-    f.sessions.set(value.agentSessionId, exact)
-    await act(async () => f.emit({ type: 'agent-session', session: exact }))
+    await unknown(wrongRun)
+    await unknown({ ...value, terminalPromptSubmission: { ...value.terminalPromptSubmission,
+      payload: { ...value.terminalPromptSubmission.payload, acknowledged: true },
+      submit: { ...value.terminalPromptSubmission.submit, notApplied: true } } })
+    f.sessions.set(value.agentSessionId, value)
+    await act(async () => f.emit({ type: 'agent-session', session: value }))
     expect(view.element.textContent).toContain('Core 已确认原输入未应用')
+    await vi.waitFor(() => expect(attempts().get(draftKey)).toMatchObject({ phase: 'rejected', request: originalRequest }))
     expect(editor(view.element).textContent).toBe('原意图的未应用事实')
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledTimes(2)
-    expect(f.submit.mock.calls[1]![0].operationId).toBe(input.operationId)
+    const next = f.submit.mock.calls[1]![0]
+    expect(next).toEqual({ ...input, operationId: expect.any(String), afterSubmissionId: input.operationId })
+    expect(next.operationId).not.toBe(input.operationId)
+    await vi.waitFor(() => expect(attempts().get(JSON.stringify(['refused-prompt', value.agentSessionId, input.operationId])))
+      .toMatchObject({ operationId: input.operationId, phase: 'rejected', draft: '原意图的未应用事实', request: originalRequest }))
   })
 
   it('answers the original permission option once and keeps an unknown request unavailable when another request replaces it', async () => {
