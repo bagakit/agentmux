@@ -27,6 +27,8 @@ export function toolkitFailureEvidenceReader(get: (includeRaw: boolean, signal: 
     const details = original.details
     const truncated = details.error.messageTruncated || details.error.stackTruncated ||
       (details.bytes?.omittedBytes ?? 0) > 0 || (details.diagnosticOutput ?? []).some(value => value.omittedBytes > 0)
+    // Ordinary get withholds fragment metadata. Absence cannot prove untruncated raw.
+    const rawTruncated = truncated ? true : includeRaw && diagnostics.failureEvidence === 'included' ? false : null
     const safe: AgentMuxToolkitFailureEvidence = { kind: 'toolkit-performance-failure',
       failure: { ...original, details: { ...details,
         error: { ...details.error, message: null, stack: null, code: toolkitFailureEvidenceCode(details.error.code) },
@@ -41,7 +43,7 @@ export function toolkitFailureEvidenceReader(get: (includeRaw: boolean, signal: 
         ? 'observed' as const : diagnostics.persistence === 'pending' || diagnostics.persistence === 'unconfirmed' ? 'unconfirmed' as const : null,
       scope: 'record' as const, observedAt: original.recordedAt, readAt, completeness: truncated ? 'partial' as const : 'complete' as const,
       raw: { retention: diagnostics.failureEvidence === 'none' ? 'not-retained' as const : 'retained' as const,
-        returned: safe.original ? 'included' as const : diagnostics.failureEvidence === 'none' ? 'unavailable' as const : 'withheld' as const, truncated },
+        returned: safe.original ? 'included' as const : diagnostics.failureEvidence === 'none' ? 'unavailable' as const : 'withheld' as const, truncated: rawTruncated },
       issue: null as import('@agentmux/diagnostic-evidence').DiagnosticEvidenceIssue | null }
     // The source's 128KiB original is independently bounded; it may not fit this query's remaining envelope.
     if (safe.original && Buffer.byteLength(JSON.stringify(result)) > bounds.maxBytes) {
