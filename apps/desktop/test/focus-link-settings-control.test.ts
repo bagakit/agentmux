@@ -28,7 +28,7 @@ it('actual public CLI discovers the destination, saves it through the only owner
     return executeSettingsControl(request, f.owner)
   } }, join(directory, 'control.sock'))
   await server.start()
-  const args = [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'settings']
+  const args = [resolve('packages/core/bin/amux'), '--endpoint', `unix:${server.path}`, 'settings']
   const call = promisify(execFile), options = { timeout: 5000, env: { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
   try {
     const inspect = JSON.parse((await call(process.execPath, [...args, 'inspect', 'focus.linkDestination'], options)).stdout).result

@@ -141,7 +141,7 @@ it('ordinary CLI executable consumes Notes/Goals via an owned private public soc
     if (request.operation !== 'settings.get' && request.operation !== 'settings.set') throw new Error('Wrong settings owner')
     return executeSettingsControl(request, f.owner)
   } }, join(directory, 'control.sock'))
-  const cli = promisify(execFile), args = [fileURLToPath(new URL('../../../packages/core/bin/agentmux', import.meta.url)), '--endpoint', `unix:${server.path}`, 'settings']
+  const cli = promisify(execFile), args = [fileURLToPath(new URL('../../../packages/core/bin/amux', import.meta.url)), '--endpoint', `unix:${server.path}`, 'settings']
   const options = { timeout: 5000, env: { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
   await server.start()
   try {

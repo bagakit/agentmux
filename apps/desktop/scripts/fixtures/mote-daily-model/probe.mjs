@@ -445,7 +445,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       const file = join(source, 'packages/core/bin', name); await bind(file)
       receipt.compiledOutputs['originalBin:' + name] = hash(await readFile(file))
     }
-    receipt.cliLocation = { originalBin: 'packages/core/bin/agentmux', originalHook: 'packages/core/bin/agentmux-hook.js',
+    receipt.cliLocation = { originalBin: 'packages/core/bin/amux', originalHook: 'packages/core/bin/agentmux-hook.js',
       coreModuleFolder: 'packages/core/dist', exportedBy: 'packages/core/src/client.ts terminalEnvironment', executorOverride: false }
     compilation = 'driver'; await bind(join(source, 'apps/desktop/scripts/probe-process.mjs'))
     receipt.sourcePreparation = { passed: true, compiledOnly: prepareOnly, realModelQualified: false }
@@ -514,7 +514,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       const args = [...fixture.privateCodexConfigArgs, '--dangerously-bypass-hook-trust', '--no-alt-screen', '--ask-for-approval', 'never',
         '--sandbox', 'workspace-write', '--config', 'model_reasoning_effort="low"']
       const parameters = { html: join(buildRoot, 'renderer/index.html'), preload, root: runtimeRoot, evidence,
-        command: executable, codexArgs: args, nativeReadArgs: [...fixture.privateCodexConfigArgs], cli: join(source, 'packages/core/bin/agentmux'),
+        command: executable, codexArgs: args, nativeReadArgs: [...fixture.privateCodexConfigArgs], cli: join(source, 'packages/core/bin/amux'),
         hook: join(source, 'packages/core/bin/agentmux-hook.js'), decisionFile: permission.grant.decisionFile }
       const main = ("const{app}=require('electron');const input=" + (JSON.stringify(parameters)) + (";app.setPath('userData',input.root+'/desktop');app.setPath('sessionData',input.root+'/desktop-session');app.setPath('home',input.root+'" + _hygiene_fixturePath("home") + "');app.on('window-all-closed',()=>{});app.whenReady().then(async()=>{const{runModelOwner}=await import(") + (JSON.stringify(pathToFileURL(owner).href)) + ");const passed=await runModelOwner(input);app.exit(passed?0:1)}).catch(error=>{console.error(error);app.exit(1)});")
       const mainFile = join(buildRoot, 'main.cjs'); await writeFile(mainFile, main); receipt.compiledOutputs.generatedMain = hash(main)

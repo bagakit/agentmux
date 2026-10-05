@@ -114,7 +114,7 @@ try {
     await fs.mkdir(phaseRoot)
     const stderr = []
     const exit = await runProbeProcess(electron, [path.join(privateRoot, 'main/main.mjs'), path.join(privateRoot, 'renderer/index.html'),
-      privateRoot, phase, path.join(fixture, 'preload.cjs'), evidence, process.execPath, path.join(privateCore, 'bin/agentmux'),
+      privateRoot, phase, path.join(fixture, 'preload.cjs'), evidence, process.execPath, path.join(privateCore, 'bin/amux'),
       receipt.candidate.commit, receipt.candidate.tree, rendererId, JSON.stringify(receipt.updateIdentity), phaseRoot],
       { temporaryRoot: phaseRoot, cwd: root, env, timeoutMs: 160000,
         onLine: line => { stderr.push(line.slice(0, 2000)); process.stderr.write(`${phase}: ${line.slice(0, 400)}\n`) } })

@@ -83,7 +83,7 @@ export async function startWorkfaceFixture() {
   const exec = promisify(execFile)
   async function run<M extends AgentMuxRpcMethod>(method: M, args: string[], code = 0): Promise<AgentMuxRpcResult<M>> {
     let output: { stdout: string; stderr: string }, actualCode = 0
-    try { output = await exec(process.execPath, [join(process.cwd(), 'packages/core/bin/agentmux'), ...args], { env, timeout: 8_000 }) }
+    try { output = await exec(process.execPath, [join(process.cwd(), 'packages/core/bin/amux'), ...args], { env, timeout: 8_000 }) }
     catch (error) {
       const failure = error as { code: number; stdout: string; stderr: string }
       if (typeof failure.code !== 'number') throw error

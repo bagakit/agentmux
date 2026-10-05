@@ -53,7 +53,7 @@ for (const mutant of ['baseline', ...Object.keys(scriptMutations), ...codecMutat
       return { contents: code, loader: path.endsWith('.ts') ? 'ts' : 'js' }
     }) } }], logLevel: 'silent' })
   if (change) assert.ok(mutated, 'Actual script mutant must be consumed')
-  let publicCli = resolve(root,'packages/core/bin/agentmux')
+  let publicCli = resolve(root,'packages/core/bin/amux')
   const cliChange = cliMutations[mutant]
   if (cliChange) {
     const input = readFileSync(cliSource,'utf8'); assert.ok(input.includes(cliChange[0])); const changed = input.replace(cliChange[0],cliChange[1]); assert.notEqual(changed,input)

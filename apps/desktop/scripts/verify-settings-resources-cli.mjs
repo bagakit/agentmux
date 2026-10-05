@@ -26,7 +26,7 @@ const evidenceRoot = join(repositoryRoot, '.tmp/settings-resources-cli')
 const evidence = join(evidenceRoot, ("run-" + (globalThis.crypto.randomUUID()) + "-" + (randomUUID()) + "")), userData = join(root, 'user-data')
 const privateHome = join(root, 'home'), codexHome = join(privateHome, 'codex'), runtimeDirectory = join(root, 'runtime')
 const workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics'), configPath = join(userData, 'agentmux.config.json')
-const cli = join(repositoryRoot, 'packages/core/bin/agentmux')
+const cli = join(repositoryRoot, 'packages/core/bin/amux')
 class PrivateChildren extends Set {
   add(child) {
     const fact={pid:child.pid,startedAt:Date.now(),stderr:`electron-${child.pid}.stderr.log`};receipt.electronProcesses??=[];receipt.electronProcesses.push(fact)
@@ -76,7 +76,7 @@ async function identity() {
   const directories = ['apps/desktop/src', 'packages/core/src', 'packages/demand/src', 'apps/desktop/out', 'packages/core/dist', 'packages/demand/dist',
     'apps/desktop/scripts/fixtures/settings-cli']
   const files = ['apps/desktop/scripts/verify-settings-resources-cli.mjs', 'apps/desktop/scripts/probe-process.mjs',
-    'packages/core/bin/agentmux', 'packages/core/package.json', 'packages/demand/package.json', 'apps/desktop/package.json',
+    'packages/core/bin/amux', 'packages/core/package.json', 'packages/demand/package.json', 'apps/desktop/package.json',
     'packages/core/scripts/build.mjs', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json']
   for (const directory of directories) {
     const entries = await readdir(join(repositoryRoot, directory), { recursive: true, withFileTypes: true })

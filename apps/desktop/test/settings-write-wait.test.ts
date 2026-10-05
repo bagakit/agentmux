@@ -213,7 +213,7 @@ describe('Control writes settle through the registered Main owner', () => {
   it('keeps the built CLI pending past the old short budget until actual Main save and publication finish', async () => {
     const f = await registered(), before = await f.bytes(), hold = f.holdSave()
     let settled = false
-    const reply = exec(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix://${f.path}`, 'settings', 'set', set.key, set.value],
+    const reply = exec(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix://${f.path}`, 'settings', 'set', set.key, set.value],
       { timeout: 10_000, env: objectCliEnvironment(f.root) }).then(value => {
       settled = true; f.trace.push('reply'); return { ok: true, value }
     }, error => { settled = true; return { ok: false, error } })
