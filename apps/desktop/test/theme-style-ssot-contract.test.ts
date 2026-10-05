@@ -4,7 +4,7 @@ import { THEME_TOKENS, themeVar } from '../src/renderer/src/lib/theme-contract.j
 import { allStyles } from './helpers/styles.js'
 
 const tokens = allStyles()
-const appearance = readFileSync(new URL('../src/renderer/src/lib/app-appearance.ts', import.meta.url), 'utf8')
+const appearance = readFileSync(new URL('../../../packages/client-ui/src/theme/runtime.ts', import.meta.url), 'utf8')
 
 function themeBlock(): string {
   const start = tokens.indexOf('@theme inline {')
@@ -34,7 +34,7 @@ describe('theme and style SSOT contract', () => {
   })
 
   it('appearance switching has one runtime entry', () => {
-    expect(appearance).toContain("dataset[APP_APPEARANCE_DATASET_KEY] = mode")
+    expect(appearance).toContain("root.dataset.appearance = resolved.mode")
     expect(appearance).not.toContain('createContext')
     expect(appearance).not.toContain('ThemeProvider')
   })
