@@ -3344,14 +3344,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const surveyZoneSelection = persistedSurveyZoneSelection(selection)
     // Re-emitting the current member preference is a refresh, not later navigation.
     if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
-    if (selection?.active) {
-      const state = get(), active = selection.active as Partial<WorkbenchProjectionSelection>
-      const locations = workbenchSelectionCatalog(state).locations.filter(location => location.zoneId === selection.zoneId &&
-        location.tabId === active.tabId && location.regionId === active.regionId &&
-        (!active.displayWorkspaceId || location.displayWorkspaceId === active.displayWorkspaceId) && (!active.groupId || location.groupId === active.groupId))
-      const exact = [...new Map(locations.map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
-      if (exact.length === 1) state.selectMainRegion(exact[0]!, state.workbenchSpaceSelection)
-    }
+    // Local Survey selection never navigates Work; explicit focus owns that handoff.
     set({ surveyZoneSelection })
     void saveWorkbenchSelection(false)
   },
