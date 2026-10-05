@@ -255,10 +255,11 @@ export function NewTabSurface({
   }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, Boolean(warmTerminal), warmKey, sections.terminal])
 
   useEffect(() => {
+    if (sections.agents === 'hidden') return
     if (!workspace || (host?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, host) : executors.every((executor) => executor.detection))) return
     if (!visible || !presentationActive || !inputRegionActive || controlNavigation) return
     void detectExecutors(workspace.hostId)
-  }, [executors, inventory, host, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace])
+  }, [executors, inventory, host, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace, sections.agents])
 
   useEffect(() => {
     if (moteId && (explicitSavedExecutor || moteExecutor || manualChoice?.moteId === moteId)) return
