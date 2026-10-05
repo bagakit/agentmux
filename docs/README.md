@@ -28,6 +28,7 @@
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
 | 防止流程失败阻断健康能力 | [红线判定](../RED-LINES.md) |
 | 新功能需要哪些 JSON-RPC／CLI、如何接线交付 | [公共能力贡献约定](guides/public-capability-contributions.md) |
+| 跨模块观测诊断、证据与错误码、历史/采样接入边界 | [Diagnostic Evidence 设计](design/diagnostic-evidence.md) |
 | 任务验证、变异、调用者、假绿防护 | [测试策略](testing/strategy.md) |
 | UI 场景采图与独立审美评审 | [视觉验收指南](guides/agent-visual-e2e-review.md) |
 | Agent 用 CLI 操作原工作面 | [对象操作指南](guides/agentmux-cli-object-control.md) |

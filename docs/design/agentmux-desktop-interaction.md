@@ -26,6 +26,7 @@
 | 协议、导航、自动化、控制交接与批准 | [Browser 工作面](behavior/browser-workface.md) |
 | 真实文件、格式、保存、worktree 与 Git 操作 | [文件、编辑与 Git](behavior/files-and-git.md) |
 | 配置入口、状态、通知、资源与 Toolkit | [设置、状态与观测](behavior/settings-and-observation.md) |
+| 跨模块诊断接入、证据关联、历史/采样边界与错误码 | [Diagnostic Evidence 设计](diagnostic-evidence.md) |
 | 对象优先 CLI、公共服务、自操作和跨客户端合同 | [公共控制与跨客户端接入](behavior/public-control.md) |
 | Topics CUI 的准确目标、内容修订、转分类与承接回执 | [Topics 知识库的公共接入](behavior/public-control.md#topics-知识库的公共接入) |
 

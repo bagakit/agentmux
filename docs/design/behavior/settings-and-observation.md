@@ -1,11 +1,12 @@
 # 设置、状态与观测
 
-本文定义 Settings 的对象导航、配置保存与草稿，以及资源观测和系统通知。配置、指标、Session 语义与注意力分别消费原 owner；全窗 Agent 入口归 Focus，资源观察保留独立按需入口。本文描述要求，不代签当前实现、安装或性能验收。
+本文定义 Settings 的对象导航、配置保存与草稿，以及诊断能力的产品消费、资源观测和系统通知。配置、指标、Session 语义与注意力分别消费原 owner；全窗 Agent 入口归 Focus，资源观察保留独立按需入口。本文描述要求，不代签当前实现、安装或性能验收。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/settings-and-observation.md)
 
 **本页章节**
 
+- [统一观测与诊断机制](#统一观测与诊断机制)
 - [状态栏](#状态栏)
 - [Settings 中的 Keyboard shortcuts](#settings-中的-keyboard-shortcuts)
 - [Activity 工作线展开信息密度](#activity-工作线展开信息密度)
@@ -18,6 +19,12 @@
 - [全局通知与底部状态入口](#全局通知与底部状态入口)
 - [设置页的信息架构](#设置页的信息架构)
 - [操作成本与当前卡顿](#操作成本与当前卡顿)
+
+## 统一观测与诊断机制
+
+统一机制的目标、模块接入、证据与错误码设计由独立 [Diagnostic Evidence 设计](../diagnostic-evidence.md)持有。本文仅定义 Settings、资源面板和 Toolkit 如何消费原 owner 的能力；机制协议与领域诊断不在本页重复定义。
+
+Settings 的诊断入口沿原公共服务读取准确目标、支持范围、原证据与部分结果，保持原来源语义；看板、配置保存和观察失败的产品反馈沿本页及原服务窗合同。通用设计的创建不代表当前 Settings、安装或 CLI 已具备新增能力。
 
 ## 状态栏
 
