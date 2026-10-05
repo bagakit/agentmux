@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Code2, Cpu, Layers, Pause, Play, Settings2, X } from 'lucide-react'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
-import type { MetricsSource, RunUsage } from '@agentmux/core/control'
+import type { MetricsSource, RunUsage, ToolkitAgentCard as AgentCard, ToolkitAgentCardField } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 
-export type RunContext = { label: string; context: string; state: string; workspace?: string; provider?: string }
+import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
+const NO_CARDS: AgentCard[] = []
+const NO_FIELDS: ToolkitAgentCardField[] = []
 export const runKey = (run: Pick<RunUsage, 'hostId' | 'runId'>) => JSON.stringify([run.hostId, run.runId])
 const cpu = (n: number | null | undefined) => n == null ? '—' : `${n.toFixed(1)}%`
 const memory = (n: number | null | undefined) => n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} GiB` : n >= 1024 ? `${Math.round(n / 1024)} MiB` : `${Math.round(n)} KiB`
@@ -44,22 +46,19 @@ function Metric({ label, value, hint, values, color }: { label: string; value: s
     {values ? <Sparkline values={values} color={color} label={`${label} · ${hint} · this observation`} /> : null}<small>{hint}</small></section>
 }
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
-function RunRow({ run, context, onToggle, basis }: { run: RunUsage; context: RunContext | undefined; onToggle(key: string, open: boolean): void; basis: string | undefined }) {
+function RunRow({ run, card, fields, facts, onToggle, basis }: { run: RunUsage; card: AgentCard | null | undefined; fields: readonly ToolkitAgentCardField[]; facts: ToolkitAgentCardFacts | undefined; onToggle(key: string, open: boolean): void; basis: string | undefined }) {
   return <details className="performance-contributor" data-run-id={run.runId} data-run-host={run.hostId} onToggle={event => onToggle(runKey(run), event.currentTarget.open)}>
-    <summary className="performance-contributor__row"><span className="performance-identity"><strong><ChevronDown size={11} className="performance-run-chevron" aria-hidden="true" /><span title={context?.label ?? run.runId}>{context?.label ?? (run.runId.length > 18 ? `${run.runId.slice(0, 8)}…${run.runId.slice(-6)}` : run.runId)}</span></strong>
-      <small title={context?.context}>{context?.context ?? 'Context unavailable'} · {context?.state ?? 'unknown'}</small></span>
+    <summary className="performance-contributor__row"><span className="performance-run-identity"><ChevronDown size={11} className="performance-run-chevron" aria-hidden="true" />
+      {card ? <ToolkitAgentCard card={card} fields={fields} resolvedFacts={facts} /> : <span className="performance-identity"><strong title={run.runId}>{run.runId}</strong><small>{card === null ? 'Agent card ambiguous' : 'Agent card unavailable'}</small></span>}</span>
       <span>{cpu(run.cpuPercent)}<small className="performance-core-equivalent">{cpuCoreLabel(run.cpuPercent, basis)}</small></span><span>{memory(run.rssKib)}</span></summary>
-    <Facts><dt>Run</dt><dd>{run.runId}</dd><dt>Identity</dt><dd>{context?.label ?? 'Unattributed Run'}</dd>
-      <dt>Workspace / provider</dt><dd>{context?.workspace ? `${context.workspace} · ${context.provider ?? 'Provider unavailable'}` : context?.context ?? 'Unknown'}</dd><dt>Host</dt><dd>{run.hostId}</dd>
-      <dt>Processes</dt><dd>{run.processCount ?? '—'}</dd>
+    <Facts><dt>Run</dt><dd>{run.runId}</dd><dt>Host</dt><dd>{run.hostId}</dd><dt>Processes</dt><dd>{run.processCount ?? '—'}</dd>
       <dt>Root · PID {run.rootPid}</dt><dd>{memory(run.rootRssKib)}</dd><dt>Descendants · {run.descendantProcessCount ?? '—'} processes</dt><dd>{memory(run.descendantsRssKib)}</dd></Facts>
   </details>
 }
 
-export function PerformanceOverview({ snapshot, contexts, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript, onVisibleRunKeysChange }: {
-  snapshot: ToolkitMetricsSnapshot | null; contexts: Record<string, RunContext>; close(): void
+export function PerformanceOverview({ snapshot, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript }: {
+  snapshot: ToolkitMetricsSnapshot | null; close(): void
   paused?: boolean; pending?: boolean; error?: string | null; onPause?(): void; onConfigure(): void; onViewScript(): void
-  onVisibleRunKeysChange?(keys: readonly string[]): void
 }) {
   const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')
   const [sort, setSort] = useState<'cpu' | 'rss'>('cpu')
@@ -81,12 +80,22 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
   }, [ranked, lockedOrder])
   const activeRun = runs.find(run => runKey(run) === selectedRun) ?? null
   const rows = all ? ordered : ordered.slice(0, 5)
-  const visibleKeys = scope === 'runs' ? [...new Set([...rows.map(runKey), ...(selectedRun ? [selectedRun] : [])])] : []
-  const keySignature = JSON.stringify(visibleKeys)
-  useEffect(() => { onVisibleRunKeysChange?.(JSON.parse(keySignature)) }, [keySignature, onVisibleRunKeysChange])
-  const contextFor = (run: RunUsage) => run.hostId === snapshot?.run?.hostId && run.runId === snapshot.run.runId
-    ? { label: 'Performance toolkit', context: `Official tool · ${run.hostId}`, state: snapshot.state }
-    : contexts[runKey(run)]
+  const cardDocument = snapshot?.document?.agentCards
+  const fields = cardDocument?.fields ?? NO_FIELDS
+  const cardsByRun = useMemo(() => {
+    const result = new Map<string, AgentCard | null>()
+    for (const card of cardDocument?.items ?? NO_CARDS) {
+      if (card.reference.kind !== 'run') continue
+      const key = runKey(card.reference)
+      result.set(key, result.has(key) ? null : card)
+    }
+    return result
+  }, [cardDocument?.items])
+  const visibleCardSignature = JSON.stringify(scope === 'runs' ? [...new Set([...rows.map(runKey), ...(selectedRun ? [selectedRun] : [])])] : [])
+  const visibleCards = useMemo(() => (JSON.parse(visibleCardSignature) as string[]).flatMap(key => {
+    const card = cardsByRun.get(key); return card ? [card] : []
+  }), [visibleCardSignature, cardsByRun])
+  const cardFacts = useToolkitAgentCards(visibleCards, fields, scope === 'runs')
   const totals = observation?.runTotals
   const source = scope === 'app' ? observation?.app : scope === 'runs' ? observation?.process : observation?.runtime
   const state = paused ? 'Paused here' : error ? 'Observation unavailable' : pending ? 'Starting…' : snapshot?.state === 'observing' ? 'Observing' : snapshot?.state === 'starting' ? 'Starting…' : snapshot?.state === 'stopping' ? 'Stopping…' : snapshot?.state === 'paused' ? 'Observation stopped' : snapshot?.state === 'failed' ? 'Observation failed' : snapshot?.state === 'unknown' ? 'Unconfirmed' : 'No observation'
@@ -209,7 +218,9 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
             <button type="button" aria-pressed={sort === 'cpu'} onClick={() => setSort('cpu')}>CPU</button><button type="button" aria-pressed={sort === 'rss'} onClick={() => setSort('rss')}>RSS</button></div></div>
           <div className="performance-table-head"><span>Run</span><span>CPU</span><span>RSS</span></div>
           <div ref={list} className="performance-run-list" onFocusCapture={lock} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && !openRuns.current.size) setLockedOrder(null) }}>
-            {rows.map(run => <RunRow key={runKey(run)} run={run} context={contextFor(run)} onToggle={toggleRun} basis={observation?.units.cpuBasis} />)}</div>
+            {rows.map(run => { const card = cardsByRun.get(runKey(run)); return <RunRow key={runKey(run)} run={run} card={card} fields={fields}
+              facts={card ? cardFacts.get(toolkitAgentCardKey(card.reference)) : undefined} onToggle={toggleRun} basis={observation?.units.cpuBasis} /> })}</div>
+          {cardDocument?.omittedItems ? <p className="performance-note">{cardDocument.omittedItems} Agent cards omitted by the result budget. Run readings and totals include all tracked Runs.</p> : null}
           {!runs.length ? <p className="performance-empty">{source?.state === 'available' ? 'No observed Runs' : 'Waiting for Run readings'}</p> : null}
           {ranked.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${ranked.length} Runs`}<ChevronDown size={12} /></button> : null}
         </>}
