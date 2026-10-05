@@ -36,7 +36,7 @@ const AMUX_FROM = 'amux'
 // 唯一真相在 skill，抄进来会在语法演进时立刻过期（与《不与 skill 争夺唯一真相》同源）。也因此这里不列
 // 窄/宽格子的特例：由 Agent 从可见版面自行决定，不给一张按尺寸查的表。
 //
-// 「驱动已开的 Browser」也在发现面里，理由同上：这个能力挂在一个**顶层动词**上（`agentmux browser run`），
+// 「驱动已开的 Browser」也在发现面里，理由同上：这个能力挂在一个**顶层动词**上（`amux browser run`），
 // 而顶层动词不像 open 的子命令那样会在别处被顺带提到——Agent 不知道它存在，就只会退回去让用户自己看页面，
 // 或者更糟，去猜坐标点击。这里只说"能做"与"按读到的元素动，不按坐标"，不写命令与 flag。
 const AGENTMUX_RUNTIME_GUIDE = `AgentMux runtime guide:

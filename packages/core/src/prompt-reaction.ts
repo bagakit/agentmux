@@ -60,7 +60,7 @@ export function promptReactionMessage(definition: PromptReactionDefinition, sour
       `meaning: ${JSON.stringify(definition.body)}`,
       `reply source: ${JSON.stringify(source)}`,
       'This describes a user reply, not permission approval or native turn correlation.',
-      `Current definition: agentmux settings prompts inspect --keyword ${definition.keyword}`
+      `Current definition: amux settings prompts inspect --keyword ${definition.keyword}`
     ].join('\n')
   }
 }

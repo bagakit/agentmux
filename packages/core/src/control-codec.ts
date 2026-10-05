@@ -592,7 +592,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       // 文案要对**两种调用方**都可执行，因为这一层两种都服务：走 CLI 的人忘了接管道，直连协议的
       // 客户端把 `code` 设成了空串。给一种人看得懂的话，另一种人就只能猜——所以一句话点两条路。
       throw new AgentMuxError(
-        'Browser script is empty. Pipe it in, for example: agentmux browser run --browser <id> < script.js — or set `code` to the program text.',
+        'Browser script is empty. Pipe it in, for example: amux browser run --browser <id> < script.js — or set `code` to the program text.',
         'INVALID_CONTROL_REQUEST'
       )
     }
