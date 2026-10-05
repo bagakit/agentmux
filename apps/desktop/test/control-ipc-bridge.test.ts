@@ -1,11 +1,9 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import type { AgentMuxControlRequest } from '@agentmux/core'
 import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
-  type AgentMuxControlRequest
-} from '@agentmux/core'
-import {
   AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS,
   AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS,
   agentMuxControlTimeoutMs,
@@ -188,7 +186,7 @@ describe('Control 等待预算只有一处', () => {
       expect(
         delay,
         `setTimeout 的延时位写着 \`${delay}\`，不是从 @agentmux/core/control 那一处取的`
-      ).toBe("agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation)")
+      ).toBe("agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation)")
     }
     // 自检：抽取器真的找到了那个调用点，否则上面那个循环跑零次、恒绿。
     expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那条守卫是死代码').toBe(1)
