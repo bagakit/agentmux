@@ -112,7 +112,7 @@
 
 ## 输入错误与浏览器选中态
 
-- Message Tools 失败层覆盖工具行或其边界，短文案说明失败动作并提供重试，不弹大块全局方框。
+- Message Tools 的等待与失败提醒及完整诊断沿[《Message Tool 的等待与失败说明》](agent-capabilities-and-messaging.md#message-tool-的等待与失败说明)的右侧 SessionMailbox 处理面呈现，输入编辑区与工具行保持原阅读和操作空间。
 - Browser Region 选中态使用与其他 Region 相同的低对比边框/标题强调，点击内容后保持可见，不增加额外装饰。
 
 ## 整合版本：消息续聊与图片
@@ -241,7 +241,7 @@ Mailbox 已有记录的单对象详情用一行紧凑的“当前对话位置”
 
 ## 输入框图片
 
-截图授权、取消与失败反馈留在原 Message Tools 的局部反馈位置，沿用单条说明与重试；不能用重复模态授权提醒打断输入或遮挡健康终端。恢复说明准确指出当前运行副本，不把「已在设置中授权但当前副本不可用」画成用户没有授权。行为真源见交互 SSOT[《Message Tools 失败反馈与 Browser Region 选中态》](../behavior/conversation-input.md#message-tools-失败反馈与-browser-region-选中态)。
+截图授权、取消与失败反馈留在原 Message Tools 的局部处理面，密度与披露沿[《Message Tool 的等待与失败说明》](agent-capabilities-and-messaging.md#message-tool-的等待与失败说明)；不能用重复模态授权提醒打断输入或遮挡健康终端。恢复说明准确指出当前运行副本，不把「已在设置中授权但当前副本不可用」画成用户没有授权。行为真源见交互 SSOT[《Message Tools 失败反馈与 Browser Region 选中态》](../behavior/conversation-input.md#message-tools-失败反馈与-browser-region-选中态)。
 
 截图/粘贴图片在输入文本流中显示等高缩略图；一行态保持原行高，展开编辑时缩略图随内容流排列。图片比例保持，点击可放大，不能用长路径挤占输入区。读取失败仍显示引用文字。行为见交互 SSOT 的“输入框截图缩略图”。
 
