@@ -14,7 +14,7 @@ it('original healthy Run input remains available while an unrelated Session writ
   Object.assign(inner.hookServer, { port: 0 })
   let release!: () => void, entered = false
   const gate = new Promise<void>(resolve => { release = resolve })
-  vi.spyOn(h.store, 'compareAndSwap').mockImplementation(async () => { entered = true; await gate })
+  vi.spyOn(h.store, 'compareAndSwapMetadata').mockImplementation(async () => { entered = true; await gate })
   const writer = inner.registry.update('slow', { runId: 'run-slow' }, (current: any) => ({ ...current, updatedAt: current.updatedAt + 1 }))
   await vi.waitFor(() => expect(entered).toBe(true))
   const load = vi.spyOn(inner.registry, 'load')
