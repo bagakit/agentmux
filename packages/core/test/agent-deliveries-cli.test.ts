@@ -308,7 +308,7 @@ function pidGone(pid: number): boolean {
   }
 }
 
-describe('actual built agentmux deliveries CLI', () => {
+describe('actual built amux deliveries CLI', () => {
   it('replays exact recipient batches after consumer SIGKILL, independently ACKs and keeps healthy Agent input usable', async () => {
     const root = await privateRoot()
     const runtime = join(root, 'runtime')

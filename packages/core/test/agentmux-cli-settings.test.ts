@@ -14,7 +14,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
 import { AgentMuxError } from '../src/errors.js'
 
 const exec = promisify(execFile)
-const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 const initial: AgentMuxControlSettingEntry[] = [
   { key: 'client.mode', kind: 'string', value: 'quiet', default: 'quiet', enum: ['quiet', 'bright'] },
   { key: 'client.copy', kind: 'boolean', value: true, default: false },
@@ -143,7 +143,7 @@ describe('settings CLI over the public Control socket', () => {
       await server.stop()
       const output = await run(args)
       expect(output.code).toBe(0)
-      expect(output.stdout).toContain('agentmux settings')
+      expect(output.stdout).toContain('amux settings')
       expect(output.stdout).toContain('CONTROL_UNAVAILABLE')
       expect(output.stdout).not.toContain('client.mode')
       expect(output.stdout).not.toContain('bright')
@@ -165,9 +165,9 @@ describe('settings CLI over the public Control socket', () => {
     const skill = await run(['--skill'])
     expect(help.code).toBe(0)
     expect(skill.code).toBe(0)
-    expect(help.stdout).toContain('agentmux settings inspect')
-    expect(skill.stdout).toContain('agentmux settings inspect')
-    expect(skill.stdout).toContain('agentmux settings set <key> <value>')
+    expect(help.stdout).toContain('amux settings inspect')
+    expect(skill.stdout).toContain('amux settings inspect')
+    expect(skill.stdout).toContain('amux settings set <key> <value>')
     expect(skill.stdout).toContain('partial')
     expect(seen).toEqual([])
   })

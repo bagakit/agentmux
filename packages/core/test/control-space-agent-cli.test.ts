@@ -1,4 +1,4 @@
-import { fixturePath, fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { spawn } from 'node:child_process'
@@ -13,9 +13,9 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlRequest, type A
 import { AgentMuxError } from '../src/errors.js'
 
 // Mutation runs use an isolated copy of the same public bin/dist, never the shared build.
-const cli = process.env.AGENTMUX_TEST_SPACE_CLI ?? fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = process.env.AGENTMUX_TEST_SPACE_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
 // Real opaque keys can exceed the ordinary 512-byte ID limit through nested absolute paths.
-const spaceId = JSON.stringify(['local', `${upstreamFixturePath("directory with spaces/")}${'long-directory/'.repeat(70)}`])
+const spaceId = JSON.stringify(['local', `${fixturePath("directory with spaces")}/${'long-directory/'.repeat(70)}`])
 const zoneId = JSON.stringify([spaceId, 'workspace', 'ws-target'])
 const address = { spaceId, zoneId, workspaceId: 'ws-target', displayWorkspaceId: 'ws-target', tabId: 'tab-target', groupId: 'group-target', regionId: 'region-target' }
 const catalog: AgentMuxSpaceCatalog = {
@@ -110,10 +110,10 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
 
   it.each([['--new-branch', true], ['--branch', false]] as const)('transports a new Git Zone with %s without running a second send', async (branchFlag, createBranch) => {
     json(await run(['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--new-zone', '--project', 'project-target', '--worktree',
-      '--path', upstreamFixturePath("literal path/$SHELL"), branchFlag, 'feat/task', '--focus', '--prompt', 'task']))
+      '--path', fixturePath("literal path/$SHELL"), branchFlag, 'feat/task', '--focus', '--prompt', 'task']))
     expect(seen).toEqual([{ schemaVersion: 5, requestId: expect.any(String), operation: 'agent.open',
       content: { kind: 'new-agent', executorId: 'saved-executor', prompt: 'task' }, destination: {
-        spaceId, newTab: true, newZone: { projectId: 'project-target', kind: 'worktree', path: upstreamFixturePath("literal path/$SHELL"), branch: 'feat/task', createBranch }
+        spaceId, newTab: true, newZone: { projectId: 'project-target', kind: 'worktree', path: fixturePath("literal path/$SHELL"), branch: 'feat/task', createBranch }
       }, focus: true }])
   })
 
@@ -217,7 +217,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
     const output = await run(args)
     expect(output.code).toBe(1); expect(output.stdout).toBe('')
     expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, error: { code: expect.stringMatching(/^INVALID_(CLI_ARGUMENT|CONTROL_REQUEST)$/) } })
-    if (args.length === 4 && args[0] === 'agent') expect(JSON.parse(output.stderr).error.message).toContain('agentmux space ls')
+    if (args.length === 4 && args[0] === 'agent') expect(JSON.parse(output.stderr).error.message).toContain('amux space ls')
     expect(seen).toEqual([])
   })
 
@@ -244,7 +244,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
       const output = await run(args)
       expect(output.code).toBe(0); expect(output.stderr).toBe('')
       expect(output.stdout.length).toBeGreaterThan(100)
-      expect(output.stdout).not.toContain('--new-tab-after'); expect(output.stdout).not.toContain('agentmux open agent')
+      expect(output.stdout).not.toContain('--new-tab-after'); expect(output.stdout).not.toContain('amux open agent')
     }
     expect((await run(['open', 'agent', '--help'])).code).toBe(1)
     expect(seen).toEqual([])

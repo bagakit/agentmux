@@ -11,7 +11,7 @@ import { AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxContro
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlRequest } from '../src/control.js'
 import { parseSettingsCommand } from '../src/settings-cli.js'
 
-const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
 // Client-owned JSON: Core has no Desktop Host schema or connection defaults.
@@ -34,9 +34,9 @@ it('discovers Host read and Test in the built skill without losing project regis
     timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: join(root, 'absent-owner'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
   })
   expect(result.stdout.length).toBeGreaterThan(0)
-  expect(result.stdout).toContain('agentmux settings hosts ls')
-  expect(result.stdout).toContain('agentmux settings hosts test <id>')
-  expect(result.stdout).toContain('agentmux settings workspaces register --input <file|->')
+  expect(result.stdout).toContain('amux settings hosts ls')
+  expect(result.stdout).toContain('amux settings hosts test <id>')
+  expect(result.stdout).toContain('amux settings workspaces register --input <file|->')
   expect(seen).toEqual([])
 })
 

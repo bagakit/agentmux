@@ -55,7 +55,7 @@ describe('demand control contract', () => {
   })
 })
 
-describe('Goal proposals through real Control and agentmux CLI', () => {
+describe('Goal proposals through real Control and amux CLI', () => {
   const proposal = { summary: 'Retain the workspace', criteria: [{ id: 'restore', text: 'Tabs remain visible' }], openQuestions: [] }
   const grounding = { alignmentRevision: 1, summary: 'Restart inspected', checks: [{ criterionId: 'restore', outcome: 'met', evidence: ['verification.log:12'], note: '' }] }
   const project = (demand: Demand): AgentMuxDemand => {
@@ -81,7 +81,7 @@ describe('Goal proposals through real Control and agentmux CLI', () => {
     } })
     await server.start()
     const run = async (...args: string[]) => await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
-      const child = spawn(process.execPath, [new URL('../bin/agentmux', import.meta.url).pathname, ...args], { cwd: root, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(process.execPath, [new URL('../bin/amux', import.meta.url).pathname, ...args], { cwd: root, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }, stdio: ['ignore', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
       child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })

@@ -10,7 +10,7 @@ import { AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxContro
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest, type AgentMuxControlCrashLogFact } from '../src/control.js'
 import { AgentMuxError } from '../src/errors.js'
 
-const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const exec = promisify(execFile), cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
 let root: string, server: AgentMuxControlServer
 let fact: AgentMuxControlCrashLogFact
 const seen: AgentMuxControlRequest[] = []
@@ -65,8 +65,8 @@ it('discovers exact fixed commands offline in the sole help and skill, with no C
     expect(result.code).toBe(0); expect(result.stdout.length).toBeGreaterThan(0)
     expect(result.stdout).toContain('system')
     if (args[0] !== '--help') {
-      expect(result.stdout).toContain('agentmux system crash-log')
-      expect(result.stdout).toContain('agentmux system crash-log reveal')
+      expect(result.stdout).toContain('amux system crash-log')
+      expect(result.stdout).toContain('amux system crash-log reveal')
     }
   }
   expect(seen).toEqual([])

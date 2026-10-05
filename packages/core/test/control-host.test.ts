@@ -957,7 +957,7 @@ describe('external Control control', () => {
 /**
  * 等待预算与「哪些操作算慢」都只有一处。
  *
- * 同一条 `agentmux agent open` 有两条到达执行方的路，各有一个等待方：这里的 CLI→daemon socket，以及
+ * 同一条 `amux agent open` 有两条到达执行方的路，各有一个等待方：这里的 CLI→daemon socket，以及
  * Renderer 拥有屏幕时 main→Renderer 的 IPC 桥（apps/desktop 的 control-ipc-bridge）。此前两侧各手抄
  * `2_000` / `60_000`，而**「哪些操作算慢」在这边是命名函数 `longOperation`、在桥那边被内联展开成同样
  * 的四项析取**。后果：加一个慢操作时只改一侧的人会得到一个全绿的仓库，而另一条路静默给它 2 秒——

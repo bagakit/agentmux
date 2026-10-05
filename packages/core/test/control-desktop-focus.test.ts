@@ -10,9 +10,9 @@ import type { AgentMuxControlRequest, AgentMuxControlResult } from '../src/contr
 import { focusFacts } from './fixtures/desktop-focus-facts.js'
 import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 
-const cli = process.env.AGENTMUX_TEST_DESKTOP_FOCUS_CLI ?? fileURLToPath(new URL('../bin/agentmux', import.meta.url))
+const cli = process.env.AGENTMUX_TEST_DESKTOP_FOCUS_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
 const base = { schemaVersion: 5, requestId: 'desktop-navigation' }
-const spaceId = JSON.stringify(['local', fixturePath("repository literal $PATH/with spaces") + '/' + 'long-directory/'.repeat(70)])
+const spaceId = JSON.stringify(['local', fixturePath('repository literal $PATH/with spaces/') + 'long-directory/'.repeat(70)])
 const zoneId = JSON.stringify([spaceId, 'zone', 'existing-directory'])
 describe('public Desktop focus and client inspection', () => {
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[]
@@ -145,6 +145,6 @@ describe('public Desktop focus and client inspection', () => {
     expect(agentMuxCommandHelp('goal.focus')).toContain('--goal ID')
     expect(agentMuxCommandHelp('space.focus')).toContain('Default --input preserve')
     expect(agentMuxCommandHelp('space.focus')).toContain('--input target')
-    expect(agentMuxCommandHelp('app.inspect')).toContain('agentmux app inspect')
+    expect(agentMuxCommandHelp('app.inspect')).toContain('amux app inspect')
   })
 })

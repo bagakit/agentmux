@@ -39,7 +39,7 @@ describe('actual product metrics CLI', () => {
         expect(result.code).toBe(0)
         expect(result.stderr).toBe('')
         expect(result.stdout.trim().length).toBeGreaterThan(0)
-        expect(result.stdout).toContain(`Usage: agentmux system metrics ${verb}`)
+        expect(result.stdout).toContain(`Usage: amux system metrics ${verb}`)
       }
       expect(connected).not.toHaveBeenCalled()
       expect(execute).not.toHaveBeenCalled(); expect(subscribe).not.toHaveBeenCalled()

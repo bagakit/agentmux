@@ -27,7 +27,7 @@ const execFileAsync = promisify(execFile)
 
 // 打进包里的 CLI 版本号唯一真相是**已安装的** @agentmux/core/package.json 的 `version`——不是本仓源码，
 // 而是这个消费者 node_modules 里那一份。这里从已解析的入口向上走到它的 package.json 读出来，作为
-// `agentmux --version` 应当报告的期望值；绝不再写死一份 `0.1.0`。`@agentmux/core` 有 `exports` 且没有
+// `amux --version` 应当报告的期望值；绝不再写死一份 `0.1.0`。`@agentmux/core` 有 `exports` 且没有
 // 暴露 `./package.json` 子路径，直接 import 会 ERR_PACKAGE_PATH_NOT_EXPORTED，所以从 `.` 入口的真实
 // 位置向上找包根。控制夹具（ctxmux-terminal-control.mjs）真的 exec 了同一个已安装 CLI 的 `--version`，
 // 于是这条把「安装出去的 CLI 报告的版本」钉成「安装出去的包声明的版本」——bump 包版本两边一起动，
@@ -147,7 +147,7 @@ async function waitFor(description, predicate) {
  * 排他的（第二次会 `ATTACHMENT_EXISTS`），所以它必须放手。那次 detach 与这里 reattach 之间就有一段
  * **没有任何监听者**的窗口，落在窗口里的输出此后只能以 replay 形式出现。
  *
- * 实测（）：在 `handshake race controlled composer pending` 之前插 3 秒延迟，让假 CLI 有
+ * 实测：在 `handshake race controlled composer pending` 之前插 3 秒延迟，让假 CLI 有
  * 充足时间在窗口里写完 `codex-controlled-ready-pending`，那条等待就从 1/3 概率永等变成 100% 永等。
  * 这不是负载 flake——负载只决定谁先跑完那一步，判据本身漏了半条流。
  *
@@ -369,7 +369,7 @@ assert.equal(
   true
 )
 assert.equal(
-  output(firstEvents, run.runId).includes(`agentmux-env:1:true:agentmux ${installedCoreVersion}`),
+  output(firstEvents, run.runId).includes(`agentmux-env:1:true:amux ${installedCoreVersion}`),
   true
 )
 assert.equal(output(firstEvents, run.runId).includes('current-env:after-daemon:explicit'), true)
@@ -463,9 +463,9 @@ await waitFor('complete stubborn process-tree stop', async () => (
 unsubscribe()
 
 /**
- * 跑一次打包出来的 `agentmux` CLI。
+ * 跑一次打包出来的 `amux` CLI。
  *
- * **没有挂钟预算。** 原先是 `timeout: 15_000`，20 处调用共用。实测（）健康情况下全部 20 次
+ * **没有挂钟预算。** 原先是 `timeout: 15_000`，20 处调用共用。实测健康情况下全部 20 次
  * 里最慢的是 `resume` 的 **191ms**；而负载 ~20 时它撞满 15 秒被 SIGTERM 杀掉——**79 倍**。
  * 这不是"界定一个慢操作"，是调度饥饿下杀死一个健康进程，与这个 fixture 里其余被删掉的预算同一个判断：
  * 两个预算守同一件事时，短的那个只贡献假阴性。上界由外层持有（跑这个脚本的那条 it 声明了 95 秒）。
