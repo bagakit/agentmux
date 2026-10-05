@@ -88,7 +88,7 @@ describe('actual Toolkit custom identity', () => {
     await fill('.toolkit-editor__name input', 'Workspace summary')
     await dom.click('.toolkit-icon-picker input[value="zap"]')
     await fill('[data-identity-script]', "console.log('Workspace summary')\n")
-    await fill('.toolkit-editor__fields input:not([type])', _hygiene_fixturePath("workspace-notes"))
+    await fill('.toolkit-editor__fields > label > input:not([type="checkbox"])', _hygiene_fixturePath("workspace-notes"))
     await fill('.toolkit-argument:nth-of-type(1) input', '--project'); await fill('.toolkit-argument:nth-of-type(2) input', 'current')
     await button('Add action'); await fill('.toolkit-editor__action-heading input', 'Open report')
     await fill('[data-identity-script]', "console.log('Report ready')\n"); await button('Add argument')
