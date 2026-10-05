@@ -7,6 +7,12 @@ import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { projectWorkspaces } from '../lib/workspace-projects'
 
+function localDateInput(timestamp: number | null | undefined): string {
+  if (timestamp == null) return ''
+  const date = new Date(timestamp)
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-')
+}
+
 const STATUS_LABELS = ['Backlog', 'Todo', 'In progress', 'In review', 'Blocked', 'Done', 'Cancelled']
 export function GoalProperties({ demand, onUpdate }: { demand: DemandProjection; onUpdate: (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1]) => void }) {
   const config = useAppStore((state) => state.config)
@@ -21,8 +27,8 @@ export function GoalProperties({ demand, onUpdate }: { demand: DemandProjection;
     <label>Project<select aria-label="Goal project" value={demand.projectId ?? ''} onChange={(event) => { if (!event.target.value) { onUpdate({ projectId: null, projectName: null }); return }; const project = projects.find(project => project.id === event.target.value); if (project) onUpdate({ projectId: project.id, projectName: project.name }) }}><option value="">Unassigned</option>{unavailableProject ? <option value={demand.projectId!} disabled>{demand.projectName ?? 'Bound project'} · Unavailable</option> : null}{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
     <label>Assignee<select aria-label="Goal assignee" value={demand.assigneeExecutorId ?? ''} onChange={(event) => onUpdate({ assigneeExecutorId: event.target.value || null })}><option value="">Unassigned</option>{Object.entries(config?.executors ?? {}).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
     <label>Tags<TextInput aria-label="Goal tags" value={tags} onChange={(event) => setTags(event.target.value)} onBlur={() => onUpdate({ tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) })} /></label>
-    <label>Planned start<TextInput type="date" aria-label="Goal planned start" value={demand.plannedStartAt ? new Date(demand.plannedStartAt).toISOString().slice(0, 10) : ''} onChange={(event) => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
-    <label>Target date<TextInput type="date" aria-label="Goal target date" value={demand.targetAt ? new Date(demand.targetAt).toISOString().slice(0, 10) : ''} onChange={(event) => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
+    <label>Planned start<TextInput type="date" aria-label="Goal planned start" value={localDateInput(demand.plannedStartAt)} onChange={(event) => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
+    <label>Target date<TextInput type="date" aria-label="Goal target date" value={localDateInput(demand.targetAt)} onChange={(event) => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
     <label>Batch<TextInput type="number" min={1} aria-label="Goal batch" value={demand.phaseIndex === null || demand.phaseIndex === undefined ? '' : demand.phaseIndex + 1} onChange={(event) => onUpdate({ phaseIndex: event.target.value ? Math.max(0, Number(event.target.value) - 1) : null })} /></label>
     <label>Parent goal<select aria-label="Parent goal" value={demand.parentDemandId ?? ''} onChange={(event) => onUpdate({ parentDemandId: event.target.value || null })}><option value="">None</option>{Object.values(demands).filter((item) => item.id !== demand.id).map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
     {demand.alignment ? <span className="goals-properties__id">Goal version · {demand.alignment.revision}</span> : null}
