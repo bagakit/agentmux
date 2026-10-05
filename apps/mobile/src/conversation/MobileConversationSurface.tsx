@@ -146,8 +146,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }, [reading.timeline, reading.session, agentSessionId, draftKey, revision])
 
   useEffect(() => {
-    if (reading.page && agentSessionId) void observeMobileQuestionAnswers(local, agentSessionId, reading.page).then(changed => { if (changed && mounted.current) redraw(value => value + 1) })
-  }, [reading.page, agentSessionId, local])
+    if (reading.page && agentSessionId) void observeMobileQuestionAnswers(local, agentSessionId, reading.page, reading.session, client?.runtimeOwnerIdentity?.()?.runtimeId).then(changed => { if (changed && mounted.current) redraw(value => value + 1) })
+  }, [reading.page, reading.session, agentSessionId, client, local])
   const diagnosticOwner = (originalClient: AgentMuxHostedClient | null): string | null => {
     const identity = originalClient?.runtimeOwnerIdentity?.()
     return identity ? `runtime:${identity.runtimeId}` : null

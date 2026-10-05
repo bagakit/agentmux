@@ -1,4 +1,4 @@
-import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
+import { validateAgentPromptCondition, type AgentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import type { ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
 import { parseQuestionReplyAttempt, questionReplyFailurePhase, questionReplyKey, questionReplyReceiptMatches, questionReplyRecorded,
@@ -54,13 +54,20 @@ export async function replyConversationQuestion(control: AgentSessionControl,
     throw error
   }
 }
-export function observeConversationQuestionAnswers(control: AgentSessionControl, page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null): void {
+export function observeConversationQuestionAnswers(control: AgentSessionControl, page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null, notApplied?: AgentPromptNotApplied): void {
   for (const [key, attempt] of Object.entries(useAppStore.getState().questionReplies?.[control.agentSessionId] ?? {})) {
     if (attempt?.phase === 'confirmed') continue
     try {
       parseQuestionReplyAttempt(attempt)
+      if (key !== questionReplyKey(control.agentSessionId, attempt.input)) continue
       if (attempt.hostId === control.hostId && questionReplyRecorded(control.agentSessionId, attempt, page, context)) {
         void retainConversationQuestionReply(control.agentSessionId, key, { ...attempt, phase: 'confirmed', diagnostic: undefined }, attempt).catch(() => {})
+      } else if (attempt.phase === 'unknown' && attempt.hostId === control.hostId &&
+        notApplied?.submissionId === attempt.input.operationId && notApplied.run.runId === attempt.input.expectedRun.runId &&
+        control.run.runId === attempt.input.expectedRun.runId) {
+        void retainConversationQuestionReply(control.agentSessionId, key, { ...attempt, phase: 'rejected', diagnostic: {
+          code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core confirmed the original reply was not applied. Your edited answer is kept; you can submit it explicitly.'
+        } }, attempt).catch(() => {})
       }
     } catch { /* Unreadable original intent remains held; observing another source cannot replace it. */ }
   }
