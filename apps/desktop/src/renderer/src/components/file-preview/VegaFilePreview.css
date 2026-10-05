@@ -1,0 +1,6 @@
+.file-vega-preview > .file-chart-control {
+  display: inline-flex; align-items: center; flex-wrap: wrap; vertical-align: middle;
+  gap: var(--sp-2); margin: 0 var(--sp-4) var(--sp-3) 0;
+  max-width: 100%; font-size: var(--fs-meta);
+}
+.file-vega-preview > .file-chart-control > .ui-input { max-width: 100%; }
