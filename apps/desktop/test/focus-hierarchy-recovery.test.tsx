@@ -4,6 +4,8 @@ import { act, createElement } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
+import {composerConfig,composerSession} from './helpers/composer-dom-fixture'
+import {scratchTopicsScope} from '../src/renderer/src/lib/scratch-topic-snapshots'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
@@ -18,36 +20,31 @@ import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSu
 const baseline = useAppStore.getState()
 let root: Root, container: HTMLDivElement
 function session(id: string, path: string, state: 'disconnected' | 'working' | 'done' = 'disconnected'): SessionSnapshot {
-  return { id, kind: 'agent', hostId: 'local', workspacePath: path, providerId: 'codex', executorId: 'codex', label: id, processState: state === 'disconnected' ? 'disconnected' : 'running', status: { state, observedAt: 1, source: 'run-process' }, capabilities: {}, control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id } } } as SessionSnapshot
+  const base=composerSession(id);return {...base,workspacePath:path,processState:state==='disconnected'?'interrupted':'running',status:{state,source:'native-hook',observedAt:1}} as SessionSnapshot
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container)
-  const config = { workspaces: [{ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: _hygiene_fixturePath("scratch"), name: 'Scratch', kind: 'folder' }, { id: 'repo', hostId: 'local', path: _hygiene_fixturePath("repo"), name: 'Product', kind: 'folder' }, { id: 'branch', hostId: 'local', path: _hygiene_fixturePath("checkout"), name: 'Product feature', kind: 'worktree', repoPath: _hygiene_fixturePath("repo"), branch: 'feature/compact' }] } as AppConfig
-  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([{ id: 'launcher:alpha', title: 'Planning', directoryPath: _hygiene_fixturePath("scratch/topic--launcher--alpha"), topicPath: '', summary: '', collaborators: [] }, { id: 'launcher:beta', title: 'Bug fixes', directoryPath: _hygiene_fixturePath("scratch/topic--launcher--beta"), topicPath: '', summary: '', collaborators: [] }])
+  const config = { ...composerConfig, workspaces: [{ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: _hygiene_fixturePath("scratch"), name: 'Scratch', kind: 'folder' }, { id: 'repo', hostId: 'local', path: _hygiene_fixturePath("repo"), name: 'Product', kind: 'folder' }, { id: 'branch', hostId: 'local', path: _hygiene_fixturePath("checkout"), name: 'Product feature', kind: 'worktree', repoPath: _hygiene_fixturePath("repo"), branch: 'feature/compact' }] } as AppConfig
+  const topics=[{ id: 'launcher:alpha', title: 'Planning', directoryPath: _hygiene_fixturePath("scratch/topic--launcher--alpha"), topicPath: '', summary: '', collaborators: [] }, { id: 'launcher:beta', title: 'Bug fixes', directoryPath: _hygiene_fixturePath("scratch/topic--launcher--beta"), topicPath: '', summary: '', collaborators: [] }]
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'git-repository', hostId: 'local', repoPath: _hygiene_fixturePath("repo"), branches: [{ name: 'feature/compact', worktreePath: _hygiene_fixturePath("checkout"), workspaceId: 'branch', isCurrent: false }] })
-  useAppStore.setState({ config, sessions: [session('one', _hygiene_fixturePath("scratch/topic--launcher--alpha")), session('two', _hygiene_fixturePath("scratch/topic--launcher--alpha")), session('three', _hygiene_fixturePath("scratch/topic--launcher--beta")), session('live', _hygiene_fixturePath("checkout"), 'working')], timelines: {}, tabs: {}, agentNames: {}, workspaceFileRevisions: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  useAppStore.setState({ config, sessions: [session('one', _hygiene_fixturePath("scratch/topic--launcher--alpha")), session('two', _hygiene_fixturePath("scratch/topic--launcher--alpha")), session('three', _hygiene_fixturePath("scratch/topic--launcher--beta")), session('live', _hygiene_fixturePath("checkout"), 'working')], timelines: {}, tabs: {}, scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:scratchTopicsScope(config.workspaces[0]!),revision:0,topics,error:null,reading:false}}, agentNames: {}, workspaceFileRevisions: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
 const render = () => act(async () => { root.render(createElement(GlobalFocusSurface)); await Promise.resolve() })
-it('keeps branch identity on the board and named disconnected Topics in the counted project drawer', async () => {
+it('keeps original branch and named Topic identities on the same board after interruption',async()=>{
   await render()
-  expect([...container.querySelectorAll<HTMLElement>('[data-lane-id]')].map(lane => [...lane.querySelectorAll('.focus-project-lanes__label')].map(label => label.textContent).join(''))).toEqual(['Productfeature/compact'])
-  const vault = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] > button')!
-  expect(vault).not.toBeNull(); expect(vault.textContent).toBe('Disconnected1 project · 3 contexts')
-  expect(container.querySelectorAll('[data-session-id]')).toHaveLength(1)
-  await act(async () => vault.click())
-  const lanes = [...container.querySelectorAll<HTMLElement>('[data-lane-id]')]
+  const lanes=[...container.querySelectorAll<HTMLElement>('[data-lane-id]')]
   expect(lanes).toHaveLength(3)
-  expect(lanes.map(lane => lane.querySelector('.focus-project-lanes__heading')!.parentElement!.className)).toEqual(['focus-project-lanes__track', 'focus-project-lanes__track', 'focus-project-lanes__track'])
-  expect(lanes.map(lane => [...lane.querySelectorAll('.focus-project-lanes__label')].map(label => label.textContent).join(''))).toEqual(['Productfeature/compact', 'ScratchPlanning', 'ScratchBug fixes'])
-  expect([...container.querySelectorAll<HTMLElement>('[data-session-id]')].map(row => row.dataset.sessionId)).toEqual(['live', 'one', 'two', 'three'])
-  await act(async () => container.querySelector<HTMLButtonElement>('[data-session-id="two"]')!.click())
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('two')
-  await act(async () => vault.click())
-  expect(container.querySelector('[data-session-id="two"]')).toBeTruthy()
-  expect(container.querySelector('[data-session-id="one"]')).toBeTruthy()
+  expect(lanes.map(lane=>[...lane.querySelectorAll('.focus-project-lanes__label')].map(label=>label.textContent).join('')).sort()).toEqual(['Productfeature/compact','Planning','Bug fixes'].sort())
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].map(row=>row.dataset.sessionId).sort()).toEqual(['live','one','two','three'].sort())
+  expect(container.querySelector('[aria-label="Disconnected projects"]')).toBeNull()
+  const original=container.querySelector('[data-session-id="one"]')
+  await act(async()=>container.querySelector<HTMLButtonElement>('[data-session-id="two"]')!.click())
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('two');expect(container.querySelector('[data-session-id="one"]')).toBe(original)
 })
-it('search finds a disconnected Topic context without opening every recovery vault', async () => {
+
+it('search finds an interrupted Topic directly in its original Recovery group', async () => {
   await render()
   const input = container.querySelector<HTMLInputElement>('input[aria-label="Search contexts"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Planning'); input.dispatchEvent(new Event('input', { bubbles: true })) })
@@ -62,14 +59,11 @@ it('keeps a checkout lane after removal and does not requery scopes for unrelate
   expect(api.workspaces.listBranches).toHaveBeenCalledTimes(branchCalls)
   expect(draws.lanes).toBe(laneDraws)
   vi.mocked(api.workspaces.listBranches).mockResolvedValue({ kind: 'git-repository', hostId: 'local', repoPath: _hygiene_fixturePath("repo"), branches: [{ name: 'feature/compact', worktreePath: null, workspaceId: null, isCurrent: false }] })
-  await act(async () => { useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.filter(workspace => workspace.id !== 'branch') }, workspaceFileRevisions: { repo: 1 }, sessions: state.sessions.map(item => item.id === 'live' ? { ...item, processState: 'disconnected', status: { ...item.status, state: 'disconnected' } } : item) })); await Promise.resolve() })
+  await act(async () => { useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.filter(workspace => workspace.id !== 'branch') }, workspaceFileRevisions: { repo: 1 }, sessions: state.sessions.map(item => item.id === 'live' ? { ...item, processState: 'interrupted', status: { ...item.status, state: 'disconnected' } } : item) })); await Promise.resolve() })
   // Root is no longer represented by a Session; its cached checkout evidence still preserves independent identity.
-  const recovery = container.querySelector<HTMLButtonElement>('[aria-label="Disconnected projects"] > button')!
-  expect(recovery.textContent).toBe('Disconnected2 projects · 4 contexts')
-  await act(async () => recovery.click())
   const orphan = container.querySelector<HTMLElement>('[data-lane-id*="checkout"]')!
   expect(orphan).toBeTruthy(); expect(orphan.textContent).toContain('feature/compact')
   expect(orphan.dataset.recovery).toBe('removed')
-  expect(orphan.closest('[aria-label="Disconnected projects"]')).not.toBeNull()
+  expect(orphan.closest('.focus-project-board')).not.toBeNull();expect(orphan.querySelector('[data-bucket="idle"]')).not.toBeNull()
   expect([...orphan.querySelectorAll<HTMLElement>('[data-session-id]')].map(row => row.dataset.sessionId)).toEqual(['live'])
 })

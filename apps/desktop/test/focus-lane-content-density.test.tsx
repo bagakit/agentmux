@@ -127,77 +127,61 @@ afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-it('uses five original readable slots at 914 for 0/7/1/6 while zero/offline facts occupy only the title', async () => {
+it('uses five readable slots at 914 while interrupted tasks remain in the original Recovery group', async () => {
   const sessions = [...Array.from({ length: 7 }, (_, i) => agent(`work-${i}`)), agent('result', 'done'),
     ...Array.from({ length: 6 }, (_, i) => agent(`idle-${i}`, 'running', 'run-process')), agent('offline-a', 'disconnected'), agent('offline-b', 'disconnected')]
   await seed(sessions, { result: timeline('result', [message('result', 'assistant_message', 'Recorded result', 2)]) }); await mount()
-  expect(groups().querySelectorAll('.focus-context')).toHaveLength(14)
+  expect(groups().querySelectorAll('.focus-context')).toHaveLength(16)
   expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working', 'results', 'idle'])
   expect(groups().dataset.focusCardSlots).toBe('5'); expect(groups().dataset.focusMaxRows).toBe('4')
   expect(['working', 'results', 'idle'].map(bucket => Number(section(bucket).style.getPropertyValue('--focus-card-columns')))).toEqual([2, 1, 2])
-  for (const [bucket, count] of [['working', 7], ['results', 1], ['idle', 6]] as const) {
+  for (const [bucket, count] of [['working', 7], ['results', 1], ['idle', 8]] as const) {
     const group = section(bucket), columns = Number(group.style.getPropertyValue('--focus-card-columns'))
     const cardWidth = (parseFloat(group.style.getPropertyValue('--focus-group-width')) - (columns - 1) * 2) / columns
     expect(cardWidth).toBeGreaterThanOrEqual(180); expect(cardWidth).toBeLessThanOrEqual(320)
     expect(group.querySelector('.focus-context-group__count')?.textContent).toBe(String(count))
-    expect([...group.querySelectorAll<HTMLElement>('.focus-context')].map(node => node.dataset.sessionId)).toEqual(sessions.filter(session => bucket === 'working' ? session.id.startsWith('work-') : bucket === 'results' ? session.id === 'result' : session.id.startsWith('idle-')).map(session => session.id))
+    expect([...group.querySelectorAll<HTMLElement>('.focus-context')].map(node => node.dataset.sessionId)).toEqual(sessions.filter(session => bucket === 'working' ? session.id.startsWith('work-') : bucket === 'results' ? session.id === 'result' : session.id.startsWith('idle-') || session.id.startsWith('offline-')).map(session => session.id))
   }
   const rail = lane().querySelector<HTMLElement>('.focus-project-lanes__status-rail')!
-  expect(rail).not.toBeNull(); expect([...rail.children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['attention', 'disconnected'])
+  expect(rail).not.toBeNull(); expect([...rail.children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['attention'])
   const zero = rail.querySelector<HTMLElement>('[data-bucket="attention"]')!
   expect(zero.title).toBe('Attention · 0'); expect(zero.getAttribute('aria-label')).toBe('Attention · 0')
   expect(zero.querySelector('svg')).not.toBeNull(); expect(zero.querySelector('button, .focus-context-group__count')).toBeNull()
-  expect(rail.querySelector('.focus-disconnected-entry')?.getAttribute('aria-label')).toBe('View disconnected contexts · 2')
+  expect(rail.querySelector('.focus-disconnected-entry')).toBeNull()
   expect(rail.querySelectorAll('.focus-context')).toHaveLength(0); expect(groups().querySelector('[data-bucket="disconnected"]')).toBeNull()
   const before = useAppStore.getState(), options = await focusFilterOptions(container, 'state')
-  expect(options.map(option => option.text)).toEqual(['All states', 'Attention · 0', 'Working · 7', 'Results · 1', 'Activity unknown · 6', 'Disconnected · 2'])
+  expect(options.map(option => option.text)).toEqual(['All states', 'Attention · 0', 'Working · 7', 'Results · 1', 'Idle / Recovery · 8'])
   expect(useAppStore.getState().sessions.map(session => session.control)).toEqual(before.sessions.map(session => session.control))
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts); expect(listObservers()).toHaveLength(1)
   for (const budget of [912, 971, 972]) {
     width = budget; await act(async () => listObservers()[0]!.callback([], {} as ResizeObserver))
     expect(groups().dataset.focusCardSlots).toBe('5'); expect(groups().dataset.focusMaxRows).toBe('4')
     expect(['working', 'results', 'idle'].map(bucket => Number(section(bucket).style.getPropertyValue('--focus-card-columns')))).toEqual([2, 1, 2])
-    expect(groups().querySelectorAll('.focus-context')).toHaveLength(14)
+    expect(groups().querySelectorAll('.focus-context')).toHaveLength(16)
   }
 })
 
-it('keeps a single card bounded and returns from the exact disconnected title entry without empty body tracks', async () => {
+it('keeps both Working and Recovery cards bounded across width changes without replacing the original input or workface', async () => {
   width = 2000; await seed([agent(A), agent('offline', 'disconnected')]); await mount()
-  expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working'])
+  expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working','idle'])
   expect(section('working').style.getPropertyValue('--focus-group-width')).toBe('320px')
-  const original = card(), before = useAppStore.getState()
-  width = 320; await act(async () => listObservers()[0]!.callback([], {} as ResizeObserver))
-  expect(Number(section('working').style.getPropertyValue('--focus-card-columns'))).toBe(1)
-  expect(parseFloat(section('working').style.getPropertyValue('--focus-group-width'))).toBeLessThanOrEqual(320)
-  expect(card()).toBe(original); expect(lane().querySelector('.focus-project-lanes__axis')?.getAttribute('title')).toContain('长项目名')
-  const entry = lane().querySelector<HTMLButtonElement>('.focus-disconnected-entry')!
-  expect(entry).not.toBeNull(); expect(entry.disabled).toBe(false)
-  await act(async () => { entry.focus(); entry.click() })
-  const directory = container.querySelector<HTMLElement>('[aria-label="Disconnected projects"]')!
-  expect(directory).not.toBeNull(); expect(directory.querySelectorAll('.focus-context')).toHaveLength(1)
-  expect(directory.querySelector('.focus-context')?.getAttribute('data-session-id')).toBe('offline')
-  await act(async () => directory.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
-  expect(document.activeElement).toBe(entry); expect(card()).toBe(original)
-  expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
-  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  const original=card(), recovered=container.querySelector('[data-session-id="offline"]'), before=useAppStore.getState()
+  expect(recovered?.textContent).toContain('Run interrupted')
+  width=320; await act(async()=>listObservers()[0]!.callback([],{} as ResizeObserver))
+  for(const bucket of ['working','idle']) { expect(Number(section(bucket).style.getPropertyValue('--focus-card-columns'))).toBe(1);expect(parseFloat(section(bucket).style.getPropertyValue('--focus-group-width'))).toBeLessThanOrEqual(320) }
+  expect(card()).toBe(original);expect(container.querySelector('[data-session-id="offline"]')).toBe(recovered)
+  expect(useAppStore.getState().sessions).toBe(before.sessions);expect(useAppStore.getState().agentFocus).toBe(before.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
 
-it('puts the sole visible state into the project title once while preserving exact disconnected and local unknown facts', async () => {
-  const unknown = agent(A, 'running', 'run-process')
-  await seed([unknown, agent('offline-1', 'disconnected'), agent('offline-2', 'disconnected')]); await mount()
-  const group = section('idle'), title = lane().querySelector('.focus-project-lanes__title')!
-  expect(group.dataset.focusSparse).toBe('true')
-  expect(group.querySelector(':scope > .focus-context-group__header')).toBeNull()
-  const header = title.querySelector<HTMLElement>('[data-visible-state="true"]')!
-  expect(header).not.toBeNull(); expect(header.getAttribute('aria-label')).toContain('Activity unknown 1')
-  expect(header.textContent).toContain('Activity unknown'); expect(header.querySelector('.focus-context-group__count')?.textContent).toBe('1')
-  expect(title.querySelector('.focus-disconnected-entry')?.getAttribute('aria-label')).toBe('View disconnected contexts · 2')
-  expect(groups().querySelector('[data-bucket="disconnected"]')).toBeNull(); expect(card().dataset.activity).toBe('unknown')
-  const original = card(), parent = original.parentElement
-  await seed([unknown, agent(B, 'done'), agent('offline-1', 'disconnected'), agent('offline-2', 'disconnected')])
-  expect(card()).toBe(original); expect(card().parentElement).toBe(parent)
-  expect(section('idle').dataset.focusSparse).toBeUndefined(); expect(section('idle').querySelector(':scope > header')).not.toBeNull()
-  await seed([unknown]); expect(card()).toBe(original); expect(card().parentElement).toBe(parent); expect(section('idle').dataset.focusSparse).toBe('true')
+it('keeps mixed unknown and interrupted facts in one Recovery group and preserves the original card across sparse transitions', async()=>{
+  const unknown=agent(A,'running','run-process')
+  await seed([unknown,agent('offline-1','disconnected'),agent('offline-2','disconnected')]);await mount()
+  const group=section('idle'), header=group.querySelector<HTMLElement>(':scope > header')!
+  expect(header.textContent).toContain('Recovery');expect(header.getAttribute('aria-label')).toContain('Activity unknown 1');expect(header.getAttribute('aria-label')).toContain('Recovery 2')
+  expect(group.querySelectorAll('.focus-context')).toHaveLength(3);expect(card().dataset.activity).toBe('unknown')
+  const original=card(),parent=original.parentElement
+  await seed([unknown,agent(B,'done'),agent('offline-1','disconnected'),agent('offline-2','disconnected')]);expect(card()).toBe(original);expect(card().parentElement).toBe(parent)
+  await seed([unknown]);expect(card()).toBe(original);expect(card().parentElement).toBe(parent);expect(section('idle').dataset.focusSparse).toBe('true')
 })
 
 it('keeps the actual rename input and exact menu target across 1 to 2 to 1 and a filtered single card', async () => {

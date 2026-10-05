@@ -5,9 +5,14 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionRecoveryCandidate, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
-import { createFocusProjectionSelector, focusColumnFor } from '../src/renderer/src/lib/focus-context'
+import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state'
 import { recoveryCandidateSession, useAppStore } from '../src/renderer/src/store'
+import { FocusNavigationPreview } from '../src/renderer/src/components/FocusNavigationPreview'
+import { WorkspaceAgentsTool } from '../src/renderer/src/components/SurfaceToolDock'
+import { readAgentPresentation } from '../src/renderer/src/lib/mobile-presentation'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -24,7 +29,7 @@ function candidate(id = 'missing'): AgentSessionRecoveryCandidate {
 }
 const pending = () => recoveryCandidateSession(candidate(), { kind: 'pending', detail: 'Original Run has not been observed. Read or restore the original Session.' })
 const row = (id = 'missing') => container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`)
-const columns = () => Object.fromEntries(createFocusProjectionSelector()(useAppStore.getState()).contexts.map(context => [context.id, focusColumnFor(context)]))
+const columns = () => Object.fromEntries(createFocusProjectionSelector()(useAppStore.getState()).contexts.map(context => [context.id, context.bucket]))
 const render = () => act(async () => root.render(<GlobalFocusSurface workspaceOpen={false} />))
 function processEvent(overrides: Partial<Extract<RuntimeEvent['event'], { type: 'process-state' }>> = {}, hostId = 'local'): RuntimeEvent {
   const run = candidate().run
@@ -65,10 +70,11 @@ it('lets a same-Run authoritative interruption replace pending provenance despit
   await act(async () => useAppStore.getState().applyEvent(processEvent()))
   expect(useAppStore.getState().recoveryCandidates).toBe(candidates)
   expect(useAppStore.getState().sessions[0]!.interruptionReason).toBeUndefined()
-  expect(columns()).toEqual({ missing: 'disconnected' })
-  expect(select(useAppStore.getState()).contexts[0]!.stateLabel).toBe('Disconnected')
-  expect(container.querySelector('[aria-label="Disconnected projects"]')).not.toBeNull()
-  expect(row()).toBeNull()
+  expect(columns()).toEqual({ missing: 'idle' })
+  expect(select(useAppStore.getState()).contexts[0]!.stateLabel).toBe('Interrupted')
+  expect(container.querySelector('[aria-label="Disconnected projects"]')).toBeNull()
+  expect(row()!.textContent).toContain('Run interrupted')
+  expect(row()!.querySelector('[data-focus-state-icon="interrupted"]')).not.toBeNull()
 })
 it('does not let a wrong Host, old Run or older process observation clear the retained projection', async () => {
   await render(); const original = useAppStore.getState().sessions[0]
@@ -87,10 +93,10 @@ it('uses a canonical snapshot to replace the placeholder and invalidates the ori
   await act(async () => useAppStore.setState(state => reduceAgentMembershipSnapshot(state, {
     sessions: [confirmed], timelines: { missing: { agentSessionId: 'missing', revision: 1, items: [] } }, recoveryCandidates: []
   }, new Set())))
-  expect(select(useAppStore.getState()).contexts[0]!.stateLabel).toBe('Disconnected')
-  expect(columns()).toEqual({ missing: 'disconnected' })
+  expect(select(useAppStore.getState()).contexts[0]!.stateLabel).toBe('Interrupted')
+  expect(columns()).toEqual({ missing: 'idle' })
 })
-it('keeps real running connection loss visible, confirmed interrupted Runs compact and recovery errors in Attention', async () => {
+it('keeps real running connection loss visible, confirmed interrupted tasks visible and recovery errors in Attention', async () => {
   const live: SessionSnapshot = { ...composerSession('healthy'), status: { state: 'disconnected', source: 'run-process', observedAt: 1 } }
   const lost: SessionSnapshot = { ...composerSession('known-lost'), processState: 'interrupted', interruptionReason: 'daemon_restart',
     status: { state: 'disconnected', source: 'run-process', observedAt: 1 } }
@@ -98,7 +104,7 @@ it('keeps real running connection loss visible, confirmed interrupted Runs compa
   const refused = recoveryCandidateSession(refusedCandidate, { kind: 'unavailable', reason: 'native-handle-unavailable',
     agentSessionId: 'refused', previousRun: refusedCandidate.run, evidence: { kind: 'run-missing', observedAt: 1 } })
   await act(async () => useAppStore.setState({ sessions: [pending(), live, lost, refused] })); await render()
-  expect(columns()).toEqual({ missing: 'idle', healthy: 'idle', 'known-lost': 'disconnected', refused: 'attention' })
+  expect(columns()).toEqual({ missing: 'idle', healthy: 'idle', 'known-lost': 'idle', refused: 'attention' })
   expect(row('healthy')).not.toBeNull(); expect(row('refused')).not.toBeNull()
   expect(row('refused')!.getAttribute('aria-label')).toContain('Failed')
 })
@@ -115,4 +121,51 @@ it('reopening Focus and unrelated output retain the original input, draft and cl
   expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
   expect(document.activeElement).toBe(input); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 8])
   expect(snapshot).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+})
+
+it('never treats stale starting, working or done facts and an old complete response as current work after interruption', async () => {
+  const sessions = (['starting', 'working', 'done'] as const).flatMap(state => [false, true].map(unobserved => ({
+    ...composerSession(state + '-' + unobserved), processState: 'interrupted' as const,
+    ...(unobserved ? {runUnobserved: true as const} : {}),
+    status: {state, source:'native-hook' as const, observedAt:Date.now()},
+    semanticStatus: {state:'working' as const,source:'native-hook' as const,observedAt:Date.now(),stateEnteredAt:Date.now()-1000}
+  })))
+  await act(async () => useAppStore.setState({sessions, timelines:Object.fromEntries(sessions.map(session => [session.id,{
+    agentSessionId:session.id,revision:1,items:[{id:'old-answer',agentSessionId:session.id,kind:'assistant_message' as const,status:'complete' as const,source:'native-hook' as const,title:'Old reply',content:'Finished before interruption',createdAt:1,updatedAt:1}]
+  }]))})); await render()
+  for (const session of sessions) {
+    expect(columns()[session.id]).toBe('idle')
+    const card=row(session.id)!
+    expect(card.textContent).toContain(session.runUnobserved ? 'Run not observed' : 'Run interrupted')
+    expect(card.querySelector('[data-focus-state-icon="'+(session.runUnobserved ? 'unknown' : 'interrupted')+'"]')).not.toBeNull()
+    expect(card.querySelector('.focus-context__recap')).toBeNull()
+  }
+})
+it('uses the same retained recovery facts in the board, current-focus preview, Space Agents and public Mobile presentation', async () => {
+  const lost:SessionSnapshot={...composerSession('lost'),processState:'interrupted',status:{state:'disconnected',source:'run-process',observedAt:1}}
+  await act(async()=>useAppStore.setState({sessions:[pending(),lost],agentFocus:{execution:{sessionId:'lost',history:[]},pmo:{sessionId:null}}}))
+  const workspace=composerConfig.workspaces[0]!,snapshot=vi.spyOn(api.sessions,'snapshot'),recover=vi.spyOn(api.sessions,'recover')
+  await act(async()=>root.render(<><GlobalFocusSurface workspaceOpen={false}/><FocusNavigationPreview/><WorkspaceAgentsTool workspace={workspace} sessions={useAppStore.getState().sessions} onOpen={()=>{}}/></>))
+  expect(row('lost')).not.toBeNull()
+  expect(container.querySelector('[data-preview-session="lost"]')?.textContent).toContain('Focused')
+  expect(container.querySelector('[data-preview-count="idle"] b')?.textContent).toBe('2')
+  expect(container.querySelector('.focus-navigation-preview__counts')?.textContent).toContain('Recovery')
+  const space=container.querySelector('.workspace-agents-tool')!
+  expect(space.querySelector('[data-session-id="lost"]')?.textContent).toContain('Run interrupted')
+  expect(space.querySelector('.workspace-agent-group header')?.textContent).toContain('Recovery')
+  const publicRows=readAgentPresentation(useAppStore.getState())
+  expect(publicRows.map(r=>[r.agentSessionId,r.group,r.state])).toEqual([['missing','idle','disconnected'],['lost','idle','disconnected']])
+  expect(publicRows.find(r=>r.agentSessionId==='lost')!.detail).toContain('Run interrupted')
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('lost')
+  expect(snapshot).not.toHaveBeenCalled();expect(recover).not.toHaveBeenCalled()
+})
+it('closing the original Tab with Keep Session and then stopping its Run does not remove the task or current attention', async () => {
+  const session=composerSession('missing'),tab=createWorkbenchTab('original-tab',{kind:'agent',phase:'attached',workspaceId:'workspace',regionId:'original-region',sessionId:session.id})
+  await act(async()=>useAppStore.setState({sessions:[session],tabs:{[tab.id]:tab},layouts:{workspace:createWorkspaceLayout('original-group',[tab.id])},agentFocus:{execution:{sessionId:session.id,history:[]},pmo:{sessionId:null}}}));await render()
+  await act(async()=>{expect(await useAppStore.getState().closeTab('workspace','original-group',tab.id,{keepAgentSessions:true})).toBe(true)})
+  expect(useAppStore.getState().sessions.map(s=>s.id)).toEqual(['missing']);expect(row()).not.toBeNull()
+  await act(async()=>useAppStore.getState().applyEvent(processEvent({state:'exited'})))
+  expect(columns()).toEqual({missing:'idle'});expect(row()).not.toBeNull()
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('missing')
+  expect(useAppStore.getState().agentComposerDrafts.missing).toBe('Keep my original unsent draft')
 })

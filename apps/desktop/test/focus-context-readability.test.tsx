@@ -61,9 +61,10 @@ it('does not redraw neighbouring task rows when one Session receives facts', asy
 })
 
 it('keeps empty categories discoverable in the shared filter without repeating project empties', async () => {
-  expect((await focusFilterOptions(container, 'state')).map(option => option.value)).toEqual(['all', 'attention', 'working', 'results', 'idle', 'disconnected'])
+  expect((await focusFilterOptions(container, 'state')).map(option => option.value)).toEqual(['all', 'attention', 'working', 'results', 'idle'])
   await chooseFocusFilter(container, 'state', 'results')
   expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(context => context.dataset.sessionId)).toEqual(['a'])
-  expect([...container.querySelectorAll<HTMLElement>('.focus-context-group')].map(group => [group.dataset.bucket, group.dataset.empty ?? 'false'])).toEqual([['attention', 'true'], ['working', 'true'], ['results', 'false'], ['idle', 'true'], ['disconnected', 'true']])
+  expect([...container.querySelectorAll<HTMLElement>('.focus-context-group')].map(group => [group.dataset.bucket, group.dataset.empty ?? 'false'])).toEqual([['results', 'false']])
+  expect([...container.querySelectorAll<HTMLElement>('.focus-project-lanes__status-rail [data-bucket]')].map(group=>group.dataset.bucket)).toEqual(['attention','working','idle'])
   expect(container.textContent).not.toContain('Nothing here')
 })

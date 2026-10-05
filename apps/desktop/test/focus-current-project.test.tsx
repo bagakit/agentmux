@@ -78,12 +78,11 @@ it('keeps entry order and original DOM when same-group task activity changes',as
  expect(useAppStore.getState().agentFocus).toBe(before.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
  const contexts=createFocusProjectionSelector()(useAppStore.getState()).contexts,copy=[...contexts];groupFocusContexts(contexts);expect(contexts).toEqual(copy)
 })
-it('keeps unconfirmed initial entry order in the actual expanded Disconnected project',async()=>{
+it('keeps unconfirmed initial entry order in the original Recovery project',async()=>{
  const now=Date.now()-10000,sessions=['offline-old','offline-new'].map(id=>({...moteAgent(id,null),processState:'interrupted' as const,status:{state:'disconnected' as const,source:'native-hook' as const,observedAt:2}}))
  const timelines=Object.fromEntries(sessions.map((s,i)=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:s.id+'-event',agentSessionId:s.id,kind:'assistant_message' as const,source:'native-hook' as const,status:'complete' as const,title:'Reply',content:'Retained reply',createdAt:now+i*1000,updatedAt:now+i*1000}]}]))
  await act(async()=>useAppStore.setState({sessions,timelines}));await render(null)
- const trigger=container.querySelector<HTMLButtonElement>('.focus-disconnected-projects__toggle')!;expect(trigger).not.toBeNull();await act(async()=>trigger.click())
- expect([...container.querySelectorAll<HTMLElement>('.focus-disconnected-projects__cards .focus-context')].map(n=>n.dataset.sessionId)).toEqual(['offline-old','offline-new'])
+ expect([...container.querySelectorAll<HTMLElement>('.focus-context-group[data-bucket="idle"] .focus-context')].map(n=>n.dataset.sessionId)).toEqual(['offline-old','offline-new'])
 })
 it('reuses grouped activity ordering in the actual Space Agents tool without a second comparator',async()=>{
  const now=Date.now()-10000,sessions=['older','newer'].map(id=>({...moteAgent(id,null),status:{state:'working' as const,source:'native-hook' as const,observedAt:Date.now()}}))

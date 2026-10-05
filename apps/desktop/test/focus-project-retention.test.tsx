@@ -13,7 +13,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { chooseFocusFilter, focusFilterOptions } from './fixtures/focus-filter-menu'
 
 // Only PTY painting is isolated. Global, original Timeline/reader, Store,
-// Project/Disconnected components, SessionPane and shared Markdown remain real.
+// Original project components, SessionPane and shared Markdown remain real.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => createElement('output', { 'data-private-pty-paint': sessionId })
 }))
@@ -56,13 +56,7 @@ function button(label: string): HTMLButtonElement {
   const node = [...container!.querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === label || node.textContent === label)
   expect(node, label).toBeDefined(); return node!
 }
-function directory(): HTMLElement {
-  const node = container!.querySelector<HTMLElement>('.focus-disconnected-projects')
-  expect(node).not.toBeNull(); return node!
-}
-function directoryIds(): string[] {
-  return [...directory().querySelectorAll<HTMLElement>('.focus-context')].map(node => node.dataset.sessionId!)
-}
+
 async function click(node: HTMLElement): Promise<void> { expect(node).toBeDefined(); await act(async () => node.click()) }
 async function mount(sessions: SessionSnapshot[], workspaces: WorkspaceRecord[], entries: AgentFocusHistoryEntry[], selectedId: string | null = null): Promise<void> {
   useAppStore.setState(state => ({ config: { ...state.config!, workspaces }, sessions, agentFocus: {
@@ -72,12 +66,7 @@ async function mount(sessions: SessionSnapshot[], workspaces: WorkspaceRecord[],
   await act(async () => new Promise<void>(resolve => setTimeout(resolve, 30)))
   expect(container!.querySelector('.recent-focus')).not.toBeNull()
 }
-async function reveal(lane: HTMLElement): Promise<HTMLButtonElement> {
-  const trigger = lane.querySelector<HTMLButtonElement>('.focus-disconnected-entry')
-  expect(trigger).not.toBeNull()
-  await act(async () => { trigger!.focus(); trigger!.click() })
-  expect(directory().dataset.expanded).toBe('true'); return trigger!
-}
+
 async function search(value: string): Promise<void> {
   const input = container!.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
   expect(input).not.toBeNull()
@@ -124,50 +113,24 @@ afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-it('keeps online, offline and retained project entry points, and returns from the exact offline lane without replacing the board', async () => {
-  const sessions = [agent('live', _hygiene_fixturePath("current")), agent('off-one', _hygiene_fixturePath("offline"), 'local', true), agent('off-two', _hygiene_fixturePath("offline"), 'local', true)]
-  const entries = [history('archived', 'past', 'Past project', NOW - 3 * DAY, { branch: 'old-branch', topicId: 'old-topic' }), history('off-one', 'offline', 'Offline project', NOW - DAY)]
-  await mount(sessions, [workspace('current', 'Current project', _hygiene_fixturePath("current")), workspace('offline', 'Offline project', _hygiene_fixturePath("offline"))], entries)
-  expect(boardLanes().map(row => row.dataset.projectKey).sort()).toEqual([key('local', 'current'), key('local', 'offline')].sort())
-  expect(directory().dataset.expanded).toBe('false')
-  expect(container!.querySelector('.focus-project-board__live [data-session-id="off-one"]')).toBeNull()
-  expect(retainedRows().map(row => row.dataset.retainedProject)).toEqual([key('local', 'past')])
-  const toggle = button('Retained projects'); expect(toggle.getAttribute('aria-expanded')).toBe('false')
-  expect(toggle.querySelector('.focus-retained-projects__count')?.textContent).toBe('1')
-  await click(toggle); expect(retainedRow('local', 'past').getAttribute('aria-label')).toBe('View Past project focus history')
-  expect(retainedRow('local', 'past').title).toContain('old-branch'); expect(retainedRow('local', 'past').title).toContain('old-topic')
-  const original = container!.querySelector('.focus-project-board__live [data-session-id="live"]')!
-  expect(original).not.toBeNull()
-  const offline = boardLanes().find(row => row.dataset.projectId === 'offline')!
-  expect(offline.querySelector('.focus-disconnected-entry')?.textContent).toContain('2')
-  const focus = useAppStore.getState().agentFocus, drafts = useAppStore.getState().agentComposerDrafts
-  const trigger = await reveal(offline)
-  expect(directoryIds()).toEqual(['off-one', 'off-two'])
-  expect(document.activeElement?.getAttribute('data-session-id')).toBe('off-one')
-  expect(retainedRow('local', 'past').isConnected).toBe(true)
-  await click(button('Return to board'))
-  expect(directory().dataset.expanded).toBe('false'); expect(document.activeElement).toBe(trigger)
-  expect(container!.querySelector('.focus-project-board__live [data-session-id="live"]')).toBe(original)
-  expect(boardLanes()).toHaveLength(2); expect(useAppStore.getState().sessions).toBe(sessions)
-  expect(useAppStore.getState().agentFocus).toBe(focus); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+it('keeps interrupted and retained project entry points together with the original live task and workface',async()=>{
+  const sessions=[agent('live',_hygiene_fixturePath("current")),agent('off-one',_hygiene_fixturePath("offline"),'local',true),agent('off-two',_hygiene_fixturePath("offline"),'local',true)]
+  const entries=[history('archived','past','Past project',NOW-3*DAY,{branch:'old-branch',topicId:'old-topic'})]
+  await mount(sessions,[workspace('current','Current project',_hygiene_fixturePath("current")),workspace('offline','Offline project',_hygiene_fixturePath("offline"))],entries)
+  expect(boardLanes().map(row=>row.dataset.projectKey).sort()).toEqual([key('local','current'),key('local','offline')].sort())
+  const original=container!.querySelector('[data-session-id="live"]'),offline=boardLanes().find(row=>row.dataset.projectId==='offline')!
+  expect(offline.querySelectorAll('.focus-context')).toHaveLength(2);expect(offline.textContent).toContain('Run interrupted')
+  expect(retainedRows().map(row=>row.dataset.retainedProject)).toEqual([key('local','past')]);const before=useAppStore.getState()
+  await click(button('Retained projects'));expect(retainedRow('local','past').title).toContain('old-branch')
+  expect(container!.querySelector('[data-session-id="live"]')).toBe(original);expect(useAppStore.getState().sessions).toBe(sessions);expect(useAppStore.getState().agentFocus).toBe(before.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
 
-it('does not auto-open an all-offline board and explicitly locates the chosen project before returning to its original title', async () => {
-  const sessions = [agent('off-alpha', _hygiene_fixturePath("alpha"), 'local', true), agent('off-beta', _hygiene_fixturePath("beta"), 'local', true)]
-  await mount(sessions, [workspace('alpha', 'Alpha project', _hygiene_fixturePath("alpha")), workspace('beta', 'Beta project', _hygiene_fixturePath("beta"))], [])
-  expect(directory().dataset.expanded).toBe('false'); expect(boardLanes()).toHaveLength(2)
-  expect(container!.querySelector<HTMLElement>('.focus-project-board__live')!.hidden).toBe(false)
-  expect(directory().querySelector('.focus-context')).toBeNull()
-  expect(directory().querySelector('.focus-disconnected-projects__count')?.textContent).toBe('2 projects · 2 contexts')
-  const beta = boardLanes().find(row => row.dataset.projectId === 'beta')!, trigger = await reveal(beta)
-  expect(directoryIds().sort()).toEqual(['off-alpha', 'off-beta'])
-  expect(document.activeElement?.getAttribute('data-session-id')).toBe('off-beta')
-  const target = [...directory().querySelectorAll<HTMLElement>('[data-lane-id]')].find(node => node.dataset.laneId === beta.dataset.laneId)!
-  expect(target).toBeDefined(); expect(vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts).toContain(target)
-  await click(button('Return to board'))
-  expect(document.activeElement).toBe(trigger); expect(boardLanes().map(row => row.dataset.projectId)).toEqual(['alpha', 'beta'])
-  expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
-  expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(api.sessions.resume).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
+it('shows all interrupted projects directly in Recovery without opening a directory or resuming anything',async()=>{
+  const sessions=[agent('off-alpha',_hygiene_fixturePath("alpha"),'local',true),agent('off-beta',_hygiene_fixturePath("beta"),'local',true)]
+  await mount(sessions,[workspace('alpha','Alpha project',_hygiene_fixturePath("alpha")),workspace('beta','Beta project',_hygiene_fixturePath("beta"))],[])
+  expect(boardLanes()).toHaveLength(2);expect(container!.querySelectorAll('.focus-context')).toHaveLength(2);expect(container!.querySelector('[aria-label="Disconnected projects"]')).toBeNull()
+  for(const row of boardLanes())expect(row.querySelector('[data-bucket="idle"]')).not.toBeNull()
+  expect(useAppStore.getState().sessions).toBe(sessions);expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull();expect(api.sessions.launchAgent).not.toHaveBeenCalled();expect(api.sessions.resume).not.toHaveBeenCalled();expect(api.sessions.stop).not.toHaveBeenCalled()
 })
 
 it('retains only recorded Agent Host/Project facts without inventing current cards, and marks zero or invalid-date visits as unknown', async () => {
@@ -209,18 +172,16 @@ it('isolates project filtering and offline ownership across Hosts with identical
   await mount(sessions, [workspace('same-id', 'Same project', _hygiene_fixturePath("same/repo")), workspace('same-id', 'Same project', _hygiene_fixturePath("same/repo"), 'other')], entries)
   expect(boardLanes()).toHaveLength(2); expect(new Set(boardLanes().map(row => row.dataset.laneId)).size).toBe(2)
   expect(boardLanes().map(row => row.dataset.projectKey).sort()).toEqual([key('local', 'same-id'), key('other', 'same-id')].sort())
-  expect(directory().querySelector('.focus-disconnected-projects__count')?.textContent).toBe('2 projects · 2 contexts')
+  expect(container!.querySelectorAll('.focus-context')).toHaveLength(2)
   const options = await focusFilterOptions(container!, 'project')
   expect(options.filter(option => option.value === key('local', 'same-id'))).toHaveLength(1)
   expect(options.find(option => option.value === key('local', 'same-id'))?.text).toContain('Local proof')
   expect(options.find(option => option.value === key('other', 'same-id'))?.text).toContain('Other proof')
-  await reveal(boardLanes().find(row => row.dataset.projectKey === key('other', 'same-id'))!)
-  expect(document.activeElement?.getAttribute('data-session-id')).toBe('other-off')
-  await chooseFocusFilter(container!, 'project', key('local', 'same-id')); expect(directoryIds()).toEqual(['local-off'])
-  await chooseFocusFilter(container!, 'project', key('other', 'same-id')); expect(directoryIds()).toEqual(['other-off'])
+  await chooseFocusFilter(container!, 'project', key('local', 'same-id')); expect([...container!.querySelectorAll<HTMLElement>('.focus-context')].map(node=>node.dataset.sessionId)).toEqual(['local-off'])
+  await chooseFocusFilter(container!, 'project', key('other', 'same-id')); expect([...container!.querySelectorAll<HTMLElement>('.focus-context')].map(node=>node.dataset.sessionId)).toEqual(['other-off'])
   await click(button('Retained projects'))
   await chooseFocusFilter(container!, 'project', key('local', 'same-past-id'))
-  expect(directoryIds()).toHaveLength(0); expect(retainedRows().map(row => row.dataset.retainedProject)).toEqual([key('local', 'same-past-id')])
+  expect([...container!.querySelectorAll<HTMLElement>('.focus-context')].map(node=>node.dataset.sessionId)).toHaveLength(0); expect(retainedRows().map(row => row.dataset.retainedProject)).toEqual([key('local', 'same-past-id')])
   expect(button('Retained projects').querySelector('.focus-retained-projects__count')?.textContent).toBe('1 of 2')
   expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().agentFocus.execution.history).toBe(entries)
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
