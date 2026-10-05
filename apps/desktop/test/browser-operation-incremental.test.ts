@@ -192,6 +192,45 @@ describe('Browser operation writes only original related facts', () => {
     expect(journal.getPersistenceWarning()).toBeUndefined()
   })
 
+  it.each([true, false])('an older failure cannot replace a newer operation warning (original ACK=%s)', async acknowledged => {
+    const f = await fixture([operation('older'), operation('newer')])
+    let call = 0, entered!: () => void, release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve }), held = new Promise<void>(resolve => { release = resolve })
+    const journal = new BrowserOperationJournal({ load: () => f.store.load(), async save(changes) {
+      if (++call === 1) { entered(); await held; throw new Error('Obsolete older save failed') }
+      if (changes.operations.some(value => value.metadata.id === 'newer') && call <= 3) throw new Error('Newer original save failed')
+      await f.store.save(changes)
+    } })
+    const older = journal.startStep('older', { method: 'snapshot', label: 'Original delayed save' })
+    await started
+    if (acknowledged) await journal.finishStep('older', 1, { status: 'completed' })
+    await journal.startStep('newer', { method: 'snapshot', label: 'Newer pending save' })
+    expect(journal.getPersistenceWarning()).toContain('Newer original save failed')
+    release(); await older
+    expect(journal.getPersistenceWarning()).toContain('Newer original save failed')
+  })
+
+  it('a confirmed older failure cannot blame unrelated facts that are still saving', async () => {
+    const f = await fixture([operation('older'), operation('saving')])
+    let call = 0, enterOlder!: () => void, releaseOlder!: () => void, enterSaving!: () => void, releaseSaving!: () => void
+    const olderEntered = new Promise<void>(resolve => { enterOlder = resolve }), olderHeld = new Promise<void>(resolve => { releaseOlder = resolve })
+    const savingEntered = new Promise<void>(resolve => { enterSaving = resolve }), savingHeld = new Promise<void>(resolve => { releaseSaving = resolve })
+    const journal = new BrowserOperationJournal({ load: () => f.store.load(), async save(changes) {
+      if (++call === 1) { enterOlder(); await olderHeld; throw new Error('Confirmed original snapshot failed late') }
+      if (call === 3) { enterSaving(); await savingHeld }
+      await f.store.save(changes)
+    } })
+    const older = journal.startStep('older', { method: 'snapshot', label: 'Delayed original save' })
+    await olderEntered
+    await journal.finishStep('older', 1, { status: 'completed' })
+    const saving = journal.startStep('saving', { method: 'snapshot', label: 'Still saving without a failure' })
+    await savingEntered
+    releaseOlder(); await older
+    expect(journal.getPersistenceWarning()).toBeUndefined()
+    releaseSaving(); await saving
+    expect(journal.getPersistenceWarning()).toBeUndefined()
+  })
+
   it('a live save ACK cannot claim the unknown original history was loaded', async () => {
     const journal = new BrowserOperationJournal({ async load() { return null }, async save() {} })
     await journal.start({ id: 'live', browserId: 'browser-live', operator: { id: 'person', name: 'Person' }, summary: 'Healthy live facts', url: 'https://example.invalid/' })
