@@ -75,9 +75,10 @@ function expectOriginalTabRow(ids: string[], selected: string | null = null) {
     creationCount++
     expect(create[0]!.closest('.workbench-tab-strip')).toBe(strip)
     expect(create[0]!.closest('.pane-tabbar__actions')).toBeNull()
-    expect(create[0]!.classList.contains('workbench-tab-create')).toBe(true)
+    expect(create[0]!.classList.contains('pane-action')).toBe(true)
     expect(create[0]!.querySelector('svg')).not.toBeNull()
-    expect(create[0]!.textContent).toBe('New discussion')
+    expect(create[0]!.textContent).toBe('')
+    expect(create[0]!.title).toBe('New discussion')
     expect(strip.querySelector('.pane-tabbar__tabs')!.lastElementChild).toBe(create[0])
   }
   // No second row of workaround discussion buttons or creation controls.
