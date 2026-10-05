@@ -3,17 +3,7 @@ import { AgentAvatar } from './AgentAvatar'
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import * as Dialog from '@radix-ui/react-dialog'
-import {
-  Bot,
-  GitBranch,
-  LoaderCircle,
-  MessageSquarePlus,
-  NotebookText,
-  Play,
-  RefreshCw,
-  Unlink,
-  X
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { describeDeliveryEvidence } from '../lib/delivery-evidence'
@@ -26,6 +16,17 @@ import { executorDetectionKey, useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeActionCreateConversationIcon = semanticIconComponent('action.create-conversation')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionUnlinkIcon = semanticIconComponent('action.unlink')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+
 
 export function BoardDiscussionCanvas({
   row,
@@ -116,7 +117,7 @@ export function BoardDiscussionCanvas({
   }
 
   const isTopic = row?.kind === 'topic'
-  const ContextIcon = isTopic ? NotebookText : GitBranch
+  const ContextIcon = isTopic ? ThemeObjectNotebookIcon : ThemeObjectBranchIcon
 
   return (
     <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
@@ -127,7 +128,7 @@ export function BoardDiscussionCanvas({
           onEscapeKeyDown={(event) => launching && event.preventDefault()}
         >
           <header className="discussion-canvas__header">
-            <span className="discussion-canvas__mark"><MessageSquarePlus size={18} /></span>
+            <span className="discussion-canvas__mark"><ThemeActionCreateConversationIcon size={18} /></span>
             <div>
               <div className="eyebrow">{isTopic ? 'Topic inbox' : 'Branch inbox'}</div>
               <Dialog.Title>Discuss {row?.name ?? (isTopic ? 'this Topic' : 'this Branch')}</Dialog.Title>
@@ -138,7 +139,7 @@ export function BoardDiscussionCanvas({
               </Dialog.Description>
             </div>
             <button type="button" className="icon-button" aria-label="Close discussion canvas" disabled={launching} onClick={onClose}>
-              <X size={15} />
+              <ThemeActionCloseIcon size={15} />
             </button>
           </header>
 
@@ -155,7 +156,7 @@ export function BoardDiscussionCanvas({
 
               {!row.path ? (
                 <section className="discussion-unavailable">
-                  <Unlink size={19} />
+                  <ThemeActionUnlinkIcon size={19} />
                   <div>
                     <strong>Create a worktree first</strong>
                     <p>AgentMux will not checkout an unbound Branch implicitly.</p>
@@ -177,7 +178,7 @@ export function BoardDiscussionCanvas({
                     <header>
                       <div><span>Agent</span><small>Detected on {host.kind === 'local' ? 'this computer' : host.label}</small></div>
                       <button type="button" className="icon-button" title="Refresh Agents" disabled={detecting} onClick={() => void detectExecutors(hostId)}>
-                        {detecting ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+                        {detecting ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
                       </button>
                     </header>
                     <div className="discussion-provider-grid">
@@ -225,12 +226,12 @@ export function BoardDiscussionCanvas({
             {/* 只声明证据支持的那一句。启动投递最多证明送到了——写成"已回复"会让人以为
                 对方看过并回应了，而此刻连读都未必读到。 */}
             <span>
-              <Bot size={12} /> Core-owned launch · first message will read{' '}
+              <ThemeObjectAgentIcon size={12} /> Core-owned launch · first message will read{' '}
               <strong>{describeDeliveryEvidence('delivered').label}</strong> until the Agent replies
             </span>
             <button type="button" className="small-button" disabled={launching} onClick={onClose}>Cancel</button>
             <button type="button" className="primary-button" disabled={!canLaunch || launching} onClick={() => void startDiscussion()}>
-              {launching ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}
+              {launching ? <ThemeStatusLoadingIcon className="spin" size={14} /> : <ThemeActionStartIcon size={14} />}
               {launching ? 'Starting…' : 'Start discussion'}
             </button>
           </footer>

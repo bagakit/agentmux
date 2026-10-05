@@ -1,12 +1,21 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, ListTree, Minus, Plus, Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
 import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import { FilePreviewState } from './FilePreviewState'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import 'pdfjs-dist/web/pdf_viewer.css'
 import '../styles/pdf-content.css'
+
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeNavigationPreviousIcon = semanticIconComponent('navigation.previous')
+const ThemeNavigationNextIcon = semanticIconComponent('navigation.next')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeObjectTreeIcon = semanticIconComponent('object.tree')
+const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
+
 
 type ScaleMode = 'page-width' | 'page-fit' | 'custom'
 type Reading = {
@@ -208,14 +217,14 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
     if (event.key === 'Escape' && outlineOpen) { event.preventDefault(); setOutlineOpen(false); outlineButton.current?.focus() }
   }}>
     <div className="pdf-content__search" role="search" aria-label="Search PDF text">
-      <Search size={13} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Find in PDF" placeholder="Find in PDF" value={currentSearch?.query ?? ''} disabled={!readable} onChange={event => find(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); find(currentSearch?.query ?? '', currentSearch?.caseSensitive, true, event.shiftKey) } }} />
+      <ThemeActionSearchIcon size={13} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Find in PDF" placeholder="Find in PDF" value={currentSearch?.query ?? ''} disabled={!readable} onChange={event => find(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); find(currentSearch?.query ?? '', currentSearch?.caseSensitive, true, event.shiftKey) } }} />
       <button className="small-button" aria-label="Match case in PDF" title="Match case" aria-pressed={currentSearch?.caseSensitive ?? false} disabled={!readable} onClick={() => find(currentSearch?.query ?? '', !currentSearch?.caseSensitive)}>Aa</button>
-      <button className="icon-button" aria-label="Previous PDF match" disabled={!readable || !currentSearch?.query} onClick={() => find(currentSearch!.query, currentSearch!.caseSensitive, true, true)}><ChevronLeft size={13} /></button>
-      <button className="icon-button" aria-label="Next PDF match" disabled={!readable || !currentSearch?.query} onClick={() => find(currentSearch!.query, currentSearch!.caseSensitive, true)}><ChevronRight size={13} /></button>
+      <button className="icon-button" aria-label="Previous PDF match" disabled={!readable || !currentSearch?.query} onClick={() => find(currentSearch!.query, currentSearch!.caseSensitive, true, true)}><ThemeNavigationPreviousIcon size={13} /></button>
+      <button className="icon-button" aria-label="Next PDF match" disabled={!readable || !currentSearch?.query} onClick={() => find(currentSearch!.query, currentSearch!.caseSensitive, true)}><ThemeNavigationNextIcon size={13} /></button>
       <output aria-live="polite">{!currentSearch?.query ? '' : currentSearch.state === 3 ? 'Searching…' : currentSearch.state === 1 ? 'No matches' : `${currentSearch.current} / ${currentSearch.total}${currentSearch.state === 2 ? ' · Wrapped' : ''}`}</output>
     </div>
     <div className="pdf-content__body">
-      {outlineOpen && currentOutline ? <nav className="pdf-content__outline" aria-label="PDF outline"><div className="pdf-content__outline-heading"><strong>Contents</strong><button className="icon-button" aria-label="Close PDF outline" onClick={() => { setOutlineOpen(false); outlineButton.current?.focus() }}><X size={13} /></button></div>
+      {outlineOpen && currentOutline ? <nav className="pdf-content__outline" aria-label="PDF outline"><div className="pdf-content__outline-heading"><strong>Contents</strong><button className="icon-button" aria-label="Close PDF outline" onClick={() => { setOutlineOpen(false); outlineButton.current?.focus() }}><ThemeActionCloseIcon size={13} /></button></div>
         {currentOutline.phase === 'loading' ? <p>Reading outline…</p> : currentOutline.phase === 'error' ? <p role="status">{currentOutline.message}</p> : !currentOutline.entries.length ? <p>No outline in this PDF.</p> : <ol>{currentOutline.entries.map((entry, index) => <li key={index} style={{ paddingLeft: Math.min(120, entry.depth * 12) }}>{entry.dest ? <button title={entry.title} onClick={() => {
           const navigation = outlineNavigation.current
           if (navigation?.owner !== data || !entry.dest) return
@@ -257,20 +266,20 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
     </div>
     <footer className="pdf-content__tools">
       <div className="file-preview__controls" role="group" aria-label="PDF pages">
-        <button ref={outlineButton} className="icon-button" aria-label="PDF contents" title="Show PDF contents" aria-expanded={outlineOpen} disabled={!readable} onClick={() => setOutlineOpen(value => !value)}><ListTree size={13} /></button>
-        <button className="icon-button" aria-label="Previous PDF page" title="Previous page (Page Up)" disabled={!readable || current!.page <= 1} onClick={() => page(current!.page - 1)}><ChevronLeft size={13} /></button>
+        <button ref={outlineButton} className="icon-button" aria-label="PDF contents" title="Show PDF contents" aria-expanded={outlineOpen} disabled={!readable} onClick={() => setOutlineOpen(value => !value)}><ThemeObjectTreeIcon size={13} /></button>
+        <button className="icon-button" aria-label="Previous PDF page" title="Previous page (Page Up)" disabled={!readable || current!.page <= 1} onClick={() => page(current!.page - 1)}><ThemeNavigationPreviousIcon size={13} /></button>
         <TextInput key={`${phase}:${current?.page}`} className="pdf-content__page" aria-label="PDF page" type="number" min={1} max={current?.pages || undefined} defaultValue={readable ? current!.page : ''} disabled={!readable}
           onBlur={event => { page(event.currentTarget.valueAsNumber); event.currentTarget.value = String(viewer.current?.currentPageNumber ?? '') }}
           onKeyDown={event => { if (event.key === 'Enter') { page(event.currentTarget.valueAsNumber); event.currentTarget.blur() } }} />
         <span className="file-preview__metadata">/ {current?.pages || '—'}</span>
-        <button className="icon-button" aria-label="Next PDF page" title="Next page (Page Down)" disabled={!readable || current!.page >= current!.pages} onClick={() => page(current!.page + 1)}><ChevronRight size={13} /></button>
+        <button className="icon-button" aria-label="Next PDF page" title="Next page (Page Down)" disabled={!readable || current!.page >= current!.pages} onClick={() => page(current!.page + 1)}><ThemeNavigationNextIcon size={13} /></button>
       </div>
       <div className="file-preview__controls" role="group" aria-label="PDF zoom">
         <button className="small-button" aria-pressed={readable && current!.mode === 'page-width'} disabled={!readable} onClick={() => scale('page-width')}>Fit width</button>
         <button className="small-button" aria-pressed={readable && current!.mode === 'page-fit'} disabled={!readable} onClick={() => scale('page-fit')}>Fit page</button>
-        <button className="icon-button" aria-label="Zoom PDF out" title="Zoom out (-)" disabled={!readable || current!.scale <= MIN_SCALE} onClick={() => scale(current!.scale / 1.25)}><Minus size={13} /></button>
+        <button className="icon-button" aria-label="Zoom PDF out" title="Zoom out (-)" disabled={!readable || current!.scale <= MIN_SCALE} onClick={() => scale(current!.scale / 1.25)}><ThemeActionCollapseIcon size={13} /></button>
         <button className="pdf-content__percent small-button" aria-label="PDF original size" title="Original size" disabled={!readable} onClick={() => scale(1)}>{readable ? `${Math.round(current!.scale * 100)}%` : '—'}</button>
-        <button className="icon-button" aria-label="Zoom PDF in" title="Zoom in (+)" disabled={!readable || current!.scale >= MAX_SCALE} onClick={() => scale(current!.scale * 1.25)}><Plus size={13} /></button>
+        <button className="icon-button" aria-label="Zoom PDF in" title="Zoom in (+)" disabled={!readable || current!.scale >= MAX_SCALE} onClick={() => scale(current!.scale * 1.25)}><ThemeActionZoomInIcon size={13} /></button>
       </div>
     </footer>
   </div>

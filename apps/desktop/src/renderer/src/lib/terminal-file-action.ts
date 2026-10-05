@@ -1,6 +1,10 @@
-import { FolderOpen, PackageOpen } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { isSystemArtifactPath, type TerminalPathLink } from '@agentmux/client-ui/terminal-path-link'
 import { revealInFileManagerLabel } from './host-platform'
+
+const ThemeActionRevealFileIcon = semanticIconComponent('action.reveal-file')
+const ThemeActionOpenSystemIcon = semanticIconComponent('action.open-system')
+
 
 /** The one click route for terminal file links; system errors never fall back to an editor tab. */
 export async function openTerminalFileLink(input: {
@@ -21,7 +25,7 @@ export type TerminalFileMenuAction = {
   key: 'reveal' | 'open-system'
   label: string
   title: string
-  icon: typeof FolderOpen
+  icon: typeof ThemeActionRevealFileIcon
   onSelect(): void
 }
 
@@ -35,11 +39,11 @@ export function terminalFileMenuActions(input: {
   const path = input.link.path
   const revealLabel = revealInFileManagerLabel()
   const actions: TerminalFileMenuAction[] = [{
-    key: 'reveal', label: revealLabel, title: `${revealLabel} · ${path}`, icon: FolderOpen,
+    key: 'reveal', label: revealLabel, title: `${revealLabel} · ${path}`, icon: ThemeActionRevealFileIcon,
     onSelect: () => input.onReveal(path)
   }]
   if (isSystemArtifactPath(path)) actions.push({
-    key: 'open-system', label: 'Open with system', title: `Open with system · ${path}`, icon: PackageOpen,
+    key: 'open-system', label: 'Open with system', title: `Open with system · ${path}`, icon: ThemeActionOpenSystemIcon,
     onSelect: () => input.onOpenSystem(path)
   })
   return actions

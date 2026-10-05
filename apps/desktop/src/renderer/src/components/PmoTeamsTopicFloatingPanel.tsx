@@ -1,4 +1,4 @@
-import { Archive, Check, Circle, X, ArrowUpRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
@@ -39,6 +39,15 @@ import { spatialCatalog } from '../lib/space-agent-control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { contextOperationKey, type MoteContextFailure, type MoteContextOperation, type MoteContextTarget } from '../../../shared/mote-context-observation'
 import { MoteContextStatus } from './MoteContextStatus'
+
+const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
+const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 function capturedContextReference(reference: WorkbenchProjectionSelection | null | undefined): WorkbenchProjectionSelection | null {
   return reference ? { displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId,
@@ -115,10 +124,10 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
         avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
       <strong>{topic.title}</strong>
     </span><span className="mote-chooser__status">
-      {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? '?' : <Circle size={7} />}</span>}
+      {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? '?' : <ThemeStatusNeutralIcon size={7} />}</span>}
       <span className="mote-chooser__status-text">{identityStatus}</span>
     </span>
-    {selected ? <Check className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
+    {selected ? <ThemeStatusSelectedIcon className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
   </button>
   return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} onChangeIcon={onAvatar} moteActions={{
     pinned, onTogglePin: () => useAppStore.getState().togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id),
@@ -181,11 +190,11 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
       {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} targetAgent={targetAgent} onReferenceSelect={onReferenceSelect} />)}
     </div>
     <div className="mote-chooser__actions">
-      <button type="button" className="mote-chooser__archive" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><Archive size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
+      <button type="button" className="mote-chooser__archive" aria-label="Show archived Motes" aria-pressed={showArchived} title={showArchived ? 'Hide archived Motes' : 'Show archived Motes'} onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
       <button type="button" aria-label="Show Mote avatars only" aria-pressed={railMode === 'avatars'} title={railMode === 'cards' ? 'Show avatars only' : 'Show Mote cards'} onClick={onToggleMode}>
-        {railMode === 'cards' ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+        {railMode === 'cards' ? <ThemeLayoutCloseLeftIcon size={14} /> : <ThemeLayoutOpenLeftIcon size={14} />}
       </button>
-      <button type="button" aria-label="Close Mote" title="Close" onClick={onClose}><X size={13} /></button>
+      <button type="button" aria-label="Close Mote" title="Close" onClick={onClose}><ThemeActionCloseIcon size={13} /></button>
     </div>
     {identityAnchor?.isConnected ? <MoteIdentityTip anchor={identityAnchor} /> : null}
   </div>
@@ -628,7 +637,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
               locationName={(reference, index) => (useAppStore.getState().config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? 'Workspace') + ' · 位置 ' + (index + 1)} />
             {profileTrigger}
             <button type="button" className="pane-action"
-            aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ArrowUpRight size={14} /></button></>} /></MoteWorkface>}
+            aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ThemeActionOpenExternalIcon size={14} /></button></>} /></MoteWorkface>}
       </MoteProfilePopover>
     </div>
     </div>

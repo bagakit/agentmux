@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, ExternalLink, GitBranch, Link2, PanelLeftClose, Shapes, SquareTerminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -8,6 +8,15 @@ import { revealInFileManagerLabel } from '../lib/host-platform'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
 import { useAppStore } from '../store'
+
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
+const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+
 
 /**
  * 工作区侧栏一行（Scratch / Project）的右键菜单。
@@ -101,12 +110,12 @@ export function createWorkspaceRowMenuModel(input: {
   }
 }
 
-const WORKSPACE_ROW_MENU_ICONS: Record<WorkspaceRowActionId, typeof Copy> = {
-  'copy-path': Copy,
-  'copy-branch': GitBranch,
-  reveal: ExternalLink,
-  'open-terminal': SquareTerminal,
-  remove: PanelLeftClose
+const WORKSPACE_ROW_MENU_ICONS: Record<WorkspaceRowActionId, typeof ThemeActionCopyIcon> = {
+  'copy-path': ThemeActionCopyIcon,
+  'copy-branch': ThemeObjectBranchIcon,
+  reveal: ThemeActionOpenExternalIcon,
+  'open-terminal': ThemeObjectTerminalIcon,
+  remove: ThemeLayoutCloseLeftIcon
 }
 
 export function WorkspaceRowContextMenu({
@@ -172,10 +181,10 @@ export function WorkspaceRowContextMenu({
           onCloseAutoFocus={menu.onCloseAutoFocus}
         >
           {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(onChangeIcon)}>
-            <Shapes size={14} /><span>Change icon…</span>
+            <ThemeObjectShapesIcon size={14} /><span>Change icon…</span>
           </ContextMenu.Item> : null}
           {onGroupProjects ? <ContextMenu.Item className="tab-context-menu__item" onSelect={onGroupProjects}>
-            <Link2 size={14} /><span>Group across devices...</span>
+            <ThemeObjectLinkIcon size={14} /><span>Group across devices...</span>
           </ContextMenu.Item> : null}
           {model.entries.map((entry, index) => {
             if (entry.kind === 'separator') {

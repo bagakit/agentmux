@@ -12,7 +12,7 @@ import { SpaceIconPicker } from './SpaceIconPicker'
 import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { ProjectActivity } from './ProjectActivity'
 import { useDirectorySessions } from '../lib/workbench-session-subscriptions'
-import { Folders, Layers, Link2, Pin, Plus, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity, type WorkspaceRecord, type SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -40,6 +40,17 @@ import { activityContextsForWorkspaces } from '../lib/activity-groups'
 import { matchesSpaceQuery, navigateSpaceTree } from '../lib/space-tree-navigation'
 import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+
+const ThemeActionPinIcon = semanticIconComponent('action.pin')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeLayoutRows2Icon = semanticIconComponent('layout.rows-2')
+const ThemeLayoutRows3Icon = semanticIconComponent('layout.rows-3')
+const ThemeLayoutRows4Icon = semanticIconComponent('layout.rows-4')
+const ThemeObjectFoldersIcon = semanticIconComponent('object.folders')
+const ThemeObjectSpacesIcon = semanticIconComponent('object.spaces')
+
 
 function folderSectionKey(hostId: string): string { return hostId === 'local' ? 'space:folders' : `space:folders:${hostId}` }
 function projectCollapseKey(id: string): string { return `project:${id}` }
@@ -210,7 +221,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             if (targetId) void selectWorkspace(targetId)
           }}
         >
-          <span className="project-rail-row__icon" aria-hidden="true"><Pin size={11} /></span>
+          <span className="project-rail-row__icon" aria-hidden="true"><ThemeActionPinIcon size={11} /></span>
           <span className="project-rail-row__identity"><strong>{label}</strong></span>
         </button>
       )
@@ -303,7 +314,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             const candidate = projects.find(candidate => candidate.id === id)!
             return `${candidate.name} · ${config?.hosts.find(host => host.id === candidate.hostId)?.label ?? candidate.hostId} · ${displayPath(candidate.repoPath, candidate.hostId)}`
           }).join('\n')}\nSame Git origin; grouping is optional`}
-          onClick={() => setGroupDialog({ seed: project.id })}><Link2 size={13} /></button> : null}
+          onClick={() => setGroupDialog({ seed: project.id })}><ThemeObjectLinkIcon size={13} /></button> : null}
         </div>
       )
       return (
@@ -346,7 +357,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         <SpaceCreateMenu onOpenFolder={chooseFolder} onCreateProjectGroup={() => setGroupDialog({})} />
       </header>
       <div className="space-tree-search">
-        <Search size={13} aria-hidden="true" />
+        <ThemeActionSearchIcon size={13} aria-hidden="true" />
         <TextInput
           ref={searchRef}
           type="search"
@@ -361,7 +372,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {query ? (
           <button type="button" className="icon-button" aria-label="Clear Space search" title="Clear · Esc"
             onClick={() => { changeQuery(''); searchRef.current?.focus() }}>
-            <X size={12} />
+            <ThemeActionClearIcon size={12} />
           </button>
         ) : null}
         <button
@@ -370,7 +381,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           aria-label={densityControlLabel}
           aria-pressed={railDensity !== 'default'}
           title={densityTitle}
-        >{railDensity === 'default' ? <Rows2 size={15} /> : railDensity === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}</button>
+        >{railDensity === 'default' ? <ThemeLayoutRows2Icon size={15} /> : railDensity === 'compact' ? <ThemeLayoutRows3Icon size={15} /> : <ThemeLayoutRows4Icon size={15} />}</button>
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
         {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={changeIcon} visible={visible} /> : null}
@@ -380,7 +391,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : folderSections.length > 1 ? <HostIcon kind="local" size={14} /> : <Folders size={14} />}
+          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : folderSections.length > 1 ? <HostIcon kind="local" size={14} /> : <ThemeObjectFoldersIcon size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed ? <DirectoryActivity workspaces={section.workspaces} visible={visible} /> : undefined} />
@@ -498,7 +509,7 @@ function GroupHeader({
         onClick={onToggle}
       >
         <span className="project-rail-group__identity">
-          <span className="space-disclosure__type project-rail-row__icon"><Layers size={13} aria-label="Automatic path group" /></span>
+          <span className="space-disclosure__type project-rail-row__icon"><ThemeObjectSpacesIcon size={13} aria-label="Automatic path group" /></span>
           <span className="project-rail-group__label">{group.label}</span>
           {collapsed && group.groupPath ? (
             <span className="project-rail-group__address">{railGroupAddress(displayPath(group.groupPath, group.hostId))}</span>
