@@ -88,7 +88,7 @@ function snapshot(): PmoTeamsTopicFloatingState {
   return state ??= readState()
 }
 function cancelClose(): void { clearTimeout(closeTimer); closeTimer = undefined }
-function update(next: Partial<PmoTeamsTopicFloatingState>): void {
+function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void {
   const current = snapshot()
   const explicitChoice = Object.hasOwn(next, 'focusChatTopicId') && Boolean(next.focusChatTopicId?.trim())
   const retryPreference = Boolean(current.preferenceIssue && (explicitChoice || Object.hasOwn(next, 'size')))
@@ -101,7 +101,7 @@ function update(next: Partial<PmoTeamsTopicFloatingState>): void {
     resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.focusChatTopicId === current.focusChatTopicId &&
     resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && !retryPreference) return
   state = resolved
-  if (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference) {
+  if (persist && (resolved.open !== current.open || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open,
       targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, reference: resolved.reference, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
       state = { ...resolved, preferenceIssue: undefined }
@@ -213,7 +213,8 @@ export function requestPmoTeamsTopicFloatingPreview(): void {
   cancelClose()
   if (snapshot().open) return
   captureFocus()
-  update(initialFloatingSelection(floatingMoteDefaultSelection({ ...snapshot(), preview: true })))
+  // A preview may resolve its current address without saving a navigation choice.
+  update(initialFloatingSelection(floatingMoteDefaultSelection({ ...snapshot(), preview: true })), false)
 }
 export function leavePmoTeamsTopicFloatingPreview(): void {
   cancelClose()
