@@ -1011,6 +1011,15 @@ export type AgentSessionQuestionReplyReceipt = {
 
 export type AgentProviderSessionHistoryPage = Omit<AgentSessionHistoryPage, 'agentSessionId'>
 
+/** Read an exact Provider-issued persisted conversation without adopting a Core Session or Run. */
+export type AgentNativeHistoryReadOptions = { source: AgentNativeResumeSource } & Pick<AgentSessionHistoryPageOptions,
+  'cursor' | 'limit' | 'signal' | 'commandOverride' | 'args' | 'env'>
+
+export type AgentNativeHistoryResourceReadOptions = AgentSessionHistoryResourceReadOptions & {
+  nativeSource: AgentNativeResumeSource
+}
+export type AgentProviderSessionHistoryResourceReadResult = Omit<AgentSessionHistoryResourceReadResult, 'agentSessionId'>
+
 /** A relevant native source changed; this is not a user message or an accepted input receipt. */
 export type AgentProviderSessionHistoryObservation =
   | { kind: 'invalidated'; source: AgentSessionHistorySource }

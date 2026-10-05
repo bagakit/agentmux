@@ -12,7 +12,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOST
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
-  'listNativeAgentSessions', 'listHostNativeAgentSessions',
+  'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'resolveAgentCreationSessionId',
@@ -182,6 +182,8 @@ export class AgentMuxHostedRuntimeService {
     if (attachment && this.consumers.get(id) !== original) throw new AgentMuxError('Attachment observation changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
+    if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
+      invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && invocation.method === 'clientPerformanceDiagnostics') invocation.args[0] = { signal: context.signal }
     const source = context.sourceDevice
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.

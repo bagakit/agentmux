@@ -175,6 +175,10 @@ import type {
   AgentNativeResumeSource,
   AgentNativeSessionCatalog,
   AgentNativeSessionCandidate,
+  AgentNativeHistoryReadOptions,
+  AgentProviderSessionHistoryPage,
+  AgentNativeHistoryResourceReadOptions,
+  AgentProviderSessionHistoryResourceReadResult,
   AgentSessionHistoryMetadata,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
@@ -773,6 +777,28 @@ export class AgentMuxClient {
     const { config } = await this.hostExecutorOwner.resolve(input.executorId)
     return await this.listNativeAgentSessions({ providerId: config.providerId, env: config.env,
       ...(input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }) })
+  }
+
+  /** The executing Host supplies private Executor configuration; no Session or Runtime connection is required. */
+  async readHostNativeAgentHistory(input: Pick<AgentNativeHistoryReadOptions, 'source' | 'cursor' | 'limit' | 'signal'> &
+    { executorId: string }): Promise<AgentProviderSessionHistoryPage> {
+    if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    const { config } = await this.hostExecutorOwner.resolve(input.executorId)
+    const source = parseAgentNativeResumeSource(input.source)
+    if (config.providerId !== source.nativeHandle.providerId) throw new AgentMuxError(
+      'The selected native conversation belongs to another Executor Provider.', 'INVALID_AGENT_NATIVE_RESUME_SOURCE')
+    return await this.readNativeAgentHistory({ ...input, source, commandOverride: config.command, args: config.args, env: config.env })
+  }
+
+  async readHostNativeAgentHistoryResource(input: Omit<AgentNativeHistoryResourceReadOptions, 'commandOverride' | 'args' | 'env'> &
+    { executorId: string }): Promise<AgentProviderSessionHistoryResourceReadResult> {
+    if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    const { config } = await this.hostExecutorOwner.resolve(input.executorId)
+    const nativeSource = parseAgentNativeResumeSource(input.nativeSource)
+    if (config.providerId !== nativeSource.nativeHandle.providerId) throw new AgentMuxError(
+      'The recorded resource belongs to another Executor Provider.', 'INVALID_AGENT_NATIVE_RESUME_SOURCE')
+    const { executorId: _executorId, ...request } = input
+    return await this.readNativeAgentHistoryResource({ ...request, nativeSource, commandOverride: config.command, args: config.args, env: config.env })
   }
 
   async configureHostExecutor(input: AgentMuxHostExecutorConfigureInput) {
@@ -2147,6 +2173,113 @@ export class AgentMuxClient {
       }
     } catch (error) { catalog.issues.push(nativeCatalogIssue(error)) }
     return { ...catalog, capabilities }
+  }
+
+  /** Preview original native history before Resume, without reserving, importing or starting an Agent. */
+  async readNativeAgentHistory(input: AgentNativeHistoryReadOptions): Promise<AgentProviderSessionHistoryPage> {
+    const native = parseAgentNativeResumeSource(input.source), limit = input.limit ?? 30
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+      (input.cursor !== undefined && (typeof input.cursor !== 'string' || !input.cursor || input.cursor.length > 16_384)) ||
+      (input.signal !== undefined && !(input.signal instanceof AbortSignal))) {
+      throw new AgentMuxError('Native history needs a limit from 1 to 100 and an opaque cursor.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
+    }
+    input.signal?.throwIfAborted()
+    const provider = this.providers.get(native.nativeHandle.providerId)
+    if (!provider.assertNativeResumeSource || !provider.readSessionHistoryPage) throw new AgentMuxError(
+      'This Provider does not expose exact persisted conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
+    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const cancel = (): void => controller.abort(input.signal?.reason)
+    input.signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      const env = input.env ?? {}, source = { providerId: provider.id, nativeSessionId: native.nativeHandle.sessionId }
+      const assertSource = () => provider.assertNativeResumeSource!({ source: native, workspacePath: native.workspacePath,
+        env, signal: controller.signal })
+      await read(assertSource())
+      const page = await read(provider.readSessionHistoryPage({ source, limit, signal: controller.signal,
+        command: resolveAgentExecutable(input.commandOverride, provider.executable), args: input.args ?? [], env,
+        workspacePath: native.workspacePath,
+        ...(native.nativeHandle.transcriptPath === undefined ? {} : { transcriptPath: native.nativeHandle.transcriptPath }),
+        ...(input.cursor === undefined ? {} : { cursor: input.cursor }) }))
+      controller.signal.throwIfAborted()
+      await read(assertSource())
+      return normalizeSessionHistoryPage(source, page, limit)
+    } finally {
+      input.signal?.removeEventListener('abort', cancel)
+      lifetime.close()
+    }
+  }
+
+  /** Read only a Provider-recorded exact resource before adoption; no caller reference grants a file path. */
+  async readNativeAgentHistoryResource(input: AgentNativeHistoryResourceReadOptions): Promise<AgentProviderSessionHistoryResourceReadResult> {
+    const native = parseAgentNativeResumeSource(input.nativeSource)
+    const { nativeSource: _nativeSource, ...resource } = input
+    const request = parseSessionHistoryResourceOptions(resource)
+    const source = { providerId: native.nativeHandle.providerId, nativeSessionId: native.nativeHandle.sessionId }
+    if (request.source.providerId !== source.providerId || request.source.nativeSessionId !== source.nativeSessionId) throw new AgentMuxError(
+      'This resource belongs to another native conversation.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    request.signal?.throwIfAborted()
+    const provider = this.providers.get(source.providerId)
+    if (!provider.assertNativeResumeSource || !provider.readSessionHistoryPage) throw new AgentMuxError(
+      'This Provider does not expose exact persisted conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
+    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const cancel = (): void => controller.abort(request.signal?.reason)
+    request.signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      const env = request.env ?? {}, context = { source, signal: controller.signal,
+        command: resolveAgentExecutable(request.commandOverride, provider.executable), args: request.args ?? [], env,
+        workspacePath: native.workspacePath,
+        ...(native.nativeHandle.transcriptPath === undefined ? {} : { transcriptPath: native.nativeHandle.transcriptPath }) }
+      const assertSource = () => provider.assertNativeResumeSource!({ source: native, workspacePath: native.workspacePath,
+        env, signal: controller.signal })
+      await read(assertSource())
+      const identity = { source, recordId: request.recordId, partIndex: request.partIndex,
+        ...(request.turnId === undefined ? {} : { turnId: request.turnId }), reference: request.expectedReference }
+      const locateRecord = async () => {
+        if (provider.readSessionHistoryRecord) {
+          const item = await read(provider.readSessionHistoryRecord({ ...context, recordId: request.recordId,
+            ...(request.turnId === undefined ? {} : { turnId: request.turnId }) }))
+          return normalizeSessionHistoryPage(source, { source, items: [item], nextCursor: null }, 1).items[0]!
+        }
+        let cursor: string | undefined
+        for (;;) {
+          const page = normalizeSessionHistoryPage(source, await read(provider.readSessionHistoryPage!({ ...context, limit: 100,
+            ...(cursor === undefined ? {} : { cursor }) })), 100)
+          const item = page.items.find(item => item.id === request.recordId && item.turnId === request.turnId)
+          if (item) return item
+          if (!page.nextCursor) throw new AgentMuxError('The exact native record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+          if (page.nextCursor === cursor) throw new AgentMuxError('The Provider did not advance the exact-record read.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
+          cursor = page.nextCursor
+        }
+      }
+      if (isNativeContentReference(request.expectedReference)) {
+        let authorizedReference = request.expectedReference
+        if (nativeContentNeedsRevalidation(request.expectedReference)) {
+          const item = await locateRecord(), part = item.contentParts[request.partIndex]
+          if (item.id !== request.recordId || item.turnId !== request.turnId || part?.kind !== 'resource' || part.resourceType !== 'text') {
+            throw new AgentMuxError('The exact native content part changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+          }
+          revalidateNativeContentReference(request.expectedReference, part.reference)
+          authorizedReference = part.reference
+        }
+        const result = await read(readNativeContentResource(context, { ...request, expectedReference: authorizedReference }))
+        await read(assertSource())
+        return { ...identity, result: result.status === 'fragment' && authorizedReference !== request.expectedReference
+          ? { ...result, continuationReference: authorizedReference } : result }
+      }
+      if (request.offsetBytes !== undefined) throw new AgentMuxError('Images do not accept a text-content offset.', 'INVALID_AGENT_SESSION_HISTORY_RESOURCE')
+      const item = await locateRecord(), part = item.contentParts[request.partIndex]
+      if (item.id !== request.recordId || request.turnId !== undefined && item.turnId !== request.turnId ||
+        part?.kind !== 'resource' || part.resourceType !== 'image' || part.reference !== request.expectedReference) {
+        throw new AgentMuxError('The exact recorded resource changed or is not an image.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
+      }
+      await read(assertSource())
+      const result = await read(readRecordedImage(part.reference, request.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal))
+      await read(assertSource())
+      return { ...identity, ...(part.label === undefined ? {} : { label: part.label }), result }
+    } finally {
+      request.signal?.removeEventListener('abort', cancel)
+      lifetime.close()
+    }
   }
 
   private async managedNativeSessions(source: AgentNativeResumeSource): Promise<Array<NonNullable<AgentNativeSessionCandidate['managed']>>> {

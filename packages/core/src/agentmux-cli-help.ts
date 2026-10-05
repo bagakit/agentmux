@@ -10,6 +10,11 @@ const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.me
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
 const NATIVE_RESUME_GUIDE = `Discover original Provider conversations with agent native ls --host HOST --executor EXECUTOR.
 Use --workspace-path PATH to filter their original execution directory; listing starts no Run.
+Read saved conversation details with agent native history --input FILE|- using JSON containing
+hostId, executorId and that exact source; limit and cursor page the original Provider history.
+Follow nextCursor with the same source. Reading and cancellation operate no Session or Run.
+Use agent native history resource --input FILE|- for a recorded resource, preserving nativeSource,
+source, recordId, turnId, partIndex and expectedReference from that exact page.
 Keep partial issues and unsupported availability visible. A managed candidate names the original
 AgentMux Session, Executor and Run. Inspect and reuse that Session: attach its healthy Run,
 recover its active identity, or agent reopen its exact retired identity. Do not create a duplicate.

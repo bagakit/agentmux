@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
-import type { AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
+import type { AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult, AgentProviderSessionHistoryResourceReadResult } from './types.js'
 
 export const SESSION_HISTORY_IMAGE_MAX_BYTES = 16 * 1024 * 1024
 // Bounded raster decode memory, matching the existing Browser screenshot budget.
@@ -93,11 +93,13 @@ export function imageBytes(bytes: Uint8Array, maxBytes: number, declaredMime?: s
   return { status: 'read', mimeType: image.mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length }
 }
 
-export function parseSessionHistoryResourceResult(value: unknown, expected: AgentSessionHistoryResourceParams): AgentSessionHistoryResourceResult {
+/** Validate the Provider's complete exact resource without inventing a Core Session identity. */
+export function parseProviderSessionHistoryResourceReadResult(value: unknown,
+  expected: AgentSessionHistoryResourceRequest): AgentProviderSessionHistoryResourceReadResult {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'reference', 'label', 'result'], code)
+  const p = rpcRecord(value, ['source', 'turnId', 'recordId', 'partIndex', 'reference', 'label', 'result'], code)
   const source = rpcRecord(p.source, ['providerId', 'nativeSessionId'], code)
-  if (p.hostId !== expected.hostId || p.agentSessionId !== expected.agentSessionId || source.providerId !== expected.source.providerId ||
+  if (source.providerId !== expected.source.providerId ||
     source.nativeSessionId !== expected.source.nativeSessionId || p.turnId !== expected.turnId || p.recordId !== expected.recordId ||
     p.partIndex !== expected.partIndex || p.reference !== expected.expectedReference) invalid('Another recorded resource was returned.', code)
   if (p.label !== undefined && typeof p.label !== 'string') invalid('Resource label must remain text.', code)
@@ -129,13 +131,22 @@ export function parseSessionHistoryResourceResult(value: unknown, expected: Agen
     if (bytes.length !== result.byteLength || bytes.length > max || encodeBase64(bytes) !== result.dataBase64 ||
       result.nextOffsetBytes !== (after === result.totalBytes ? null : after)) invalid('Text content fragment has an invalid continuation.', code)
   } else invalid('Resource read has an unknown status.', code)
+  return p as AgentProviderSessionHistoryResourceReadResult
+}
+
+export function parseSessionHistoryResourceResult(value: unknown, expected: AgentSessionHistoryResourceParams): AgentSessionHistoryResourceResult {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'reference', 'label', 'result'], 'CONTROL_PROTOCOL_ERROR')
+  if (p.hostId !== expected.hostId || p.agentSessionId !== expected.agentSessionId) invalid('Another recorded resource was returned.', 'CONTROL_PROTOCOL_ERROR')
+  const { hostId: _hostId, agentSessionId: _agentSessionId, ...resource } = p
+  parseProviderSessionHistoryResourceReadResult(resource, expected)
   return p as AgentSessionHistoryResourceResult
 }
 
 /** Hosted SDK replies carry no transport Host field; validate their complete exact shape before adaptation. */
 export function parseSessionHistoryResourceReadResult(value: unknown, agentSessionId: string, expected: AgentSessionHistoryResourceReadOptions): AgentSessionHistoryResourceReadResult {
   const record = rpcRecord(value, ['agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'reference', 'label', 'result'], 'CONTROL_PROTOCOL_ERROR')
-  const { hostId: _hostId, ...result } = parseSessionHistoryResourceResult({ ...record, hostId: 'local' },
-    { ...expected, hostId: 'local', agentSessionId })
-  return result
+  if (record.agentSessionId !== agentSessionId) invalid('Another recorded resource was returned.', 'CONTROL_PROTOCOL_ERROR')
+  const { agentSessionId: _agentSessionId, ...resource } = record
+  parseProviderSessionHistoryResourceReadResult(resource, expected)
+  return record as AgentSessionHistoryResourceReadResult
 }
