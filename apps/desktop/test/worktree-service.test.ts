@@ -116,14 +116,9 @@ describe('WorktreeService', () => {
 
   it('models a plain folder as a normal non-Git capability state', async () => {
     const executionHost = branchHost()
-    vi.mocked(executionHost.run).mockImplementation(async (command, args) => command === 'test'
-      ? gitResult(args, '', '', 1)
-      : gitResult(
-          args,
-          '',
-          'fatal: not a git repository (or any of the parent directories): .git\n',
-          128
-        ))
+    vi.mocked(executionHost.run).mockImplementation(async (command, args) => command === 'node'
+      ? gitResult(args, JSON.stringify({ requestedPath: args.at(-1), hasMetadata: false }))
+      : gitResult(args, '', 'arbitrary discovery failure', 128))
     const service = new WorktreeService(() => executionHost, { save: vi.fn() })
     const branchConfig: AppConfig = {
       ...config,
@@ -135,33 +130,10 @@ describe('WorktreeService', () => {
       hostId: 'remote',
       workspacePath: _hygiene_fixturePath("srv/plain-folder")
     })
-    expect(executionHost.run).toHaveBeenCalledWith(
-      'git',
-      ['-C', _hygiene_fixturePath("srv/plain-folder"), 'rev-parse', '--show-toplevel'],
-      {
-        env: NONINTERACTIVE_ENV,
-        timeoutMs: 20_000,
-        maxOutputBytes: 256 * 1024
-      }
-    )
-    expect(executionHost.run).toHaveBeenNthCalledWith(
-      2,
-      'test',
-      ['-e', _hygiene_fixturePath("srv/plain-folder/.git"), '-o', '-L', _hygiene_fixturePath("srv/plain-folder/.git")],
-      { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 }
-    )
-    expect(executionHost.run).toHaveBeenNthCalledWith(
-      3,
-      'test',
-      ['-e', _hygiene_fixturePath("srv/.git"), '-o', '-L', _hygiene_fixturePath("srv/.git")],
-      { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 }
-    )
-    expect(executionHost.run).toHaveBeenNthCalledWith(
-      4,
-      'test',
-      ['-e', '/.git', '-o', '-L', '/.git'],
-      { timeoutMs: 20_000, maxOutputBytes: 256 * 1024 }
-    )
+    expect(executionHost.run).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(executionHost.run).mock.calls[1]?.[0]).toBe('node')
+    expect(vi.mocked(executionHost.run).mock.calls[1]?.[1].at(-1)).toBe(_hygiene_fixturePath('srv/plain-folder'))
+
   })
 
   it.each([
@@ -181,14 +153,9 @@ describe('WorktreeService', () => {
 
   it('rejects Git-only branch actions for a plain folder', async () => {
     const executionHost = branchHost()
-    vi.mocked(executionHost.run).mockImplementation(async (command, args) => command === 'test'
-      ? gitResult(args, '', '', 1)
-      : gitResult(
-          args,
-          '',
-          'fatal: not a git repository (or any of the parent directories): .git\n',
-          128
-        ))
+    vi.mocked(executionHost.run).mockImplementation(async (command, args) => command === 'node'
+      ? gitResult(args, JSON.stringify({ requestedPath: args.at(-1), hasMetadata: false }))
+      : gitResult(args, '', 'arbitrary discovery failure', 128))
     const save = vi.fn(async (value: AppConfig) => value)
     const service = new WorktreeService(() => executionHost, { save })
     const branchConfig: AppConfig = {

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { GitService } from '../src/main/git-service.js'
-import { classifyGitRemoteError } from '@agentmux/git'
+import { classifyGitRemoteError, GIT_NONINTERACTIVE_ENV } from '@agentmux/git'
 
 const config: AppConfig = {
   version: 9,
@@ -18,12 +18,7 @@ const config: AppConfig = {
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
 
-const NONINTERACTIVE_ENV = {
-  LC_ALL: 'C',
-  LANG: 'C',
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes'
-}
+const NONINTERACTIVE_ENV = GIT_NONINTERACTIVE_ENV
 // Local plumbing (rev-parse/rev-list) keeps the short local bound; network verbs get a longer one so
 // a real push/pull is not killed mid-transfer — the no-hang guarantee comes from the env, not the clock.
 const LOCAL_OPTIONS = { env: NONINTERACTIVE_ENV, timeoutMs: 20_000, maxOutputBytes: 2 * 1024 * 1024 }
@@ -37,7 +32,7 @@ function gitResult(args: readonly string[], stdout = '', stderr = '', exitCode =
 
 /**
  * A fake host that answers the plumbing GitService leans on for remote work: repo-root resolution,
- * upstream resolution (`@{push}` then `@{upstream}`), ahead/behind counting, and the push/pull/fetch
+ * structured push/upstream ref fields, ahead/behind counting, and the push/pull/fetch
  * verbs themselves. Each verb is overridable so a test can inject a rejection or a two-phase sequence.
  */
 function remoteHost(handlers: {
@@ -56,10 +51,14 @@ function remoteHost(handlers: {
     dispose: vi.fn(async () => {}),
     run: vi.fn(async (_command: string, args: readonly string[]) => {
       if (args.includes('rev-parse') && args.includes('--show-toplevel')) return gitResult(args, (_hygiene_fixturePath("srv/repo") + "\n"))
-      if (args.includes('rev-parse') && args.includes('--symbolic-full-name')) {
-        if (args.includes('@{push}')) return handlers.pushRef?.() ?? gitResult(args, '', '', 1)
-        if (args.includes('@{upstream}')) return handlers.upstreamRef?.() ?? gitResult(args, '', '', 1)
-        return gitResult(args, '', '', 1)
+      if (args.includes('symbolic-ref')) return gitResult(args, 'refs/heads/main\n')
+      if (args.includes('for-each-ref')) {
+        if (args.includes('--format=%(refname)%00%(push)%00%(upstream)')) {
+          const push = handlers.pushRef?.().stdout.trim() ?? ''
+          const upstream = handlers.upstreamRef?.().stdout.trim() ?? ''
+          return gitResult(args, `refs/heads/main\0${push}\0${upstream}\n`)
+        }
+        return gitResult(args, `${args.at(-1)}\n`)
       }
       if (args.includes('rev-list')) return handlers.revList?.(args) ?? gitResult(args, '0\t0\n')
       if (args.includes('push')) return handlers.push?.(args) ?? gitResult(args)
@@ -307,26 +306,14 @@ describe('GitService.pull (fake executor)', () => {
     expect(rebaseHost.run).toHaveBeenCalledWith('git', ['-C', _hygiene_fixturePath("srv/repo"), 'pull', '--rebase'], REMOTE_OPTIONS)
   })
 
-  it('falls back to a merge when an unpinned pull hard-fails on divergent branches', async () => {
-    // The host has no pull.rebase/pull.ff policy, so a bare pull on a diverged branch fatals with
-    // "Need to specify how to reconcile divergent branches." The service must not surface that raw —
-    // it retries once with an explicit merge, which is the auto-merge fallback.
-    let bareCalls = 0
+  it('performs one unpinned pull and preserves the refusal for the caller to choose a strategy', async () => {
     const host = remoteHost({
-      pull: (args) => {
-        if (args.includes('--no-rebase')) return gitResult(args, "Merge made by the 'ort' strategy.\n")
-        bareCalls += 1
-        return gitResult(args, '', 'fatal: Need to specify how to reconcile divergent branches.', 128)
-      }
+      pull: (args) => gitResult(args, '', 'fatal: Need to specify how to reconcile divergent branches.', 128)
     })
     const { service, config: cfg } = withWorkspace(host)
-
-    const result = await service.pull('repo', cfg)
-    expect(result).toEqual({ kind: 'ok' })
-    expect(bareCalls).toBe(1)
-    // First a bare pull (no strategy flag), then the merge retry.
-    expect(host.run).toHaveBeenCalledWith('git', ['-C', _hygiene_fixturePath("srv/repo"), 'pull'], REMOTE_OPTIONS)
-    expect(host.run).toHaveBeenCalledWith('git', ['-C', _hygiene_fixturePath("srv/repo"), 'pull', '--no-rebase'], REMOTE_OPTIONS)
+    expect((await service.pull('repo', cfg)).kind).toBe('diverged')
+    const pulls = vi.mocked(host.run).mock.calls.filter(([, args]) => args.includes('pull'))
+    expect(pulls).toEqual([['git', ['-C', _hygiene_fixturePath('srv/repo'), 'pull'], REMOTE_OPTIONS]])
   })
 
   it('does NOT fall back when the caller pinned ff-only — the diverged result is surfaced', async () => {
@@ -380,12 +367,9 @@ describe('GitService.aheadBehind (fake executor)', () => {
       ahead: 1,
       behind: 0
     })
-    // @{push} / @{upstream} are magic revisions: they must be plain revision args, never behind
-    // --end-of-options (git cannot resolve them there), and resolution uses --verify --quiet so a
-    // missing ref is a clean exit-1 rather than a fatal.
     expect(host.run).toHaveBeenCalledWith(
       'git',
-      ['-C', _hygiene_fixturePath("srv/repo"), 'rev-parse', '--symbolic-full-name', '--verify', '--quiet', '@{push}'],
+      ['-C', _hygiene_fixturePath('srv/repo'), 'for-each-ref', '--format=%(refname)%00%(push)%00%(upstream)', '--', 'refs/heads/main'],
       LOCAL_OPTIONS
     )
     expect(host.run).toHaveBeenCalledWith(
@@ -425,6 +409,26 @@ describe('GitService.aheadBehind (fake executor)', () => {
     })
   })
 
+  it('keeps failed destination observation visible instead of reporting zero/zero', async () => {
+    const host = remoteHost()
+    const original = vi.mocked(host.run).getMockImplementation()!
+    vi.mocked(host.run).mockImplementation(async (command, args, options) =>
+      args.includes('--format=%(refname)%00%(push)%00%(upstream)')
+        ? gitResult(args, '', 'arbitrary protocol failure', 128)
+        : original(command, args, options))
+    const { service, config: cfg } = withWorkspace(host)
+    await expect(service.aheadBehind('repo', cfg)).rejects.toThrow('arbitrary protocol failure')
+  })
+
+  it('rejects malformed counts instead of manufacturing zero/zero', async () => {
+    const host = remoteHost({
+      upstreamRef: () => gitResult([], 'refs/remotes/origin/main\n'),
+      revList: args => gitResult(args, 'unavailable\t0\n')
+    })
+    const { service, config: cfg } = withWorkspace(host)
+    await expect(service.aheadBehind('repo', cfg)).rejects.toThrow('invalid upstream counts')
+  })
+
   it('reports no upstream (zero/zero) when neither push target nor configured upstream resolves', async () => {
     const host = remoteHost({
       pushRef: () => gitResult([], '', '', 1),
@@ -438,8 +442,7 @@ describe('GitService.aheadBehind (fake executor)', () => {
 
 // These exercise real git against throwaway repositories, proving the argv the fakes assert actually
 // drive git the way the derived conclusions claim: fetch really writes FETCH_HEAD (not a no-op that
-// still "passes"), ahead/behind counts the effective upstream, and the unpinned pull fallback merges a
-// diverged branch a bare pull would refuse on a host with no reconcile policy.
+// still "passes"), ahead/behind counts the effective upstream, and an unpinned refusal leaves HEAD unchanged until an explicit strategy is selected.
 describe('GitService remote verbs (real git, temporary repositories)', () => {
   const temporaryRoots: string[] = []
 
@@ -529,7 +532,7 @@ describe('GitService remote verbs (real git, temporary repositories)', () => {
     expect(head.trim()).toMatch(/^[0-9a-f]{40}$/)
   })
 
-  it('an unpinned pull auto-merges a diverged branch a bare pull would refuse without a reconcile policy', async () => {
+  it('an unpinned pull keeps the original HEAD; an explicitly requested merge then integrates divergence', async () => {
     const remote = await seededRemote()
     const other = await makeClone(remote, 'other')
     const work = await makeClone(remote, 'diverge')
@@ -542,10 +545,10 @@ describe('GitService remote verbs (real git, temporary repositories)', () => {
     await gitIn(work, ['commit', '-q', '--allow-empty', '-m', 'local-c'])
 
     const { service, config: cfg } = serviceFor(work)
-    // No pull.rebase / pull.ff policy anywhere (config is isolated), so a bare pull would fatal with
-    // "Need to specify how to reconcile divergent branches." The unpinned fallback retries as a merge.
-    const result = await service.pull('repo', cfg)
-    expect(result).toEqual({ kind: 'ok' })
+    const before = await gitIn(work, ['rev-parse', 'HEAD'])
+    expect((await service.pull('repo', cfg)).kind).toBe('diverged')
+    expect(await gitIn(work, ['rev-parse', 'HEAD'])).toBe(before)
+    expect(await service.pull('repo', cfg, { strategy: 'merge' })).toEqual({ kind: 'ok' })
     // The merge produced a commit with two parents.
     const parents = await gitIn(work, ['rev-list', '--parents', '-n', '1', 'HEAD'])
     expect(parents.trim().split(/\s+/).length).toBe(3)
