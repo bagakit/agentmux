@@ -219,7 +219,7 @@ to { transform: rotate(360deg); } }
 .mobile-navigation button[aria-current='page'] { background: var(--surface-2); color: var(--green); font-weight: 600; }
 @media (prefers-reduced-motion:reduce) {
 .mobile-app { transition: none; } }
-.mobile-app { position: fixed; top: var(--mobile-viewport-top, 0px); left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; height: var(--mobile-viewport-height, 100dvh); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; background: #111419; transition: transform 220ms ease, border-radius 220ms ease; font-size: 13px; }
+.mobile-app { position: fixed; top: var(--mobile-viewport-top, 0px); left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; height: var(--mobile-viewport-height, 100dvh); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; background: #111419; transition: transform 220ms ease, border-radius 220ms ease; font-size: 13px; }
 .mobile-spatial-panel { padding: 4px 12px 10px; }
 .mobile-spatial-panel h1 { margin: 0; font-size: 17px; }
 .mobile-spatial-panel .mobile-section-heading { align-items: center; padding-bottom: 8px; }

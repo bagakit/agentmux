@@ -9,6 +9,9 @@ import { createMobileTerminalReader, type MobileTerminalReading } from './reader
 import { createMobileTerminalControl, type MobileTerminalControlState } from './control'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import '@xterm/xterm/css/xterm.css'
+import './terminal.css'
+
+const noticeSummary = (message: string) => message.split(/[；。]/u, 1)[0]
 
 export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible }: {
   client: AgentMuxHostedClient | null; agentSessionId: string | null; connection: MobileConnection
@@ -30,7 +33,9 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const visibleRef = useRef(visible); visibleRef.current = visible
   const [reading, setReading] = useState<MobileTerminalReading>({ phase: 'unavailable', message: '终端输出尚未核实。请选择原会话并恢复 Mac 连接。', historyBoundary: null })
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const horizontalTouch = useRef<{ id: number; x: number; y: number; left: number } | null>(null)
   useEffect(() => {
+    horizontalTouch.current = null
     if (canvasSession.current !== agentSessionId) {
       if (reader.current) { released.current = reader.current.dispose(); reader.current = null }
       terminal.current?.dispose(); terminal.current = null; setCurrentCanvas(null); canvasSession.current = agentSessionId
@@ -81,10 +86,9 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
         if (selectedSession.current === agentSessionId) setInputState(state)
       } })
       controls.current.set(agentSessionId, binding)
-    }
+    } else if (binding) binding.rebind(client)
     if (!binding) { control.current = null; return }
     control.current = binding
-    binding.rebind(client)
     const input = subscribeTerminalInput(canvas, (data, source) => {
       if (selectedSession.current === agentSessionId) binding.send(data, source)
     })
@@ -124,6 +128,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     try { setCopyNotice(await platform.copyText(selection, () => setCopyNotice('复制未完成；选中文字仍保留，可重新复制。')) ? '选中文字已复制。' : '复制未完成；选中文字仍保留，可重新复制。') }
     catch { setCopyNotice('复制未完成；选中文字仍保留，可重新复制。') }
   }
+  const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
   return <section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
     <div className="mobile-terminal-toolbar"><span><SquareTerminal size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span><button aria-label="复制选中文字" onClick={() => { void copy() }}><Copy size={17} /></button><button aria-label="重新核实终端输出" onClick={() => { void reader.current?.retry() }}><RefreshCw size={17} /></button></div>
     {agentSessionId && <div className="mobile-terminal-actions">
@@ -139,13 +144,37 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
     }}><label>列<TextInput aria-label="PTY 列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="PTY 行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到原 Run</button><p>只按这次选择改变 Mac 的 PTY；手机旋转不会再改尺寸。</p></form>}
     {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看原会话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
-    <div className="mobile-terminal-canvas" ref={container} aria-label="原会话终端输出" />
-    <aside className="mobile-terminal-notice" role="status"><p>{!client || !agentSessionId ? connection.message : reading.message}</p>
-      {agentSessionId && <p>{inputState.message}</p>}{inputState.storageIssue && <p>{inputState.storageIssue}</p>}
+    <div className="mobile-terminal-canvas" ref={container} aria-label="原会话终端输出"
+      onTouchStart={event => {
+        const touch = event.touches.length === 1 ? event.touches[0] : null
+        horizontalTouch.current = touch ? { id: touch.identifier, x: touch.clientX, y: touch.clientY, left: event.currentTarget.scrollLeft } : null
+      }}
+      onTouchMove={event => {
+        const start = horizontalTouch.current, touch = event.touches.length === 1 ? event.touches[0] : null
+        if (start && touch?.identifier === start.id) {
+          const dx = start.x - touch.clientX, dy = start.y - touch.clientY
+          // xterm consumes touch gestures for its vertical history. Move only
+          // our local horizontal viewport; leave its events and PTY untouched.
+          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) event.currentTarget.scrollLeft = start.left + dx
+        } else horizontalTouch.current = null
+      }}
+      onTouchEnd={() => { horizontalTouch.current = null }} onTouchCancel={() => { horizontalTouch.current = null }} />
+    <aside className="mobile-terminal-notice" role="status">
+      <p>{noticeSummary(!client || !agentSessionId ? connection.message : reading.message)}</p>
+      {agentSessionId && <p>{inputState.phase === 'unknown' ? '终端操作回执未确认；原操作不会重发。' : noticeSummary(inputState.message)}</p>}
       {inputState.phase === 'unknown' && <button onClick={() => { control.current?.continueAfterReview() }}>已在原会话核对，继续新输入</button>}
-      {inputState.queuedBytes > 0 && <div><p>{inputState.queuedBytes} 字节尚未提交，仅在当前页面保留。</p><button onClick={() => {
+      {inputState.queuedBytes > 0 && <div className="mobile-terminal-unsent"><p>{inputState.queuedBytes} 字节尚未提交，仅在当前页面保留。</p><div className="mobile-terminal-unsent__actions"><button onClick={() => {
         const text = control.current?.queuedText(); if (text) void platform.copyText(text, () => setCopyNotice('复制未完成，未发送输入仍保留。'))
-      }}>复制未发送输入</button><button onClick={() => control.current?.discardUnsent()}>放弃未发送输入</button></div>}
-      {copyNotice && <p>{copyNotice}</p>}{reading.historyBoundary && <p>{reading.historyBoundary}</p>}</aside>
+      }}>复制未发送输入</button><button onClick={() => control.current?.discardUnsent()}>放弃未发送输入</button></div></div>}
+      {copyNotice && <p>{copyNotice}</p>}
+      {inputState.storageIssue && <p>本机回执记录未确认；原字节保留。<span className="mobile-terminal-detail-hint">详情见下方</span></p>}
+      {reading.historyBoundary && <p>{reading.historyBoundary}</p>}
+      <details className="mobile-terminal-details"><summary>输出与操作详情</summary>
+        <p>{!client || !agentSessionId ? connection.message : reading.message}</p>
+        {agentSessionId && <p>{inputState.message}</p>}{inputState.storageIssue && <p>{inputState.storageIssue}</p>}
+        {originalPending && <dl><dt>原 Run</dt><dd>{originalPending.runId}</dd>
+          <dt>本机操作记录</dt><dd>{originalPending.intentId}</dd></dl>}
+      </details>
+    </aside>
   </section>
 }

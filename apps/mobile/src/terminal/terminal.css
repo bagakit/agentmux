@@ -1,0 +1,14 @@
+.mobile-terminal-notice { padding: 8px 12px; color: var(--text-2); font-size: 11px; line-height: 1.5; }
+.mobile-terminal-notice > p + p { margin-top: 3px; }
+.mobile-terminal-notice > button { margin-top: 8px; width: 100%; }
+.mobile-terminal-unsent { margin-top: 8px; }
+.mobile-terminal-unsent__actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mobile-terminal-unsent__actions > button { flex: 1 1 128px; }
+.mobile-terminal-details { margin-top: 4px; }
+.mobile-terminal-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--text-3); }
+.mobile-terminal-details[open] > summary { color: var(--text-2); }
+.mobile-terminal-details > p + p { margin-top: 6px; }
+.mobile-terminal-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; margin: 8px 0; }
+.mobile-terminal-details dt { color: var(--text-3); }
+.mobile-terminal-details dd { margin: 0; overflow-wrap: anywhere; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mobile-terminal-detail-hint { margin-left: 4px; color: var(--text-3); }
