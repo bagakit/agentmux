@@ -51,8 +51,9 @@ async function submit() {
 }
 async function inspectInputContextMenu() {
   const input = container.querySelector<HTMLInputElement>('input[role="combobox"]'); expect(input).not.toBeNull()
+  const readsBeforeFocus = vi.mocked(api.browser.listInputHistory).mock.calls.length
   await act(async () => input!.focus())
-  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(readsBeforeFocus + 1)
   // React delegates at this root; test the original event above that boundary.
   const bubbled = vi.fn(); document.body.addEventListener('contextmenu', bubbled)
   const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
