@@ -184,6 +184,8 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 
 `local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。聚合发现与检查保留原 Session 的 `hostId`，另返回该服务内可复用的 `routeHostId`，用于后续按 Host 范围准确读取；配置 Host ID 不是 SSH 地址或跨 endpoint 的全局机器 ID。`agent context` 的 `hostId` 是本次路由，`sourceHostId` 与 descriptor 保留源服务身份。发现结果只在同一 endpoint 范围续用，未知或多 owner 不按首项猜测。
 
+默认 Host 入口的 `agent ls` 消费其已连接 Client 的多 Host 聚合，不能因本地清单非空而遗漏远端。聚合连接不可用时仍返回可用的本地事实，并在 `errors` 明示聚合观察缺失；Client 已明确返回的业务拒绝不改为本地成功。准确 Session 的 `agent inspect` 与 `agent output` 优先读取本 Core 已知 owner；只有本地明确查无目标时，才沿既有 Client 聚合通路继续定位。来源认证与请求校验先于委托，歧义、存储未确认或读取中故障不冒充查无目标。输出委托保持原 opening response、ordered bytes、Gap 与 reader 取消，开始观察后不自动换源或重订阅；已知本地 Session 的读取不以 Client 可用为前提。
+
 ### 传输、业务回执与持续读取
 
 HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保旧 schema5 信封、原自定义 wire 或兼容别名。
