@@ -108,8 +108,8 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     timelines: selectedTimeline ? { [selectedSessionId]: selectedTimeline } : facts.timelines,
     agentNames: selectedName === undefined ? {} : { [selectedSessionId]: selectedName },
     sessions: selectedSession ? [selectedSession] : savedSession ? [savedSession] : [],
-    nativeRecaps: { [selectedSessionId]: reads[selectedSessionId]?.recap }
-  })[0] : savedSelection, [savedSelection, selectedSessionId, config, workspace, selectedTimeline, selectedName, selectedSession, savedSession, facts.timelines, reads, topics])
+    nativeRecaps: { [selectedSessionId]: reads[selectedSessionId]?.recap ?? previews[launcherPreviewKey(savedSelection)]?.recap }
+  })[0] : savedSelection, [savedSelection, selectedSessionId, config, workspace, selectedTimeline, selectedName, selectedSession, savedSession, facts.timelines, reads, previews, topics])
   const selectedTimelineRecap = selectedSessionId ? launcherTimelineRecap(selectedTimeline ?? facts.timelines[selectedSessionId]) : null
   const projectCount = rows.filter(row => row.inProject).length
   const selectedHostConfigured = Boolean(config?.hosts.some(host => host.id === selectedHostId))
@@ -196,7 +196,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     const owner = ++requestOwner.current
     let current = true
     setReads(values => ({ ...values, [selectedSessionId]: { state: 'loading', recap: null } }))
-    void api.sessions.historyPage({ hostId: selectedHostId, agentSessionId: selectedSessionId }, { limit: 6 }).then(page => {
+    void api.sessions.historyPage({ hostId: selectedHostId, agentSessionId: selectedSessionId }, { limit: 100 }).then(page => {
       if (!current || owner !== requestOwner.current) return
       if (page.agentSessionId !== selectedSessionId) throw new Error('Conversation read returned another Session identity.')
       const recap = launcherNativeRecap(page)
