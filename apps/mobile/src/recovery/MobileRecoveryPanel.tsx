@@ -42,10 +42,10 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
       setNotice('文件已完整核实，尚未替换当前工作面。恢复前请先导出需要保留的当前草稿。')
     } catch { if (active === epoch.current) setNotice('这个工作面文件无法完整核实，当前工作面和原记录尚未替换。') }
   }
-  const restore = () => {
+  const restore = async () => {
     if (!candidate) return
     try {
-      getDeviceWorkface().replaceBackup(candidate)
+      await getDeviceWorkface().replaceBackup(candidate)
       setCandidate(null); setNotice('工作面已保存，正在重新读取。设备授权需另行确认，未知输入不会重投。')
       onRestored()
     } catch { setNotice('工作面恢复尚未保存，原记录和当前阅读仍保留。请恢复设备存储后重试。') }

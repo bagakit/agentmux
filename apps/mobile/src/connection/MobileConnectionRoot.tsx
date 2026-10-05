@@ -39,7 +39,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal })
         if (controller.signal.aborted) { await value.dispose(); return }
         owned = value; setClient(value); attempt = 0
-        try { getDeviceWorkface().confirmHost({ origin: location.origin, hostId: selected!.serverId }) }
+        try { await getDeviceWorkface().confirmHost({ origin: location.origin, hostId: selected!.serverId }) }
         catch { bindingNotice = '设备工作面保存尚未确认，当前连接可继续使用；请保全工作面或恢复设备存储。' }
         setConnection({ state: 'connected', message: '已连接 Mac', ...(bindingNotice ? { issue: bindingNotice } : {}) })
         release = value.onEvent(event => {

@@ -47,10 +47,11 @@ export async function inspectGoal(client: AgentMuxHostedClient, goalId: string, 
 /** A fresh read and original business OP precede each explicit write. Reconnection never calls this. */
 export async function sendGoalOperation(client: AgentMuxHostedClient, owner: DeviceWorkfaceStore,
   operation: MobileGoalOperation, stillCurrent: () => boolean): Promise<MobileGoalDetail> {
+  const recordId = owner.recordIdentity()
   if (!client.forwardRpc || !stillCurrent()) throw unavailable('当前选择已经改变或连接不可用。')
   if (!admitsGoalWorkTarget(operation, goalWorkTarget(client, owner, operation.sessionId, operation.goalId))) throw unavailable('待确认操作属于另一个原 Host。')
   const detail = await inspectGoal(client, operation.goalId, operation.sessionId)
-  if (!stillCurrent() || !admitsGoalWorkTarget(operation, goalWorkTarget(client, owner, operation.sessionId, operation.goalId))) throw unavailable('读取期间目标或 Host 已改变。')
+  if (owner.recordIdentity() !== recordId || !stillCurrent() || !admitsGoalWorkTarget(operation, goalWorkTarget(client, owner, operation.sessionId, operation.goalId))) throw unavailable('读取期间目标或 Host 已改变。')
   const loops = goalSessionLoops(client, detail, operation.sessionId)
   if (operation.kind === 'start') {
     const sameOperation = loops.filter(loop => loop.creationOperationId === operation.operationId)
@@ -72,7 +73,7 @@ export async function sendGoalOperation(client: AgentMuxHostedClient, owner: Dev
       || loop.taskSource.alignmentRevision !== operation.alignmentRevision) throw unavailable('开始操作的回执尚未确认。')
     const returned = { goal: result.goal, goalContinuations: [loop] }
     if (goalSessionLoops(client, returned, operation.sessionId).length !== 1) throw unavailable('开始回执属于其他执行会话。')
-    if (loop.initialDelivery.state === 'confirmed') owner.confirmGoalOperation(operation)
+    if (loop.initialDelivery.state === 'confirmed') await owner.confirmGoalOperation(operation, recordId)
   } else {
     const loop = loops.find(item => item.loopId === operation.loopId)
     if (!loop) throw unavailable('原续跑引用尚未确认。')
@@ -89,7 +90,7 @@ export async function sendGoalOperation(client: AgentMuxHostedClient, owner: Dev
       || receipt.lastMutation?.operationId !== operation.operationId || receipt.lastMutation.action !== operation.action
       || receipt.lastMutation.expectedRevision !== operation.expectedRevision) throw unavailable('原续跑操作的回执尚未确认。')
     if (goalSessionLoops(client, { goal: detail.goal, goalContinuations: [receipt] }, operation.sessionId).length !== 1) throw unavailable('续跑回执属于其他执行会话。')
-    owner.confirmGoalOperation(operation)
+    await owner.confirmGoalOperation(operation, recordId)
   }
   return stillCurrent() ? inspectGoal(client, operation.goalId, operation.sessionId) : detail
 }
