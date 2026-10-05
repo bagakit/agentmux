@@ -132,7 +132,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     // 抛（store.ts 里 `region.kind !== 'agent'` 那一处，全仓仅此一处），但 regionId 在抛出点就丢了。
     // 此时凑一条命令形状的文字比不给更糟：看着像出路，粘过去撞第二次失败。
     const notAgent = addressingRecovery({ code: 'MESSAGE_TARGET_NOT_AGENT' })
-    expect(notAgent).not.toMatch(/^agentmux (?:inspect|send)\s*$/mu)
+    expect(notAgent).not.toMatch(/^amux (?:inspect|send)\s*$/mu)
     expect(notAgent).toMatch(/右键|界面/u)
   })
 
@@ -143,7 +143,7 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
     for (const code of ['UNKNOWN_AGENT_SESSION', 'TAB_NOT_OPEN', 'MESSAGE_TARGET_NOT_AGENT']) {
       const recovery = addressingRecovery({ code })
       expect(recovery).toContain('amux agent ls')
-      expect(recovery).not.toContain('agentmux settings executors ls')
+      expect(recovery).not.toContain('amux settings executors ls')
     }
   })
 
