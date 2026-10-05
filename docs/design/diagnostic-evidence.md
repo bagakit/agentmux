@@ -1,6 +1,6 @@
 # Diagnostic Evidence：统一观测与诊断机制
 
-本文独立持有 AgentMux 观测诊断系统的目标、接入边界、证据语义和错误码设计。机制覆盖 AgentMux 自身及以 AgentMux 为环境的实际执行，供模块 owner 接入、产品呈现和 Agent CLI 诊断使用。目标与职责已确认；包布局、类型形状和新增公共入口仍为设计候选，尚未实施，不代表当前安装已支持。
+本文独立持有 AgentMux 观测诊断系统的目标、接入边界、证据语义和错误码设计。机制覆盖 AgentMux 自身及以 AgentMux 为环境的实际执行，供模块 owner 接入、产品呈现和 Agent CLI 诊断使用。通用 SDK 与准确失败查询已实现；模块历史、采样及新领域接入仍按各自 owner 的实际能力贡献。源码实现不代表当前安装已加载。
 
 [文档导航](../README.md) · [交互专题索引](agentmux-desktop-interaction.md) · [系统职责地图](../architecture/system-ownership.md) · [公共能力来源](../specs/public-capabilities.md)
 
@@ -26,18 +26,18 @@
 
 分层和执行身份沿[系统职责地图](../architecture/system-ownership.md)。Settings、Session 服务窗、Toolkit、产品详情和 CLI 是消费者，不因展示同一结果而拥有第二份业务事实。
 
-## 包与逻辑模块（候选）
+## 包与逻辑模块
 
-候选位置为 `packages/diagnostic-evidence`，包名为 `@agentmux/diagnostic-evidence`。名称明确诊断证据用途，公开类型使用 `DiagnosticEvidence` 前缀，避免与泛用 Source、Context、Record 或项目已有 evidence 概念重名。发布前核名称冲突、平台及 exports；名称可用不能由本文件代签。
+核心包位于 `packages/diagnostic-evidence`，包名为 `@agentmux/diagnostic-evidence`。名称明确诊断证据用途，公开类型使用 `DiagnosticEvidence` 前缀，避免与泛用 Source、Context、Record 或项目已有 evidence 概念重名。发布前核名称冲突、平台及 exports；名称可用不能由本文件代签。
 
 Core、Host、Desktop 和业务模块依赖该包，包不反向依赖 Core、Electron、React、Browser 或 Provider。默认入口可在浏览器和 Node 使用，不载入 fs、Worker 或常驻采集器；确有共享宿主实现时才提供明确的 Node 子入口。
 
-保持一个包、三个逻辑模块，不先拆成多包：
+保持一个 portable 包、两块实现及原宿主的组装接缝：
 
 | 模块 | 通用职责 | 原 owner 的贡献 |
 | --- | --- | --- |
 | protocol | 引用、读取、关联、问题及扩展接口的强类型和语义 | 本领域的准确目标、结果、阶段和错误 |
-| integration | 显式注入 typed reader/handler、留证接缝及接入生命期 | 实际事实生产、安全投影、原材料、存储和释放 |
+| 原宿主 integration | 显式注入 typed reader，复用原领域服务，不另建机制 registry | 实际事实生产、安全投影、原材料、存储和释放 |
 | query | 有界分派、去重、关联核验与 partial | 原权限、业务核验及领域解释 |
 
 RPC/CLI、UI、具体采样器和领域 IO 在原服务与 owner 组装。接入不需要独立 daemon、全局可变 registry、自动扫描工作区或任意执行插件；也不要求没有现成 journal 的模块放弃留证。该模块可以在自己的边界注入有界文件或记录适配，保存诊断观察，继续由该模块持有原材料。
@@ -64,7 +64,7 @@ RPC/CLI、UI、具体采样器和领域 IO 在原服务与 owner 组装。接入
 
 logId 标识原 owner 的一份诊断记录，在原记录的尝试边界分配一次。跨传输、保存和后续读取不重新生成；Client 与 Core 分别记录自己观察到的事实时各有 logId，以显式关联连接。业务 operationId、RPC requestId、Run 和输入字节 ACK 保持各自含义。
 
-候选直接复用 mintObjectId：当前实现为 12 位 Base58，使用安全随机源，约 70.3 bit；[DeliveryAttempt](../../packages/core/src/delivery-attempt.ts) 已消费它。随机 ID 不是数学上的绝对全局唯一，也不是授权凭据。写入端保留不可覆盖的冲突核验；冲突只影响该次诊断，不能覆盖原件或重发业务。按 namespace、生成量与留存规模核容量，不从 ID 解码时间、顺序或因果，也不从正文 hash 推导身份。
+直接复用 mintObjectId：当前实现为 12 位 Base58，使用安全随机源，约 70.3 bit；[DeliveryAttempt](../../packages/core/src/delivery-attempt.ts) 已消费它。随机 ID 不是数学上的绝对全局唯一，也不是授权凭据。写入端保留不可覆盖的冲突核验；冲突只影响该次诊断，不能覆盖原件或重发业务。按 namespace、生成量与留存规模核容量，不从 ID 解码时间、顺序或因果，也不从正文 hash 推导身份。
 
 准确原记录引用包含 domain、logId 和可核的记录 authority；访问路线 routeHostId 独立表达。Core authority 复用原 durable runtimeId。Client journal 的 journalId 是其接收存储 namespace 的 server-created 身份，不能借用相邻 Core runtimeId、路径 hash 或报送者自称身份。Headless 与 Desktop 的 client journal 也不因都叫 local 而合并。
 
@@ -74,54 +74,9 @@ authority 不是当时 producer。producer/build/ownerInstanceId、ctxmux instan
 
 route 经现有可信连接核实际 owner；改绑路由不能将新 owner 的相似记录当作旧证据。不能跨 Host 搜索猜测 owner，或凭名称、路径、PID、文本合并记录。
 
-## 三个读取与关联原语（类型形状候选）
+## 三个读取与关联原语
 
-机制的必要原语是原记录引用、显式关联和按来源读取结果。读取目标是请求上下文，不是额外的持久实体。下面仅示意形状，领域和 authority 分支不是永久封闭列表；正式公开类型、wire 与扩展方式须在实现时共同收敛。
-
-```ts
-type DiagnosticEvidenceAuthority =
-  | { kind: 'core'; runtimeId: string }
-  | { kind: 'client'; journalId: string }
-type DiagnosticEvidenceRef = {
-  domain: string
-  logId: string
-  authority: DiagnosticEvidenceAuthority | null
-  routeHostId: string | null
-}
-type DiagnosticEvidenceRead<TTarget, TData> = {
-  target: TTarget
-  recordRef: DiagnosticEvidenceRef | null
-  readAuthority: DiagnosticEvidenceAuthority | null
-  authorityStatus: 'verified' | 'unconfirmed' | 'unavailable'
-  availability: 'found' | 'not-found' | 'unavailable' | 'corrupt' |
-    'evicted' | 'expired' | 'not-exposed' | 'unsupported' | 'forbidden'
-  data: TData | null
-  persistence: 'confirmed' | 'observed' | 'unconfirmed' | null
-  scope: 'record' | 'point-observation' | 'interval-observation' | 'artifact'
-  observedAt: number | null
-  readAt: number
-  completeness: 'complete' | 'partial' | 'unknown'
-  issue: { code: DiagnosticEvidenceIssueCode; stage: string; causeCode: string | null } | null
-}
-interface DiagnosticEvidenceReader<TTarget, TData> {
-  read(target: TTarget, bounds: { signal: AbortSignal; maxBytes: number }):
-    Promise<DiagnosticEvidenceRead<TTarget, TData>>
-}
-type DiagnosticEvidenceRelation = {
-  from: DiagnosticEvidenceRef
-  to: DiagnosticEvidenceRef
-  declaredBy: DiagnosticEvidenceRef
-  kind: 'reported-core-error' | 'owner-recorded-receipt' | 'context'
-  verification: 'declared' | 'target-matched' | 'owner-confirmed' |
-    'unverifiable' | 'conflict'
-  // 有限依据与原记录引用；不接受自由文本、正文或凭据。
-  basis: Array<{
-    kind: 'declared-reference' | 'scoped-record-read' | 'compatible-constraints' |
-      'owner-recorded-receipt' | 'context-only'
-    refs: DiagnosticEvidenceRef[]
-  }>
-}
-```
+必要原语是原记录引用、显式关联和按来源读取结果。准确字段由 [portable protocol](../../packages/diagnostic-evidence/src/protocol.ts) 和 [Core 领域类型](../../packages/core/src/diagnostic-evidence.ts)持有；语义沿[公共协议](../specs/diagnostic-evidence-protocol.md)。读取目标不是额外持久实体。authority 使用 kind/id/lifetime，领域和 authority 不成为 portable 包的封闭业务列表；进程内直接绑定 typed reader，wire 扩展沿原宿主的准确类型分支。
 
 domain 由已接入模块的明确公开合同识别，目标和数据由 typed reader 成对绑定；没有任意 payload 的通用执行入口。进程内不要求 reader schema；wire 仍解析实际模块分支，不能让 metrics 填进投递分支。
 
@@ -129,7 +84,7 @@ recordRef 只指实际取得的原诊断记录。实时观察、未取得记录�
 
 scope 描述材料形态，不要求正常性能区间或限制聚合伪装失败。失败时快照、对原发生的观察和后来观察的关系由领域目标与原 payload 明确表达，不能由读取时间推断。observedAt 仅为来源实际给出的 wall 观察时间，缺失为 null；readAt 是本次读取时间。区间和 monotonic 时间保留在原领域数据中。
 
-示例：Native 内部 first I/O failure 没有公开 producer，读取原 Session/Run 的 native-recorder-failure 目标返回 not-exposed、recordRef=null、data=null、observedAt=null 和 SOURCE_NOT_EXPOSED 的诊断问题；原投递 root 仍保留。后来 system.storage 读取返回 found 原观察、recordRef=null、scope=point-observation、原 observedAt 和 readAt；它是后来观察，不成为失败时快照，也不产生持久确认。
+示例：Native 内部 first I/O failure 没有公开 producer，读取原 Session/Run 的 native-recorder-failure 目标返回 not-exposed、recordRef=null、data=null、observedAt=null 和 DIAGNOSTIC_EVIDENCE_SOURCE_NOT_EXPOSED 的诊断问题；原投递 root 仍保留。后来 system.storage 读取返回 found 原观察、recordRef=null、scope=point-observation、原 observedAt 和 readAt；它是后来观察，不成为失败时快照，也不产生持久确认。
 
 反例：journal 身份 metadata 报 EACCES，但未绑定 authority 的准确旧 logId 文件可读，返回 found + 安全投影，readAuthority=null、authorityStatus=unavailable；无原身份的 recordRef.authority 为 null，关联 unverifiable。显式要求 journalId=A 时，同一元数据缺证只使 A 的限定读取不可用，不能把未核文件送作 A 的原件。原文件自带已核身份时保留该事实，不冒充当前 namespace 已核。
 
@@ -247,38 +202,7 @@ artifact 只指原 owner 实际保留的材料及其格式、范围、字节、c
 
 机制自身使用明确 `DIAGNOSTIC_EVIDENCE_` 前缀及有限 TS literal union。领域沿已有命名和强类型合同，不为接入重命名历史错误；新增领域码用明确领域前缀和准确条件，避免泛用 ERROR、FAILED、UNKNOWN。Provider 原生码、errno、syscall、exit code/signal 是原 cause 的事实，不强制并入机制 union。错误码与原错误文本的隐私/留存也分开。
 
-以下为首批必要条件的候选语义，精确 union 在公开协议实现时按实际分支收敛；无错误的 not-found、expired、evicted、unsupported 不必各造一个同义错误码：
-
-| 候选码（前缀均为 DIAGNOSTIC_EVIDENCE_） | 准确条件 | 可执行处理边界 |
-| --- | --- | --- |
-| AUTHORITY_UNAVAILABLE | 身份 metadata/来源未取得，可读原件仍可能存在 | 保留合法可读数据，关联降为无法核验；不扩大成整个诊断不可用 |
-| AUTHORITY_UNVERIFIABLE | 请求明确限定 authority，但没有足够原依据核验 | 拒绝该限定读取，保留其他合法事实；不自动放宽请求 |
-| AUTHORITY_MISMATCH | 原已核 authority 与明确限定不符 | 拒绝该目标，核原路线/身份；不能搜相似记录替代 |
-| SOURCE_NOT_EXPOSED | 所需原 producer 没有可消费的公开来源 | 明确缺证与支持范围，不能包装推测成原失败 |
-| READ_FAILED | 原子来源读取确已失败 | 保留原 I/O/传输 cause 的已知范围与其他结果；不猜缺失历史 |
-| INVALID_SOURCE_DATA | 原来源的数据未通过该来源边界解析 | 隔离该来源并保留已取得事实；不将整条查询变成 protocol error |
-| QUERY_LIMIT_REACHED | 本次查询实际触及预算、deadline 或在途上限 | 返回 partial 与已用预算/停止原因，动作只影响本查询 |
-| PERSIST_FAILED | 本次诊断材料保存/发布确已失败 | 原业务错误继续返回，保留实际内存/持久状态；不宣称已保存 |
-
-候选强类型直接定义有限码，不新增运行时码注册表或错误类层级：
-
-```ts
-type DiagnosticEvidenceIssueCode =
-  | 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNAVAILABLE'
-  | 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE'
-  | 'DIAGNOSTIC_EVIDENCE_AUTHORITY_MISMATCH'
-  | 'DIAGNOSTIC_EVIDENCE_SOURCE_NOT_EXPOSED'
-  | 'DIAGNOSTIC_EVIDENCE_READ_FAILED'
-  | 'DIAGNOSTIC_EVIDENCE_INVALID_SOURCE_DATA'
-  | 'DIAGNOSTIC_EVIDENCE_QUERY_LIMIT_REACHED'
-  | 'DIAGNOSTIC_EVIDENCE_PERSIST_FAILED'
-```
-
-causeCode 仅保留原来源实际取得、该字段安全合同允许的有限原码；例如已核的 EACCES。未取得为 null，不能由错误文本推导。原 cause 的更多字段和 raw 留存沿领域合同，机制不承诺还原完整 Error。复用[原错误及确认类型](../../packages/core/src/errors.ts)和[公共 RPC 编解码](../../packages/core/src/public-rpc-wire.ts)的接缝；JSON-RPC 数值 error.code 与领域字符串 code 仍是不同层的字段，不互相改名或冒充。
-
-缺支持、覆盖不足、正常结束与 unknown 属于相应能力/读取/生命周期状态，不强行包成业务异常。用户先读到原失败与诊断缺口，再由已核条件选择动作；单个 retryable 布尔值不能授权未知输入重放或原业务重试。
-
-同一码只能有一个 owning 定义，定义同时说明触发条件、能证明和不能证明的事实、产生步骤、必要安全字段、原 cause 留存及允许动作。各可触发分支必须能由真实领域链路核对；不可达码和以文案猜出的分类不列为支持。语义变化须改原 owning 合同及消费者，不给旧码悄悄赋新意义，不以兼容包装层掩盖 owner 变化。
+机制必要码已在 [finite issue union](../../packages/diagnostic-evidence/src/protocol.ts)按真实分支收敛，精确码名以源码为 SSOT；[公共协议](../specs/diagnostic-evidence-protocol.md#错误码)解释分层，不再维护另一份候选码全集。not-found 不需造错误；来源读失败、身份缺证/不匹配、真实在途忙、取消/期限/预算和投影失败分别表达。实际领域默认投影仅接受来源有限安全码，未知原 code 留在显式原件；大写 regex 不是安全码合同。
 
 原 primary failure 不被晚到 cleanup、诊断保存或读取错误替换。二级问题各保原阶段；CLI/API/产品共同消费相同结构，JSON 输出保留码、阶段、准确引用、availability、确认/未知及 partial，人类文案不成为 parser。新增码须核当前客户端对未知领域/native 码和协议版本的行为：不能猜已知根因或因一个子来源新码抹掉其他合法证据；严格外层合同和子来源隔离同时成立。
 
@@ -302,9 +226,9 @@ raw 是否保留与本次是否返回独立：retained、withheld、not-retained
 
 ## 协议与使用文档的 SSOT
 
-本文持有目标与设计语义。准确公开类型、协议版本、模块扩展、权限、错误、partial、生命周期和字段合同由机制公开类型及唯一协议规范共同维护；实现时拟使用 `docs/specs/diagnostic-evidence-protocol.md`，该协议文件目前尚未创建。类型持有字段和签名，规范解释其语义，不手写另一套全集；wire codec 留在实际数据边界。
+本文持有目标与设计语义。准确公开类型、协议版本、模块扩展、权限、错误、partial、生命周期和字段合同由机制公开类型及唯一协议规范共同维护；见[唯一公共协议](../specs/diagnostic-evidence-protocol.md)。类型持有字段和签名，规范解释其语义，不手写另一套全集；wire codec 留在实际数据边界。
 
-owner 接入指南拟放在 `docs/guides/diagnostic-evidence-integration.md`，目前尚未创建。指南引用原协议与类型，说明责任分工、最小 typed reader、外部读取边界、可选留证/capture、CLI 发现及实际查询、缺证和失败处理、释放与成本验证；包 README 只作导航和起步。示例必须在实际包/API/CLI 成立，不能用本文类型示意冒充已发布接口。
+owner 接入见[模块指南](../guides/diagnostic-evidence-integration.md)。指南引用原协议与类型，说明责任分工、最小 typed reader、外部读取边界、可选留证/capture、CLI 发现及实际查询、缺证和失败处理、释放与成本验证；包 README 只作导航和起步。示例必须在实际包/API/CLI 成立，不能用本文类型示意冒充已发布接口。
 
 Settings 只持有[设置与观测入口的产品消费](behavior/settings-and-observation.md#统一观测与诊断机制)，具体业务文档沿自身 owner；它们引用本机制，不重复定义通用协议。当前实现导航仍归[公共能力来源](../specs/public-capabilities.md)，不会因设计文件创建而宣布交付。
 
@@ -312,11 +236,13 @@ Settings 只持有[设置与观测入口的产品消费](behavior/settings-and-o
 
 首个真实竖切是 Message Tool 原失败 → Client 原记录 → Core 原记录 → 有界关联/缺证 → 产品详情、typed API 和真正 CLI。复用[Client 捕获](../../packages/client-ui/src/lib/delivery-diagnostics.ts)、[Core 原存储](../../packages/core/src/delivery-attempt-store.ts)和[公共服务](../../packages/core/src/public-rpc-service.ts)，不修造 Native 内部 producer。原草稿和健康输入保留，查询不增加 Input 次数或触发重试。
 
-第二种领域验证由原[截图 owner](../../apps/desktop/src/main/composer-screenshot.ts)记录 select/capture/save 的原阶段、primary/cleanup failure、有限原 cause 和准确 App/权限观察时刻，经 trusted IPC、产品、typed API/CLI 消费。截图不塞进投递 payload；不同 OS/协议触发检验通用边界，denied 不直接归因为用户未授权。
+第二个现有竖切薄接原 Toolkit Performance failure 的 executionId、原阶段和原保留状态，复用原只读 get 与公开 API/CLI，不启动采样、运行或复制存储。它检验没有 logId 的领域接入；latest-only 明确不是 archive。
+
+截图领域后续仍由原[截图 owner](../../apps/desktop/src/main/composer-screenshot.ts)记录 select/capture/save 的原阶段、primary/cleanup failure、有限原 cause 和准确 App/权限观察时刻，经 trusted IPC、产品、typed API/CLI 消费。截图不塞进投递 payload；不同 OS/协议触发检验通用边界，denied 不直接归因为用户未授权。
 
 截图的 create-directory、spawn、close、stat/save 和 cleanup 也沿实际来源保留阶段；child PID/出生、exit code/signal、errno/syscall、stderr 范围和裁切仅在确已取得时报告。运行 App 身份沿启动时已核材料及核验时刻，失败处理时读到的权限不是 selector 开始时快照。code=0 且没有输出不证明取消，cleanup 错误不替换 primary；截图失败保留草稿和健康 Agent，公开查询不能绕过原 trusted capture 或权限确认。
 
-公共接口冻结前用普通性能 reader 与可选 capture 示意验证正常区间、无 logId 查找、unsupported、原 artifact 读取与最小生命周期；后续性能实现仍由性能 owner 接入原 recorder/metrics/Toolkit。短环覆盖、窗口外查找、producer 冻结、阈值修改、旧 Host 子结果失败、collector 提前结束及重启空窗是可证伪反例，不要求 Message/截图等待全部性能能力。
+公共接口冻结前用普通性能 reader 与可选 capture 示意验证正常区间、无 logId 查找、unsupported、原 artifact 读取与最小生命周期；后续性能实现仍由性能 owner 接入原 recorder/metrics/Toolkit。短环覆盖、窗口外查找、producer 冻结、阈值修改、旧 Host 子结果失败、collector 提前结束及重启空窗是可证伪反例，不要求已接入 reader 等待全部性能能力。
 
 纯设计变更核来源、链接与语义保全；实现时按原计划和[测试策略](../testing/strategy.md#任务验收与假绿防护)验证变异与真实产品/API/CLI。仅有 logger、接口导出、模拟组合结果、help 或某个业务的专用查询不足以证明可插拔机制和文档完成，模块 owner 还应能依据 SSOT 文档完成接入。
 
