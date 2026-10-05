@@ -13,7 +13,7 @@ const error = (message: string) => new AgentMuxError(message, 'TOOLKIT_RESULT_CH
  */
 export async function openToolkitResultChannel(args: {
   onBytes(bytes: Uint8Array): Promise<void> | void
-  onEnd(): void
+  onEnd(): Promise<void> | void
   onError(error: unknown): void
 }) {
   // A short private path also fits macOS sockaddr_un, independent of TMPDIR length.
@@ -43,7 +43,7 @@ export async function openToolkitResultChannel(args: {
           }
           if (bytes.length) await args.onBytes(bytes)
         }
-        if (accepted && !closing) args.onEnd()
+        if (accepted && !closing) await args.onEnd()
       } catch (failure) { if (accepted && !closing) args.onError(failure) }
       finally { socket.destroy() }
     })()
@@ -57,6 +57,7 @@ export async function openToolkitResultChannel(args: {
   server.on('error', failure => { if (!closing) args.onError(failure) })
   return {
     env: { [PATH_ENV]: path, [TOKEN_ENV]: token },
+    get connected() { return authenticated },
     close(): Promise<void> {
       return closeWork ??= (async () => {
         closing = true
