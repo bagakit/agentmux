@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { randomBytes, randomUUID } from 'node:crypto'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 
+export interface LocalRelayConnectionInfo { readonly address?: string; readonly userAgent?: string }
+
 /** Local adapter for Paseo's V2 control/data protocol. Encryption remains end to end. */
 export async function startLocalRelay(options: {
   serverId: string
@@ -17,7 +19,7 @@ export async function startLocalRelay(options: {
   })
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024, perMessageDeflate: false })
   let control: WebSocket | undefined, disposed = false
-  const pairs = new Map<string, { client: WebSocket; data?: WebSocket; pending: { data: RawData; binary: boolean }[]; bytes: number; timer: NodeJS.Timeout }>()
+  const pairs = new Map<string, { client: WebSocket; data?: WebSocket; pending: { data: RawData; binary: boolean }[]; bytes: number; timer: NodeJS.Timeout; info: LocalRelayConnectionInfo }>()
   const send = (socket: WebSocket | undefined, data: RawData | string, binary = false) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false
     if (socket.bufferedAmount > 8 * 1024 * 1024) { socket.close(4008, 'Reader exceeded its budget'); return false }
@@ -67,8 +69,12 @@ export async function startLocalRelay(options: {
       }
       if (!control || control.readyState !== WebSocket.OPEN) { ws.close(4001, 'Host reconnecting'); return }
       const key = randomUUID()
+      const address = request.socket.remoteAddress?.replace(/^::ffff:/u, '')
+      const userAgent = request.headers['user-agent']
       const pair = { client: ws, data: undefined as WebSocket | undefined, pending: [] as { data: RawData; binary: boolean }[], bytes: 0,
-        timer: setTimeout(() => drop(key), 10000) }
+        timer: setTimeout(() => drop(key), 10000), info: {
+          ...(address ? { address } : {}), ...(userAgent ? { userAgent } : {})
+        } }
       pairs.set(key, pair); notify({ type: 'connected', connectionId: key })
       ws.on('message', (data, binary) => {
         if (pair.data) { send(pair.data, data, binary); return }
@@ -88,7 +94,13 @@ export async function startLocalRelay(options: {
   })
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('Local Relay address is unavailable.')
-  return { port: address.port, hostWebSocket: (url: string) => new WebSocket(url, { headers: { Authorization: `Bearer ${controlToken}` }, handshakeTimeout: 10000, perMessageDeflate: false }), async stop() {
+  return { port: address.port,
+    /** Only the original client upgrade supplies identification, never Relay control/data sockets. */
+    connectionInfo: (connectionId: string): LocalRelayConnectionInfo | undefined => {
+      const info = pairs.get(connectionId)?.info
+      return info ? { ...info } : undefined
+    },
+    hostWebSocket: (url: string) => new WebSocket(url, { headers: { Authorization: `Bearer ${controlToken}` }, handshakeTimeout: 10000, perMessageDeflate: false }), async stop() {
     if (disposed) return; disposed = true
     for (const id of [...pairs.keys()]) drop(id)
     control?.terminate(); for (const socket of sockets.clients) socket.terminate()
