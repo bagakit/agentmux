@@ -255,9 +255,9 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   }, [floating.open, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, discussionChoices.length, motes, setFloating])
   useEffect(() => {
     const reference = projectionState?.projection?.selection[0]
-    if (visible && floating.reference === undefined && reference?.tabId === target.tabId)
+    if (floating.open && floating.reference === undefined && reference?.tabId === target.tabId)
       setFloating({ reference })
-  }, [visible, floating.reference, target.tabId, projectionState?.projection, setFloating])
+  }, [floating.open, floating.reference, target.tabId, projectionState?.projection, setFloating])
   useEffect(() => {
     if (floating.open && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
   }, [floating.open, target.session, focusPmoSession])
@@ -381,6 +381,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const close = useCallback(() => { endResize(false); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [endResize])
   const openSpace = useCallback((topicId = target.topicId, tabId = topicId === target.topicId ? target.tabId : undefined) => {
     spaceActionRef.current?.abort()
+    setPreparationIssue(null)
     const controller = new AbortController(); spaceActionRef.current = controller
     const floatingIntent = () => {
       const current = readPmoTeamsTopicFloatingState(), reference = current?.reference
