@@ -591,10 +591,16 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     return observed.stdout.split('\n').flatMap((line) => {
       const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/u.exec(line)
       if (!match || match[5] !== semanticHostCommand) return []
-      const uid = Number(match[1]), pid = Number(match[2]), ppid = Number(match[3]), birth = match[4].replace(/\s+/g, ' ')
+      const uid = Number(match[1]), pid = Number(match[2]), birth = match[4].replace(/\s+/g, ' ')
+      // The selected Host may exit or be reparented during the bound mode read.
+      // Only the later OS snapshot can settle absence; a missing mode cannot.
+      const current = scope.ownershipObservation.identities.get(pid)
+      if (!current) return []
+      assert(current.uid === uid && current.birth === birth,
+        'Private launch smoke Host PID was reused or changed owner.')
       const mode = scope.nodeModes.find(row => row.pid === pid)
       assert(uid === process.getuid() && mode?.mode === 'node' && mode.executable === executable &&
-        mode.uid === uid && mode.ppid === ppid && mode.birth === birth,
+        mode.uid === current.uid && mode.ppid === current.ppid && mode.birth === current.birth,
         'Private launch smoke Host process identity is unconfirmed.')
       if (semanticHostOwners.has(pid)) assert(semanticHostOwners.get(pid) === birth,
         'Private launch smoke Host PID was reused.')
