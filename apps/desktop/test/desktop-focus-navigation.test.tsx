@@ -1,4 +1,5 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+const { fixturePath: _reshape_fixturePath, fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { fixturePath as _hygiene_fixturePath } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
@@ -67,9 +68,9 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', la
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const space = directoryIdentity('local', _hygiene_fixturePath("target")), zone = workspaceZoneId(space, 'target')
 function agent(id: string, workspace: string): Extract<SessionSnapshot, { kind: 'agent' }> {
-  return { id, kind: 'agent', hostId: 'local', executorId: 'fixture', providerId: 'codex', workspacePath: `/${workspace}`, label: id,
-    createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running', latestOutputBytes: 0,
-    status: { state: 'running', source: 'run-process', observedAt: 1 },
+  return { id, kind: 'agent', hostId: 'local', executorId: 'fixture', providerId: 'codex', workspacePath: _reshape_fixturePath(workspace), label: id,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1), processState: 'running', latestOutputBytes: 0,
+    status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) },
     capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run:${id}` } } }
 }
@@ -77,7 +78,7 @@ const source = agent('source-agent', 'source'), target = agent('target-agent', '
 const sourceTab = createWorkbenchTab('source-tab', { kind: 'agent', phase: 'attached', workspaceId: 'source', regionId: 'source-region', sessionId: source.id })
 const targetTab = createWorkbenchTab('target-tab', { kind: 'agent', phase: 'attached', workspaceId: 'target', regionId: 'target-region', sessionId: target.id })
 const goal = (id: string, sessionIds: string[] = []) => ({ id, title: id, description: '', status: 'in_progress' as const,
-  priority: 'normal' as const, projectId: null, projectName: null, sessionIds, source: 'default-topic' as const, createdAt: 1, updatedAt: 1 })
+  priority: 'normal' as const, projectId: null, projectName: null, sessionIds, source: 'default-topic' as const, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1) })
 let root: Root, container: HTMLDivElement, outside: HTMLTextAreaElement, dispose: (() => void) | undefined, restorePopover: (() => void) | undefined
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)) }) }
 async function control(target: AgentMuxDesktopFocusTarget, inputPolicy: 'preserve' | 'target' = 'preserve') {
@@ -775,7 +776,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     expect(current.sessions).toBe(before.sessions); expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
     expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(prewarm).not.toHaveBeenCalled(); expect(detect).not.toHaveBeenCalled()
   })
-  it.each(['bad-parent', 'ambiguous-location', 'existing-region-unobserved'] as const)('does not replace a retained Region with the current Tab selection when %s', async kind => {
+  it.each(['bad-parent', 'conflicting-location', 'existing-region-unobserved'] as const)('does not replace a retained Region with the current Tab selection when %s', async kind => {
     const { tab, input } = await arrangePrimaryInputMote(true)
     input.focus(); await control({ kind: 'space', regionId: 'primary-input-region' })
     const before = useAppStore.getState(), floating = readPmoTeamsTopicFloatingState()!
@@ -788,7 +789,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     const exact = catalog.locations.filter(location => location.displayWorkspaceId === current.displayWorkspaceId &&
       location.groupId === current.groupId && location.tabId === current.tabId && location.regionId === current.regionId)
     expect(exact).toHaveLength(1)
-    const observed = kind === 'ambiguous-location' ? { ...catalog, locations: [...catalog.locations, exact[0]!] }
+    const observed = kind === 'conflicting-location' ? { ...catalog, locations: [...catalog.locations, { ...exact[0]!, zoneId: 'unconfirmed-other-zone' }] }
       : kind === 'existing-region-unobserved' ? { ...catalog, locations: catalog.locations.filter(location => location.regionId !== original.regionId) } : catalog
     const reference = kind === 'bad-parent' ? { ...original, groupId: 'unconfirmed-parent' } : original
     const result = moteWorkbenchProjection(observed, currentTab, { ...floating, reference }, () => {}, before.layouts)

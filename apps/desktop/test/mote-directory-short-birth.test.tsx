@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { createHash, webcrypto } from 'node:crypto'
@@ -86,7 +87,7 @@ it('pending metadata facts do not implicitly bind an unbound Tab before confirme
   expect(surfaces().space.confirmed).toBe(true)
   pending.reject(new Error('Unconfirmed'));await expect(job).rejects.toThrow('Unconfirmed')
 })
-it('duplicate, invalid Group and late Region references preserve raw selection and never forge a floating projection',async()=>{
+it('invalid Group stays unknown while a retired Region and consistent duplicate facts retain the original parent',async()=>{
   const pending=deferred<ScratchTopicSnapshot>();vi.spyOn(api.scratch,'ensureMote').mockReturnValue(pending.promise)
   const job=useAppStore.getState().createScratchTopic('mote',{prompt:'Keep'}),born=surfaces()
   for(const reference of [{...born.reference,groupId:'missing'}]) {
@@ -96,9 +97,11 @@ it('duplicate, invalid Group and late Region references preserve raw selection a
   }
   const lateReference={...born.reference,regionId:'retired'}
   const late=moteWorkbenchProjection(born.catalog,born.tab,{open:true,preview:false,targetTabId:born.tab.id,reference:lateReference},vi.fn(),born.state.layouts)
-  expect(late.projection?.selection).toEqual([born.reference]);expect(late.issue).toMatch(/previously selected Region/);expect(lateReference.regionId).toBe('retired')
+  expect(late.projection?.selection).toEqual([lateReference]);expect(late.issueKind).toBe('parent-available');expect(lateReference.regionId).toBe('retired')
+  expect(projectWorkbenchProjection(born.state.layouts[scratch.id],born.state.tabs,late.projection!).selection).toEqual([lateReference])
   const duplicate={...born.catalog,locations:[...born.catalog.locations,{...born.catalog.locations[0]!}]}
-  expect(moteWorkbenchProjection(duplicate,born.tab,{open:true,preview:false,targetTabId:born.tab.id,reference:born.reference},vi.fn(),born.state.layouts).projection).toBeNull()
+  const repeated=moteWorkbenchProjection(duplicate,born.tab,{open:true,preview:false,targetTabId:born.tab.id,reference:born.reference},vi.fn(),born.state.layouts)
+  expect(repeated.projection?.selection).toEqual([born.reference]);expect(repeated.issue).toBeNull();expect(repeated.catalog).toBe(duplicate)
   pending.reject(new Error('Keep')); await expect(job).rejects.toThrow('Keep')
 })
 it('an ID-less discovery issue keeps previously confirmed Mote facts and healthy fresh objects independently',async()=>{
@@ -114,7 +117,7 @@ it('an ID-less discovery issue keeps previously confirmed Mote facts and healthy
 
 it('successful current continuity applies the healthy session before persistent Wiki service explanation',async()=>{
   const control={kind:'agent' as const,hostId:'local',agentSessionId:'agent-1',run:{runId:'run-1'}}
-  const session:import('../src/shared/contracts').SessionSnapshot={id:'agent-1',kind:'agent',hostId:'local',executorId:'codex',providerId:'codex',workspacePath:_hygiene_fixturePath("private/short-birth/motes/0123456789abcdef"),label:'Healthy',createdAt:1,updatedAt:1,agentSessionUpdatedAt:1,processState:'running',latestOutputBytes:0,status:{state:'running',source:'run-process',observedAt:1},capabilities:{terminal:true,timeline:'streaming',permission:'observe',providerResume:true,replyCorrelation:'none'},control}
+  const session:import('../src/shared/contracts').SessionSnapshot={id:'agent-1',kind:'agent',hostId:'local',executorId:'codex',providerId:'codex',workspacePath:_hygiene_fixturePath("private/short-birth/motes/0123456789abcdef"),label:'Healthy',createdAt:_reshape_fixtureEpoch(0, 0, 1),updatedAt:_reshape_fixtureEpoch(0, 0, 1),agentSessionUpdatedAt:_reshape_fixtureEpoch(0, 0, 1),processState:'running',latestOutputBytes:0,status:{state:'running',source:'run-process',observedAt:_reshape_fixtureEpoch(0, 0, 1)},capabilities:{terminal:true,timeline:'streaming',permission:'observe',providerResume:true,replyCorrelation:'none'},control}
   const tab=createWorkbenchTab('original-agent',{kind:'agent',phase:'attached',workspaceId:scratch.id,regionId:'original-agent-region',sessionId:session.id})
   useAppStore.setState({sessions:[session],tabs:{[tab.id]:tab},layouts:{[scratch.id]:createWorkspaceLayout('original-group',[tab.id])}})
   vi.spyOn(api.sessions,'recover').mockResolvedValue({kind:'reattachable',session,advisory:'Wiki directory association is unconfirmed: Private stalled read. Agent input remains available.'})
