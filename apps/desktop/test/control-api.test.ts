@@ -1,9 +1,9 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
-import {
-  AGENTMUX_CONTROL_SCHEMA_VERSION,
-  type AgentMuxControlRequest,
-  type AgentMuxControlResult
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
+import type {
+  AgentMuxControlRequest,
+  AgentMuxControlResult
 } from '@agentmux/core'
 import type {
   AgentMuxPreloadApi,
