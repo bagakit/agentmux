@@ -39,6 +39,8 @@ async function flush() {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
 }
+const pane = () => <SessionPane sessionId="question-session" surfaceKind="agent" interactiveResize={false}
+  visible={true} readOnly={false} linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} />
 async function setup() {
   const h = await fixture();
   const page = await h.client.sessionHistoryPage('question-session', h.invocation);
@@ -133,19 +135,7 @@ async function setup() {
     authorHuman: true,
     sourceChannel: 'question-reply'
   }));
-  await act(async () => root.render(<SessionPane
-    sessionId="question-session"
-    surfaceKind="agent"
-    interactiveResize={false}
-    visible={true}
-    readOnly={false}
-    linkOrigin={{
-    workspaceId: 'ws',
-    tabGroupId: 'group',
-    tabId: 'tab',
-    regionId: 'region'
-  }}
-  />));
+  await act(async () => root.render(pane()));
   await flush();
   return {
     h,
@@ -193,6 +183,7 @@ it('actual SessionPane→Activity supplies the shared question callback without 
   expect(submit).not.toBeNull();
   await act(async () => submit!.click());
   await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('submitted'));
   expect(send.mock.calls[0]![0]).toEqual(control);
   expect(send.mock.calls[0]![1].answers).toEqual([{
     questionId: request.questions[1]!.id,
@@ -201,6 +192,25 @@ it('actual SessionPane→Activity supplies the shared question callback without 
   expect(reads.mock.calls.length).toBe(count);
   expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT');
 });
+it('actual retained Pane receives the scoped unknown intent update, retains an independently edited draft across remount and explicitly retries the original reply', async () => {
+  const { send, reads } = await setup()
+  send.mockRejectedValueOnce(new Error('Original receipt unknown'))
+  await fill(activeCard().querySelector('textarea')!, 'Original frozen answer')
+  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
+  const input = send.mock.calls[0]![1]
+  await fill(activeCard().querySelector('textarea')!, 'Another unsent draft')
+  await act(async () => root.render(<div>Another surface</div>)); await act(async () => root.render(pane())); await flush()
+  expect(activeCard().querySelector('textarea')?.value).toBe('Another unsent draft')
+  expect(activeCard().querySelector('.agent-question__footer button')?.textContent).toContain('Retry original reply')
+  expect(send).toHaveBeenCalledOnce()
+  const count = reads.mock.calls.length
+  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  expect(send.mock.calls[1]![1]).toEqual(input)
+  expect(reads.mock.calls.length).toBe(count)
+  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT')
+})
 it('actual SessionPane→History reuses the same shared question card and preserves its original Activity body', async () => {
   const {
     send
