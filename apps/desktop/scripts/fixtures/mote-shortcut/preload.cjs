@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('moteNative', {
     onEvent: listen('agentmux:browser-event')
   },
   ui: {
+    nativeBrowserVisibility: invoke('ui:nativeBrowserVisibility'),
+    onNativeBrowserVisibility: listen('ui:nativeBrowserVisibility'),
     publishNativeOverlays: invoke('ui:publishNativeOverlays'),
     onNativeOverlayWarning: listen('ui:nativeOverlayWarning'),
     onNativeBrowserInput: listen('ui:nativeBrowserInput')

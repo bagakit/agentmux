@@ -61,7 +61,7 @@ const topics = [topicFor(PMO_TEAMS_TOPIC_ID, 'Mote'), topicFor(customId, customN
 const topicById = id => topics.find(one => one.id === id)
 // Controlled external Goal content is not another product UI owner.
 const goalTitleKey = 'private-mote-proof-goal-title'
-const goal = { id: 'private-goal', title: localStorage.getItem(goalTitleKey) ?? title, description: 'Return to the same work after restarting the application.', status: 'in_progress', priority: 'normal', projectId: project.id, projectName: project.name, executorId: null, plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], tags: [], activities: [], decisions: [], createdAt: 1000, updatedAt: 1000 }
+const goal = { id: 'private-goal', title: localStorage.getItem(goalTitleKey) ?? title, description: 'Return to the same work after restarting the application.', status: 'in_progress', priority: 'normal', projectId: project.id, projectName: project.name, executorId: null, plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], tags: [], activities: [], decisions: [], createdAt: 1000, updatedAt: 1000 }
 api.config.get = async () => structuredClone(config)
 api.demands.list = async () => [goal]
 api.scratch.listTopics = async () => {
@@ -182,7 +182,7 @@ function facts() {
     floating: JSON.parse(localStorage.getItem('agentmux.leader-topic-floating.v1') ?? 'null'),
     ui: { entryTitle: document.getElementById(entry?.getAttribute('aria-describedby'))?.textContent, expanded: entry?.getAttribute('aria-expanded'), entryRect: rect(entry),
       entryTarget: entry?.closest('[data-mote-target-tab]')?.getAttribute('data-mote-target-tab'),
-      panelTarget: panel?.getAttribute('data-mote-target-tab'), panelTopic: panel?.getAttribute('data-mote-target-topic'), panelSession: panel?.getAttribute('data-mote-target-session'), panelStatus: panel?.getAttribute('data-mote-status'),
+      panelTarget: panel?.getAttribute('data-mote-target-tab'), panelTopic: panel?.getAttribute('data-mote-target-topic'), panelRegion: panel?.getAttribute('data-mote-target-region'), panelSession: panel?.getAttribute('data-mote-target-session'), panelStatus: panel?.getAttribute('data-mote-status'),
       panelVisible: !!panel && panel.matches(':popover-open'), panelRect: rect(panel), panelText: panel?.textContent, titleRows: panel?.querySelectorAll('.pmo-teams-topic-floating__titlebar').length,
       globalChrome: panel?.querySelectorAll('.top-row-leading-chrome').length, footerHeight: document.querySelector('.window-status-bar')?.getBoundingClientRect().height,
       footerRect: rect(document.querySelector('.window-status-bar')), entryAvatarRect: rect(entry?.querySelector('.space-object-icon')),
@@ -191,7 +191,8 @@ function facts() {
         selection: { anchorOffset: window.getSelection()?.anchorOffset, focusOffset: window.getSelection()?.focusOffset, anchorText: window.getSelection()?.anchorNode?.textContent, focusText: window.getSelection()?.focusNode?.textContent } },
       choices: [...(panel?.querySelectorAll('[data-mote-topic-id]') ?? [])].map(one => ({ topicId: one.dataset.moteTopicId, text: one.textContent, selected: one.getAttribute('aria-pressed'), rect: rect(one) })),
       regions: [...document.querySelectorAll('[data-workbench-region-id]')].map(one => one.dataset.workbenchRegionId),
-      actions: [...(panel?.querySelectorAll('.mote-chooser__actions button') ?? [])].map(one => ({ label: one.getAttribute('aria-label'), ...rect(one) })) } }
+      actions: [...(panel?.querySelectorAll('.mote-chooser__actions button') ?? [])].map(one => ({ label: one.getAttribute('aria-label'), ...rect(one) })),
+      spaceActions: [...(panel?.querySelectorAll('button[aria-label="Open in Space"]') ?? [])].map(one => ({ label: one.getAttribute('aria-label'), ...rect(one) })) } }
 }
 const surfaceEvents = []
 const recordSurfaceEvent = event => {
@@ -220,9 +221,9 @@ window.moteProof = { ready: false, targetId, customTabId, customId, quietId, ord
   status: state => useAppStore.setState(current => ({ sessions: current.sessions.map(one => one.id === 'mote-primary' ? { ...one, status: { ...one.status, state, observedAt: Date.now() }, semanticStatus: undefined } : one) })),
   pending: () => useAppStore.setState(current => ({ sessions: current.sessions.filter(one => one.id !== 'mote-primary') })),
   restoreFacts: () => useAppStore.setState({ sessions: structuredClone(sessions) }),
-  directory: failed => {
+  directory: async failed => {
     directoryFailure = failed
-    useAppStore.setState(current => ({ workspaceFileRevisions: { ...current.workspaceFileRevisions, [scratch.id]: (current.workspaceFileRevisions[scratch.id] ?? 0) + 1 } }))
+    await useAppStore.getState().refreshScratchTopics(scratch.id, true)
   },
   showProject: async (tabId = 'original-project-tab') => {
     await useAppStore.getState().selectWorkspace(project.id)
