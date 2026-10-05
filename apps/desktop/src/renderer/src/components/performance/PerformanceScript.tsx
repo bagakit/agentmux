@@ -1,7 +1,12 @@
 import { Textarea } from '@agentmux/client-ui/input'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, Code2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ToolkitDesktopApi, ToolkitScript } from '../../../../shared/toolkit'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 /** 官方资产只读查看，不提供编辑、保存或执行入口。 */
 export function PerformanceScript({ api, back, close }: { api: Pick<ToolkitDesktopApi, 'script'>; back(): void; close(): void }) {
@@ -17,9 +22,9 @@ export function PerformanceScript({ api, back, close }: { api: Pick<ToolkitDeskt
     return () => { connected = false }
   }, [api])
   return <>
-    <header className="performance-header"><div className="performance-title"><button ref={first} type="button" className="performance-icon-button" aria-label="Back to Performance" onClick={back}><ArrowLeft size={14} /></button>
-      <Code2 size={15} /><h2>Official script</h2><span className="performance-official">Read-only</span></div>
-      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><X size={14} /></button></header>
+    <header className="performance-header"><div className="performance-title"><button ref={first} type="button" className="performance-icon-button" aria-label="Back to Performance" onClick={back}><ThemeNavigationBackIcon size={14} /></button>
+      <ThemeObjectSourceCodeIcon size={15} /><h2>Official script</h2><span className="performance-official">Read-only</span></div>
+      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
     <div className="performance-body performance-script">
       {script ? <><p className="performance-note">Performance observes resources through the public metrics API.</p>
         <Textarea readOnly spellCheck={false} aria-label="Official Performance script source" value={script.text} />

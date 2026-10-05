@@ -1,9 +1,12 @@
-import { Smartphone } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useState } from 'react'
 import { MOBILE_CONNECTION_TOOL_ID, resolveMobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
 import { useAppStore } from '../../store'
 import { ToolkitPopover, type ToolkitPopoverSelection } from '../performance/PerformancePopover'
 import { MobileConnectionResult } from './MobileConnectionResult'
+
+const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
+
 
 /** Only an entry: official scripts, actions and receipts use the public Toolkit owner. */
 export const MobileConnectionToolkit = memo(function MobileConnectionToolkit(selection: ToolkitPopoverSelection) {
@@ -12,7 +15,7 @@ export const MobileConnectionToolkit = memo(function MobileConnectionToolkit(sel
   const [visible, setVisible] = useState(false)
   const changed = useCallback((value: boolean) => setVisible(value), [])
   if (!enabled) return null
-  return <ToolkitPopover {...selection} toolId={MOBILE_CONNECTION_TOOL_ID} name="Phone connection" icon={<Smartphone size={14} aria-hidden="true" />} label={layout === 'label'} onVisibleChange={changed}>
+  return <ToolkitPopover {...selection} toolId={MOBILE_CONNECTION_TOOL_ID} name="Phone connection" icon={<ThemeObjectPhoneIcon size={14} aria-hidden="true" />} label={layout === 'label'} onVisibleChange={changed}>
     {close => <MobileConnectionResult active={visible && selection.selectedToolId === MOBILE_CONNECTION_TOOL_ID} close={close} />}
   </ToolkitPopover>
 })

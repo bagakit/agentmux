@@ -1,12 +1,16 @@
 import { RecordedStepsCard } from '@agentmux/client-ui/components/WorkflowObservation'
 import { useId, useState } from 'react'
-import { ChevronRight, GitBranch } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WorkflowPhase } from './WorkflowPhase'
 import { WorkflowProgressRail } from './WorkflowProgressRail'
 import { WorkflowStatusGlyph } from './WorkflowStatusGlyph'
 import { workflowStatusLabel, type WorkflowSnapshot, type WorkflowVariant } from './types'
 import { WorkflowToolRow } from './WorkflowToolRow'
 import { workflowPresentation } from './presentation'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+
 
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -73,8 +77,8 @@ function WorkflowSnapshotCard({
         aria-controls={contentId}
         onClick={() => setExpandedValue(!expandedValue)}
       >
-        <ChevronRight className="wf-chev" size={14} aria-hidden="true" />
-        <GitBranch className="wf-ico" size={12} aria-hidden="true" />
+        <ThemeNavigationDisclosureIcon className="wf-chev" size={14} aria-hidden="true" />
+        <ThemeObjectBranchIcon className="wf-ico" size={12} aria-hidden="true" />
         <span className="wf-head__name">Workflow <em>{workflow.name}</em></span>
         <span className="wf-chip">
           <WorkflowStatusGlyph status={workflow.status} size={12} />
@@ -98,7 +102,7 @@ function WorkflowSnapshotCard({
             aria-expanded={phasesExpanded}
             onClick={() => setPhasesExpanded((value) => !value)}
           >
-            <ChevronRight className="wf-chev" size={12} aria-hidden="true" />
+            <ThemeNavigationDisclosureIcon className="wf-chev" size={12} aria-hidden="true" />
             <span>阶段</span>
             <span className="wf-sr">{phasesExpanded ? '已展开' : '已折叠'}</span>
           </button>
