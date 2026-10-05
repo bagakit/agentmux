@@ -55,12 +55,26 @@ async function complete(f: Awaited<ReturnType<typeof fixture>>, options: { path?
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 describe('Browser event-first download owner', () => {
+  it('reads the original completed UUID receipt and file after restart without allocating a replacement', async () => {
+    const f = await fixture(), { receipt } = await complete(f)
+    const id = '11111111-1111-4111-8111-111111111111', reference = { ...receipt.reference!, id }
+    await writeFile(join(f.directory, `${id}.json`), JSON.stringify({ schema: 'agentmux.browser-download.v1', receipt: { ...receipt, id, reference } }))
+    await rm(join(f.directory, `${receipt.id}.json`))
+    const restarted = new BrowserDownloads(f.directory, f.files, f.resolveWorkspace)
+    expect((await restarted.list(f.context)).map(item => item.id)).toEqual([id])
+    const read = await restarted.read(reference, f.context)
+    expect(Buffer.from(read.data, 'base64')).toEqual(payload)
+    await expect(restarted.read({ ...reference, id: '../../escape' }, f.context)).rejects.toThrow('does not belong')
+    expect(await readdir(f.directory)).toEqual([`${id}.json`])
+  })
+
   it('registers before a synchronous trigger and publishes exact binary bytes only after Chromium completion', async () => {
     const f = await fixture(), updates: BrowserDownloadReceipt[] = []
     const { receipt } = await complete(f, { onUpdate: receipt => updates.push(receipt) })
     expect(updates.map(update => update.status)).toEqual(['received', 'in-progress', 'completed'])
     expect(updates[0]!.reference).toBeUndefined()
     expect(updates[1]!.reference).toBeUndefined()
+    expect(receipt.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(receipt.status).toBe('completed')
     expect(receipt.reference).toMatchObject({ kind: 'browser-download-file', workspaceId: f.workspace.id, browserId: f.context.browserId, operationId: f.context.operationId, navigationId: f.context.navigationId, path: 'report.bin', byteLength: payload.length })
     expect(await readFile(join(f.workspace.path, 'report.bin'))).toEqual(payload)

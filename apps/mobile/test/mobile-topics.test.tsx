@@ -120,7 +120,7 @@ describe('original Topic mobile consumers', () => {
     await input(element.querySelector('input')!, '新知识'); await input(element.querySelector('textarea')!, '保留的草稿')
     await click(button(element, '保存知识'))
     const first = vi.mocked(rpc).mock.calls[0]![1] as { entryId: string; expectedRevision: unknown }
-    expect(first.expectedRevision).toBeNull(); expect(first.entryId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(first.expectedRevision).toBeNull(); expect(first.entryId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(element.querySelector('textarea')?.value).toBe('保留的草稿'); expect(button(element, '保存知识').disabled).toBe(true)
     await click(button(element, '检查原保存结果'))
     expect(rpc).toHaveBeenLastCalledWith('topic.knowledge.read', { topicId: topic.topicId, entryId: first.entryId })
@@ -160,7 +160,7 @@ describe('original Topic mobile consumers', () => {
     const { element } = await mount(<MobileTopicOrganization rpc={rpc} category={category} categories={[category]} topic={null} onChanged={vi.fn()} />)
     await click(button(element, '新建 Topic')); await input(element.querySelector('input')!, '新 Topic'); await click(button(element, '确认保存'))
     const original = vi.mocked(rpc).mock.calls[0]![1] as { topicId: string }
-    expect(original.topicId).toMatch(/^view:[0-9a-f-]{36}$/)
+    expect(original.topicId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     await click(button(element, '检查原操作结果'))
     expect(rpc).toHaveBeenLastCalledWith('topic.inspect', { topicId: original.topicId })
     await click(button(element, '以检查结果为基准继续'))

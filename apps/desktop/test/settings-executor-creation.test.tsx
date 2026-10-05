@@ -123,7 +123,7 @@ async function openLaunch() {
   await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
 }
 
-it('identity: new configurations use short Provider identities without reusing a removed sequence', async () => {
+it('identity: new configurations use opaque short identities without reusing a removed sequence', async () => {
   await render()
   await click('Add executor'); const first = editor().dataset.resourceEditor!
   await click('Add executor'); const second = editor().dataset.resourceEditor!
@@ -131,13 +131,13 @@ it('identity: new configurations use short Provider identities without reusing a
   await dom.click('.settings-executor-remove button')
   await click('Add executor'); const third = editor().dataset.resourceEditor!
   expect(third, 'New Executor identity must not reuse the removed Provider sequence').not.toBe(second)
-  for (const id of [first, second, third]) expect(id).toMatch(new RegExp(`^${catalog[0]!.id}-[0-9a-f]{8}$`))
+  for (const id of [first, second, third]) expect(id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   await fill(name(), 'Renamed independent configuration')
   expect(editor().dataset.resourceEditor).toBe(third)
   await changeProvider(catalog[0]!.id)
   expect(editor().dataset.resourceEditor).toBe(third)
   await changeProvider(catalog[1]!.id)
-  expect(editor().dataset.resourceEditor).toMatch(new RegExp(`^${catalog[1]!.id}-[0-9a-f]{8}$`))
+  expect(editor().dataset.resourceEditor).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   expect(name().value).toBe('Renamed independent configuration')
   expect(providerSelect().isConnected).toBe(true); expect(document.activeElement).toBe(providerSelect())
   expect(field('Command').value).toBe(catalog[1]!.executable)
@@ -174,11 +174,11 @@ it('keeps the complete unsaved draft, custom command, disclosure and focus when 
 })
 
 it.each(['draft', 'config', 'expected'] as const)('rerolls a forced short code collision against %s without replacing its authored object', async kind => {
-  const provider = catalog[0]!, reserved = `${provider.id}-deadbeef`, accepted = `${provider.id}-cafebabe`
-  const uuid = (prefix: string) => `${prefix}-1111-4111-8111-111111111111` as `${string}-${string}-${string}-${string}-${string}`
-  const random = vi.spyOn(crypto, 'randomUUID')
+  const provider = catalog[0]!, reserved = '111111111111', accepted = '111111111112'
+  const sample = (value: number) => <T extends ArrayBufferView>(bytes: T): T => { const sample = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength); sample.fill(0); sample[sample.length - 1] = value; return bytes }
+  const random = vi.spyOn(crypto, 'getRandomValues')
   if (kind === 'draft') {
-    random.mockReturnValueOnce(uuid('deadbeef'))
+    random.mockImplementationOnce(sample(0))
     await render(); await click('Add executor'); await fill(name(), 'Keep the first authored draft')
   } else {
     config = { ...config, executors: { [reserved]: { ...Object.values(config.executors)[0]!, label: 'Keep the reserved configuration', providerId: provider.id } } }
@@ -188,7 +188,7 @@ it.each(['draft', 'config', 'expected'] as const)('rerolls a forced short code c
       config = { ...config, executors: {} }; await render()
     }
   }
-  random.mockReturnValueOnce(uuid('deadbeef')).mockReturnValueOnce(uuid('cafebabe'))
+  random.mockImplementationOnce(sample(0)).mockImplementationOnce(sample(1))
   await click('Add executor')
   expect(editor().dataset.resourceEditor).toBe(accepted)
   expect(random.mock.calls.length).toBe(kind === 'draft' ? 3 : 2)

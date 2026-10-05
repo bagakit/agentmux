@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -19,10 +19,27 @@ const identity = { operationId: 'op-a', sequence: 1, browserId: 'browser-a', nav
 const content = { kind: 'diagnostic' as const, code: 'page-call-failed' as const, message: 'Step 1 failed.', nextAction: 'Inspect the page.' }
 
 describe('saved Browser step evidence', () => {
+  it('reads original UUID evidence beside new short evidence after restarting its store', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-legacy-step-'))
+    try {
+      const current = await new BrowserStepEvidenceStore(root).write(identity, content)
+      const reference = { ...current, id: '11111111-1111-4111-8111-111111111111' }
+      const document = JSON.parse(await readFile(join(root, `${current.id}.json`), 'utf8'))
+      document.reference = reference
+      await writeFile(join(root, `${reference.id}.json`), JSON.stringify(document))
+      await rm(join(root, `${current.id}.json`))
+      const restarted = new BrowserStepEvidenceStore(root)
+      const next = await restarted.write({ ...identity, sequence: 2 }, content)
+      expect(next.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+      await expect(restarted.read(reference)).resolves.toEqual({ reference, content })
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('keeps exact operation, step and navigation identity across a store restart', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-step-evidence-'))
     try {
       const reference = await recordBrowserStepEvidence(new BrowserStepEvidenceStore(root), identity, content)
+      expect(reference.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
       expect(reference).toMatchObject({ ...identity, kind: 'diagnostic', byteLength: Buffer.byteLength(JSON.stringify(content)) })
       const restarted = new BrowserStepEvidenceStore(root)
       await expect(restarted.read(reference)).resolves.toEqual({ reference, content })

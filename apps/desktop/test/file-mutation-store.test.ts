@@ -318,9 +318,9 @@ describe('file mutation resource reconciliation', () => {
     await useAppStore.getState().renamePath('src/app', 'src/renamed')
 
     const renamedPath = 'src/renamed/index.ts'
-    const renamedId = `file:${workspace.id}:${renamedPath}`
+    const renamedId = child.id
     const renamed = useAppStore.getState()
-    expect(renamed.tabs[child.id]).toBeUndefined()
+    expect(renamed.tabs[child.id]!.titleRegionId).toBe(child.titleRegionId)
     expect(titleWorkbenchSurface(renamed.tabs[renamedId]!)).toMatchObject({ path: renamedPath })
     expect(renamed.tabs[neighbor.id]).toEqual(neighbor)
     expect(renamed.documents[documentKey(workspace.id, renamedPath)]).toEqual({
@@ -376,7 +376,7 @@ describe('file mutation resource reconciliation', () => {
     await useAppStore.getState().deletePath('src/final')
     const deleted = useAppStore.getState()
     expect(deleted.tabs[neighbor.id]).toEqual(neighbor)
-    expect(deleted.tabs[`file:${workspace.id}:src/final/index.ts`]).toBeUndefined()
+    expect(deleted.tabs[child.id]).toBeUndefined()
     expect(deleted.documents[documentKey(workspace.id, neighborPath)]).toBeDefined()
     expect(deleted.documents[documentKey(workspace.id, 'src/final/index.ts')]).toBeUndefined()
     expect(deleted.documents[documentKey(workspace.id, 'src/final/closed.ts')]).toBeUndefined()

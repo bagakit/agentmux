@@ -83,7 +83,7 @@ it('does not convert a nonnull unknown operation into known-unsubmitted waiting'
  const chosen={...entry('chosen'),promptCondition:{expectedRun:{runId},afterSubmissionId:'original-admission'},execution:'immediate' as const,awaitingExplicitSend:true as const}
  useAppStore.setState({agentSteerQueues:{[sid]:[chosen]}})
  vi.mocked(api.sessions.submitPrompt).mockRejectedValue(Object.assign(new Error('Exact pending race'),{code:'AGENT_INTERACTION_PENDING'}))
- await expect(send()).rejects.toMatchObject({code:'AGENT_INTERACTION_PENDING',logId:expect.stringMatching(/^delivery-/)})
+ await expect(send()).rejects.toMatchObject({code:'AGENT_INTERACTION_PENDING',logId:expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/)})
  expect(queue()[0]!.promptCondition).toEqual(chosen.promptCondition);expect(queue()[0]!.awaitingExplicitSend).toBe(true)
  clearInteraction();await useAppStore.getState().flushAgentSteerQueue(sid)
  expect(api.sessions.submitPrompt).toHaveBeenCalledTimes(1);expect(queue()[0]!.operationId).toBe('chosen')

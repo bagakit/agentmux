@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrowserResultArtifactStore, readBrowserResultArtifact } from '../src/main/browser-result-artifact.js'
 import { runBrowserScript } from '../src/main/browser-script-runner.js'
 import { browserRunOutcomeFromFailure } from '../src/main/browser-run-outcome.js'
@@ -25,10 +25,45 @@ async function fixture(value: unknown = 'seed') {
 }
 
 describe('bounded durable Browser result continuation', () => {
+  it('rejects a repeated random allocation using its original index and keeps both full results readable', async () => {
+    const { store, storePath } = await fixture()
+    const random = vi.spyOn(globalThis.crypto, 'getRandomValues').mockReturnValueOnce(new Uint8Array(9))
+    let first: BrowserResultArtifactReference
+    try { first = await store.registerJSON(context, { original: 'full retained bytes' }) } finally { random.mockRestore() }
+    expect(first.id).toBe('111111111111')
+    const repeated = vi.spyOn(globalThis.crypto, 'getRandomValues').mockReturnValueOnce(new Uint8Array(9))
+    let second: BrowserResultArtifactReference
+    try { second = await store.registerJSON(context, { next: 'independent bytes' }); expect(repeated.mock.calls.length).toBeGreaterThan(1) } finally { repeated.mockRestore() }
+    expect(second.id).not.toBe(first.id)
+    const restarted = new BrowserResultArtifactStore(storePath)
+    for (const [reference, expected] of [[first, { original: 'full retained bytes' }], [second, { next: 'independent bytes' }]] as const) {
+      const read = await restarted.read(reference, owner)
+      expect(JSON.parse(Buffer.from(read.data, 'base64').toString('utf8'))).toEqual(expected)
+    }
+  })
+
+  it('reads an original UUID artifact after restart and retains it beside a newly allocated short ID', async () => {
+    const { store, storePath } = await fixture()
+    const current = await store.registerJSON(context, { retained: 'original' })
+    const id = '11111111-1111-4111-8111-111111111111', reference = { ...current, id }
+    const document = JSON.parse(await readFile(join(storePath, `${current.id}.json`), 'utf8'))
+    document.reference = reference
+    await writeFile(join(storePath, `${id}.json`), JSON.stringify(document))
+    await writeFile(join(storePath, `${id}.data`), await readFile(join(storePath, `${current.id}.data`)))
+    await rm(join(storePath, `${current.id}.json`)); await rm(join(storePath, `${current.id}.data`))
+    const restarted = new BrowserResultArtifactStore(storePath)
+    const next = await restarted.registerJSON(context, { new: true })
+    expect(next.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+    const read = await restarted.read(reference, owner)
+    expect(JSON.parse(Buffer.from(read.data, 'base64').toString('utf8'))).toEqual({ retained: 'original' })
+    expect((await readdir(storePath)).sort()).toEqual([`${id}.data`, `${id}.json`, `${next.id}.data`, `${next.id}.json`].sort())
+  })
+
   it('Main JSON registration shares retained bytes, original ownership and restart reads with script imports', async () => {
     const { store, storePath } = await fixture()
     const value = { fields: [{ key: 'empty', value: '' }, { key: 'zero', value: 0 }, { key: 'flag', value: false }], text: '中文🙂'.repeat(8000) }
     const reference = await store.registerJSON(context, value)
+    expect(reference.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(reference).toMatchObject({ ...context, kind: 'browser-result-artifact', byteLength: Buffer.byteLength(JSON.stringify(value)) })
     const restarted = new BrowserResultArtifactStore(storePath)
     const first = await restarted.read(reference, owner, { maxBytes: 65536 })
@@ -150,6 +185,7 @@ describe('bounded durable Browser result continuation', () => {
       { ...reference, id: '../outside' }
     ]
     for (const forged of changed) await expect(store.read(forged, owner)).rejects.toThrow()
+    await expect(store.read({ ...reference, id: '../outside' }, owner)).rejects.toThrow('Workspace and Browser')
     expect(changed).toHaveLength(7)
     for (const current of [{ ...owner, workspaceId: 'foreign-workspace' }, { ...owner, browserId: 'foreign-browser' }, { ...owner, workspaceId: null }]) {
       await expect(store.read(reference, current)).rejects.toThrow(/Workspace and Browser/)

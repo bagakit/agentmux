@@ -55,6 +55,7 @@ describe('custom Toolkit owner admission and terminal facts', () => {
     expect(value).toMatchObject({ kind: 'script', state: 'succeeded', admission: null,
       latestConfirmed: { invocationId: input.invocationId, text: '工具_ACK', exitCode: 0, definition: { revision: 'author-1' } } })
     expect(f.port.attach).toHaveBeenCalledTimes(1); expect(f.port.remove).toHaveBeenCalledTimes(1)
+    expect(value.latestConfirmed?.executionId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(parseToolkitSnapshot(value)).toEqual(value)
     await f.custom.run('quota', input, new AbortController().signal)
     expect(f.port.create).toHaveBeenCalledTimes(1)

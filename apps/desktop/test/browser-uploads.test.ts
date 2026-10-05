@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { LocalExecutionHost } from '@agentmux/core'
@@ -48,6 +48,7 @@ it('snapshots real binary files once, assigns the exact frame object and leaves 
   const receipt=await uploadBrowserFiles(f.owner,f.context,['bytes.bin','second.txt'])
   expect(receipt).toMatchObject({kind:'browser-upload-files',workspaceId:'workspace',browserId:'browser',operationId:'operation',navigationId:'document-1',byteLength:10})
   expect(receipt.files.map(file=>[file.path,file.name,file.byteLength])).toEqual([['bytes.bin','bytes.bin',5],['second.txt','second.txt',5]])
+  expect((await readdir(f.staging))).toEqual([expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/)])
   expect(snapshot).toHaveBeenCalledTimes(2)
   expect(f.send.mock.calls.filter(call=>call[0]==='DOM.setFileInputFiles')).toEqual([['DOM.setFileInputFiles',{objectId:'exact-object',files:f.selected()}]])
   expect(JSON.stringify(receipt)).not.toContain(f.root)
@@ -196,4 +197,33 @@ it('old-document cleanup cannot consume a new document selection created while i
     await expect(readFile(newPath,'utf8')).resolves.toBe('one')
     expect(await readdir(f.staging)).toEqual([dirname(dirname(newPath)).split('/').at(-1)])
   } finally {removeRace.before=null;unblock();await release}
+})
+
+
+it('retains the old upload directory identity after restart and preserves an occupied new ID while allocating another', async () => {
+  const f = await fixture()
+  await writeFile(join(f.root, 'original.txt'), 'original selected bytes')
+  await uploadBrowserFiles(f.owner, { ...f.context, documentSurvivesClient: true }, ['original.txt'])
+  const original = (await f.owner.retained()).selections[0]!
+  expect(original.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+  await rename(join(f.staging, original.id), join(f.staging, 'upload-AbCd12'))
+  const occupied = join(f.staging, '111111111111')
+  await mkdir(occupied); await writeFile(join(occupied, 'preserve.txt'), 'occupied bytes')
+  // A collision before the exact mkdir cannot claim or overwrite another directory.
+  const random = vi.spyOn(globalThis.crypto, 'getRandomValues').mockReturnValueOnce(new Uint8Array(9))
+  try {
+    await uploadBrowserFiles(f.owner, { ...f.context, browserId: 'another-browser', documentSurvivesClient: true }, ['original.txt'])
+    expect(random).toHaveBeenCalled(); expect(await readFile(join(occupied, 'preserve.txt'), 'utf8')).toBe('occupied bytes')
+  } finally { random.mockRestore() }
+  // Preserve the unrelated occupied directory; original readers only inspect valid retained metadata.
+  await rm(occupied, { recursive: true })
+  const reopened = new BrowserUploads(f.staging, f.files, () => f.workspace)
+  const retained = await reopened.retained()
+  expect(retained.selections).toHaveLength(2)
+  expect(retained.selections.map(item => item.id)).toContain('upload-AbCd12')
+  expect(await readFile(join(f.staging, 'upload-AbCd12', '0', 'original.txt'), 'utf8')).toBe('original selected bytes')
+  expect(await reopened.confirmDiscardSelection('upload-AbCd12', async () => false)).toBe(false)
+  expect((await reopened.retained()).selections.map(item => item.id)).toContain('upload-AbCd12')
+  expect(await reopened.confirmDiscardSelection('upload-AbCd12', async () => true)).toBe(true)
+  expect((await reopened.retained()).selections).toHaveLength(1)
 })

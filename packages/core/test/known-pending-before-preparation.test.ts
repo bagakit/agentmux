@@ -117,7 +117,7 @@ it.each(['permission','question'] as const)('rejects known fresh %s before nativ
     await pending(f,kind)
     const error = await f.send().then(()=>null,error=>error)
     expect(error).toMatchObject({code:'AGENT_INTERACTION_PENDING'})
-    expect(error.logId).toMatch(/^delivery-/)
+    expect(error.logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect((await f.client.readDeliveryAttempt(error.logId))).toMatchObject({availability:'found',record:{operationId:f.request.operationId,error:{code:'AGENT_INTERACTION_PENDING'}}})
     expect(f.statistics()).toEqual({readCount:0,verifyCount:0})
     expect(screen).not.toHaveBeenCalled();expect(f.preparation).not.toHaveBeenCalled()
@@ -188,7 +188,7 @@ it('preserves pending refusal through the actual Hosted service and public diagn
  try{
   await pending(f);subscription=await service.subscribe('runtime.events',{fence:hostedTestFence,consumerId:'original-consumer'},logicalHostedEvents(()=>{}));await subscription.start?.()
   const error=await service.call('runtime.invoke',{fence:hostedTestFence,consumerId:'original-consumer',invocation:{method:'submitAgentPrompt',args:[f.request]}}).then(()=>null,error=>error)
-  expect(error).toMatchObject({code:'AGENT_INTERACTION_PENDING'});expect(error.logId).toMatch(/^delivery-/)
+  expect(error).toMatchObject({code:'AGENT_INTERACTION_PENDING'});expect(error.logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   await server.start();rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}})
   expect(await rpc.call('message.delivery.inspect',{hostId:'local',logId:error.logId})).toEqual(await f.client.readDeliveryAttempt(error.logId))
   const cli=await runCompiledObjectCli(['--endpoint','unix://'+server.path,'message','delivery','inspect','--host-id','local','--logid',error.logId],objectCliEnvironment(f.root))

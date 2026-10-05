@@ -248,6 +248,7 @@ describe('WorktreeService', () => {
 
     const selection = await service.openBranch('repo', 'feature/used', branchConfig)
 
+    expect(selection.workspace.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(selection.workspace).toMatchObject({
       hostId: 'remote',
       path: _hygiene_fixturePath("srv/worktrees/used"),
@@ -274,6 +275,7 @@ describe('WorktreeService', () => {
       path: _hygiene_fixturePath("srv/worktrees/free")
     }, branchConfig)
 
+    expect(selection.workspace.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(executionHost.run).toHaveBeenCalledWith(
       'git',
       ['-C', _hygiene_fixturePath("srv/repo"), 'worktree', 'add', '--', _hygiene_fixturePath("srv/worktrees/free"), 'feature/free'],

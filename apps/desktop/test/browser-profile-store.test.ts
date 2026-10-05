@@ -66,7 +66,7 @@ describe('BrowserProfileStore', () => {
     const persisted = JSON.parse(await readFile(path, 'utf8'))
 
     expect(profiles).toEqual([{
-      id: expect.stringMatching(/^[\da-f-]{36}$/),
+      id: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/),
       label: 'Default',
       createdAt: expect.any(Number),
       isDefault: true,
@@ -88,7 +88,7 @@ describe('BrowserProfileStore', () => {
     expect(browserProfilePartition(profiles[0]!.id)).toBe(
       `persist:agentmux-browser-profile:${profiles[0]!.id}`
     )
-    expect(() => browserProfilePartition('default')).toThrow('canonical UUID v4')
+    expect(() => browserProfilePartition('default')).toThrow('stored object identity')
     if (process.platform !== 'win32') {
       expect((await stat(path)).mode & 0o777).toBe(0o600)
     }

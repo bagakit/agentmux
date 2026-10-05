@@ -37,6 +37,17 @@ async function fixture() {
 }
 
 describe('actual bounded Browser input history store', () => {
+  it('stores a new short Profile scope beside the original UUID scope without merging or rewriting either', async () => {
+    const f = await fixture(), short = { ...scope, profileId: 'AbCdEfGh1234' }
+    await f.store.record(scope, 'original UUID profile')
+    await f.store.record(short, 'new short profile')
+    const restarted = new BrowserInputHistoryStore(f.directory)
+    expect((await restarted.list(scope)).entries.map(entry => entry.text)).toEqual(['original UUID profile'])
+    expect((await restarted.list(short)).entries.map(entry => entry.text)).toEqual(['new short profile'])
+    expect((await readdir(f.directory)).sort()).toEqual([pathFor(f.directory).split('/').at(-1), pathFor(f.directory, short).split('/').at(-1)].sort())
+    await expect(restarted.list({ ...scope, profileId: '../../escape' })).rejects.toThrow()
+  })
+
   it('treats only absence as empty and keeps whitespace submissions off disk', async () => {
     const f = await fixture()
     expect(await f.store.list(scope)).toEqual({ scope, entries: [] })

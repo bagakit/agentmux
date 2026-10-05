@@ -129,7 +129,7 @@ describe('durable delivery diagnostics observe failures without admitting Input'
     const error = await client.submitAgentPrompt({ agentSessionId: 'hosted-session', operationId: 'original-hosted-operation',
       expectedRun: { runId: 'run-hosted-session' }, afterSubmissionId: null, authorHuman: true, prompt: 'original private Hosted body' })
       .then(() => null, failure => failure)
-    expect(error).toMatchObject({ code: original.code, detail: original.detail, controlFailure: original.controlFailure, logId: expect.stringMatching(/^delivery-/u) })
+    expect(error).toMatchObject({ code: original.code, detail: original.detail, controlFailure: original.controlFailure, logId: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/u) })
     const first = await client.readDeliveryAttempt(error.logId)
     expect(first).toMatchObject({ availability: 'found', record: { source: 'core', operationId: 'original-hosted-operation',
       error: { message: original.message, detail: original.detail } } })

@@ -166,7 +166,7 @@ it('device intent I/O failure keeps human acknowledgement and its unknown recove
 it('one click uses the strict public service to save one pending ID and enter its original main Mote launcher Tab', async () => {
   const view = await mount(); await view.click('新建目标'); await view.wait('此讨论尚未启动 Agent')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  expect(input).toMatchObject({ goalId: expect.stringMatching(/^demand_/), title: 'Untitled goal', description: '', status: 'backlog' })
+  expect(input).toMatchObject({ goalId: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/), title: 'Untitled goal', description: '', status: 'backlog' })
   expect(input).not.toHaveProperty('projectId')
   const saved = (await openDemandStore({ root: directory }).get(input.goalId))!
   expect(saved).toMatchObject({ id: input.goalId, projectId: null, description: '', sessionIds: [] }); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()

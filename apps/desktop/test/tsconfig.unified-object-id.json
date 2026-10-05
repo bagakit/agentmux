@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "unified-object-id.test.ts",
+    "unified-object-id-store.test.ts",
+    "unified-object-id-process-restore.test.ts",
+    "settings-executor-creation.test.tsx",
+    "../src/renderer/src/global.d.ts"
+  ],
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "paths": {
+      "esbuild": [
+        "packages/core/node_modules/esbuild/lib/main.d.ts"
+      ]
+    }
+  }
+}

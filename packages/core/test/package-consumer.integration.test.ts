@@ -1,10 +1,11 @@
 import { fixturePath } from './helpers/fixture-values.js'
+import { runtimeWorkspacePackages } from './helpers/runtime-workspace-packages.js'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -366,10 +367,9 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         }
       }
       const manifests = new Map<string, { name: string; version: string; files: string[]; scripts?: Record<string, string>; dependencies?: Record<string, string> }>()
-      for (const directory of ['core', 'demand']) {
-        const source = join(repositoryRoot, 'packages', directory)
+      const workspacePackages = await runtimeWorkspacePackages(join(repositoryRoot, 'packages/core'))
+      for (const { directory, source, manifest } of workspacePackages) {
         const destination = join(packWorkspace, 'packages', directory)
-        const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
         expect(manifest.files.length).toBeGreaterThan(0)
         manifests.set(manifest.name, manifest)
         await mkdir(destination, { recursive: true })
@@ -381,11 +381,21 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
       const sourceManifest = manifests.get('@agentmux/core')!
       // Reproduce the workspace link inside the owned copy; pnpm reads its version to publish
       // workspace:*. The external consumer below installs tarballs, never this link or checkout.
-      await mkdir(join(packWorkspace, 'packages/core/node_modules/@agentmux'), { recursive: true })
-      await symlink('../../../demand', join(packWorkspace, 'packages/core/node_modules/@agentmux/demand'))
-      const demandMetadata = await pack('demand')
-      expect(demandMetadata.files.map((file: { path: string }) => file.path)).toContain('dist/src/goals.js')
-      const demandArchive = resolve(packDirectory, demandMetadata.filename)
+      const workspaceByName = new Map(workspacePackages.map(item => [item.manifest.name, item]))
+      for (const item of workspacePackages) for (const [name, version] of Object.entries(item.manifest.dependencies ?? {})) {
+        if (!version.startsWith('workspace:')) continue
+        const target = workspaceByName.get(name)!
+        const link = join(packWorkspace, 'packages', item.directory, 'node_modules', name)
+        await mkdir(dirname(link), { recursive: true })
+        await symlink(relative(dirname(link), join(packWorkspace, 'packages', target.directory)), link)
+      }
+      const workspaceArchives: string[] = []
+      for (const item of workspacePackages) {
+        if (item.manifest.name === '@agentmux/core') continue
+        const packed = await pack(item.directory)
+        if (item.manifest.name === '@agentmux/demand') expect(packed.files.map(file => file.path)).toContain('dist/src/goals.js')
+        workspaceArchives.push(resolve(packDirectory, packed.filename))
+      }
 
       // Artifact freshness remains the global setup's responsibility. These deterministic local
       // packing/install steps share the owning test deadline, never a shorter competing budget.
@@ -424,7 +434,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           dependencyArchives.push(resolve(packDirectory, metadata[0].filename))
         }
       }
-      await packDependencies(join(repositoryRoot, 'packages/core'), sourceManifest.dependencies!)
+      for (const item of workspacePackages) await packDependencies(item.source, item.manifest.dependencies ?? {})
       expect(dependencyArchives.length).toBeGreaterThan(0)
       const packedPaths = metadata.files.map((file) => file.path)
       expect(packedPaths).not.toContain('bin/agentmux')
@@ -446,7 +456,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         '--no-package-lock',
         '--no-save',
         ...dependencyArchives,
-        demandArchive,
+        ...workspaceArchives,
         packedArchive
       ], {
         cwd: consumerDirectory,

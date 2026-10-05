@@ -230,7 +230,7 @@ it('keeps an actual Runner cancellation cause and its exact logid queryable thro
     expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
     expect(JSON.parse(error.detail)).toMatchObject({ code: 'COMMAND_ABORTED' })
     expect(JSON.parse(JSON.parse(error.detail).detail)).toMatchObject({ code: reason.code, detail: reason.detail })
-    expect(error.logId).toMatch(/^delivery-/)
+    expect(error.logId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     const sdk = await f.client.readDeliveryAttempt(error.logId)
     expect(sdk).toMatchObject({ availability: 'found', record: { logId: error.logId, operationId: f.request.operationId, source: 'core' } })
     expect(JSON.stringify(sdk)).toContain(reason.code)

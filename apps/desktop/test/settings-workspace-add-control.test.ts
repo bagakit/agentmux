@@ -13,7 +13,7 @@ import type { WorkspaceFiles } from '../src/main/workspace-files.js'
 const ipc = vi.hoisted(() => ({ root: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined,
   choose: vi.fn() }))
-vi.mock('electron', () => ({ app: { getPath: () => ipc.root || tmpdir() },
+vi.mock('electron', () => ({ app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop' },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: { showOpenDialog: ipc.choose }, nativeImage: {}, shell: {} }))
@@ -24,6 +24,7 @@ vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'owned.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/notes-storage-owner.js', () => ({ NotesStorageOwner: class { constructor(_config: unknown, _spatial: unknown, _publish: unknown, readonly storage: unknown) {} async initialize() {} } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { ConfigStore, DEFAULT_CONFIG, createWorkspaceInputSchema } from '../src/main/config-store.js'
@@ -55,7 +56,7 @@ async function fixture() {
     send:vi.fn((channel:string,value:unknown)=>{if(channel===CONFIG_CHANGED_CHANNEL)publications.push(value as AppConfig)})})
   ipc.handlers.clear();ipc.execute=undefined
   const dispose=await registerIpc({window:{isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow,
-    configStore:store,runtime,progressLoops,scratchTopics:{} as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
+    configStore:store,runtime,progressLoops,scratchTopics:{setNameAudit:vi.fn(),normalizeDirectoryIdentities:vi.fn().mockResolvedValue(undefined)} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
   prepare.mockClear();const save=vi.spyOn(store,'save')
   const invoke=async<T>(channel:string,...values:unknown[])=>{
     const handler=ipc.handlers.get(channel);expect(handler).toBeTypeOf('function')
@@ -95,7 +96,7 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
   const f=await fixture();try{
    const literal=join(f.root,'~not-expanded ') // no existing directory or creation is required
    const first=await f.cli({hostId:'local',path:literal,name:'   '})
-   expect(first.changed).toBe(true);expect(first.item.id).toMatch(/^[0-9a-f-]{36}$/)
+   expect(first.changed).toBe(true);expect(first.item.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
    expect(first.item.value).toEqual({name:'~not-expanded ',hostId:'local',path:literal,kind:'folder'})
    const bytes=await f.bytes(),count=f.publications.length
    const existing=await f.invoke<WorkspaceRecord>('workspaces:add',{hostId:'local',path:literal+'/',name:'Do not rename'})
