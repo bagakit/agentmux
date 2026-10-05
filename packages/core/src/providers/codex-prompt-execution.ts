@@ -23,7 +23,7 @@ function inspectCodexPromptPane(screen: AgentTerminalScreenSnapshot, strategy: N
   let footerRow = cursor.row + 1
   while (footerRow < rows && !lines[footerRow]?.text.trim()) footerRow++
   const footer = lines[footerRow]?.text.trim() ?? ''
-  if (!footer || !/^(?:\? for shortcuts|\S+ (?:none|minimal|low|medium|high|xhigh|default)(?: ·|$)|\d+% context left)/u.test(footer)) return 'unavailable'
+  if (!footer || !/^(?:\? for shortcuts|\S+ (?:none|minimal|low|medium|high|xhigh|max|default)(?: ·|$)|\d+% context left)/u.test(footer)) return 'unavailable'
   // A custom status line leaves the native shortcut hint on the next row.
   // The last-row warning badge can share a non-dim shortcut label or stand alone.
   // Recognize only its complete, aligned layout; other hints retain the dim check.
