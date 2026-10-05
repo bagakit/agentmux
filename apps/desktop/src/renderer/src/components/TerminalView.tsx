@@ -777,7 +777,7 @@ export function TerminalView({
       readContext: () => ({ visible: visibleRef.current, liveReady: readyForLiveOutput,
         acceptsInput: acceptsCurrentInput(), readOnly: readOnlyRef.current,
         buffer: terminal.buffer.active.type, mouseTrackingMode: terminal.modes.mouseTrackingMode }),
-      slow: (detail, duration) => rendererPerformance.terminalInteraction(detail, duration)
+      slow: (detail, duration, occurrenceMonoMs) => rendererPerformance.terminalInteraction(detail, duration, occurrenceMonoMs)
     })
     const readObservation = (): AgentMuxTerminalViewObservation | undefined => {
       if (disposed || terminalRef.current !== terminal) return undefined

@@ -11,7 +11,12 @@ export function createTabSwitchObservation(now = () => performance.now(), wall =
   let serial = 0, active: { record: RendererTabSwitchCost; key: string; start: number } | null = null
   let frame: number | null = null, frameGeneration = 0
   const cancel = () => { frameGeneration++; if (frame !== null) cancelFrame(frame); frame = null }
-  const elapsed = () => Math.max(0, now() - active!.start)
+  const elapsed = () => active!.record.elapsedMs = Math.max(active!.record.elapsedMs, 0, now() - active!.start)
+  const finish = (state: 'observed' | 'superseded') => {
+    if (!active) return
+    elapsed(); active.record.state = state; active.record.pendingStage = null
+    cancel(); active = null
+  }
   const matches = (target: RendererTabSwitchTarget) => active && active.record.target.tabId === target.tabId &&
     active.record.target.regionId === target.regionId && active.record.target.groupId === target.groupId &&
     active.record.target.displayWorkspaceId === target.displayWorkspaceId && active.record.target.presentationId === target.presentationId
@@ -24,23 +29,26 @@ export function createTabSwitchObservation(now = () => performance.now(), wall =
   function originalTerminal(facts: RendererTabSwitchTerminal): boolean {
     const previous = active?.record.terminal
     if (previous && (previous.sessionId !== facts.sessionId || previous.runId !== facts.runId)) {
-      active!.record.state = 'superseded'; cancel(); active = null; return false
+      finish('superseded'); return false
     }
     return true
   }
   function observe(): void {
-    if (!active || active.record.state === 'superseded' || active.record.mode !== 'terminal') return
+    if (!active || active.record.state !== 'pending' || active.record.mode !== 'terminal') return
     const record = active.record
     const facts = readOne(terminals, active.key)
     if (facts && !originalTerminal(facts)) return
-    if (readOne(placements, active.key) === true) record.placedMs ??= elapsed()
+    const placed = readOne(placements, active.key) === true
+    if (placed) record.placedMs ??= elapsed()
     if (facts) {
       record.terminal = { ...facts }
       if (facts.visible && facts.revealed) record.terminalMs ??= elapsed()
       if (facts.visible && facts.revealed && facts.acceptsInput) record.inputReadyMs ??= elapsed()
     }
-    if (record.frameMs !== null && (record.inputReadyMs !== null || facts?.readOnly)) { active = null; return }
-    if (record.selectedMs === null || record.placedMs === null || record.terminalMs === null || record.frameMs !== null || frame !== null) return
+    record.pendingStage = record.selectedMs === null ? 'selection' : !placed ? 'placement' :
+      !facts?.visible || !facts.revealed ? 'terminal' : record.frameMs === null ? 'frame' : 'input-gate'
+    if (record.frameMs !== null && placed && facts?.visible && facts.revealed && (facts.acceptsInput || facts.readOnly)) { finish('observed'); return }
+    if (record.selectedMs === null || !placed || !facts?.visible || !facts.revealed || record.frameMs !== null || frame !== null) return
     const generation = record.id, epoch = frameGeneration
     frame = requestFrame(() => {
       if (epoch !== frameGeneration || !active || active.record.id !== generation || active.record.state !== 'pending') return
@@ -49,10 +57,13 @@ export function createTabSwitchObservation(now = () => performance.now(), wall =
         frame = null
         const current = readOne(terminals, active.key)
         if (current && !originalTerminal(current)) return
-        if (!current?.visible || !current.revealed || readOne(placements, active.key) !== true) return
-        record.terminal = { ...current }; record.frameMs = elapsed(); record.state = 'observed'
+        const placed = readOne(placements, active.key) === true
+        if (!placed || !current?.visible || !current.revealed) {
+          record.pendingStage = !placed ? 'placement' : 'terminal'; return
+        }
+        record.terminal = { ...current }; record.frameMs = elapsed(); record.pendingStage = 'input-gate'
         if (current.acceptsInput) record.inputReadyMs ??= elapsed()
-        if (current.acceptsInput || current.readOnly) active = null
+        if (current.acceptsInput || current.readOnly) finish('observed')
       })
     })
   }
@@ -65,36 +76,42 @@ export function createTabSwitchObservation(now = () => performance.now(), wall =
       if (disposed) return
       disposed = true; owners.delete(read)
       if (owners.size === 0) readers.delete(address)
-      if (active?.key === address) cancel()
+      if (active?.key === address) {
+        if (owners.size === 0) finish('superseded')
+        else { cancel(); observe() }
+      }
     }
   }
   return {
     begin(target: RendererTabSwitchTarget, mode: RendererTabSwitchCost['mode'], eventTimestamp: number | null) {
-      cancel()
-      if (active?.record.state === 'pending') active.record.state = 'superseded'
+      finish('superseded'); cancel()
       const start = now()
       const inputDelayMs = eventTimestamp !== null && Number.isFinite(eventTimestamp) && eventTimestamp > 0 && eventTimestamp <= start
         ? start - eventTimestamp : null
       const record: RendererTabSwitchCost = { id: ++serial, target: { ...target }, handlerAt: wall(), inputDelayMs,
-        selectedMs: null, placedMs: null, terminalMs: null, frameMs: null, inputReadyMs: null, state: 'pending', mode, terminal: null }
+        selectedMs: null, placedMs: null, terminalMs: null, frameMs: null, inputReadyMs: null,
+        elapsedMs: 0, pendingStage: 'selection', state: 'pending', mode, terminal: null }
       if (records.length === 16) records.shift()
       records.push(record); active = { record, key: key(target), start }
-      // The selected mode is a fact at this click. Activity is not a failed Terminal load.
-      if (mode === 'activity' || mode === 'other') record.state = 'observed'
       observe()
       return record.id
     },
     selected(target: RendererTabSwitchTarget) {
       if (!active || !matches(target)) return
       active.record.selectedMs ??= elapsed()
-      if (active.record.mode === 'activity' || active.record.mode === 'other') { active = null; return }
+      // The selected mode is a fact at this click. Activity is not a failed Terminal load.
+      if (active.record.mode === 'activity' || active.record.mode === 'other') { finish('observed'); return }
+      active.record.pendingStage = 'terminal'
       observe()
     },
     observe(target: RendererTabSwitchTarget) { if (matches(target)) observe() },
     registerPlacement(target: RendererTabSwitchTarget, read: () => boolean) { return register(placements, target, read) },
     registerTerminal(target: RendererTabSwitchTarget, read: () => RendererTabSwitchTerminal | null) { return register(terminals, target, read) },
     omitted(): number { return serial - records.length },
-    snapshot(): RendererTabSwitchCost[] { return records.map(record => ({ ...record, target: { ...record.target }, terminal: record.terminal ? { ...record.terminal } : null })) }
+    snapshot(): RendererTabSwitchCost[] {
+      if (active) elapsed()
+      return records.map(record => ({ ...record, target: { ...record.target }, terminal: record.terminal ? { ...record.terminal } : null }))
+    }
   }
 }
 export const tabSwitchObservation = createTabSwitchObservation()
