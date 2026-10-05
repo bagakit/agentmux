@@ -10,6 +10,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const require = createRequire(import.meta.url)
 const sourcePath = join(root, 'apps/desktop/scripts/macos-signing.mjs')
 const testPath = join(root, 'apps/desktop/test/package-macos-signing.test.ts')
+const localSourcePath = join(root, 'apps/desktop/scripts/macos-local-signing.mjs')
+const localTestPath = join(root, 'apps/desktop/test/macos-local-signing.test.ts')
 const packagePath = join(root, 'apps/desktop/scripts/package-macos.mjs')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 
@@ -39,6 +41,11 @@ async function callers() {
   assert.ok(importNode?.importClause?.namedBindings && ts.isNamedImports(importNode.importClause.namedBindings))
   const imports = importNode.importClause.namedBindings.elements.map(node => node.name.text)
   for (const symbol of ['preflightMacosSigning', 'signMacosApplication', 'verifyMacosSigning']) assert.ok(imports.includes(symbol))
+  const signing = await readFile(sourcePath, 'utf8')
+  assert.ok(signing.includes("import { readLocalSigningIdentity } from './macos-local-signing.mjs'"))
+  assert.ok(signing.includes('local = await loadLocal()'), 'Packaging must consume the saved local identity')
+  assert.ok(source.includes("await plistReplace(plist, 'NSScreenCaptureUsageDescription', 'string',"), 'Branding must declare screen capture purpose')
+  assert.ok(source.includes("await plistValue(plist, 'NSScreenCaptureUsageDescription')"), 'Package verification must consume actual purpose declaration')
   return { nonempty: true, count: 3, file: 'apps/desktop/scripts/package-macos.mjs', sourceSha256: sha(source), calls: [preflight, sign, verify] }
 }
 
@@ -46,27 +53,41 @@ const mutations = [
   ['stable-request-becomes-adhoc', "if (!/^[A-F0-9]{40}$/.test(fingerprint)) reject('Stable macOS delivery requires an exact certificate SHA1.')", "if (!/^[A-F0-9]{40}$/.test(fingerprint)) return Object.freeze({ kind: 'ad-hoc' })"],
   ['wrong-certificate-selected', 'match[1].toUpperCase() === fingerprint', 'true'],
   ['ambiguous-certificate-accepted', 'selected.length !== 1', 'selected.length === 0'],
-  ['signer-validation-disabled', "identityValidation: plan.kind === 'certificate'", 'identityValidation: false'],
+  ['signer-validation-disabled', "identityValidation: plan.kind === 'certificate' && plan.profile !== 'local'", 'identityValidation: false'],
   ['implicit-hardening-enabled', 'hardenedRuntime: false', 'hardenedRuntime: true'],
   ['automatic-profile-enabled', 'preEmbedProvisioningProfile: false', 'preEmbedProvisioningProfile: true'],
   ['automatic-entitlements-enabled', 'preAutoEntitlements: false', 'preAutoEntitlements: true'],
   ['team-metadata-ignored', '!metadata.split(\'\\n\').includes(`TeamIdentifier=${plan.teamId}`)', 'false'],
   ['weak-identifier-only-source', 'hardenedRuntime: false, entitlements,', 'hardenedRuntime: false, entitlements, requirements: \'=designated => identifier "dev.agentmux.desktop"\','],
   ['native-boundary-test-omitted', "if (plan.kind === 'certificate') verification.push", 'if (false) verification.push'],
-  ['native-requirement-treated-as-file', '`=identifier', '`identifier'],
+  ['native-requirement-treated-as-file', '      `=identifier', '      `identifier'],
   ['native-signature-not-verified', "await run('/usr/bin/codesign', [...verification, appPath])", '/* native verification omitted */'],
+  ['adhoc-canonical-install-allowed', "if (argv.includes('--install')) reject(", 'if (false) reject('],
+  ['local-native-policy-broadened', "'-p', 'codesigning'", "'-p', 'basic'"],
+  ['local-leaf-not-pinned', 'certificate leaf = H"${plan.identity}"', 'certificate leaf = H"${"B".repeat(40)}"'],
+  ['local-anchor-not-pinned', "if (plan.profile === 'local' && !requirement.includes", "if (false && !requirement.includes"],
+]
+
+const localMutations = [
+  ['local-import-all-apps', "'-T', '/usr/bin/codesign'", "'-A'"],
+  ['local-trust-all-policies', "'-p', 'codeSign',", ''],
+  ['local-record-fingerprint-ignored', 'record.identity !== identity', 'false'],
+  ['local-empty-p12-password', "'-P', password,", "'-P', '',"],
+  ['local-import-password-exposed', "String(error.stderr || error.message).replaceAll(password, '[redacted]')", 'String(error.stderr || error.message)'],
 ]
 
 async function verifyMutations(evidence) {
-  const original = await readFile(sourcePath), tests = await readFile(testPath)
+  const original = await readFile(sourcePath), tests = await readFile(testPath), localOriginal = await readFile(localSourcePath)
   await mkdir(evidence, { recursive: true })
   const receipt = { scope: 'Source only; native runner and signer are test doubles, not lawful signing or OS acceptance', passed: false,
-    inputs: { source: sha(original), tests: sha(tests), package: sha(await readFile(packagePath)) }, cases: [], artifacts: {} }
+    inputs: { source: sha(original), tests: sha(tests), localSource: sha(localOriginal), localTests: sha(await readFile(localTestPath)), package: sha(await readFile(packagePath)) }, cases: [], artifacts: {} }
   const vitest = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs')
   const config = join(evidence, 'vitest.config.mjs')
   await writeFile(config, `export default { root: ${JSON.stringify(root)}, test: { environment: 'node', include: ['apps/desktop/test/package-macos-signing.test.ts'], maxWorkers: 1, fileParallelism: false, watch: false } }\n`)
-  const run = async name => {
-    const result = spawnSync(process.execPath, [vitest, 'run', '--config', config], { cwd: root, encoding: 'utf8', timeout: 30_000 })
+  const localConfig = join(evidence, 'vitest.local.config.mjs')
+  await writeFile(localConfig, `export default { root: ${JSON.stringify(root)}, test: { environment: 'node', include: ['apps/desktop/test/macos-local-signing.test.ts'], maxWorkers: 1, fileParallelism: false, watch: false } }\n`)
+  const run = async (name, configuration = config) => {
+    const result = spawnSync(process.execPath, [vitest, 'run', '--config', configuration], { cwd: root, encoding: 'utf8', timeout: 30_000 })
     const log = `${result.stdout ?? ''}${result.stderr ?? ''}`
     await writeFile(join(evidence, name + '.log'), log)
     receipt.artifacts[name + '.log'] = sha(log)
@@ -76,6 +97,9 @@ async function verifyMutations(evidence) {
     const baseline = await run('candidate-owning')
     assert.equal(baseline.status, 0, baseline.log)
     assert.match(baseline.log, /Tests\s+[1-9]\d* passed/)
+    const localBaseline = await run('candidate-local-owning', localConfig)
+    assert.equal(localBaseline.status, 0, localBaseline.log)
+    assert.match(localBaseline.log, /Tests\s+[1-9]\d* passed/)
     for (const [name, before, after] of mutations) {
       const text = original.toString()
       assert.equal(text.split(before).length - 1, 1, `Nonunique mutation anchor: ${name}`)
@@ -89,15 +113,32 @@ async function verifyMutations(evidence) {
         receipt.cases.push({ name, mutatedSourceSha256: sha(changed), redExit: red.status })
       } finally { await writeFile(sourcePath, original) }
     }
+    for (const [name, before, after] of localMutations) {
+      assert.equal(localOriginal.toString().split(before).length - 1, 1, `Nonunique mutation anchor: ${name}`)
+      const changed = localOriginal.toString().replace(before, after)
+      try {
+        await writeFile(localSourcePath, changed)
+        const red = await run(name, localConfig)
+        assert.ok(Number.isInteger(red.status) && red.status !== 0, `Mutation survived: ${name}`)
+        assert.match(red.log, /AssertionError/, `Mutation failed outside behavior: ${name}`)
+        assert.match(red.log, /Tests\s+[1-9]\d* failed/)
+        receipt.cases.push({ name, file: 'apps/desktop/scripts/macos-local-signing.mjs', mutatedSourceSha256: sha(changed), redExit: red.status })
+      } finally { await writeFile(localSourcePath, localOriginal) }
+    }
     const restored = await run('restored-owning')
     assert.equal(restored.status, 0, restored.log)
+    const localRestored = await run('restored-local-owning', localConfig)
+    assert.equal(localRestored.status, 0, localRestored.log)
     receipt.callers = await callers()
     receipt.passed = true
   } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
   finally {
     await writeFile(sourcePath, original)
+    await writeFile(localSourcePath, localOriginal)
     receipt.restoredSourceSha256 = sha(await readFile(sourcePath))
     assert.equal(receipt.restoredSourceSha256, receipt.inputs.source)
+    receipt.restoredLocalSourceSha256 = sha(await readFile(localSourcePath))
+    assert.equal(receipt.restoredLocalSourceSha256, receipt.inputs.localSource)
     await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   }
   assert.equal(receipt.passed, true, receipt.failure?.message)
@@ -158,7 +199,11 @@ async function verifyCallerMutations(evidence) {
 }
 
 const mode = process.argv[2]
-if (mode === 'callers') console.log(JSON.stringify(await callers()))
+if (mode === '--all') {
+  const evidence = join(root, "docs/reviews/messagetool-screenshot-stable-signing-fixture/source")
+  await verifyMutations(join(evidence, 'mutations'))
+  await verifyCallerMutations(join(evidence, 'callers'))
+} else if (mode === 'callers') console.log(JSON.stringify(await callers()))
 else if (mode === 'mutations' || mode === 'caller-mutations') {
   const index = process.argv.indexOf('--evidence-dir')
   assert.ok(index >= 0 && process.argv[index + 1], 'An owned evidence directory is required')
