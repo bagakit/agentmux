@@ -1,12 +1,12 @@
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 
 /** One same-page history boundary delegates Back to the visible top layer. No Runtime navigation. */
 export function useMobileBack(hasBack: boolean, onBack: () => void): () => void {
   const current = useRef({ hasBack, onBack })
   current.current = { hasBack, onBack }
   const binding = useRef<{ sync(): void; back(): void } | null>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const saved = window.history.state
     const restored = typeof saved?.agentmuxMobileBack === 'string' && saved.agentmuxMobileBack.startsWith('mobile-back:')
     const owner = restored ? saved.agentmuxMobileBack : `mobile-back:${randomClientRequestId()}`
@@ -33,7 +33,9 @@ export function useMobileBack(hasBack: boolean, onBack: () => void): () => void 
     }
     window.addEventListener('popstate', pop)
     binding.current = { sync, back() {
-      if (releasing) return
+      // Retiring the previous boundary must not swallow a new explicit native Back.
+      // Its pending traversal is bookkeeping; delegate this action to the current layer.
+      if (releasing) { if (current.current.hasBack) current.current.onBack(); return }
       if (guarded && owns()) window.history.back()
       else if (current.current.hasBack) current.current.onBack()
     } }
