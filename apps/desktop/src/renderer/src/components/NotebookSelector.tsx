@@ -20,9 +20,11 @@ export function NotebookSelector({ notebooks, selectedId, onSelect, onCreate, pe
     <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
       <DropdownMenu.Content className="recall-notebook-menu" align="start" sideOffset={5} collisionPadding={8} aria-label="Choose notebook" onCloseAutoFocus={event => { if (!activeRef.current || creating.current) event.preventDefault(); creating.current = false }}>
         <DropdownMenu.Label className="recall-notebook-menu-label">Your notebooks</DropdownMenu.Label>
-        <div className="recall-notebook-menu-books">{notebooks.map(book => <DropdownMenu.Item key={book.notebookId} className="recall-notebook-menu-item" aria-label={`Switch to notebook: ${book.name}`} onSelect={() => onSelect(book.notebookId)}>
-          <BookOpen size={14} /><span>{book.name}</span>{selectedId === book.notebookId ? <Check size={14} aria-label="Current notebook" /> : null}
-        </DropdownMenu.Item>)}</div>
+        <DropdownMenu.RadioGroup className="recall-notebook-menu-books" value={selectedId ?? ''} onValueChange={onSelect}>
+          {notebooks.map(book => <DropdownMenu.RadioItem key={book.notebookId} value={book.notebookId} className="recall-notebook-menu-item" aria-label={`Switch to notebook: ${book.name}`}>
+            <BookOpen size={14} aria-hidden="true" /><span>{book.name}</span><DropdownMenu.ItemIndicator className="recall-notebook-menu-check"><Check size={14} aria-label="Current notebook" /></DropdownMenu.ItemIndicator>
+          </DropdownMenu.RadioItem>)}
+        </DropdownMenu.RadioGroup>
         <DropdownMenu.Separator className="recall-notebook-menu-separator" />
         <DropdownMenu.Item className="recall-notebook-menu-item" aria-label="New notebook" disabled={pending} onSelect={() => { creating.current = true; onCreate() }}><Plus size={14} /><span>New notebook</span></DropdownMenu.Item>
       </DropdownMenu.Content>
