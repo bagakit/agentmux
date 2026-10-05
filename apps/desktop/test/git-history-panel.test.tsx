@@ -333,6 +333,80 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     await select(''); expect(history.mock.calls.at(-1)?.[1]).toEqual({ ref: null })
   })
 
+  it('keeps reference options selectable through consecutive pending ranges without showing old commits or accepting late metadata', async () => {
+    const topic = 'refs/heads/topic/pure-branch', rootOnly = 'refs/heads/root-only'
+    const available = [...snapshot.refs, { name: topic, kind: 'local' as const, oid: b }, { name: rootOnly, kind: 'local' as const, oid: c }]
+    const scope = { ...snapshot, refs: available }, pendingTopic = deferred<GitHistoryResult>(), pendingRoot = deferred<GitHistoryResult>()
+    history.mockResolvedValueOnce(page([commit(a, 'All branches commit', [b])], false, scope))
+      .mockReturnValueOnce(pendingTopic.promise).mockReturnValueOnce(pendingRoot.promise)
+    const options = () => [...host.querySelectorAll<HTMLOptionElement>('select option')].map(option => option.value)
+    await render()
+    const initialOptions = options()
+    await select(topic)
+    expect(options()).toEqual(initialOptions)
+    expect(options()).toContain(rootOnly)
+    expect(controls.result).toBeNull()
+    expect(rows()).toEqual([])
+    expect(host.textContent).not.toContain('All branches commit')
+    await select(rootOnly)
+    expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: rootOnly })
+    expect(options()).toEqual(initialOptions)
+    await act(async () => pendingTopic.resolve(page([commit(b, 'Obsolete topic commit', [])], false,
+      { ...scope, selectedRef: topic, refs: [{ name: 'refs/heads/late-option', kind: 'local', oid: b }] })))
+    expect(options()).toEqual(initialOptions)
+    expect(controls.reference).toBe(rootOnly)
+    expect(rows()).toEqual([])
+    const replaced = { ...scope, selectedRef: rootOnly, refs: available.filter(ref => ref.name === rootOnly) }
+    await act(async () => pendingRoot.resolve(page([commit(c, 'Root-only commit', [])], false, replaced)))
+    expect(rows()).toEqual([c])
+    expect(controls.refs).toEqual(replaced.refs)
+    expect(options()).toEqual(['', rootOnly])
+    expect(host.textContent).not.toContain('Obsolete topic commit')
+    expect(history).toHaveBeenCalledTimes(3)
+  })
+
+  it('retains only same-workspace refs through hidden reads, error handoff and a foreign pending workspace', async () => {
+    const pending = deferred<GitHistoryResult>(), foreign = deferred<GitHistoryResult>()
+    const other = { ...workspace, id: 'other', hostId: 'remote', path: _hygiene_fixturePath("other") }
+    history.mockResolvedValueOnce(page([commit(a, 'Completed original range', [])]))
+      .mockReturnValueOnce(pending.promise).mockRejectedValueOnce(new Error('Selected range unavailable'))
+      .mockReturnValueOnce(foreign.promise).mockResolvedValueOnce({ kind: 'not-a-git-repository', hostId: other.hostId, workspacePath: other.path })
+    await render(); await select('refs/heads/main'); await render(false)
+    expect(controls.refs).toEqual(snapshot.refs)
+    expect(controls.captureWindow()).toBeNull() // A pending selection never becomes a completed window.
+    await act(async () => pending.resolve(page([commit(b, 'Late hidden range', [])], false, { ...snapshot, refs: [] })))
+    expect(controls.refs).toEqual(snapshot.refs)
+    expect(rows()).toEqual([])
+    await render(true)
+    expect(controls.error).toBe('Selected range unavailable')
+    expect(controls.refs).toEqual(snapshot.refs)
+    const captured = controls.captureWindow()!
+    expect(captured.refs).toEqual(snapshot.refs)
+    function Next({ target }: { target: WorkspaceRecord }) {
+      const value = useGitHistory(target, true)
+      controls = value
+      useLayoutEffect(() => { value.adoptWindow(captured) }, [value.adoptWindow])
+      return createElement(GitHistoryPanel, { workspace: target, history: value, onSelectCommit: () => {} })
+    }
+    await act(async () => root.render(createElement(Next, { target: workspace })))
+    expect(history).toHaveBeenCalledTimes(3)
+    expect(controls.reference).toBe('refs/heads/main')
+    expect(controls.error).toBe('Selected range unavailable')
+    expect(controls.refs).toEqual(snapshot.refs)
+    await act(async () => root.render(createElement(Next, { target: other })))
+    expect(history).toHaveBeenLastCalledWith(other.id, { ref: null })
+    expect(history).toHaveBeenCalledTimes(4)
+    expect(controls.refs).toEqual([])
+    expect([...host.querySelectorAll<HTMLOptionElement>('select option')].map(option => option.value)).toEqual([''])
+    const foreignRefs = [{ name: 'refs/heads/other-only', kind: 'local' as const, oid: d }]
+    await act(async () => foreign.resolve(page([commit(d, 'New repository commit', [])], false,
+      { ...snapshot, hostId: other.hostId, repoPath: other.path, refs: foreignRefs })))
+    expect(controls.refs).toEqual(foreignRefs)
+    await click('Refresh history')
+    expect(controls.result?.kind).toBe('not-a-git-repository')
+    expect(controls.refs).toEqual([])
+  })
+
   it('invalidates pending pages while a tab or document is hidden, retains completed pages and allows a bounded retry', async () => {
     const late = deferred<GitHistoryResult>(), background = deferred<GitHistoryResult>()
     history.mockResolvedValueOnce(page([commit(a, 'Loaded merge', [b, c])], true)).mockReturnValueOnce(late.promise)
