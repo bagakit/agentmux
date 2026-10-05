@@ -9,23 +9,34 @@ import type { AgentTimelineSnapshot } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
-import { requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { pmoTeamsTopicFloatingTargetTabId, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { usePmoTeamsTopicTarget } from '../src/renderer/src/lib/pmo-teams-topic-target'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { MAX_AGENT_STEER_QUEUE_ENTRIES, useAppStore } from '../src/renderer/src/store'
+import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-projection'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import type { WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
 // The native App proof owns the retained workbench/terminal DOM. This bounded
 // test keeps the real shortcut, tooltip, window, input and navigation owners.
 vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({
-  WorkspaceWorkbench: ({ projectionTabId, onTabSelect }: { projectionTabId?: string; onTabSelect?: (id: string) => void }) => {
-    const tab = useAppStore((state) => projectionTabId ? state.tabs[projectionTabId] : undefined)
-    const region = tab?.regions[tab.layout.activeRegionId]
-    return createElement('div', { 'data-projected-target': projectionTabId },
-      createElement('button', { 'data-select-context': 'other-tab', onClick: () => onTabSelect?.('other-tab') }, 'Select another context'),
+  WorkspaceWorkbench: ({ projection, retainedTabId, onTabSelect, presentationAction }: {
+    projection?: WorkbenchProjection; retainedTabId?: string; onTabSelect?: (id: string, groupId?: string) => void
+    presentationAction?: React.ReactNode
+  }) => {
+    const tab = useAppStore((state) => retainedTabId ? state.tabs[retainedTabId] : undefined)
+    const reference = projection?.selection.find(reference => reference.tabId === retainedTabId)
+    const region = reference ? tab?.regions[reference.regionId] : undefined
+    return createElement('div', { 'data-projected-target': retainedTabId, 'data-projected-reference': JSON.stringify(reference) }, presentationAction,
+      createElement('button', { 'data-select-context': 'other-tab', onClick: () => onTabSelect?.('other-tab', 'mote-group') }, 'Select another context'),
       region?.kind === 'agent' ? createElement(AgentSessionComposer, { sessionId: region.sessionId }) : null)
   }
 }))
-vi.mock('../src/renderer/src/components/SessionMailbox', () => ({ SessionMailbox: () => null }))
+vi.mock('../src/renderer/src/components/SessionMailbox', () => ({
+  // Mailbox owns the overlay; its render prop still carries the real Composer.
+  SessionMailbox: ({ children }: { children?: (mailbox: React.ReactNode, pending: React.ReactNode) => React.ReactNode }) => children?.(null, null)
+}))
 import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
@@ -54,9 +65,15 @@ const currentTab = { ...createWorkbenchTab('current-tab', { kind: 'agent', phase
   regionId: 'current-region', sessionId: current.id }, 'PMO · Ship the target goal'), topicId: PMO_TEAMS_TOPIC_ID }
 const otherTab = { ...createWorkbenchTab('other-tab', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID,
   regionId: 'other-region', sessionId: other.id }, 'PMO · Another goal'), topicId: PMO_TEAMS_TOPIC_ID }
+const topic = { id: PMO_TEAMS_TOPIC_ID, directoryPath: current.workspacePath, topicPath: `${current.workspacePath}/topic.md`, title: 'Mote', summary: '', collaborators: [] }
+const currentReference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: currentTab.id, regionId: 'current-region' }
 function Floating() {
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
-  return createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating })
+  const state = useAppStore()
+  const tabId = pmoTeamsTopicFloatingTargetTabId(floating, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
+  const projectionState = moteWorkbenchProjection(spatialCatalog(state, [topic]), tabId ? state.tabs[tabId] : undefined,
+    floating, reference => setFloating({ targetTabId: reference.tabId, reference }), state.layouts)
+  return createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating, projectionState })
 }
 function Probe({ rendered }: { rendered: () => void }) {
   const [floating] = usePmoTeamsTopicFloatingState()
@@ -83,12 +100,12 @@ beforeEach(() => {
   window.localStorage.clear(); restorePopover = installNativePopover()
   useAppStore.setState({ config, sessions: [current, other], tabs: { [currentTab.id]: currentTab, [otherTab.id]: otherTab },
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [currentTab.id, otherTab.id]) },
-    scratchTopicSnapshots: {}, workspaceFileRevisions: {}, timelines: {}, agentNames: {}, viewModes: { [current.id]: 'terminal' }, activeWorkspaceId: 'original-project', mainSurface: 'board',
+    scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(config.workspaces[0]!), topics: [topic], revision: 0, reading: false, error: null } },
+    workspaceFileRevisions: {}, timelines: {}, agentNames: {}, viewModes: { [current.id]: 'terminal' }, activeWorkspaceId: 'original-project', mainSurface: 'board',
     agentFocus: { execution: { sessionId: 'execution', history: [{ sessionId: 'execution', focusedAt: 123 }] }, pmo: { sessionId: other.id } },
     agentComposerDrafts: { [current.id]: 'Original draft', execution: 'Execution draft' }, agentSteerQueues: {}, agentSteerInFlight: {}, reportError: vi.fn() })
   window.localStorage.setItem(savedKey, JSON.stringify({ open: false, targetTabId: currentTab.id,
-    targetTopicId: PMO_TEAMS_TOPIC_ID }))
-  const topic = { id: PMO_TEAMS_TOPIC_ID, directoryPath: current.workspacePath, topicPath: `${current.workspacePath}/topic.md`, title: 'Mote', summary: '', collaborators: [] }
+    targetTopicId: PMO_TEAMS_TOPIC_ID, reference: currentReference }))
   vi.spyOn(api.scratch, 'ensureMote').mockResolvedValue(topic)
   vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
@@ -150,10 +167,15 @@ describe('Mote shortcut current context', () => {
       button('Open Mote').click()
     }); await settle()
     expect(dialog.dataset.moteTargetTab).toBe(currentTab.id)
-    expect(Object.keys(saved()).sort()).toEqual(['open', 'targetTabId', 'targetTopicId'])
-    await act(async () => button('Open Mote Space').click()); await settle()
+    expect(Object.keys(saved()).sort()).toEqual(['open', 'reference', 'targetTabId', 'targetTopicId'])
+    expect(saved().reference).toEqual(currentReference)
+    const originalLayout = useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]
+    await act(async () => button('Open in Space').click()); await settle()
     const full = useAppStore.getState()
-    expect(full.layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(currentTab.id)
+    expect(full.workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, groupId: currentReference.groupId,
+      tabId: currentReference.tabId, regionId: currentReference.regionId, topicId: PMO_TEAMS_TOPIC_ID })
+    expect(full.layouts[SCRATCH_WORKSPACE_ID]).toEqual({ ...originalLayout,
+      groups: [{ ...originalLayout!.groups[0]!, activeTabId: currentTab.id, recentTabIds: [otherTab.id, currentTab.id] }] })
     expect(full.mainSurface).toBe('workbench')
     expect(full.agentFocus.execution).toEqual(execution)
     expect(full.sessions).toBe(state.sessions)
@@ -165,6 +187,8 @@ describe('Mote shortcut current context', () => {
       workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'other-in-split', sessionId: other.id })
     split = { ...split, layout: { ...split.layout, activeRegionId: 'other-in-split' } }
     useAppStore.setState({ tabs: { [split.id]: split, [otherTab.id]: otherTab } })
+    window.localStorage.setItem(savedKey, JSON.stringify({ open: false, targetTabId: currentTab.id,
+      targetTopicId: PMO_TEAMS_TOPIC_ID, reference: { ...currentReference, regionId: 'other-in-split' } }))
     await render()
     expect(button('Open Mote').dataset.moteStatus).toBe('Needs reply')
     await act(async () => button('Open Mote').click()); await settle()
@@ -179,14 +203,16 @@ describe('Mote shortcut current context', () => {
   it('does not close a newly selected context when an earlier full Space action finishes late', async () => {
     let finish!: () => void
     const fullSpace = new Promise<void>((resolve) => { finish = resolve })
-    const open = vi.fn<typeof baseline.openScratchTopic>((topicId, workspaceId, options) => options?.reveal === false
-      ? baseline.openScratchTopic(topicId, workspaceId, options) : fullSpace)
-    useAppStore.setState({ openScratchTopic: open })
+    const open = vi.fn<typeof baseline.executeControl>(async (request, signal, options) => {
+      if (request.operation === 'focus') await fullSpace
+      return baseline.executeControl(request, signal, options)
+    })
+    useAppStore.setState({ executeControl: open })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
-    await act(async () => button('Open Mote Space').click())
-    expect(open).toHaveBeenLastCalledWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID,
-      expect.objectContaining({ tabId: currentTab.id, signal: expect.any(AbortSignal) }))
+    await act(async () => button('Open in Space').click())
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ operation: 'focus', inputPolicy: 'preserve',
+      target: expect.objectContaining({ kind: 'space', ...currentReference }) }), expect.any(AbortSignal))
     await act(async () => container.querySelector<HTMLButtonElement>('[data-select-context]')!.click()); await settle()
     await act(async () => finish()); await settle()
     expect(saved().open).toBe(true)
@@ -202,27 +228,47 @@ describe('Mote shortcut current context', () => {
       const unsubscribe = subscribe(listener)
       return () => { active.delete(listener); unsubscribe() }
     })
-    const finish: (() => void)[] = []
-    useAppStore.setState({ openScratchTopic: (topicId, workspaceId, options) => options?.reveal === false
-      ? baseline.openScratchTopic(topicId, workspaceId, options)
-      : new Promise<void>((resolve) => { finish.push(resolve) }) })
+    const focus = vi.fn<typeof baseline.executeControl>(baseline.executeControl)
+    useAppStore.setState({ executeControl: focus })
     await render()
     await act(async () => button('Open Mote').click()); await settle()
+    // Delay the real public focus owner's discovery, after opening has settled.
+    // Both the public owner and the floating caller must cancel their consumers.
+    const finish: (() => void)[] = []
+    vi.mocked(api.scratch.listTopics).mockImplementation(() => new Promise(resolve => { finish.push(() => resolve([topic])) }))
+    const original = useAppStore.getState()
     const before = new Set(active)
     expect(before.size).toBeGreaterThan(0)
-    // Keep the mounted original workface's consumers. This public seam observes
-    // only the navigation action's added whole-store subscription and its release.
+    // Closing also releases the original open-only recovery intent, without
+    // unmounting input. It must not leave either navigation consumer behind.
     const navigationConsumers = () => [...active].filter(listener => !before.has(listener))
-    await act(async () => button('Open Mote Space').click())
-    expect(navigationConsumers()).toHaveLength(1)
+    await act(async () => button('Open in Space').click())
+    expect(finish).toHaveLength(1)
+    expect(navigationConsumers()).toHaveLength(2)
     expect([...before].every(listener => active.has(listener))).toBe(true)
-    await act(async () => button('Open Mote Space').click())
+    await act(async () => button('Open in Space').click())
     expect(finish).toHaveLength(2)
-    expect(navigationConsumers()).toHaveLength(1)
+    expect(focus.mock.calls[0]![1]!.aborted).toBe(true)
+    expect(navigationConsumers()).toHaveLength(2)
     await act(async () => button('Close Mote').click()); await settle()
-    expect(active).toEqual(before)
-    await act(async () => finish.forEach((resolve) => resolve())); await settle()
-    expect(active).toEqual(before)
+    expect(focus).toHaveBeenCalledTimes(2)
+    expect(focus.mock.calls.every(([, signal]) => signal?.aborted)).toBe(true)
+    expect(navigationConsumers()).toHaveLength(0)
+    expect([...active].every(listener => before.has(listener))).toBe(true)
+    const closedConsumers = new Set(active)
+    await act(async () => {
+      finish.forEach((resolve) => resolve())
+      await Promise.all(focus.mock.results.map(result => result.value))
+    }); await settle()
+    expect(active).toEqual(closedConsumers)
+    const after = useAppStore.getState()
+    expect(after.mainSurface).toBe(original.mainSurface)
+    expect(after.activeWorkspaceId).toBe(original.activeWorkspaceId)
+    expect(after.workbenchSpaceSelection).toBe(original.workbenchSpaceSelection)
+    expect(after.layouts).toBe(original.layouts)
+    expect(after.tabs).toBe(original.tabs)
+    expect(after.agentComposerDrafts).toBe(original.agentComposerDrafts)
+    expect(after.reportError).not.toHaveBeenCalled()
     expect(saved().open).toBe(false)
   })
 
@@ -248,6 +294,7 @@ describe('Mote shortcut current context', () => {
     useAppStore.setState({ launchAgent: launch, enqueueAgentSteer: enqueue })
     await render()
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTabId: currentTab.id })); await settle()
+    expect(container.querySelector('[data-projected-target]')?.getAttribute('data-projected-reference')).toBe(JSON.stringify(currentReference))
     const input = container.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
     expect(input).not.toBeNull()
     expect(input.textContent).toBe('Newer draft')
@@ -269,7 +316,7 @@ describe('Mote shortcut current context', () => {
     const queue = [{ operationId: 'saved-intent', runId: current.control.run.runId, text: 'Queued original input', status: 'deferred' as const, promptCondition: null }]
     useAppStore.setState({ enqueueAgentSteer: enqueue, flushAgentSteerQueue: flush, launchAgent: launch, agentSteerQueues: { [current.id]: queue } })
     window.localStorage.setItem(savedKey, JSON.stringify({ open: true, targetTabId: currentTab.id,
-      targetTopicId: PMO_TEAMS_TOPIC_ID }))
+      targetTopicId: PMO_TEAMS_TOPIC_ID, reference: currentReference }))
     await render()
     expect(container.querySelector<HTMLElement>('[role="dialog"]')!.dataset.moteTargetTab).toBe(currentTab.id)
     expect(useAppStore.getState().agentComposerDrafts[current.id]).toBe('Original draft')

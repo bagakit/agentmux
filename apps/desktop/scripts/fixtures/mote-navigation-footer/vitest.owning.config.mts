@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 const repository = resolve(import.meta.dirname, '../../../../..')
 // This bounded UI gate consumes current Source directly. It does not build or
 // claim freshness of Core's published dist, nor exercise a live Runtime/Run.
-const aliases = ['core', 'demand', 'layout', 'client-ui'].flatMap(name => {
+const aliases = ['core', 'demand', 'layout', 'identity', 'client-ui'].flatMap(name => {
   const directory = resolve(repository, 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')) as {
     exports: Record<string, string | { import: string; browser?: string }>
@@ -29,7 +29,7 @@ const aliases = ['core', 'demand', 'layout', 'client-ui'].flatMap(name => {
     if (name !== 'layout' && (!target.import.startsWith('./dist/') || !target.import.endsWith('.js')))
       throw new Error(`Unmapped ${name} Source export: ${subpath}`)
     const specifier = '@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))
-    const source = target.import.replace('./dist/', name === 'core' ? './src/' : './').replace(/\.js$/, '.ts')
+    const source = target.import.replace('./dist/', name === 'core' || name === 'identity' ? './src/' : './').replace(/\.js$/, '.ts')
     const replacement = resolve(directory, source)
     if (!existsSync(replacement)) throw new Error(`Missing current Source for ${specifier}: ${replacement}`)
     return { find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement }
