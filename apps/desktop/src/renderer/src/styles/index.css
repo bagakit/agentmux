@@ -8,6 +8,7 @@
 @import './base.css';
 @import '@agentmux/client-ui/input/styles.css';
 @import './chrome.css';
+@import './selection-field.css';
 @import './space-tree.css';
 @import './project-groups.css';
 @import './space-object-appearance.css';
@@ -77,6 +78,7 @@
 @import '@agentmux/client-ui/styles/conversation-avatar.css';
 @import './conversation-axis.css';
 @import './overlays.css';
+@import './goal-agent-picker.css';
 @import './agent-panels.css';
 @import './performance-toolkit.css';
 @import './agent-avatar.css';

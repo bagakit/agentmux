@@ -32,6 +32,7 @@ import {
   type WorkbenchTab
 } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
+import { agentSessionPresentationIndex } from './session-presentation'
 
 export type SessionViewMode = 'terminal' | 'activity'
 
@@ -64,7 +65,7 @@ type AgentTimelineRuntimeEvent = RuntimeEvent & {
 
 export type PendingAgentLaunch = {
   /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
-  request?: { executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string }
+  request?: { executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string; goalPmo?: import('../../../shared/goal-pmo-origin').GoalPmoIntent }
   events: RuntimeEvent[]
   overflowed: boolean
   /** Accepted Core identity while optional display reads are unavailable. */
@@ -95,7 +96,7 @@ function ownsRunEvent(
   agentSessionId: string | undefined,
   run: AgentMuxRunRef
 ): boolean {
-  return session.id === (agentSessionId ?? run.runId) && sameRun(session.control.run, run)
+  return (session.kind === 'agent' ? session.control.agentSessionId === agentSessionId : session.id === run.runId) && sameRun(session.control.run, run)
 }
 
 function acceptsAgentEvidence(session: SessionSnapshot, evidence: AgentMuxEvidence): boolean {
@@ -106,7 +107,7 @@ function acceptsAgentSessionTransition(
   session: Extract<SessionSnapshot, { kind: 'agent' }>,
   incoming: AgentMuxAgentSession
 ): boolean {
-  if (session.id !== incoming.agentSessionId) return false
+  if (session.control.agentSessionId !== incoming.agentSessionId) return false
   if (sameRun(session.control.run, incoming.run) && nativeBindingKey(session) === nativeBindingKey(incoming) &&
     (incoming.semanticStatus?.currentActivityRevision ?? 0) < (session.semanticStatus?.currentActivityRevision ?? 0)) return false
   if (incoming.updatedAt < session.agentSessionUpdatedAt) return false
@@ -248,7 +249,7 @@ function workingToolEpoch(session: SessionSnapshot): number | undefined {
 function acceptsCurrentToolEvent(session: SessionSnapshot, event: AgentTimelineRuntimeEvent, epoch: number | undefined, observedAt = 0): boolean {
   const { evidence, mutation, agentSessionId } = event.event
   const updateAt = mutation.type === 'update' ? mutation.updatedAt : mutation.item.updatedAt
-  return epoch !== undefined && event.hostId === session.hostId && agentSessionId === session.id && mutation.agentSessionId === session.id &&
+  return epoch !== undefined && event.hostId === session.hostId && session.kind === 'agent' && agentSessionId === session.control.agentSessionId && mutation.agentSessionId === session.control.agentSessionId &&
     evidence.run?.runId === session.control.run.runId && ['native-hook', 'acp'].includes(evidence.source) &&
     evidence.observedAt >= epoch && evidence.observedAt >= observedAt && updateAt >= epoch &&
     (mutation.type === 'update' || mutation.item.createdAt >= epoch)
@@ -266,7 +267,7 @@ function projectLiveTool(previous: RendererAgentTimelineSnapshot | undefined, se
     return mutation.status === 'complete' || mutation.status === 'failed' ? undefined : { ...retained, observedAt: evidence.observedAt }
   }
   const item = mutation.item
-  if (item.agentSessionId !== session.id || item.kind !== 'tool_call') return retained
+  if (session.kind !== 'agent' || item.agentSessionId !== session.control.agentSessionId || item.kind !== 'tool_call') return retained
   if (item.status !== 'streaming') return retained?.itemId === item.id && item.createdAt === retained.startedAt && updateAt >= retained.startedAt ? undefined : retained
   if (item.createdAt < epoch!) return retained
   return { itemId: item.id, hostId: session.hostId, runId: session.control.run.runId, epoch: epoch!, observedAt: evidence.observedAt, startedAt: item.createdAt }
@@ -285,13 +286,26 @@ function eventAgentSessionId(event: RuntimeEvent['event']): string | null {
   return null
 }
 
+/** Keep local slots only when the native identity, Host and original Run select one presentation. */
+export function runtimeEventSession(sessions: SessionSnapshot[], event: RuntimeEvent): SessionSnapshot | undefined {
+  const id = eventAgentSessionId(event.event)
+  if (id === null) return undefined
+  const core = event.event
+  const run = core.type === 'agent-session' ? core.session.run
+    : 'run' in core ? core.run : 'evidence' in core ? core.evidence.run : undefined
+  const matches = (agentSessionPresentationIndex(sessions).get(id) ?? []).filter(session =>
+    session.control.agentSessionId === id && session.hostId === event.hostId && session.control.hostId === event.hostId &&
+    (session.id === id || run !== undefined && sameRun(session.control.run, run)))
+  return matches.length === 1 ? matches[0] : undefined
+}
+
 export function pendingAgentLaunchEventId(
   state: SessionProjectionState,
   event: RuntimeEvent
 ): string | null {
   const agentSessionId = eventAgentSessionId(event.event)
   return agentSessionId !== null &&
-    !state.sessions.some((session) => session.id === agentSessionId) &&
+    !agentSessionPresentationIndex(state.sessions).has(agentSessionId) &&
     state.pendingAgentLaunches[agentSessionId] !== undefined
     ? agentSessionId
     : null
@@ -400,18 +414,17 @@ export function reduceDetachedAgentLaunch(
 
 export function reduceTimelineSnapshot(
   state: SessionProjectionState,
-  snapshot: AgentTimelineSnapshot
+  snapshot: AgentTimelineSnapshot,
+  sessionId = snapshot.agentSessionId
 ): SessionProjectionState {
-  if (!state.sessions.some((session) => session.kind === 'agent' && session.id === snapshot.agentSessionId)) {
-    return state
-  }
-  const current = state.timelines[snapshot.agentSessionId]
+  if (!state.sessions.some((session) => session.kind === 'agent' && session.id === sessionId && session.control.agentSessionId === snapshot.agentSessionId)) return state
+  const current = state.timelines[sessionId]
   const pending = state.pendingAgentLaunches[snapshot.agentSessionId]
   const failures = pending?.projectionFailures?.filter(failure => failure.step !== 'timeline')
   return {
     ...state,
     ...(current && (snapshot.revision < current.revision || snapshot.revision === current.revision && !current.liveTool) ? {} : {
-      timelines: { ...state.timelines, [snapshot.agentSessionId]: { agentSessionId: snapshot.agentSessionId, revision: snapshot.revision, items: snapshot.items } }
+      timelines: { ...state.timelines, [sessionId]: { agentSessionId: snapshot.agentSessionId, revision: snapshot.revision, items: snapshot.items } }
     }),
     ...(pending?.created && failures ? { pendingAgentLaunches: failures.length > 0
       ? { ...state.pendingAgentLaunches, [snapshot.agentSessionId]: { ...pending, projectionFailures: failures } }
@@ -671,10 +684,9 @@ export function projectRuntimeEvent(
     } }
   }
   const pendingAgentSessionId = eventAgentSessionId(core)
-  const existingEventSession = pendingAgentSessionId
-    ? state.sessions.find((session) => session.id === pendingAgentSessionId)
-    : undefined
-  if (existingEventSession && existingEventSession.hostId !== event.hostId) return { state }
+  const existingEventSession = runtimeEventSession(state.sessions, event)
+  // A stale or ambiguous existing presentation is an observation gap, never new membership.
+  if (pendingAgentSessionId && !existingEventSession && agentSessionPresentationIndex(state.sessions).has(pendingAgentSessionId)) return { state }
   if (
     pendingAgentSessionId &&
     ownsPendingAgentLaunchEvent(state, event)
@@ -686,7 +698,7 @@ export function projectRuntimeEvent(
   }
   if (core.type === 'run-service') {
     return { state: { ...state, sessions: state.sessions.map(item =>
-      item.hostId === event.hostId && ownsRunEvent(item, core.agentSessionId, core.run) &&
+      item.hostId === event.hostId && (core.agentSessionId === undefined || item === existingEventSession) && ownsRunEvent(item, core.agentSessionId, core.run) &&
       (item.nativeService == null || core.nativeService.revision > item.nativeService.revision)
         ? { ...item, nativeService: core.nativeService } : item) } }
   }
@@ -712,7 +724,7 @@ export function projectRuntimeEvent(
       ...(core.state !== 'running' && existingEventSession && ownsRunEvent(existingEventSession, core.agentSessionId, core.run) && core.evidence.observedAt >= existingEventSession.status.observedAt
         ? { timelines: clearLiveTool(state.timelines, existingEventSession.id) } : {}),
       sessions: state.sessions.map((item) =>
-        ownsRunEvent(item, core.agentSessionId, core.run) &&
+        item.hostId === event.hostId && (core.agentSessionId === undefined || item === existingEventSession) && ownsRunEvent(item, core.agentSessionId, core.run) &&
         core.evidence.observedAt >= item.status.observedAt
           ? (() => {
               const { interruptionReason: _interruptionReason, runUnobserved: _runUnobserved, ...current } = item
@@ -855,11 +867,11 @@ export function projectRuntimeEvent(
   // Interaction events announce observations, including additional native requests.
   // Only the authoritative agent-session record chooses the current answerable request.
   if (core.type === 'agent-timeline') {
-    const session = state.sessions.find((item) => item.id === core.agentSessionId)
+    const session = existingEventSession
     if (!session) return { state }
-    const previous = state.timelines[core.agentSessionId]
+    const previous = state.timelines[session.id]
     const applied = applyTimelineEvent(
-      state.timelines[core.agentSessionId] ?? {
+      state.timelines[session.id] ?? {
         agentSessionId: core.agentSessionId,
         revision: 0,
         items: []
@@ -873,23 +885,25 @@ export function projectRuntimeEvent(
       const currentGap = live?.hostId === session.hostId && live.runId === session.control.run.runId && live.epoch === epoch &&
         acceptsCurrentToolEvent(session, event as AgentTimelineRuntimeEvent, epoch, live.observedAt)
       return { state: currentGap ? { ...state, timelines: clearLiveTool(state.timelines, session.id) } : state,
-        timelineGapSessionId: core.agentSessionId }
+        timelineGapSessionId: session.id }
     }
-    if (applied.snapshot === state.timelines[core.agentSessionId]) return { state }
+    if (applied.snapshot === state.timelines[session.id]) return { state }
     const liveTool = projectLiveTool(previous, session, event as AgentTimelineRuntimeEvent)
     return { state: {
       ...state,
-      sessions: state.sessions.map((item) => item.id === core.agentSessionId
+      sessions: state.sessions.map((item) => item === session
         ? { ...item, updatedAt: Math.max(item.updatedAt, core.evidence.observedAt) }
         : item),
       timelines: {
         ...state.timelines,
-        [core.agentSessionId]: { ...applied.snapshot, ...(liveTool ? { liveTool } : {}) }
+        [session.id]: { ...applied.snapshot, ...(liveTool ? { liveTool } : {}) }
       }
     } }
   }
   if (core.type !== 'run-removed') return { state }
-  const session = state.sessions.find((item) => ownsRunEvent(item, core.agentSessionId, core.run))
+  const session = core.agentSessionId === undefined
+    ? state.sessions.find((item) => item.hostId === event.hostId && ownsRunEvent(item, undefined, core.run))
+    : existingEventSession && ownsRunEvent(existingEventSession, core.agentSessionId, core.run) ? existingEventSession : undefined
   if (!session) return { state }
   return { state: removeSessionProjection(state, session.id) }
 }

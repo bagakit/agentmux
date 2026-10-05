@@ -2,7 +2,6 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import '../styles/selection-field.css'
 
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 

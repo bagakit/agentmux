@@ -1,28 +1,55 @@
 import { GoalContinuationControl } from './GoalContinuationControl'
-import { ArrowUpRight } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowUpRight, Plus, Users } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
+import { goalAgentRows, type GoalAgentRole } from '../lib/goal-agent-selection'
+import { agentSessionPresentationIndex } from '../lib/session-presentation'
+import { firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { AgentTopologySummary } from './AgentTopologySummary'
-import { StatusDot } from './StatusDot'
+import { GoalAgentFace, GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
 
-/** The all-Session picker and topology are explicit, expanded consumers only. */
-export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; onUpdate: (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1]) => void }) {
-  const sessions = useAppStore((state) => state.sessions)
-  const selectSession = useAppStore((state) => state.selectSession)
-  const [sessionToAdd, setSessionToAdd] = useState('')
-  const [arrangementOpen, setArrangementOpen] = useState(false)
-  const linked = sessions.filter((session) => demand.sessionIds.includes(session.id))
-  return <>
-    <GoalContinuationControl demand={demand} />
-    {demand.sessionIds.length && !linked.length ? <p className="goals-service">Linked Sessions are not yet available. Their identities are retained while recovery continues.</p> : null}
-    {linked.map((session) => <div className="goals-execution__row" key={session.id}><StatusDot status={session.status} /><span className="goals-execution__name">{session.label}</span><button type="button" className="goals-button" onClick={() => selectSession(session.id)}><ArrowUpRight size={13} />Open in Space</button><button type="button" className="goals-button" aria-label={`Unlink ${session.label}`} onClick={() => onUpdate({ sessionIds: demand.sessionIds.filter((id) => id !== session.id) })}>Unlink</button></div>)}
-    <div className="goals-execution__link"><select aria-label="Add Session to goal" value={sessionToAdd} onChange={(event) => setSessionToAdd(event.target.value)}><option value="">Link an existing Session…</option>{sessions.filter((session) => !demand.sessionIds.includes(session.id)).map((session) => <option key={session.id} value={session.id}>{session.label}</option>)}</select><button type="button" className="goals-button" disabled={!sessionToAdd} onClick={() => { onUpdate({ sessionIds: [...demand.sessionIds, sessionToAdd] }); setSessionToAdd('') }}>Link</button></div>
-    {demand.sessionIds.length ? <details className="goals-topology" onToggle={(event) => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement demand={demand} sessions={sessions} /> : null}</details> : null}
-  </>
+/** The full Agent directory and topology mount only in their explicit editors. */
+export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; onUpdate: GoalRelationSave }) {
+  const [role, setRole] = useState<GoalAgentRole | null>(null), [arrangementOpen, setArrangementOpen] = useState(false)
+  const [issue, setIssue] = useState<string | null>(null)
+  const ids = useMemo(() => [...new Set([...demand.sessionIds, ...demand.assigneeSessionIds ?? [], ...demand.participations?.map(source => source.agentSessionId) ?? []])], [demand.sessionIds, demand.assigneeSessionIds, demand.participations])
+  const facts = useAppStore(useShallow(state => {
+    const index = agentSessionPresentationIndex(state.sessions)
+    return [state.config, state.scratchTopicSnapshots, ...ids.flatMap(id => [id, state.agentNames[id], ...(index.get(id) ?? []).flatMap(session => [session.id, session.label, session.providerId, session.executorId, session.workspacePath, session.hostId, session.status.state, Boolean(session.pendingInteraction), state.agentNames[session.id], firstPromptFromTimeline(state.timelines[session.id])])])]
+  }))
+  const rows = useMemo(() => {
+    const state = useAppStore.getState(), index = agentSessionPresentationIndex(state.sessions)
+    return goalAgentRows({ ...state, sessions: [...new Set(ids.flatMap(id => index.get(id) ?? []))] }, demand, ids)
+  }, [facts, demand, ids])
+  const selectSession = useAppStore(state => state.selectSession)
+  const assignees = rows.filter(row => (demand.assigneeSessionIds ?? []).includes(row.id))
+  const related = rows.filter(row => demand.sessionIds.includes(row.id))
+  const supervisor = rows.find(row => row.id === demand.supervisorSessionId)
+  const recommended = rows.filter(row => row.selectable && row.id !== demand.supervisorSessionId && (row.related || demand.participations?.some(source => source.agentSessionId === row.id))).slice(0, 3)
+  const creationDrafts = useAppStore(useShallow(state => Object.values(state.goalAgentCreationDrafts).filter(draft => draft.goalId === demand.id)))
+  async function recommend(id: string) {
+    setIssue(null)
+    try { if (!await onUpdate({ assigneeSessionIds: [...new Set([...demand.assigneeSessionIds ?? [], id])], supervisorSessionId: id }, demand.updatedAt)) setIssue('Supervisor is not saved. The original selection and Agent remain available.') }
+    catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
+  }
+  const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ArrowUpRight size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
+  return <section className="goal-collaboration" aria-label="Goal collaboration">
+    <div className="goals-section-heading"><h2><Users size={15} />Collaboration</h2><span className="goals-caption">Selection does not start execution</span></div>
+    <div className="goal-collaboration__line"><strong>Assignees</strong><div>{members(assignees, 'No assignees yet')}</div><button type="button" className="goals-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><Plus size={12} />Choose</button></div>
+    <div className="goal-collaboration__line"><strong>Related</strong><div>{members(related, 'No related sessions')}</div><button type="button" className="goals-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Edit</button></div>
+    <div className="goal-collaboration__line"><strong>Supervisor</strong><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div><button type="button" className="goals-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button></div>
+    {!supervisor && recommended.length ? <div className="goal-collaboration__recommendations"><span className="goals-caption">Recommended</span>{recommended.map(row => <button key={row.id} type="button" className="goals-button" aria-label={`Assign ${row.name} as Supervisor`} title={row.id} onClick={() => void recommend(row.id)}><GoalAgentFace row={row} /><span>{row.name}</span><span className="goal-collaboration__assign">Assign</span></button>)}</div> : null}
+    {!supervisor && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
+    {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="goals-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
+    {issue ? <p className="goals-service" role="status">{issue}</p> : null}
+    <GoalContinuationControl demand={demand} onChooseSupervisor={() => setRole('supervisor')} />
+    {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={related.map(row => row.session?.id ?? row.id)} /> : null}</details> : null}
+    {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}
+  </section>
 }
-function GoalArrangement({ demand, sessions }: { demand: DemandProjection; sessions: ReturnType<typeof useAppStore.getState>['sessions'] }) {
-  const config = useAppStore((state) => state.config)
-  const tabs = useAppStore((state) => state.tabs)
-  return <AgentTopologySummary sessionIds={demand.sessionIds} sessions={sessions} tabs={tabs} config={config} />
+function GoalArrangement({ sessionIds }: { sessionIds: string[] }) {
+  const config = useAppStore(state => state.config), tabs = useAppStore(state => state.tabs), sessions = useAppStore(state => state.sessions)
+  return <AgentTopologySummary sessionIds={sessionIds} sessions={sessions} tabs={tabs} config={config} />
 }

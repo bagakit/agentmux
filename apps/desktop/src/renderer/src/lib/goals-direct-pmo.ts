@@ -15,6 +15,7 @@ type DirectGoalRequest = {
   phase: 'save' | 'pmo'
   pending: boolean
   error: string | null
+  creationOperationId?: string | undefined
   notSaved?: boolean
   project?: { id: string; name: string }
 }
@@ -61,14 +62,14 @@ function runDirectGoal(current: DirectGoalRequest, intent: PresentationIntent, c
             await useAppStore.getState().refreshDemand(current.id)
           }
         } else await useAppStore.getState().refreshDemand(current.id)
-        publish({ ...current, phase: 'pmo', pending: true, error: null, notSaved: false })
+        publish({ ...current, phase: 'pmo', pending: true, error: null, notSaved: false, creationOperationId: useAppStore.getState().demands[current.id]?.creationOrigin?.operationId })
       }
       if (!mayPresent(intent, current.id)) {
-        publish({ id: current.id, phase: 'pmo', pending: false, error: '你已切换工作面。目标已保存，需要时可继续此目标的专属讨论。' })
+        publish({ ...(request ?? current), phase: 'pmo', pending: false, error: '你已切换工作面。目标已保存，需要时可继续此目标的专属讨论。' })
         return
       }
       useAppStore.getState().setSelectedDemand(current.id)
-      const tabId = await useAppStore.getState().requestDemandPmoTask(current.id, 'grill')
+      const tabId = await useAppStore.getState().requestDemandPmoTask(current.id, 'grill', { creationOperationId: request?.creationOperationId ?? current.creationOperationId })
       if (mayPresent(intent, current.id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
       publish(null)
     } catch (cause) {

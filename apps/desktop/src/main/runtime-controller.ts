@@ -1101,6 +1101,10 @@ export class RuntimeController {
     return { ...await client.inspectAgentCreation(agentSessionId), hostId }
   }
 
+  async resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string> {
+    return (await this.connectedClient(hostId)).resolveAgentCreationSessionId(createOperationId)
+  }
+
   async sessionHistorySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
   async sessionHistorySources(): Promise<AgentSessionHistoryDescriptor[]>
   async sessionHistorySources(options?: { observation: true }): Promise<AgentSessionHistoryDescriptor[] | SessionHistorySourcesObservation> {
