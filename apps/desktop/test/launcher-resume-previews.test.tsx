@@ -1,4 +1,4 @@
-const { fixturePath: _reshape_fixturePath } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+const { fixturePath: _reshape_fixturePath, fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -92,4 +92,38 @@ it('ignores closed reads and retains the global two-request budget across reopen
  await act(async () => observer.notify([1, 2, 3]))
  expect(calls).toHaveLength(6); expect(document.body.textContent).not.toContain('Stale old preview')
  expect(document.body.textContent).not.toContain('Closed preview')
+})
+it('releases a settled loading entry when adoption temporarily removes the native candidate', async () => {
+ await open(); await act(async () => observer.notify([1, 2]))
+ const pending = calls[1]!
+ await act(async () => useAppStore.setState({ recoveryCandidates: [{ agentSessionId: 'adopted-1', hostId: 'local',
+  workspacePath: _reshape_fixturePath("repo"), providerId: 'codex', executorId: 'codex', nativeSessionId: 'original-1', label: 'Adopted original',
+  createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 4000), run: { runId: 'retained-adopted-run' }, capabilities: { providerResume: true } as any }] }))
+ expect(row(1)).toBeNull()
+ await act(async () => pending.resolve(page(pending, 'Completed while candidate absent')))
+ await act(async () => useAppStore.setState({ recoveryCandidates: [] }))
+ await act(async () => observer.notify([1]))
+ expect(calls.filter(c => c.input.source.nativeHandle.sessionId === 'original-1')).toHaveLength(2)
+ const reread = calls.at(-1)!
+ await act(async () => reread.resolve(page(reread, 'Returned candidate original reply')))
+ expect(row(1).textContent).toContain('Reply · Returned candidate original reply')
+})
+it('uses managed Core history and refuses a reply for another managed Session without disabling Resume', async () => {
+ const managed = (id: string, n: number) => ({ agentSessionId: id, hostId: 'local', workspacePath: _reshape_fixturePath("repo"), providerId: 'codex' as const,
+  executorId: 'codex', label: id, nativeSessionId: `provider-${id}`, createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: 5000 - n,
+  run: { runId: `retained-${id}` }, capabilities: { providerResume: true } as any })
+ useAppStore.setState({ recoveryCandidates: [managed('selected', 0), managed('original', 1), managed('other', 2)] })
+ vi.mocked(api.sessions.nativeSessions).mockResolvedValue({ hostId: 'local', executorId: 'codex', providerId: 'codex',
+  availability: 'available', capabilities: { providerResume: true } as any, sessions: [], issues: [] })
+ vi.spyOn(api.sessions, 'historyPage').mockImplementation(async input => ({ agentSessionId: input.agentSessionId === 'other' ? 'wrong' : input.agentSessionId,
+  source: { providerId: 'codex', nativeSessionId: `provider-${input.agentSessionId}` }, nextCursor: null,
+  items: [{ id: 'request', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Actual managed request' }] }] }))
+ await act(async () => root.render(<NewTabSurface tabGroupId="group" />))
+ await act(async () => document.querySelector<HTMLButtonElement>('.launcher-resume-trigger')!.click())
+ await act(async () => observer.notify([0, 1, 2]))
+ const original = document.querySelector<HTMLElement>('[data-resume-key="original"]')!, other = document.querySelector<HTMLElement>('[data-resume-key="other"]')!
+ expect(original.textContent).toContain('Input · Actual managed request'); expect(other.textContent).toContain('Preview could not be read')
+ expect(api.sessions.historyPage).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'original' }, { limit: 100 })
+ expect(document.querySelector<HTMLButtonElement>('.launcher-resume__footer .primary-button')!.disabled).toBe(false)
+ expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
