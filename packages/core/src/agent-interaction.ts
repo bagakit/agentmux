@@ -22,9 +22,9 @@ const ESC = '\u001b'
 export type AgentTerminalInteractionDetection = {
   questionEvents: readonly string[]
   questionTools: readonly string[]
-  /** Successful completion events for those exact question invocations, when supported. */
+  /** Terminal completion events for those exact question invocations, when supported; not proof of success. */
   questionCompletionEvents?: readonly string[]
-  /** Successful completions which can correlate a native permission invocation. */
+  /** Terminal completions which correlate a native permission invocation; not proof of success. */
   permissionCompletionEvents?: readonly string[]
   permissionOptions: readonly TerminalPermissionOption[]
 }

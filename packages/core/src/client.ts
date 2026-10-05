@@ -7134,7 +7134,11 @@ export class AgentMuxClient {
       result.reason = error instanceof AgentMuxError && error.code === 'AGENT_NATIVE_IDENTITY_AMBIGUOUS'
         ? 'native-main-ambiguous' : 'native-witness-unavailable'
     }
-    this.hookNativeWitnesses.set(session.run.runId, result)
+    // Unavailable observation is not reusable source authority. The next relevant
+    // Hook rechecks this same Run; it never authenticates an earlier lost event.
+    if (result.reason === 'native-witness-unavailable' || result.reason === 'native-main-ambiguous') {
+      this.hookNativeWitnesses.delete(session.run.runId)
+    } else this.hookNativeWitnesses.set(session.run.runId, result)
     return result
   }
 
