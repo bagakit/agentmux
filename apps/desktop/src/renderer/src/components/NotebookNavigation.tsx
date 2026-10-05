@@ -2,35 +2,23 @@ import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Archive, ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search, X } from 'lucide-react'
+import { Archive, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search, X } from 'lucide-react'
 import { DEFAULT_NOTEBOOK_ID, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { notebookPageRows } from '../lib/notebook-page-tree'
 import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperation'
 
-export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onCreateChild, query, onQuery, onBack, onCreate, pending, actions, archived, onArchivedChange }: {
+export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onCreateChild, query, onQuery, onCreate, pending, actions, archived, onArchivedChange }: {
   notebooks: Notebook[]; pages: NotebookPage[]; selectedId: string | null; selectedNoteId: string | null
   onSelect(notebookId: string): void; onOpen(page: NotebookPage): void; onCreateChild(page: NotebookPage): void; query: string; onQuery(query: string): void
-  onBack(): void; onCreate(): void; pending: boolean; actions: ReactNode; archived: boolean; onArchivedChange(archived: boolean): void
+  onCreate(): void; pending: boolean; actions: ReactNode; archived: boolean; onArchivedChange(archived: boolean): void
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const book = notebooks.find(candidate => candidate.notebookId === selectedId)
-  if (!book) return <div className="survey-notebooks" aria-label="Notebooks">
-    {notebooks.map(notebook => <div key={notebook.notebookId} className="survey-notebook-group" data-notebook-id={notebook.notebookId}>
-      <button className="survey-item survey-notebook-item" title={notebook.name} onClick={() => onSelect(notebook.notebookId)}>
-        <BookOpen size={16} /><strong>{notebook.name}</strong>
-      </button>
-    </div>)}
-  </div>
+  if (!book) return <p className="notebook-no-results" role="status">{selectedId ? 'Original Notebook selection kept. Refresh the directory or choose a Notebook above.' : 'Loading Notebook directory…'}</p>
   const members = pages.filter(page => page.notebookId === book.notebookId)
   const rows = notebookPageRows(pages, book.notebookId, query, collapsed, archived)
   return <div className="survey-notebook-navigation" aria-label="Notebook navigation" data-notebook-id={book.notebookId}>
-    <button className="survey-notebook-back" aria-label="Back to Recall" onClick={onBack}><ArrowLeft size={14} /><span>Recall</span></button>
-    <div className="survey-notebook-heading">
-      <button className="survey-item survey-notebook-item" title={book.name} aria-label={`Notebook directory: ${book.name}`} aria-current={!selectedNoteId ? 'page' : undefined} onClick={() => onSelect(book.notebookId)}>
-        <BookOpen size={16} /><strong>{book.name}</strong>
-      </button>
-      {actions}
-    </div>
+    <div className="recall-directory-tools"><button className="recall-directory-home" aria-label={`Notebook directory: ${book.name}`} aria-current={!selectedNoteId ? 'page' : undefined} onClick={() => onSelect(book.notebookId)}>Pages</button>{actions}</div>
     <button className="survey-notebook-new-page" aria-label={`New page in ${book.name}`} disabled={pending} onClick={onCreate}><Plus size={14} /><span>New page</span></button>
     <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} />
     {members.length ? <label className="notebook-find notebook-find--sidebar"><Search size={12} /><TextInput aria-label={`Find pages in ${book.name}`} placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
@@ -78,7 +66,7 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, query
 }
 
 /** Creating a container is deliberate; the original metadata operation owns uncertain receipts. */
-export function NotebookCreateDialog({ open, active, onClose, onCreated }: { open: boolean; active: boolean; onClose(): void; onCreated(notebookId: string): void }) {
+export function NotebookCreateDialog({ open, active, onClose, onCreated, onCreateIntent, restoreFocus }: { open: boolean; active: boolean; onClose(): void; onCreated(notebookId: string): void; onCreateIntent?(): void; restoreFocus?(): void }) {
   const [name, setName] = useState('')
   const operation = useNotebookOperation()
   const input = useRef<HTMLInputElement>(null)
@@ -86,13 +74,18 @@ export function NotebookCreateDialog({ open, active, onClose, onCreated }: { ope
   async function create() {
     if (operation.busy || !name.trim()) return
     if (operation.pending) { await operation.retry(); return }
+    onCreateIntent?.()
     const notebookId = crypto.randomUUID()
     await operation.run({ kind: 'create', notebookId, name: name.trim() }, () => { setName(''); onCreated(notebookId) })
   }
   return <Dialog.Root open={open} onOpenChange={value => { if (!value) close() }}>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="dialog-scrim" />
-      <Dialog.Content className="notebook-create-dialog dialog-surface" onOpenAutoFocus={event => { if (!operation.pending) { event.preventDefault(); input.current?.focus() } }} onCloseAutoFocus={event => { if (!active) event.preventDefault() }} onEscapeKeyDown={event => { if (operation.busy) event.preventDefault() }} onInteractOutside={event => { if (operation.busy) event.preventDefault() }}>
+      <Dialog.Content className="notebook-create-dialog dialog-surface" onOpenAutoFocus={event => { if (!operation.pending) { event.preventDefault(); input.current?.focus() } }} onCloseAutoFocus={event => {
+        if (!active || restoreFocus) event.preventDefault()
+        const stillInDialog = event.target instanceof HTMLElement && event.target.contains(document.activeElement)
+        if (active && (stillInDialog || document.activeElement === document.body)) restoreFocus?.()
+      }} onEscapeKeyDown={event => { if (operation.busy) event.preventDefault() }} onInteractOutside={event => { if (operation.busy) event.preventDefault() }}>
         <header><Dialog.Title>New notebook</Dialog.Title><button type="button" className="icon-button" aria-label="Close notebook creation" disabled={operation.busy} onClick={close}><X size={15} /></button></header>
         <Dialog.Description className="notebook-create-description">A home for related notes.</Dialog.Description>
         <form aria-label="Create notebook" onSubmit={event => { event.preventDefault(); void create() }}>
