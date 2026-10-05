@@ -5,3 +5,5 @@ export { runDemandCli } from './cli.js'
 export * from './goals.js'
 
 export * from './content-references.js'
+
+export * from './collaboration.js'

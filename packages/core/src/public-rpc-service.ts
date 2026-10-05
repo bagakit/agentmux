@@ -124,8 +124,8 @@ const NATIVE_FIELDS = {
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
-  'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'status', 'since', 'limit', 'include'],
-  'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
+  'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit', 'include'],
+  'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
 } as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
@@ -145,7 +145,7 @@ function bytes({ dataBytes, ...range }: FollowOutput) {
   return { ...range, dataBase64: Buffer.from(dataBytes).toString('base64') }
 }
 function validateFilters(p: Record<string, unknown>): void {
-  for (const field of ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'status']) {
+  for (const field of ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status']) {
     if (p[field] !== undefined) rpcString(p[field], field)
   }
   if (p.since !== undefined) rpcCount(p.since, 0)
@@ -630,6 +630,20 @@ export class AgentMuxRpcService {
         if (request.continuation && exact !== request.sessionId) throw new AgentMuxError('Goal continuation requires the complete original Session ID.', 'INVALID_CONTROL_REQUEST')
         request.sessionId = exact
       }
+      if (request.operation === 'demand.create' || request.operation === 'demand.update' || request.operation === 'demand.assign' || request.operation === 'demand.handoff') {
+        const assignees = request.operation === 'demand.update' ? request.patch.assigneeSessionIds
+          : request.assigneeSessionIds ?? (request.operation === 'demand.handoff' && request.sessionId ? [request.sessionId] : undefined)
+        if (assignees !== undefined && assignees.length) {
+          const retained = new Set<string>()
+          if (request.operation !== 'demand.create') {
+            const previous = await this.execute(rpcControlRequest('goal.inspect', { goalId: request.demandId }))
+            if (previous.operation !== 'demand.show' || !previous.demand) throw new AgentMuxError('Original Goal read is unconfirmed; inspect it before changing assignment.', 'CONTROL_PROTOCOL_ERROR')
+            previous.demand.assigneeSessionIds.forEach(id => retained.add(id))
+          }
+          for (const assignee of assignees) if (!retained.has(assignee) && (await this.owner(assignee)).agentSessionId !== assignee)
+            throw new AgentMuxError('New Goal assignment requires the complete exact Session ID.', 'INVALID_CONTROL_REQUEST')
+        }
+      }
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
         : await this.execute(request, nameContext)
@@ -974,7 +988,8 @@ export class AgentMuxRpcService {
     return result.demands.filter(goal => (!filters.goalId || goal.id === filters.goalId) &&
       (!filters.projectId || goal.projectId === filters.projectId) &&
       (!filters.agentSessionId || goal.sessionIds.includes(String(filters.agentSessionId))) &&
-      (!filters.executorId || goal.assigneeExecutorId === filters.executorId) &&
+      (!filters.assigneeSessionId || goal.assigneeSessionIds.includes(String(filters.assigneeSessionId))) &&
+      (!filters.supervisorSessionId || goal.supervisorSessionId === filters.supervisorSessionId) &&
       (!filters.status || goal.status === filters.status) &&
       (filters.since === undefined || goal.updatedAt >= rpcCount(filters.since, 0)))
       .slice(0, rpcCount(filters.limit, 100, 1000))
@@ -1093,7 +1108,7 @@ export class AgentMuxRpcService {
           (!p.executorId || agent.executorId === p.executorId) && (!p.status || agent.status === p.status))
         if (result.operation === 'demand.list') {
           const goals = result.demands.filter(goal => (!p.goalId || goal.id === p.goalId) && (!p.projectId || goal.projectId === p.projectId) &&
-            (!p.agentSessionId || goal.sessionIds.includes(String(p.agentSessionId))) && (!p.executorId || goal.assigneeExecutorId === p.executorId) &&
+            (!p.agentSessionId || goal.sessionIds.includes(String(p.agentSessionId))) && (!p.assigneeSessionId || goal.assigneeSessionIds.includes(String(p.assigneeSessionId))) && (!p.supervisorSessionId || goal.supervisorSessionId === p.supervisorSessionId) &&
             (!p.status || goal.status === p.status) && (p.since === undefined || goal.updatedAt >= rpcCount(p.since, 0)))
           observation.goals = rpcControlResult('goal.ls', { operation: 'demand.list', demands: goals }).goals as AgentMuxRpcSnapshot['goals']
           observation.activity = goals.flatMap(goal => (goal.activities ?? []).map(activity => ({ goalId: goal.id, ...activity })))

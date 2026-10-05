@@ -1620,7 +1620,7 @@ export type AgentMuxDesktopApi = {
   }
   demands: {
     list(): Promise<import('@agentmux/demand').Demand[]>
-    create(input: import('@agentmux/demand').CreateDemandInput): Promise<import('@agentmux/demand').DemandReceipt>
+    create(input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
     update(id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number): Promise<import('@agentmux/demand').DemandReceipt>
     confirmAlignment(id: string, expectedRevision: number): Promise<import('@agentmux/demand').DemandReceipt>
     acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean): Promise<import('@agentmux/demand').DemandReceipt>

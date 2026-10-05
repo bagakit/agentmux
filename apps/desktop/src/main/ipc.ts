@@ -1,3 +1,4 @@
+import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from './demand-participation.js'
 import { NotesStorageOwner } from './notes-storage-owner.js'
 import { NOTES_WORKSPACE_ID } from '../shared/notes-library.js'
 import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
@@ -825,11 +826,18 @@ export async function registerIpc(args: {
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
   handle('demands:list', async () => await demands.list())
-  handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput) => await demands.create(input))
+  handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string) => {
+    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
+      request => admittedDemandCreateMatches(request, input))
+    const participation = await admittedDemandParticipation(admitted.context, 'create', config, args.scratchTopics)
+    return demands.create(input, { context: admitted.context, operationId: admitted.operationId, ...(participation ? { participation } : {}) })
+  })
   handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number) => {
-    const request = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
-      request => request.operation === 'demand.update' && request.demandId === id && request.patch.title === patch.title)
-    return await demands.update(id, patch, { context: request.context, operationId: request.operationId, ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
+    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
+      request => admittedDemandUpdateMatches(request, id, patch, expectedUpdatedAt))
+    const requirements = patch.description !== undefined || patch.alignment !== undefined
+    const participation = requirements ? await admittedDemandParticipation(admitted.context, 'requirements', config, args.scratchTopics) : undefined
+    return await demands.update(id, patch, { context: admitted.context, operationId: admitted.operationId, ...(participation ? { participation } : {}), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
   })
   handle('demands:confirmAlignment', async (id: string, expectedRevision: number) => await demands.confirmAlignment(id, expectedRevision))
   handle('demands:acceptGrounding', async (id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean) => await demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps))
@@ -840,8 +848,9 @@ export async function registerIpc(args: {
     const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
       request => request.operation === 'demand.activity.append' && request.demandId === id && request.kind === input.kind && request.message === input.message && request.requestId === input.operationId)
     if (!admitted.context.actor.verified) throw Object.assign(new Error('Activity author is unconfirmed. Original Goal and Agent remain available; authenticate and inspect the original operation.'), { code: 'CONTROL_PERMISSION_DENIED' })
+    const participation = input.kind === 'requirements' ? await admittedDemandParticipation(admitted.context, 'requirements', config, args.scratchTopics) : undefined
     return await demands.addActivity(id, { kind: input.kind, message: input.message, actorId: admitted.context.actor.id,
-      ...(input.operationId === undefined ? {} : { operationId: input.operationId }) })
+      ...(input.operationId === undefined ? {} : { operationId: input.operationId }) }, participation ? { participation } : {})
   })
   handle('demands:inspectActivity', async (id: string, operationId: string) => await demands.inspectActivity(id, operationId))
   handle('demands:readActivities', async (id: string) => await demands.readActivities(id))

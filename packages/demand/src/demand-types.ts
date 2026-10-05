@@ -1,3 +1,4 @@
+import type { DemandCreationOrigin, DemandParticipation, DemandParticipationSource } from './collaboration.js'
 import type { DemandContentReference } from './content-references.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from './goals.js'
 
@@ -50,6 +51,8 @@ export type DemandTitleMutationOptions = {
   expectedRevision?: number
   /** Compare this exact record before a content update. */
   expectedUpdatedAt?: number
+  /** Established by the trusted calling host, never a business patch. */
+  participation?: DemandParticipationSource
 }
 
 export type DemandActivity = {
@@ -89,6 +92,10 @@ export type Demand = {
   parentDemandId: string | null
   phaseIndex: number | null
   sessionIds: string[]
+  assigneeSessionIds: string[]
+  supervisorSessionId: string | null
+  participations: DemandParticipation[]
+  creationOrigin?: DemandCreationOrigin
   /** Append-only original content provenance, not execution or display ownership. */
   contentRefs?: DemandContentReference[]
   activities: DemandActivity[]
@@ -116,20 +123,29 @@ export type CreateDemandInput = {
   priority?: DemandPriority
   projectId?: string | null
   projectName?: string | null
-  executorId?: string | null
   tags?: readonly string[]
   plannedStartAt?: number | null
   targetAt?: number | null
   parentDemandId?: string | null
   phaseIndex?: number | null
   sessionIds?: readonly string[]
+  assigneeSessionIds?: readonly string[]
+  supervisorSessionId?: string | null
   contentRefs?: readonly DemandContentReference[]
 }
 
 export type UpdateDemandInput = Partial<Pick<
   Demand,
-  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'executorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'contentRefs'
+  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'sessionIds' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'contentRefs'
 >> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
+
+export type DemandCreateOptions = {
+  operationId?: string
+  context?: DemandNameContext
+  participation?: DemandParticipationSource
+  /** Creation policy snapshot admitted by the original host. */
+  creationOrigin?: { requesterAsSupervisor: boolean }
+}
 
 export type DemandReceipt = {
   schema: typeof DEMAND_RECEIPT_SCHEMA

@@ -687,7 +687,8 @@ type AppState = {
     description?: string
     projectId?: string | null
     projectName?: string | null
-    assigneeExecutorId?: string | null
+    assigneeSessionIds?: readonly string[]
+    supervisorSessionId?: string | null
     tags?: readonly string[]
     plannedStartAt?: number | null
     targetAt?: number | null
@@ -700,8 +701,8 @@ type AppState = {
     status?: DemandStatus
     source?: DemandRecord['source']
     decisionLog?: readonly AgentMuxDemandDecision[]
-  }): Promise<string>
-  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string, expectedUpdatedAt?: number): Promise<void>
+  }, controlRequestId?: string): Promise<string>
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string, expectedUpdatedAt?: number): Promise<void>
   deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
@@ -1260,7 +1261,10 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     priority: demand.priority,
     projectId: demand.projectId,
     projectName: demand.projectName,
-    assigneeExecutorId: demand.executorId,
+    assigneeSessionIds: [...demand.assigneeSessionIds],
+    supervisorSessionId: demand.supervisorSessionId,
+    participations: [...demand.participations],
+    ...(demand.creationOrigin === undefined ? {} : { creationOrigin: demand.creationOrigin }),
     tags: [...demand.tags],
     plannedStartAt: demand.plannedStartAt,
     targetAt: demand.targetAt,
@@ -4605,11 +4609,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     const controlProject = (id: string) => projectWorkspaces((get().config?.workspaces ?? []).filter(workspace => !isScratchWorkspaceId(workspace.id))).find(project => project.id === id)
-    const demandRecord = (id: string): DemandRecord => {
+    const demandRecord = (id: string): DemandRecord & { assigneeSessionIds: string[]; supervisorSessionId: string | null; participations: NonNullable<DemandRecord['participations']> } => {
       const demand = projectDemands(get().config, get().sessions, get().demands).find((candidate) => candidate.id === id)
       if (!demand) throw controlFailure('CONTROL_FAILED', `Demand is not available: ${id}`)
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
-      return record
+      return { ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] }
     }
     if (request.operation === 'demand.list' || request.operation === 'demand.show') {
       const facts = await api.demands.list()
@@ -4618,12 +4622,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set(state => ({ demands: { ...state.demands, ...records } }))
       const projected = projectDemands(get().config, get().sessions, records)
       if (request.operation === 'demand.list') {
-        return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...demand }) => demand) }
+        return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...record }) => ({ ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] })) }
       }
       const demand = projected.find((candidate) => candidate.id === request.demandId)
       if (!demand) return { operation: request.operation, demand: null, goalContinuations: await api.continuousProgress.goals(request.demandId) }
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
-      return { operation: request.operation, demand: record, goalContinuations: await api.continuousProgress.goals(request.demandId) }
+      return { operation: request.operation, demand: { ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] }, goalContinuations: await api.continuousProgress.goals(request.demandId) }
     }
     if (request.operation === 'demand.activity.append') {
       const saved = await api.demands.activity(request.demandId, { kind: request.kind, message: request.message, actorId: null, operationId: request.requestId }, request.requestId)
@@ -4679,9 +4683,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(request.priority === undefined ? {} : { priority: request.priority }),
         ...(request.status === undefined ? {} : { status: request.status }),
         ...(request.sessionIds === undefined ? {} : { sessionIds: request.sessionIds }),
+        ...(request.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: request.assigneeSessionIds }),
+        ...(request.supervisorSessionId === undefined ? {} : { supervisorSessionId: request.supervisorSessionId }),
         ...(request.contentRefs === undefined ? {} : { contentRefs: request.contentRefs }),
         ...(request.decision === undefined ? {} : { decisionLog: [request.decision] })
-      })
+      }, request.requestId)
       const demand = demandRecord(id)
       return { operation: request.operation, demand, receipt: { demandId: id, createdAt: demand.createdAt } }
     }
@@ -4748,10 +4754,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const projectId = request.projectId === undefined ? current.projectId : request.projectId
       const project = projectId ? controlProject(projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      await get().updateDemand(request.demandId, { projectId, projectName: project?.name ?? null, assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId })
+      await get().updateDemand(request.demandId, { ...(request.projectId === undefined ? {} : { projectId, projectName: project?.name ?? null }), ...(request.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: request.assigneeSessionIds }), ...(request.supervisorSessionId === undefined ? {} : { supervisorSessionId: request.supervisorSessionId }) }, request.requestId, request.expectedUpdatedAt ?? current.updatedAt)
       await appendDemandActivity(request.demandId, request.start ? 'Assigned and start requested.' : 'Assigned without starting execution.')
       if (request.start) {
-        const started = await startDemand(request.demandId)
+        const started = await startDemand(request.demandId, request.sessionId, undefined, request.requestId)
         return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: true } }
       }
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: false } }
@@ -4762,8 +4768,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'demand.handoff') {
       const current = demandRecord(request.demandId)
-      await get().updateDemand(request.demandId, { assigneeExecutorId: request.assigneeExecutorId === undefined ? current.assigneeExecutorId ?? null : request.assigneeExecutorId, ...(request.sessionId && !current.sessionIds.includes(request.sessionId) ? { sessionIds: [...current.sessionIds, request.sessionId] } : {}) })
-      await appendDemandActivity(request.demandId, `Handoff to ${request.assigneeExecutorId ?? 'unassigned'}${request.sessionId ? ` with Session ${request.sessionId}` : ''}.`)
+      await get().updateDemand(request.demandId, { ...(request.assigneeSessionIds === undefined ? request.sessionId ? { assigneeSessionIds: [request.sessionId] } : {} : { assigneeSessionIds: request.assigneeSessionIds }), ...(request.supervisorSessionId === undefined ? {} : { supervisorSessionId: request.supervisorSessionId }) }, request.requestId, request.expectedUpdatedAt ?? current.updatedAt)
+      await appendDemandActivity(request.demandId, `Handoff to ${(request.assigneeSessionIds ?? (request.sessionId ? [request.sessionId] : [])).join(', ') || 'unassigned'}.`)
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, handedOffAt: Date.now(), sessionId: request.sessionId ?? null } }
     }
     if (request.operation === 'demand.delete') {
@@ -6151,7 +6157,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     ].join('\n\n')
     return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work')
   },
-  async createDemand(input) {
+  async createDemand(input, controlRequestId) {
     const presentation = get()
     const catalog = workbenchSelectionCatalog(presentation)
     const sourceSessionIds = input.decisionLog?.flatMap(decision => decision.sourceSessionId ? [decision.sourceSessionId] : [])
@@ -6166,7 +6172,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(input.priority === undefined ? {} : { priority: input.priority }),
       projectId: input.projectId ?? null,
       projectName: input.projectName ?? null,
-      executorId: input.assigneeExecutorId ?? null,
+      ...(input.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: [...input.assigneeSessionIds] }),
+      ...(input.supervisorSessionId === undefined ? {} : { supervisorSessionId: input.supervisorSessionId }),
       ...(input.tags === undefined ? {} : { tags: input.tags }),
       ...(input.plannedStartAt === undefined ? {} : { plannedStartAt: input.plannedStartAt }),
       ...(input.targetAt === undefined ? {} : { targetAt: input.targetAt }),
@@ -6174,7 +6181,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(input.phaseIndex === undefined ? {} : { phaseIndex: input.phaseIndex }),
       sessionIds: input.sessionIds ?? [],
       ...(contentRefs === undefined ? {} : { contentRefs: [...contentRefs] })
-    })
+    }, controlRequestId)
     const id = receipt.demand.id
     const decisionLog: AgentMuxDemandDecision[] = []
     const publish = (): void => {
@@ -6211,7 +6218,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(patch.priority === undefined ? {} : { priority: patch.priority }),
       ...(patch.projectId === undefined ? {} : { projectId: patch.projectId }),
       ...(patch.projectName === undefined ? {} : { projectName: patch.projectName }),
-      ...(patch.assigneeExecutorId === undefined ? {} : { executorId: patch.assigneeExecutorId }),
+      ...(patch.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: patch.assigneeSessionIds }),
+      ...(Object.hasOwn(patch, 'supervisorSessionId') ? { supervisorSessionId: patch.supervisorSessionId ?? null } : {}),
+      ...(patch.sessionIds === undefined ? {} : { sessionIds: patch.sessionIds }),
       ...(patch.tags === undefined ? {} : { tags: patch.tags }),
       ...(patch.plannedStartAt === undefined ? {} : { plannedStartAt: patch.plannedStartAt }),
       ...(patch.targetAt === undefined ? {} : { targetAt: patch.targetAt }),
@@ -6220,18 +6229,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(patch.alignment === undefined ? {} : { alignment: patch.alignment }),
       ...(patch.grounding === undefined ? {} : { grounding: patch.grounding }),
       ...(patch.contentRefs === undefined ? {} : { contentRefs: patch.contentRefs })
-    }, controlRequestId, expectedUpdatedAt)
+    }, controlRequestId, expectedUpdatedAt ?? current.updatedAt)
     const publish = (): void => {
       const record = { ...demandRecordFromFilesystem(receipt.demand), source: current.source, decisionLog: [...decisionLog] }
       set(state => ({ demands: { ...state.demands, [id]: record } }))
     }
     publish()
     try {
-      if (patch.sessionIds !== undefined) {
-        const previous = new Set(current.sessionIds), next = new Set(patch.sessionIds)
-        for (const sessionId of patch.sessionIds) if (!previous.has(sessionId)) { receipt = await api.demands.linkSession(id, sessionId); publish() }
-        for (const sessionId of current.sessionIds) if (!next.has(sessionId)) { receipt = await api.demands.unlinkSession(id, sessionId); publish() }
-      }
       for (const message of patch.activityLog?.slice(current.activityLog?.length ?? 0) ?? []) {
         receipt = await api.demands.activity(id, { kind: 'board', message, actorId: null })
         publish()
