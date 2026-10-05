@@ -125,7 +125,8 @@ const controlServer = new AgentMuxControlServer({
         return { operation: request.operation, agentSessionId: targetId }
       }
       if (request.operation === 'interrupt') {
-        await controlClient.signalAgent(targetId, 'SIGINT')
+        const session = controlClient.agentSession(targetId)
+        await controlClient.signalAgent(targetId, session.run, 'SIGINT')
         return { operation: request.operation, agentSessionId: targetId }
       }
       if (request.operation === 'resume') {
