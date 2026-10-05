@@ -60,7 +60,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Workspace atomic move | Main owner tests 在 destination-absent 后、最终 syscall 前制造竞争目标，并覆盖 no-follow、no-replace、typed unsupported；post-commit receipt matrix 覆盖 source/destination replacement、moved-back、双缺失、destination parent/Workspace Root 换代与 mutation/read interleave，所有场景都保持 `unknown`，不从 pathname occupancy 猜对象身份。Store tests 覆盖 save mutation admission、目标 owner 冲突、unknown 不改投影，以及 Document/Dirty/Last Active/Tab/Region/Selection/Expanded/changed observed payload 的一次性 segment-aware rekey；订阅断言证明每次 Rename 恰好一次 Explorer projection 引用变化，A→B→A 为零次。Fast interaction tests 固定同 parent、自身/后代与 loaded collision 的共享 plan、成功或 unknown 后恰好两 parent 并发去重刷新。Mounted Desktop 证明 Pointer/菜单只表达单项 Move、非法目标不提交、真实 input 驱动的 A→B→A 保持多选且产生零 Explorer projection 通知；commit barrier 另制造 A Move 已提交、B 已激活、旧 A closure 才继续的时序，证明一次路径事务通知之外两个 parent load 都被 Workspace identity/epoch admission 拒绝，B DOM/cache 不受污染，回 A 后由当前 owner 自行恢复。packaged helper 继续证明安装副本使用同一 no-replace owner。 |
 | Hook acceptance/drain | Hook command 的 receipt id 跨重试稳定；bound ingress 仅在 owner persistence 成功后 `204`，失败以非 2xx 触发同 receipt 重试；Server shutdown 排空已接受事件 |
 | Desktop Control owner | Fast suite 对真实 Renderer Store 验证 caller identity、Tab/Region 投影、四向 split、精确 focus、三类 typed open、send 唯一性、arrange 和 owner-loss rollback；bridge 测试证明跨 Electron world 只传普通 request/response/cancellation，所有布局 mutation 继续通过同一个 workbench reducer，ctxmux 只接收最终 viewport size |
-| Packed Control CLI | checkout-external packed consumer 从 injected `PATH` 执行同版本 `agentmux`，通过一个版本化 endpoint 验证 `inspect/list/open/send/focus/arrange/output/interrupt/resume/stop`、稳定 JSON receipt、literal `--help` payload、UTF-8 分片和 peer early-close；Core endpoint 测试另锁定 protocol mismatch、closed target、typed candidates 与 owner unavailable error |
+| Packed Control CLI | checkout-external packed consumer 从 injected `PATH` 执行同版本 `amux`，通过一个版本化 endpoint 验证 `inspect/list/open/send/focus/arrange/output/interrupt/resume/stop`、稳定 JSON receipt、literal `--help` payload、UTF-8 分片和 peer early-close；Core endpoint 测试另锁定 protocol mismatch、closed target、typed candidates 与 owner unavailable error |
 | Agent-owned CLI discovery | fake Codex 复核 `AGENTMUX_ENV`、权威 `AGENTMUX_CLI` 与 Agent Session identity；Fast suite 固定逐级帮助、typed flags、子命令成功语义和 `--skill` 的 fail-closed Control 边界；Desktop package smoke 在 `PATH=/usr/bin:/bin` 下证明 launcher 使用 `.app` 自带 Node runtime |
 | Managed Agent 启动指南 | Core 验证开启、关闭、原任务与空任务的组装；Desktop 使用 [config-store.ts](../../apps/desktop/src/main/config-store.ts) 的当前 Executor 模型与默认配置，RuntimeController 把同一 Executor 交给 Core。历史 Config/Profile 版本不能充当现行合同。 |
 | Darwin endpoint bound | 默认 Unix endpoint 按 runtime-paths.ts 的稳定短 namespace 构造，并与 durable state 分离；绝对路径 override 仍需验证平台 socket 长度边界。Native package/LaunchServices oracle 使用真实随包 ctxmuxd。 |
@@ -76,15 +76,15 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 - ready receipt 确认 `packaged: true`；caller Agent Session 由 `.app` 内随包 Core/ctxmux artifact
   创建，packaged Desktop 从同一 Store 建立其唯一 Tab/Region 投影；
-- 受管 caller 执行 `agentmux space inspect --tab self`，读取确切 Region ID，再用
-  `agentmux agent open --executor <executor-id> --region <region-id> --split right`；
+- 受管 caller 执行 `amux space inspect --tab self`，读取确切 Region ID，再用
+  `amux agent open --executor <executor-id> --region <region-id> --split right`；
   receipt 的 `result.agent` 返回新 Agent Session/Run，`result.to` 返回实际空间地址，
   新 Run 的 public status 为 `running`；
 - launch 前后 `owner.json.daemonInstanceId` 与 exact `ctxmuxd` PID 均不变；同一份受信 Core artifact
   从 checkout 搬到 packaged App 后可以继续使用原 daemon，receipt 中的启动路径只作诊断，不参与身份判断；
 - 将随包 source/manifest 身份、正在服务的 Runtime identity/capability 与 cleanup 归属分别核对；
   兼容服务可以继续承载健康 Run，旧启动路径或缺失 owner receipt 不能代替不兼容判据；
-- smoke 后通过公开 `agentmux agent stop --session <test-session-id>` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
+- smoke 后通过公开 `amux agent stop --session <test-session-id>` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
   进程残留，再删除系统临时目录中的 test-only 子目录。
 
 空间方向的非视觉合同由 Desktop Control/Layout 测试对真实 Layout Store/reducer
