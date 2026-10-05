@@ -136,7 +136,7 @@ function gapObservationDetail(o: AgentMuxAttachmentGapObservation): string {
 export function runtimeDiagnosticNotice(
   state: Pick<SessionProjectionState, 'sessions'>,
   event: RuntimeEvent
-): { message: string; summary: string; subject?: SessionControl } | null {
+): { message: string; summary: string; subject?: SessionControl; cause?: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' } | null {
   const core = event.event
   if (core.type !== 'agent-error') return null
   const run = core.evidence.run
@@ -183,7 +183,12 @@ export function runtimeDiagnosticNotice(
   return {
     message: `${summary}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}${observation}\n${recovery}`,
     summary,
-    ...(confirmed ? { subject: confirmed.control } : {})
+    ...(confirmed ? { subject: confirmed.control } : {}),
+    // Only an absent main identity has this success condition. Source conflicts and failed
+    // persistence retain their own cause; matching text or a generic error code cannot settle them.
+    ...(confirmed?.kind === 'agent' && !confirmed.nativeHandle && !confirmed.observedNativeHandle &&
+      !confirmed.nativeSourceObservation && core.evidence.source === 'agentmux' &&
+      core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ? { cause: core.code } : {})
   }
 }
 
@@ -793,6 +798,7 @@ export function projectRuntimeEvent(
       turnUsage: _turnUsage,
       nativeSessionId: _nativeSessionId,
       nativeHandle: _nativeHandle,
+      nativeHandlePersistence: _nativeHandlePersistence,
       observedNativeHandle: _observedNativeHandle,
       nativeSourceObservation: _nativeSourceObservation,
       hookIngressObservation: _hookIngressObservation,

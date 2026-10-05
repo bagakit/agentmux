@@ -62,7 +62,15 @@ function issues(value: unknown, source = false): void {
 export function parseRpcAgentSession(value: unknown): ReturnType<typeof normalizeAgentSession> {
   const source = record(value)
   if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken')) fail()
-  try { return normalizeAgentSession(source) } catch { return fail() }
+  try {
+    const session = normalizeAgentSession(source)
+    if (source.nativeHandlePersistence !== undefined) {
+      if (!session.nativeHandle) fail()
+      member(source.nativeHandlePersistence, ['confirmed', 'unconfirmed'])
+      session.nativeHandlePersistence = source.nativeHandlePersistence as 'confirmed' | 'unconfirmed'
+    }
+    return session
+  } catch { return fail() }
 }
 /** Prefix admission belongs to the service's full durable set. The client only
  * verifies that its canonical answer can be the exact requested identity. */

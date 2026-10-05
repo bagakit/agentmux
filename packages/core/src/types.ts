@@ -1089,6 +1089,8 @@ export type AgentMuxAgentSession = {
   semanticStatus?: AgentStatus
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
+  /** Live Core save acknowledgement for this locator; readable post-replacement bytes are unconfirmed. Never stored. */
+  nativeHandlePersistence?: 'confirmed' | 'unconfirmed'
   nativeBinding?: AgentNativeBinding
   /** A confirmed process source that cannot silently replace a retained resume target. */
   observedNativeHandle?: AgentNativeSessionHandle
@@ -1268,7 +1270,7 @@ export type AgentHookIngressObservation = {
 
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence'> & {
   hookBindingId: string
   hookToken: string
   /** Agent 说话凭证的 sha256。raw 只在受管进程的 env 里，Core 侧只留 hash。 */
