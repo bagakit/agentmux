@@ -31,6 +31,7 @@ import {
   type AgentProviderId,
   type AgentSessionHistoryPage,
   type AgentMuxAgentResumeInput,
+  type AgentMuxSshHostedClient,
   type AgentSessionHistoryDescriptor,
   type AgentSessionHistoryResourceRequest,
   type AgentSessionHistoryResourceReadResult,
@@ -128,10 +129,19 @@ export type RuntimePreparation = {
   reservedHostIds: string[]
   runtimeBindings?: Map<string, string>
   configs?: HostConfig[]
+  launcherUpdates?: {
+    config: HostConfig & { kind: 'ssh'; runtimeId: string }
+    client: AgentMuxSshHostedClient
+    expectedSignature: string
+  }[]
 }
 
 function runtimeOwner(client: AgentMuxClient) {
   return 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : null
+}
+
+function isSshHostedClient(client: AgentMuxClient): client is AgentMuxSshHostedClient {
+  return 'setRemoteCommand' in client && typeof client.setRemoteCommand === 'function'
 }
 
 function endpointWarning(hostId: string, step: string, error: unknown): RuntimeEndpointWarning {
@@ -487,10 +497,21 @@ export class RuntimeController {
     const changed = config.hosts.filter(
       (host) => this.hostSignatures.get(host.id) !== nextSignatures.get(host.id)
     )
+    const launcherUpdates: NonNullable<RuntimePreparation['launcherUpdates']> = changed.flatMap(next => {
+      const existing = this.hosts.get(next.id), expectedSignature = this.hostSignatures.get(next.id)
+      if (next.kind !== 'ssh' || !next.runtimeId || existing?.config.kind !== 'ssh' ||
+        existing.config.runtimeId !== next.runtimeId || expectedSignature === undefined ||
+        existing.config.remoteCommand === next.remoteCommand || !isSshHostedClient(existing.client)) return []
+      const { remoteCommand: _nextCommand, ...nextRoute } = next
+      const { remoteCommand: _previousCommand, ...previousRoute } = existing.config
+      if (hostSignature(nextRoute) !== hostSignature(previousRoute)) return []
+      return [{ config: { ...next, runtimeId: next.runtimeId }, client: existing.client, expectedSignature }]
+    })
+    const launcherHostIds = new Set(launcherUpdates.map(update => update.config.id))
     const removedHostIds = [...this.hostSignatures.keys()].filter((id) => !nextSignatures.has(id))
     const reservedHostIds = [...new Set([
       ...removedHostIds,
-      ...changed.flatMap((host) => this.hosts.has(host.id) ? [host.id] : [])
+      ...changed.flatMap((host) => this.hosts.has(host.id) && !launcherHostIds.has(host.id) ? [host.id] : [])
     ])]
     const acquiredHostIds: string[] = []
     for (const hostId of reservedHostIds) {
@@ -503,9 +524,23 @@ export class RuntimeController {
     }
     try {
       await Promise.all(reservedHostIds.map(async (hostId) => await this.waitForHostQuiescence(hostId)))
-      await this.assertConfigurable(nextSignatures)
-      const results = await Promise.allSettled(changed.map(async (host) => await this.prepareHost(host)))
-      const prepared = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+      await this.assertConfigurable(nextSignatures, launcherHostIds)
+      const results = await Promise.allSettled(changed.map(async host => {
+        const update = launcherUpdates.find(update => update.config.id === host.id)
+        if (!update) return await this.prepareHost(host)
+        // A slow or failed probe cannot reserve healthy input on the retained consumer.
+        const probe = await this.prepareHost(update.config)
+        try {
+          await probe.client.connectRuntime()
+          const owner = runtimeOwner(probe.client)
+          if (owner?.availability !== 'connected' || owner.runtimeId !== update.config.runtimeId) {
+            throw new AgentMuxError('The candidate launcher did not confirm the original Runtime. Its current connection and Runs were retained.', 'RUNTIME_OWNER_MISMATCH')
+          }
+          this.assertLauncherUpdateCurrent(update)
+        } finally { await disposePrepared([probe]) }
+        return undefined
+      }))
+      const prepared = results.flatMap((result) => result.status === 'fulfilled' && result.value ? [result.value] : [])
       const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
       if (errors.length > 0) {
         try {
@@ -533,6 +568,7 @@ export class RuntimeController {
         removedHostIds,
         hostSignatures: signatures(boundConfig),
         reservedHostIds,
+        launcherUpdates,
         runtimeBindings,
         configs: boundConfig.hosts
       }
@@ -544,6 +580,8 @@ export class RuntimeController {
 
   commit(preparation: RuntimePreparation): void {
     try {
+      for (const update of preparation.launcherUpdates ?? []) this.assertLauncherUpdateCurrent(update)
+      for (const update of preparation.launcherUpdates ?? []) update.client.setRemoteCommand(update.config.remoteCommand)
       const retired = new Map<string, RuntimeHost>()
       for (const id of preparation.removedHostIds) {
         const host = this.hosts.get(id)
@@ -2121,9 +2159,17 @@ export class RuntimeController {
     })
   }
 
-  private async assertConfigurable(nextSignatures: ReadonlyMap<string, string>): Promise<void> {
+  private assertLauncherUpdateCurrent(update: NonNullable<RuntimePreparation['launcherUpdates']>[number]): void {
+    const host = this.hosts.get(update.config.id)
+    if (host?.client !== update.client || this.hostSignatures.get(update.config.id) !== update.expectedSignature ||
+      host.config.kind !== 'ssh' || host.config.runtimeId !== update.config.runtimeId) {
+      throw new AgentMuxError('The Runtime connection changed while confirming its launcher. Retry the original operation; existing consumers and Runs were retained.', 'RUNTIME_OWNER_CHANGED')
+    }
+  }
+
+  private async assertConfigurable(nextSignatures: ReadonlyMap<string, string>, launcherHostIds: ReadonlySet<string>): Promise<void> {
     for (const [hostId, host] of this.hosts) {
-      if (nextSignatures.get(hostId) === this.hostSignatures.get(hostId)) continue
+      if (nextSignatures.get(hostId) === this.hostSignatures.get(hostId) || launcherHostIds.has(hostId)) continue
       await host.client.connect()
       if ((await host.client.listRuns()).some(run => run.state === 'running')) {
         throw new Error(`Stop sessions on ${hostId} before changing that host`)
