@@ -15,6 +15,8 @@ import { DIRECT_GOAL_TITLE, directGoalRequest, retryDirectGoal, saveDirectGoal, 
 import { GoalDetail } from './GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { GoalsCommonActions } from './GoalsCommonActions'
+import { SelectionField } from './SelectionField'
+import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '../../../shared/goals-preferences'
 
 export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
@@ -93,6 +95,7 @@ export function GlobalBoardSurface() {
     return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.includes(assigneeFilter))
   }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
+  const visibleStatuses = statusFilter === 'all' ? DEMAND_STATUS_IDS : [statusFilter]
   const appliedFilters = [
     ...(statusFilter !== 'all' ? [{ label: GOAL_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
     ...(projectFilter !== 'all' ? [{ label: projects.find((project) => project.id === projectFilter)?.name ?? 'Project unavailable', clear: () => setProjectFilter('all') }] : []),
@@ -127,7 +130,8 @@ export function GlobalBoardSurface() {
   function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={Boolean(acknowledgementFeedback[demand.id]?.failure)} selectedSessionId={selectedSessionId} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
   return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
-    if (event.key !== 'Escape' || event.nativeEvent.isComposing) return
+    if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return
+    if ((event.target as HTMLElement).closest('[role="menu"], [role="dialog"]')) return
     if (filtersOpen) { setFiltersOpen(false); queueMicrotask(() => filterRef.current?.focus()) }
     else if (selectedDemand && !['INPUT', 'TEXTAREA', 'SELECT'].includes((event.target as HTMLElement).tagName)) closeDetail()
   }}>
@@ -136,14 +140,14 @@ export function GlobalBoardSurface() {
       <header className="goals-toolbar">
         <label className="goals-search"><Search size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={12} /></button> : null}</label>
         <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
-        <div className="goals-view-toggle" role="group" aria-label="Goal view"><button type="button" aria-label="List view" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={14} /></button><button type="button" aria-label="Board view" aria-pressed={view === 'board'} onClick={() => setView('board')}><Columns3 size={14} /></button></div>
-        <button ref={newGoalRef} type="button" className="goals-button" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><CirclePlus size={13} />New Goal</button>
+        <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <List size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <Columns3 size={14} />, ariaLabel: 'Board view' }]} />
+        <button ref={newGoalRef} type="button" className="goals-button goals-create" aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><CirclePlus size={14} /><span>New Goal<small id="goals-create-effect">Draft + discussion</small></span></button>
       </header>
       {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">
-        <label>Work status<select aria-label="Filter work status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">All active</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{GOAL_STATUS_LABELS[status]}</option>)}</select></label>
-        <label>Project<select aria-label="Filter project" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">All projects</option>{projectFilter !== 'all' && !projects.some(project => project.id === projectFilter) ? <option value={projectFilter} disabled>Project unavailable</option> : null}{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
-        <label>Routing<select aria-label="Filter routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select></label>
-        <label>Assignee<select aria-label="Filter assignee" value={assigneeFilter} onChange={event => setAssigneeFilter(event.target.value)}><option value="all">Any assignee</option>{assigneeIds.map(id => <option key={id} value={id}>{assigneeName(id)}</option>)}</select></label>
+        <label>Work status<SelectionField label="Filter work status" value={statusFilter} onValueChange={value => setStatusFilter(value as typeof statusFilter)} options={[{ value: 'all', label: showHistory ? 'All statuses' : 'All active' }, ...DEMAND_STATUS_IDS.map(value => ({ value, label: GOAL_STATUS_LABELS[value] }))]} /></label>
+        <label>Project<SelectionField label="Filter project" value={projectFilter} onValueChange={setProjectFilter} options={[{ value: 'all', label: 'All projects' }, ...(projectFilter !== 'all' && !projects.some(project => project.id === projectFilter) ? [{ value: projectFilter, label: 'Project unavailable', disabled: true }] : []), ...projects.map(project => ({ value: project.id, label: project.name }))]} /></label>
+        <label>Routing<SelectionField label="Filter routing" value={routingFilter} onValueChange={value => setRoutingFilter(value as typeof routingFilter)} options={[{ value: 'all', label: 'All routing' }, { value: 'unassigned', label: 'Needs routing' }, { value: 'assigned', label: 'Assigned' }]} /></label>
+        <label>Assignee<SelectionField label="Filter assignee" value={assigneeFilter} onValueChange={setAssigneeFilter} options={[{ value: 'all', label: 'Any assignee' }, ...assigneeIds.map(value => ({ value, label: assigneeName(value) }))]} /></label>
       </div> : null}
       {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<X size={11} /></button>)}</div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>
@@ -151,7 +155,7 @@ export function GlobalBoardSurface() {
         {creation.error ? <><span>{creation.error}</span><button type="button" className="goals-button goals-button--primary" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? '保存这个目标' : '重新读取目标' : '重试专属讨论'}<ArrowUpRight size={13} /></button></> : null}
       </div> : null}
       <div className={`goals-collection goals-collection--${view}`} role="region" aria-label="Global goals">
-        {filteredDemands.length === 0 ? <div className="goals-empty">{projectedDemands.length ? <><strong>No goals match this view.</strong><p>{query.trim() ? `No match for “${query.trim()}”${appliedFilters.length ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}</p>{query.trim() || appliedFilters.length ? <button type="button" className="goals-button" onClick={clearConditions}>Clear search & filters<ArrowUpRight size={13} /></button> : <button type="button" className="goals-button" onClick={() => setShowHistory(true)}>Show finished</button>}</> : creation?.phase === 'save' && !creation.notSaved ? null : <><strong>还没有目标</strong><p>常用操作直接开始对话，New Goal 创建待定义目标并打开专属讨论。</p></>}</div> : view === 'list' ? <div className="goals-list">{filteredDemands.map(renderRow)}</div> : <div className="goals-board" aria-label="Goals by work status">{DEMAND_STATUS_IDS.filter((status) => columns[status].length > 0 || !['done', 'cancelled'].includes(status)).map((status) => <section className="goals-board-column" key={status} data-status={status}><header><strong>{GOAL_STATUS_LABELS[status]}</strong><span>{columns[status].length}</span></header>{columns[status].map(renderRow)}{columns[status].length === 0 ? <p className="goals-board-column__empty">—</p> : null}</section>)}</div>}
+        {filteredDemands.length === 0 ? <div className="goals-empty">{projectedDemands.length ? <><strong>No goals match this view.</strong><p>{query.trim() ? `No match for “${query.trim()}”${appliedFilters.length ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}</p>{query.trim() || appliedFilters.length ? <button type="button" className="goals-button" onClick={clearConditions}>Clear search & filters<ArrowUpRight size={13} /></button> : <button type="button" className="goals-button" onClick={() => setShowHistory(true)}>Show finished</button>}</> : creation?.phase === 'save' && !creation.notSaved ? null : <><strong>还没有目标</strong><p>常用操作直接开始对话，New Goal 创建待定义目标并打开专属讨论。</p></>}</div> : view === 'list' ? <div className="goals-list">{filteredDemands.map(renderRow)}</div> : <div className="goals-board" aria-label="Goals by work status">{visibleStatuses.filter((status) => columns[status].length > 0 || !['done', 'cancelled'].includes(status)).map((status) => <section className={`goals-board-column${columns[status].length ? '' : ' goals-board-column--empty'}`} key={status} data-status={status}><header><strong>{GOAL_STATUS_LABELS[status]}</strong><span>{columns[status].length}</span></header>{columns[status].map(renderRow)}{columns[status].length === 0 ? <p className="goals-board-column__empty">No goals</p> : null}</section>)}</div>}
       </div>
       <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals{view === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
     </div>
