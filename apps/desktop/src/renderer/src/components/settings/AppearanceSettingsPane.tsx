@@ -1,6 +1,7 @@
+import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { Check, Monitor, Moon, Palette, SquareTerminal, Sun } from 'lucide-react'
+import { SemanticIcon, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { useId } from 'react'
 import { useSettingDraft } from './use-setting-draft'
 import { readAppEditorFontSize } from '../../hooks/useEditorTypography'
@@ -19,16 +20,18 @@ import {
 import { TERMINAL_THEME_CATALOG } from '../../lib/terminal-theme'
 
 const APP_APPEARANCE_COPY = {
-  dark: { title: 'Dark', description: 'Quiet and focused', icon: Moon },
-  light: { title: 'Light', description: 'Clear and bright', icon: Sun },
-  system: { title: 'System', description: 'Follow your device', icon: Monitor }
-} satisfies Record<AppAppearanceId, { title: string; description: string; icon: typeof Moon }>
+  dark: { title: 'Dark', description: 'Quiet and focused', icon: 'appearance.dark' },
+  light: { title: 'Light', description: 'Clear and bright', icon: 'appearance.light' },
+  system: { title: 'System', description: 'Follow your device', icon: 'object.display' }
+} satisfies Record<AppAppearanceId, { title: string; description: string; icon: SemanticIconId }>
 
 export function AppearanceSettingsPane({ appearance, onSave }: {
   appearance: AppearanceConfig
   onSave: (appearance: AppearanceConfig, expected: AppearanceConfig) => Promise<void>
 }) {
   const choiceId = useId()
+  const theme = useSettingDraft(appearance.themeId ?? DEFAULT_THEME_ID)
+  const catalog = getThemeCatalog(appearance.customThemes)
   const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
   const terminal = useSettingDraft<TerminalThemeId>(appearance.terminalTheme)
   const font = useSettingDraft(String(appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT))
@@ -43,7 +46,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
     && parsedFontSize >= TERMINAL_FONT_SIZE_MIN && parsedFontSize <= TERMINAL_FONT_SIZE_MAX
   const fontSize = validFontSize ? parsedFontSize : Number(font.expected)
   const appAppearance = app.value, terminalTheme = terminal.value
-  const dirty = app.dirty || terminal.dirty || font.dirty || editorFont.dirty
+  const dirty = theme.dirty || app.dirty || terminal.dirty || font.dirty || editorFont.dirty
   const setAppAppearance = app.setValue, setTerminalTheme = terminal.setValue, setFontSize = font.setValue
 
   async function save(): Promise<void> {
@@ -59,15 +62,19 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
       })
       return
     }
+    const submittedTheme = theme.beginSave()
     const submittedApp = app.beginSave(), submittedTerminal = terminal.beginSave(), submittedFont = font.beginSave()
     const submittedEditorFont = editorFont.beginSave()
     const next = { ...appearance, appAppearance: submittedApp.value, terminalTheme: submittedTerminal.value, terminalFontSize: parsedFontSize }
     const expected = { ...appearance, appAppearance: submittedApp.expected, terminalTheme: submittedTerminal.expected, terminalFontSize: Number(submittedFont.expected) }
+    if (appearance.themeId !== undefined || submittedTheme.value !== DEFAULT_THEME_ID) next.themeId = submittedTheme.value
+    if (appearance.themeId !== undefined || submittedTheme.expected !== DEFAULT_THEME_ID) expected.themeId = submittedTheme.expected
     if (submittedEditorFont.value === 'inherit') delete next.editorFontSize
     else next.editorFontSize = Number(submittedEditorFont.value)
     if (submittedEditorFont.expected === 'inherit') delete expected.editorFontSize
     else expected.editorFontSize = Number(submittedEditorFont.expected)
     const committed = await saveState.run(() => onSave(next, expected))
+    submittedTheme.finish(committed)
     submittedApp.finish(committed)
     submittedTerminal.finish(committed)
     submittedFont.finish(committed)
@@ -77,6 +84,25 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   return (
     <div className="settings-pane-stack">
       <section className="settings-group">
+        <header><span>Workspace theme</span><small>{catalog.items.length} themes</small></header>
+        <div className="settings-theme-grid" role="radiogroup" aria-label="Workspace theme">
+          {catalog.items.map(item => <label key={item.id} className={`settings-theme-choice ${theme.value === item.id ? 'settings-theme-choice--selected' : ''}`}>
+            <input className="settings-choice-radio" type="radio" name={`${choiceId}-theme`} value={item.id}
+              checked={theme.value === item.id} onChange={() => theme.setValue(item.id)} aria-label={`${item.value.name} (${item.id})`} />
+            <span className="settings-theme-choice__sample" aria-hidden="true">
+              {(['dark', 'light'] as const).map(mode => <span key={mode} style={{ background: item.value.variants[mode].colors.background, color: item.value.variants[mode].colors.text, borderColor: item.value.variants[mode].colors.line }}>
+                <i style={{ background: item.value.variants[mode].colors.surface2 }} /><b style={{ color: item.value.variants[mode].colors.action }}>Aa</b><em style={{ background: item.value.variants[mode].colors.surface1 }} />
+              </span>)}
+            </span>
+            <span><strong>{item.value.name}</strong><small>{item.value.description}</small><small className="settings-theme-choice__identity" title={item.id}>{item.readonly ? 'Built-in · ' : 'Custom · '}{item.id}</small></span>
+            {theme.value === item.id ? <SemanticIcon name="status.selected" className="settings-theme-choice__check" size={13} /> : null}
+          </label>)}
+        </div>
+        {catalog.issues.map(issue => <p className="settings-error" key={issue.id}><strong>{issue.id}</strong> — {issue.message}</p>)}
+        {!catalog.items.some(item => item.id === theme.value) ? <p className="settings-error">Selected theme “{theme.value}” is unavailable. Its data is retained; choose a theme to restore the selection.</p> : null}
+        <p className="settings-hint">Each theme includes dark and light surfaces. Application appearance below chooses the brightness; your terminal palette stays independent.</p>
+      </section>
+      <section className="settings-group">
         <header><span>Application appearance</span><small>Window</small></header>
         <div className="settings-appearance-modes" role="radiogroup" aria-label="Application appearance">
           {APP_APPEARANCE_IDS.map((mode) => (
@@ -84,9 +110,9 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
               <input className="settings-choice-radio" type="radio" name={`${choiceId}-application`}
                 value={mode} checked={appAppearance === mode} onChange={() => setAppAppearance(mode)}
                 aria-label={APP_APPEARANCE_COPY[mode].title} aria-describedby={`${choiceId}-${mode}-description`} />
-              {(() => { const Icon = APP_APPEARANCE_COPY[mode].icon; return <Icon size={20} /> })()}
+              <SemanticIcon name={APP_APPEARANCE_COPY[mode].icon} size={20} />
               <span><strong>{APP_APPEARANCE_COPY[mode].title}</strong><small id={`${choiceId}-${mode}-description`}>{APP_APPEARANCE_COPY[mode].description}</small></span>
-              {appAppearance === mode ? <Check className="settings-appearance-choice__check" size={13} /> : null}
+              {appAppearance === mode ? <SemanticIcon name="status.selected" className="settings-appearance-choice__check" size={13} /> : null}
             </label>
           ))}
         </div>
@@ -161,7 +187,7 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
                   <strong>{definition.label}</strong>
                   <small id={`${choiceId}-${definition.id}-description`}>{definition.description}</small>
                 </span>
-                {selected ? <Palette size={14} /> : <SquareTerminal size={14} />}
+                <SemanticIcon name={selected ? 'appearance.theme' : 'object.terminal'} size={14} />
               </label>
             )
           })}

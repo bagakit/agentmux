@@ -84,7 +84,7 @@
 .wf-ico--running { color: var(--text-2); }
 .wf-streaming-glyph { transform-origin: center; animation: wf-streaming-turn 1.6s linear infinite; }
 @keyframes wf-streaming-turn { to { transform: rotate(360deg); } }
-.wf-ico--completed { color: var(--green); }
+.wf-ico--completed { color: var(--success); }
 .wf-ico--failed { color: var(--red); }
 .wf-ico--paused { color: var(--amber); }
 .wf-ico--killed { color: var(--text-3); }

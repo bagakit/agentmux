@@ -45,7 +45,7 @@ import { api } from './lib/api'
 import { fileNavigationSelection, useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
 import { isMacPlatform } from './lib/host-platform'
-import { applyAppAppearance } from './lib/app-appearance'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { useNativeOverlayChrome } from './hooks/useNativeOverlayChrome'
 import { RendererResourceOwners } from './components/RendererResourceOwners'
 import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
@@ -366,7 +366,8 @@ function DesktopApp() {
   const executorIdentity = useMemo(() => ({ config, onPanelVisibilityChange: onAgentPanelVisibilityChange }), [config, onAgentPanelVisibilityChange])
   const nativeOverlayWarning = useNativeOverlayChrome()
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
-  useEffect(() => applyAppAppearance(config?.appearance.appAppearance), [config?.appearance.appAppearance])
+  useLayoutEffect(() => mountThemeRuntime(window, useAppStore.getState().config?.appearance ?? {}), [])
+  useLayoutEffect(() => { updateThemeSelection(config?.appearance ?? {}) }, [config?.appearance.appAppearance, config?.appearance.themeId, config?.appearance.customThemes])
   useEffect(() => api.config.onChange((committed) => useAppStore.getState().setConfig(committed)), [])
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const fileEditingProbe = typeof window !== 'undefined' &&
