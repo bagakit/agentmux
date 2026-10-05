@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act, type ReactNode } from 'react';
+import { act, useEffect, type ReactNode } from 'react';
 import type { Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages';
@@ -13,8 +13,9 @@ import { createClientUiRoot } from './helpers/client-ui-render';
 import { fixture, nativeQuestion, request, raw } from './helpers/native-async-question-fixture';
 import { api } from '../src/renderer/src/lib/api';
 import { useAppStore } from '../src/renderer/src/store';
-import { replyConversationQuestion } from '../src/renderer/src/lib/conversation-question';
+import { replyConversationQuestion, desktopQuestionReplyState, observeConversationQuestionAnswers, editConversationQuestionDraft } from '../src/renderer/src/lib/conversation-question';
 import { renderConversationQuestionNotice } from '../src/renderer/src/components/ConversationQuestionNotice';
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply';
 import { RuntimeController } from '../src/main/runtime-controller';
 import type { DesktopRuntimeClient } from '../src/main/desktop-host';
 import type { AppConfig, AgentSessionControl, SessionSnapshot } from '../src/shared/contracts';
@@ -135,14 +136,16 @@ async function text(value: string) {
   });
   await flush();
 }
-function thread(page: AgentSessionHistoryPage, onReply = replyConversationQuestion.bind(null, control)) {
-  return <ConversationView
-    page={page}
-    sessionId="question-session"
-    onReplyQuestion={onReply}
-    renderQuestionNotice={renderConversationQuestionNotice}
-  />;
+function Thread({ page, onReply = replyConversationQuestion.bind(null, control) }: { page: AgentSessionHistoryPage; onReply?: typeof replyConversationQuestion extends (control: any, input: infer I) => infer R ? (input: I) => R : never }) {
+  const replies = useAppStore(state => state.questionReplies?.['question-session'])
+  const drafts = useAppStore(state => state.questionReplyDrafts?.['question-session'])
+  useEffect(() => observeConversationQuestionAnswers(control, page), [page])
+  return <ConversationView page={page} sessionId="question-session" onReplyQuestion={onReply}
+    questionReplyState={target => desktopQuestionReplyState(replies, 'question-session', target)}
+    questionReplyDraft={target => drafts?.[questionReplyKey('question-session', target)]}
+    onQuestionDraftChange={(target, answers) => editConversationQuestionDraft(control, target, answers)} renderQuestionNotice={renderConversationQuestionNotice} />
 }
+function thread(page: AgentSessionHistoryPage, onReply = replyConversationQuestion.bind(null, control)) { return <Thread page={page} onReply={onReply} /> }
 async function bridge(h: Awaited<ReturnType<typeof fixture>>) {
   const runtime = new RuntimeController(h.store, async () => {
     throw new Error('No Runtime connection action is permitted in this test');
@@ -249,7 +252,7 @@ it('exact loaded native answers remain readable; an unanswered sibling never bec
   const page = await h.client.sessionHistoryPage('question-session', h.invocation);
   await render(thread(page));
   expect(container.querySelector('.agent-question__answer')?.textContent).toBe('Keep original');
-  expect(container.textContent).toContain(raw);
+  expect(page.items.flatMap(item => item.questionAnswers ?? [])).toContainEqual(expect.objectContaining({ questionId: request.questions[0]!.id, answer: 'Keep original' }));
   expect(container.querySelectorAll('.agent-question__field')[0]?.querySelector('button')).toBeNull();
   await text('Actual second reply');
   await click('Submit reply');
@@ -281,46 +284,74 @@ it('fully recorded answers show their exact content and no reply action', async 
   expect(container.querySelectorAll('.agent-question__answer')).toHaveLength(2);
   expect(container.querySelectorAll('button,textarea')).toHaveLength(0);
 });
-it('a failed explicit reply preserves draft and retries the same operation identity', async () => {
-  const submit = vi.fn().mockRejectedValueOnce(new Error('Original service unavailable')).mockResolvedValueOnce({
-    outcome: 'submitted'
-  });
-  await render(<AgentAsyncQuestionCard
-    request={{
-    delivery: 'async',
-    questions: [request.questions[1]!]
-  }}
-    recordedAnswers={new Map()}
-    onSubmit={submit}
-    renderNotice={renderConversationQuestionNotice}
-  />);
-  await text('Kept draft');
-  await click('Submit reply');
-  expect(container.textContent).toContain('Original service unavailable');
-  expect(container.querySelector('textarea')?.value).toBe('Kept draft');
-  await click('Retry reply');
-  expect(submit).toHaveBeenCalledTimes(2);
-  expect(submit.mock.calls[1]![1]).toBe(submit.mock.calls[0]![1]);
-  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted');
-});
-it('a corrected draft uses a new operation while preserving normal manual input', async () => {
-  const submit = vi.fn().mockRejectedValue(new Error('Original unconfirmed reply'));
-  await render(<AgentAsyncQuestionCard
-    request={{
-    delivery: 'async',
-    questions: [request.questions[1]!]
-  }}
-    recordedAnswers={new Map()}
-    onSubmit={submit}
-  />);
-  await text('first');
-  await click('Submit reply');
-  await text('second');
-  await click('Submit reply');
-  expect(submit).toHaveBeenCalledTimes(2);
-  expect(submit.mock.calls[1]![1]).not.toBe(submit.mock.calls[0]![1]);
-  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('UNSENT ORIGINAL DRAFT');
-});
+it('a lost reply receipt survives card remount and retries the original Core operation and predecessor; changed answers cannot replace it', async () => {
+  const h = await fixture('unanswered'), condition = await h.beginWorking()
+  const session = useAppStore.getState().sessions[0]!
+  if (session.kind !== 'agent') throw Error('Exact Agent fixture required')
+  useAppStore.setState({ sessions: [{ ...session, promptSubmissionPredecessor: condition.afterSubmissionId }] })
+  const send = await bridge(h), originalSend = send.getMockImplementation()!
+  send.mockImplementationOnce(async (...args) => { await originalSend(...args); throw new Error('Receipt lost after original Core input') })
+  const page = await h.client.sessionHistoryPage('question-session', h.invocation)
+  await render(thread(page)); await click('Keep original'); await click('Submit reply')
+  await vi.waitFor(() => expect(container.textContent).toContain('Reply unconfirmed'))
+  const first = send.mock.calls[0]![1], bytes = h.writes.length
+  await render(<div>Temporarily another surface</div>); await render(thread(page))
+  expect(button('Revise').disabled).toBe(false)
+  await click('Revise'); await text('另一份尚未发送的新草稿')
+  await render(<div>Another remount</div>); await render(thread(page))
+  expect(button('Revise').getAttribute('aria-pressed')).toBe('true')
+  expect([...container.querySelectorAll('textarea')].at(-1)?.value).toBe('另一份尚未发送的新草稿')
+  expect(Object.values(useAppStore.getState().questionReplies['question-session']!)[0]?.input).toEqual(first)
+  expect(button('Retry original reply').disabled).toBe(false)
+  useAppStore.setState({ sessions: [{ ...session, promptSubmissionPredecessor: first.operationId }] })
+  await expect(replyConversationQuestion(control, { source: page.source, turnId: 'question-turn', recordId: nativeQuestion.id,
+    answers: [{ questionId: request.questions[0]!.id, answer: 'Revise' }] })).rejects.toThrow('changed answer cannot replace')
+  expect(send).toHaveBeenCalledTimes(1)
+  await click('Retry original reply')
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  await vi.waitFor(() => expect(container.textContent).toContain('Submitted · Awaiting'))
+  expect(send.mock.calls[1]![1]).toEqual(first)
+  expect(first.afterSubmissionId).toBe(condition.afterSubmissionId); expect(h.writes).toHaveLength(bytes)
+  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('UNSENT ORIGINAL DRAFT')
+})
+it('a later not-applied retry cannot clear the original unknown reply or grant a new answer', async () => {
+  const h = await fixture('unanswered'), send = await bridge(h), page = await h.client.sessionHistoryPage('question-session', h.invocation)
+  send.mockRejectedValueOnce(new Error('Original receipt unknown')).mockRejectedValueOnce(Object.assign(new Error('This later call was refused'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }))
+  await render(thread(page)); await click('Keep original'); await click('Submit reply')
+  await vi.waitFor(() => expect(container.textContent).toContain('Reply unconfirmed'))
+  await click('Retry original reply')
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  expect(button('Revise').disabled).toBe(false); expect(container.textContent).toContain('Reply unconfirmed')
+  expect(Object.values(useAppStore.getState().questionReplies['question-session']!)[0]?.phase).toBe('unknown')
+})
+it('the existing durable Workbench writer restores the complete original reply independently of the edited answer draft', async () => {
+  vi.spyOn(api.config, 'get').mockResolvedValue(config)
+  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  const sessions = useAppStore.getState().sessions
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions, timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
+  const dispose = await useAppStore.getState().initialize()
+  try {
+    seed()
+    const h = await fixture('unanswered'), send = await bridge(h), page = await h.client.sessionHistoryPage('question-session', h.invocation)
+    send.mockRejectedValueOnce(new Error('Original receipt unknown'))
+    await render(thread(page)); await click('Keep original'); await click('Submit reply')
+    await vi.waitFor(() => expect(container.textContent).toContain('Reply unconfirmed'))
+    const input = send.mock.calls[0]![1]
+    await click('Revise'); await text('另一份保存的新草稿')
+    const saved = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state
+    expect(saved.questionReplies).toBeDefined()
+    const savedAttempt = Object.values(saved.questionReplies['question-session'])[0] as any
+    expect(savedAttempt).toMatchObject({ phase: 'unknown', hostId: 'local', input })
+    expect(Object.values(saved.questionReplyDrafts['question-session'])[0]).toContainEqual({ questionId: request.questions[1]!.id, answer: '另一份保存的新草稿' })
+    await useAppStore.persist.rehydrate()
+    expect(Object.values(useAppStore.getState().questionReplies['question-session']!)[0]?.input).toEqual(input)
+    await render(<div>Remounted after durable hydration</div>); await render(thread(page))
+    expect([...container.querySelectorAll('textarea')].at(-1)?.value).toBe('另一份保存的新草稿')
+    expect(button('Retry original reply').disabled).toBe(false); expect(send).toHaveBeenCalledOnce()
+  } finally { dispose() }
+})
 it('the rendered Run remains the target; a changed Session refuses only this reply without losing its question or draft', async () => {
   const h = await fixture();
   const send = await bridge(h);
@@ -356,7 +387,7 @@ it('source replacement resets local submission state and refuses stale loaded an
   await render(thread(page, submit));
   await text('Local old source');
   await click('Submit reply');
-  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted');
+  expect(submit).toHaveBeenCalledTimes(1);
   await render(thread({
     ...page,
     source: {
@@ -411,7 +442,7 @@ it('one delayed explicit submission cannot be duplicated by rapid activation and
     operationId: 'actual-local-operation',
     outcome: 'submitted'
   }));
-  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted');
+  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('unknown');
   expect(original.isConnected).toBe(true);
 });
 it('submits a nonempty exact subset and later unlocks other questions only after exact recorded facts arrive', async () => {
@@ -431,7 +462,7 @@ it('submits a nonempty exact subset and later unlocks other questions only after
     questionId: request.questions[0]!.id,
     answer: 'Revise'
   }]);
-  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted');
+  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('unknown');
   await render(renderCard(new Map([[request.questions[0]!.id, 'Revise']])));
   expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('unknown');
   expect(container.textContent).toContain('1 of 2 answers recorded · Others unconfirmed');
@@ -441,7 +472,7 @@ it('submits a nonempty exact subset and later unlocks other questions only after
     questionId: request.questions[1]!.id,
     answer: 'Remaining exact answer'
   }]);
-  expect(submit.mock.calls[1]![1]).not.toBe(submit.mock.calls[0]![1]);
+  expect(submit.mock.calls[1]).toHaveLength(1);
 });
 it('local reply draft and ACK cannot cross Managed Session identities even when native source and record IDs are the same', async () => {
   const h = await fixture();
@@ -464,7 +495,7 @@ it('local reply draft and ACK cannot cross Managed Session identities even when 
   await render(thread(first, submit));
   await text('Session A submitted answer');
   await click('Submit reply');
-  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted');
+  expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('unknown');
   await render(<ConversationView
     page={second}
     sessionId="second-managed-session"

@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryQuestionRequest } from '@agentmux/core'
+import type { QuestionReplyState } from '../src/lib/conversation-question-reply.js'
 import { AgentAsyncQuestionCard } from '../src/components/AgentAsyncQuestionCard.js'
 
 const request: AgentSessionHistoryQuestionRequest = { delivery: 'async', questions: [
@@ -19,8 +20,8 @@ const field = () => host.querySelector<HTMLTextAreaElement>('[aria-label="Your a
 const submit = () => host.querySelector<HTMLButtonElement>('.agent-question__footer button')!
 const setDom = (node: HTMLTextAreaElement, value: string) => Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(node, value)
 async function type(value: string) { await act(async () => { setDom(field(), value); field().dispatchEvent(new Event('input', { bubbles: true })) }) }
-async function render(answers: ReadonlyMap<string, string> = new Map(), onSubmit?: Parameters<typeof AgentAsyncQuestionCard>[0]['onSubmit']) {
-  await act(async () => root.render(<AgentAsyncQuestionCard request={request} recordedAnswers={answers} onSubmit={onSubmit} />))
+async function render(answers: ReadonlyMap<string, string> = new Map(), onSubmit?: Parameters<typeof AgentAsyncQuestionCard>[0]['onSubmit'], attempt?: QuestionReplyState) {
+  await act(async () => root.render(<AgentAsyncQuestionCard request={request} recordedAnswers={answers} onSubmit={onSubmit} attempt={attempt} />))
 }
 
 it('retains the real custom-answer composition preview through unrelated recorded-fact refreshes', async () => {
@@ -38,10 +39,10 @@ it('retains the real custom-answer composition preview through unrelated recorde
   expect(submit().disabled).toBe(false)
   expect(write).not.toHaveBeenCalled()
   await act(async () => submit().click())
-  expect(write).toHaveBeenCalledExactlyOnceWith([{ questionId: 'opaque-free', answer: '保留原始草稿\n不猜确认' }], expect.any(String))
+  expect(write).toHaveBeenCalledExactlyOnceWith([{ questionId: 'opaque-free', answer: '保留原始草稿\n不猜确认' }])
 })
 
-it('keeps exact text and the original operation identity after failure, without confirming submitted replies', async () => {
+it('keeps the host-held original answer separate from an editable draft and retries only that original answer', async () => {
   let reject!: (error: Error) => void
   const write = vi.fn<NonNullable<Parameters<typeof AgentAsyncQuestionCard>[0]['onSubmit']>>(() => new Promise<void>((_, fail) => { reject = fail }))
   await render(new Map(), write)
@@ -52,6 +53,7 @@ it('keeps exact text and the original operation identity after failure, without 
   expect(field().disabled).toBe(true)
   await act(async () => reject(new Error('Receipt unknown; original Session remains available.')))
   expect(field().value).toBe('  Keep original work.\n保留空格  ')
+  await render(new Map(), write, { phase: 'unknown', answers: first[0], diagnostic: { code: 'UNKNOWN', message: 'Receipt unknown' } })
   expect(field().disabled).toBe(false)
   expect(host.textContent).toContain('Receipt unknown')
   await act(async () => submit().click())
@@ -59,7 +61,9 @@ it('keeps exact text and the original operation identity after failure, without 
   await act(async () => reject(new Error('Still unconfirmed')))
   await type('Corrected exact answer')
   await act(async () => submit().click())
-  expect(write.mock.calls[2]![1]).not.toBe(first[1])
+  expect(field().value).toBe('Corrected exact answer')
+  expect(host.textContent).toContain('  Keep original work.\n保留空格  ')
+  expect(write.mock.calls[2]).toEqual(first)
 })
 
 it('waits for exact recorded answer facts before unlocking remaining questions', async () => {
@@ -67,11 +71,13 @@ it('waits for exact recorded answer facts before unlocking remaining questions',
   await render(new Map(), write)
   await type('First answer')
   await act(async () => submit().click())
+  const attempt: QuestionReplyState = { phase: 'submitted', answers: [{ questionId: 'opaque-free', answer: 'First answer' }] }
+  await render(new Map(), write, attempt)
   expect(host.textContent).toContain('Submitted · Awaiting a recorded answer')
   expect(field().disabled).toBe(true)
-  await render(new Map([['other-question', 'Does not confirm this reply']]), write)
+  await render(new Map([['other-question', 'Does not confirm this reply']]), write, attempt)
   expect(field().disabled).toBe(true)
-  await render(new Map([['opaque-free', 'First answer']]), write)
+  await render(new Map([['opaque-free', 'First answer']]), write, { ...attempt, phase: 'confirmed' })
   expect(field()).toBeNull()
   expect(host.textContent).toContain('1 of 2 answers recorded · Others unconfirmed')
   const remaining = host.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Choose a direction"]')!
