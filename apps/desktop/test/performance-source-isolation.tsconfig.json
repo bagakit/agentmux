@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "performance-source-isolation.test.ts",
+    "main-performance-diagnostics.test.ts",
+    "../src/renderer/src/global.d.ts"
+  ]
+}
