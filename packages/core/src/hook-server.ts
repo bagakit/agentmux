@@ -7,7 +7,6 @@ import { defaultAgentMuxHookPort } from './runtime-paths.js'
 import { HOOK_OWNER_TIMEOUT_MS, HOOK_REQUEST_TIMEOUT_MS, HOOK_RETRY_DELAY_MS } from './agent-hook-delivery.js'
 
 const MAX_BODY_BYTES = 128 * 1024
-const MAX_BINDINGS = 256
 const MAX_PENDING_EVENTS = 8
 const MAX_PENDING_DELIVERIES = 8
 // Keep completed and unknown receipts for the sender's two-observation retry window.
@@ -216,9 +215,6 @@ export class AgentHookServer {
   ): AgentHookBinding {
     const endpoint = this.endpoint
     if (!endpoint) throw new AgentMuxError('Hook server is not running.', 'HOOK_SERVER_NOT_RUNNING')
-    if (this.bindings.size >= MAX_BINDINGS) {
-      throw new AgentMuxError('Hook binding limit reached.', 'HOOK_BINDING_LIMIT')
-    }
     const bindingId = requestedBindingId ?? randomBytes(32).toString('base64url')
     const token = requestedToken ?? randomBytes(32).toString('base64url')
     if (!/^[A-Za-z0-9_-]{43}$/u.test(bindingId) || !/^[A-Za-z0-9_-]{43}$/u.test(token)) {

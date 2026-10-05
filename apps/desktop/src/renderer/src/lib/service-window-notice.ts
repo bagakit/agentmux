@@ -211,6 +211,16 @@ export function nativeSessionServiceOutcome(session: SessionSnapshot): StepOutco
   } }
 }
 
+export function hookIngressServiceOutcome(session: SessionSnapshot): StepOutcome {
+  const failure = session.kind === 'agent' ? session.hookIngressObservation : undefined
+  if (!failure || failure.run.runId !== session.control.run.runId) return { completed: true }
+  return { completed: false, agentViability: agentViabilityFromProcessState(session.processState), step: {
+    label: `Native Hook observation (${failure.phase === 'listen' ? 'listener' : 'Run binding'}, ${failure.code})`,
+    degradedMode: `${failure.message} The original Run was last observed ${session.processState}; its terminal input and output remain separate capabilities.`,
+    restore: 'Refresh this Session observation to retry the original Hook binding. Keep the existing Session and do not resend unconfirmed input.'
+  } }
+}
+
 export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
 

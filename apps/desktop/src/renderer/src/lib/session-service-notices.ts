@@ -2,7 +2,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queue-drain'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
-import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
+import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
 import { agentLifecycleFailureNotice, lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './agent-lifecycle-feedback'
 
@@ -17,6 +17,11 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       cause: nativeSessionServiceCause(session), notice })
   }
   if (session?.kind !== 'agent') return notices
+  const hookNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session)))
+  if (hookNotice && session.hookIngressObservation) notices.push({ id: 'hook-ingress',
+    occurrence: JSON.stringify([session.hostId, session.id, session.control.run.runId]),
+    cause: JSON.stringify([session.hookIngressObservation.phase, session.hookIngressObservation.code, session.hookIngressObservation.message]),
+    observedAt: session.hookIngressObservation.observedAt, notice: hookNotice })
   if (session.creation?.initialPrompt === 'unconfirmed' || session.creation?.initialPrompt === 'unknown') notices.push({
     id: 'initial-prompt', occurrence: session.creation.createOperationId, notice: { kind: 'indeterminate', notice: {
       step: 'The original first prompt is unconfirmed', mode: 'The existing Agent Session remains available. Its first prompt will not be sent again automatically.',

@@ -285,6 +285,9 @@ function projectSession(
       providerId: subject.providerId,
       executorId: subject.executorId,
       ...projectNativeSourceFacts(subject.agentSession),
+      ...(subject.agentSession.hookIngressObservation
+        ? { hookIngressObservation: structuredClone(subject.agentSession.hookIngressObservation) }
+        : {}),
       ...(subject.agentSession.nativeHandle
         ? { nativeSessionId: subject.agentSession.nativeHandle.sessionId }
         : {}),

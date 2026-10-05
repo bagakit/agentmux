@@ -996,6 +996,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
       observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
       nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
+      hookIngressObservation?: NonNullable<AgentMuxAgentSession['hookIngressObservation']>
       nativeConfirmation?: NonNullable<AgentMuxAgentSession['nativeConfirmation']>
       capabilities: AgentCapabilities
       /** Core record freshness; activity updatedAt cannot order authoritative Session snapshots. */

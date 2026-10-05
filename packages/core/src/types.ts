@@ -1089,6 +1089,8 @@ export type AgentMuxAgentSession = {
   /** A confirmed process source that cannot silently replace a retained resume target. */
   observedNativeHandle?: AgentNativeSessionHandle
   nativeSourceObservation?: AgentNativeSourceObservation
+  /** Current Core-owned Hook restore failure, scoped to this exact Run; never a durable or semantic status. */
+  hookIngressObservation?: AgentHookIngressObservation
   nativeConfirmation?: AgentNativeSessionConfirmationReceipt
   /** Original confirmed operation facts; the Provider still has only one current conversation. */
   nativeConfirmationHistory?: AgentNativeSessionConfirmationReceipt[]
@@ -1251,9 +1253,18 @@ export type AgentTerminalPromptSubmissionState = {
   submit: AgentTerminalInputPhaseState
 }
 
+/** A live auxiliary observation failure; absent means no retained Hook restoration failure. */
+export type AgentHookIngressObservation = {
+  run: AgentMuxRunRef
+  phase: 'listen' | 'binding'
+  code: string
+  message: string
+  observedAt: number
+}
+
 /** This is the complete persistent semantic/control record. It deliberately has no
- * PTY, process, replay, terminal snapshot, or terminal output bytes. */
-export type AgentMuxStoredAgentSession = AgentMuxAgentSession & {
+ * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation'> & {
   hookBindingId: string
   hookToken: string
   /** Agent 说话凭证的 sha256。raw 只在受管进程的 env 里，Core 侧只留 hash。 */
