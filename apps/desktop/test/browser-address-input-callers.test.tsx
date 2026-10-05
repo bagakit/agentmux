@@ -78,8 +78,8 @@ it('a late real BrowserPane navigation update preserves a newer human draft and 
   const input = container.querySelector<HTMLInputElement>('input[role="combobox"]')!; input.setSelectionRange(3, 7)
   await act(async () => root.render(<BrowserPane tab={{ ...tab, url: 'https://example.test/late' }} visible />))
   expect(input.value).toBe('editing the next address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 7])
-  await act(async () => root.render(<BrowserPane tab={{ ...tab, browserId: 'different', url: 'https://example.test/other' }} visible />))
-  expect(container.querySelector<HTMLInputElement>('input[role="combobox"]')?.value).toBe('https://example.test/other')
+  await act(async () => root.render(<BrowserPane tab={{ ...tab, id: 'different', browserId: 'different', regionId: 'different', url: 'https://example.test/other' }} visible />))
+  expect(container.querySelector<HTMLInputElement>('input[role="combobox"]')!.value).toBe('https://example.test/other')
 })
 
 it('the actual Launcher input shares resource history and right-click without waiting for a history save', async () => {

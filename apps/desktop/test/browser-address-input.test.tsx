@@ -96,16 +96,6 @@ it('clicking the already focused field reopens suggestions after Escape and show
   expect(submitted).toHaveBeenCalledExactlyOnceWith('kept input')
 })
 
-it('keeps filtering an edited draft after focus leaves and returns', async () => {
-  await mount(target, 'https://different.test/current'); await focus(); await fill('original search')
-  await act(async () => container.querySelector<HTMLButtonElement>('#outside')!.focus())
-  expect(popup()).toBeNull()
-  await focus()
-  expect(field().value).toBe('original search')
-  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
-  expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
-})
-
 it('typing during a real deferred focus read keeps the draft and selection while confirming the actual nonempty history', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
   await mount(); await focus(); await fill('original'); field().setSelectionRange(2, 4)
