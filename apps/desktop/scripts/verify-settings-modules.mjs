@@ -55,7 +55,7 @@ const mutants = [
     proves: 'Published summaries are actually read from their feature contribution.' },
   { id: 'expected', file: owners.summary,
     expectedFailure: { file: 'apps/desktop/test/settings-structure.test.tsx', fullName: 'General saves only copied paths through the existing config owner with its captured expected value' },
-    source: replaceOnce(source.summary, 'copyPathsAsAbsolute: expected', 'copyPathsAsAbsolute'),
+    source: replaceOnce(source.summary, 'copyPathsAsAbsolute: expected.copyPathsAsAbsolute', 'copyPathsAsAbsolute: value.copyPathsAsAbsolute'),
     proves: 'The moved General adapter preserves the authored baseline instead of its new value.' },
   { id: 'main-fields', file: owners.main,
     expectedFailure: { file: 'apps/desktop/test/settings-modules-control.test.ts', fullName: 'composes every durable scalar once, groups the public list and keeps the original target contract' },

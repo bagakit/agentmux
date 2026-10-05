@@ -158,7 +158,10 @@ describe('Settings drafts across external commits', () => {
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(false)
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
-    expect(onSave.mock.calls[1]).toEqual([false, true])
+    expect(onSave.mock.calls[1]).toEqual([
+      { copyPathsAsAbsolute: false, messageToolInitialLayout: 'one-line' },
+      { copyPathsAsAbsolute: true, messageToolInitialLayout: 'one-line' }
+    ])
     await act(async () => finish())
   })
 
@@ -169,7 +172,10 @@ describe('Settings drafts across external commits', () => {
     await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
-    expect(onSave).toHaveBeenCalledWith(true, false)
+    expect(onSave).toHaveBeenCalledWith(
+      { copyPathsAsAbsolute: true, messageToolInitialLayout: 'one-line' },
+      { copyPathsAsAbsolute: false, messageToolInitialLayout: 'one-line' }
+    )
     expect(saveButton().disabled).toBe(true)
   })
 
@@ -182,7 +188,10 @@ describe('Settings drafts across external commits', () => {
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(true)
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
-    expect(onSave.mock.calls).toEqual([[true, false], [true, false]])
+    expect(onSave.mock.calls).toEqual(Array.from({ length: 2 }, () => [
+      { copyPathsAsAbsolute: true, messageToolInitialLayout: 'one-line' },
+      { copyPathsAsAbsolute: false, messageToolInitialLayout: 'one-line' }
+    ]))
     expect(saveButton().disabled).toBe(true)
   })
 
