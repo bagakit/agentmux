@@ -480,6 +480,8 @@ export type AgentSteerQueueEntry = {
   awaitingExplicitSend?: true
   /** Retain this exact intent and its delivery facts outside active queue consumption. */
   archived?: true
+  /** This original body was explicitly appended to its existing draft; only save may be retried. */
+  movedToDraft?: true
   origin?: 'manual'
   /** Frozen when explicitly selected, before awaits. Queue-only default leaves it absent;
    * known-null retains that original selection across recovery/wait, but boot pauses it. */
@@ -1117,6 +1119,7 @@ type AppState = {
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
+  moveQueuedAgentSteerToDraft(sessionId: string, operationId: string, expectedText: string, expectedRunId: string): Promise<void>
   archiveAgentSteer(sessionId: string, operationId: string, expectedText: string, archived: boolean): Promise<{ changed: boolean; entry: AgentSteerQueueEntry }>
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
@@ -9071,6 +9074,40 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) {
     return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) !== false
   },
+  async moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, expectedRunId) {
+    let pause: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
+    set(state => {
+      const queue = state.agentSteerQueues[sessionId], entry = queue?.find(item => item.operationId === operationId)
+      const session = state.sessions.find(item => item.id === sessionId)
+      if (!entry || entry.text !== expectedText || entry.errorCode !== 'AGENT_PROMPT_CONDITION_CHANGED') {
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The original message changed or is unavailable. Read its current record before moving it to the draft.')
+      }
+      // A repeated activation only retries the save; never append the authored body twice.
+      if (entry.movedToDraft && !entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original body was already moved to its draft. Restoring its archive does not authorize appending it again.')
+      if (entry.archived) {
+        if (entry.movedToDraft) return state
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This message was archived without moving its text. Read the original archive before composing another message.')
+      }
+      if (session?.kind !== 'agent' || session.control.agentSessionId !== sessionId || session.hostId !== session.control.hostId ||
+          session.control.run.runId !== expectedRunId || entry.runId !== expectedRunId || entry.promptCondition?.expectedRun.runId !== expectedRunId) {
+        throw controlFailure('STALE_AGENT_SESSION', 'The original Session or Run binding changed. Its message and current draft are kept.')
+      }
+      if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is still active. Its message and draft are kept.')
+      if (confirmedSteerDelivery(state.timelines[sessionId], session.control, operationId)) {
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Read its History before composing another message.')
+      }
+      const draft = state.agentComposerDrafts[sessionId] ?? ''
+      if (!draft.trim() && entry.text.trim()) pause = session
+      return {
+        agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: `${draft}${draft ? '\n\n' : ''}${entry.text}` },
+        agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue!.map(item => item === entry ? { ...item, archived: true as const, movedToDraft: true as const } : item) }
+      }
+    })
+    agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
+    if (pause) void api.continuousProgress.pauseForInput(pause.control).catch(error => get().reportError(error))
+    try { await flushMessageWorkbench(false) }
+    catch (error) { get().reportWorkbenchSaveFailure(error); throw error }
+  },
   async archiveAgentSteer(sessionId, operationId, expectedText, archived) {
     let changed = false
     let result!: AgentSteerQueueEntry
@@ -9191,6 +9228,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async sendQueuedAgentSteer(sessionId, operationId) {
     const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
     const session = get().sessions.find(item => item.id === sessionId)
+    if (entry?.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED') throw controlFailure('AGENT_PROMPT_CONDITION_CHANGED',
+        'This original send condition changed. Inspect the conversation and move its authored text to the draft before explicitly sending a new message.',
+        { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
     const attemptKey = JSON.stringify([sessionId, operationId])
     const admission = manualSteerAttempts.get(attemptKey)
     const seed = admission?.stage === 'queue-admission' ? admission.seed : startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
@@ -9202,6 +9242,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try {
       if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is no longer in the pending queue.')
       if (entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived. Restore it before choosing Send.')
+
       if (get().agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original message already has an active send attempt. Its original input is kept.')
       if (session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
       const changedRun = entry.runId !== undefined && !steerEntryTargetsRun(entry, session.control.run.runId)

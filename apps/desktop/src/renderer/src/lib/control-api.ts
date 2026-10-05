@@ -108,9 +108,14 @@ function responseError(error: unknown): AgentMuxControlError {
   if (source?.candidates !== undefined) {
     return { code: 'CONTROL_FAILED', message: 'Desktop Control owner returned unexpected message target candidates.' }
   }
+  const failure = source?.controlFailure
+  // Preserve the new exact pre-input refusal; never infer historical delivery from its code.
+  const noInput = code === 'AGENT_PROMPT_CONDITION_CHANGED' && typeof failure === 'object' && failure !== null &&
+    (failure as Record<string, unknown>).disposition === 'not_applied' && (failure as Record<string, unknown>).confirmedInputBytes === 0
   return {
     code,
-    message: withRecovery(message, { code })
+    message: withRecovery(message, { code }),
+    ...(noInput ? { controlFailure: { disposition: 'not_applied' as const, confirmedInputBytes: 0 } } : {})
   }
 }
 

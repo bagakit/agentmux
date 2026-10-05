@@ -2,13 +2,13 @@ import { ArrowUp, Check, CircleHelp, Clock3, Copy, LoaderCircle, TriangleAlert, 
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { queuedMessageState, type ComposerQueuedMessage, type ArchiveQueuedMessage } from './ComposerOutbox'
+import { queuedMessageState, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../lib/terminal-view-observation'
 
 /** Original queue facts, viewed by operation identity; this surface owns no delivery state. */
-export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, sendImmediately = false, suppressed = false, onMore }: {
+export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, onMore }: {
   queued: readonly ComposerQueuedMessage[]
   pendingInteraction: boolean
   anchorRef: RefObject<HTMLButtonElement | null>
@@ -16,6 +16,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   onCancelPreparation?: ((id: string) => void) | undefined
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   onEdit?: EditQueuedMessage | undefined
+  onMoveToDraft?: MoveQueuedMessageToDraft | undefined
   onArchive?: ArchiveQueuedMessage | undefined
   sendImmediately?: boolean
   suppressed?: boolean
@@ -298,7 +299,8 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
           {queued.map((entry, index) => {
             const state = queuedMessageState(entry, pendingInteraction)
             const immediate = entry.immediateSend ?? sendImmediately
-            const canSend = entry.id !== editingId && !state.busy && Boolean(onSend)
+            const conditionChanged = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
+            const canSend = !conditionChanged && entry.id !== editingId && !state.busy && Boolean(onSend)
             const Icon = state.busy ? LoaderCircle : entry.unconfirmed ? CircleHelp : !entry.deliverable || entry.error || entry.status === 'failed' ? TriangleAlert : Clock3
             const editing = entry.id === editingId && Boolean(onEdit)
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
@@ -317,8 +319,9 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
               <div className="composer-pending__actions">
                 {entry.preparationWait?.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
                 {entry.id === selected.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><X size={12} aria-hidden="true" /></button> : null}
-                <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
-                  disabled={!canSend} onClick={() => onSend?.(entry.id)}><ArrowUp size={14} aria-hidden="true" /></button>
+                {conditionChanged && onMoveToDraft ? <button type="button" className="composer-tool composer-pending__recover" disabled={Boolean(editingId) || state.busy} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={() => { void onMoveToDraft(entry.id, entry.text) }}>移至草稿</button> : null}
+                {!conditionChanged ? <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
+                  disabled={!canSend} onClick={() => onSend?.(entry.id)}><ArrowUp size={14} aria-hidden="true" /></button> : null}
                 <button key="copy" type="button" className="composer-tool composer-pending__copy" aria-label="复制这条待发消息" title={copied === 'copied' ? '已复制' : copied === 'failed' ? '复制未确认，请重试' : '复制全文'} data-copy-state={copied} disabled={!onCopy}
                   onClick={() => { void copy(entry) }}>{copied === 'copied' ? <Check size={13} aria-hidden="true" /> : copied === 'failed' ? <TriangleAlert size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}</button>
                 <button key="more" type="button" className="composer-tool composer-pending__more" aria-label="在 Outbox 查看待发消息和操作" title="在 Mail 查看全文、状态和原操作" disabled={Boolean(editingId)} onClick={() => onMore(entry.id)}><span>{index + 1}/{queued.length}</span></button>
