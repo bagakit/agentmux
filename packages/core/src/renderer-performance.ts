@@ -42,6 +42,9 @@ export type RendererTabSwitchTerminal = {
 }
 export type RendererTabSwitchCost = {
   id: number; target: RendererTabSwitchTarget
+  /** Monotonic elapsed from this handler; freezes when this occurrence ends. */
+  elapsedMs: number
+  pendingStage: 'selection' | 'placement' | 'terminal' | 'frame' | 'input-gate' | null
   /** Wall-clock handler timestamp. Phase durations below use monotonic elapsed time. */
   handlerAt: number
   inputDelayMs: number | null; selectedMs: number | null; placedMs: number | null; terminalMs: number | null
@@ -51,6 +54,22 @@ export type RendererTabSwitchCost = {
   frameMs: number | null
   state: 'pending' | 'observed' | 'superseded'; mode: 'unknown' | 'terminal' | 'activity' | 'other'
   terminal: RendererTabSwitchTerminal | null
+}
+export type RendererTimingKind = 'session-event' | 'terminal-write' | 'long-task' | 'input-delay' | 'terminal-interaction'
+export type RendererTimingEpoch = {
+  startMonoMs: number; endMonoMs: number; timings: Record<RendererTimingKind, RendererWorkTiming>
+}
+export type RendererTimingEpochs = {
+  durationMs: 10000; basis: 'monotonic-occurrence-start'
+  /** First epoch may have partial coverage; combine with observer support/state. */
+  recordingSinceMonoMs: number; observedMonoMs: number
+  current: RendererTimingEpoch; previous: RendererTimingEpoch | null
+  late: Record<RendererTimingKind, number>; unknown: Record<RendererTimingKind, number>
+}
+export type RendererSlowEvent = {
+  id: number; kind: RendererTimingKind; detail: string; observedAt: number; durationMs: number
+  /** Local Renderer Performance API timebase, never comparable across processes. */
+  occurredAtMonoMs: number | null; deliveredAtMonoMs: number
 }
 export type RendererPerformanceSnapshot = {
   startedAt: number; observedAt: number
@@ -66,6 +85,9 @@ export type RendererPerformanceSnapshot = {
   /** At most 16 recent exact-occurrence observations. Missing stages stay null. */
   tabSwitches: RendererTabSwitchCost[]
   tabSwitchesOmitted: number
-  slowEvents: { kind: 'session-event' | 'terminal-write' | 'long-task' | 'input-delay' | 'terminal-interaction'; detail: string; observedAt: number; durationMs: number }[]
+  /** Latest six per kind, ordered by delivery id; <=30 detached records. */
+  slowEvents: RendererSlowEvent[]
+  slowEventsOmitted: Record<RendererTimingKind, number>
+  timingEpochs: RendererTimingEpochs
   observerCost: { snapshots: RendererWorkTiming; performanceCallbacks: RendererWorkTiming }
 }

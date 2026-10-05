@@ -7,9 +7,27 @@ function add(target: RendererWorkTiming, duration: number) {
   const ms = Math.max(0, duration)
   target.count++; target.totalMs += ms; target.maxMs = Math.max(target.maxMs, ms)
 }
+const timingKinds = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction'] as const
+type TimingKind = typeof timingKinds[number]
+const kindCounts = (): Record<TimingKind, number> => ({ 'session-event': 0, 'terminal-write': 0, 'long-task': 0, 'input-delay': 0, 'terminal-interaction': 0 })
+const epoch = (startMonoMs: number): RendererPerformanceSnapshot['timingEpochs']['current'] => ({
+  startMonoMs, endMonoMs: startMonoMs + 10_000,
+  timings: { 'session-event': timing(), 'terminal-write': timing(), 'long-task': timing(), 'input-delay': timing(), 'terminal-interaction': timing() }
+})
+const copyEpoch = (value: ReturnType<typeof epoch>): ReturnType<typeof epoch> => ({
+  ...value, timings: Object.fromEntries(timingKinds.map(kind => [kind, { ...value.timings[kind] }])) as ReturnType<typeof epoch>['timings']
+})
 /** No clock, subscription, payload or historical buffer scan on a selector check. */
 export function createRendererPerformance(now = () => performance.now(), wall = Date.now) {
   const startedAt = wall()
+  const recordingSinceMonoMs = now()
+  let currentEpoch = epoch(Math.floor(recordingSinceMonoMs / 10_000) * 10_000)
+  let previousEpoch: ReturnType<typeof epoch> | null = null
+  const late = kindCounts(), unknown = kindCounts(), slowEventsOmitted = kindCounts()
+  const slowByKind: Record<TimingKind, RendererPerformanceSnapshot['slowEvents']> = {
+    'session-event': [], 'terminal-write': [], 'long-task': [], 'input-delay': [], 'terminal-interaction': []
+  }
+  let eventSerial = 0
   const consumers = { composer: { visible: consumer(), hidden: consumer() }, sessionPane: { visible: consumer(), hidden: consumer() } }
   const overlay: RendererPerformanceSnapshot['overlay'] = {
     triggers: { initial: 0, demand: 0, mutation: 0, resize: 0, scroll: 0, toggle: 0, font: 0, collect: 0 },
@@ -24,12 +42,25 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
   const inputDelay: RendererPerformanceSnapshot['inputDelay'] = { state: 'stopped', reason: null, durationThresholdMs: 16, timing: timing() }
   const observerCost = { snapshots: timing(), performanceCallbacks: timing() }
   const terminals = new Set<() => RendererTerminalCost>()
-  const slowEvents: RendererPerformanceSnapshot['slowEvents'] = []
   let observer: PerformanceObserver | undefined, inputObserver: PerformanceObserver | undefined, observerOwners = 0, observerGeneration = 0
-  function slow(kind: RendererPerformanceSnapshot['slowEvents'][number]['kind'], detail: string, durationMs: number) {
+  // Fixed epochs, not a rolling window: current is partial; the first previous epoch may also have partial coverage.
+  function rotate(deliveredAtMonoMs: number): void {
+    const startMonoMs = Math.floor(deliveredAtMonoMs / 10_000) * 10_000
+    if (startMonoMs <= currentEpoch.startMonoMs) return
+    previousEpoch = startMonoMs === currentEpoch.endMonoMs ? currentEpoch : epoch(startMonoMs - 10_000)
+    currentEpoch = epoch(startMonoMs)
+  }
+  function record(kind: TimingKind, detail: string, durationMs: number, occurrence: number | null, deliveredAtMonoMs: number): void {
+    rotate(deliveredAtMonoMs)
+    const occurredAtMonoMs = occurrence !== null && Number.isFinite(occurrence) && occurrence >= recordingSinceMonoMs && occurrence <= deliveredAtMonoMs ? occurrence : null
+    if (occurredAtMonoMs === null) unknown[kind]++
+    else if (occurredAtMonoMs >= currentEpoch.startMonoMs) add(currentEpoch.timings[kind], durationMs)
+    else if (previousEpoch && occurredAtMonoMs >= previousEpoch.startMonoMs) add(previousEpoch.timings[kind], durationMs)
+    else late[kind]++
     if (durationMs < 50) return
-    if (slowEvents.length === 32) slowEvents.shift()
-    slowEvents.push({ kind, detail: detail.slice(0, 128), observedAt: wall(), durationMs })
+    const records = slowByKind[kind]
+    if (records.length === 6) { records.shift(); slowEventsOmitted[kind]++ }
+    records.push({ id: ++eventSerial, kind, detail, observedAt: wall(), durationMs, occurredAtMonoMs, deliveredAtMonoMs })
   }
   return {
     check(kind: keyof typeof consumers, visible: boolean, changed: boolean) {
@@ -60,19 +91,21 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
       }
       if (observation.collectMs !== undefined) add(overlay.collect, observation.collectMs)
     },
-    terminalInteraction(detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number) {
-      slow('terminal-interaction', detail, duration)
+    terminalInteraction(detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number) {
+      const delivered = now()
+      record('terminal-interaction', detail, duration, occurrenceMonoMs, delivered)
     },
-    sessionEvent(kind: string, start: number) {
-      const elapsed = Math.max(0, now() - start)
-      add(sessionEvents, elapsed); slow('session-event', kind, elapsed)
+    // Event type is not a public free-text channel. No prompt/body supplied by a caller is retained.
+    sessionEvent(_kind: string, start: number) {
+      const delivered = now(), elapsed = Math.max(0, delivered - start)
+      add(sessionEvents, elapsed); record('session-event', 'session-event', elapsed, start, delivered)
     },
     terminalWrite(visible: boolean, data: string | Uint8Array, start: number) {
-      const elapsed = Math.max(0, now() - start)
+      const delivered = now(), elapsed = Math.max(0, delivered - start)
       add(terminalWrites[visible ? 'visible' : 'hidden'], elapsed)
       if (typeof data === 'string') terminalWrites.stringCodeUnits += data.length
       else terminalWrites.bytes += data.byteLength
-      slow('terminal-write', visible ? 'visible' : 'hidden', elapsed)
+      record('terminal-write', visible ? 'visible' : 'hidden', elapsed, start, delivered)
     },
     registerTerminal(read: () => RendererTerminalCost) {
       terminals.add(read)
@@ -91,7 +124,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
             if (observerOwners === 0 || generation !== observerGeneration) return
             const start = now()
             for (const entry of list.getEntries()) {
-              add(longTasks.timing, entry.duration); slow('long-task', 'renderer-main-thread', entry.duration)
+              add(longTasks.timing, entry.duration); record('long-task', 'renderer-main-thread', entry.duration, entry.startTime, start)
             }
             add(observerCost.performanceCallbacks, now() - start)
           })
@@ -113,7 +146,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
                 // Only Event Timing latency; never event names, target, keys or input text.
                 const delay = event.processingStart - event.startTime
                 if (!Number.isFinite(delay) || delay < 0) continue
-                add(inputDelay.timing, delay); slow('input-delay', 'event-timing', delay)
+                add(inputDelay.timing, delay); record('input-delay', 'event-timing', delay, event.startTime, start)
               }
               add(observerCost.performanceCallbacks, now() - start)
             })
@@ -140,6 +173,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
     },
     snapshot(): RendererPerformanceSnapshot {
       const start = now(), current: RendererTerminalCost[] = []
+      rotate(start)
       let attempted = 0, unavailableTerminals = 0
       for (const read of terminals) {
         if (attempted === 64) break
@@ -156,7 +190,11 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         sessionEvents: { ...sessionEvents }, terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
         inputDelay: { ...inputDelay, timing: { ...inputDelay.timing } },
         longTasks: { ...longTasks, timing: { ...longTasks.timing } }, terminals: current, omittedTerminals: terminals.size - attempted, unavailableTerminals,
-        slowEvents: slowEvents.map(event => ({ ...event })), tabSwitches: tabSwitchObservation.snapshot(), tabSwitchesOmitted: tabSwitchObservation.omitted(),
+        slowEvents: timingKinds.flatMap(kind => slowByKind[kind].map(event => ({ ...event }))).sort((a, b) => a.id - b.id),
+        slowEventsOmitted: { ...slowEventsOmitted },
+        timingEpochs: { durationMs: 10_000, basis: 'monotonic-occurrence-start', recordingSinceMonoMs, observedMonoMs: start,
+          current: copyEpoch(currentEpoch), previous: previousEpoch && copyEpoch(previousEpoch), late: { ...late }, unknown: { ...unknown } },
+        tabSwitches: tabSwitchObservation.snapshot(), tabSwitchesOmitted: tabSwitchObservation.omitted(),
         observerCost: { snapshots: { ...observerCost.snapshots }, performanceCallbacks: { ...observerCost.performanceCallbacks } }
       }
       add(observerCost.snapshots, now() - start)

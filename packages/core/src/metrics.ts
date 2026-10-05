@@ -122,6 +122,7 @@ const diagnosticsParser = record({ main: clientPerformanceParser,
 const consumerParser = record({ checks: count, changes: count, commits: count })
 const visibilityParser = record({ visible: consumerParser, hidden: consumerParser })
 const tabSwitchParser = record({ id: count,
+  elapsedMs: number, pendingStage: nullable(v => { if (!['selection', 'placement', 'terminal', 'frame', 'input-gate'].includes(v as string)) invalid() }),
   target: record({ displayWorkspaceId: identity, groupId: identity, tabId: identity, regionId: identity, presentationId: identity }),
   handlerAt: number, inputDelayMs: nullable(number), selectedMs: nullable(number), placedMs: nullable(number),
   terminalMs: nullable(number), inputReadyMs: nullable(number), frameMs: nullable(number),
@@ -129,6 +130,16 @@ const tabSwitchParser = record({ id: count,
   mode: v => { if (!['unknown', 'terminal', 'activity', 'other'].includes(v as string)) invalid() },
   terminal: nullable(record({ sessionId: identity, runId: identity, readySinceAt: nullable(number),
     visible: boolean, revealed: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean, replaying: boolean })) })
+const timingKinds = ['session-event', 'terminal-write', 'long-task', 'input-delay', 'terminal-interaction'] as const
+const timingKind: Parser = v => { if (!timingKinds.includes(v as typeof timingKinds[number])) invalid() }
+const timingKindRecord = (parse: Parser): Parser => record(Object.fromEntries(timingKinds.map(kind => [kind, parse])))
+const timingEpochParser = record({ startMonoMs: number, endMonoMs: number, timings: timingKindRecord(timingParser) })
+const slowEventParser = record({ id: count, kind: timingKind, detail: text, observedAt: number, durationMs: number,
+  occurredAtMonoMs: nullable(number), deliveredAtMonoMs: number })
+const slowEventsParser: Parser = value => {
+  boundedArray(30, slowEventParser)(value)
+  for (const kind of timingKinds) if ((value as {kind: string}[]).filter(event => event.kind === kind).length > 6) invalid()
+}
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
   consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }), sessionEvents: timingParser,
@@ -145,8 +156,10 @@ const performanceParser = record({ startedAt: number, observedAt: number, record
     replaying: boolean, inFlightWrites: count, queuedItems: count, queuedBytes: count, pendingItems: count, pendingBytes: count,
     cols: count, rows: count, normalLines: count, alternateLines: count, interaction: terminalInteractionParser })), omittedTerminals: count, unavailableTerminals: count,
   tabSwitches: boundedArray(16, tabSwitchParser), tabSwitchesOmitted: count,
-  slowEvents: boundedArray(32, record({ kind: v => { if (!['session-event','terminal-write','long-task','input-delay','terminal-interaction'].includes(v as string)) invalid() },
-    detail: text, observedAt: number, durationMs: number })),
+  slowEvents: slowEventsParser, slowEventsOmitted: timingKindRecord(count),
+  timingEpochs: record({ durationMs: literal(10000), basis: literal('monotonic-occurrence-start'),
+    recordingSinceMonoMs: number, observedMonoMs: number, current: timingEpochParser, previous: nullable(timingEpochParser),
+    late: timingKindRecord(count), unknown: timingKindRecord(count) }),
   observerCost: record({ snapshots: timingParser, performanceCallbacks: timingParser }) })
 export function parseRendererPerformanceSnapshot(value: unknown): RendererPerformanceSnapshot {
   performanceParser(value); return value as RendererPerformanceSnapshot

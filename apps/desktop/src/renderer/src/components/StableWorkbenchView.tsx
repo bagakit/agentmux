@@ -145,11 +145,14 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
   const switchTarget = useMemo(() => reference ? { ...reference, presentationId: projection?.presentationId ?? surface ?? 'space' } : null,
     [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, reference?.regionId, projection?.presentationId, surface])
+  // Reveal and spatial moves update this owner; cleanup means its exact identity departed.
+  const placementFacts = useRef({ visible, destinationId: targetId ?? homeId })
+  useLayoutEffect(() => { placementFacts.current = { visible, destinationId: targetId ?? homeId } }, [visible, targetId, homeId])
   useLayoutEffect(() => {
     if (!switchTarget || (kind === 'region') !== (projection?.entity.kind === 'region')) return
-    return tabSwitchObservation.registerPlacement(switchTarget, () => visible && host.isConnected &&
-      host.parentElement?.id === (targetId ?? homeId) && !host.closest('[hidden], [inert]'))
-  }, [switchTarget, kind, projection?.entity.kind, visible, host, targetId, homeId])
+    return tabSwitchObservation.registerPlacement(switchTarget, () => placementFacts.current.visible && host.isConnected &&
+      host.parentElement?.id === placementFacts.current.destinationId && !host.closest('[hidden], [inert]'))
+  }, [switchTarget, kind, projection?.entity.kind, host])
   useLayoutEffect(() => {
     const destinationId = targetId ?? homeId
     const attach = () => {

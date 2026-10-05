@@ -13,7 +13,7 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
 }: {
   host: Pick<HTMLElement, 'addEventListener' | 'removeEventListener'>
   readContext: () => Context
-  slow: (detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number) => void
+  slow: (detail: 'keydown-dispatch' | 'wheel-dispatch' | 'write-request', duration: number, occurrenceMonoMs: number) => void
   now?: () => number; wall?: () => number
 }) {
   let disposed = false
@@ -32,7 +32,7 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
     const delayMs = Number.isFinite(at) && Number.isFinite(stamp) && stamp > 0 && stamp <= at ? at - stamp : null
     item.count++
     if (delayMs === null) item.unknownDelayCount++
-    else { add(item.delay, delayMs); slow(`${kind}-dispatch`, delayMs) }
+    else { add(item.delay, delayMs); slow(`${kind}-dispatch`, delayMs, stamp) }
     state.lastEvent = { ...readContext(), kind, observedAt: wall(), delayMs }
   }
   const options = { capture: true, passive: true }
@@ -49,7 +49,7 @@ export function createTerminalInteractionObservation({ host, readContext, slow,
         settled = true
         requests.pending--; requests[failed ? 'failed' : 'completed']++; requests.lastSettledAt = wall()
         const elapsed = Math.max(0, now() - startedAt)
-        add(requests.wall, elapsed); slow('write-request', elapsed)
+        add(requests.wall, elapsed); slow('write-request', elapsed, startedAt)
       }
       // Observe both outcomes without replacing the original Promise or its error handler.
       void request.then(() => settle(false), () => settle(true))
