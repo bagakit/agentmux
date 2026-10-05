@@ -259,7 +259,7 @@
 .continuous-progress-control__interval { grid-template-columns: minmax(0, 1fr) calc(var(--sp-8) * 2); align-items: center; }
 .continuous-progress-control label:has(> input[type='checkbox']) { display: flex; align-items: flex-start; gap: var(--sp-4); }
 .continuous-progress-control input[type='checkbox'] { flex: none; width: 14px; height: 14px; margin: var(--sp-1) 0 0; accent-color: var(--green); }
-.continuous-progress-control :is(input, textarea, summary):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.continuous-progress-control :is(input[type="checkbox"], summary):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 .continuous-progress-control__help { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .continuous-progress-control__details { min-width: 0; border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
 .continuous-progress-control__details > summary { cursor: pointer; color: var(--text-2); }
