@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useMemo, type ReactNode } from 'react'
 import { semanticIconComponent } from '../theme/icons.js'
 const ImageReferenceIcon = semanticIconComponent('object.image')
 import { looksLikeMarkdown, parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode } from '../lib/agent-markdown.js'
@@ -190,15 +190,19 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
 }) {
   const renderObjectLink = useObjectLinkRenderer()
   const isInput = inputMode && !documentMode
+  const parseMode = documentMode && outline && !readOnly ? 'document' : documentMode || isInput ? 'blocks' : 'auto'
+  const parsed = useMemo(() => {
+    if (parseMode === 'auto' && !looksLikeMarkdown(content)) return null
+    const document = parseMode === 'document' ? parseAgentMarkdownDocument(content) : null
+    return { document, blocks: document?.blocks ?? parseAgentMarkdown(content) }
+  }, [content, parseMode])
   const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, visible,
     ...(!readOnly && !documentMode && renderObjectLink ? { renderObjectLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),
     ...(!readOnly && renderImage ? { renderImage } : {}) }
-  if (!documentMode && !isInput && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
-  const document = documentMode && outline && !readOnly ? parseAgentMarkdownDocument(content) : null
-  const blocks = document?.blocks ?? parseAgentMarkdown(content)
-  if (!blocks.length && !documentMode) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
+  if (!parsed || (!parsed.blocks.length && !documentMode)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
+  const { document, blocks } = parsed
   return <div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
     {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
     {blocks.map((block, index) => <Block key={index} node={block} context={context} />)}
