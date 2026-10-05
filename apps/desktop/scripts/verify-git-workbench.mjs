@@ -137,12 +137,27 @@ async function normalQuit(probe) {
 }
 
 async function activate(cdp) {
-  await cdp.nativeMain.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); const w = e.BrowserWindow.getAllWindows()[0]; w.show(); w.focus(); e.app.focus({steal: true}); return w.isVisible() })()`)
-  await cdp.call('Page.bringToFront')
-  await waitFor('actual visible and focused document', () => cdp.evaluate('document.visibilityState === "visible" && document.hasFocus()'))
-  const native = await cdp.nativeMain.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); const w = e.BrowserWindow.getAllWindows()[0]; return {visible:w.isVisible(),focused:w.isFocused()} })()`)
-  assert.deepEqual(native, {visible:true,focused:true})
-  return {...native, ...await cdp.evaluate('({visibility:document.visibilityState,documentFocused:document.hasFocus()})')}
+  let requestedAt = 0, observed
+  try {
+    // Native macOS activation completes asynchronously. A focused CDP document alone
+    // does not prove the real window is focused, so wait for both actual facts.
+    return await waitFor('actual visible and focused native window and document', async () => {
+      if (Date.now() - requestedAt >= 250) {
+        await cdp.nativeMain.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); const w = e.BrowserWindow.getAllWindows()[0]; w.show(); e.app.focus({steal: true}); w.focus() })()`)
+        await cdp.call('Page.bringToFront')
+        requestedAt = Date.now()
+      }
+      const [native, document] = await Promise.all([
+        cdp.nativeMain.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); const w = e.BrowserWindow.getAllWindows()[0]; return {visible:w.isVisible(),focused:w.isFocused()} })()`),
+        cdp.evaluate('({visibility:document.visibilityState,documentFocused:document.hasFocus()})')
+      ])
+      observed = {...native, ...document}
+      return native.visible && native.focused && document.visibility === 'visible' && document.documentFocused ? observed : null
+    }, 10_000)
+  } catch (error) {
+    receipt.activationFailure = observed
+    throw error
+  }
 }
 async function capture(cdp, name, width = 1280, theme = 'dark') {
   const focus = await activate(cdp)
