@@ -115,7 +115,15 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
 
 /** Native inputs and captured deliveries share this reading grammar; copying keeps original bytes. */
 export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix | null {
-  if (text.startsWith('<amux')) return parseDeclaredContexts(text)
+  if (!text.startsWith('<amux')) return parseSenderPrefix(text)
+  const contexts = parseDeclaredContexts(text)
+  if (!contexts) return null
+  // Only newline separators join a following declaration; indentation remains authored text.
+  const sender = parseSenderPrefix(contexts.body.replace(/^(?:\r?\n)*/u, ''))
+  return sender ? { ...contexts, ...sender } : contexts
+}
+
+function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
   const header = /^\[Message from ([^\]\r\n]+)\]\r?\n([\s\S]+)$/iu.exec(text)
   const authoredBody = header?.[2] ?? text
   const packet = parsePacket(authoredBody)
