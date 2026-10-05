@@ -107,7 +107,7 @@ async function renderMarkup(): Promise<string> {
       surface: { regionId: REGION, kind: 'file' as const, workspaceId: WORKSPACE, path: PATH }
     })
   ))
-  await act(async () => { await import('../src/renderer/src/components/FileSourceEditor.js'); await import('../src/renderer/src/components/GitDiffCanvas.js') })
+  await act(async () => { await import('../src/renderer/src/components/FileSourceEditor.js'); await import('../src/renderer/src/features/git/diff/GitDiffCanvas.js') })
   return container.innerHTML
 }
 

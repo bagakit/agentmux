@@ -12,7 +12,7 @@ vi.hoisted(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: ({ sessionId }: { sessionId: string }) => createElement('output', { 'data-visible-session': sessionId }, sessionId) }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => null }))
-vi.mock('../src/renderer/src/components/GitBranchDiffPane', () => ({ GitBranchDiffPane: () => null }))
+vi.mock('../src/renderer/src/features/git/diff/GitBranchDiffPane', () => ({ GitBranchDiffPane: () => null }))
 vi.mock('../src/renderer/src/components/NewTabSurface', () => ({ NewTabSurface: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'

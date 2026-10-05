@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as monaco from 'monaco-editor/editor/editor.api.js'
-import { GitDiffCanvas } from '../src/renderer/src/components/GitDiffCanvas'
+import { GitDiffCanvas } from '../src/renderer/src/features/git/diff/GitDiffCanvas'
 import type { EditorRegionDiffState } from '../src/renderer/src/store'
 
 vi.mock('../src/renderer/src/monaco', () => ({}))

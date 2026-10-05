@@ -61,10 +61,13 @@ beforeAll(async () => {
   server = new AgentMuxControlServer({ socketPath: socket, coreClients: () => [], git: owner,
     execute: async request => {
       if (request.operation !== 'open.git') throw new Error('Unexpected presentation request')
-      const selected = ready(await owner.call('git.commit', { workspaceId: request.workspaceId, expectedResource: request.expectedResource,
-        oid: request.oid, ...(request.parentOid === undefined ? {} : { parentOid: request.parentOid }) }))
-      // Protocol-only placement: actual Renderer placement is independently verified by T-003/T-005.
-      return { operation: 'open.git', workspaceId: request.workspaceId, read: { kind: 'ready', snapshot: selected.snapshot }, presentation: { tabId: 'original-git-tab', regionId: 'original-git-region' } }
+      const result = request.oid === undefined
+        ? await owner.call('git.history', { workspaceId: request.workspaceId, expectedResource: request.expectedResource, limit: 1 })
+        : await owner.call('git.commit', { workspaceId: request.workspaceId, expectedResource: request.expectedResource, oid: request.oid, ...(request.parentOid === undefined ? {} : { parentOid: request.parentOid }) })
+      if (result.kind !== 'ready') throw new Error('Original repository unavailable')
+      // Protocol-only placement; the real Renderer owner and public CLI are verified in the native probe.
+      const snapshot = request.oid === undefined ? { hostId: result.snapshot.hostId, repoPath: result.snapshot.repoPath } : result.snapshot
+      return { operation: 'open.git', workspaceId: request.workspaceId, read: { kind: 'ready', snapshot }, presentation: { tabId: 'original-git-tab', regionId: 'original-git-region' } }
     } })
   await server.start()
 }, 20_000)
@@ -124,6 +127,9 @@ describe('public CLI to Desktop Git owner to neutral Git on a real private repos
     const opened = await cli(['git', 'open', ...cliTarget(), '--oid', renamedOid, '--operation-id', 'git-open-public'])
     expect(opened.code, opened.stderr).toBe(0)
     expect(opened.body).toMatchObject({ operation: 'git.open', operationId: 'git-open-public', result: { read: { kind: 'ready', snapshot: { commitOid: renamedOid } }, presentation: { tabId: 'original-git-tab', regionId: 'original-git-region' } } })
+    const repository = await cli(['git', 'open', ...cliTarget(), '--operation-id', 'git-history-public'])
+    expect(repository.code, repository.stderr).toBe(0)
+    expect(repository.body.result.read.snapshot).toEqual({ hostId: 'local', repoPath: repo })
     expect(await git('rev-parse', 'HEAD')).toBe(before); expect(await git('status', '--porcelain')).toBe(status)
   }, 60_000)
 

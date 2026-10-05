@@ -60,7 +60,7 @@ async function hideAndRelease() {
   expect(released.has(other.regionId)).toBe(false)
   await render(released)
 }
-beforeAll(async () => { await import('../src/renderer/src/components/GitBranchDiffPane') })
+beforeAll(async () => { await import('../src/renderer/src/features/git/diff/GitBranchDiffPane') })
 beforeEach(() => {
   localStorage.clear(); commitDiff.mockReset().mockResolvedValue(fixed); branchDiff.mockReset().mockResolvedValue(fixed)
   Object.assign(window, { agentmux: { git: { commitDiff, branchDiff } } })

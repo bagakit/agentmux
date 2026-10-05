@@ -62,7 +62,7 @@ function file(region: string) { const surface = useAppStore.getState().tabs[curr
 async function mount() {
   // Exercise real components after their cold module imports, rather than assuming a Suspense commit timing.
   await Promise.all([import('../src/renderer/src/components/EditorPane'),
-    import('../src/renderer/src/components/FileSourceEditor'), import('../src/renderer/src/components/GitDiffCanvas')])
+    import('../src/renderer/src/components/FileSourceEditor'), import('../src/renderer/src/features/git/diff/GitDiffCanvas')])
   await act(async () => root.render(<><div data-file-view="first" data-workbench-tab-id={currentId} data-workbench-region-id={currentRegion}><FileSurfaceView tabId={currentId} surface={file(currentRegion)} /></div>
     <div data-file-view="second" data-workbench-tab-id={currentId} data-workbench-region-id={currentRegion}><FileSurfaceView tabId={currentId} surface={file(currentRegion)} /></div>
     <div data-file-view="neighbor" data-workbench-tab-id={currentId} data-workbench-region-id={otherRegion}><FileSurfaceView tabId={currentId} surface={file(otherRegion)} /></div></>))
