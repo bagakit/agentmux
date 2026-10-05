@@ -13,6 +13,7 @@ export function observation(time = 1000): MetricsObservation {
     units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
     process: { state: 'available', data: [{ hostId: 'local', runId: 'nonempty-run', rootPid: process.pid, processCount: 1, cpuPercent: 2, rssKib: 64,
       rootRssKib: 64, descendantsRssKib: 0, descendantProcessCount: 0 }], observedAt: time, lastSuccessAt: time, reason: null },
+    runTotals: { coverage: { trackedRuns: 1, observedRoots: 1, missingRoots: 0 }, processCount: 1, cpuPercent: 2, rssKib: 64 },
     app: pending, runtime: pending, main: pending, diagnostics: pending, renderer: pending }
 }
 const request = (operation: 'toolkit.get'|'toolkit.run'|'toolkit.stop') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'owning', operation, toolId: 'performance' as const })
@@ -35,7 +36,8 @@ async function fixture(delayed = false) {
     accept({ type: 'terminal-output', run: { runId: 'owned-run' }, dataBytes: data, data: '',
       evidence: { source: 'terminal-output', observedAt: 1000, run: { runId: 'owned-run' }, outputByteRange: { startByte, endByte: cursor } } } as any)
   }
-  function frame(sequence = 1, obs = observation()) { return JSON.stringify({ schema: 'agentmux.toolkit.result.v1', event: 'result', sequence, payload: obs }) + '\r\n' }
+  function frame(sequence = 1, obs = observation()) { return JSON.stringify({ schema: 'agentmux.toolkit.result.v1', event: 'result', sequence, payload: obs,
+    document: { schema: 'agentmux.toolkit.result.v1', summary: 'Runs', items: [], links: [], notice: '' } }) + '\r\n' }
   return { owner, port, bytes, frame, releaseCreate: () => releaseCreate!(), get accept() { return accept } }
 }
 const flush = async () => { for (let i=0;i<8;i++) await new Promise(resolve => setImmediate(resolve)) }
@@ -96,7 +98,7 @@ describe('Toolkit observation owner', () => {
     for (let i=1;i<=65;i++) {
       const obs = observation(i*1000)
       obs.app = { state:'available', observedAt:i*1000, lastSuccessAt:i*1000, reason:null,
-        data:{ processCount:1,cpuPercent:2,rssKib:64,groups:[],unavailable:null } }
+        data:{ processCount:1,cpuPercent:2,rssKib:64,groups:[],processes:[],omittedProcesses:0,logicalCpuCount:1,unavailable:null } }
       f.bytes(Buffer.from(f.frame(i,obs)))
     }
     expect(f.owner.current.trend).toHaveLength(60); expect(f.owner.current.trend[0]?.observedAt).toBe(6000)

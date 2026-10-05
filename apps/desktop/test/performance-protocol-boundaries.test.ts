@@ -72,6 +72,7 @@ function observation(count = 1) {
   const value = deepMetricsSnapshot().observation!
   value.scope.hostname = '测试-host'
   value.process = { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null, data: Array.from({ length: count }, (_, i) => ({ runId: `00000000-0000-4000-8000-${i.toString().padStart(12,'0')}`, hostId: 'local', rootPid: i+1, processCount: 1, cpuPercent: 0, rssKib: 1024, rootRssKib: 1024, descendantsRssKib: 0, descendantProcessCount: 0 })) }
+  value.runTotals = { coverage: { trackedRuns: count, observedRoots: count, missingRoots: 0 }, processCount: count, cpuPercent: 0, rssKib: 1024 * count }
   return value
 }
 const opening = (data: unknown) => ({ jsonrpc: '2.0', id: 'proof', result: { subscriptionId: 'reader', method: 'system.metrics.watch', initial: { observation: data } } })

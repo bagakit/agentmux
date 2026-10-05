@@ -66,6 +66,7 @@ it('retains complete message byte budget without truncating valid metrics', () =
   snapshot.observation!.process = { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null,
     data: Array.from({ length: 1400 }, () => ({ runId: text, hostId: text, rootPid: 1, processCount: 1,
       cpuPercent: 0, rssKib: 1, rootRssKib: 1, descendantsRssKib: 0, descendantProcessCount: 0 })) }
+  snapshot.observation!.runTotals = { coverage: { trackedRuns: 1400, observedRoots: 1400, missingRoots: 0 }, processCount: 1400, cpuPercent: 0, rssKib: 1400 }
   expect(parseMetricsObservation(snapshot.observation)).toBe(snapshot.observation)
   expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeGreaterThan(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES)
   expect(() => parseToolkitSnapshot(snapshot)).toThrow('budget')

@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createConnection, createServer, type Socket, type Server } from 'node:net'
+import { createConnection, createServer, type Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlRequest } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
@@ -9,7 +9,7 @@ import { parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitMetricsSnap
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'toolkit-owning', toolId: 'performance' } as const
 const snapshot = (): ToolkitMetricsSnapshot => ({ schema:'agentmux.toolkit.v1',kind:'metrics',toolId:'performance',executionId:null,run:null,
-  state:'idle',reason:null,startedAt:null,observedAt:null,observation:null,manual:false,consumerCount:0,sequence:0,trend:[] })
+  state:'idle',reason:null,startedAt:null,observedAt:null,observation:null,document:null,manual:false,consumerCount:0,sequence:0,trend:[] })
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function endpoint() {
@@ -70,7 +70,8 @@ describe('public Toolkit RPC lifecycle and framing',()=>{
   it('coalesces synchronous snapshots after real opening backpressure',async()=>{
     const dispose=vi.fn(),{owner,path}=await server(port(async (_toolId,push)=>{for(let i=0;i<50;i++)push({...snapshot(),sequence:i});return {dispose}}))
     let serverSocket!:Socket
-    ;(owner as unknown as {server:Server}).server.once('connection',s=>{serverSocket=s;(s as any)._writableState.highWaterMark=1})
+    const socketOwner=owner as unknown as {accept(socket:Socket):void},accept=socketOwner.accept.bind(owner)
+    vi.spyOn(socketOwner,'accept').mockImplementation(s=>{serverSocket=s;(s as any)._writableState.highWaterMark=1;accept(s)})
     const frames:any[]=[],rpc=await client(path)
     const lease=await rpc.subscribe('toolkit.watch',{toolId:base.toolId},{onInitial:()=>frames.push({type:'attached'}),onEvent:event=>frames.push(event),onEnd:vi.fn()})
     await vi.waitFor(()=>expect(frames).toHaveLength(2));expect(frames.map(f=>f.type)).toEqual(['attached','snapshot'])
