@@ -63,7 +63,7 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, onTal
   return <section className="survey-notebook-home" aria-label={`${notebook.name} Notebook`}>
     <div className="notebook-cover-mark"><BookOpen size={27} strokeWidth={1.3} /></div>
     <header><NotebookName key={notebook.notebookId} notebook={notebook} />{pages.length ? <p>{rows.length} {archived ? 'archived ' : ''}{rows.length === 1 ? 'page' : 'pages'}</p> : null}</header>
-    {onViewChange ? <NotebookViewPicker value={view} onChange={onViewChange} /> : null}
+    {onViewChange ? <NotebookViewPicker value={view} onChange={onViewChange} active={active} /> : null}
     {!navigationVisible && onArchivedChange ? <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} /> : null}
     {!navigationVisible || !pages.length ? <button className="notebook-create-page" disabled={pending} onClick={onCreate}><Plus size={15} /><span>New page</span></button> : null}
     {pages.length ? <>{onQuery ? <label className="notebook-find notebook-find--directory"><Search size={14} /><TextInput aria-label="Search notebook pages" placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}

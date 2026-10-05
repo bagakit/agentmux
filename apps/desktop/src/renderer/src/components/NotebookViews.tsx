@@ -7,11 +7,15 @@ import { notebookPageResourceMatches } from '../lib/notebook-library'
 import { notebookGraph } from '../lib/notebook-view-model'
 import { useAppStore } from '../store'
 import { NotebookDirectoryContextMenu, type NoteTalkHandler } from './NotebookDirectoryContextMenu'
+import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
 export type NotebookDirectoryView = 'tree' | 'cards' | 'graph'
-export function NotebookViewPicker({ value, onChange }: { value: NotebookDirectoryView; onChange(value: NotebookDirectoryView): void }) {
-  return <div className="recall-view-picker" role="group" aria-label="Notebook presentation">
-    {([['tree', 'Tree', ListTree], ['cards', 'Cards', LayoutGrid], ['graph', 'Graph', GitBranch]] as const).map(([view, label, Icon]) => <button key={view} type="button" aria-label={`${label} view`} aria-pressed={value === view} onClick={() => onChange(view)}><Icon size={14} /><span>{label}</span></button>)}
+export function NotebookViewPicker({ value, onChange, active }: { value: NotebookDirectoryView; onChange(value: NotebookDirectoryView): void; active: boolean }) {
+  return <div className="recall-view-picker">
+    <SurfaceModeSwitch value={value} onChange={onChange} active={active} ariaLabel="Notebook presentation"
+      options={([['tree', 'Tree', ListTree], ['cards', 'Cards', LayoutGrid], ['graph', 'Graph', GitBranch]] as const).map(([view, label, Icon]) => ({
+        value: view, ariaLabel: `${label} view`, label: <><Icon size={14} aria-hidden="true" /><span>{label}</span></>
+      }))} />
   </div>
 }
 function sourceLabel(page: NotebookPage) {
