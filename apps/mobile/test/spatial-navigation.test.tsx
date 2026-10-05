@@ -102,6 +102,7 @@ it('keeps the locally selected Topic across a Session round trip after an extern
   })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
   await click(button(view.element, '手机设置与连接')); await click(button(overlay, 'Survey研究与笔记'))
+  await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '原研究原研究选择'))
   await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '外部 Topic A'))
   const topics = view.element.querySelector('.mobile-topics') as HTMLElement
   expect(topics.querySelector('h1')?.textContent).toBe('Topic A')
@@ -110,9 +111,14 @@ it('keeps the locally selected Topic across a Session round trip after an extern
   expect(topics.querySelector('h1')?.textContent).toBe('Topic B')
   await click([...topics.querySelectorAll<HTMLButtonElement>('.mobile-topic-workface button')].find(value => value.textContent?.includes('原讨论 Agent'))!)
   expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+  expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
+  const input = editor(view.element)
+  const inspections = f.client.forwardRpc.mock.calls.filter(([method]) => method === 'topic.inspect').length
   await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, 'Topics'))
   expect(topics.querySelector('h1')?.textContent).toBe('Topic B')
-  expect(f.client.forwardRpc).toHaveBeenCalledWith('topic.inspect', { topicId: topicB.topicId })
+  expect(editor(view.element)).toBe(input)
+  expect(f.client.forwardRpc).toHaveBeenCalledWith('topic.ls', { categoryId: category.categoryId })
+  expect(f.client.forwardRpc.mock.calls.filter(([method]) => method === 'topic.inspect')).toHaveLength(inspections)
   expect(f.client.forwardRpc).toHaveBeenCalledWith('space.ls', { target: { zoneId: 'zone-b' }, presentation: true })
   expect(f.submit).not.toHaveBeenCalled()
 })

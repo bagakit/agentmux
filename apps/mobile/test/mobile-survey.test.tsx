@@ -33,7 +33,7 @@ async function mount(forwardRpc = vi.fn().mockImplementation(async (method: stri
   const root = createRoot(element); mounted.push({ root, element })
   const openSession = vi.fn(), openTopic = vi.fn()
   await act(async () => root.render(<MobileSurveySurface client={{ forwardRpc } as any} connected openSession={openSession} openTopic={openTopic} />))
-  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => button.textContent?.includes(text)); expect(button).toBeDefined(); await act(async () => button!.click()) }
+  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => !button.closest('[hidden]') && button.textContent?.includes(text)); expect(button).toBeDefined(); await act(async () => button!.click()) }
   return { element, forwardRpc, openSession, openTopic, click }
 }
 describe('original Survey mobile slice', () => {
@@ -41,18 +41,23 @@ describe('original Survey mobile slice', () => {
     const view = await mount()
     expect(view.forwardRpc).toHaveBeenCalledWith('space.ls', { target: {}, presentation: true })
     const list = view.element.querySelector('nav[aria-label="原研究列表"]')!
-    expect([...list.querySelectorAll('button')].map(button => button.textContent)).toEqual(['原命名研究', '图暂缺的原研究'])
+    expect([...list.querySelectorAll('button strong')].map(button => button.textContent)).toEqual(['原命名研究', '图暂缺的原研究'])
     expect(list.textContent).not.toContain('uncollected')
+    expect(view.forwardRpc.mock.calls.map(call => call[0])).toEqual(['space.ls'])
+    await view.click('原命名研究')
     expect(view.element.textContent).toContain('tab-original / agent-original')
     expect(view.element.textContent).toContain('display-a'); expect(view.element.textContent).toContain('display-b')
     await view.click('继续对话')
     expect(view.openSession).toHaveBeenCalledWith('session-original', { name: '原 Agent 名称', project: '原项目' })
     await view.click('原关联课题'); expect(view.openTopic).toHaveBeenCalledWith('topic-original')
-    expect(view.element.textContent).toContain('刷新原 Browser 当前网址')
+    expect(view.element.textContent).not.toContain('刷新原 Browser 当前网址')
+    expect(view.element.textContent).not.toContain('刷新原文件')
+    await view.click('original.note.json')
     expect(view.element.textContent).toContain('刷新原文件')
   })
   it('retains original selection and healthy conversation on failed or missing presentation reads', async () => {
     const view = await mount()
+    await view.click('原命名研究')
     view.forwardRpc.mockRejectedValueOnce(new Error('probe failed'))
     await view.click('刷新原研究')
     expect(view.element.textContent).toContain('probe failed')
@@ -62,15 +67,17 @@ describe('original Survey mobile slice', () => {
     await view.click('刷新原研究')
     expect(view.element.textContent).toContain('原 Survey 呈现尚未确认')
     expect(view.element.textContent).toContain('原命名研究')
-    await view.click('图暂缺的原研究')
+    await view.click('返回研究列表'); await view.click('图暂缺的原研究')
     expect(view.element.textContent).toContain('原 Zone 暂未确认')
     expect(view.element.textContent).not.toContain('继续对话')
   })
   it('reads original Note content only on selection and retains it after observation failure', async () => {
     const view = await mount()
+    expect(view.forwardRpc.mock.calls.some(call => call[0] === 'file.read')).toBe(false)
+    await view.click('原命名研究'); await view.click('original.note.json')
     expect(view.forwardRpc).toHaveBeenCalledWith('file.read', { zoneId: 'research', path: 'original.note.json', expectedResource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original") } })
     const content = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'note-id', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'block-id' }, content: [{ type: 'text', text: '原笔记全文' }] }] } })
-    view.forwardRpc.mockResolvedValueOnce({ workspaces: [{ workspaceId: 'resource', hostId: 'local', path: fixturePath('original') }] }).mockResolvedValueOnce({ result: { status: 'read', document: { path: 'original.note.json', content, revision: 'rev-original' } } })
+    view.forwardRpc.mockResolvedValueOnce({ workspaces: [{ workspaceId: 'resource', hostId: 'local', path: fixturePath("original") }] }).mockResolvedValueOnce({ resource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original"), zoneId: 'research', zonePath: fixturePath("original"), path: 'original.note.json' }, result: { status: 'read', document: { path: 'original.note.json', content, revision: 'rev-original' } } })
     await view.click('刷新原文件')
     expect(view.forwardRpc).toHaveBeenLastCalledWith('file.read', { zoneId: 'research', path: 'original.note.json', expectedResource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original") } })
     expect(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body')?.textContent).toBe('原笔记全文')
@@ -82,6 +89,7 @@ describe('original Survey mobile slice', () => {
   })
   it('opens the exact browserId URL as an independent mobile page', async () => {
     const view = await mount()
+    await view.click('原命名研究'); await view.click('查看原网页')
     view.forwardRpc.mockResolvedValueOnce({ targets: [{ id: 'wrong-browser', url: 'https://wrong.example', title: 'wrong', status: 'ready' }, { id: 'browser-id-original', url: 'https://original.example/page', title: 'Original page', status: 'ready' }] })
     await view.click('刷新原 Browser 当前网址')
     expect(view.forwardRpc).toHaveBeenLastCalledWith('browser.targets', {})
@@ -102,10 +110,11 @@ describe('original Survey mobile slice', () => {
       return { catalog: parsed({ ...catalog, survey }) }
     })
     const view = await mount(forward)
-    expect(read).toHaveBeenCalledTimes(1)
+    expect(read).not.toHaveBeenCalled()
     expect(view.element.querySelector('nav')?.textContent).toContain(state.surveyExplorationNames.research)
     expect(view.element.querySelector('nav')?.textContent).toContain('研究工作面暂未确认')
-    await view.click('刷新原文件')
+    await view.click('原名中文'); await view.click('original.note.json')
+    expect(read).toHaveBeenCalledTimes(1)
     expect(read).toHaveBeenCalledWith(workspace, 'original.note.json', undefined)
     expect(view.element.querySelector('h2[data-block-id="heading"]')?.textContent).toBe('原标题')
     expect(view.element.querySelector('.mobile-note-body strong')?.textContent).toBe('加粗原正文')
@@ -118,7 +127,7 @@ describe('original Survey mobile slice', () => {
     const root = createRoot(element); mounted.push({ root, element })
     let resolveOld!: (value: unknown) => void
     const old = new Promise(resolve => { resolveOld = resolve })
-    const forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => method === 'app.snapshot' ? { workspaces: [{ workspaceId: 'resource', hostId: 'local', path: fixturePath('original') }] } : params.path === 'old.txt' ? old : { result: { status: 'read', document: { path: 'new.txt', content: '新Region原正文', revision: 'new-revision' } } })
+    const forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => method === 'app.snapshot' ? { workspaces: [{ workspaceId: 'resource', hostId: 'local', path: fixturePath("original") }] } : params.path === 'old.txt' ? old : { resource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original"), zoneId: 'research', zonePath: fixturePath("original"), path: 'new.txt' }, result: { status: 'read', document: { path: 'new.txt', content: '新Region原正文', revision: 'new-revision' } } })
     const render = async (path: string, visible: boolean) => act(async () => root.render(<MobileRegionContent client={{ forwardRpc } as any} tabId="tab" regionId={path} zoneId="research" kind="file" file={{ workspaceId: 'resource', path, zoneRelativePath: path }} visible={visible} />))
     await render('old.txt', false); expect(forwardRpc).not.toHaveBeenCalled()
     await render('old.txt', true); expect(forwardRpc).toHaveBeenCalledWith('file.read', expect.objectContaining({ path: 'old.txt' }))
