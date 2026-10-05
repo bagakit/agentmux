@@ -110,4 +110,8 @@ Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值�
 
 ## Message Tool 的等待与失败说明
 
-发送等待或失败就地显示简洁原因、原消息状态和可执行下一步；上下文整理等待表达为“正在整理上下文，稍后重试”，有限自动尝试显示次数、下一次等待及停止动作。失败、结果未知和暂时等待使用可辨的层级，不用嵌套错误 JSON 占据主要阅读区。技术详情按需展开，保留完整原错误、Host、Session／Run、operation 和 logid，并提供一键复制完整诊断及准确成功／失败反馈。窄面板保留可读换行和完整操作，交互可用键盘访问，不遮住草稿或原工作面。行为与投递边界沿[原消息合同](../behavior/agent-capabilities-and-messaging.md#跨重启的-prompt-投递凭据)。
+Desktop 的发送等待与失败提醒 dock 在所属 Message Tool 的右侧，复用 SessionMailbox 的 Notices／Outbox 作为唯一处理面；入口随原邮箱对齐，提醒不覆盖工具行、不在输入编辑区重复铺大错误块。主提醒最多两行：简洁的原消息状态／短原因与紧凑的可用操作；窄面仍保留可辨操作，不以多行原错误、嵌套 JSON、常驻大横幅或缩字补空间。失败、结果未知和暂时等待可区分；通知到达不偷焦点、不撑高 Composer、不遮住原工作面，关闭或披露后保原草稿、选择与输入位置。
+
+完整原错误、stack、结构化 JSON、Host、Session／Run、messageId、operation 和 logid 留在同一处理面的默认折叠详情中，按需完整阅读与一键复制；首层摘要不得裁掉存储原文或重建一份诊断事实。复制沿原 Clipboard 回执显示准确的成功、失败或未确认反馈，不能只用 tooltip 告知。原 owner 已确认上下文整理时才表达“正在整理上下文，稍后重试”；有限自动尝试的次数、下一次等待与停止动作在同一处理面按需查看。等待、重试、停止等待与投递资格继续消费[原消息合同](../behavior/agent-capabilities-and-messaging.md#跨重启的-prompt-投递凭据)，呈现位置与行数不授予或取消这些资格，也不新增队列或 notice 事实 Store。
+
+Desktop 的 dock 位置由宿主持有；共用的错误、详情与复制组件保留各 client 的呈现入口，Mobile 不套用 Desktop 的右侧 dock。正常／窄分屏、长草稿及完整长诊断须沿[独立 Agent 看图评审](../../guides/agent-visual-e2e-review.md)在实际产品工作面操作、采图并复审，确认短因、原动作、展开／完整复制与键盘访问可达；图片或纯样式检查不能代签审美通过。
