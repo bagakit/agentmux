@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -29,10 +30,16 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const ordinary = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local && !entry.stream)
     expect(ordinary.length).toBeGreaterThan(0)
     const graph = parseAgentMuxSpatialGraph({ spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} })
+    const nativeSource = { nativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'saved-native',
+      transcriptPath: join(fixture.root, 'saved-native.jsonl') }, workspacePath: fixture.root, revision: 'a'.repeat(64) }
     const stdinByMethod: Record<string, string> = {
+      'agent.native.history': JSON.stringify({ hostId: 'local', executorId: 'private', source: nativeSource }),
+      'agent.native.history.resource': JSON.stringify({ hostId: 'local', executorId: 'private', nativeSource,
+        source: { providerId: 'private', nativeSessionId: 'saved-native' }, recordId: 'original-record',
+        partIndex: 0, expectedReference: 'native:image' }),
       'agent.native.confirm': JSON.stringify({ agentSessionId: 'SID', expectedRun: { runId: 'RUN' },
         expectedNativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'before' },
-        candidateNativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'current' }, expectedObservationAt: 1, operationId: 'NATIVE' }),
+        candidateNativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'current' }, expectedObservationAt: reshapeFixtureEpoch(0, 0, 1), operationId: 'NATIVE' }),
       'space.commit': JSON.stringify(graph),
       'browser.task.batch': JSON.stringify({ parameters: { fresh: 'input' }, items: [{ id: 'ITEM', parameters: { fresh: 'item' } }] }),
       'browser.task.run': JSON.stringify({ fresh: 'input' })
@@ -51,7 +58,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       if (request.params.operationId !== undefined) expect(request.id).not.toBe(request.params.operationId)
     }
     for (const method of ['agent.reopen', 'agent.reopen.check']) {
-      expect(fixture.requests.find(request => request.method === method)?.params).toEqual({ agentSessionId: 'SID', expectedRetiredAt: 12, operationId: 'REOPEN' })
+      expect(fixture.requests.find(request => request.method === method)?.params).toEqual({ agentSessionId: 'SID', expectedRetiredAt: reshapeFixtureEpoch(0, 0, 12), operationId: 'REOPEN' })
     }
     expect(fixture.requests.find(request => request.method === 'space.commit')?.params).toEqual({ expectedRevision: 0, graph })
     expect(fixture.requests.find(request => request.method === 'space.resolve')?.params).toEqual({ tabId: 'TAB', regionId: 'R', direction: 'left' })
@@ -146,7 +153,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
   it('keeps an uncertain device mutation as one request and reads current facts without certifying the lost reply', async () => {
     const fixture = await probe(request => {
       if (request.method === 'device.revoke') throw Object.assign(new Error('Device mutation outcome is unconfirmed.'), { code: 'CONTROL_TIMEOUT' })
-      return { hostId: 'original-host', devices: [{ deviceId: 'DEVICE', name: 'Original device', createdAt: 1 }], mobileAccess: { state: 'unavailable', message: 'Controlled fixture has no Host getter.' } }
+      return { hostId: 'original-host', devices: [{ deviceId: 'DEVICE', name: 'Original device', createdAt: reshapeFixtureEpoch(0, 0, 1) }], mobileAccess: { state: 'unavailable', message: 'Controlled fixture has no Host getter.' } }
     })
     const mutation = await fixture.run(['device', 'revoke', '--device', 'DEVICE'])
     expect(mutation.code).toBe(1)
@@ -157,7 +164,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const current = await fixture.run(['device', 'ls'])
     expect(current.code, current.stderr).toBe(0)
     expect(JSON.parse(current.stdout)).toEqual({ ok: true, operation: 'device.ls', result: {
-      hostId: 'original-host', devices: [{ deviceId: 'DEVICE', name: 'Original device', createdAt: 1 }], mobileAccess: { state: 'unavailable', message: 'Controlled fixture has no Host getter.' }
+      hostId: 'original-host', devices: [{ deviceId: 'DEVICE', name: 'Original device', createdAt: reshapeFixtureEpoch(0, 0, 1) }], mobileAccess: { state: 'unavailable', message: 'Controlled fixture has no Host getter.' }
     } })
     expect(fixture.requests.map(request => request.method)).toEqual(['device.revoke', 'device.ls'])
   })
@@ -185,7 +192,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     expect(streamEntries.map(entry => entry.method)).toEqual(['agent.output', 'browser.follow', 'system.metrics.watch', 'toolkit.watch'])
     const raw = Uint8Array.from([0xe4, 0xb8, 0xad, 0x00, 0xff])
     const pending = { state: 'pending', observedAt: null, lastSuccessAt: null, reason: null, data: null }
-    const observation = { schema: 'agentmux.metrics.v1', observedAt: 1,
+    const observation = { schema: 'agentmux.metrics.v1', observedAt: reshapeFixtureEpoch(0, 0, 1),
       scope: { kind: 'unix-host', hostId: 'local', hostname: 'private-host', mainPid: 1 }, window: null,
       units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
       diagnostics: pending, process: pending, runTotals: null, app: pending, runtime: pending, main: pending, renderer: pending }
@@ -196,7 +203,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     for (const entry of streamEntries) for (const followed of entry.method === 'agent.output' ? [false, true] : [false]) {
       const initial = entry.method === 'agent.output'
         ? { session: { kind: 'agent', agentSessionId: 'SID', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("fixture"),
-          run: { runId: 'RUN' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }, run: { runId: 'RUN', state: 'running', latestOutputBytes: 10 },
+          run: { runId: 'RUN' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }, run: { runId: 'RUN', state: 'running', latestOutputBytes: 10 },
           terminal: { type: 'not-requested' }, resizeRevision: 0, gap: { requestedAfterByte: 0, firstAvailableByte: 5 } }
         : entry.method === 'browser.follow' ? { runOperation: null, gap: { droppedThrough: 3 } }
         : entry.method === 'toolkit.watch' ? { toolId: 'TOOL' } : { observation }

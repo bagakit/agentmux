@@ -83,6 +83,8 @@ export function objectCliSeed(method: string, input: string): string[] {
   const fixed: Record<string, string[]> = {
     whoami: [], 'agent.ls': [], 'agent.inspect': ['--session', ids.agent],
     'agent.native.confirm': ['--input', '-'],
+    'agent.native.history': ['--input', '-'],
+    'agent.native.history.resource': ['--input', '-'],
     'agent.native.ls': ['--host', 'local', '--executor', 'codex'],
     'agent.context': ['--host', 'local', '--session', ids.agent],
     'message.pending.ls': ['--session', ids.agent],
