@@ -1,9 +1,11 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Check, ImagePlus, RotateCcw, Smile, Shapes } from 'lucide-react'
+import { Check, ImagePlus, RotateCcw, Smile, Shapes, Library } from 'lucide-react'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconId, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { DEFAULT_MOTE_FACE, isMoteFace, MOTE_AVATAR_INPUT_MAX_BYTES, type MoteAvatarInput } from '../../../shared/mote-avatars'
 import { api } from '../lib/api'
+import { isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
+import { MoteAvatarSeriesEditor, type MoteAvatarSeriesDraft } from './MoteAvatarSeriesEditor'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { MoteAvatarCrop } from './MoteAvatarCrop'
@@ -23,7 +25,11 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [errorStep, setErrorStep] = useState<'prepare' | 'save'>('save')
-  const [editingFace, setEditingFace] = useState(false)
+  const [mode, setMode] = useState<'face' | 'alternative' | 'series'>('alternative')
+  const editingFace = mode === 'face', editingSeries = mode === 'series'
+  const [seriesDraft, setSeriesDraft] = useState<MoteAvatarSeriesDraft | null>(null)
+  const [savedSeries, setSavedSeries] = useState<MoteAvatarSeriesChoice | null>(null)
+  const [seriesPreparing, setSeriesPreparing] = useState(false)
   const [faceDraft, setFaceDraft] = useState(DEFAULT_MOTE_FACE)
   const [alternativeDraft, setAlternativeDraft] = useState<SpaceIconChoice | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -38,7 +44,10 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     const face = isMoteFace(saved) ? saved : { ...DEFAULT_MOTE_FACE }
     setFaceDraft(face); setAlternativeDraft(isMoteFace(saved) ? null : saved)
     setDraft(saved)
-    setEditingFace(Boolean(target?.avatarTarget && isMoteFace(saved)))
+    const originalSaved: unknown = saved
+    const series = isMoteAvatarSeriesChoice(originalSaved) ? originalSaved : null
+    setSavedSeries(series); setSeriesDraft(null); setSeriesPreparing(false)
+    setMode(target?.avatarTarget && series ? 'series' : target?.avatarTarget && isMoteFace(saved) ? 'face' : 'alternative')
     setPreview(null); setPreviewReady(false); setPreparing(false); setBusy(false); setError(null)
     return () => { editor.current = {}; inputRequest.current = {} }
   }, [target?.key])
@@ -59,12 +68,12 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       const input = { mimeType: file.type, dataUrl } as MoteAvatarInput
       const value = original.imageTarget ? await api.spaceObjects.previewAvatar(original.imageTarget, input)
         : await api.scratch.previewMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
-      if (current()) { setEditingFace(false); setPreviewReady(false); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1 })) }
+      if (current()) { setMode('alternative'); setPreviewReady(false); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1 })) }
     } catch (cause) { if (current()) { setErrorStep('prepare'); setError(presentError(cause)) } }
     finally { if (current()) setPreparing(false) }
   }
   async function save(): Promise<void> {
-    if (!target || busy || preparing || !editingFace && preview && !previewReady) return
+    if (!target || busy || preparing || seriesPreparing || editingSeries || !editingFace && preview && !previewReady) return
     const original = target, session = editor.current
     const current = () => editor.current === session && currentTarget.current?.key === original.key
     setBusy(true); setError(null)
@@ -88,14 +97,14 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     if (isMoteFace(choice)) setFaceDraft(choice)
     else { setAlternativeDraft(choice); setPreview(null); setPreviewReady(false) }
   }
-  const source = (face: boolean) => {
-    inputRequest.current = {}; setPreparing(false); setError(null); setEditingFace(face)
-    setDraft(face ? faceDraft : alternativeDraft)
+  const source = (next: typeof mode) => {
+    inputRequest.current = {}; setPreparing(false); setSeriesPreparing(false); setError(null); setMode(next)
+    if (next !== 'series') setDraft(next === 'face' ? faceDraft : alternativeDraft)
   }
   return <Dialog.Root open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
-      <Dialog.Content ref={content} className={`space-icon-picker dialog-surface${supportsImages ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+      <Dialog.Content ref={content} data-series-draft-ready={Boolean(seriesDraft)} className={`space-icon-picker dialog-surface${editingSeries ? ' space-icon-picker--series' : ''}${supportsImages ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}
         onCloseAutoFocus={event => {
           event.preventDefault()
@@ -109,14 +118,17 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           <Dialog.Description className="space-icon-picker__description">{target?.name}</Dialog.Description>
         </header>
         {supportsImages && target ? <>
-          {target.avatarTarget ? <><div className="mote-avatar-source" role="group" aria-label="Mote avatar style">
-            <LiquidSelectionSurface selected={editingFace ? 'face' : 'alternative'} active={target !== null} targetAttribute="data-avatar-source" />
-            <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source(true)}><Smile size={15} />Make a face<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
-            <button type="button" data-avatar-source="alternative" aria-pressed={!editingFace} disabled={busy} onClick={() => source(false)}><Shapes size={15} />Icon or image<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+          {target.avatarTarget ? <><div className="mote-avatar-source mote-avatar-source--series" role="group" aria-label="Mote avatar style">
+            <LiquidSelectionSurface selected={mode} active={target !== null} targetAttribute="data-avatar-source" />
+            <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source('face')}><Smile size={15} />Make a face<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+            <button type="button" data-avatar-source="alternative" aria-pressed={mode === 'alternative'} disabled={busy} onClick={() => source('alternative')}><Shapes size={15} />Icon or image<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+            <button type="button" data-avatar-source="series" aria-pressed={editingSeries} disabled={busy} onClick={() => source('series')}><Library size={15} />Series<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
           </div>
           <MoteFaceEditor face={faceDraft} visible={editingFace} disabled={busy} onChange={select} />
           </> : null}
-          <div className="mote-avatar-alternative" hidden={editingFace}>
+          {target.avatarTarget ? <MoteAvatarSeriesEditor key={target.key} targetKey={target.key} visible={editingSeries} disabled={busy}
+            initialChoice={savedSeries} onDraft={setSeriesDraft} onPreparing={setSeriesPreparing} /> : null}
+          <div className="mote-avatar-alternative" hidden={mode !== 'alternative'}>
             {preview ? <MoteAvatarCrop key={preview.revision} source={preview.dataUrl} canvasRef={canvas} disabled={busy || preparing}
               onReady={() => setPreviewReady(true)} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label={`Your ${target.kind} avatar preview`}>
               <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
@@ -130,18 +142,18 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
             {preparing ? <p className="space-icon-picker__description" role="status">Preparing image…</p> : null}
           </div>
         </> : null}
-        {!editingFace ? <div className="space-icon-picker__choices" role="group" aria-label="Icon choices">
+        {mode === 'alternative' ? <div className="space-icon-picker__choices" role="group" aria-label="Icon choices">
           {(Object.entries(SPACE_ICON_CATALOG) as Array<[SpaceIconId, typeof SPACE_ICON_CATALOG[SpaceIconId]]>).map(([id, { Icon, label }]) =>
             <button key={id} type="button" className="space-icon-picker__choice" aria-label={`${label} icon`}
               title={label} aria-pressed={!preview && draft === id} data-space-icon-choice={id} disabled={busy}
               onClick={() => select(id)}><Icon size={18} /></button>)}
         </div> : null}
-        <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={!editingFace && !preview && draft === null}
-          disabled={busy} onClick={() => { select(null); setEditingFace(false) }}><RotateCcw size={13} />Restore automatic</button>
+        <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={mode === 'alternative' && !preview && draft === null}
+          disabled={busy} onClick={() => { select(null); setMode('alternative') }}><RotateCcw size={13} />Restore automatic</button>
         {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; review the current avatar before saving again.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         <footer>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
-          <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'} disabled={busy || preparing || Boolean(!editingFace && preview && !previewReady)} onClick={() => void save()}>
+          <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'} disabled={busy || preparing || seriesPreparing || editingSeries || Boolean(!editingFace && preview && !previewReady)} onClick={() => void save()}>
             {busy ? 'Saving…' : error && errorStep === 'save' ? 'Retry saving' : supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'}
           </button>
         </footer>
