@@ -62,7 +62,7 @@ function verify(c, before, after) {
       'Nonempty existing normal buffer must scroll in the actual direction')
     return
   }
-  const gated = c.readOnly || c.pending || c.shift || c.delta === 0
+  const gated = c.readOnly || c.shift || c.delta === 0
   let expected = 0
   if (!gated) {
     const distance = Math.abs(c.delta) * (c.events ?? 1) * before.scrollSensitivity * (c.ctrl ? before.fastScrollSensitivity : 1)
@@ -71,22 +71,28 @@ function verify(c, before, after) {
   }
   assert.ok(Number.isInteger(expected) && (gated || expected > 0))
   assert.equal(after.program.reports, expected, 'Computed integer wheel distance must reach the actual bridge')
-  assert.equal(after.writes.length, expected, 'No report may be silently duplicated or discarded')
+  const events = c.events ?? 1
+  const perEvent = expected ? Math.abs(c.delta) * before.scrollSensitivity * (c.ctrl ? before.fastScrollSensitivity : 1) * (c.unit === 2 ? before.rows : c.unit === 1 ? 1 : (Math.abs(c.delta) < 50 ? 0.3 : 1) / before.cellHeight) : 0
+  const inputEvents = Array.from({length:events},(_,i)=>Math.trunc(perEvent*(i+1)) > Math.trunc(perEvent*i)).filter(Boolean).length
+  assert.equal(after.writes.length, inputEvents, 'Each admitted wheel owns one complete report chunk')
   assert.equal(after.program.top, 500 + (c.delta > 0 ? -3 : 3) * expected)
   assert.ok(after.firstLine.includes(`private-TUI-row-${after.program.top}`), 'Actual live output must repaint the TUI')
   if (!expected) return
   if (c.mode === 'alternate-mouse') {
-    const encoded = after.writes.map(write => /^\x1b\[<(\d+);(\d+);(\d+)M$/.exec(write.text))
+    const encoded = [...after.writes.map(write=>write.text).join('').matchAll(/\x1b\[<(\d+);(\d+);(\d+)M/g)]
+    assert.equal(encoded.length, expected)
     assert.ok(encoded.length > 0 && encoded.every(Boolean))
     const code = (c.delta > 0 ? 64 : 65) + (c.ctrl ? 16 : 0)
     assert.ok(encoded.every(match => Number(match[1]) === code))
     assert.deepEqual([...new Set(encoded.map(match => `${match[2]}:${match[3]}`))], [`${encoded[0][2]}:${encoded[0][3]}`],
       'Each fresh report must retain its original coordinates')
   } else if (c.mode === 'alternate-binary') {
-    assert.ok(after.writes.every(write => write.binary && write.length === 6))
+    assert.ok(after.writes.length > 0 && after.writes.every(write => write.binary && write.length % 6 === 0))
     assert.ok(after.writes[0].bytes[4] >= 128, 'Legacy coordinates must exercise actual Latin-1 bytes')
-    assert.ok(after.writes.every(write => write.bytes[3] === 96 && write.bytes[4] === after.writes[0].bytes[4] && write.bytes[5] === after.writes[0].bytes[5]))
-  } else assert.ok(after.writes.every(write => write.text === `\x1b${c.applicationCursor ? 'O' : '['}${c.delta > 0 ? 'A' : 'B'}`))
+    const bytes=after.writes.flatMap(write=>write.bytes), report=bytes.slice(0,6)
+    assert.equal(bytes.length,expected*6); assert.equal(report[3],96)
+    assert.deepEqual(bytes,Array.from({length:expected},()=>report).flat())
+  } else assert.equal(after.writes.map(write=>write.text).join(''), `\x1b${c.applicationCursor ? 'O' : '['}${c.delta > 0 ? 'A' : 'B'}`.repeat(expected))
 }
 const cases = [
   { name:'normal-up', mode:'normal', delta:350 },
