@@ -17,7 +17,7 @@ import { captureAgentNativeSessionIdentity } from './agent-native-session-captur
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource, type AgentMuxAgentForkSource } from './agent-fork.js'
-import { agentInteractionResponseUnavailableReason, agentInteractionResponseSettled } from './agent-interaction-state.js'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled } from './agent-interaction-state.js'
 import {
   normalizeLaunchOptionSelection,
   type LaunchOptionSelection
@@ -2950,7 +2950,7 @@ export class AgentMuxClient {
       process: projectedRun.state,
       status,
       timelineCapability: capabilities.timeline,
-      awaitingRequest: session.pendingInteraction !== undefined,
+      awaitingRequest: agentInteractionActiveRequest(session.pendingInteraction) !== undefined,
       terminalCapabilityUnverified: session.terminalCapability !== undefined
     }, Date.now())
     const interactionResponseUnavailableReason = session.pendingInteraction && agentInteractionResponseUnavailableReason(session.pendingInteraction)

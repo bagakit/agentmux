@@ -64,6 +64,7 @@ export function AgentSessionComposer({
   resultReview,
   reading,
   onRevealMessage,
+  onOpenTerminal,
   mailboxOrigin,
   visible = true
 }: {
@@ -74,6 +75,7 @@ export function AgentSessionComposer({
   tabName?: string
   reading?: ConversationReadingProps | undefined
   onRevealMessage?: RevealMailboxMessage | undefined
+  onOpenTerminal?(): void
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
@@ -259,6 +261,8 @@ export function AgentSessionComposer({
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
     { message: lifecycleMessage, failure: lifecycleFailure }).map(notice => notice.id === 'timeline-observation'
       ? { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
+      : notice.id === 'interaction-receipt' && onOpenTerminal
+        ? { ...notice, action: { label: 'Open terminal', run: onOpenTerminal } }
       : notice)
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
     step: 'A message tool action did not complete', mode: feedback.failure.message,
