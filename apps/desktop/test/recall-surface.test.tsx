@@ -5,12 +5,15 @@ import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook
 import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
+import { AgentMuxNotebookStore } from '../../../packages/core/src/notebook-store'
+import { WorkspaceFiles } from '../src/main/workspace-files'
 import { desktopSpatialGraph, desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { act } from 'react'
+import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
@@ -181,7 +184,7 @@ function noteTransport(status: 'written' | 'unknown' | 'error' = 'written', wait
   return writes
 }
 async function recoverSameNote() { const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Recover same note')!; expect(button).toBeDefined(); await act(async () => button.click()) }
-async function readyNoteRegion() { await vi.waitFor(async () => { await act(async () => {}); expect(savedNotes().at(-1), JSON.stringify(savedNotes().at(-1))).toMatchObject({ status: 'written', revealed: true }); expect(dom.container.querySelector('.global-recall-surface .note-editor')).not.toBeNull() }); return pendingNoteReference() }
+async function readyNoteRegion() { await vi.waitFor(async () => { await act(async () => {}); expect(savedNotes().at(-1), JSON.stringify(savedNotes().at(-1))).toMatchObject({ status: 'written', revealed: true }); expect(dom.container.querySelector('.global-recall-surface .note-editor'), dom.container.querySelector('.global-recall-surface')?.textContent).not.toBeNull() }, { timeout: 5000 }); return pendingNoteReference() }
 async function fill(field: HTMLInputElement, value: string) {
   expect(field).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) })
@@ -337,12 +340,26 @@ async function browserMenuAction(label: string) {
 
 
 async function createNotebook(name = 'Research notebook') {
-  await dom.click('[aria-label="New notebook"]')
+  await openNotebookCreation()
   const input = document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')!
   expect(input).not.toBeNull()
   await fill(input, name)
   await submit(document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!)
   await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.notebooks[useAppStore.getState().recallNotebookId!]?.name).toBe(name))
+}
+async function openNotebookMenu() {
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Switch notebook"]')!
+  expect(trigger).not.toBeNull()
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Choose notebook"]')).not.toBeNull())
+}
+async function openNotebookCreation() {
+  await openNotebookMenu()
+  await act(async () => document.querySelector<HTMLElement>('[aria-label="New notebook"]')!.click())
+}
+async function switchNotebook(name: string) {
+  await openNotebookMenu()
+  await act(async () => document.querySelector<HTMLElement>(`[aria-label="Switch to notebook: ${name}"]`)!.click())
 }
 
 async function startNotebookWithPage() {
@@ -396,6 +413,110 @@ async function archiveCurrentNotebookPage() {
 async function requestDeleteNotebook() { await dom.click('[aria-label="Delete notebook"]'); await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).not.toBeNull()) }
 async function confirmDeleteNotebook() { await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog [data-confirm-label]')!.click()) }
 
+it('defaults only first Recall entry and keeps the current Notebook tree through product switching', async () => {
+  await renderApp(); await enterSurvey()
+  await vi.waitFor(() => expect(useAppStore.getState().recallNotebookId).toBe('quick-notes'))
+  expect(dom.container.querySelector('.recall-start')).toBeNull()
+  await createNotebook('First current book')
+  const first = useAppStore.getState().recallNotebookId
+  await createNotebook('Second current book')
+  await switchNotebook('First current book')
+  expect(useAppStore.getState().recallNotebookId).toBe(first)
+  expect(dom.container.querySelector('.survey-notebook-navigation')?.getAttribute('data-notebook-id')).toBe(first)
+  expect(dom.container.querySelector('.survey-notebook-navigation')?.textContent).not.toContain('Second current book')
+  expect(dom.container.querySelector('[aria-label="Switch notebook"]')?.textContent).toContain('First current book')
+  expect(dom.container.querySelector('[aria-label="Back to Recall"]')).toBeNull(); healthy()
+})
+
+it('closes the Notebook portal after a public surface switch and keeps later Survey input focused', async () => {
+  await renderApp(); await dom.click('[aria-label="Survey: browse and explore"]'); await enterSurvey(); await openNotebookMenu()
+  const original = useAppStore.getState(), tabs = original.tabs, bookId = original.recallNotebookId
+  const hiddenTriggerFocus = vi.spyOn(dom.container.querySelector<HTMLButtonElement>('[aria-label="Switch notebook"]')!, 'focus')
+  const later = dom.container.querySelector<HTMLInputElement>('.global-survey-surface [aria-label="Search or enter a web address"]')!
+  expect(later).not.toBeNull()
+  await act(async () => {
+    await original.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'notebook-menu-hide', operation: 'focus', target: { kind: 'surface', surface: 'survey' }, inputPolicy: 'preserve' }))
+    flushSync(() => {})
+    expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(hiddenTriggerFocus).not.toHaveBeenCalled()
+    later.focus(); await new Promise(resolve => setTimeout(resolve, 10))
+  })
+  expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
+  expect(document.activeElement).toBe(later)
+  expect(useAppStore.getState().tabs).toBe(tabs)
+  expect(useAppStore.getState().recallNotebookId).toBe(bookId)
+  await enterSurvey()
+  expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull(); healthy()
+})
+
+it('closes the Notebook portal when its sidebar collapses without restoring it or stealing later focus', async () => {
+  await renderApp(); await enterSurvey(); await openNotebookMenu()
+  const hiddenTriggerFocus = vi.spyOn(dom.container.querySelector<HTMLButtonElement>('[aria-label="Switch notebook"]')!, 'focus')
+  let later!: HTMLButtonElement
+  await act(async () => {
+    flushSync(() => useAppStore.getState().setRecallSidebarCollapsed(true))
+    expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(hiddenTriggerFocus).not.toHaveBeenCalled()
+    later = dom.container.querySelector<HTMLButtonElement>('[aria-label="Show Recall items"]')!
+    later.focus(); await new Promise(resolve => setTimeout(resolve, 10))
+  })
+  expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull()
+  expect(document.activeElement).toBe(later)
+  await act(async () => useAppStore.getState().setRecallSidebarCollapsed(false))
+  expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull(); healthy()
+})
+
+it('keeps a restored unavailable Notebook and its original workface instead of replacing it with the default', async () => {
+  const selection = { zoneId: originalZoneId(), selection: [referenceA], active: referenceA }
+  useAppStore.setState({ recallNotebookId: 'original-unavailable-book', recallNoteId: 'original-unavailable-note', recallZoneSelection: selection })
+  const before = useAppStore.getState()
+  await renderApp(); await enterSurvey()
+  expect(useAppStore.getState().recallNotebookId).toBe('original-unavailable-book')
+  expect(useAppStore.getState().recallNoteId).toBe('original-unavailable-note')
+  expect(useAppStore.getState().recallZoneSelection).toBe(selection)
+  expect(dom.container.querySelector('.survey-notebook-navigation')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Recall items"]')?.textContent).toContain('Original Notebook selection kept')
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().documents[key]?.content).toBe('Unsaved file'); healthy()
+})
+
+it('creates and switches Notebooks then reopens the exact original Note through durable Notebook and file owners', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-recall-navigation-')))
+  try {
+    const path = join(root, 'notes'); await mkdir(path)
+    const notesWorkspace = { ...scratchWorkspace, path }
+    useAppStore.setState({ config: { ...useAppStore.getState().config!, workspaces: useAppStore.getState().config!.workspaces.map(item => item.id === NOTES_WORKSPACE_ID ? notesWorkspace : item) } })
+    const notebooks = new AgentMuxNotebookStore(join(path, 'notebooks.json'))
+    const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }))
+    vi.spyOn(api.notebooks, 'read').mockImplementation(() => notebooks.read())
+    vi.spyOn(api.notebooks, 'apply').mockImplementation(input => notebooks.apply(input, { kind: 'user', id: 'navigation-user' }))
+    vi.spyOn(api.notebooks, 'onChange').mockImplementation(listener => notebooks.subscribe(listener))
+    vi.spyOn(api.files, 'read').mockImplementation((id, filePath) => { expect(id).toBe(NOTES_WORKSPACE_ID); return files.read(notesWorkspace, filePath) })
+    vi.spyOn(api.files, 'write').mockImplementation((id, input) => { expect(id).toBe(NOTES_WORKSPACE_ID); return files.write(notesWorkspace, input) })
+    await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+    const original = useAppStore.getState(), bookId = original.recallNotebookId!, noteId = original.recallNoteId!
+    const catalog = await notebooks.read(), page = catalog.pages[noteId]!, bytes = await readFile(join(path, page.resource.path), 'utf8')
+    const reference = original.recallZoneSelection!.active!, originalZone = page.workface!.zoneId
+    expect(JSON.parse(bytes).noteId).toBe(noteId)
+    await createNotebook('Other book')
+    expect(dom.container.querySelector('.survey-notebook-pages')?.textContent).not.toContain(page.title)
+    await switchNotebook('Research notebook')
+    expect(useAppStore.getState().recallNotebookId).toBe(bookId)
+    await dom.click('.survey-notebook-page')
+    await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active).toEqual(reference))
+    expect(useAppStore.getState().recallNoteId).toBe(noteId)
+    expect(useAppStore.getState().recallZoneSelection?.zoneId).toBe(originalZone)
+    expect(useAppStore.getState().tabs[reference.tabId]?.regions[reference.regionId]).toMatchObject({ kind: 'file', workspaceId: NOTES_WORKSPACE_ID, path: page.resource.path })
+    expect(await readFile(join(path, page.resource.path), 'utf8')).toBe(bytes)
+    expect((await notebooks.read()).pages[noteId]).toEqual(page)
+    expect(api.files.write).toHaveBeenCalledTimes(1)
+    expect(api.files.read).toHaveBeenCalledWith(NOTES_WORKSPACE_ID, page.resource.path)
+    expect(useAppStore.getState().documents[key]?.content).toBe('Unsaved file'); healthy()
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 
 
 it('creates a Notebook first and adds its Note page in the original Zone without a Browser or spare preparation Tab', async () => {
@@ -403,7 +524,9 @@ it('creates a Notebook first and adds its Note page in the original Zone without
   vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { writes.set(input.path, input.content); return { status: 'written', revision: 'note-created' } })
   vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: writes.get(path)!, revision: 'note-created' } }))
   await renderApp(); await enterSurvey()
-  expect(dom.container.querySelector('.survey-start-heading h1')!.textContent).toBe('Recall')
+  await vi.waitFor(() => expect(useAppStore.getState().recallNotebookId).toBe('quick-notes'))
+  expect(dom.container.querySelector('[aria-label="Switch notebook"]')!.textContent).toContain('随手记')
+  expect(dom.container.querySelector('[aria-label="Back to Recall"]')).toBeNull()
   const before = useAppStore.getState()
   expect(before.layouts[NOTES_WORKSPACE_ID]).toBeUndefined()
   await startNotebookWithPage()
@@ -499,9 +622,9 @@ it('keeps every existing Note Region on an ambiguous directory reopen rather tha
 it('requires a name and deliberate submission to create a Notebook and cancels without any persistent side effect', async () => {
   const write = vi.spyOn(api.files, 'write')
   await renderApp(); await enterSurvey()
-  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Notebooks"]')?.textContent).toContain('随手记'))
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Switch notebook"]')?.textContent).toContain('随手记'))
   const original = await api.notebooks.read()
-  await dom.click('[aria-label="New notebook"]')
+  await openNotebookCreation()
   expect(await api.notebooks.read()).toEqual(original)
   const form = document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!
   expect(form.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled).toBe(true)
@@ -719,18 +842,18 @@ it('keeps one exact named creation after a lost reply and does not navigate over
   await renderApp(); await enterSurvey()
   const original = vi.mocked(api.notebooks.apply).getMockImplementation()!
   vi.mocked(api.notebooks.apply).mockImplementationOnce(async input => { await original(input); throw new Error('Creation reply lost') })
-  await dom.click('[aria-label="New notebook"]')
+  await openNotebookCreation()
   await fill(document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')!, 'One exact book')
   await submit(document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!)
   await vi.waitFor(() => expect(document.querySelector('.notebook-create-issue')?.textContent).toContain('Creation reply lost'))
   const first = vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0]
   expect(document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')?.disabled).toBe(true)
-  await act(async () => useAppStore.getState().setRecallNotebook('quick-notes'))
+  await act(async () => { await changeNotebook({ kind: 'create', notebookId: 'later-created-book', name: 'Later choice' }, 'later-created-book-op'); useAppStore.getState().setRecallNotebook('later-created-book') })
   await submit(document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!)
   await vi.waitFor(() => expect(document.querySelector('.notebook-create-dialog')).toBeNull())
   expect(vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0].operationId).toBe(first.operationId)
   expect(Object.values((await api.notebooks.read()).notebooks).filter(book => book.name === 'One exact book')).toHaveLength(1)
-  expect(useAppStore.getState().recallNotebookId).toBe('quick-notes'); healthy()
+  expect(useAppStore.getState().recallNotebookId).toBe('later-created-book'); healthy()
 })
 
 
