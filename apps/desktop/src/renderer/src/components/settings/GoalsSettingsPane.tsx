@@ -1,9 +1,13 @@
 import { useId } from 'react'
-import { Columns3, List } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { DEFAULT_GOALS_COMMON_ACTIONS, GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '../../../../shared/goals-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
+
+const ThemeObjectListIcon = semanticIconComponent('object.list')
+const ThemeLayoutColumns3Icon = semanticIconComponent('layout.columns-3')
+
 
 export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals }: {
   collapsed: boolean | undefined
@@ -32,7 +36,7 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       <fieldset className="settings-goals-view"><legend>Default Goals view</legend>
         {GOALS_VIEW_IDS.map(choice => <label key={choice} data-selected={view.value === choice}>
           <input type="radio" name={viewGroup} checked={view.value === choice} onChange={() => view.setValue(choice)} />
-          <span className="settings-goals-view__preview" aria-hidden="true" data-view={choice}>{choice === 'list' ? <List size={22} /> : <Columns3 size={22} />}</span>
+          <span className="settings-goals-view__preview" aria-hidden="true" data-view={choice}>{choice === 'list' ? <ThemeObjectListIcon size={22} /> : <ThemeLayoutColumns3Icon size={22} />}</span>
           <span>{choice === 'list' ? 'List' : 'Board'}</span>
         </label>)}
       </fieldset>

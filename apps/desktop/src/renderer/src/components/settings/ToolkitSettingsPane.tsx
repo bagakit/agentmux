@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import { Activity, ArrowLeft, Check, LockKeyhole, Plus, Search, Smartphone, Wrench, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ToolkitToolConfiguration, ToolkitConfigurationFields } from '@agentmux/core/control'
 import { DEFAULT_MOBILE_CONNECTION_PREFERENCES, MOBILE_CONNECTION_TOOL_ID, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
@@ -13,6 +13,20 @@ import { packageFact, toolkitIdentity, useToolkitPackages } from '../toolkit/use
 import { ToolkitToolEditor } from './ToolkitToolEditor'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { isInlineDraft, isPackageDraft, toolkitDraftDirty, toolkitFields, useToolkitDrafts, type ToolkitDraftWriter } from './use-toolkit-drafts'
+const ThemeObjectToolsIcon = semanticIconComponent('object.tools')
+
+
+const ThemeActionInstallPackageIcon = semanticIconComponent('action.install-package')
+const ThemeActionCreateToolIcon = semanticIconComponent('action.create-tool')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
+const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
+const ThemeStatusLockedIcon = semanticIconComponent('status.locked')
+const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+
 
 function shortDirectory(path: string) {
   const segments = path.split(/[\\/]/u).filter(Boolean)
@@ -92,13 +106,13 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view} data-creation-empty={!entries.length && selectedId === null}>
     <header className="settings-pane-toolbar toolkit-workbench__toolbar">
       <p className="toolkit-workbench__intro">Your scripts. Your actions.</p>
-      <button type="button" className="small-button" disabled={entries.length >= 128} onClick={install}><Plus size={13} /> Install package</button>
-      <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> New custom tool</button>
+      <button type="button" className="small-button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Install package</button>
+      <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> New custom tool</button>
     </header>
     {metadata.error ? <p className="settings-inline-error" role="status">Package files could not be read: {metadata.error} Your configuration and drafts are kept. <button type="button" className="small-button" onClick={() => void metadata.refresh()}>Refresh files</button></p> : null}
     <div className="toolkit-workbench__body">
       <section className="toolkit-library" aria-label="Toolkit Library">
-        <label className="toolkit-library__search"><Search size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search tools" placeholder="Find a tool…" value={query} onChange={event => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear tool search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
+        <label className="toolkit-library__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search tools" placeholder="Find a tool…" value={query} onChange={event => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear tool search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}</label>
         <div ref={library} className="toolkit-library__items">
           <LiquidSelectionSurface selected={selectedId} active={active && (!narrow || view === 'library')} targetAttribute="data-tool-id" />
           <p className="toolkit-library__group">Custom</p>
@@ -106,18 +120,18 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
             const identity = identityFor(id, entry), path = 'kind' in entry.value ? entry.value.packagePath : entry.value.workspacePath
             const directory = shortDirectory(path), fact = entry.expected ? packageFact(entry.expected, metadata.packages) : undefined
             return <button type="button" className="toolkit-library__item" key={id} data-tool-id={id} aria-pressed={selectedId === id} onClick={() => open(id)}>
-            <ToolkitIcon icon={identity.icon} size={17} /><span><strong>{identity.name}</strong><small>{'kind' in entry.value ? 'Custom · local package' : 'Custom · script'} · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}{fact?.availability === 'unavailable' ? ' · Source unavailable' : ''}</small><code title={path}>{path ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a local directory'}</code></span>{selectedId === id ? <Check className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
+            <ToolkitIcon icon={identity.icon} size={17} /><span><strong>{identity.name}</strong><small>{'kind' in entry.value ? 'Custom · local package' : 'Custom · script'} · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}{fact?.availability === 'unavailable' ? ' · Source unavailable' : ''}</small><code title={path}>{path ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a local directory'}</code></span>{selectedId === id ? <ThemeActionConfirmIcon className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
           </button>})}
           {!visible.length ? <p className="settings-resource-empty">{entries.length ? 'No matching custom tools. Your drafts are kept.' : 'Create a tool with your own script and actions.'}</p> : null}
           {showPerformance || showMobileConnection ? <p className="toolkit-library__group">Built-in</p> : null}
-          {showPerformance ? <><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={selectedId === 'performance'} onClick={() => open('performance')}><Activity size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><LockKeyhole className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
-          {showMobileConnection ? <button type="button" className="toolkit-library__item" data-tool-id={MOBILE_CONNECTION_TOOL_ID} aria-pressed={selectedId === MOBILE_CONNECTION_TOOL_ID} onClick={() => open(MOBILE_CONNECTION_TOOL_ID)}><Smartphone size={17} /><span><strong>手机连接</strong><small>Official · 连接与设备状态</small></span><LockKeyhole className="toolkit-library__official" size={12} aria-label="Official tool" /></button> : null}
+          {showPerformance ? <><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={selectedId === 'performance'} onClick={() => open('performance')}><ThemeObjectPerformanceIcon size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><ThemeStatusLockedIcon className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
+          {showMobileConnection ? <button type="button" className="toolkit-library__item" data-tool-id={MOBILE_CONNECTION_TOOL_ID} aria-pressed={selectedId === MOBILE_CONNECTION_TOOL_ID} onClick={() => open(MOBILE_CONNECTION_TOOL_ID)}><ThemeObjectPhoneIcon size={17} /><span><strong>手机连接</strong><small>Official · 连接与设备状态</small></span><ThemeStatusLockedIcon className="toolkit-library__official" size={12} aria-label="Official tool" /></button> : null}
         </div>
       </section>
       <div className="toolkit-workbench__detail">
-        <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ArrowLeft size={13} /> Back to tools</button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
-        <div hidden={selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={selectedId !== MOBILE_CONNECTION_TOOL_ID}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ArrowLeft size={13} /> Back to tools</button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('手机连接显示配置尚未加载，草稿保留。'); await onSaveMobileConnection(value, expected) }} /></div>
-        {selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? isPackageDraft(selected) ? <ToolkitPackageEditor key={selectedId} id={selectedId} entry={selected} fact={selected.expected ? packageFact(selected.expected, metadata.packages) : undefined} active={active && (!narrow || view === 'editor')} pathInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={() => onRunTool(selectedId)} onBack={back} onRefresh={metadata.refresh} /> : isInlineDraft(selected) ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={definition => onRunTool(definition.id)} onBack={back} /> : null : <section className="toolkit-workbench__empty"><Wrench size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Make a tool your own.'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Start with any script. Give it a name and icon, then add buttons to its results.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> Create your first tool</button> : null}</section>}
+        <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
+        <div hidden={selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={selectedId !== MOBILE_CONNECTION_TOOL_ID}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('手机连接显示配置尚未加载，草稿保留。'); await onSaveMobileConnection(value, expected) }} /></div>
+        {selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? isPackageDraft(selected) ? <ToolkitPackageEditor key={selectedId} id={selectedId} entry={selected} fact={selected.expected ? packageFact(selected.expected, metadata.packages) : undefined} active={active && (!narrow || view === 'editor')} pathInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={() => onRunTool(selectedId)} onBack={back} onRefresh={metadata.refresh} /> : isInlineDraft(selected) ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={definition => onRunTool(definition.id)} onBack={back} /> : null : <section className="toolkit-workbench__empty"><ThemeObjectToolsIcon size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Make a tool your own.'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Start with any script. Give it a name and icon, then add buttons to its results.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> Create your first tool</button> : null}</section>}
       </div>
     </div>
   </div>

@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { ArrowLeft, Check, Plus, Search, Trash2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROMPT_REACTION_ICONS, PROMPT_REACTION_STARTERS, isPromptReactionCode, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
 import { PromptReactionIconView } from '@agentmux/client-ui/components/ConversationReactionActions'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
@@ -13,6 +13,14 @@ import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
+
+const ThemeActionCreatePromptIcon = semanticIconComponent('action.create-prompt')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'
 const providerName = (prompt: ComposerShortcut) => prompt.providerId ? `${agentProviderLabel(prompt.providerId)} only` : 'Every Agent'
@@ -141,18 +149,18 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     <div className="settings-pane-stack prompt-workbench" data-view={view}>
       <div className="settings-pane-toolbar prompt-workbench__toolbar">
         <span className="settings-resource-count">{drafts.length} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
-        <button type="button" className="small-button" onClick={add}><Plus size={13} /> Add prompt</button>
+        <button type="button" className="small-button" onClick={add}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
-          <button type="button" className="small-button" onClick={addReactionStarters}><Check size={13} /> Add quick replies</button> : null}
+          <button type="button" className="small-button" onClick={addReactionStarters}><ThemeStatusSelectedIcon size={13} /> Add quick replies</button> : null}
       </div>
       <div className="prompt-workbench__body">
         <section className="prompt-library" aria-label="Prompt library">
-          <label className="prompt-library__search"><Search size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
+          <label className="prompt-library__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}</label>
           <div ref={library} className="prompt-library__items">
             <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => (
               <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
-                <span className="prompt-library__name">{candidate.reactionIcon ? <PromptReactionIconView icon={candidate.reactionIcon} size={13} /> : null}<strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <Check size={13} aria-label="Selected prompt" /> : null}</span>
+                <span className="prompt-library__name">{candidate.reactionIcon ? <PromptReactionIconView icon={candidate.reactionIcon} size={13} /> : null}<strong>{promptName(candidate)}</strong>{selectedId === candidate.id ? <ThemeStatusSelectedIcon size={13} aria-label="Selected prompt" /> : null}</span>
                 <code>{candidate.keyword.trim() ? `/${candidate.keyword.trim()}` : 'No keyword yet'}</code>
                 <span className="prompt-library__body">{candidate.body.trim().split('\n').find((line) => line.trim()) || 'Write an instruction…'}</span>
                 <span className="prompt-library__scope">{providerName(candidate)} · {candidate.reactionIcon ? 'Reply card' : candidate.states?.length ? candidate.states.map(stateName).join(', ') : 'Draft shortcut'}</span>
@@ -163,7 +171,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
           {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No matching prompts. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
         </section>
         {prompt ? <section className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
-          <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ArrowLeft size={13} /> Back to prompts</button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}>{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
+          <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}>{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
           {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search. <button type="button" className="small-button" onClick={() => setQuery('')}>Show in library</button></p> : null}
           <div className="agent-settings-fields prompt-editor__fields">
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
@@ -184,7 +192,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
               return <label key={state}><input type="checkbox" value={state} checked={prompt.states?.includes(state) ?? false} onChange={(event) => update(prompt.id, { states: event.target.checked ? [...(prompt.states ?? []), state] : (prompt.states ?? []).filter((candidate) => candidate !== state) })} /><span><strong>{meaning.label} <code>{state}</code></strong><small>{meaning.description}</small></span></label>
             })}</div><small>Each selection matches its exact state. Running does not include working. Visibility is separate from whether a message can be sent.</small></fieldset>
             <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
-            <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><Trash2 size={13} /> Delete prompt</> : <><X size={13} /> Cancel new prompt</>}</button></div>
+            <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionRemoveIcon size={13} /> Cancel new prompt</>}</button></div>
           </div>
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
       </div>

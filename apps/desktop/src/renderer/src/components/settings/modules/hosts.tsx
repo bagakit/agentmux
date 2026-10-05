@@ -1,9 +1,12 @@
-import { Server } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig, HostConfig, WorkspaceRecord } from '../../../../../shared/contracts'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { HostSettingsPane } from '../HostSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectHostIcon = semanticIconComponent('object.host')
+
 
 async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>): Promise<void> {
   const current = useAppStore.getState().config
@@ -16,7 +19,7 @@ export const hostsSettingsModule = {
   group: 'connections',
   title: 'Environments',
   description: 'Connections, project folders, and remote access.',
-  icon: Server,
+  icon: ThemeObjectHostIcon,
   keywords: 'host hosts ssh remote hostname user port key test connection environment project folder workspace worktree register open',
   savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'environment' : 'environments'}`,
   Pane({ config, active, onClose, navigationRequest }) {

@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Plus, RadioTower, Trash2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
@@ -15,6 +15,16 @@ import { ConfirmationDialog } from '../ConfirmationDialog'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { HostUpgradePanel } from './HostUpgradePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
+
+const ThemeActionCreateHostIcon = semanticIconComponent('action.create-host')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
+const ThemeStatusInfoIcon = semanticIconComponent('status.info')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeObjectBroadcastIcon = semanticIconComponent('object.broadcast')
+
 
 const NO_SESSIONS: SessionSnapshot[] = []
 const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
@@ -172,7 +182,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     <div className="settings-pane-stack settings-resource-workbench" data-resource-view={view}>
       <div className="settings-pane-toolbar">
         <span className="settings-resource-count">{filter.query.trim() ? `${hosts.filter((host) => matches(host.id)).length} of ` : ''}{hosts.length} {hosts.length === 1 ? 'connection' : 'connections'}</span>
-        <button className="small-button" disabled={saving} onClick={addHost}><Plus size={13} /> Add SSH host</button>
+        <button className="small-button" disabled={saving} onClick={addHost}><ThemeActionCreateHostIcon size={13} /> Add SSH host</button>
       </div>
       <div className="settings-resource-split">
         <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
@@ -184,11 +194,11 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               projectCount: projects,
               detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local machine'}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
-              status: <span className={`settings-resource-row__check check-pill--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check?.state === 'ready' ? <CheckCircle2 size={13} /> : <Info size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
+              status: <span className={`settings-resource-row__check check-pill--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon className="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
           })} />
         <div ref={editor} className="settings-resource-editor">
-          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ArrowLeft size={14} /> All connections</button>
+          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All connections</button>
         {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
           const sessionCount = sessions.filter((session) => session.hostId === host.id).length
@@ -199,17 +209,17 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                 <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local machine'}</small></div>
                 {check ? (
                   <span role="status" className={`check-pill check-pill--${check.state === 'error' ? check.result?.outcome ?? 'check-failed' : check.state}`}>
-                    {check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> :
-                      check.state === 'ready' ? <CheckCircle2 size={13} /> : check.state === 'error' ? <Info size={13} /> : null}
+                    {check.state === 'checking' ? <ThemeStatusLoadingIcon className="spin" size={13} /> :
+                      check.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : check.state === 'error' ? <ThemeStatusInfoIcon size={13} /> : null}
                     {hostCheckLabel(check)}
                   </span>
                 ) : null}
                 {panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
-                {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
+                {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><ThemeActionRemoveIcon size={14} /></button> : null}
               </header>
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">
-                  <summary>Test details <ChevronDown size={13} /></summary>
+                  <summary>Test details <ThemeNavigationDownIcon size={13} /></summary>
                   <p className="host-check-detail">{check.detail}</p>
                 </details>
               ) : <p className="host-check-detail">{check.detail}</p> : null}
@@ -241,7 +251,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               connectionChanged={JSON.stringify(draft) !== JSON.stringify(committed)}
               active={active && selectedId === id && panel === 'projects'} hidden={selectedId !== id || panel !== 'projects'} onClose={onClose} />
           })}
-          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><RadioTower size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your environments'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
+          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectBroadcastIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your environments'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
         </div>
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
@@ -276,7 +286,7 @@ function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
       </div>
       <p className="settings-group-note">Use an alias from your SSH config, or a hostname. Connects to an existing AgentMux service; Test verifies this connection.</p>
       <details className="host-edit-disclosure" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
-        <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ChevronDown size={13} /></summary>
+        <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ThemeNavigationDownIcon size={13} /></summary>
         <div className="host-edit-grid">
         <label><span>User</span><TextInput value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="From SSH config" /></label>
         <label><span>Port</span><TextInput type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="From SSH config" /></label>

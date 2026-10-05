@@ -1,10 +1,14 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { Search, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useRef, useState } from 'react'
 import { buildCheatSheet, type CheatSheetRow } from '../../lib/shortcut-cheat-sheet'
 import { bindingById, type ShortcutBinding } from '../../lib/shortcut-registry'
 import { isMacPlatform } from '../../lib/host-platform'
 import '../../styles/settings-keyboard-shortcuts.css'
+
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+
 
 function scopeDescription(binding: ShortcutBinding): string {
   switch (binding.scope) {
@@ -35,7 +39,7 @@ export function KeyboardShortcutsPane() {
   return <div className="keyboard-shortcuts" data-keyboard-shortcuts>
     <div className="keyboard-shortcuts__intro"><p>Shortcuts for {isMac ? 'macOS' : 'this platform'}. These bindings are read-only.</p></div>
     <div className="keyboard-shortcuts__tools">
-      <label className="keyboard-shortcuts__search"><Search size={14} aria-hidden="true" /><TextInput ref={search} aria-label="Find a command or shortcut" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a command or shortcut" />{query ? <button type="button" aria-label="Clear shortcut search" onClick={clearSearch}><X size={13} /></button> : null}</label>
+      <label className="keyboard-shortcuts__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={search} aria-label="Find a command or shortcut" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a command or shortcut" />{query ? <button type="button" aria-label="Clear shortcut search" onClick={clearSearch}><ThemeActionClearIcon size={13} /></button> : null}</label>
       <span className="keyboard-shortcuts__count" role="status">{count} {count === 1 ? 'binding' : 'bindings'}</span>
     </div>
     {count === 0 ? <div className="keyboard-shortcuts__empty"><p>No shortcuts match “{query}”.</p><button type="button" className="small-button" onClick={clearSearch}>Clear search</button></div> : null}

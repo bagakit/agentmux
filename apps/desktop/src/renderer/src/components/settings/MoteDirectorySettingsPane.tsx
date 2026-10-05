@@ -1,9 +1,15 @@
 import type { CSSProperties } from 'react'
-import { ArrowUpRight, List, UserRound, Users } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_VIEW_IDS, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_MIN, MOTE_DIRECTORY_AVATAR_SIZE_MAX, type MoteDirectoryView } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/mote-directory.css'
+
+const ThemeObjectTeamIcon = semanticIconComponent('object.team')
+const ThemeObjectListIcon = semanticIconComponent('object.list')
+const ThemeObjectUserIcon = semanticIconComponent('object.user')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 export const moteDirectoryViewLabel = (value: MoteDirectoryView | undefined): string =>
   (value ?? MOTE_DIRECTORY_VIEW_DEFAULT) === 'collaborators' ? 'Collaborators' : 'List'
@@ -30,12 +36,12 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
             {[0, 1, 2].map(index => <span key={index}><i /><b /></span>)}
           </span>
           <span className="mote-directory-settings__choice"><input type="radio" name="mote-directory-view" value={value} checked={draft.value.view === value} onChange={() => draft.setField('view', value)} />
-            {value === 'collaborators' ? <Users size={14} /> : <List size={14} />}{moteDirectoryViewLabel(value)}</span>
+            {value === 'collaborators' ? <ThemeObjectTeamIcon size={14} /> : <ThemeObjectListIcon size={14} />}{moteDirectoryViewLabel(value)}</span>
         </label>)}
       </fieldset>
       <fieldset className="mote-directory-sizes"><legend className="sr-only">Avatar size presets</legend>
         {[24, 32, 40, 48].map(size => <button type="button" key={size} aria-label={`${size}px avatar`} aria-pressed={draft.value.avatarSize === size}
-          onClick={() => draft.setField('avatarSize', size)}><span className="mote-directory-sizes__silhouette" style={{ width: size, height: size }} aria-hidden="true"><UserRound size={size * .7} strokeWidth={1.5} /></span><small>{size}</small></button>)}
+          onClick={() => draft.setField('avatarSize', size)}><span className="mote-directory-sizes__silhouette" style={{ width: size, height: size }} aria-hidden="true"><ThemeObjectUserIcon size={size * .7} strokeWidth={1.5} /></span><small>{size}</small></button>)}
       </fieldset>
       <label className="mote-directory-size"><span>Avatar size</span><input type="range" min={MOTE_DIRECTORY_AVATAR_SIZE_MIN} max={MOTE_DIRECTORY_AVATAR_SIZE_MAX} step={1} value={draft.value.avatarSize}
         onChange={event => draft.setField('avatarSize', Number(event.target.value))} /><output>{draft.value.avatarSize}px</output></label>
@@ -45,7 +51,7 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
       <header><span>Your collaborators</span></header>
       <div className="settings-workflows__inline-action">
         <p className="settings-workflows__note">Profiles, avatars and behavior belong to each Mote.</p>
-        <button type="button" className="small-button" onClick={onOpen}>Open Mote Club<ArrowUpRight size={14} aria-hidden="true" /></button>
+        <button type="button" className="small-button" onClick={onOpen}>Open Mote Club<ThemeActionOpenExternalIcon size={14} aria-hidden="true" /></button>
       </div>
     </section>
   </div>

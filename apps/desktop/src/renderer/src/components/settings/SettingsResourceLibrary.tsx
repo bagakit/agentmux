@@ -1,6 +1,10 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { Check, Search } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+
 
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
 
@@ -30,7 +34,7 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   const tabId = items.some((item) => item.id === focusedId) ? focusedId : items.some((item) => item.id === selectedId) ? selectedId : items[0]?.id
   return (
     <aside className="settings-resource-library">
-      <label className="settings-resource-search"><Search size={14} aria-hidden="true" />
+      <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
         <TextInput ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
       </label>
       <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label}>
@@ -51,7 +55,7 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
           }}>
           <span className="settings-resource-row__mark">{item.mark}</span>
           <span className="settings-resource-row__text"><strong>{item.name}</strong><small>{item.detail}</small></span>
-          <span className="settings-resource-row__status">{item.status}{selectedId === item.id ? <Check size={13} aria-hidden="true" /> : null}</span>
+          <span className="settings-resource-row__status">{item.status}{selectedId === item.id ? <ThemeStatusSelectedIcon size={13} aria-hidden="true" /> : null}</span>
         </button>)}
         {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No ${label.toLowerCase()} match “${query}”.` : `No ${label.toLowerCase()} yet.`}</p> : null}
       </div>

@@ -1,4 +1,4 @@
-import { Users } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { requestPmoTeamsTopicFloatingOpen } from '../../../lib/pmo-teams-topic-floating'
 import { MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT } from '../../../../../shared/contracts'
 import { api } from '../../../lib/api'
@@ -6,8 +6,11 @@ import { useAppStore } from '../../../store'
 import { MoteDirectorySettingsPane, moteDirectoryViewLabel, type MoteDirectoryDisplay } from '../MoteDirectorySettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
+const ThemeObjectTeamIcon = semanticIconComponent('object.team')
+
+
 export const moteSettingsModule = {
-  id: 'mote', group: 'mote', title: 'Mote Club', icon: Users,
+  id: 'mote', group: 'mote', title: 'Mote Club', icon: ThemeObjectTeamIcon,
   description: 'Directory view and your collaborators’ profiles.',
   keywords: 'mote club collaborator collaborators profile roles soul avatar directory list view size',
   savedSummary: config => `${moteDirectoryViewLabel(config.moteDirectoryView)} · ${config.moteDirectoryAvatarSize ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT}px · Profiles and SOUL`,

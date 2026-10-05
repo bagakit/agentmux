@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import { ArrowLeft, Code2, Folder, Play, Plus, Trash2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { lazy, Suspense, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { TOOLKIT_ICON_IDS } from '../../../../shared/toolkit-preferences'
@@ -10,6 +10,15 @@ import { SettingsSaveBar } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './use-toolkit-drafts'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeActionStartIcon = semanticIconComponent('action.start')
+const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
+const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
+const ThemeActionAddOperationIcon = semanticIconComponent('action.add-operation')
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+const ThemeActionAddArgumentIcon = semanticIconComponent('action.add-argument')
+
 
 const ScriptEditor = lazy(() => import('./ToolkitScriptEditor'))
 
@@ -68,9 +77,9 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   }
   return <section className="toolkit-editor" data-tool-editor={id} aria-label={`Edit ${tool.name.trim() || 'new tool'}`}>
     <header className="toolkit-editor__heading">
-      <button type="button" className="small-button toolkit-editor__back" onClick={onBack}><ArrowLeft size={13} /> Back to tools</button>
+      <button type="button" className="small-button toolkit-editor__back" onClick={onBack}><ThemeNavigationBackIcon size={13} /> Back to tools</button>
       <span className="toolkit-editor__metadata"><span>Custom tool · JavaScript ESM</span><span className="toolkit-editor__status" data-dirty={dirty}>{entry.saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
-      <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><Play size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button>
+      <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><ThemeActionStartIcon size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button>
     </header>
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
     <div className="toolkit-editor__identity">
@@ -93,28 +102,28 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       <p className="settings-hint">Buttons shown with a confirmed result. Each action runs its saved script in this tool’s fixed directory.</p>
       <div className="toolkit-action-list">
         {actions.map(item => <div className="toolkit-action-list__row" key={item.id}>
-          <button type="button" aria-pressed={actionId === item.id} data-toolkit-edit-action={item.id} onClick={() => chooseAction(item.id)}><Code2 size={13} /><span>{item.label.trim() || 'Untitled action'}</span></button>
-          <button type="button" className="small-button" aria-label={`Remove action ${item.label.trim() || 'Untitled action'}`} onClick={() => { onEdit({ actions: actions.filter(value => value.id !== item.id) }); if (actionId === item.id) setActionId(null) }}><X size={13} /></button>
+          <button type="button" aria-pressed={actionId === item.id} data-toolkit-edit-action={item.id} onClick={() => chooseAction(item.id)}><ThemeObjectSourceCodeIcon size={13} /><span>{item.label.trim() || 'Untitled action'}</span></button>
+          <button type="button" className="small-button" aria-label={`Remove action ${item.label.trim() || 'Untitled action'}`} onClick={() => { onEdit({ actions: actions.filter(value => value.id !== item.id) }); if (actionId === item.id) setActionId(null) }}><ThemeActionRemoveIcon size={13} /></button>
         </div>)}
       </div>
-      <button type="button" className="small-button" disabled={actions.length >= 16} onClick={addAction}><Plus size={13} /> Add action</button>
+      <button type="button" className="small-button" disabled={actions.length >= 16} onClick={addAction}><ThemeActionAddOperationIcon size={13} /> Add action</button>
     </details>
     {displayOpen || actionId !== null ? <div className="toolkit-editor__action-heading">
-      <button type="button" className="small-button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ArrowLeft size={13} /> Main script</button>
+      <button type="button" className="small-button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ThemeNavigationBackIcon size={13} /> Main script</button>
       {displayOpen ? <p className="settings-hint">Runs once when the tool is displayed, including a hover that opens its panel. Refresh runs it again. Use a script that is safe to repeat.</p> : action ? <label><span>Action button label</span><TextInput ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
     </div> : null}
     <section className="toolkit-editor__script" aria-label={displayOpen ? 'Display JavaScript script' : actionId === null ? 'JavaScript script' : 'Action JavaScript script'}>
-      <header><span><Code2 size={13} /> {scriptTitle}</span><span>JavaScript</span></header>
+      <header><span><ThemeObjectSourceCodeIcon size={13} /> {scriptTitle}</span><span>JavaScript</span></header>
       {active && (displayOpen ? Boolean(tool.display) : actionId === null || action) ? <Suspense fallback={<p className="settings-hint">Opening script editor…</p>}><ScriptEditor key={JSON.stringify([id, displayOpen, actionId])} id={id} actionId={actionId} display={displayOpen} value={displayOpen ? tool.display!.script : actionId === null ? tool.script : action!.script} onChange={script => editScript({ script })} /></Suspense> : null}
     </section>
     <p className="settings-hint">{displayOpen ? 'Save to enable evaluation when displayed. This script runs as your local user with the same file and network access as the main script.' : actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run the main script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
     <details className="toolkit-editor__scope"><summary>Local execution scope</summary><p>Your script can read and write local files, environment variables and the network. It uses your current user account; it is not sandboxed.</p></details>
     <div className="toolkit-editor__fields">
-      <label><span><Folder size={13} /> Fixed working directory</span><TextInput value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Choose an absolute local directory" /><small>Does not follow the current Agent or focused workspace.</small></label>
+      <label><span><ThemeObjectFolderIcon size={13} /> Fixed working directory</span><TextInput value={tool.workspacePath} onChange={event => onEdit({ workspacePath: event.target.value })} placeholder="Choose an absolute local directory" /><small>Does not follow the current Agent or focused workspace.</small></label>
       <label className="toolkit-editor__toggle"><span><strong>Show in status bar</strong><small>Hide the entry and prevent new runs when off. An existing run keeps its captured version.</small></span><input type="checkbox" checked={tool.enabled} onChange={event => onEdit({ enabled: event.target.checked })} /></label>
       <div className="toolkit-editor__display">
         <label className="toolkit-editor__toggle"><span><strong>Evaluate when displayed</strong><small>Run a separate display script when its panel opens. No background polling.</small></span><input type="checkbox" aria-label="Evaluate when displayed" checked={Boolean(tool.display)} onChange={event => { onEdit({ display: event.target.checked ? { script: "console.log('Display ready')\n", args: [] } : null }); if (!event.target.checked) setDisplayOpen(false) }} /></label>
-        {tool.display ? <button type="button" className="small-button" aria-pressed={displayOpen} onClick={() => { setActionId(null); setDisplayOpen(true) }}><Code2 size={13} /> Edit display script</button> : null}
+        {tool.display ? <button type="button" className="small-button" aria-pressed={displayOpen} onClick={() => { setActionId(null); setDisplayOpen(true) }}><ThemeObjectSourceCodeIcon size={13} /> Edit display script</button> : null}
       </div>
       <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend><div className="toolkit-settings__choices">
         <LiquidSelectionSurface selected={tool.statusBar} active={active} targetAttribute="data-settings-target" />
@@ -125,14 +134,14 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       </div></fieldset>
       {(displayOpen ? Boolean(tool.display) : actionId === null || action) ? <details className="toolkit-editor__arguments"><summary>{displayOpen ? 'Display arguments' : actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
         <p className="settings-hint">Each argument is a separate value. No shell expansion or interpolation.</p>
-        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><X size={13} /></button></label>)}
-        <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><Plus size={13} /> Add argument</button>
+        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveIcon size={13} /></button></label>)}
+        <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</button>
       </details> : null}
     </div>
     {runFeedback ? <p className="settings-hint" role="status">{runFeedback}</p> : null}
     {operationError ? <p className="settings-inline-error" role="alert">{operationError}</p> : null}
     <footer className="toolkit-editor__footer">
-      <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><Trash2 size={13} /> Delete tool</> : <><X size={13} /> Cancel new tool</>}</button>
+      <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionRemoveIcon size={13} /> Cancel new tool</>}</button>
       <SettingsSaveBar save={save} dirty={dirty} disabled={invalid || entry.missing} label="Save tool" onSave={onSave} />
     </footer>
     <ConfirmationDialog open={confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />

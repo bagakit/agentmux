@@ -1,6 +1,10 @@
-import { Check, LoaderCircle } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
+
 
 export function useSettingsSave() {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -33,7 +37,7 @@ export function SettingsSaveBar({ save, dirty, label = 'Save changes', onSave, d
   return (
     <div className="settings-pane-actions" data-settings-save-bar>
       <span className={`settings-save-feedback ${save.error ? 'settings-inline-error' : ''}`} role={save.error ? 'alert' : 'status'}>
-        {save.error ? save.error : save.saving ? <><LoaderCircle className="spin" size={13} /> Saving changes…</> : dirty ? 'Unsaved changes' : save.state === 'saved' ? <><Check size={13} /> Changes saved</> : 'All changes saved'}
+        {save.error ? save.error : save.saving ? <><ThemeStatusLoadingIcon className="spin" size={13} /> Saving changes…</> : dirty ? 'Unsaved changes' : save.state === 'saved' ? <><ThemeStatusSavedIcon size={13} /> Changes saved</> : 'All changes saved'}
       </span>
       <button className="primary-button" disabled={save.saving || !dirty || disabled} onClick={onSave}>{save.saving ? 'Saving…' : label}</button>
     </div>

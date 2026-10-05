@@ -1,10 +1,13 @@
-import { MessageSquareText } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveComposerShortcuts } from '../../../../../shared/composer-shortcut-library'
 import type { ComposerShortcut } from '../../../../../shared/contracts'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { ShortcutSettingsPane } from '../ShortcutSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectContextIcon = semanticIconComponent('object.context')
+
 
 // An empty list is an authored deletion; never restore defaults based on length.
 async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[], expected: ComposerShortcut[]): Promise<void> {
@@ -18,7 +21,7 @@ export const promptsSettingsModule = {
   group: 'resources',
   title: 'Prompts',
   description: 'Keep your everyday instructions close at hand.',
-  icon: MessageSquareText,
+  icon: ThemeObjectContextIcon,
   keywords: 'prompt preset shortcut keyword slash command snippet template library review changes summarize progress eli5 custom',
   savedSummary(config) {
     const count = resolveComposerShortcuts(config).length

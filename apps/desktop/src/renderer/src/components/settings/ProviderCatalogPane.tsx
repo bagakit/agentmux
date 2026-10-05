@@ -1,6 +1,12 @@
-import { ArrowLeft, ArrowUpRight, LoaderCircle, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentCatalogEntry } from '@agentmux/core'
 import { AgentProviderIcon } from '../AgentProviderIcon'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 export function ProviderCatalogPane({ entries, read, saving, onRefresh, onBack, onCreate }: {
   entries: readonly AgentCatalogEntry[]
@@ -13,9 +19,9 @@ export function ProviderCatalogPane({ entries, read, saving, onRefresh, onBack, 
   const loading = read.state === 'loading'
   return <section className="settings-provider-catalog" aria-label="Provider catalog">
     <header className="settings-provider-catalog__header">
-      <button type="button" className="small-button" onClick={onBack}><ArrowLeft size={14} /> Executors</button>
+      <button type="button" className="small-button" onClick={onBack}><ThemeNavigationBackIcon size={14} /> Executors</button>
       <button type="button" className="small-button" disabled={loading} onClick={onRefresh}>
-        {loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
+        {loading ? <ThemeStatusLoadingIcon className="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         {loading ? 'Loading providers…' : read.state === 'error' ? 'Retry providers' : 'Refresh providers'}
       </button>
     </header>
@@ -37,7 +43,7 @@ export function ProviderCatalogPane({ entries, read, saving, onRefresh, onBack, 
         <span>{provider.capabilities.permission === 'respond' ? 'Permission responses' : provider.capabilities.permission === 'observe' ? 'Permission observation' : 'CLI permissions'}</span>
         <span>{provider.capabilities.providerResume ? 'Native resume' : 'No native resume'}</span>
       </div>
-      <button type="button" className="small-button" disabled={saving} aria-label={`Create executor with ${provider.label}`} onClick={() => onCreate(provider)}>Create executor <ArrowUpRight size={13} /></button>
+      <button type="button" className="small-button" disabled={saving} aria-label={`Create executor with ${provider.label}`} onClick={() => onCreate(provider)}>Create executor <ThemeActionOpenExternalIcon size={13} /></button>
     </li>)}</ul> : null}
   </section>
 }

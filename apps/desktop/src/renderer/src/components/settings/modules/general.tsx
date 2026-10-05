@@ -1,9 +1,12 @@
-import { Settings2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { GeneralSettingsPane, type GeneralSettingsValues } from '../GeneralSettingsPane'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../../../shared/contracts'
 import type { SettingsModule } from '../settings-catalog'
+
+const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
+
 
 async function saveGeneralSettings(value: GeneralSettingsValues, expected: GeneralSettingsValues): Promise<void> {
   const current = useAppStore.getState().config
@@ -21,7 +24,7 @@ export const generalSettingsModule = {
   group: 'preferences',
   title: 'General',
   description: 'Message Tool layout, project paths, local data, and diagnostics.',
-  icon: Settings2,
+  icon: ThemeObjectSettingsIcon,
   keywords: 'message tool initial layout one line two lines composer input tools 一行 两行 初始 copy path clipboard home directory ~ tilde abbreviate absolute full shorten core runtime terminal tmux ssh show crash log session recovery',
   savedSummary: (config) => `${config.copyPathsAsAbsolute === true ? 'Absolute paths' : 'Home paths (~)'} · ${(config.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT) === 'one-line' ? 'One-line Message Tool' : 'Two-line Message Tool'}`,
   Pane({ config }) {
