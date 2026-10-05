@@ -142,29 +142,31 @@ export function sameSpatialValue(a: unknown, b: unknown): boolean {
     keys.every(key => Object.hasOwn(right, key) && sameSpatialValue(left[key], right[key]));
 }
 /** Rebase only disjoint document edits. Overlapping edits stay visible and unsaved. */
-export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentMuxSpatialGraph, remote: AgentMuxSpatialGraph): AgentMuxSpatialGraph {
+export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentMuxSpatialGraph, remote: AgentMuxSpatialGraph, intermediate: AgentMuxSpatialGraph = base): AgentMuxSpatialGraph {
   const result = structuredClone(remote), same = sameSpatialValue;
   const arrays = [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId'], ['bindings', null], ['projectGroups', 'groupId']] as const;
   for (const [field, key] of arrays) {
-    if (field === 'projectGroups' && !base.projectGroups && !local.projectGroups && !remote.projectGroups) continue;
+    if (field === 'projectGroups' && !base.projectGroups && !local.projectGroups && !remote.projectGroups && !intermediate.projectGroups) continue;
     const identity = (value: unknown) => key ? String((value as Record<string, unknown>)[key]) : JSON.stringify([(value as {
         zoneId: string;
       }).zoneId, (value as {
         spaceId: string;
       }).spaceId]);
     const original = new Map((base[field] ?? []).map(v => [identity(v), v])), changed = new Map((local[field] ?? []).map(v => [identity(v), v])), current = new Map((remote[field] ?? []).map(v => [identity(v), v]));
-    for (const id of new Set([...original.keys(), ...changed.keys()])) {
-      let before = original.get(id), after = changed.get(id);
+    const between = intermediate === base ? original : new Map((intermediate[field] ?? []).map(v => [identity(v), v]));
+    for (const id of new Set([...original.keys(), ...changed.keys(), ...between.keys()])) {
+      let before = original.get(id), after = changed.get(id), middle = between.get(id);
       // Label edits use their own exact revision; bulk layout reconciliation
       // always retains the acknowledged remote Tab name.
       if (field === 'tabs' && current.has(id)) {
         const name = (current.get(id) as AgentMuxSpatialGraph['tabs'][number]).name;
         if (before) before = { ...before as AgentMuxSpatialGraph['tabs'][number], name };
         if (after) after = { ...after as AgentMuxSpatialGraph['tabs'][number], name };
+        if (middle) middle = { ...middle as AgentMuxSpatialGraph['tabs'][number], name };
       }
-      if (same(before, after))
+      if (same(before, after) && same(middle, after))
         continue;
-      if (!same(current.get(id), before) && !same(current.get(id), after))
+      if (!same(current.get(id), before) && !same(current.get(id), middle) && !same(current.get(id), after))
         throw new Error('The same spatial entity was edited elsewhere. Local changes are retained; inspect the current graph before retrying.');
       if (after === undefined)
         current.delete(id);
@@ -175,12 +177,12 @@ export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentM
     (result as unknown as Record<string, unknown>)[field] = [...current.values()];
   }
   for (const field of ['layouts', 'tabLayouts', 'resources'] as const) {
-    for (const id of new Set([...Object.keys(base[field]), ...Object.keys(local[field])])) {
+    for (const id of new Set([...Object.keys(base[field]), ...Object.keys(local[field]), ...Object.keys(intermediate[field])])) {
       if (field === 'resources' && id === AGENTMUX_DISPLAY_LABEL_RESOURCE) continue;
-      const before = base[field][id], after = local[field][id];
-      if (same(before, after))
+      const before = base[field][id], after = local[field][id], middle = intermediate[field][id];
+      if (same(before, after) && same(middle, after))
         continue;
-      if (!same(remote[field][id], before) && !same(remote[field][id], after))
+      if (!same(remote[field][id], before) && !same(remote[field][id], middle) && !same(remote[field][id], after))
         throw new Error('The same spatial layout or resource was edited elsewhere. Local changes are retained; inspect the current graph before retrying.');
       if (after === undefined)
         delete result[field][id];
@@ -200,6 +202,7 @@ export class DesktopSpatialPersistence {
     baseline: AgentMuxSpatialState;
   } | null = null;
   private saving: Promise<void> | null = null;
+  private unconfirmed: { baseline: AgentMuxSpatialState; input: AgentMuxSpatialGraph; graph: AgentMuxSpatialGraph } | null = null;
   private readonly removed = new Set<string>();
   private readonly removedProjectGroups = new Set<string>();
   removeProjectGroup(id: string): void { this.removedProjectGroups.add(id); }
@@ -212,7 +215,10 @@ export class DesktopSpatialPersistence {
   get current(): AgentMuxSpatialState | null { return this.state; }
   acceptNames(state: AgentMuxSpatialState): void {
     if (this.state && state.revision < this.state.revision) return;
-    if (this.pending) this.pending = { baseline: state,
+    // The serialized save owns an in-flight or unconfirmed input relationship.
+    // Keep that intent and mark the newer observation so an older layout ACK
+    // cannot apply before flush reconciles the independent name facts.
+    if (this.pending) this.pending = this.saving || this.unconfirmed ? { ...this.pending } : { baseline: state,
       graph: reconcileSpatialGraphs(this.pending.baseline.graph, this.pending.graph, state.graph) };
     this.state = state;
   }
@@ -275,7 +281,9 @@ export class DesktopSpatialPersistence {
       this.warn(new Error('Core spatial state has not been confirmed. Original work is retained; restore storage and retry.'));
       return;
     }
-    if (sameSpatialValue(graph, this.state!.graph))
+    // Compare with the latest intent: returning to the confirmed graph can undo
+    // an in-flight edit, while repeating that edit should not enqueue another write.
+    if (sameSpatialValue(graph, this.pending?.graph ?? this.state!.graph))
       return;
     this.pending = { graph, baseline: this.state! };
     // Coalesce synchronous structural changes; this never opens a resource or Run.
@@ -297,9 +305,24 @@ export class DesktopSpatialPersistence {
       const remote = await this.port.read();
       if (!remote)
         throw new Error('The durable spatial document is unavailable. Pending work is retained.');
-      const graph = remote.revision === baseline.revision ? local : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
-      const next = await this.port.commit({ expectedRevision: remote.revision, graph, allowEntityRemoval: removals.size > 0,
-        ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) });
+      const uncertain = this.unconfirmed;
+      // A lost ACK may have saved the intermediate edit. Carry the subsequent
+      // input delta onto that attempted graph, retaining unrelated observed data.
+      // Equal values permit a merge; they never prove who applied the write.
+      const graph = uncertain ? reconcileSpatialGraphs(uncertain.baseline.graph,
+        reconcileSpatialGraphs(uncertain.input, local, uncertain.graph), remote.graph, uncertain.graph)
+        : remote.revision === baseline.revision ? local : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
+      let next: AgentMuxSpatialState;
+      try {
+        next = await this.port.commit({ expectedRevision: remote.revision, graph, allowEntityRemoval: removals.size > 0,
+          ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) });
+      } catch (error) {
+        // Each successful read supplies the next baseline, including after
+        // repeated lost replies. Do not apply an unconfirmed projection.
+        this.unconfirmed = { baseline: remote, input: local, graph };
+        throw error;
+      }
+      this.unconfirmed = null;
       this.state = next;
       for (const id of removals)
         this.removed.delete(id);
