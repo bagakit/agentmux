@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { flushSync } from 'react-dom'
 import '../agent-region-actions/entry'
@@ -5,7 +6,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { formatRegionAddress } from '../../../src/renderer/src/lib/agent-address'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import type { AgentSessionHistoryPage, AgentTimelineItem, ContinuousProgressLoop } from '@agentmux/core'
 
 const workspaceId = useAppStore.getState().activeWorkspaceId!
@@ -13,6 +14,7 @@ const tabId = 'region-actions-tab', leftId = 'region-actions-target', rightId = 
 const names = ['Layout coordinator · investigate recovery without losing this original Agent', 'Notes researcher', 'Build reviewer']
 const original = (window as any).regionActions
 const first = useAppStore.getState().sessions[0]!
+mountThemeRuntime(window, useAppStore.getState().config?.appearance ?? {})
 // Controlled API facts for the real UI: no timer, delivery or second loop manager.
 let progressLoops: ContinuousProgressLoop[] = []
 const progressListeners = new Set<(loop: ContinuousProgressLoop) => void>()
@@ -28,6 +30,13 @@ api.continuousProgress.onChanged = listener => {
 }
 const third = (await api.sessions.launchAgent({ executorId: first.executorId!, hostId: 'local', workspacePath: first.workspacePath })).session
 const clipboard: string[] = [], resizes: unknown[] = [], selections: unknown[] = []
+const waitCancelCalls: { sessionId: string; operationId: string; result: boolean }[] = []
+const cancelPreparation = useAppStore.getState().cancelAgentSteerPreparation
+useAppStore.setState({ cancelAgentSteerPreparation(sessionId, operationId) {
+  const result = cancelPreparation(sessionId, operationId)
+  waitCancelCalls.push({ sessionId, operationId, result })
+  return result
+} })
 const mailboxInputs: unknown[] = []
 for (const type of ['pointerenter', 'pointerdown', 'click', 'keydown', 'input', 'compositionstart', 'compositionend'])
   document.addEventListener(type, event => {
@@ -51,7 +60,8 @@ api.sessions.historyPage = async (control, options) => {
   return page
 }
 const copy = api.ui.writeClipboardText, resize = api.sessions.resize
-api.ui.writeClipboardText = async text => { clipboard.push(text); await copy(text) }
+let failCopy = false
+api.ui.writeClipboardText = async text => { clipboard.push(text); if (failCopy) throw new Error('Private clipboard refusal'); await copy(text) }
 api.sessions.resize = async (...args) => { resizes.push(args); return resize(...args) }
 for(const type of ['pointerdown','click','keydown'])document.addEventListener(type, event => {
   const item = event.target instanceof Element ? event.target.closest('[role="menuitem"]') : null
@@ -68,7 +78,32 @@ function naming() {
 }
 const probe = {
   names,
-  appearance(mode: 'dark' | 'light') { applyAppAppearance(mode) },
+  messageFeedback(kind: 'tool' | 'failed' | 'unknown' | 'waiting') {
+    const state = useAppStore.getState(), session = state.sessions.find(session => session.id === first.id)!
+    if (session.kind !== 'agent') throw new Error('Message feedback fixture needs the original Agent owner')
+    const id = 'original-feedback-operation', messageId = 'original-feedback-message', logId = 'original-feedback-log'
+    const identities = { hostId: session.hostId, agentSessionId: session.id, runId: session.control.run.runId, operationId: id, messageId, logId }
+    const raw = 'Original preparation unavailable.\n' + JSON.stringify(identities) + '\n' + 'Original diagnostic line.\n'.repeat(900) + 'original-diagnostic-tail-完整'
+    const text = 'Original unsent message.\n' + '原始正文 must remain available.\n'.repeat(20) + 'original-message-tail-完整'
+    let toolCalls = 0
+    api.ui.chooseFiles = async () => {
+      toolCalls++
+      if (toolCalls === 1) throw Object.assign(new Error(raw), { ...identities, detail: JSON.stringify(identities) })
+      return []
+    }
+    failCopy = false
+    flushSync(() => useAppStore.setState({ agentSteerQueues: { ...state.agentSteerQueues, [session.id]: kind === 'tool' ? [] : [{
+      operationId: id, runId: session.control.run.runId, text, status: 'deferred', promptCondition: null,
+      error: raw, errorCode: 'AGENT_PROMPT_PREPARATION_FAILED', logId,
+      ...(kind !== 'unknown' ? { preparationInputNotApplied: true as const } : {}), enqueuedAt: _reshape_fixtureEpoch(0, 0, 1),
+      ...(kind === 'unknown' ? { promptCondition: { expectedRun: { ...session.control.run }, afterSubmissionId: null } } : {}),
+      ...(kind === 'waiting' ? { preparationWait: { reason: 'context-compaction', state: 'waiting', attempt: 2, maxAttempts: 3, nextAttemptAt: Date.now() + 30_000 } } : {})
+    }] } }))
+    return { identities, raw, text }
+  },
+  failFeedbackCopy(value: boolean) { failCopy = value },
+  feedbackWaitCancelCalls() { return [...waitCancelCalls] },
+  appearance(mode: 'dark' | 'light') { return updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: mode }) },
   progress(state: 'inactive' | 'active' | 'paused' | 'unconfirmed' | 'stopped', full = false) {
     const loop: ContinuousProgressLoop = { loopId: 'visual-progress', hostId: first.hostId, agentSessionId: first.id,
       providerId: first.providerId, workspacePath: first.workspacePath, intervalMs: 1_800_000,
@@ -138,7 +173,7 @@ const probe = {
       }) },
       agentComposerDrafts: Object.fromEntries(sessions.map(session => [session.id, `Unsent original ${session.id}`])),
       agentSteerQueues: Object.fromEntries(sessions.map(session => [session.id, [{ operationId: `pending-${session.id}`,
-        runId: session.control.run.runId, text: `Unsent pending ${session.id}`, status: 'queued', enqueuedAt: 1 }]]))
+        runId: session.control.run.runId, text: `Unsent pending ${session.id}`, status: 'queued', enqueuedAt: _reshape_fixtureEpoch(0, 0, 1) }]]))
     }))
     return generation
   },
@@ -152,11 +187,11 @@ const probe = {
   },
   terminal() {
     const element = document.querySelector(`[data-workbench-region-id="${leftId}"] .xterm`) ?? document.querySelector('.xterm')
-    const terminals = (window as any).identityTerminals as Array<{ id: number; terminal: { element: Element | undefined; cols: number; rows: number }; disposed: boolean }>
+    const terminals = (window as any).identityTerminals as Array<{ id: number; terminal: { element: Element | undefined; cols: number; rows: number; buffer: { active: { cursorX: number; cursorY: number } } }; disposed: boolean }>
     const record = terminals.find(record => record.terminal.element === element)
     if (!record || record.disposed) throw new Error('The actual original xterm instance is absent')
     const r = element!.parentElement!.getBoundingClientRect()
-    return { id: record.id, cols: record.terminal.cols, rows: record.terminal.rows,
+    return { id: record.id, cols: record.terminal.cols, rows: record.terminal.rows, cursor: { x: record.terminal.buffer.active.cursorX, y: record.terminal.buffer.active.cursorY },
       container: { x: r.x, y: r.y, width: r.width, height: r.height }, resizes: resizes.length }
   }
 }

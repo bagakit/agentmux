@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -12,7 +13,7 @@ const failure = () => Object.assign(new Error(original), { code: 'AGENT_PROMPT_P
 const log = (): ClientDeliveryLog => ({ owner: 'original-owner', localSaved: true, localIssue: null, notificationIssue: null, remote: null, reportIssue: null,
   record: { logId, source: 'client', hostId: 'original-host', agentSessionId: 'original-session', expectedRunId: 'original-run',
     operationId: 'original-operation', afterSubmissionId: 'previous-submission', conditionAvailable: true, promptDigest: null,
-    execution: 'immediate', startedAt: 1, failedAt: 2, stage: 'core-submit', error: {
+    execution: 'immediate', startedAt: _reshape_fixtureEpoch(0, 0, 1), failedAt: _reshape_fixtureEpoch(0, 0, 2), stage: 'core-submit', error: {
       name: 'AgentMuxError', message: original, code: 'AGENT_PROMPT_PREPARATION_FAILED', detail: '{"original":"detail"}',
       controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }
     } } })
@@ -42,6 +43,24 @@ it('shows concise preparation cause and state while preserving the original erro
   for (const value of [logId, 'original-host', 'original-session', 'original-run', 'original-operation', 'previous-submission']) expect(report).toContain(value)
   expect(container.querySelector('[data-copy-state]')!.textContent).toBe('完整诊断已复制')
   expect(container.querySelector('pre')!.textContent).toBe(report)
+})
+
+it('the compact host presentation folds explanations without clipping original diagnostics or changing retry and copy receipts', async () => {
+  const copy = vi.fn<(text: string) => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const retry = vi.fn(), error = failure(), diagnostic = log()
+  await render(<MessageDeliveryFailure compact error={error} logId={logId} log={diagnostic} copyText={copy} onRetry={retry} />)
+  expect(container.querySelector('section')?.dataset.compact).toBe('true')
+  expect(container.querySelector('details')!.open).toBe(false)
+  expect(container.querySelector('.message-delivery-failure__state')!.closest('details')).not.toBeNull()
+  expect(container.querySelector('summary')!.textContent).toBe('详情')
+  await click(); expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('failed')
+  await click(); expect(container.querySelector('[data-copy-state]')!.getAttribute('data-copy-state')).toBe('copied')
+  const report = copy.mock.calls[1]![0]
+  expect(report).toBe(messageDeliveryDiagnosticReport({ error, logId, log: diagnostic }))
+  expect(container.querySelector('pre')!.textContent).toBe(report)
+  for (const value of [original, logId, 'original-host', 'original-session', 'original-run', 'original-operation', 'previous-submission']) expect(report).toContain(value)
+  expect(retry).not.toHaveBeenCalled()
+  await click('重试'); expect(retry).toHaveBeenCalledTimes(1)
 })
 
 it('only describes compaction from typed facts and this-call no-input evidence; original unknown takes precedence', () => {
