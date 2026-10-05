@@ -83,7 +83,6 @@
 .performance-runtime__overview em { font-size:var(--fs-meta); font-style:normal; color:var(--text-3); font-weight:400; }
 .performance-script { padding-top:var(--sp-4); }
 .performance-script textarea { display:block; width:100%; height:min(360px,50vh); resize:none; border:1px solid var(--line-soft); border-radius:var(--radius-sm); padding:var(--sp-4); background:var(--surface-1); color:var(--text-2); font:var(--fs-meta)/1.6 var(--font-mono); tab-size:2; }
-.performance-script textarea:focus-visible { outline:1px solid var(--focus-line); box-shadow:var(--focus-ring); }
 @media(max-width:400px) { .performance-header { padding-left:var(--sp-5); } .performance-observation { margin-inline:var(--sp-5); } .performance-body { padding-inline:var(--sp-5); } .performance-table-head,.performance-role-row,.performance-contributor__row { grid-template-columns:minmax(0,1fr) 48px 64px; gap:var(--sp-2); } .performance-metrics { gap:var(--sp-5); } .performance-actions { gap:var(--sp-1); } }
 
 .mobile-connection-toolkit { padding-top:var(--sp-4); }
