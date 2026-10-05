@@ -215,6 +215,7 @@ export async function registerIpc(args: {
   scratchTopics: ScratchTopics
   environmentWarning?: string
   onRendererUpdateReady?: (token: string) => void
+  onRendererStartupFailure?: (input: unknown) => boolean
   spatialLinks?: SpatialLinkIngress
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
@@ -1040,6 +1041,11 @@ export async function registerIpc(args: {
     }))
     // Electron returns void: this requests flush without claiming a disk acknowledgement.
     args.window.webContents.session.flushStorageData()
+  })
+  handleWithEvent('ui:recordStartupFailure', (event, input: unknown) => {
+    requireTrustedSender('ui:recordStartupFailure', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) return false
+    return args.onRendererStartupFailure?.(input) ?? false
   })
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
     requireTrustedSender('ui:rendererUpdateReady', event)

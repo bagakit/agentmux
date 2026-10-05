@@ -787,6 +787,7 @@ const mockApi: AgentMuxDesktopApi = {
     onNativeOverlayWarning: () => () => {},
     requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
+    recordStartupFailure: async () => false,
     spatialLinksReady: async () => {},
     openObjectLink: async () => { throw new Error('Object link navigation requires the desktop app. Open its original work surface in Desktop and retry.') },
     onSpatialLinkIssue: () => () => {},
