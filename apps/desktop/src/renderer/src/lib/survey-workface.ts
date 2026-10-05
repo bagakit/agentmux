@@ -24,6 +24,32 @@ export function surveyZoneItems(catalog: AgentMuxSpaceCatalog, collected: Survey
   return catalog.zones.filter(zone => collected[zone.zoneId] === true)
 }
 
+/** Explicit Tab removal retires only its Survey reference; unavailable membership is never emptiness. */
+export function surveyCollectionAfterClose(before: Readonly<Record<string, WorkbenchTab>>, after: Readonly<Record<string, WorkbenchTab>>,
+  collected: Record<string, true>, catalog: AgentMuxSpaceCatalog): Record<string, true> {
+  const facts = new Map(catalog.tabs.map(tab => [tab.tabId, tab]))
+  const removedZones = new Set(Object.keys(before).filter(id => !after[id]).flatMap(id => {
+    const fact = facts.get(id)
+    const zone = catalog.zones.find(zone => zone.zoneId === fact?.zoneId)
+    return fact?.zoneId && !fact.issue && zone && zone.kind !== 'unknown' && !zone.issue && collected[fact.zoneId]
+      ? [fact.zoneId] : []
+  }))
+  let next = collected
+  for (const zoneId of removedZones) {
+    const workspaceId = catalog.zones.find(zone => zone.zoneId === zoneId)!.workspaceId
+    const remaining = catalog.tabs.some(fact => !before[fact.tabId] &&
+      (fact.zoneId === zoneId || ((fact.zoneId === null || fact.issue) && fact.workspaceId === workspaceId))) || Object.values(after).some(tab => {
+      const fact = facts.get(tab.id)
+      // An unresolved member in the same resource could still belong to this Zone.
+      return fact?.zoneId === zoneId || ((!fact || fact.zoneId === null || fact.issue) && tab.workspaceId === workspaceId)
+    })
+    if (remaining) continue
+    if (next === collected) next = { ...collected }
+    delete next[zoneId]
+  }
+  return next
+}
+
 /** Selection is derived from current members; old display coordinates cannot block the Zone. */
 export function surveyResolvedZoneSelection(held: SurveyZoneSelection, projection: WorkbenchProjection | null,
   current: WorkbenchProjectionSelection | null = null): ResolvedSurveyZoneSelection {
