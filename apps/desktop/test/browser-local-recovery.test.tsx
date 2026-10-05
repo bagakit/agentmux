@@ -1,3 +1,4 @@
+import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import { BrowserLocalRecoveryFailure, BROWSER_LOCAL_RECOVERY_BUDGET, recoverBrowserTaskStep,
@@ -70,7 +71,7 @@ async function fixture() {
   expect(failure).toBeInstanceOf(BrowserLocalRecoveryFailure)
   expect(actions.map(action => action.objectId)).toEqual(['object-11'])
   let saved: BrowserOperationJournalDocument | null = null
-  const journal = new BrowserOperationJournal({ load: async () => null, save: async document => { saved = structuredClone(document) } })
+  const journal = new BrowserOperationJournal({ load: async () => null, save: async document => { saved = applyJournalChanges(saved, document) } })
   await journal.start({ id: identity.operationId, browserId: identity.browserId, operator: { id: 'agent-a', name: 'Agent' }, summary: 'Original task', url })
   const evaluation: BrowserOutcomeEvaluation = { context: { workspaceId: 'workspace-a', browserId: identity.browserId,
     operationId: identity.operationId, navigationId }, assetRun: { runId: identity.runId, assetId: identity.assetId, version: identity.version },

@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from '../src/main/browser-operation-feedback.js'
 import { AgentMuxControlServer, BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
@@ -836,6 +838,40 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     return { path, journal: new BrowserOperationJournal(new BrowserOperationFileStore(path)) }
   }
 
+  it('另一真实进程持写锁时 Main 仍完成健康 Browser，保留原增量待存储恢复', async () => {
+    const { path, journal } = fileJournal()
+    await journal.start({ id: 'original', browserId: 'b1', operator: { id: 'person', name: 'Person' }, summary: 'Original', url: 'https://example.invalid/' })
+    await journal.finish('original', 'completed')
+    const child = spawn(process.execPath, ['--input-type=module', '-e', `
+      import { DatabaseSync } from 'node:sqlite';
+      const database = new DatabaseSync(process.argv[1]);
+      database.exec('BEGIN IMMEDIATE');
+      process.stdout.write('locked');
+      process.stdin.once('data', () => { database.exec('ROLLBACK'); database.close(); process.exit(0); });
+    `, path], { stdio: ['pipe', 'pipe', 'ignore'] })
+    const exited = new Promise<void>((resolve, reject) => { child.once('exit', code => code === 0 ? resolve() : reject(new Error(`SQLite lock process exited ${code}`))); child.once('error', reject) })
+    try {
+      await new Promise<void>((resolve, reject) => { child.stdout.once('data', () => resolve()); child.once('exit', code => reject(new Error(`SQLite lock was not obtained (${code})`))); child.once('error', reject) })
+      const { manager, sentEvents } = await managerWithBrowser(journal)
+      const started = performance.now()
+      const report = await manager.runScript('b1', 'return await snapshot()')
+      expect(performance.now() - started, 'A storage lock blocked the Main event loop').toBeLessThan(1000)
+      expect(report.outcome.kind).toBe('completed')
+      expect(report.result).toBe('dispatched:snapshot')
+      expect(report.runOperation?.warning).toContain('could not be saved')
+      expect(sentEvents().at(-1)?.browser.activity.warning).toContain('could not be saved')
+      child.stdin.write('release'); await exited
+      await journal.finish(report.runOperation!.id, 'completed')
+      const recovered = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+      expect(await recovered.get('original')).toMatchObject({ id: 'original', phase: 'completed' })
+      expect(await recovered.get(report.runOperation!.id)).toMatchObject({ phase: 'completed', steps: [{ sequence: 1, status: 'completed' }] })
+    } finally {
+      if (child.exitCode === null) child.stdin.write('release')
+      await exited
+      await rm(dirname(path), { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('旧步骤缺口在 Main owner 拒绝整轮和单步，原页面仍可执行新操作', async () => {
     const { path, journal: first } = fileJournal()
     await first.start({ id: 'legacy-gap', browserId: 'b1', operator: { id: 'agent', name: 'Agent' }, summary: 'Original', url: 'https://example.invalid/' })
@@ -844,9 +880,11 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
       await first.finishStep('legacy-gap', index, { status: 'completed' })
     }
     await first.finish('legacy-gap', 'completed')
-    const document = JSON.parse(await readFile(path, 'utf8')) as BrowserOperationJournalDocument
+    const document = (await new BrowserOperationFileStore(path).load())!
     document.operations[0]!.steps = document.operations[0]!.steps.slice(1)
-    await writeFile(path, JSON.stringify(document)) // An actual old retained tail, not a new empty identity.
+    const database = new DatabaseSync(path)
+    database.prepare('DELETE FROM steps WHERE operation_id = ? AND sequence = 1').run('legacy-gap')
+    database.close() // A stored retained tail, not a new empty identity.
     const journal = new BrowserOperationJournal(new BrowserOperationFileStore(path))
     const { manager, contents } = await managerWithBrowser(journal)
     const surviving = document.operations[0]!.steps.map(step => step.replay!)
@@ -952,9 +990,11 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
         expect(createDispatch).not.toHaveBeenCalled()
         expect((await journal.get(id))?.steps).toHaveLength(2)
       }
-      const document = JSON.parse(await readFile(path, 'utf8')) as BrowserOperationJournalDocument
+      const document = (await new BrowserOperationFileStore(path).load())!
       document.operations.find(operation => operation.id === 'cli-original')!.steps.shift()
-      await writeFile(path, JSON.stringify(document))
+      const database = new DatabaseSync(path)
+      database.prepare('DELETE FROM steps WHERE operation_id = ? AND sequence = 1').run('cli-original')
+      database.close()
       const restored = new BrowserOperationJournal(new BrowserOperationFileStore(path))
       api.browser.replayPlan = id => restored.replayPlan(id)
       createDispatch.mockClear()
@@ -1025,7 +1065,7 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     // create a fresh owner until the completed snapshot is on disk: loading the transient running
     // version would correctly recover it as indeterminate and then overwrite the completed record.
     await vi.waitFor(async () => {
-      const document = JSON.parse(await readFile(path, 'utf8')) as { operations?: Array<{ id: string; phase: string }> }
+      const document = (await new BrowserOperationFileStore(path).load())!
       expect(document.operations?.find((operation) => operation.id === operationId)?.phase).toBe('completed')
     })
     const restarted = new BrowserOperationJournal(new BrowserOperationFileStore(path))
@@ -1333,7 +1373,7 @@ describe('Browser RSI：operation 凭 id 可查可停，与发起它的那条连
     // 等最后一次写落盘再换 owner：读到中途那份 running 版本会被正确地恢复成 indeterminate，
     // 然后把 completed 记录覆盖掉——那是竞态，不是被测的性质。
     await vi.waitFor(async () => {
-      const document = JSON.parse(await readFile(path, 'utf8')) as { operations?: Array<{ id: string; phase: string }> }
+      const document = (await new BrowserOperationFileStore(path).load())!
       expect(document.operations?.find((operation) => operation.id === finished)?.phase).toBe('completed')
     })
 
@@ -1345,17 +1385,10 @@ describe('Browser RSI：operation 凭 id 可查可停，与发起它的那条连
 
     // 另一档：重启时**活着**的操作。手写一条 running 记录进磁盘，再让新 owner 读它——这一步
     // 必须真的经过 journal 重载，不是手造一条 indeterminate 记录来自证。
-    const live = JSON.parse(await readFile(path, 'utf8')) as {
-      version: number
-      operations: Array<Record<string, unknown>>
-      events: unknown[]
-    }
-    live.operations.push({
+    await new BrowserOperationFileStore(path).save({ writer: 'crash-fixture', revision: 1, operations: [{ metadata: {
       id: 'op:was-running', browserId: 'b1', operator: { id: 'agent:x', name: 'Agent' },
-      startedAt: 1, phase: 'running', summary: 'Agent is operating the Browser',
-      url: 'https://example.invalid/', steps: []
-    })
-    await writeFile(path, JSON.stringify(live), 'utf8')
+      startedAt: 1, phase: 'running', summary: 'Agent is operating the Browser', url: 'https://example.invalid/'
+    }, steps: [] }], events: [], maxEvents: 512 })
     const { manager: afterCrash } = await managerWithBrowser(
       new BrowserOperationJournal(new BrowserOperationFileStore(path))
     )

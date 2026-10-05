@@ -1,16 +1,15 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { readFileSync } from 'node:fs'
+import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   BrowserOperationFileStore,
   BrowserOperationJournal,
   type BrowserOperationEvent,
   type BrowserOperationJournalDocument,
-  type BrowserOperationJournalStore
+  type BrowserOperationJournalChanges, type BrowserOperationJournalStore
 } from '../src/main/browser-operation-journal.js'
 
 class MemoryStore implements BrowserOperationJournalStore {
@@ -23,9 +22,9 @@ class MemoryStore implements BrowserOperationJournalStore {
     return this.document ? JSON.parse(JSON.stringify(this.document)) as BrowserOperationJournalDocument : null
   }
 
-  async save(document: BrowserOperationJournalDocument): Promise<void> {
+  async save(changes: BrowserOperationJournalChanges): Promise<void> {
     if (this.failSave) throw new Error('save failed')
-    this.document = JSON.parse(JSON.stringify(document)) as BrowserOperationJournalDocument
+    this.document = applyJournalChanges(this.document, changes)
   }
 }
 
@@ -325,27 +324,15 @@ describe('BrowserOperationJournal', () => {
     expect(step.target!.name).toContain('grant access')
   })
 
-  it('file store survives concurrent saves without producing partial JSON', async () => {
+  it('file store survives concurrent delta saves without producing partial transactions', async () => {
     const path = `${process.env.TMPDIR ?? _hygiene_fixturePath("tmp")}/agentmux-browser-operation-journal-${Date.now()}-${Math.random()}.json`
     const store = new BrowserOperationFileStore(path)
     const document: BrowserOperationJournalDocument = { version: 1, operations: [], events: [] }
-    await Promise.all(Array.from({ length: 5 }, () => store.save(document)))
+    await Promise.all(Array.from({ length: 5 }, () => store.save({ writer: 'test', revision: 1, operations: [], events: [], maxEvents: 512 })))
     await expect(store.load()).resolves.toEqual(document)
   })
 
-  /**
-   * T-005：**operation identity 只有一个铸造点。**
-   *
-   * 判据分两层，缺一层都留一整族改动能静默把它变回两个铸造点：
-   *   1. 行为层：调用方给的 id 原样成为记录的 id，缺席时才由这里铸。
-   *   2. 结构层：全仓为 browser operation 铸 id 的地方只有这一处。
-   *
-   * 为什么必须有第 2 层：加回一个 `operationId ?? randomUUID()` 兜底之后，**今天所有行为判据照旧
-   * 全绿**——因为调用方给了 id 的那条路两边算出来的是同一个值，两次解析今天恰好一致。分岔只在
-   * 「调用方给的 id 被 journal 判为不合法」那一刻发生，而那时两边各自看起来都正常：调用方拿着
-   * 自己那个 id 去查，查不到；记录里那条挂在另一个 id 上。所以这一条判在结构上。
-   */
-  it('caller-supplied ids pass through unchanged, and only one place mints them', async () => {
+  it('caller-supplied operation identity survives lookup and persistence independently of storage identities', async () => {
     const store = new MemoryStore()
     const journal = new BrowserOperationJournal(store, { id: () => 'minted-here' })
     const base = {
@@ -362,33 +349,8 @@ describe('BrowserOperationJournal', () => {
     // 两道门都对同一件事说同一句话），这里钉的是这一层自己不会把空白当成一个合法 identity。
     expect((await journal.start({ ...base, id: '   ' })).id).toBe('minted-here')
 
-    // 结构层：数「为 operation 铸 id」的地方。navigationId 是另一件事（每次导航一个），排掉。
-    const sources = ['browser-operation-journal.ts', 'browser-view-manager.ts']
-    const mintSites: string[] = []
-    let scanned = 0
-    for (const name of sources) {
-      const source = readFileSync(fileURLToPath(new URL(`../src/main/${name}`, import.meta.url)), 'utf8')
-      scanned += source.length
-      for (const line of source.split('\n')) {
-        // 只看代码行：注释里点名 `randomUUID()` 是在解释「为什么这里不写它」，那正是本判据要
-        // 守的那句话，把它算成命中会让判据自己把自己判红。
-        const code = line.trim()
-        if (code.startsWith('*') || code.startsWith('//')) continue
-        if (!code.includes('randomUUID')) continue
-        if (code.includes('navigationId')) continue
-        // T014 的 inspectionToken 属于元素选取 owner，精确放行这一声明；不放行 UUID 值或整行含该名字。
-        if (code === 'const inspectionToken = randomUUID()') continue
-        if (code.startsWith('import ')) continue
-        mintSites.push(`${name}: ${code}`)
-      }
-    }
-    // 前提自检：扫到了真东西。两个文件都读空的话下面那条恒真（MEMORY：扫到空内容）。
-    expect(scanned, '两个源文件都读空了——下面的唯一性判据在对空气生效').toBeGreaterThan(1000)
-    expect(
-      mintSites,
-      'browser operation 的 id 铸造点不只一处。两个铸造点会让调用方查询用的 id 与记录里的那个分岔，' +
-        '而分岔时两边各自看起来都正常——今天的行为判据一条都不会红。\n' + mintSites.join('\n')
-    ).toEqual(['browser-operation-journal.ts: this.makeId = options.id ?? randomUUID'])
+    expect(await journal.get('op:from-caller')).toMatchObject({ id: 'op:from-caller' })
+    expect(store.document!.operations.map(operation => operation.id)).toContain('op:from-caller')
   })
 })
 

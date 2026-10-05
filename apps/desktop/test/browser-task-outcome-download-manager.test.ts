@@ -123,7 +123,7 @@ async function fixture() {
   const beforeProducer: any[] = [], waitingMetadata: Array<{ name: string; bytes: Buffer }> = []
   const install = (target = runtime, mode: 'complete' | 'cancelled' | 'stop' = 'complete') => {
     target.contents.onDownloadClick = async () => {
-      const document = JSON.parse(await readFile(journalPath, 'utf8'))
+      const document = (await new BrowserOperationFileStore(journalPath).load())!
       const operations = document.operations
       expect(operations.length).toBeGreaterThan(0)
       const operation = operations.at(-1)

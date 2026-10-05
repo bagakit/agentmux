@@ -1,10 +1,11 @@
+import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { describe, expect, it } from 'vitest'
-import { BrowserOperationJournal, type BrowserOperationJournalDocument, type BrowserOperationJournalStore } from '../src/main/browser-operation-journal.js'
+import { BrowserOperationJournal, type BrowserOperationJournalDocument, type BrowserOperationJournalChanges, type BrowserOperationJournalStore } from '../src/main/browser-operation-journal.js'
 
 class MemoryStore implements BrowserOperationJournalStore {
   document: BrowserOperationJournalDocument | null = null
   async load() { return this.document ? structuredClone(this.document) : null }
-  async save(document: BrowserOperationJournalDocument) { this.document = structuredClone(document) }
+  async save(changes: BrowserOperationJournalChanges) { this.document = applyJournalChanges(this.document, changes) }
 }
 const start = (journal: BrowserOperationJournal, id: string) => journal.start({ id, browserId: `browser-${id}`,
   operator: { id: 'owner', name: 'Agent' }, summary: 'Original work', url: 'https://example.invalid/' })

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -14,15 +15,16 @@ const bridge = vi.hoisted(() => ({ executeControl: vi.fn(async () => ({ operatio
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: {
   getDemonstration: async () => ({ draft: null }), getTaskAssets: async () => ({ assets: [], runs: [] }),
   cancelElementSelection: async () => {}, setAnnotationMarkers: async () => {}, setBounds: async () => {},
+  onPresentationEvent: () => () => {},
   runTaskAsset: bridge.runTask, stopTaskAsset: bridge.stopTask, saveTaskAssetDraft: bridge.saveDraft,
   returnControl: bridge.returnControl
 }, ui: { getZoomFactor: () => 1 } } }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: (selector: (state: unknown) => unknown) => selector({
+vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: unknown) => unknown) => selector({
   executeControl: bridge.executeControl, reportError: bridge.reportError, applyBrowserEvent: vi.fn(),
   setWorkspaceTool: vi.fn(), saveBrowserBookmark: vi.fn(), openFile: vi.fn(),
-  config: { browser: { toolbar: { more: true } } }, toolsOpen: false,
-  browserAnnotationsByBrowserId: {}, addBrowserAnnotation: vi.fn()
-}) }))
+  config: { workspaces: [], browser: { toolbar: { more: true } } }, toolsOpen: false,
+  browserAnnotationsByBrowserId: {}, addBrowserAnnotation: vi.fn(), noticeReadReceipts: {}
+}), { setState: vi.fn() }) }))
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
 import { BrowserOperationStatus } from '../src/renderer/src/components/BrowserOperationSurface'
 import { BrowserTaskAssetEditor } from '../src/renderer/src/components/BrowserTaskAssetEditor'
@@ -49,7 +51,7 @@ async function ownerFixture(mode?: 'step') {
   const options = { now: () => at++, id: () => `owner-${++identity}` }
   const owner = new BrowserTaskAssets(store, options)
   const journal = new BrowserOperationJournal({ load: async () => journalDocument,
-    save: async next => { journalDocument = structuredClone(next) } }, options)
+    save: async next => { journalDocument = applyJournalChanges(journalDocument, next) } }, options)
   const imported = await owner.importRecording(recording)
   const draft = { ...imported.draft, name: 'Review profile', parameters: [{ key: 'name', label: 'Name', secret: true }], steps: [
     { ...imported.draft.steps[0]!, reviewed: true },
