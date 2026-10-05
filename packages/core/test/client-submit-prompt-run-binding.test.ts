@@ -1,9 +1,12 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
-import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import type { AgentPromptSubmissionCoordinator } from '../src/prompt-submission.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
@@ -16,9 +19,11 @@ import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
 
 const clients: AgentMuxClient[] = []
+const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
   await Promise.all(clients.splice(0).map((client) => client.dispose()))
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
 type Input = { operationId: string; expectedByte: number; data: string | Uint8Array }
@@ -42,7 +47,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-async function fixture(singlePhase = false) {
+async function fixture(singlePhase = false, durable = false) {
   const template = new AgentProviderRegistry().get('codex')
   const { providerFork: _fork, promptExecution: _immediate, ...capabilities } = template.catalog.capabilities
   const generic = defineAgentProvider({
@@ -51,7 +56,9 @@ async function fixture(singlePhase = false) {
     buildArgs: (_prompt, args) => [...args]
   })
   const providerId = singlePhase ? generic.id : 'codex'
-  const store = new AgentMuxMemoryAgentSessionStore()
+  const root = durable ? await mkdtemp(join(tmpdir(), 'amux-future-admission-')) : undefined
+  if (root) roots.push(root)
+  const store = root ? new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')) : new AgentMuxMemoryAgentSessionStore()
   const initial: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'bound-agent', providerId, executorId: providerId,
     hostId: 'local', workspacePath: fixturePath("repo"), run: { runId: 'original-run' }, retiredRuns: [],
@@ -214,8 +221,8 @@ describe('conditional exact Run prompt admission', () => {
 })
 
 describe('saved future-message admission', () => {
-  it('delegates a borrowed future-message save and occurrence through the finite original Host transport', async () => {
-    const h = await fixture(true)
+  it.each([false, true])('delegates a borrowed future-message save and occurrence through the finite original Host transport (durable=%s)', async durable => {
+    const h = await fixture(true, durable)
     h.inner.kernel.identity = () => ({ daemonInstanceId: 'bound-daemon', protocolVersion: 18, buildIdentity: 'private-future-host' })
     vi.spyOn(h.client, 'connect').mockResolvedValue()
     const saves = vi.spyOn(h.client, 'saveAgentFuturePromptIntent')
@@ -289,8 +296,8 @@ describe('saved future-message admission', () => {
     expect(rejected).toMatchObject({ code: 'AGENT_FUTURE_INTENT_CHANGED' })
     expect(await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-split')).not.toHaveProperty('lastOccurrenceAt')
   })
-  it('persists exact future intent through the production client and admits each occurrence once', async () => {
-    const h = await fixture(true)
+  it.each([false, true])('persists exact future intent through the production client and admits each occurrence once (durable=%s)', async durable => {
+    const h = await fixture(true, durable)
     await h.client.saveAgentFuturePromptIntent({ agentSessionId: 'bound-agent', intentId: 'schedule-1', operationId: 'saved-operation', prompt: 'hello', active: true })
     expect((await loadAgentSessions(h.store))[0]!.futurePromptIntents!['schedule-1']).toMatchObject({ operationId: 'saved-operation', prompt: 'hello', active: true, message: { userContent: 'hello' } })
     const future = { intentId: 'schedule-1', occurrenceAt: 1000 }

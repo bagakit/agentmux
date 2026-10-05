@@ -4,9 +4,9 @@ import { appendFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../../../..')
 const changes: Record<string, { path: string; from: string; to: string }> = {
-  'directory-ack-omitted': { path: 'packages/core/src/agent-session-store.ts', from: 'mode: 0o600, requireDirectorySync: true,', to: 'mode: 0o600, requireDirectorySync: false,' },
+  'directory-ack-omitted': { path: 'packages/core/src/agent-session-database.ts', from: 'for (const target of [path, dirname(path)])', to: 'for (const target of [path])' },
   'writer-lock-bypassed': { path: 'packages/core/src/agent-session-store.ts', from: 'if (native.tryLock(handle.fd)) return async () => { await handle.close() }', to: 'if (true) return async () => { await handle.close() }' },
-  'confirmation-snapshot-bypassed': { path: 'packages/core/src/agent-session-store.ts', from: 'const current = document.sessions.find(session => session.agentSessionId === agentSessionId)\n      if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession))', to: 'const current = document.sessions.find(session => session.agentSessionId === agentSessionId)\n      if (!current || current.run.runId !== expectedRun.runId)' },
+  'confirmation-snapshot-bypassed': { path: 'packages/core/src/agent-session-store.ts', from: 'const current = this.sessionMetadata(this.db, agentSessionId)\n      if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, agentSessionMetadata(expectedSession)))', to: 'const current = this.sessionMetadata(this.db, agentSessionId)\n      if (!current || current.run.runId !== expectedRun.runId)' },
   'readable-binding-discarded': { path: 'packages/core/src/agent-session-registry.ts', from: 'this.remember(session)\n        this.unconfirmedDurability.add', to: '/* mutation discards readable original binding */\n        this.unconfirmedDurability.add' }
 }
 const sha = (v: string) => createHash('sha256').update(v).digest('hex')

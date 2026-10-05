@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -142,7 +142,7 @@ describe('Session durable acknowledgement and kernel writer ownership', () => {
     expect(nextInstance.get(original.agentSessionId).nativeHandle).toEqual(registry.get(original.agentSessionId).nativeHandle)
   })
 
-  it('retains the same newly committed readable Session when rename succeeded but confirmation failed', async () => {
+  it('retains the same newly committed readable Session when its transaction succeeded but confirmation failed', async () => {
     const { store } = await setup(); const registry = new AgentMuxAgentSessionRegistry(store)
     const original = session(); const reservation = await registry.reserveNew(original.agentSessionId, 'original-create')
     ctl.directoryFailure = true
@@ -176,15 +176,18 @@ describe('Session durable acknowledgement and kernel writer ownership', () => {
     expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ nativeHandle: { sessionId: 'native-b' } })
   })
 
-  it('keeps original bytes on pre-replacement failure and refuses a changed confirmation target', async () => {
-    const { path, store } = await setup(); const original = session(); await store.compareAndSwap(null, original)
-    const registry = new AgentMuxAgentSessionRegistry(store); await registry.load('local'); const before = await readFile(path, 'utf8')
+  it('keeps original bytes on physical cutover failure and refuses a changed confirmation target', async () => {
+    const { path, store } = await setup(); const original = session()
+    const before = JSON.stringify({ version: 5, sessions: [original], reservations: [], retiredRuns: [], retiredAgentSessions: [] })
+    await writeFile(path, before)
     ctl.renameFailure = true
-    await expect(registry.update(original.agentSessionId, original.run, current => ({ ...current, updatedAt: 101 })))
-      .rejects.toMatchObject({ code: 'EIO' })
+    const error = await store.compareAndSwap(original, { ...original, updatedAt: 101 }).catch(error => error)
+    expect(error).toMatchObject({ code: 'AGENT_SESSION_STORE_UNAVAILABLE' })
+    expect(error.detail).toContain('EIO')
     expect(await readFile(path, 'utf8')).toBe(before)
-    expect(registry.isDurabilityUnconfirmed(original.agentSessionId)).toBe(false)
     ctl.renameFailure = false
+    const registry = new AgentMuxAgentSessionRegistry(store); await registry.load('local')
+    expect(registry.isDurabilityUnconfirmed(original.agentSessionId)).toBe(false)
     await expect(registry.confirmDurability(original.agentSessionId, { runId: 'different-run' })).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
   })
 })

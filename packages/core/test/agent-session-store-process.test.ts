@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentMuxFileAgentSessionStore,
@@ -769,8 +770,9 @@ describe('File Store multi-process authority', () => {
     const [created] = await store.load()
     expect(created).toMatchObject({ agentSessionId: 'shared-semantic' })
 
-    const documentAfterCreate = JSON.parse(await readFile(storePath, 'utf8')) as { reservations: unknown[] }
-    expect(documentAfterCreate.reservations).toEqual([])
+    const dbAfterCreate = new DatabaseSync(storePath)
+    try { expect(dbAfterCreate.prepare('SELECT id FROM reservations').all()).toEqual([]) }
+    finally { dbAfterCreate.close() }
     const original = normalizeStoredAgentSession(created)
     const normalizedOriginal = normalizeStoredAgentSession({
       ...original,
@@ -790,8 +792,9 @@ describe('File Store multi-process authority', () => {
       agentSessionId: 'shared-semantic',
       retiredRuns: [{ runId: original.run.runId }, { runId: 'original-run' }]
     })
-    const documentAfterResume = JSON.parse(await readFile(storePath, 'utf8')) as { reservations: unknown[] }
-    expect(documentAfterResume.reservations).toEqual([])
+    const dbAfterResume = new DatabaseSync(storePath)
+    try { expect(dbAfterResume.prepare('SELECT id FROM reservations').all()).toEqual([]) }
+    finally { dbAfterResume.close() }
   }))
 
   it('serializes concurrent Timeline revisions without losing either process update', () => withWorkerOwner(async (owner) => {

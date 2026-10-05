@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentMuxFileAgentSessionStore,
+  AgentMuxMemoryAgentSessionStore,
   loadAgentSessions,
   type AgentMuxAgentSessionStore
 } from '../src/agent-session-store.js'
@@ -37,28 +38,7 @@ function session(index: number) {
 }
 
 function store(values: readonly unknown[]): AgentMuxAgentSessionStore {
-  return {
-    async load() { return values },
-    async loadRetiredRuns() { return [] },
-    async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
-  async loadRetiredAgentSessions() { return [] },
-  async loadReopenCorrelations() { return [] },
-    async compareAndSwap() {},
-    async reserveLifecycle() {},
-    async claimStaleLifecycles() { return [] },
-    async releaseLifecycle() {},
-    async retireRuns() {},
-    async commitLifecycle() {},
-    async loadTimeline(agentSessionId) { return { agentSessionId, revision: 0, items: [] } },
-    async applyTimelineMutation(mutation) {
-      return {
-        agentSessionId: mutation.agentSessionId,
-        revision: 0,
-        changed: false,
-        mutation
-      }
-    }
-  }
+  return Object.assign(new AgentMuxMemoryAgentSessionStore(), { async load() { return values } })
 }
 
 describe('Agent Session Store resource limits', () => {

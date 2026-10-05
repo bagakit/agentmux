@@ -1,5 +1,4 @@
-const sourceModule = process.env.AGENTMUX_TEST_DURABILITY_STORE_MODULE
-if (!sourceModule) throw new Error('Private writer requires the exact source-bundled Session Store')
+const sourceModule = process.env.AGENTMUX_TEST_DURABILITY_STORE_MODULE ?? new URL('../../../dist/agent-session-store.js', import.meta.url).href
 const { AgentMuxFileAgentSessionStore } = await import(sourceModule)
 import { createRequire } from 'node:module'
 import { open } from 'node:fs/promises'
