@@ -3251,9 +3251,11 @@ export class AgentMuxClient {
   ): Promise<void> {
     // Admission runs inside the existing journal lock. The SessionStore is a separate authority,
     // not an atomic transaction with this journal; no Provider probe or Session write is added.
-    const sessions = await loadAgentSessionMetadata(this.store)
-    const current = sessions.find((session) => session.hostId === 'local' && session.agentSessionId === author)
-    if (!current) throw new AgentMuxError('Dispatch caller Session is unknown.', 'UNKNOWN_AGENT_SESSION')
+    const participantIds = new Set([author, ...messages.flatMap(message => [message.senderSessionId, message.recipientSessionId])])
+    const sessions = new Map(await Promise.all([...participantIds].map(async id =>
+      [id, id === null ? null : await this.store.readMetadata(id)] as const)))
+    const current = sessions.get(author)
+    if (!current || current.hostId !== 'local') throw new AgentMuxError('Dispatch caller Session is unknown.', 'UNKNOWN_AGENT_SESSION')
     this.resolveMessageAuthor(capability, author, current)
     if (!sameRun(current.run, expectedRun)) {
       throw new AgentMuxError('The Dispatch caller Run changed before admission.', 'AGENT_CAPABILITY_STALE_RUN')
@@ -3262,8 +3264,8 @@ export class AgentMuxClient {
       for (const [agentSessionId, runId] of [
         [message.senderSessionId, message.senderRunId], [message.recipientSessionId, message.recipientRunId]
       ]) {
-        const participant = sessions.find((session) => session.hostId === 'local' && session.agentSessionId === agentSessionId)
-        if (!participant || (participant.run.runId !== runId && !participant.retiredRuns.some((run) => run.runId === runId))) {
+        const participant = sessions.get(agentSessionId ?? null)
+        if (!participant || participant.hostId !== 'local' || (participant.run.runId !== runId && !participant.retiredRuns.some((run) => run.runId === runId))) {
           throw new AgentMuxError('A Dispatch message Run is outside the retained Session identity history.', 'DISPATCH_IDENTITY_UNAVAILABLE')
         }
       }
