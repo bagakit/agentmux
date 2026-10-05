@@ -46,10 +46,14 @@ export function recordedQuestionAnswers(page: AgentSessionHistoryPage, context?:
   collect(page)
   return answers
 }
-export function questionReplyRecorded(sessionId: string, attempt: QuestionReplyAttempt, page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null): boolean {
-  if (page.agentSessionId !== sessionId || page.source.providerId !== attempt.input.source.providerId || page.source.nativeSessionId !== attempt.input.source.nativeSessionId) return false
-  const answers = recordedQuestionAnswers(page, context)
-  return attempt.input.answers.every(answer => answers.has(answer.questionId))
+/** One native page/context index per observation, shared by all related original intents. */
+export function createQuestionReplyMatcher(sessionId: string, page: AgentSessionHistoryPage, context?: AgentSessionHistoryPage | null): (attempt: QuestionReplyAttempt) => boolean {
+  let answers: ReadonlyMap<string, string> | undefined
+  return attempt => {
+    if (page.agentSessionId !== sessionId || page.source.providerId !== attempt.input.source.providerId || page.source.nativeSessionId !== attempt.input.source.nativeSessionId) return false
+    answers ??= recordedQuestionAnswers(page, context)
+    return attempt.input.answers.every(answer => answers!.has(answer.questionId))
+  }
 }
 /** A later rejected invocation cannot prove an earlier unknown invocation was unapplied. */
 export function questionReplyFailurePhase(previous: QuestionReplyPhase | undefined, dispatched: boolean, error: unknown): 'unknown' | 'rejected' {

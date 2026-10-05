@@ -10,7 +10,7 @@ import { agentRegionExecution, useAppStore } from '../store'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
 import { createFirstPromptSelector, createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentMuxRunExitReason, AgentSessionUserMessage, AgentSessionHistoryPage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { projectNativeSourceFacts } from '../../../shared/agent-native-source'
@@ -172,6 +172,17 @@ export function SessionPane({
   const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
   const questionReplies = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplies?.[sessionId])
   const questionDrafts = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplyDrafts?.[sessionId])
+  const questionControl = session?.kind === 'agent' ? session.control : undefined
+  const questionNotApplied = session?.kind === 'agent' ? session.promptInputNotApplied : undefined
+  const questionSessionId = questionControl?.agentSessionId, questionHostId = questionControl?.hostId, questionRunId = questionControl?.run.runId
+  const refusedQuestionOperation = questionNotApplied?.submissionId, refusedQuestionRun = questionNotApplied?.run.runId
+  const observeQuestionAnswers = useCallback((page: AgentSessionHistoryPage, context: AgentSessionHistoryPage | null) => {
+    if (questionSessionId && questionHostId && questionRunId) observeConversationQuestionAnswers(
+      { kind: 'agent', agentSessionId: questionSessionId, hostId: questionHostId, run: { runId: questionRunId } }, page, context,
+      refusedQuestionOperation && refusedQuestionRun ? { submissionId: refusedQuestionOperation, run: { runId: refusedQuestionRun } } : undefined)
+    // New submitted/unknown intents must observe the same already-read page. Draft,
+    // presentation and other Session updates do not change this observation.
+  }, [questionSessionId, questionHostId, questionRunId, refusedQuestionOperation, refusedQuestionRun, questionReplies])
   const appendAgentComposerDraft = useAppStore.getState().appendAgentComposerDraft
   const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.config?.appearance.terminalTheme)
   const autoFocus = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
@@ -899,7 +910,7 @@ export function SessionPane({
       questionReplyDraft: target => questionDrafts?.[questionReplyKey(sessionId, target)],
       onQuestionDraftChange: (target, answers) => editConversationQuestionDraft(session.control, target, answers),
       questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target),
-      onQuestionAnswersObserved: (page, context) => observeConversationQuestionAnswers(session.control, page, context, session.promptInputNotApplied) } : {})
+      onQuestionAnswersObserved: observeQuestionAnswers } : {})
   }
   // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && activityShown) {

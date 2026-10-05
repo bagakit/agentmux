@@ -2,7 +2,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
 import { agentPromptCondition, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { parseQuestionReplyAttempt, questionReplyFailurePhase, questionReplyKey, questionReplyReceiptMatches, questionReplyRecorded,
+import { parseQuestionReplyAttempt, questionReplyFailurePhase, questionReplyKey, questionReplyReceiptMatches, createQuestionReplyMatcher,
   questionReplyState, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyAttempt, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
 import { errorMessage } from './delivery'
 import type { createLocalDrafts } from './local-drafts'
@@ -70,9 +70,10 @@ export async function replyMobileQuestion(client: AgentMuxHostedClient, sessionI
 }
 export async function observeMobileQuestionAnswers(local: Local, sessionId: string, page: AgentSessionHistoryPage, session?: AgentMuxAgentSession | null, runtimeId?: string | null): Promise<boolean> {
   let changed = false
-  for (const [key, attempt] of local.questions) {
+  const recorded = createQuestionReplyMatcher(sessionId, page)
+  for (const [key, attempt] of local.questions.forSession(sessionId)) {
     if (key !== questionReplyKey(sessionId, attempt.input) || attempt.phase === 'confirmed') continue
-    if (questionReplyRecorded(sessionId, attempt, page)) {
+    if (recorded(attempt)) {
       local.questions.set(key, { ...attempt, phase: 'confirmed', diagnostic: undefined }); changed = true
     } else if (attempt.phase === 'unknown' && originalReplyNotApplied(attempt, sessionId, session, runtimeId)) {
       local.questions.set(key, { ...attempt, phase: 'rejected', diagnostic: notAppliedDiagnostic }); changed = true
