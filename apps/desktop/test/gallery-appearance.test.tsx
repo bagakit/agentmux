@@ -7,7 +7,6 @@ import { APP_APPEARANCE_IDS } from '../src/shared/contracts'
 
 // Isolate Gallery's theme lifecycle; the actual controls and appearance owner remain in this test.
 vi.mock('../src/renderer/src/components/ObservationSurfaceGallery', () => ({ ObservationSurfaceGallery: () => null }))
-vi.mock('../src/renderer/src/components/semantic-icons', () => ({ SemanticIcon: () => null }))
 vi.mock('../src/renderer/src/components/workflow', () => ({ WorkflowCard: () => null, WorkflowDock: () => null, WorkflowToolRow: () => null }))
 
 let container: HTMLDivElement, root: Root, dark: boolean
@@ -43,6 +42,14 @@ describe('Gallery consumes the application appearance owner', () => {
   it('uses the shared choices, follows system changes and releases the actual listener', async () => {
     await render()
     expect(container.querySelectorAll('.wf-gallery__theme button')).toHaveLength(APP_APPEARANCE_IDS.length)
+    expect(container.querySelector('.wf-gallery__intro-mark use')?.getAttribute('href')).toBe('#agentmux-icon-object.workflow')
+    const icons = [...container.querySelectorAll<SVGElement>('[data-semantic-icon]')]
+    expect(icons.length).toBeGreaterThan(5)
+    for (const icon of icons) {
+      const href = icon.querySelector('use')?.getAttribute('href')
+      expect(href, icon.dataset.semanticIcon).toMatch(/^#agentmux-icon-/)
+      expect(document.getElementById(href!.slice(1))?.childElementCount).toBeGreaterThan(0)
+    }
     expect(document.documentElement.dataset.appearance).toBe('dark')
     expect(document.documentElement.style.colorScheme).toBe('dark')
     await select('跟随系统')
