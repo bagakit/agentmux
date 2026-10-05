@@ -4,6 +4,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -63,8 +64,7 @@ export const COPILOT_HOOK_EVENTS = [
  * `workingDirectory`：同一个 CLI 的两条 hook 通道（shell 命令 / SDK JS 回调）负载拼法不同，
  * 照 SDK 的键读 shell 负载会读到 undefined。
  *
- * `agentStop` 判 done：它是一轮收尾。它**没有** Claude 的 `StopFailure`/grok 的 `stop_cancelled`
- * 那种第二收尾事件（十五个键里没有），所以不必照抄那两家的多条 done 规则。
+ * `agentStop` 与 `subagentStop` 允许其它 Hook block 并继续；回调到达不证明最终完成。
  *
  * `permissionRequest` 判 waiting 而非 working：这一刻 Copilot 正把这次调用按住等一个决定。我们不回
  * 决定，于是它会落到 Copilot 自己的 TUI 提示上等用户——那正是 waiting 的定义。判成 working 会让
@@ -73,10 +73,22 @@ export const COPILOT_HOOK_EVENTS = [
 export const COPILOT_HOOKS: AgentNativeHookSpecification = {
   // 事件名靠 `--event` 旗标送达（负载不带任何事件名键，见 createCopilotManagedHookPlan 的说明）。
   eventNameSource: { kind: 'flag' },
+  resolveSubject(payload, context) {
+    const nativeId = normalizeNativeSessionId(payload.sessionId), main = context.nativeHandle
+    if (!nativeId) return { kind: 'unknown', basis: 'provider-protocol', reason: 'native-session-identity-unconfirmed' }
+    if (main && (main.kind !== 'provider' || main.providerId !== 'copilot' || main.sessionId !== nativeId))
+      return { kind: 'foreign', basis: 'provider-protocol', reason: 'native-session-mismatch', nativeSessionId: nativeId }
+    if (typeof payload.agentName === 'string' || typeof payload.agentId === 'string') {
+      const childId = normalizeNativeSessionId(payload.agentId)
+      return { kind: 'child', basis: 'provider-protocol', reason: childId ? 'copilot-child-agent' : 'child-native-identity-unconfirmed',
+        ...(childId ? { nativeSessionId: childId } : {}) }
+    }
+    return { kind: 'main', basis: 'provider-protocol', reason: 'run-bound-protocol', nativeSessionId: nativeId }
+  },
   rules: [
     // 授权门：Copilot 正等一个决定。
     { events: ['permissionRequest'], state: 'waiting' },
-    { events: ['agentStop'], state: 'done' },
+    { events: ['agentStop', 'subagentStop'], state: 'unknown', lifecycleEvent: null },
     {
       events: [
         'sessionStart', 'userPromptSubmitted', 'preToolUse', 'postToolUse',
@@ -85,16 +97,12 @@ export const COPILOT_HOOKS: AgentNativeHookSpecification = {
       state: 'working'
     }
   ],
-  // 子代理按**名字**记账，不是按 id：实测 `subagentStart` 的负载只有 `transcriptPath` + `agentName`，
-  // **没有** `agentId`（`subagentStop` 两个都有）。记账要求 start 与 stop 认同一个键才能加一减一，
-  // 于是唯一两端都在的键是 `agentName`。后果是同名子代理并发时会记成一个——这是上游负载的事实，
-  // 不是这里可以补的：拿 `agentId` 记账会让每个 start 都记不上、每个 stop 都减一个不存在的条目。
-  // 与 Kimi 同一形状、同一取舍。
+  // agentName is a label. The start callback has no unique ID; retain that gap, never merge names.
   subagentTracking: {
     startEvents: ['subagentStart'],
-    stopEvents: ['subagentStop'],
-    mainStopEvents: ['agentStop'],
-    idKeys: ['agentName']
+    stopEvents: [],
+    mainStopEvents: [],
+    idKeys: ['agentId']
   },
   // 负载键是 camelCase `sessionId`/`transcriptPath`（实测）。**不**声明 requireTranscriptPath：
   // `transcriptPath` 只在 stop 一族事件上出现，`sessionStart` 那条没有它。

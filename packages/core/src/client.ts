@@ -35,7 +35,7 @@ import {
   type AgentProviderPreparedInteractionResponse
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { releaseSubagentRoster, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
+import { releaseSubagentRoster, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -141,6 +141,7 @@ import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import { acceptsAgentActivityState, advanceAgentActivityCommit, agentActivityTimelineItem } from './agent-activity-state.js'
 import type {
   AgentActivityObservation,
+  AgentSemanticState,
   AgentActivityState,
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
@@ -6595,6 +6596,18 @@ export class AgentMuxClient {
             const hook = current.hookReceipt
             if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && hook?.nativeTurnId && hook.nativeTurnId !== observation.nativeTurnId &&
               (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= hook.observedAt)) return
+            const ended = observation.state === 'done' || observation.state === 'error' ||
+              observation.state === 'unknown' && observation.endReason === 'interrupted'
+            if (observation.state === 'unknown' && !ended) {
+              watch.recordId = observation.recordId
+              if (observation.sequence !== undefined) watch.sequence = observation.sequence
+              this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
+                code: 'AGENT_NATIVE_STATUS_UNCONFIRMED',
+                message: 'The native turn status is unknown. Retained work, child scopes, Session and input remain available.',
+                evidence: { source: 'agentmux', run: { ...current.run }, observedAt: Date.now() } })
+              return
+            }
+            let publishedState: AgentSemanticState = observation.state
             const next = await this.updateExactAgentSession(current.agentSessionId, current.run, saved => {
               if (watch.controller.signal.aborted || !sameNativeHandle(saved.nativeHandle, session.nativeHandle)) return saved
               const savedHook = saved.hookReceipt
@@ -6606,8 +6619,9 @@ export class AgentMuxClient {
               // Reading an old working record never renews the native activity clock.
               if (observation.initialSnapshot && observation.state === 'working' && (observation.nativeObservedAt === undefined ||
                 observation.nativeObservedAt <= (saved.semanticStatus?.observedAt ?? 0))) return saved
+              publishedState = ended ? observeSubagentMainEnd(saved.run.runId, observation.state) : observation.state
               const status = transitionAgentSemanticStatus(saved.semanticStatus, {
-                state: observation.state === 'unknown' ? 'running' : observation.state,
+                state: publishedState === 'unknown' ? 'running' : publishedState,
                 source: 'native-transcript', observedAt: observation.initialSnapshot && observation.state === 'working' ? observation.nativeObservedAt! :
                   Math.max(Date.now(), (saved.semanticStatus?.observedAt ?? 0) + 1),
                 nativeTurnId: observation.nativeTurnId,
@@ -6629,7 +6643,8 @@ export class AgentMuxClient {
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             watch.recordId = observation.recordId
             if (observation.sequence !== undefined) watch.sequence = observation.sequence
-            this.hookTurnPhases.set(session.run.runId, observation.state === 'working' ? 'in-turn' : 'turn-ended')
+            if (observation.state === 'working' || ended)
+              this.hookTurnPhases.set(session.run.runId, ended ? 'turn-ended' : 'in-turn')
             const status = next.semanticStatus!
             if (status.failure) {
               await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: next.agentSessionId, item: {
@@ -6642,7 +6657,7 @@ export class AgentMuxClient {
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             this.publisher.publish({ type: 'agent-session', session: this.projectSession(next) })
             this.publisher.publish({ type: 'agent-status', agentSessionId: next.agentSessionId,
-              state: observation.state, ...(status.detail ? { detail: status.detail } : {}),
+              state: publishedState, ...(status.detail ? { detail: status.detail } : {}),
               ...(status.failure ? { failure: structuredClone(status.failure) } : {}),
               evidence: { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt } })
           }).catch(error => unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_PERSIST_FAILED',
@@ -7471,7 +7486,7 @@ export class AgentMuxClient {
     // A Provider contributing native turn outcomes owns completion, including after tool Hooks.
     // An ordinary Stop proves a yield; it cannot prove success or overwrite that outcome.
     const nativeEnd = provider.observeSessionStatus !== undefined
-    const updatesSemanticStatus = !(nativeEnd && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
+    const updatesSemanticStatus = !(nativeEnd && normalized.mainSubject && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
       turnPhase,
       normalized.lifecycleEvent,
       provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent))

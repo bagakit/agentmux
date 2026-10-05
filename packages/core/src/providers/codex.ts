@@ -112,7 +112,8 @@ export const CODEX_HOOKS: AgentNativeHookSpecification = {
     { events: ['Interrupt'], state: 'unknown', lifecycleEvent: 'turn-end' },
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['request_user_input', 'askuserquestion'], state: 'waiting' },
-    { events: ['Stop'], state: 'done' },
+    // Stop callbacks can still be vetoed; the original native outcome observer owns completion.
+    { events: ['Stop', 'SubagentStop'], state: 'unknown', lifecycleEvent: null },
     {
       events: ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart'],
       state: 'working'
@@ -120,8 +121,8 @@ export const CODEX_HOOKS: AgentNativeHookSpecification = {
   ],
   subagentTracking: {
     startEvents: ['SubagentStart'],
-    stopEvents: ['SubagentStop'],
-    mainStopEvents: ['Stop'],
+    stopEvents: [],
+    mainStopEvents: [],
     idKeys: ['agent_id', 'agentId']
   },
   nativeHandle: {

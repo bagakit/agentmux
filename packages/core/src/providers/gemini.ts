@@ -14,7 +14,7 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
  *
  * 只装 AgentMux 真的要用的事件。Gemini 另有 `BeforeModel`/`AfterModel`/`BeforeToolSelection`/
  * `PreCompress`/`Notification`：每次模型往返都触发，而 Core 今天没有任何判断需要它们——装了
- * 只会让每轮多起若干子进程。`SessionEnd` 也不装：AgentMux 判「这一轮结束」靠 `AfterAgent`，
+ * 只会让每轮多起若干子进程。`SessionEnd` 也不装：它仅表示会话退出，
  * 会话终结由 PTY 事实回答（那是 ctxmux 的所有权，不是 Provider 语义）。
  */
 export const GEMINI_HOOK_EVENTS = [
@@ -29,14 +29,14 @@ export const GEMINI_HOOK_EVENTS = [
  * --from-claude` 为什么成立。**但事件名是 Gemini 自己的**（`BeforeTool` 而非 `PreToolUse`），
  * 所以不能照抄 Claude 的事件清单——只有负载键的拼法同族。
  *
- * `AfterAgent` 是**一轮**收尾（带 `prompt` / `prompt_response` / `stop_hook_active`），不是会话
- * 收尾——因此它才是 done 的来源。`SessionEnd` 属于会话终结，Core 不拿它判轮次。
+ * `AfterAgent` 的输出可以拒绝结果并重试；它不是所有 Hook 已收口的最终成功回执。
+ * `SessionEnd` 属于会话终结，Core 不拿它判轮次。
  */
 export const GEMINI_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：负载是 Claude 同族的 snake_case，带 `hook_event_name`（见下方 rules 前的说明）。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
-    { events: ['AfterAgent'], state: 'done' },
+    { events: ['AfterAgent'], state: 'unknown', lifecycleEvent: null },
     { events: ['SessionStart', 'BeforeAgent', 'BeforeTool', 'AfterTool'], state: 'working' }
   ],
   // Gemini 每个事件都带 transcript_path（见 `createBaseInput`），所以 usage 能真的抽到 token。

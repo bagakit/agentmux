@@ -482,6 +482,8 @@ export type AgentProviderSessionStatus = {
   sequence?: number
   nativeTurnId: string
   state: 'working' | 'done' | 'error' | 'unknown'
+  /** Exact native end; unknown state alone never closes a turn or its child scope. */
+  endReason?: NonNullable<AgentPromptExecutionEvidence['endReason']>
   nativeObservedAt?: number
   failure?: AgentFailure
 }
