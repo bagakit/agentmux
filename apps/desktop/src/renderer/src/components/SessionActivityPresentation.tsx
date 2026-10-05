@@ -86,6 +86,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
         <OpenDestinationPopover request={fileOpening.request} canSplit={fileOpening.canSplit}
           onDismiss={fileOpening.dismiss} onSelect={fileOpening.choose} />
         <ConversationAnnotationNote ref={noteRef} sessionId={sessionId} regionRef={surfaceRef}
+          origin={origin}
           active={visible && eligible && Boolean(onAnnotate)} {...(onAnnotate ? { onAnnotate } : {})} />
         {composer ? <div className="agent-input-stack" data-input-surface="activity" hidden={!eligible} inert={!eligible}>{composer}</div> : null}
       </section>
