@@ -78,6 +78,22 @@ async function external(patch: Partial<typeof f.owner.current>) {
 }
 
 describe('Goals common actions through the mounted product and durable config owner', () => {
+  it('orders, removes and discloses through distinct themeable meanings in the actual directory', async () => {
+    await mount(); await manage()
+    const up = dom.container.querySelector('[aria-label="上移 了解我并给我建议"]')!
+    const down = dom.container.querySelector('[aria-label="下移 了解我并给我建议"]')!
+    const remove = dom.container.querySelector('[aria-label="移出常用 了解我并给我建议"]')!
+    expect(up.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.move-up')
+    expect(down.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.move-down')
+    expect(remove.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.remove')
+    expect((up as HTMLButtonElement).disabled).toBe(true)
+    expect((down as HTMLButtonElement).disabled).toBe(false)
+    const collapse = dom.container.querySelector('[aria-label="收起常用操作"]')!
+    expect(collapse.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('navigation.up')
+    await dom.click('[aria-label="下移 了解我并给我建议"]'); await settled()
+    expect(f.owner.current.goalsCommonActions?.items[1]).toEqual({ kind: 'builtin', id: 'understand' })
+  })
+
   it('shows two complete default requests with semantic art and retains the original action when art fails', async () => {
     await mount()
     const requests = [...dom.container.querySelectorAll('.goals-entry__request')].map(node => node.textContent)
