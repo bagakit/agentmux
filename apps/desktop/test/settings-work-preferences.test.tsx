@@ -208,8 +208,8 @@ it('pending Goals save retains the later native view choice and exact authored b
   await goalsView('Board'); await dom.click('[aria-label="Show finished goals by default"]'); await save('goals')
   await goalsView('List')
   const [submitted, expected] = write.mock.calls[0]!
-  expect(submitted.goals).toEqual({ defaultView: 'board', showFinished: true })
-  expect(expected?.goals).toEqual({ defaultView: 'list', showFinished: false })
+  expect(submitted.goals).toEqual({ defaultView: 'board', showFinished: true, requesterAsSupervisor: true })
+  expect(expected?.goals).toEqual({ defaultView: 'list', showFinished: false, requesterAsSupervisor: true })
   await act(async () => { useAppStore.setState({ config: submitted }); finish(submitted) })
   expect([...pane('goals').querySelectorAll<HTMLLabelElement>('fieldset label')].find(label => label.textContent?.trim() === 'List')!.querySelector<HTMLInputElement>('input')!.checked).toBe(true)
   expect(pane('goals').textContent).toContain('Unsaved changes')
