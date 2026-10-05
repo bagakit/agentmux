@@ -35,6 +35,8 @@ authority 元数据与原记录可读性独立。未限定 authority 的准确 l
 
 默认只传安全字段。有限来源码、阶段、结构化确认、准确身份和时刻可以投影；任意 message/detail/stack/stderr、Prompt、凭据、自由关联说明和未知原错误码不因短或大写而变安全。原件只有 `includeRaw=true` 且原来源权限成立时返回；未知码留在原件。原件只代表 owner 实际保留的材料，不能还原未保存的 Error、stderr 或深层 cause。
 
+普通 Toolkit get 已隐藏字节片段元数据时，未见截断只能使 `raw.truncated=null`；已有文本标记证明截断时仍为 true。safe summary 的 completeness 描述已取得投影，不能代签未读取原件的完整度；只有显式取得原材料才能据其元数据确认 false。查询不得为补该字段隐式读取 raw 或借当前 execution 的字节。
+
 Toolkit 的 `diagnostics.failureEvidence` 保留原领域读取状态；封套 `raw.returned` 描述组合查询最终是否返回材料。原件超过剩余查询预算时保留安全失败，列 `omissions=['raw-query-budget']`、partial 和 QUERY_BUDGET，raw withheld；不返回重新裁切却标 complete 的“原件”。安全投影自身超预算时返回结构化预算结果。
 
 ## 关联与部分结果
