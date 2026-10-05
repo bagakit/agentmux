@@ -16,7 +16,7 @@ import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 const exec = promisify(execFile)
 const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_GUIDANCE_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_GUIDANCE_CLIENT)).AgentMuxClient : DefaultClient
-const cli = process.env.AGENTMUX_TEST_GUIDANCE_CLI ?? fileURLToPath(new URL('../dist/agentmux.js', import.meta.url))
+const cli = process.env.AGENTMUX_TEST_GUIDANCE_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
 const daemon = process.env.AGENTMUX_TEST_GUIDANCE_DAEMON ?? fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
 it('real creation, whoami and compiled skill discover messaging and advisory opening guidance', async () => {
   const root = await mkdtemp(fixturePath("tmp/amux-messaging-guidance-")), storePath = join(root, 'sessions.json')
@@ -37,6 +37,7 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
   })
   let created: Awaited<ReturnType<typeof client.createAgent>> | undefined
   let ownerPid: number | undefined
+  let terminal: Awaited<ReturnType<typeof client.createTerminal>> | undefined
   try {
     await client.connect()
     await server.start()
@@ -45,15 +46,29 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     ownerPid = owners[0]!.pid
     expect(owners[0]!.command.startsWith(daemon + ' ')).toBe(true)
     const capture = join(root, 'issued.json'), agent = join(root, 'fixture-agent.mjs')
-    await writeFile(agent, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID, capability: process.env.AGENTMUX_AGENT_CAPABILITY, args: process.argv.slice(2) })); setInterval(() => {}, 1000);\n`)
+    const fixture = (destination: string) => `import { writeFileSync } from 'node:fs'; import { spawnSync } from 'node:child_process'; const invoke = command => { const result = spawnSync(command, ['system', 'endpoint'], {encoding: 'utf8'}); return {status: result.status, stdout: result.stdout, error: result.error?.code}; }; writeFileSync(${JSON.stringify(destination)}, JSON.stringify({ agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID, capability: process.env.AGENTMUX_AGENT_CAPABILITY, args: process.argv.slice(2), cli: process.env.AGENTMUX_CLI, path: process.env.PATH, injected: invoke(process.env.AGENTMUX_CLI), discovered: invoke('amux') })); setInterval(() => {}, 1000);\n`
+    await writeFile(agent, fixture(capture))
     created = await client.createAgent({ agentSessionId: 'private-discovery-agent', createOperationId: 'private-discovery-create',
       executorId: 'private-fixture', providerId: 'traex', commandOverride: process.execPath, args: [agent], workspacePath: root, injectAgentMuxGuide: true })
-    let issued!: { agentSessionId: string; capability: string; args: string[] }
+    let issued!: { agentSessionId: string; capability: string; args: string[]; cli: string; path: string; injected: {status: number; stdout: string}; discovered: {status: number; stdout: string} }
     await vi.waitFor(async () => {
       issued = JSON.parse(await readFile(capture, 'utf8'))
-      expect(issued).toEqual({ agentSessionId: created!.agentSessionId, capability: expect.any(String), args: expect.any(Array) })
+      expect(issued).toMatchObject({ agentSessionId: created!.agentSessionId, capability: expect.any(String), args: expect.any(Array) })
       expect(issued.capability.length).toBeGreaterThan(0)
     }, { timeout: 5000, interval: 20 })
+    const assertCli = (child: Pick<typeof issued, 'cli' | 'path' | 'injected' | 'discovered'>) => {
+      expect(child.cli).toBe(fileURLToPath(new URL('../bin/amux', import.meta.url)))
+      expect(child.path.split(':')[0]).toBe(fileURLToPath(new URL('../bin', import.meta.url)))
+      for (const result of [child.injected, child.discovered]) {
+        expect(result.status).toBe(0)
+        expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, operation: 'system.endpoint' })
+      }
+    }
+    assertCli(issued)
+    const terminalCapture = join(root, 'terminal-issued.json'), terminalFixture = join(root, 'fixture-terminal.mjs')
+    await writeFile(terminalFixture, fixture(terminalCapture))
+    terminal = await client.createTerminal({ createOperationId: 'private-cli-terminal', workspacePath: root, command: process.execPath, args: [terminalFixture] })
+    await vi.waitFor(async () => assertCli(JSON.parse(await readFile(terminalCapture, 'utf8'))), { timeout: 5000, interval: 20 })
     const launched = await (client as unknown as { kernel: { status(id: string): Promise<{ args: string[] }> } }).kernel.status(created.run.runId)
     const guideArgs = launched.args.filter(arg => arg.includes('AgentMux runtime guide:'))
     expect(guideArgs).toHaveLength(1)
@@ -97,6 +112,7 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     expect(launch.text.endsWith('</amux>\n\noriginal request')).toBe(true)
   } finally {
     await server.stop()
+    if (terminal) await client.stopTerminal({ runId: terminal.runId }).catch(() => {})
     if (created) await client.stopAgent(created.agentSessionId, created.run).catch(() => {})
     await client.dispose()
     const owners = await owned()

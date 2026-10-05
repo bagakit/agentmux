@@ -34,8 +34,8 @@ if (
 }
 if (
   process.env.AGENTMUX_ENV !== '1' ||
-  !process.env.AGENTMUX_CLI?.endsWith('/bin/agentmux') ||
-  !process.env.PATH?.split(':').includes(process.env.AGENTMUX_CLI.slice(0, -'/agentmux'.length))
+  !process.env.AGENTMUX_CLI?.endsWith('/bin/amux') ||
+  !process.env.PATH?.split(':').includes(process.env.AGENTMUX_CLI.slice(0, -'/amux'.length))
 ) {
   throw new Error('AgentMux did not provide its managed CLI environment')
 }

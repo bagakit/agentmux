@@ -25,6 +25,7 @@ async function sshCarrier(socketPath: string, delay = 0) {
   closes.push(() => rm(directory, { recursive: true, force: true }))
   return { endpoint: { transport: 'ssh' as const, host: 'private-owner', socketPath },
     replyDelay: (ms: number) => writeFile(latency, String(ms)),
+    calls: async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { args: string[] }),
     count: async () => (await readFile(log, 'utf8')).trim().split('\n').length }
 }
 const catalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }
@@ -54,6 +55,7 @@ it('establishes once before business deadlines, multiplexes callers and releases
   const [calls, first, second] = cold.value
   expect(calls, 'SSH establishment precedes the original short business deadline').toMatchObject({ value: [{ catalog }, { protocol: 'jsonrpc-2.0' }] })
   expect(await ssh.count(), 'warm calls and readers share one SSH process').toBe(1)
+  expect((await ssh.calls())[0]!.args.at(-1)).toBe(`'amux' '--endpoint' 'unix:${server.path}' 'system' 'endpoint' '--stdio'`)
   await ssh.replyDelay(2_300)
   const delayed = await client.call('space.ls', { target: {} }).then(value => ({ value }), error => ({ error }))
   expect(delayed, 'SSH response transit cannot masquerade as a failed short business intent').toEqual({ value: { catalog } })
@@ -94,12 +96,12 @@ it('prepares an unverified SSH endpoint immediately and disposes its pending chi
   const started = performance.now()
   const client = await connectSsh({ waitForReady: false, expectedRuntimeId: 'pinned-owner',
     target: { hostId: 'pending', hostname: 'private-owner', user: 'tester', port: 2222,
-      identityFile: fixturePath("private/key with spaces"), remoteCommand: fixturePath("private/agentmux owner"), remoteSocketPath: fixturePath("private/runtime socket") } })
+      identityFile: ((fixturePath("private/key")) + " with spaces"), remoteCommand: ((fixturePath("private/agentmux")) + " owner"), remoteSocketPath: ((fixturePath("private/runtime")) + " socket") } })
   closes.push(() => client.dispose())
   expect(performance.now() - started, 'initial preparation must not wait for a remote response').toBeLessThan(1000)
   expect(client.runtimeOwnerIdentity()).toBeNull()
   const child = await until(async () => { try { return JSON.parse(await readFile(log, 'utf8')) as { pid: number; args: string[] } } catch { return null } }, Boolean, 'pending SSH child')
-  expect(child!.args).toContain(fixturePath("private/key with spaces"))
+  expect(child!.args).toContain(((fixturePath("private/key")) + " with spaces"))
   expect(child!.args).toContain('tester@private-owner')
   expect(child!.args.at(-1)).toBe(("'" + (fixturePath("private/agentmux")) + " owner' '--endpoint' 'unix:" + (fixturePath("private/runtime")) + " socket' 'system' 'endpoint' '--stdio'"))
   await client.dispose()
