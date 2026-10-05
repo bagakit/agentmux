@@ -3,10 +3,25 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ClientUiProvider } from '@agentmux/client-ui/platform'
+import type * as Monaco from 'monaco-editor'
 import { FileDataPreview } from '../src/renderer/src/components/FileDataPreview'
 import { readDelimitedPreview } from '../src/renderer/src/lib/file-delimited-preview'
-import { delimitedTokens, DelimitedState } from '../src/renderer/src/lib/monaco-languages/register-file-formats'
+import { delimitedTokens, DelimitedState, registerFileFormatLanguages } from '../src/renderer/src/lib/monaco-languages/register-file-formats'
 afterEach(() => vi.unstubAllGlobals())
+
+function registeredDelimitedTokens(language: 'csv' | 'tsv'): Monaco.languages.TokensProvider {
+  const registered: { id: string }[] = []
+  let provider: Monaco.languages.TokensProvider | undefined
+  registerFileFormatLanguages({ languages: {
+    getLanguages: () => registered,
+    register: (value: { id: string }) => registered.push(value),
+    setTokensProvider: (id: string, value: Monaco.languages.TokensProvider) => { if (id === language) provider = value },
+    setMonarchTokensProvider: () => {}
+  } } as unknown as typeof Monaco)
+  expect(provider).toBeDefined()
+  return provider!
+}
+
 describe('File CSV dialect and source columns', () => {
   it('preserves quoted separators, multiline strings, leading zeroes and formula-looking text across dialects', () => {
     for (const separator of [',', ';', '\t', '|'] as const) {
@@ -29,14 +44,65 @@ describe('File CSV dialect and source columns', () => {
     expect(next.tokens[0]!.scopes).toBe(header.tokens[0]!.scopes)
     expect(new Set(header.tokens.filter(token => token.scopes !== 'delimiter').map(token => token.scopes)).size).toBe(3)
   })
+  it.each([',', ';', '\t', '|'])('the registered CSV tokenizer waits for %j evidence after blank and single-column lines', separator => {
+    const provider = registeredDelimitedTokens('csv')
+    const blank = provider.tokenize('', provider.getInitialState())
+    expect(blank.endState).toEqual(new DelimitedState(null))
+    const single = provider.tokenize('One column', blank.endState)
+    expect(single.endState).toEqual(new DelimitedState(null))
+    const header = provider.tokenize(`Name${separator}Value`, single.endState)
+    expect(header.endState).toEqual(new DelimitedState(separator))
+    expect(header.tokens).toEqual([
+      { startIndex: 0, scopes: 'type.identifier' },
+      { startIndex: 4, scopes: 'delimiter' },
+      { startIndex: 5, scopes: 'string' }
+    ])
+    const nextBlank = provider.tokenize('', header.endState)
+    expect(nextBlank.endState).toEqual(new DelimitedState(separator))
+    const row = provider.tokenize(`Ada${separator}001`, nextBlank.endState)
+    expect(row.tokens.filter(token => token.scopes === 'delimiter')).toHaveLength(1)
+    expect(row.tokens.at(-1)!.scopes).toBe('string')
+  })
+  it('waits through quoted separators and carries unknown quoted state across physical lines', () => {
+    const provider = registeredDelimitedTokens('csv')
+    const quoted = provider.tokenize('"quoted,;|\t"', provider.getInitialState())
+    expect(quoted.endState).toEqual(new DelimitedState(null))
+    const first = provider.tokenize('"first;line', quoted.endState)
+    expect(first.endState).toEqual(new DelimitedState(null, 0, true))
+    expect(first.tokens.filter(token => token.scopes === 'delimiter')).toHaveLength(0)
+    const continued = provider.tokenize('second ""quoted, field"" line";tail', first.endState)
+    expect(continued.endState).toEqual(new DelimitedState(';'))
+    expect(continued.tokens.filter(token => token.scopes === 'delimiter')).toHaveLength(1)
+    expect(continued.tokens[0]!.scopes).toBe('type.identifier')
+    expect(continued.tokens.at(-1)!.scopes).toBe('string')
+  })
+  it('the registered TSV tokenizer retains its explicit tab through blank, quoted and other-delimiter lines', () => {
+    const provider = registeredDelimitedTokens('tsv')
+    const blank = provider.tokenize('', provider.getInitialState())
+    expect(blank.endState).toEqual(new DelimitedState('\t'))
+    const single = provider.tokenize('one;comma,|value', blank.endState)
+    expect(single.endState).toEqual(new DelimitedState('\t'))
+    expect(single.tokens.filter(token => token.scopes === 'delimiter')).toHaveLength(0)
+    const first = provider.tokenize('left\t"continued,;\t', single.endState)
+    expect(first.endState).toEqual(new DelimitedState('\t', 1, true))
+    const continued = provider.tokenize('end"\tlast', first.endState)
+    expect(continued.endState).toEqual(new DelimitedState('\t'))
+    expect(continued.tokens[0]!.scopes).toBe('string')
+    expect(continued.tokens.filter(token => token.scopes === 'delimiter')).toHaveLength(1)
+  })
   it('the actual table control reparses a selected delimiter without changing its source', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     const container = document.createElement('div'), root = createRoot(container)
-    const content = 'Name;Value\nAda;001'
+    const content = '\nName;Value\nAda;001'
     const platform = { copyText: async () => true, overlayContainer: () => document.body, bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
     try {
       await act(async () => root.render(<ClientUiProvider platform={platform}><FileDataPreview content={content} kind="csv" /></ClientUiProvider>))
       expect(container.querySelectorAll('thead th')).toHaveLength(3)
+      const tokenizer = registeredDelimitedTokens('csv')
+      const empty = tokenizer.tokenize('', tokenizer.getInitialState())
+      const heading = tokenizer.tokenize('Name;Value', empty.endState)
+      expect(heading.endState).toEqual(new DelimitedState(';'))
+      expect(heading.tokens.filter(token => token.scopes === 'delimiter')).toHaveLength(1)
       const select = container.querySelector<HTMLSelectElement>('select[aria-label="Table separator"]')!
       await act(async () => { select.value = ','; select.dispatchEvent(new Event('change', { bubbles: true })) })
       expect(container.querySelectorAll('thead th')).toHaveLength(2)
@@ -44,7 +110,7 @@ describe('File CSV dialect and source columns', () => {
       await act(async () => { select.value = ';'; select.dispatchEvent(new Event('change', { bubbles: true })) })
       expect(container.querySelectorAll('thead th')).toHaveLength(3)
       expect(container.textContent).toContain('001')
-      expect(content).toBe('Name;Value\nAda;001')
+      expect(content).toBe('\nName;Value\nAda;001')
     } finally { await act(async () => root.unmount()) }
   })
 })
