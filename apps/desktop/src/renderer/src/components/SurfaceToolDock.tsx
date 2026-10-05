@@ -2,13 +2,7 @@ import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { AgentContextContent } from './AgentContextContent'
 import { useShallow } from 'zustand/react/shallow'
 import { agentContextForSession, FOCUS_BUCKETS, groupFocusContexts, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
-import {
-  ArrowUpRight,
-  Bot,
-  FolderGit2,
-  NotebookText,
-  Plus
-} from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useContext, useMemo } from 'react'
 import type {
   SessionSnapshot,
@@ -28,16 +22,23 @@ import { WorkspaceFilesTool } from './WorkspaceFilesTool'
 import { scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 
+const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectNotebookIcon = semanticIconComponent('object.notebook')
+const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
+
+
 type ToolDefinition<T extends string> = {
   id: T
   label: string
   description: string
-  icon: typeof FolderGit2
+  icon: typeof ThemeObjectRepositoryIcon
 }
 
 const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTool>, 'id'>> = {
-  'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: FolderGit2 },
-  agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot }
+  'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: ThemeObjectRepositoryIcon },
+  agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: ThemeObjectAgentIcon }
 }
 
 const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown' }
@@ -68,12 +69,12 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
           <strong>{workspace.name}</strong>
         </span>
         <em>{count}</em>
-        <button type="button" className="workspace-agents-tool__focus" onClick={() => openFocus('agents')}><ArrowUpRight size={12} aria-hidden="true" />去 Focus 中查看</button>
+        <button type="button" className="workspace-agents-tool__focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={12} aria-hidden="true" />去 Focus 中查看</button>
       </div>
       <div className="workspace-agents-tool__scroll">
         {count === 0 ? (
           <div className="workspace-agents-tool__empty">
-            <Bot size={18} />
+            <ThemeObjectAgentIcon size={18} />
             <strong>No Agents in this workspace</strong>
             <span>Use + to start an Agent. Choose “Keep Session” on close to leave it running here.</span>
           </div>
@@ -115,7 +116,7 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
                         ) : null}
                       {context.lastActivityAt === null ? <span title="Activity time unknown">—</span> : <time dateTime={new Date(context.lastActivityAt).toISOString()} title={`Last active ${new Date(context.lastActivityAt).toLocaleString()}`}>{new Date(context.lastActivityAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>}
                     </span>} />
-                    <ArrowUpRight className="focus-context__open" size={11} aria-hidden="true" />
+                    <ThemeActionOpenExternalIcon className="focus-context__open" size={11} aria-hidden="true" />
                   </button>
                   )
                 })}
@@ -123,7 +124,7 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
             </section>
           )
         })}
-        <button type="button" className="workspace-agents-tool__focus workspace-agents-tool__focus--footer" onClick={() => openFocus('agents')}>去 Focus 关注 <ArrowUpRight size={12} aria-hidden="true" /></button>
+        <button type="button" className="workspace-agents-tool__focus workspace-agents-tool__focus--footer" onClick={() => openFocus('agents')}>去 Focus 关注 <ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button>
       </div>
     </section>
   )
@@ -166,7 +167,7 @@ export function SurfaceToolDock({
         const meta = WORKSPACE_TOOL_META[id]
         // Re-skin the content slot for Scratch without changing its enum id.
         if (id === 'files-branches' && isScratch) {
-          return { id, ...meta, label: contentSlot.label, description: 'Browse the topic wiki and collaborators', icon: NotebookText }
+          return { id, ...meta, label: contentSlot.label, description: 'Browse the topic wiki and collaborators', icon: ThemeObjectNotebookIcon }
         }
         return { id, ...meta }
       })
@@ -206,7 +207,7 @@ export function SurfaceToolDock({
             title="New Agent — choose an Executor"
             onClick={() => openLauncher({ workspaceId: workspace.id, ...(activePaneId ? { tabGroupId: activePaneId } : {}), reveal: true })}
           >
-            <Plus size={15} />
+            <ThemeActionCreateAgentIcon size={15} />
           </button>
         ) : null}
       </header>

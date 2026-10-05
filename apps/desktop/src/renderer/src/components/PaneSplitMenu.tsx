@@ -1,9 +1,13 @@
 import * as DropdownMenu from './HoverDropdownMenu'
-import { ChevronDown, Columns2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import { workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '@agentmux/layout'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
+
+const ThemeLayoutColumns2Icon = semanticIconComponent('layout.columns-2')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 /**
  * Tab 条上的 Split 下拉。内容与「一格的右键菜单」「Tab 的右键菜单」逐项相同，所以三者都只
@@ -38,7 +42,7 @@ export function PaneSplitMenu({
           disabled={disabled}
           onClick={() => onSplit('right')}
         >
-          <Columns2 size={13} />
+          <ThemeLayoutColumns2Icon size={13} />
           <span>Split</span>
         </button>
         <DropdownMenu.Trigger asChild>
@@ -49,7 +53,7 @@ export function PaneSplitMenu({
             aria-label="Choose split direction"
             disabled={disabled}
           >
-            <ChevronDown size={10} />
+            <ThemeNavigationDownIcon size={10} />
           </button>
         </DropdownMenu.Trigger>
       </div>

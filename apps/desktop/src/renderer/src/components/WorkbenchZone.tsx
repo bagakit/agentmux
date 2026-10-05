@@ -1,9 +1,13 @@
 import type { ReactNode } from 'react'
-import { ArrowUpRight, Globe2 } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchProjection } from '../lib/workbench-projection'
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 /** A Zone reference loads its original workbenches, never a second content tree. */
 export function WorkbenchZone({ zoneId, catalog, projection, viewTargets, visible, leadingChrome, onCreateTab, onStartBrowsing }: {
@@ -25,13 +29,13 @@ export function WorkbenchZone({ zoneId, catalog, projection, viewTargets, visibl
       workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets}
       onCreateTab={groupId => onCreateTab(projection.displayWorkspaceId, groupId)} leadingChrome={leadingChrome} visible={visible} />
       : <div className="workbench-zone-state" role="status" aria-label={empty ? 'Empty research' : 'Research unavailable'}>
-        <div className="workbench-zone-state-orbit" aria-hidden="true"><Globe2 size={32} strokeWidth={1.1} /></div>
+        <div className="workbench-zone-state-orbit" aria-hidden="true"><ThemeObjectBrowserIcon size={32} strokeWidth={1.1} /></div>
         <span className="workbench-zone-state-eyebrow">{empty ? 'A clean slate' : 'Your research is kept'}</span>
         <h2>{empty ? 'Where would you like to go?' : 'This research is unavailable'}</h2>
         <p>{empty ? 'Open a page. Follow an idea.' : 'We can’t open this research right now. Your saved content hasn’t been removed.'}</p>
         <button type="button" className="workbench-zone-state-action" onClick={() => canCreate && zone && layout
           ? onCreateTab(zone.workspaceId, layout.activeGroupId) : onStartBrowsing()}>
-          {canCreate ? 'Open a page' : 'Start browsing'}<ArrowUpRight size={15} />
+          {canCreate ? 'Open a page' : 'Start browsing'}<ThemeActionOpenExternalIcon size={15} />
         </button>
       </div>}
   </div>

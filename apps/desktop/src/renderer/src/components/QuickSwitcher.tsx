@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as Dialog from '@radix-ui/react-dialog'
-import { CornerDownLeft, FileCode2, Globe2, Search, PanelsTopLeft, SquareTerminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { attentionAccentFor } from '../lib/attention-event'
 import {
@@ -18,6 +18,14 @@ import { useAppStore } from '../store'
 import { QuickOpenFiles } from './QuickOpenFiles'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeFileCodeIcon = semanticIconComponent('file.code')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeNavigationReturnIcon = semanticIconComponent('navigation.return')
+
+
 // One modal overlay a single keystroke summons to jump anywhere in the window — any agent session or
 // any open non-session tab — without reaching for the mouse. It reuses the Radix Dialog shell the app
 // already ships (BranchesPanel, BoardDiscussionCanvas) rather than adding a second modal primitive,
@@ -28,11 +36,11 @@ import { desktopElementVisible } from '../lib/desktop-presentation'
 function KindGlyph({ item }: { item: QuickSwitchItem }) {
   if (item.kind === 'session') {
     if (item.providerId) return <AgentAvatar label={item.title} sessionId={item.target.kind === 'session' ? item.target.sessionId : undefined} state={item.state ?? undefined} providerId={item.providerId} size={14} />
-    return <SquareTerminal size={13} />
+    return <ThemeObjectTerminalIcon size={13} />
   }
   // Non-session tab rows: file / browser / launcher get their own quiet kind glyph.
-  if (item.title === 'New Tab') return <PanelsTopLeft size={13} />
-  return item.subtitle.includes('://') ? <Globe2 size={13} /> : <FileCode2 size={13} />
+  if (item.title === 'New Tab') return <ThemeObjectLauncherIcon size={13} />
+  return item.subtitle.includes('://') ? <ThemeObjectBrowserIcon size={13} /> : <ThemeFileCodeIcon size={13} />
 }
 
 export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; onClose: () => void; returnFocus?: () => HTMLElement | null }) {
@@ -128,7 +136,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           </div>
           {mode === 'files' ? open ? <QuickOpenFiles onClose={() => { activated.current = true; onClose() }} /> : null : <>
           <div className="quick-switch__input">
-            <Search size={15} />
+            <ThemeActionSearchIcon size={15} />
             {/* autoFocus is honest here: the dialog exists only to take this query. */}
             <TextInput
               autoFocus
@@ -168,7 +176,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           </>}
           <div className="quick-switch__footer">
             <span><kbd>↑</kbd><kbd>↓</kbd> to navigate</span>
-            <span><kbd><CornerDownLeft size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>
+            <span><kbd><ThemeNavigationReturnIcon size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

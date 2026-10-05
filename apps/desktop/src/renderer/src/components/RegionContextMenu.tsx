@@ -1,10 +1,16 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, Replace, SquareArrowOutUpRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { createContext, useContext, type ReactNode } from 'react'
 import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCopyIcon = semanticIconComponent('action.copy')
+const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
+const ThemeActionReplaceIcon = semanticIconComponent('action.replace')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 type RegionCopyAction = {
   label: 'Copy Region Link' | 'Copy Agent Link'
@@ -88,9 +94,9 @@ function regionMenuEntries(
   return [...withSwap, { kind: 'separator' }, { kind: 'promote', onSelect: promote }]
 }
 
-const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof Copy> = {
-  'Copy Region Link': Crosshair,
-  'Copy Agent Link': Copy
+const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof ThemeActionCopyIcon> = {
+  'Copy Region Link': ThemeActionCopyAddressIcon,
+  'Copy Agent Link': ThemeActionCopyIcon
 }
 
 const RegionMenuContext = createContext<readonly RegionMenuEntry[]>([])
@@ -138,7 +144,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator }: {
         title={entry.entry.label}
         onSelect={entry.entry.onSelect}
       >
-        <Replace size={14} />
+        <ThemeActionReplaceIcon size={14} />
         <span>{entry.entry.label}</span>
       </Item>
     )
@@ -150,7 +156,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator }: {
         className="tab-context-menu__item"
         onSelect={entry.onSelect}
       >
-        <SquareArrowOutUpRight size={14} />
+        <ThemeActionOpenExternalIcon size={14} />
         <span>Move to New Tab</span>
       </Item>
     )

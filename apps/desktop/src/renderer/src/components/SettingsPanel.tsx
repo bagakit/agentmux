@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { Check, ChevronDown, LayoutDashboard, Search, Settings2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
 import type { SettingsNavigationRequest } from './SettingsNavigation'
@@ -12,6 +12,15 @@ import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { SETTINGS_GROUPS as GROUPS } from './settings/settings-catalog'
 import { settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
+
+const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionClearIcon = semanticIconComponent('action.clear')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectBoardIcon = semanticIconComponent('object.board')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 export { visibleSettingsSections, settingsNavGroups } from './settings/settings-modules'
 export type { SettingsSectionId, SettingsPageId } from './settings/settings-modules'
@@ -86,13 +95,13 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId, t
       <aside className="settings-sidebar">
         <header>
           {active === 'overview'
-            ? <div className="settings-sidebar__brand"><Settings2 size={24} aria-hidden="true" /><span><strong>Settings</strong></span></div>
+            ? <div className="settings-sidebar__brand"><ThemeObjectSettingsIcon size={24} aria-hidden="true" /><span><strong>Settings</strong></span></div>
             : <div className="settings-sidebar__brand"><BrandIcon size={26} /><span><strong>AgentMux</strong><small>Settings</small></span></div>}
         </header>
-        <label className="settings-search"><Search size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={clearSearch}><X size={12} /></button> : null}</label>
+        <label className="settings-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search settings" />{query ? <button aria-label="Clear settings search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}</label>
         <DropdownMenu.Root modal={false}>
           <DropdownMenu.Trigger asChild>
-            <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ChevronDown size={13} /></button>
+            <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ThemeNavigationDownIcon size={13} /></button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content className="settings-section-menu" align="end" sideOffset={6} collisionPadding={{ top: 34, right: 8, bottom: 40, left: 8 }} onEscapeKeyDown={(event) => event.stopPropagation()} onCloseAutoFocus={(event) => {
@@ -103,11 +112,11 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId, t
                 && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
             }}>
               <DropdownMenu.RadioGroup value={active} onValueChange={(value) => setActive(value as SettingsPageId)}>
-                {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><Check size={13} /></DropdownMenu.ItemIndicator></span>Overview</DropdownMenu.RadioItem> : null}
+                {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>Overview</DropdownMenu.RadioItem> : null}
                 {navGroups.map((group) => <Fragment key={group.id}>
                   <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
                   {group.items.map((item) => <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item">
-                    <span><DropdownMenu.ItemIndicator><Check size={13} /></DropdownMenu.ItemIndicator></span>{item.title}
+                    <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>{item.title}
                   </DropdownMenu.RadioItem>)}
                 </Fragment>)}
               </DropdownMenu.RadioGroup>
@@ -116,7 +125,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId, t
         </DropdownMenu.Root>
         <nav aria-label="Settings sections">
           <LiquidSelectionSurface selected={active} active={true} targetAttribute="data-settings-target" />
-          {!query.trim() ? <button type="button" className={active === 'overview' ? 'selected' : ''} aria-current={active === 'overview' ? 'page' : undefined} data-settings-target="overview" data-settings-overview-nav onClick={() => setActive('overview')}><LayoutDashboard size={15} /><span><strong>Overview</strong></span></button> : null}
+          {!query.trim() ? <button type="button" className={active === 'overview' ? 'selected' : ''} aria-current={active === 'overview' ? 'page' : undefined} data-settings-target="overview" data-settings-overview-nav onClick={() => setActive('overview')}><ThemeObjectBoardIcon size={15} /><span><strong>Overview</strong></span></button> : null}
           {navGroups.map((group) => (
             <Fragment key={group.id}>
               <p>{group.title}</p>
@@ -139,7 +148,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId, t
           </div>
           <div className="settings-content__actions">
             <span className="settings-content__hint"><kbd>Esc</kbd><span>Close</span></span>
-            <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><X size={16} /></button>
+            <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><ThemeActionCloseIcon size={16} /></button>
           </div>
         </header>
         {visibleSections.length === 0 ? <div className="settings-nav-empty" role="status">No settings match “{query}”. Try a different word.</div> : null}

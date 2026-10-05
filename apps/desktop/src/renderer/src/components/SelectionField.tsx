@@ -1,7 +1,11 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useId, useRef, useState, type ReactNode } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+
 
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 
@@ -19,7 +23,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
     <Menu.Trigger asChild>
       <button ref={trigger} id={id} type="button" className={`selection-field ${className}`} aria-label={label}
         aria-describedby={descriptionId} data-value={value} title={selected ? currentDescription : `${currentLabel}: ${value}`} disabled={disabled}>
-        <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{currentLabel}</span></span><span id={descriptionId} hidden>{selected ? currentDescription : `${currentLabel}: ${value}`}</span><ChevronDown size={13} aria-hidden="true" />
+        <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{currentLabel}</span></span><span id={descriptionId} hidden>{selected ? currentDescription : `${currentLabel}: ${value}`}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
       </button>
     </Menu.Trigger>
     <Menu.Portal container={resolveOverlayContainer()}>
@@ -28,11 +32,11 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
           if (!disabled && options.some(option => option.value === next && !option.disabled)) onValueChange(next)
         }}>
           {!selected ? <Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} disabled>
-            <span className="selection-field__mark"><Check size={13} /></span><span title={value}>{currentLabel}</span>
+            <span className="selection-field__mark"><ThemeStatusSelectedIcon size={13} /></span><span title={value}>{currentLabel}</span>
           </Menu.RadioItem> : null}
           {options.map(option => <Menu.RadioItem key={option.value} value={option.value} data-value={option.value} disabled={disabled || (option.disabled ?? false)}
             textValue={option.label} className="tab-context-menu__item selection-field__option">
-            <span className="selection-field__mark"><Menu.ItemIndicator><Check size={13} /></Menu.ItemIndicator></span>
+            <span className="selection-field__mark"><Menu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></Menu.ItemIndicator></span>
             <span className="selection-field__choice" title={option.description ? `${option.label} · ${option.description}` : option.label}>{option.icon ? <span className="selection-field__icon" inert aria-hidden="true">{option.icon}</span> : null}<span>{option.label}{option.description ? <small className="selection-field__description">{option.description}</small> : null}</span></span>
           </Menu.RadioItem>)}
         </Menu.RadioGroup>

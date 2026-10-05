@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import {
   useCallback,
   useEffect,
@@ -13,6 +13,10 @@ import {
   sameWorkbenchTabStripState,
   type WorkbenchTabStripState
 } from '../lib/workbench-tab-strip'
+
+const ThemeNavigationPreviousIcon = semanticIconComponent('navigation.previous')
+const ThemeNavigationNextIcon = semanticIconComponent('navigation.next')
+
 
 const EMPTY_SCROLL_STATE: WorkbenchTabStripState = {
   hasOverflow: false,
@@ -117,7 +121,7 @@ export function WorkbenchTabStrip({
             disabled={!scrollState.canScrollStart}
             onClick={() => scrollByPage(-1)}
           >
-            <ChevronLeft size={13} />
+            <ThemeNavigationPreviousIcon size={13} />
           </button>
           <button
             type="button"
@@ -127,7 +131,7 @@ export function WorkbenchTabStrip({
             disabled={!scrollState.canScrollEnd}
             onClick={() => scrollByPage(1)}
           >
-            <ChevronRight size={13} />
+            <ThemeNavigationNextIcon size={13} />
           </button>
         </>
       ) : null}
