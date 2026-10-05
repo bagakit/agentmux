@@ -2412,7 +2412,7 @@ describe('RuntimeController configuration transaction', () => {
     ])
     expect(snapshot.runtimeEndpointWarnings).toEqual([])
     expect(snapshot.timelines['agent-1']).toBeUndefined()
-    const next = reduceAgentMembershipSnapshot(state, snapshot, new Set())
+    const next = reduceAgentMembershipSnapshot(state, snapshot)
     expect(next.tabs).toBe(state.tabs)
     expect(next.layouts).toBe(state.layouts)
     expect(next.timelines['agent-1']).toBe(state.timelines['agent-1'])
@@ -2426,10 +2426,10 @@ describe('RuntimeController configuration transaction', () => {
 
     // A successful original read settles only its own failure, even while another fails.
     unreadable.add('agent-2')
-    const bothFailed = reduceAgentMembershipSnapshot(next, await controller.snapshot(localConfig), new Set())
+    const bothFailed = reduceAgentMembershipSnapshot(next, await controller.snapshot(localConfig))
     expect(bothFailed.sessions.flatMap(session => sessionServiceNotices(session))).toHaveLength(2)
     unreadable.delete('agent-1'); revision = 8
-    const recovered = reduceAgentMembershipSnapshot(bothFailed, await controller.snapshot(localConfig), new Set())
+    const recovered = reduceAgentMembershipSnapshot(bothFailed, await controller.snapshot(localConfig))
     expect(sessionServiceNotices(recovered.sessions[0])).toEqual([])
     expect(sessionServiceNotices(recovered.sessions[1])).toEqual([expect.objectContaining({
       occurrence: JSON.stringify(['local', 'agent-2', 'run-2'])

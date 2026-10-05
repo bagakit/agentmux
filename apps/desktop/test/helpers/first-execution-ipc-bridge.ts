@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
@@ -14,11 +15,22 @@ import { LocalExecutionHost } from '@agentmux/core'
 import { RuntimeController } from '../../src/main/runtime-controller'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
-  directory: '', invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
+  directory: '', invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  listeners: new Map<string, Set<(...args: unknown[]) => void>>() }))
 export { bridge }
 vi.mock('electron', () => ({
-  contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
-  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() },
+  contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
+    bridge.api = api
+    if (typeof window !== 'undefined') Object.assign(window, { [name]: api })
+  } },
+  ipcRenderer: { invoke: bridge.invoke,
+    on: (channel: string, listener: (...args: unknown[]) => void) => {
+      const listeners = bridge.listeners.get(channel) ?? new Set()
+      listeners.add(listener); bridge.listeners.set(channel, listeners)
+    },
+    off: (channel: string, listener: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(listener),
+    removeListener: (channel: string, listener: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(listener),
+    send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory, getAppPath: () => bridge.directory },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
@@ -47,7 +59,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   const runtime = new RuntimeController(actual?.store ?? new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, actual?.scratchTopics)
   const durable = { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'codex', executorId: 'private',
     hostId: 'local', workspacePath: _hygiene_fixturePath("private/fixture"), run: control.run, retiredRuns: [],
-     createdAt: 1, updatedAt: 2 }
+     createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2) }
   const canonical = { ...durable, run: { runId: 'canonical-run' } }
   const client = actual?.client ?? { connect: vi.fn().mockResolvedValue(undefined), onEvent: vi.fn().mockReturnValue(vi.fn()),
     submitAgentMessage: vi.fn().mockResolvedValue(undefined),
@@ -58,7 +70,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
       previousRun: control.run, currentRun: canonical.run, reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } }),
     runtimeSubject: vi.fn().mockResolvedValue({ subjectId: 'private-agent', kind: 'agent', hostId: 'local',
       workspacePath: durable.workspacePath, providerId: 'codex', executorId: 'private', agentSession: canonical,
-      run: { runId: canonical.run.runId, state: 'running', pid: 123, observedAt: 3, latestOutputBytes: 0 } }),
+      run: { runId: canonical.run.runId, state: 'running', pid: 123, observedAt: _reshape_fixtureEpoch(0, 0, 3), latestOutputBytes: 0 } }),
     providers: { get: () => ({ catalog: { capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' } } }) } }
   runtime.commit({ hosts: [{ id: 'local', client: client as unknown as AgentMuxClient,
     executionHost: { kind: 'local', dispose: vi.fn() } as never, config: actual?.config.hosts.find(host => host.id === 'local') ?? { id: 'local', kind: 'local', label: 'Private Host' } }],
@@ -69,7 +81,10 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   } }
   const flush = vi.fn(() => {})
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
-  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, isLoadingMainFrame: () => false, send: vi.fn(),
+  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, isLoadingMainFrame: () => false,
+    send: vi.fn((channel: string, value: unknown) => {
+      for (const listener of bridge.listeners.get(channel) ?? []) listener({}, structuredClone(value))
+    }),
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
   try { release = await registerIpc({ window: { id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,

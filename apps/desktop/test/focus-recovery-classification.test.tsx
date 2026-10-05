@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -79,7 +80,7 @@ it('lets a same-Run authoritative interruption replace pending provenance despit
 it('does not let a wrong Host, old Run or older process observation clear the retained projection', async () => {
   await render(); const original = useAppStore.getState().sessions[0]
   const events = [processEvent({}, 'other-host'), processEvent({ run: { runId: 'older-run' } }),
-    processEvent({ evidence: { source: 'run-process', observedAt: 1, run: candidate().run } })]
+    processEvent({ evidence: { source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1), run: candidate().run } })]
   for (const event of events) {
     await act(async () => useAppStore.getState().applyEvent(event))
     expect(useAppStore.getState().sessions[0]).toBe(original)
@@ -92,17 +93,17 @@ it('uses a canonical snapshot to replace the placeholder and invalidates the ori
     status: { state: 'disconnected', source: 'run-process', observedAt: Date.now() + 1000 } }
   await act(async () => useAppStore.setState(state => reduceAgentMembershipSnapshot(state, {
     sessions: [confirmed], timelines: { missing: { agentSessionId: 'missing', revision: 1, items: [] } }, recoveryCandidates: []
-  }, new Set())))
+  })))
   expect(select(useAppStore.getState()).contexts[0]!.stateLabel).toBe('Interrupted')
   expect(columns()).toEqual({ missing: 'idle' })
 })
 it('keeps real running connection loss visible, confirmed interrupted tasks visible and recovery errors in Attention', async () => {
-  const live: SessionSnapshot = { ...composerSession('healthy'), status: { state: 'disconnected', source: 'run-process', observedAt: 1 } }
+  const live: SessionSnapshot = { ...composerSession('healthy'), status: { state: 'disconnected', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
   const lost: SessionSnapshot = { ...composerSession('known-lost'), processState: 'interrupted', interruptionReason: 'daemon_restart',
-    status: { state: 'disconnected', source: 'run-process', observedAt: 1 } }
+    status: { state: 'disconnected', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) } }
   const refusedCandidate = candidate('refused')
   const refused = recoveryCandidateSession(refusedCandidate, { kind: 'unavailable', reason: 'native-handle-unavailable',
-    agentSessionId: 'refused', previousRun: refusedCandidate.run, evidence: { kind: 'run-missing', observedAt: 1 } })
+    agentSessionId: 'refused', previousRun: refusedCandidate.run, evidence: { kind: 'run-missing', observedAt: _reshape_fixtureEpoch(0, 0, 1) } })
   await act(async () => useAppStore.setState({ sessions: [pending(), live, lost, refused] })); await render()
   expect(columns()).toEqual({ missing: 'idle', healthy: 'idle', 'known-lost': 'idle', refused: 'attention' })
   expect(row('healthy')).not.toBeNull(); expect(row('refused')).not.toBeNull()
@@ -131,7 +132,7 @@ it('never treats stale starting, working or done facts and an old complete respo
     semanticStatus: {state:'working' as const,source:'native-hook' as const,observedAt:Date.now(),stateEnteredAt:Date.now()-1000}
   })))
   await act(async () => useAppStore.setState({sessions, timelines:Object.fromEntries(sessions.map(session => [session.id,{
-    agentSessionId:session.id,revision:1,items:[{id:'old-answer',agentSessionId:session.id,kind:'assistant_message' as const,status:'complete' as const,source:'native-hook' as const,title:'Old reply',content:'Finished before interruption',createdAt:1,updatedAt:1}]
+    agentSessionId:session.id,revision:1,items:[{id:'old-answer',agentSessionId:session.id,kind:'assistant_message' as const,status:'complete' as const,source:'native-hook' as const,title:'Old reply',content:'Finished before interruption',createdAt:_reshape_fixtureEpoch(0, 0, 1),updatedAt:_reshape_fixtureEpoch(0, 0, 1)}]
   }]))})); await render()
   for (const session of sessions) {
     expect(columns()[session.id]).toBe('idle')
@@ -142,7 +143,7 @@ it('never treats stale starting, working or done facts and an old complete respo
   }
 })
 it('uses the same retained recovery facts in the board, current-focus preview, Space Agents and public Mobile presentation', async () => {
-  const lost:SessionSnapshot={...composerSession('lost'),processState:'interrupted',status:{state:'disconnected',source:'run-process',observedAt:1}}
+  const lost:SessionSnapshot={...composerSession('lost'),processState:'interrupted',status:{state:'disconnected',source:'run-process',observedAt:_reshape_fixtureEpoch(0, 0, 1)}}
   await act(async()=>useAppStore.setState({sessions:[pending(),lost],agentFocus:{execution:{sessionId:'lost',history:[]},pmo:{sessionId:null}}}))
   const workspace=composerConfig.workspaces[0]!,snapshot=vi.spyOn(api.sessions,'snapshot'),recover=vi.spyOn(api.sessions,'recover')
   await act(async()=>root.render(<><GlobalFocusSurface workspaceOpen={false}/><FocusNavigationPreview/><WorkspaceAgentsTool workspace={workspace} sessions={useAppStore.getState().sessions} onOpen={()=>{}}/></>))

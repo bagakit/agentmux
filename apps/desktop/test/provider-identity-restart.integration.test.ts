@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 // T-005 of f-25k8f8m9k：身份绑定与重启恢复的 durable 边界。
@@ -89,11 +90,11 @@ function agentSession(id: string, runId: string): Extract<SessionSnapshot, { kin
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo/a"),
     label: 'Codex',
-    createdAt: 1,
-    updatedAt: 2,
-    agentSessionUpdatedAt: 2,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1),
+    updatedAt: _reshape_fixtureEpoch(0, 0, 2),
+    agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 2),
     processState: 'running',
-    status: { state: 'running', source: 'run-process', observedAt: 2 },
+    status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 2) },
     latestOutputBytes: 0,
     control: {
       kind: 'agent',
@@ -137,10 +138,10 @@ function terminalSession(id: string): Extract<SessionSnapshot, { kind: 'terminal
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo/a"),
     label: 'Shell',
-    createdAt: 1,
-    updatedAt: 2,
+    createdAt: _reshape_fixtureEpoch(0, 0, 1),
+    updatedAt: _reshape_fixtureEpoch(0, 0, 2),
     processState: 'running',
-    status: { state: 'running', source: 'run-process', observedAt: 2 },
+    status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 2) },
     latestOutputBytes: 0,
     control: { kind: 'terminal', hostId: 'local', runId, run: { runId } }
   }
@@ -280,7 +281,7 @@ describe('public Hook native identity survives a new Client and Desktop durable 
         getItem: () => JSON.parse(readFileSync(persistedPath,'utf8')),
         setItem: (_name,value) => writeFileSync(persistedPath,JSON.stringify(value)),removeItem: () => {}
       }})
-      const focus = {execution:{sessionId,history:[{sessionId,focusedAt:1}]},pmo:{sessionId:null}}
+      const focus = {execution:{sessionId,history:[{sessionId,focusedAt:_reshape_fixtureEpoch(0, 0, 1)}]},pmo:{sessionId:null}}
       useAppStore.setState({tabs:{[tabId]:split},layouts:{'workspace-a':createWorkspaceLayout('pane',[tabId])},
         activeWorkspaceId:'workspace-a',agentFocus:focus,agentComposerDrafts:{[sessionId]:'draft survives'}})
       const durableUiBytes = await readFile(persistedPath)
@@ -429,7 +430,7 @@ describe('空快照与流程故障不清工作面（T-005 性质 1）', () => {
     }
     const empty: RuntimeSnapshot = { sessions: [], timelines: {}, recoveryCandidates: [] }
 
-    const next = reduceAgentMembershipSnapshot(state, empty, new Set())
+    const next = reduceAgentMembershipSnapshot(state, empty)
 
     // 承重：不可逆的删除面前 fail-open——整份 state 原样返回。把 session-state.ts:343 的空快照守卫
     // 删掉（让它继续走 removeSessionProjection），这一格连 tab 带 layout 会被摘掉，这三条变红。
@@ -451,20 +452,17 @@ describe('空快照与流程故障不清工作面（T-005 性质 1）', () => {
     }
     const empty: RuntimeSnapshot = { sessions: [], timelines: {}, recoveryCandidates: [] }
 
-    // 非空快照先立一个对照：这个 reducer 确实会摘掉快照里没有的 terminal。没有这一半，下面
-    // 「空快照原样返回」就可能只是因为它对 terminal 从来什么都不做——那种绿是恒真的。
+    // 非空快照只合入准确成员；缺席仍然保留原 Terminal Region。
     const authoritative: RuntimeSnapshot = {
       sessions: [terminalSession('terminal-somebody-else')],
       timelines: {},
       recoveryCandidates: []
     }
-    expect(reduceTerminalMembershipSnapshot(state, authoritative).tabs[tabId]).toBeUndefined()
+    expect(reduceTerminalMembershipSnapshot(state, authoritative).tabs[tabId]).toBe(state.tabs[tabId])
 
     const next = reduceTerminalMembershipSnapshot(state, empty)
 
-    // 承重：同一条 fail-open 规则的第二个出口。reduceTerminalMembershipSnapshot 的 docstring 明写
-    // 「An empty snapshot is deliberately fail-open」，但在此之前**只有 agent 那一侧被钉住**——实测
-    // 把 session-state.ts:384 的空快照守卫删掉，整份 desktop 测试面全绿。把它删掉，这三条会红。
+    // 空读同样不授权删除原工作面。
     expect(next).toBe(state)
     expect(next.tabs[tabId]).toBeDefined()
     expect(next.layouts['workspace-a']?.groups[0]?.tabOrder).toEqual([tabId])
@@ -503,8 +501,8 @@ describe('空快照与流程故障不清工作面（T-005 性质 1）', () => {
           replyCorrelation: 'none'
         },
         label: 'Codex',
-        createdAt: 1,
-        updatedAt: 1,
+        createdAt: _reshape_fixtureEpoch(0, 0, 1),
+        updatedAt: _reshape_fixtureEpoch(0, 0, 1),
         run: { runId: 'run-1' }
       }]
     })

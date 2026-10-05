@@ -6,7 +6,8 @@ import { isVanishedAgentRunError } from '../src/renderer/src/lib/terminal-attach
 describe('terminal attach recovery', () => {
   it('recognizes a vanished Run without treating it as a terminal attach failure', () => {
     expect(isVanishedAgentRunError({ code: 'CTXMUX_run_not_found', message: 'Run is gone' })).toBe(true)
-    expect(isVanishedAgentRunError(new Error('AgentMuxError: Run bf96 does not exist'))).toBe(true)
+    expect(isVanishedAgentRunError(new Error('AgentMuxError: Run bf96 does not exist'))).toBe(false)
+    expect(isVanishedAgentRunError({ code: 'CONTROL_UNAVAILABLE', message: 'Run bf96 does not exist' })).toBe(false)
     expect(isVanishedAgentRunError(new Error('Provider executable is unavailable'))).toBe(false)
   })
 

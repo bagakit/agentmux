@@ -106,6 +106,6 @@ describe('historical terminal parsing does not answer the current process', () =
     const backfill = source.slice(source.indexOf('const backfillRetainedOutput ='), source.indexOf('const applyContinuation ='))
     expect(backfill).toContain('write: writeHistoricalOutput')
     const historical = source.slice(source.indexOf('const writeHistoricalOutput ='), source.indexOf('const backfillRetainedOutput ='))
-    expect(historical).toMatch(/historicalOutputDepth\+\+[\s\S]*try[\s\S]*await writeOutput\(data\)[\s\S]*finally[\s\S]*historicalOutputDepth--/)
+    expect(historical).toMatch(/historicalOutputDepth\+\+[\s\S]*try[\s\S]*await writeOutput\(data, 'history'\)[\s\S]*finally[\s\S]*historicalOutputDepth--/)
   })
 })
