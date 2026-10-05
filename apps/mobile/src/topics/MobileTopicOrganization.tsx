@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import type { TopicsRpc } from './MobileTopicKnowledge'
@@ -7,10 +7,17 @@ import type { TopicsRpc } from './MobileTopicKnowledge'
 type Action = { kind: 'category-create' } | { kind: 'topic-create'; category: TopicCategory }
   | { kind: 'category-rename'; category: TopicCategory } | { kind: 'topic-move'; topic: KnowledgeTopic }
 /** The editor captures the exact action at opening; names are never used as identities. */
-export function MobileTopicOrganization({ rpc, categories, category, topic, onChanged, onRefresh }: {
+export function MobileTopicOrganization({ rpc, categories, category, topic, onChanged, onRefresh, visible = true, onBackChange }: {
   rpc: TopicsRpc; categories: TopicCategory[]; category: TopicCategory | null; topic: KnowledgeTopic | null; onChanged(): void; onRefresh?: () => void
+  visible?: boolean; onBackChange?(back: (() => void) | null): void
 }) {
   const [action, setAction] = useState<Action | null>(null), [open, setOpen] = useState(false)
+  const close = useCallback(() => setOpen(false), [])
+  useEffect(() => {
+    if (!visible || !onBackChange) return
+    onBackChange(open ? close : null)
+    return () => onBackChange(null)
+  }, [visible, onBackChange, open, close])
   function begin(value: Action) { if (!action) setAction(value); setOpen(true) }
   return <details className="mobile-topic-organization"><summary>更多</summary>
     {!open && <div className="mobile-topics-actions"><button onClick={() => begin({ kind: 'category-create' })}>新建分类</button>
@@ -18,7 +25,7 @@ export function MobileTopicOrganization({ rpc, categories, category, topic, onCh
       {category && <><button onClick={() => begin({ kind: 'topic-create', category })}>新建 Topic</button><button onClick={() => begin({ kind: 'category-rename', category })}>重命名分类</button></>}
       {topic && <button onClick={() => begin({ kind: 'topic-move', topic })}>移动 Topic</button>}
       {action && <button onClick={() => setOpen(true)}>继续管理草稿</button>}</div>}
-    {action && <div hidden={!open}><OrganizationEditor rpc={rpc} action={action} categories={categories} onClose={() => setOpen(false)} onSaved={() => { setAction(null); setOpen(false); onChanged() }} /></div>}
+    {action && <div hidden={!open}><OrganizationEditor rpc={rpc} action={action} categories={categories} onClose={close} onSaved={() => { setAction(null); setOpen(false); onChanged() }} /></div>}
   </details>
 }
 function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {

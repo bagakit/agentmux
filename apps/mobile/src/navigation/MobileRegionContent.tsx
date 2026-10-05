@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileNoteFile } from './MobileNoteFile'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 
@@ -9,7 +10,9 @@ function OriginalFile({ value, client, visible }: { value: Content; client: Agen
   if (value.content === null) return null
   return value.path.endsWith('.note.json') && client?.forwardRpc
     ? <MobileNoteFile rpc={client.forwardRpc} params={value.params} read={value.read} visible={visible} />
-    : <pre>{value.content}</pre>
+    : /\.(md|markdown|mdx)$/iu.test(value.path)
+      ? <AgentMarkdown content={value.content} documentMode sourcePath={value.path} workspaceRoot={value.params.expectedResource!.workspacePath} />
+      : <pre>{value.content}</pre>
 }
 export type MobileRegionContentProps = { client: AgentMuxHostedClient | null; visible?: boolean; tabId: string; regionId: string; zoneId: string | null; kind: 'file' | 'browser'; browserId?: string | undefined; file?: AgentMuxSpaceCatalog['regions'][number]['file'] }
 export function MobileRegionContent(props: MobileRegionContentProps) {
