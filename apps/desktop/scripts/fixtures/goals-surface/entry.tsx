@@ -1,3 +1,4 @@
+import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../../lib/fixture-values.mjs"
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
@@ -47,7 +48,7 @@ const ensureTopic = api.scratch.ensureTopic
 const ensureMote = api.scratch.ensureMote
 const createGoal = api.demands.create, readGoals = api.demands.list, updateGoal = api.demands.update, launchGoalPmo = api.sessions.launchAgent
 let directFailure: 'save-unknown' | 'pmo' | null = null
-let directCreates: string[] = [], directLaunches: { prompt: string; topicId?: string }[] = []
+let directCreates: string[] = [], directLaunches: { prompt: string; agentMuxNote: string; topicId?: string }[] = []
 const directHistory = new Map<string, { prompt: string; providerId: string }>()
 function seedDirect(mode?: 'save-unknown' | 'pmo') {
   if (directGoalRequest()) throw new Error('Settle the previous actual direct Goal operation before reseeding')
@@ -58,8 +59,8 @@ function seedDirect(mode?: 'save-unknown' | 'pmo') {
   api.demands.update = async (id, patch) => { const receipt = await updateGoal(id, patch); if (patch.alignment) receipt.demand.alignment = { ...patch.alignment, revision: (useAppStore.getState().demands[id]?.alignment?.revision ?? 0) + 1, confirmedAt: null }; return receipt }
   api.demands.list = async () => { if (directFailure === 'save-unknown') throw new Error('保存服务暂时无法读取。请求 ID 已保留，请稍后重新读取。'); return readGoals() }
   api.sessions.launchAgent = async input => {
-    directLaunches.push({ prompt: input.prompt ?? '', ...(input.scratchTopicId ? { topicId: input.scratchTopicId } : {}) })
-    if (directFailure === 'pmo') throw new Error('专属 Agent 的启动回执尚未确认。此目标和原启动区保留，请重试。')
+    directLaunches.push({ prompt: input.prompt ?? '', agentMuxNote: input.agentMuxNote ?? '', ...(input.scratchTopicId ? { topicId: input.scratchTopicId } : {}) })
+    if (directFailure === 'pmo') throw Object.assign(new Error('专属 Agent 尚未启动。此目标和原启动区保留，请重试。'), { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
     const receipt = await launchGoalPmo(input)
     if (!receipt.session || receipt.session.kind !== 'agent') throw new Error('The preview transport did not return its Agent Session projection')
     directHistory.set(receipt.session.id, { prompt: input.prompt ?? '', providerId: receipt.session.providerId })
@@ -73,8 +74,8 @@ function seedDirect(mode?: 'save-unknown' | 'pmo') {
     return { agentSessionId: control.agentSessionId,
       source: { providerId: captured.providerId, nativeSessionId: control.agentSessionId }, nextCursor: null,
       items: [
-        { id: `${control.agentSessionId}-direct-request`, kind: 'user-message', startedAt: 1, contentParts: [{ kind: 'text', text: captured.prompt }] },
-        { id: `${control.agentSessionId}-direct-answer`, kind: 'assistant-message', startedAt: 2, contentParts: [{ kind: 'text', text: '我们从这个目标开始。你希望通过这次尝试，解决什么问题？' }] }
+        { id: `${control.agentSessionId}-direct-request`, kind: 'user-message', startedAt: _reshape_fixtureEpoch(0, 0, 1), contentParts: [{ kind: 'text', text: captured.prompt }] },
+        { id: `${control.agentSessionId}-direct-answer`, kind: 'assistant-message', startedAt: _reshape_fixtureEpoch(0, 0, 2), contentParts: [{ kind: 'text', text: '我们从这个目标开始。你希望通过这次尝试，解决什么问题？' }] }
       ] }
   }
   api.sessions.observeHistory = async control => {
@@ -87,7 +88,7 @@ function directFacts() {
   const state = useAppStore.getState(), id = state.selectedDemandId ?? directGoalRequest()?.id, goal = id ? state.demands[id] : undefined
   const tabId = id ? state.demandPmoTabIds[id] : undefined, tab = tabId ? state.tabs[tabId] : undefined
   return { request: directGoalRequest(), goal, tabId, tabName: tab?.name, appearance: state.config?.appearance.appAppearance, regionId: tab?.layout.activeRegionId, surface: tab?.regions[tab.layout.activeRegionId], topicId: tab?.topicId,
-    draft: tab ? state.agentComposerDrafts[tab.layout.activeRegionId] : undefined, creates: [...directCreates], launches: [...directLaunches], floating: readPmoTeamsTopicFloatingState(), pmoTopic: PMO_TEAMS_TOPIC_ID }
+    draft: tab ? state.agentComposerDrafts[tab.layout.activeRegionId] : undefined, draftNote: tab ? state.agentComposerNotes[tab.layout.activeRegionId] : undefined, creates: [...directCreates], launches: [...directLaunches], floating: readPmoTeamsTopicFloatingState(), pmoTopic: PMO_TEAMS_TOPIC_ID }
 }
 let finishPreparation: (() => Promise<void>) | undefined
 let root: ReturnType<typeof createRoot> | undefined
@@ -142,7 +143,7 @@ Object.assign(window, { goalsVisual: { seed,
   seedMaturity: () => {
     seed('many')
     const variants = [goals[0]!, phase('questions'), phase('proposal'), phase('confirmed'), phase('results'), phase('unknown')]
-    const mixed = variants.map((entry, index) => ({ ...entry, id: goals[index]!.id, title: goals[index]!.title, description: goals[index]!.description, sessionIds: index === 0 ? goals[0]!.sessionIds : [] }))
+    const mixed = variants.map((entry, index) => ({ ...entry, id: goals[index]!.id, title: goals[index]!.title, status: goals[index]!.status, projectId: goals[index]!.projectId, projectName: goals[index]!.projectName, description: goals[index]!.description, sessionIds: index === 0 ? goals[0]!.sessionIds : [] }))
     flushSync(() => { useAppStore.setState({ demands: Object.fromEntries(mixed.map(entry => [entry.id, entry])), selectedDemandId: null }); root?.render(<App key="maturity-mixed" />) })
   },
   seedCommon,
