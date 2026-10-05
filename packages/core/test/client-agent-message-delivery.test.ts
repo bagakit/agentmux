@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { DurableAgentMuxMessageQueue, type AgentMuxMessageEnvelope } from '../src/agent-global-message-queue.js'
-import { agentPromptCondition } from '../src/agent-prompt-condition.js'
+import { agentPromptCondition, agentPromptNotApplied } from '../src/agent-prompt-condition.js'
+import { AgentMuxError } from '../src/errors.js'
 import { hashAgentCapability, issueAgentCapability } from '../src/agent-capability.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from '../src/agent-messaging-guidance.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -60,7 +61,7 @@ async function fixture() {
     disposals.push(async () => await owner.dispose())
   }
   await configure(client)
-  const start = vi.fn(async (_input: { args: string[] }) => run()), stop = vi.fn()
+  const start = vi.fn(async (_input: { args: string[]; operationKey: string }) => run()), stop = vi.fn()
   inner.kernel.start = start; inner.kernel.stop = stop
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43),
@@ -244,6 +245,56 @@ describe('initial Agent messages retain the single creation transport', () => {
     expect(initialInput).toHaveBeenCalledTimes(1); expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
     expect(await f.queue.listAfter()).toEqual([expect.objectContaining({ delivery: { state: 'queued', at: expect.any(Number), reason: expect.stringContaining('unconfirmed') },
       envelope: expect.objectContaining({ recipientRunId: null }), promptCondition: expect.objectContaining({ expectedRun: { runId: 'initial-run' } }) })])
+  })
+
+  it('preserves the original created Agent when Native refuses its initial Input and never replays it after reopening', async () => {
+    const f = await fixture()
+    // The real create owner and Prompt submission execute; only the Native transport
+    // refuses once, before applying any bytes. This is distinct from a lost ACK.
+    const input = f.inner.kernel.input as (...args: unknown[]) => Promise<unknown>
+    const nativeInput = vi.fn(async (...args: unknown[]) => {
+      if (nativeInput.mock.calls.length === 1) throw new AgentMuxError('The initial Native Input was not applied.',
+        'CTXMUX_input_cursor_mismatch', 'not_applied', { disposition: 'not_applied', confirmedInputBytes: 0 })
+      return await input(...args)
+    })
+    f.inner.kernel.input = nativeInput
+    const request = { callerAgentSessionId: 'sender', capability: f.capability, executorId: 'kimi', providerId: 'kimi' as const,
+      workspacePath: f.root, body, operationId: 'discussion-native-refused' }
+    const first = await f.client.startDiscussion(request)
+    const sessionId = first.session.agentSessionId
+    const originalAdmission = agentPromptNotApplied(first.session)
+    expect(originalAdmission).toEqual({ submissionId: `launch-prompt:${f.start.mock.calls[0]![0].operationKey}`, run: { runId: 'initial-run' } })
+    expect(first.session.creation?.initialPrompt).toBe('unconfirmed')
+    expect(await f.store.readMetadata(sessionId)).toMatchObject({ agentSessionId: sessionId, run: { runId: 'initial-run' },
+      creation: { createOperationId: request.operationId, initialPrompt: 'unconfirmed' },
+      promptCompletionAdmission: { submissionId: originalAdmission!.submissionId, notApplied: true } })
+    const [original] = await f.queue.listAfter()
+    expect(original).toMatchObject({ envelope: { body, senderSessionId: 'sender', recipientSessionId: sessionId, recipientRunId: null },
+      promptCondition: { expectedRun: { runId: 'initial-run' }, afterSubmissionId: originalAdmission!.submissionId }, delivery: { state: 'queued' } })
+    const originalTimeline = await f.store.loadTimeline(sessionId)
+    expect(originalTimeline.items).toContainEqual(expect.objectContaining({ kind: 'user_message', status: 'failed',
+      content: `[Message from Agent sender]\n${body}` }))
+    expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: sessionId, code: 'CTXMUX_input_cursor_mismatch' }))
+    expect(nativeInput).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([])
+
+    const reopened = await f.reopen(), reopenedInner = reopened as unknown as Internals
+    reopenedInner.kernel.input = nativeInput; reopenedInner.kernel.start = f.start; reopenedInner.kernel.stop = f.stop
+    const retry = await reopened.startDiscussion(request)
+    expect(retry.session).toMatchObject({ agentSessionId: sessionId, run: { runId: 'initial-run' },
+      creation: { createOperationId: request.operationId, initialPrompt: 'unconfirmed' } })
+    expect(agentPromptNotApplied(retry.session)).toEqual(originalAdmission)
+    expect(await f.queue.listAfter()).toEqual([expect.objectContaining({ envelope: original!.envelope,
+      promptCondition: original!.promptCondition, delivery: expect.objectContaining({ state: 'queued' }) })])
+    expect(await f.store.loadTimeline(sessionId)).toEqual(originalTimeline)
+    expect(nativeInput).toHaveBeenCalledTimes(1); expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
+
+    // A separate explicit intent can still use that same healthy Agent and Run.
+    await reopened.submitAgentPrompt({ agentSessionId: sessionId, ...agentPromptCondition(retry.session),
+      operationId: 'explicit-new-intent-after-initial-refusal', prompt: 'new explicit input', authorHuman: true, allowUncertainTurn: true })
+    expect(nativeInput).toHaveBeenCalledTimes(2); expect(f.writes).toEqual(['new explicit input\r'])
+    expect(reopened.agentSession(sessionId).run).toEqual({ runId: 'initial-run' })
+    expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
+    expect((await f.queue.listAfter())[0]!.envelope).toEqual(original!.envelope)
   })
 
   it('never backfills a lost initial Run binding from a later resumed Session', async () => {

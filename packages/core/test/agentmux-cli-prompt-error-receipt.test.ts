@@ -44,8 +44,9 @@ async function fixture() {
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const capability = issueAgentCapability()
   const template = new AgentProviderRegistry().get('codex')
+  const { providerFork: _fork, promptExecution: _immediate, ...capabilities } = template.catalog.capabilities
   const provider = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
+    catalog: { ...template.catalog, capabilities, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
     hook: template.hook, ...(template.planManagedHooks ? { planManagedHooks: template.planManagedHooks } : {}), buildArgs: (_prompt, args) => [...args]
   })
   const stored: AgentMuxStoredAgentSession = {
@@ -84,7 +85,7 @@ async function fixture() {
     }
     inner.kernel.stop = async runId => { stops.push(runId) }
     const requests: AgentMuxControlSendRequest[] = []
-    const failures: Array<{ code: string; message: string }> = []
+    const failures: Array<{ code: string; message: string; detail?: string; logId?: string }> = []
     const host: AgentMuxControlHost = {
       async execute(request) {
         if (request.operation === 'list.active-agents') {
@@ -103,11 +104,12 @@ async function fixture() {
           if (!request.caller?.capability) throw new Error('This fixture requires the issued managed caller capability.')
           await owner.submitAgentMessage({
             agentSessionId: stored.agentSessionId, condition: request.promptCondition,
-            envelope: request.message, caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability }
+            envelope: request.message, sourceChannel: request.sourceChannel,
+            caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability }
           })
         } catch (error) {
-          const source = error as { code: string; message: string }
-          failures.push({ code: source.code, message: source.message })
+          const source = error as { code: string; message: string; detail?: string; logId?: string }
+          failures.push({ code: source.code, message: source.message, detail: source.detail, logId: source.logId })
           throw error
         }
         return { operation: request.operation, agentSessionId: stored.agentSessionId }
@@ -134,7 +136,7 @@ async function fixture() {
         expect(receipts).toHaveLength(1)
         return JSON.parse(receipts[0]!) as {
           operationId: string; operation: string; ok: boolean
-          error: { code: string; message: string }
+          error: { code: string; message: string; detail?: string; logId?: string }
         }
       })
       return result
@@ -159,13 +161,13 @@ describe('public Prompt errors through Control and built CLI', () => {
         const reply = code === 'AGENT_PROMPT_SUBMISSION_BUSY'
           ? await h.store.withPromptSubmission('receipt-agent', h.failSend)
           : await (async () => {
-              const read = h.store.load.bind(h.store)
+              const read = h.store.readMetadata.bind(h.store)
               const withPrompt = h.store.withPromptSubmission.bind(h.store)
               let producerEntered = false
               const producer = vi.spyOn(h.store, 'withPromptSubmission').mockImplementation((id, operation) =>
                 withPrompt(id, async () => { producerEntered = true; return await operation() }))
-              const missingRead = vi.spyOn(h.store, 'load').mockImplementation(async () =>
-                producerEntered ? [] : await read())
+              const missingRead = vi.spyOn(h.store, 'readMetadata').mockImplementation(async id =>
+                producerEntered ? null : await read(id))
               restoreMissingRead = () => { missingRead.mockRestore(); producer.mockRestore() }
               return await h.failSend()
             })()
@@ -174,7 +176,9 @@ describe('public Prompt errors through Control and built CLI', () => {
         expect(h.failures).toHaveLength(1)
         expect(h.failures[0]!.code).toBe(code)
         expect(reply).toEqual({ operationId: 'original-operation', operation: 'agent.send', ok: false,
-          error: { code, message: h.failures[0]!.message } })
+          error: { code, message: h.failures[0]!.message, logId: h.failures[0]!.logId,
+            ...(h.failures[0]!.detail === undefined ? {} : { detail: h.failures[0]!.detail }) } })
+        expect(reply.error.logId).toEqual(expect.any(String))
         expect(h.failures[0]!.message.length).toBeGreaterThan(0)
         expect(h.requests[0]!.text).toBe('  original message\n第二行  ')
         expect(h.requests[0]!.message?.body).toBe(h.requests[0]!.text)
@@ -194,7 +198,8 @@ describe('public Prompt errors through Control and built CLI', () => {
         const originalCaller = h.requests[0]!.caller
         if (!originalCaller?.capability) throw new Error('The original managed caller capability must remain available for explicit retry.')
         await h.owner.submitAgentMessage({ agentSessionId: 'receipt-agent', condition: h.requests[0]!.promptCondition,
-          envelope: h.requests[0]!.message, caller: { agentSessionId: originalCaller.agentSessionId, capability: originalCaller.capability } })
+          envelope: h.requests[0]!.message, sourceChannel: h.requests[0]!.sourceChannel,
+          caller: { agentSessionId: originalCaller.agentSessionId, capability: originalCaller.capability } })
         const admitted = h.owner.agentSession('receipt-agent').promptCompletionAdmission
         expect(admitted).toMatchObject({ submissionId: 'original-message', acknowledged: true })
         expect(h.writes).toEqual([{ operationId: admitted!.operationId, data: renderAgentMuxMessageEnvelope(h.requests[0]!.message) + '\r' }])
