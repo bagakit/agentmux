@@ -19,7 +19,7 @@ it('actual page dispatcher refuses a call whose preparation used the remaining d
   const native = vi.spyOn(manager as any, 'startNavigation').mockResolvedValue(undefined)
   const sender = { sendCommand: vi.fn(), frames: new Map() }
   const cursor = { browserId: entry.id, runId: 'original-run', assetId: 'original-asset', version: 1, stepId: 'step', deadlineMillis: 1005 }
-  const dispatch = (manager as any).pageCallHandler(entry, sender, [], { at: null }, operation, false, new AbortController().signal, { cursor })
+  const dispatch = (manager as any).pageCallHandler(entry, sender, [], operation, false, new AbortController().signal, { cursor })
   await expect(dispatch('gotoUrl', ['https://fixture.invalid/next'])).rejects.toThrow('budget reached before page dispatch')
   expect(entry.feedback.begin).toHaveBeenCalledOnce(); expect(native).not.toHaveBeenCalled(); expect(sender.sendCommand).not.toHaveBeenCalled()
 })
