@@ -251,6 +251,15 @@ describe('one operative Mote hover surface', () => {
     expect(panel().dataset.moteTargetTab).toBe(newId)
     expect(launcherInput(panel(), tab)).toBe(input)
     await click(entry()); await click(entry())
+    if (background === 'same-topic') {
+      // A Launcher visit preserves the last actual Agent for the next entry.
+      expect(panel().dataset.moteTargetTab).toBe(customTab.id)
+      expect(panel().dataset.moteTargetSession).toBe(customAgent.id)
+      expect(useAppStore.getState().recentMoteAgents[customMoteId]?.presentationSessionId).toBe(customAgent.id)
+      expect(useAppStore.getState().tabs[newId]).toBe(tab)
+      expect(useAppStore.getState().agentComposerDrafts[tab.layout.activeRegionId]).toBe('New Mote unsent')
+      await click(panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${newId}"]`)!)
+    }
     expect(panel().dataset.moteTargetTab).toBe(newId)
     expect(launcherInput(panel(), tab)).toBe(input)
     expect(input.textContent).toBe('New Mote unsent')
@@ -339,14 +348,14 @@ describe('one operative Mote hover surface', () => {
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
   })
 
-  it('keeps an unselected multi-discussion Mote ambiguous until an explicit discussion choice', async () => {
+  it('uses the confirmed original active Group for a legacy multi-discussion Mote without persisting hover intent', async () => {
     window.localStorage.removeItem(savedMoteKey)
     await mount(); await hover()
     expect(panel().dataset.moteTargetTopic).toBe(PMO_TEAMS_TOPIC_ID)
-    expect(panel().dataset.moteTargetTab).toBeUndefined()
-    expect(panel().dataset.moteTargetSession).toBeUndefined()
-    expect(panel().textContent).toContain('Choose a discussion')
-    expect(panel().querySelector('[aria-label="Message Agent"]')).toBeNull()
+    expect(panel().dataset.moteTargetTab).toBe(defaultTab.id)
+    expect(panel().dataset.moteTargetSession).toBe(defaultAgent.id)
+    expect(panel().textContent).not.toContain('Choose a discussion')
+    expect(panel().querySelector('[aria-label="Message Agent"]')).not.toBeNull()
     expect(saved()).toBeNull()
     const original = useAppStore.getState()
     const choices = Array.from(panel().querySelectorAll<HTMLButtonElement>(`.workbench-tab-strip button[data-workbench-tab-id="${defaultTab.id}"]`))

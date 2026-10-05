@@ -56,7 +56,7 @@ export const moteTabs = Object.fromEntries([defaultTab, neighborTab, customTab, 
 export function seedMoteWorkface({ directory = true }: { directory?: boolean } = {}): void {
   useAppStore.setState({ config: moteConfig, sessions: moteSessions, tabs: moteTabs,
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', Object.keys(moteTabs)), project: createWorkspaceLayout('project-group') },
-    workspaceFileRevisions: {}, scratchTopicSnapshots: directory ? { [SCRATCH_WORKSPACE_ID]: {
+    recentMoteAgents: {}, workspaceFileRevisions: {}, scratchTopicSnapshots: directory ? { [SCRATCH_WORKSPACE_ID]: {
       scope: scratchTopicsScope(scratchWorkspace), revision: 0, topics: moteTopics, error: null, reading: false
     } } : {},
     timelines: {}, agentNames: {}, viewModes: {}, demands: {}, recoveryCandidates: [], pendingAgentLaunches: {},
