@@ -201,6 +201,14 @@
     "./diagnostic-evidence": {
       "types": "./dist/diagnostic-evidence.d.ts",
       "import": "./dist/diagnostic-evidence.js"
+    },
+    "./mote-face": {
+      "types": "./dist/mote-face.d.ts",
+      "import": "./dist/mote-face.js"
+    },
+    "./mote-avatar-series": {
+      "types": "./dist/mote-avatar-series.d.ts",
+      "import": "./dist/mote-avatar-series.js"
     }
   },
   "bin": {

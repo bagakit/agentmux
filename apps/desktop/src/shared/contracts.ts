@@ -1634,6 +1634,10 @@ export type AgentMuxDesktopApi = {
     openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
+  moteAvatars: {
+    list(): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCatalog>
+    preview(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPreviewParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesPrepared>
+  }
   topics: {
     call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>
   }

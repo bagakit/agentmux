@@ -1,4 +1,5 @@
 import { parseAppearanceObservation, type AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
+import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult, type AgentMuxRpcMoteAvatarsOwner, type MoteAvatarSeriesMethod } from './mote-avatar-series.js'
 import { DiagnosticEvidenceQuery } from '@agentmux/diagnostic-evidence'
 import { parseDiagnosticEvidenceParams, parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { inspectDiagnosticEvidence } from './diagnostic-evidence-service.js'
@@ -78,6 +79,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   files?: AgentMuxRpcFilesOwner
   git?: AgentMuxRpcGitOwner
   fileUploads?: AgentMuxRpcFileUploadsOwner
+  moteAvatars?: AgentMuxRpcMoteAvatarsOwner
   topics?: AgentMuxRpcTopicsOwner
 
   appearance?: AgentMuxAppearanceObservationPort
@@ -151,7 +153,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteAvatarSeriesMethod | TopicMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -474,6 +476,14 @@ export class AgentMuxRpcService {
       if (!this.ports.schedules && !this.ports.forwardControl) throw new AgentMuxError('The original Host arrangement owner is unavailable. Saved arrangements and Agents are retained.', 'CONTROL_UNAVAILABLE')
       const result = this.ports.schedules ? await this.ports.schedules.call<ScheduleMethod>(scheduleMethod, input, context) : await this.ports.forwardControl!<ScheduleMethod>(scheduleMethod, input, context)
       return validateScheduleRpcResult<ScheduleMethod>(scheduleMethod, result, input) as AgentMuxRpcResult<M>
+    }
+    if (isMoteAvatarSeriesMethod(method)) {
+      const input = parseMoteAvatarSeriesParams(method, params)
+      if (!this.ports.moteAvatars && !this.ports.forwardControl) throw new AgentMuxError('The original Host avatar source owner is unavailable. Saved avatars and work remain available.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted()
+      const result = this.ports.moteAvatars ? await this.ports.moteAvatars.call(method, input)
+        : await this.ports.forwardControl!<MoteAvatarSeriesMethod>(method, input, context)
+      return parseMoteAvatarSeriesResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (isTopicMethod(method)) {
       const input = parseTopicParams(method, params)

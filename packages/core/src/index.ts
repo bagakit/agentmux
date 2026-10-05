@@ -102,3 +102,4 @@ export { createInputPerformanceRecorder, hostedCarrierPerformance } from './perf
 export type { ClientPerformanceDiagnostics, InputPerformanceSnapshot, HostedCarrierCost, InputObservationReference, InputPerformanceSender } from './performance-diagnostics.js'
 
 export type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'
+export * from './mote-avatar-series.js'
