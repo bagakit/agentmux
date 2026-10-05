@@ -7,6 +7,12 @@ const replace = (source, before, after) => {
 }
 export function mutateMouseSource(source, mutation) {
   if (mutation === 'source') return source
+  if (mutation === 'source-restore-damping') return replace(source,
+    '      // A reversed gesture owns its own fractional distance.',
+    '      if (Math.abs(ev.deltaY) < 50) amount *= 0.3;\n      // A reversed gesture owns its own fractional distance.')
+  if (mutation === 'source-retain-reversal') return replace(source,
+    '      if (this._wheelPartialScroll * amount < 0) {\n        this._wheelPartialScroll = 0;\n      }', '')
+  if (mutation === 'source-old-distance') return mutateMouseSource(mutateMouseSource(source, 'source-restore-damping'), 'source-retain-reversal')
   if (mutation === 'source-unbatch') {
     source = replace(source, 'this._coreService.triggerBinaryEvent(report.repeat(reportCount));',
       'for (let i = 0; i < reportCount; i++) this._coreService.triggerBinaryEvent(report);')

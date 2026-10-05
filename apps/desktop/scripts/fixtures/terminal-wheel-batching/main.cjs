@@ -4,6 +4,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs'), path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { performance } = require('node:perf_hooks')
+const { verifyWheelDistance } = require('./distance-cases.cjs')
 const [html, privateRoot, coreFile, nodeExecutable, phase = 'candidate', variant = 'candidate'] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -57,6 +58,8 @@ async function drain() {
 }
 async function mount(c) {
   await win.webContents.executeJavaScript(`mount(${JSON.stringify(c.mode)},${!!c.readOnly},${!!c.pending},${!!c.applicationCursor})`)
+  // Retaining the product View cannot leak a preceding independent case's wheel filter or residue.
+  await win.webContents.executeJavaScript('terminals.at(-1).attachCustomWheelEventHandler(()=>true);terminals.at(-1)._core._mouseService._wheelPartialScroll=0')
   let before = await info(), stable = 0
   for (let i = 0; i < 50 && stable < 3; i++) { await delay(20); const next = await info(); stable = next.cols === before.cols && next.rows === before.rows && next.baseY === before.baseY ? stable + 1 : 0; before = next }
   assert.equal(stable, 3); assert.equal(before.terminalCount, 1); assert.deepEqual(before.errors, [])
@@ -82,7 +85,7 @@ function verify(c, before, after, native) {
   assert.equal(after.cols, before.cols); assert.equal(after.rows, before.rows); assert.equal(after.baseY, before.baseY)
   const noReports = c.readOnly || c.shift || c.delta === 0 || c.filtered || c.fractionalLine
   const distance = Math.abs(c.delta) * (c.events ?? 1) * before.scrollSensitivity * (c.ctrl ? before.fastScrollSensitivity : 1)
-  const reports = noReports || c.mode === 'normal' ? 0 : Math.trunc(c.unit === 1 ? distance : c.unit === 2 ? distance * before.rows : distance / before.cellHeight * (Math.abs(c.delta) < 50 ? 0.3 : 1))
+  const reports = noReports || c.mode === 'normal' ? 0 : Math.trunc(c.unit === 1 ? distance : c.unit === 2 ? distance * before.rows : distance / before.cellHeight)
   assert.equal(native.program.reports, reports, 'Exact wheel report distance reaches the real PTY program')
   const expectedWrites = reports ? phase === 'baseline' ? reports : c.events ?? 1 : 0
   assert.equal(native.requests.length, expectedWrites, 'One admitted wheel must produce one request, not one per report')
@@ -175,21 +178,21 @@ app.whenReady().then(async () => {
     handle('sessions:write', (_event, value, data, source) => write(value, data, source))
     handle('sessions:paste', (_event, value, text, terminalData) => write(value, terminalData, 'user', 'paste', text))
     stage('create-window')
-    win = new BrowserWindow({ width: 1560, height: 580, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: false, contextIsolation: true, backgroundThrottling: false } })
+    win = new BrowserWindow({ width: 1560, height: 580, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: false, contextIsolation: true, backgroundThrottling: false, offscreen: true } })
     win.webContents.on('console-message', (_event, level, message) => { if(level >= 2) process.stderr.write(message + '\n') })
     stage('load-window')
-    await win.loadFile(html); win.showInactive(); win.webContents.debugger.attach('1.3')
+    await win.loadFile(html); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until(() => win.webContents.executeJavaScript('window.ready===true'), x => x, 'Native Renderer did not load')
-    for (const distribution of variant === 'candidate' ? ['esm', 'umd', 'source'] : [variant]) {
+    for (const distribution of [variant]) {
       await win.webContents.executeJavaScript(`setDistribution(${JSON.stringify(distribution)})`)
-      for (const c of cases) {
+      if (phase !== 'old-distance') for (const c of cases) {
         stage(distribution + ':' + c.name)
         const before = await mount(c); await wheel(c, before)
         await delay(60); const native = await drain(); const after = c.mode === 'normal' ? await info() : await until(info, value => value.firstLine?.includes(`private-TUI-row-${native.program.top}`), 'Actual xterm must repaint the final native TUI position')
         result.cases.push({ distribution, ...c, before, after, native }); verify(c, before, after, native)
       }
-      for (const latency of [0, 4]) {
+      if (phase !== 'old-distance') for (const latency of [0, 4]) {
         const c = { name: latency ? 'controlled-service-latency' : 'unmodified-service-latency', mode: 'alternate-mouse', delta: 350, immediate: true }
         const before = await mount(c); serviceDelay = latency
         await wheel(c, before)
@@ -208,6 +211,7 @@ app.whenReady().then(async () => {
           keyboardQueueMs: keyCall.enteredAt - keyboard.receivedAt, keyboardAckMs: keyboard.ackAt - keyboard.receivedAt,
           wholeGestureAckMs: keyboard.ackAt - first.receivedAt, native })
       }
+      if (phase !== 'old-distance') {
       const mouseBefore = await mount({ mode: 'alternate-mouse' })
       await win.webContents.executeJavaScript('terminals.at(-1).options.mouseEventsRequireAlt=false')
       const mousePoint = { x: mouseBefore.point.x, y: mouseBefore.point.y, modifiers: 0 }
@@ -235,6 +239,8 @@ app.whenReady().then(async () => {
         ['write', 'user', 'k'], ['paste', 'user', '\x1b[200~paste-body\x1b[201~'], ['write', 'terminal-protocol', '\x1b[0n']
       ], 'Wheel, keyboard, paste and parser reply retain separate FIFO input identities')
       result.cases.push({ distribution, ...ordered, native })
+      }
+      await verifyWheelDistance({ win, mount, drain, info, until, phase, distribution, cases: result.cases })
     }
     stage('passed')
     result.passed = true
