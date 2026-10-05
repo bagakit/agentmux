@@ -1,3 +1,4 @@
+import { mountMonacoTheme } from './lib/monaco-theme'
 import { mountMonacoIcons } from './lib/monaco-icons'
 import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
@@ -91,3 +92,6 @@ resourceWindow.__agentmuxFileEditingProbe = {
 
 const disposeMonacoIcons = mountMonacoIcons()
 if (import.meta.hot) import.meta.hot.dispose(disposeMonacoIcons)
+
+const disposeTheme = mountMonacoTheme(monaco.editor)
+if (import.meta.hot) import.meta.hot.dispose(disposeTheme)
