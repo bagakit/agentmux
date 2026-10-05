@@ -8,6 +8,8 @@ import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { button, click, editor, fixture, mount, mounted } from './conversation-fixture'
 import { retainObjectReference } from '../src/recovery/presentation-route'
+import { parseAgentMuxControlReceipt } from '../../../packages/core/src/control-codec'
+import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 
 const key = JSON.stringify(['draft', 'session-original'])
 function original(): DeviceWorkface {
@@ -29,6 +31,136 @@ afterEach(async () => {
   document.body.replaceChildren(); vi.restoreAllMocks()
 })
 describe('one durable mobile workface owner', () => {
+  it.each(['space', 'survey'] as const)('preserves Core spatial ID references from actual mounted %s through backup and a new owner without replaying unknown input', async primary => {
+    const ids = { spaceId: 'space:目录/' + '原'.repeat(300), zoneId: 'zone:目录/' + '区'.repeat(300),
+      tabId: 'tab:原目录/' + '层/'.repeat(180), regionId: 'region:file:' + '目录/'.repeat(120) + 'original.md' }
+    const catalog: AgentMuxSpaceCatalog = {
+      spaces: [{ spaceId: 'first-space', kind: 'folder', name: '首个无关空间', hostId: 'host-original', directoryPath: fixturePath("other"), projectId: null },
+        { spaceId: ids.spaceId, kind: 'folder', name: '长 ID 原空间', hostId: 'host-original', directoryPath: fixturePath("workspace"), projectId: null }],
+      zones: [{ zoneId: 'first-zone', workspaceId: 'first-workspace', hostId: 'host-original', directoryPath: fixturePath("other"), kind: 'directory', branch: null },
+        { zoneId: ids.zoneId, workspaceId: 'original-workspace', hostId: 'host-original', directoryPath: fixturePath("workspace"), kind: 'directory', branch: null }],
+      tabs: [{ tabId: ids.tabId, zoneId: ids.zoneId, workspaceId: 'original-workspace', name: '长 ID 原 Tab', regionIds: ['first-region', ids.regionId] }],
+      regions: [{ regionId: 'first-region', tabId: ids.tabId, kind: 'file', agentSessionId: null, runId: null, execution: null,
+        file: { workspaceId: 'original-workspace', path: 'first.md', zoneRelativePath: 'first.md' } },
+        { regionId: ids.regionId, tabId: ids.tabId, kind: 'file', agentSessionId: null, runId: null, execution: null,
+          file: { workspaceId: 'original-workspace', path: 'original.md', zoneRelativePath: 'original.md' } }],
+      bindings: [{ spaceId: ids.spaceId, zoneId: ids.zoneId }],
+      locations: ['first-region', ids.regionId].map(regionId => ({ spaceId: ids.spaceId, zoneId: ids.zoneId,
+        workspaceId: 'original-workspace', displayWorkspaceId: 'original-display', groupId: 'original-group', tabId: ids.tabId, regionId })),
+      survey: { items: [{ zoneId: 'first-zone', name: '首个无关研究' }, { zoneId: ids.zoneId, name: '长 ID 原研究' }],
+        selection: { zoneId: ids.zoneId, selection: [{ tabId: ids.tabId, regionId: 'first-region' }], active: { tabId: ids.tabId, regionId: 'first-region' } } }
+    }
+    const receipt = parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: 'long-content-catalog', ok: true, operation: 'space.ls', result: { catalog } })
+    if (!receipt.ok || receipt.operation !== 'space.ls') throw new Error('Public original catalog was not accepted')
+    expect(receipt.result).toEqual({ catalog })
+    const frozenInput = '原未知输入\r\n完整正文 🦊\t末行', laterDraft = '后来未发送草稿\r\n原末行 🦊'
+    const seeded = original()
+    seeded.conversation = { ...seeded.conversation, drafts: [[key, laterDraft]], attempts: [[key, {
+      operationId: 'intent-original', runId: 'run-original', draft: frozenInput, phase: 'unknown', inputRequested: true,
+      originalRuntimeId: 'runtime-original', originalHostId: 'host-original', explicit: true,
+      request: { condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: 'original-predecessor' },
+        execution: 'default', explicit: true, runtimeId: 'runtime-original' }
+    }]] }
+    await getDeviceWorkface().replaceBackup(seeded)
+    const f = fixture(), rpc = vi.fn().mockImplementation(async (method: string, params: any) => {
+      if (method === 'space.ls') return receipt.result
+      if (method === 'app.snapshot') return { sessions: [], agents: [], projects: [], executors: [], unavailable: [],
+        workspaces: [{ workspaceId: 'original-workspace', hostId: 'host-original', path: fixturePath("workspace") }] }
+      if (method === 'file.read') {
+        expect(params).toEqual({ zoneId: ids.zoneId, path: 'original.md',
+          expectedResource: { hostId: 'host-original', workspaceId: 'original-workspace', workspacePath: fixturePath("workspace") } })
+        return { resource: { ...params.expectedResource, zoneId: params.zoneId, path: params.path },
+          result: { status: 'read', document: { path: params.path, content: '# 准确长 ID 原文件\n\n完整原正文', revision: 'sha256:' + 'a'.repeat(64) } } }
+      }
+      throw new Error(`Unexpected public method ${method}`)
+    })
+    f.client.forwardRpc = rpc
+    const app = () => <MobileApp client={f.client} connection={{ state: 'connected', message: '原 Host' }} platform={createBrowserPlatform()} />
+    const view = await mount(app())
+    if (primary === 'space') await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+    else {
+      await click(view.element.querySelector('.mobile-settings-button')!)
+      const survey = document.body.querySelector('.mobile-drawer-workfaces button')!
+      expect(survey.textContent).toContain('Survey'); await click(survey)
+    }
+    await vi.waitFor(async () => { await act(async () => {}); expect(view.element.textContent).toContain(primary === 'space' ? '长 ID 原空间' : '长 ID 原研究') })
+    const contentButton = (label: string) => {
+      const found = [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => !value.closest('[hidden]') && value.querySelector('strong')?.textContent === label)
+      expect(found, label).toBeDefined(); return found!
+    }
+    await click(contentButton(primary === 'space' ? '长 ID 原空间' : '长 ID 原研究'))
+    await click(contentButton('original.md'))
+    const reference = primary === 'space' ? { spaceId: ids.spaceId, tabId: ids.tabId, regionId: ids.regionId }
+      : { zoneId: ids.zoneId, tabId: ids.tabId, regionId: ids.regionId }
+    const family = primary === 'space' ? 'spatial' : 'survey'
+    await vi.waitFor(async () => {
+      await act(async () => {})
+      expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确长 ID 原文件')
+      expect(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!).presentation[family]).toEqual(reference)
+    })
+    const owner = new DeviceWorkfaceStore(() => localStorage), durable = owner.snapshot().record, raw = localStorage.getItem(DEVICE_WORKFACE_KEY)
+    expect(owner.snapshot().issue).toBeNull(); expect(durable.conversation).toEqual(seeded.conversation)
+    expect(owner.parseBackup(owner.exportBackup())).toEqual(durable)
+    expect(Object.keys(durable.presentation![family]!)).toEqual([primary === 'space' ? 'spaceId' : 'zoneId', 'tabId', 'regionId'])
+    expect(raw).not.toContain('准确长 ID 原文件'); expect(raw).not.toContain('完整原正文')
+    const previous = mounted.splice(mounted.findIndex(item => item.element === view.element), 1)[0]!
+    await act(async () => previous.root.unmount()); previous.element.remove()
+    expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(raw)
+    expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record).toEqual(durable)
+    const restored = await mount(app())
+    await vi.waitFor(async () => { await act(async () => {}); expect(restored.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确长 ID 原文件') })
+    expect(getDeviceWorkface().snapshot().record.presentation![family]).toEqual(reference)
+    expect(getDeviceWorkface().snapshot().record.conversation).toEqual(seeded.conversation)
+    expect(rpc.mock.calls.filter(([method]) => method === 'file.read').map(([, params]) => params.path)).toEqual(['original.md', 'original.md'])
+    expect(rpc.mock.calls.filter(([method]) => !['space.ls', 'app.snapshot', 'file.read'].includes(method))).toEqual([])
+    expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+  })
+  it('keeps the Core spatial ID UTF-8 limit and exact-ID rules without weakening hierarchy or the complete record budget', () => {
+    const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
+    const route = { primary: 'space' as const, showSession: false, showGoalWork: false, identity: null, profile: null }
+    const boundary = '汉'.repeat(5461) + 'a'
+    expect(new TextEncoder().encode(boundary).byteLength).toBe(16 * 1024)
+    const accepted = { ...route, spatial: { spaceId: boundary, tabId: boundary, regionId: boundary }, survey: { zoneId: boundary, tabId: boundary, regionId: boundary } }
+    expect(owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...original(), presentation: accepted } })).presentation).toEqual(accepted)
+    for (const id of [boundary + 'a', '', ' \t ', 'self', 'id\0nul', 'id\rcr', 'id\nlf']) {
+      for (const family of ['spatial', 'survey']) for (const field of [family === 'spatial' ? 'spaceId' : 'zoneId', 'tabId', 'regionId']) {
+        const context = { [family === 'spatial' ? 'spaceId' : 'zoneId']: 'original-parent', tabId: 'original-tab', regionId: 'original-region', [field]: id }
+        expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...original(), presentation: { ...route, [family]: context } } }))).toThrow()
+      }
+    }
+    for (const context of [{ spaceId: null, tabId: 'orphan-tab', regionId: null }, { spaceId: 'parent', tabId: null, regionId: 'orphan-region' }])
+      expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...original(), presentation: { ...route, spatial: context } } }))).toThrow()
+    const oversized = { ...original(), presentation: accepted, conversation: { version: 1, drafts: Array.from({ length: 33 }, (_, i) => ['draft-' + i, 'x'.repeat(65536)]), attempts: [], responses: [] } }
+    expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: oversized }))).toThrow()
+    expect(disk.raw()).toBe(before); expect(disk.setItem).not.toHaveBeenCalled()
+  })
+  it('restores exact Space and Survey content references beside the original draft and unknown input without storing file bodies', async () => {
+    const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk)
+    const route = { primary: 'survey' as const, showSession: false, showGoalWork: false, identity: null, profile: null,
+      survey: { zoneId: 'original-study', tabId: 'second-tab', regionId: 'original-note' },
+      spatial: { spaceId: 'original-space', tabId: 'second-file-tab', regionId: 'original-file' } }
+    await owner.updatePresentation(original(), route)
+    const restored = new DeviceWorkfaceStore(() => disk).snapshot().record
+    expect(restored).toEqual({ ...original(), presentation: route })
+    expect(owner.parseBackup(owner.exportBackup())).toEqual(restored)
+    const laterDraft = { ...restored.conversation, drafts: [[key, '后来未发送的草稿']] as Array<[string, string]> }
+    await owner.updateConversation(laterDraft)
+    expect(new DeviceWorkfaceStore(() => disk).snapshot().record).toEqual({ ...restored, conversation: laterDraft })
+    expect(Object.keys(restored.presentation!.survey!)).toEqual(['zoneId', 'tabId', 'regionId'])
+    expect(Object.keys(restored.presentation!.spatial!)).toEqual(['spaceId', 'tabId', 'regionId'])
+  })
+  it('refuses incomplete or content-bearing saved frames without replacing the original record or its input guard', () => {
+    const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
+    const route = { primary: 'space' as const, showSession: false, showGoalWork: false, identity: null, profile: null }
+    const malformed = [
+      { ...route, spatial: { spaceId: 'original-space', tabId: null, regionId: 'unparented-region' } },
+      { ...route, survey: { zoneId: null, tabId: 'unparented-tab', regionId: null } },
+      { ...route, spatial: { spaceId: 'original-space', tabId: 'tab', regionId: 'region', content: 'foreign body' } },
+      { ...route, survey: { zoneId: 'zone', tabId: 'tab', regionId: 'region', runId: 'invented-run' } }
+    ]
+    for (const value of malformed) expect(() => owner.parseBackup(JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...original(), presentation: value } }))).toThrow()
+    expect(disk.raw()).toBe(before); expect(owner.snapshot().record).toEqual(original()); expect(disk.setItem).not.toHaveBeenCalled()
+  })
   it('exports and restores original display/source references alongside original input guards without persisting live catalog or image facts', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk)
     const identity = retainObjectReference({ name: '原 Mote', project: '原项目', context: { spaceId: 'mote', zoneId: 'home', workspaceId: 'scratch', displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' },
