@@ -1,9 +1,9 @@
 import { normalizeBrowserOutcomeJournal } from './browser-outcome-journal.js'
 import type { BrowserOutcomeRegistration, BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { durableWriteFile } from '@agentmux/core'
+import { BROWSER_OPERATION_JOURNAL_VERSION, type BrowserOperationJournalStore, type BrowserOperationJournalChanges } from './browser-operation-store.js'
+export { BrowserOperationFileStore, BROWSER_OPERATION_JOURNAL_VERSION, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-store.js'
+export type { BrowserOperationJournalStore, BrowserOperationJournalChanges } from './browser-operation-store.js'
 import type {
   BrowserOperation,
   BrowserOperationPhase,
@@ -13,10 +13,6 @@ import type {
   BrowserReplayStep,
   BrowserReplayTarget
 } from '../shared/browser-operation.js'
-
-/** The on-disk shape is deliberately a snapshot, rather than an append-only log. */
-export const BROWSER_OPERATION_JOURNAL_VERSION = 1 as const
-export const BROWSER_OPERATION_JOURNAL_FILE = 'browser-operation-journal.json'
 
 /** Bound the history presentation and event backlog, never durable operation identity or steps. */
 export const MAX_BROWSER_OPERATIONS = 64
@@ -67,41 +63,6 @@ export type BrowserOperationJournalDocument = {
   version: typeof BROWSER_OPERATION_JOURNAL_VERSION
   operations: BrowserOperation[]
   events: BrowserOperationEvent[]
-}
-
-export interface BrowserOperationJournalStore {
-  load(): Promise<BrowserOperationJournalDocument | null>
-  save(document: BrowserOperationJournalDocument): Promise<void>
-}
-
-/**
- * The file store is intentionally independent of Electron. Main creates it with its userData path;
- * tests and embedders can use a temporary path. A missing journal is a healthy first use; damage or
- * unreadable history remains observable without stopping a healthy Browser from opening.
- */
-export class BrowserOperationFileStore implements BrowserOperationJournalStore {
-  private saveTail: Promise<void> = Promise.resolve()
-
-  constructor(private readonly path: string) {}
-
-  async load(): Promise<BrowserOperationJournalDocument | null> {
-    try {
-      const parsed: unknown = JSON.parse(await readFile(this.path, 'utf8'))
-      return isJournalDocument(parsed) ? parsed : null
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyDocument()
-      return null
-    }
-  }
-
-  async save(document: BrowserOperationJournalDocument): Promise<void> {
-    const operation = this.saveTail.catch(() => {}).then(async () => {
-      await mkdir(dirname(this.path), { recursive: true })
-      await durableWriteFile(this.path, `${JSON.stringify(document, null, 2)}\n`)
-    })
-    this.saveTail = operation.then(() => {}, () => {})
-    await operation
-  }
 }
 
 export type BrowserOperationStart = {
@@ -183,12 +144,19 @@ export class BrowserOperationJournal {
   private warning: string | undefined
   /** 序号属于实际事件引用；裁剪可从中间移除事件，不能从数组下标反推。重启后重新发号。 */
   private sequenced = 0
+  private readonly eventEpoch = randomUUID()
   private readonly eventFacts = new WeakMap<BrowserOperationEvent, { sequence: number; published: boolean }>()
   /** 只在 ACK 未到或同 operation 前序未交付时暂存；Journal 仍是唯一持久事实。 */
   private readonly deliveryQueues = new Map<string, DeliveryQueue>()
   /** 投递只访问相关 operation 的消费者；坏订阅不能成为控制路径上的闸。 */
   private readonly subscribers = new Map<string, Map<number, JournalSubscriber>>()
   private nextSubscriberId = 1
+  private readonly operations = new Map<string, BrowserOperation>()
+  private readonly steps = new Map<string, Map<number, BrowserOperationStep>>()
+  private readonly maxSequences = new Map<string, number>()
+  private readonly dirtyOperations = new Map<string, { metadata: Omit<BrowserOperation, 'steps'>; steps: Map<number, BrowserOperationStep> }>()
+  private readonly dirtyEvents = new Map<string, Map<number, BrowserOperationEvent>>()
+  private writeRevision = 0
 
   constructor(store: BrowserOperationJournalStore, options: JournalOptions = {}) {
     this.saveStore = store
@@ -221,9 +189,10 @@ export class BrowserOperationJournal {
       ...(input.replayOf ? { replayOf: input.replayOf } : {})
     })
     this.document.operations.push(operation)
+    this.indexOperation(operation)
     this.trim()
     this.publish({ type: 'operation-started', operationId: operation.id, at, operation })
-    await this.persist()
+    await this.persist(operation)
     return cloneOperation(operation)
   }
 
@@ -245,7 +214,7 @@ export class BrowserOperationJournal {
       phase,
       ...(options.warning ? { warning: clampProse(options.warning) } : {})
     })
-    await this.persist()
+    await this.persist(operation)
     return cloneOperation(operation)
   }
 
@@ -254,9 +223,7 @@ export class BrowserOperationJournal {
     const operation = this.find(operationId)
     if (!operation) return null
     const startedAt = this.now()
-    const sequence = operation.steps.length === 0
-      ? 1
-      : Math.max(...operation.steps.map((step) => step.sequence)) + 1
+    const sequence = (this.maxSequences.get(operationId) ?? 0) + 1
     const step = sanitizeStep({
       sequence,
       method: input.method,
@@ -269,9 +236,11 @@ export class BrowserOperationJournal {
       ...(input.replay ? { replay: input.replay } : {})
     })
     operation.steps.push(step)
+    this.steps.get(operationId)!.set(sequence, step)
+    this.maxSequences.set(operationId, sequence)
     if (operation.phase === 'preparing' || operation.phase === 'waiting') operation.phase = 'running'
     this.publish({ type: 'step-started', operationId, at: startedAt, step })
-    await this.persist()
+    await this.persist(operation, step)
     return cloneStep(step)
   }
 
@@ -282,7 +251,7 @@ export class BrowserOperationJournal {
   ): Promise<BrowserOperationStep | null> {
     await this.ready()
     const operation = this.find(operationId)
-    const step = operation?.steps.find((candidate) => candidate.sequence === sequence)
+    const step = this.steps.get(operationId)?.get(sequence)
     if (!operation || !step) return null
     step.status = input.status
     step.finishedAt = this.now()
@@ -292,7 +261,7 @@ export class BrowserOperationJournal {
     if (input.evidence !== undefined) step.evidence = input.evidence
     if (input.evidenceWarning !== undefined) step.evidenceWarning = clampProse(input.evidenceWarning)
     this.publish({ type: 'step-finished', operationId, at: step.finishedAt, step })
-    await this.persist()
+    await this.persist(operation, step)
     return cloneStep(step)
   }
 
@@ -310,7 +279,7 @@ export class BrowserOperationJournal {
     if (options.summary !== undefined) operation.summary = clampProse(options.summary)
     if (options.warning !== undefined) operation.warning = clampProse(options.warning)
     this.publish({ type: 'operation-finished', operationId, at, operation })
-    await this.persist()
+    await this.persist(operation)
     return cloneOperation(operation)
   }
 
@@ -322,7 +291,7 @@ export class BrowserOperationJournal {
     const outcome = normalizeBrowserOutcomeJournal({ registration }, operation.id, operation.browserId)
     if (!outcome) return null
     operation.outcome = outcome
-    const saved = await this.persist()
+    const saved = await this.persist(operation)
     return { operation: cloneOperation(operation), saved }
   }
 
@@ -336,13 +305,17 @@ export class BrowserOperationJournal {
     operation.outcome = outcome
     const event = this.record({ type: 'operation-checked', operationId, at: this.now(), operation })
     const pending = this.enqueue(event, false)
-    const saved = await this.persist()
+    const saved = await this.persist(operation)
     // ACK 对应原检查，不读取可能已经被下一次检查/phase 更新的 operation。
     const checked = (event.event as Extract<BrowserOperationEvent, { type: 'operation-finished' | 'operation-checked' }>).operation
     if (!saved && checked.outcome?.evaluation) {
       const notice = 'The result was checked but could not be saved. Existing Browser work remains; restore local storage before relying on recovery.'
       checked.outcome.evaluation.warning = notice
-      if (operation.outcome === outcome && outcome.evaluation) outcome.evaluation.warning = notice
+      if (operation.outcome === outcome && outcome.evaluation) {
+        outcome.evaluation.warning = notice
+        this.markDirty(operation)
+      }
+      this.markEventDirty(event.sequence, event.event)
     }
     pending.ready = true
     this.flush(operationId)
@@ -457,6 +430,10 @@ export class BrowserOperationJournal {
       // 两者已经一致。写一句 `this.sequenced = 0` 只是把同一个事实说两遍。
       return
     }
+    for (const operation of this.document.operations) this.indexOperation(operation)
+    for (const event of this.document.events) {
+      this.eventFacts.set(event, { sequence: ++this.sequenced, published: true })
+    }
     let recovered = false
     const at = this.now()
     for (const operation of this.document.operations) {
@@ -469,26 +446,38 @@ export class BrowserOperationJournal {
         step.status = 'stopped'
         step.finishedAt = at
         step.summary = 'Operation was interrupted by application restart'
+        this.markDirty(operation, step)
       }
-      this.document.events.push({
+      this.record({
         type: 'operation-recovered',
         operationId: operation.id,
         at,
         warning: OPERATION_WARNING
       })
+      this.markDirty(operation)
       recovered = true
     }
     if (recovered) {
       this.trim()
       await this.persist()
     }
-    for (const event of this.document.events) {
-      this.eventFacts.set(event, { sequence: ++this.sequenced, published: true })
+    for (const event of this.document.events) this.eventFacts.get(event)!.published = true
+  }
+
+  private indexOperation(operation: BrowserOperation): void {
+    this.operations.set(operation.id, operation)
+    const steps = new Map<number, BrowserOperationStep>()
+    let maximum = 0
+    for (const step of operation.steps) {
+      steps.set(step.sequence, step)
+      maximum = Math.max(maximum, step.sequence)
     }
+    this.steps.set(operation.id, steps)
+    this.maxSequences.set(operation.id, maximum)
   }
 
   private find(operationId: string): BrowserOperation | undefined {
-    return this.document.operations.find((operation) => operation.id === operationId)
+    return this.operations.get(operationId)
   }
 
   private publish(event: BrowserOperationEvent): void {
@@ -501,6 +490,7 @@ export class BrowserOperationJournal {
     const sequence = ++this.sequenced
     this.eventFacts.set(fact, { sequence, published: false })
     this.document.events.push(fact)
+    this.markEventDirty(sequence, fact)
     this.trim()
     return { sequence, event: fact }
   }
@@ -546,14 +536,57 @@ export class BrowserOperationJournal {
     }
   }
 
-  private async persist(): Promise<boolean> {
-    try {
-      await this.saveStore.save(normalizeDocument(this.document))
-      return true
-    } catch (error) {
-      this.warning = `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}`
-      return false
-    }
+  private markEventDirty(sequence: number, event: BrowserOperationEvent): void {
+    const related = this.dirtyEvents.get(event.operationId) ?? new Map<number, BrowserOperationEvent>()
+    related.set(sequence, cloneEvent(event))
+    this.dirtyEvents.set(event.operationId, related)
+  }
+
+  private markDirty(operation: BrowserOperation, step?: BrowserOperationStep): void {
+    const { steps: _steps, ...metadata } = operation
+    const pending = this.dirtyOperations.get(operation.id) ?? { metadata, steps: new Map<number, BrowserOperationStep>() }
+    pending.metadata = structuredClone(metadata)
+    if (step) pending.steps.set(step.sequence, cloneStep(step))
+    this.dirtyOperations.set(operation.id, pending)
+  }
+
+  private persist(operation?: BrowserOperation, step?: BrowserOperationStep): Promise<boolean> {
+    if (operation) this.markDirty(operation, step)
+    return (async () => {
+      // Capture exact immutable facts at the transaction boundary. Concurrent changes acquire new
+      // references; an ACK only clears the facts included in this save, never later mutations.
+      const entries = operation
+        ? (this.dirtyOperations.has(operation.id) ? [[operation.id, this.dirtyOperations.get(operation.id)!] as const] : [])
+        : [...this.dirtyOperations]
+      const operations = entries.map(([id, pending]) => ({ id, metadata: pending.metadata, steps: [...pending.steps.values()] }))
+      const events = operation ? [...(this.dirtyEvents.get(operation.id) ?? [])]
+        : [...this.dirtyEvents.values()].flatMap(related => [...related])
+      const changes: BrowserOperationJournalChanges = {
+        writer: this.eventEpoch, revision: ++this.writeRevision,
+        operations: operations.map(({ metadata, steps }) => ({ metadata, steps })),
+        events: events.map(([sequence, event]) => ({ id: `${this.eventEpoch}:${sequence}`, sequence, event: cloneEvent(event) })), maxEvents: this.maxEvents
+      }
+      try {
+        await this.saveStore.save(changes)
+        for (const captured of operations) {
+          const pending = this.dirtyOperations.get(captured.id)
+          if (!pending) continue
+          for (const changed of captured.steps) {
+            if (pending.steps.get(changed.sequence) === changed) pending.steps.delete(changed.sequence)
+          }
+          if (pending.metadata === captured.metadata && pending.steps.size === 0) this.dirtyOperations.delete(captured.id)
+        }
+        for (const [sequence, event] of events) {
+          const related = this.dirtyEvents.get(event.operationId)
+          if (related?.get(sequence) === event) related.delete(sequence)
+          if (related?.size === 0) this.dirtyEvents.delete(event.operationId)
+        }
+        return true
+      } catch (error) {
+        this.warning = `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}`
+        return false
+      }
+    })()
   }
 }
 
