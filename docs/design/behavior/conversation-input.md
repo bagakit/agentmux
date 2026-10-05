@@ -305,8 +305,6 @@ AgentMux 自身通过 User message 提供内容的范围、包装与组合约束
 
 **完整前导声明上下文的同记录阅读**。Goals 的阅读反馈希望把输入开头完整的 `<amux from="amux">…</amux>` 声明上下文收拢，让随后原请求可连续读。完整且边界明确的前导声明可以折叠、随时展开并选择原文；连续的完整前导声明保持其原次序，同一记录的真实尾文完整可读。没有普通尾文时保留声明和记录，不补写用户请求或捏造一段用户话。第一段普通正文以后不再寻找并隐藏声明；引用、blockquote、fenced／inline／缩进代码、非前导样例、不完整或结构含糊的前导序列保持全文可读。
 
-Owning location: docs/design/behavior/conversation-input.md, existing source declaration reading paragraph.
-
 完整、位于输入起始的连续 `<amux from="amux">…</amux>` 上下文之后，紧接的既有来源头／完整消息包沿同一阅读语法组合呈现。各上下文保留原始 source span，来源仍明确为声明，原始 unknown／已知 Agent 作者不变且可信作者优先；正文的开头换行、尾部与完整 Copy 保原始内容。未完成、未知、引用或代码中的声明保原文可读，不按启动用途、发起工具或特定 Provider 分支。
 
 这只是原记录内的阅读分层，不创建新的消息或来源事实；声明即使来自用户原文也只叫声明，不认证 System、Agent 或人类，不改变原 unknown 作者、source、record ID、time、parts 或 native／captured 关联。已明确的 producer systemContext 仍以其原事实表达，不从这层声明投影反推系统记录。整条 Copy 保持完整原 wire，缩进、空格、引用及各 parts 不因折叠或展开而改写；原正文节点、Range、阅读位置、展开和草稿保持，查看不发送、导航、切 focus 或控制 Run。隐藏和无关 Session 输出不增加读取，不新增消息／身份账本、第二 Reader 或独立 parser。 声明收起后的尾文分隔与普通段落排版只见密度文档[《用户消息气泡的内文密度》](../presentation/conversation-input.md#用户消息气泡的内文密度)中的“声明尾文的连续排版”。
