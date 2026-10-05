@@ -18,3 +18,8 @@ export function fixtureIso(offsetMs = 0) {
   const dayMs = 24 * 60 * 60 * 1000
   return new Date(dayMs + offsetMs).toISOString()
 }
+
+/** Exact Unix-zero-relative fixture instants; offsets preserve ordering and sentinels. */
+export function fixtureEpoch(days, seconds = 0, milliseconds = 0) {
+  return days * 24 * 60 * 60 * 1_000 + seconds * 1_000 + milliseconds
+}
