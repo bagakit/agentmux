@@ -1,10 +1,14 @@
+import { parseToolkitSnapshot } from '@agentmux/core/toolkit'
+import { parseToolkitResultDocument } from '@agentmux/core/toolkit-result-document'
+import { openToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, DurableWriteError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitResultDocument, parseToolkitSnapshot, type AgentMuxToolkitPort,
+import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, type AgentMuxToolkitPort,
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot,
-  ToolkitFailureCapture, toolkitFailureError, parseToolkitPerformanceFailureDetails,
-  type ToolkitPerformanceIssue, type ToolkitPerformanceFailure, type ToolkitPerformanceFailureDetails, type ToolkitPerformanceFailureStage } from '@agentmux/core/control'
+} from '@agentmux/core/control'
+import { ToolkitFailureCapture, toolkitFailureError, parseToolkitPerformanceFailureDetails,
+  type ToolkitPerformanceIssue, type ToolkitPerformanceFailure, type ToolkitPerformanceFailureDetails, type ToolkitPerformanceFailureStage } from '@agentmux/core/toolkit-performance-failure'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import { bundledToolkitTools, bundledToolkitScript } from './toolkit-bundled.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
@@ -21,6 +25,10 @@ type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort 
   creationPending: boolean; admissionSaved: boolean; receiptUnconfirmed: boolean; cleanupConfirmed: boolean
   captureFailure: boolean; stage: ToolkitPerformanceFailureStage; frame: ToolkitFailureCapture | null
   failureDetails: ToolkitPerformanceFailureDetails | null; frameStart: number
+  channel: Awaited<ReturnType<typeof openToolkitResultChannel>> | null; runReady: Promise<void>; ready(): void
+  drainTimer: ReturnType<typeof setTimeout> | null
+  exit: { code: number | null; signal: string | null } | null
+  terminalCursor: number; terminalCapture: ToolkitFailureCapture | null
   lastAppObservedAt: number | null; cursor: number; buffer: string; decoder: TextDecoder; sequence: number }
 type PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1'; admission:
   (Pick<ToolkitMetricsSnapshot, 'executionId' | 'run' | 'reason' | 'startedAt'>) | null }
@@ -42,20 +50,23 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   get current(): ToolkitMetricsSnapshot { return this.snapshot() }
   private snapshot(includeFailureEvidence = false): ToolkitMetricsSnapshot {
     const retained = this.failure !== null && this.hasFailureEvidence(this.failure) ||
-      this.value.diagnostics.issue?.message != null || this.value.diagnostics.cleanupIssue?.message != null
+      this.value.diagnostics.issue?.message != null || this.value.diagnostics.cleanupIssue?.message != null ||
+      this.value.diagnostics.output?.terminal != null || this.value.diagnostics.output?.stderr != null
     const safeIssue = (issue: ToolkitPerformanceIssue | null) => issue === null ? null : { ...issue, message: null }
     const diagnostics = { ...this.value.diagnostics,
       lastFailure: includeFailureEvidence ? this.failure : this.value.diagnostics.lastFailure,
       issue: includeFailureEvidence ? this.value.diagnostics.issue : safeIssue(this.value.diagnostics.issue),
       cleanupIssue: includeFailureEvidence ? this.value.diagnostics.cleanupIssue : safeIssue(this.value.diagnostics.cleanupIssue),
+      ...(this.value.diagnostics.output ? { output: includeFailureEvidence ? this.value.diagnostics.output :
+        { ...this.value.diagnostics.output, terminal: null, stderr: null } } : {}),
       failureEvidence: retained ? (includeFailureEvidence ? 'included' as const : 'retained' as const) : 'none' as const }
     return structuredClone({ ...this.value, diagnostics, manual: this.manual, consumerCount: this.leases.size })
   }
   private hasFailureEvidence(failure: ToolkitPerformanceFailure) {
-    return failure.details.bytes !== null || failure.details.error.stack !== null || failure.details.error.message !== null
+    return failure.details.bytes !== null || failure.details.error.stack !== null || failure.details.error.message !== null || (failure.details.diagnosticOutput?.length ?? 0) > 0
   }
   private safeFailure(failure: ToolkitPerformanceFailure): ToolkitPerformanceFailure {
-    return { ...failure, details: { ...failure.details, bytes: null, error: { ...failure.details.error, message: null, stack: null } } }
+    return { ...failure, details: { ...failure.details, bytes: null, ...(failure.details.diagnosticOutput ? { diagnosticOutput: [] } : {}), error: { ...failure.details.error, message: null, stack: null } } }
   }
   private publish() {
     let safe: ToolkitMetricsSnapshot | undefined, evidence: ToolkitMetricsSnapshot | undefined
@@ -70,8 +81,11 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   }
   private wanted() { return !this.closed && (this.manual || this.leases.size > 0) }
   private newExecution(id: string): Execution {
+    let ready!: () => void
+    const runReady = new Promise<void>(resolve => { ready = resolve })
     return { id, ref: null, port: null, ended: false, creationPending: false, admissionSaved: false,
       receiptUnconfirmed: false, cleanupConfirmed: false, captureFailure: false, stage: 'launch', frame: null,
+      channel: null, runReady, ready, drainTimer: null, exit: null, terminalCursor: 0, terminalCapture: null,
       failureDetails: null, frameStart: 0, lastAppObservedAt: null,
       cursor: 0, buffer: '', decoder: new TextDecoder('utf-8', { fatal: true }), sequence: 0 }
   }
@@ -197,7 +211,8 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     this.execution = execution
     this.value = { ...this.value, executionId: execution.id, run: null, state: 'starting', reason: null,
       startedAt: (this.args.now ?? Date.now)(), observation: null, document: null, observedAt: null, sequence: 0, trend: [],
-      diagnostics: { ...this.value.diagnostics, captureEnabled: captureFailure, cleanupIssue: null } }
+      diagnostics: { ...this.value.diagnostics, captureEnabled: captureFailure, cleanupIssue: null,
+        output: { executionId: execution.id, run: null, terminalBytes: 0, stderrBytes: 0, terminalGap: false, terminal: null, stderr: null } } }
     this.publish()
     const work = async () => {
       const launch = this.args.launch()
@@ -211,24 +226,44 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       const port = await this.args.openRunPort()
       execution.port = port
       if (!this.wanted() || execution.ended) return
+      execution.stage = 'result-channel'
+      execution.channel = await openToolkitResultChannel({
+        onBytes: async bytes => {
+          // Kernel socket buffers provide backpressure until Core confirms the original Run.
+          await execution.runReady
+          if (!execution.ended && this.execution === execution) {
+            try { this.bytes(execution, execution.cursor, execution.cursor + bytes.length, bytes) }
+            catch (error) { this.fail(execution, error) }
+          }
+        },
+        onEnd: async () => { await execution.runReady; this.outputEnded(execution) },
+        onError: error => { if (!execution.ended) { execution.stage = 'result-channel'; this.fail(execution, error) } }
+      })
+      if (!this.wanted() || execution.ended) return
       execution.creationPending = true
       execution.stage = 'create'
       const run = await port.create({ createOperationId: execution.id, workspacePath: launch.cwd,
-        command: launch.runner, args: [launch.script, launch.cli], env: { ...launch.env, AGENTMUX_PERFORMANCE_CAPTURE_FAILURE: captureFailure ? '1' : '0' }, cols: 80, rows: 24 },
+        command: launch.runner, args: [launch.script, launch.cli], env: { ...launch.env, ...execution.channel.env, AGENTMUX_PERFORMANCE_CAPTURE_FAILURE: captureFailure ? '1' : '0' }, cols: 80, rows: 24 },
       event => this.accept(execution, event))
       execution.ref = { runId: run.runId }
       execution.creationPending = false
       this.value.run = { hostId: 'local', runId: run.runId }
+      this.value.diagnostics.output!.run = this.value.run
       execution.stage = 'admission'
       await this.save(execution)
+      execution.ready()
       if (!this.wanted() || execution.ended) return
       execution.stage = 'attach'
       const attached = await port.attach(execution.ref, 0)
-      if (attached.gap) throw new AgentMuxError('Tool output replay has a Gap.', 'CONTROL_PROTOCOL_ERROR')
-      for (const chunk of attached.replay) this.bytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
-      if (!execution.ended) { this.value.state = 'observing'; this.publish() }
+      if (attached.gap) this.value.diagnostics.output!.terminalGap = true
+      for (const chunk of attached.replay) this.terminalBytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
+      if (!execution.ended) {
+        this.value.state = execution.exit ? 'unknown' : 'observing'
+        this.publish()
+      }
     }
     this.starting = work().catch(async error => {
+      execution.ready()
       this.recordFailure(execution, error)
       this.manual = false; execution.ended = true
       this.value.state = execution.creationPending || execution.receiptUnconfirmed ? 'unknown' : 'failed'
@@ -253,11 +288,11 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     try {
       if (event.type === 'terminal-output') {
         const range = event.evidence.outputByteRange
-        this.bytes(execution, range.startByte, range.endByte, event.dataBytes)
+        this.terminalBytes(execution, range.startByte, range.endByte, event.dataBytes)
       } else if (event.type === 'terminal-snapshot') {
         execution.stage = 'run-output-order'
-        if (event.gap) throw new AgentMuxError('Tool output snapshot has a Gap.', 'CONTROL_PROTOCOL_ERROR')
-        for (const chunk of event.replay) this.bytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
+        if (event.gap) this.value.diagnostics.output!.terminalGap = true
+        for (const chunk of event.replay) this.terminalBytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
       } else if (event.type === 'agent-error') {
         execution.stage = 'run-event'
         const error = new AgentMuxError(event.message, event.code)
@@ -265,17 +300,52 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
           eventOrigin: { source: event.evidence.source, observedAt: event.evidence.observedAt, run: event.evidence.run ?? null } }
         throw error
       } else if (event.type === 'process-state' && event.state !== 'running') {
-        execution.stage = 'run-output-decode'
-        execution.buffer += execution.decoder.decode()
-        execution.stage = 'run-output-lf'
-        if (execution.buffer.length) throw new AgentMuxError('Tool output ended without a complete LF frame.', 'CONTROL_PROTOCOL_ERROR')
-        execution.stage = 'process-exit'
-        const error = new AgentMuxError(event.exitCode === 0 ? 'Observation ended.' : 'Performance script exited unsuccessfully.', 'CONTROL_FAILED')
-        execution.failureDetails = { stage: execution.stage, error: toolkitFailureError(error, execution.captureFailure), bytes: null,
-          exit: { code: event.exitCode ?? null, signal: event.exitSignal ?? null } }
-        this.fail(execution, error)
+        execution.exit = { code: event.exitCode ?? null, signal: event.exitSignal ?? null }
+        // An exit event may precede the socket's final bytes. Drain that actual
+        // stream before deciding its outcome; exit never invents a result frame.
+        if (!execution.channel?.connected) this.outputEnded(execution)
+        else {
+          this.value.state = 'unknown'; this.value.reason = 'Run exited; final Toolkit result-channel bytes are still draining.'; this.publish()
+          // A dead producer cannot keep readers observing forever. Use the existing
+          // ordinary observation wait budget; expiry reports incomplete/unknown EOF,
+          // never a complete result or a new Run. Already received evidence is retained.
+          execution.drainTimer ??= setTimeout(() => {
+            execution.stage = 'result-channel'
+            execution.failureDetails = { stage: execution.stage, error: toolkitFailureError(new AgentMuxError('Run exited but Toolkit result-channel EOF is unconfirmed; final output may be incomplete.', 'CONTROL_TIMEOUT'), execution.captureFailure), bytes: execution.frame?.value ?? null, exit: execution.exit }
+            this.fail(execution, new AgentMuxError('Toolkit final output is unconfirmed after Run exit.', 'CONTROL_TIMEOUT'))
+          }, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS)
+          execution.drainTimer.unref()
+        }
       }
     } catch (error) { this.fail(execution, error) }
+  }
+  private outputEnded(execution: Execution) {
+    if (execution.ended || this.execution !== execution) return
+    if (execution.drainTimer) { clearTimeout(execution.drainTimer); execution.drainTimer = null }
+    try {
+      execution.stage = 'run-output-decode'
+      execution.buffer += execution.decoder.decode()
+      execution.stage = 'run-output-lf'
+      if (execution.buffer.length) throw new AgentMuxError('Tool result channel ended without a complete LF frame.', 'CONTROL_PROTOCOL_ERROR')
+      execution.stage = execution.exit ? 'process-exit' : 'result-channel'
+      const error = new AgentMuxError(execution.exit ? 'Performance script exited.' : 'Toolkit result channel ended.', 'CONTROL_FAILED')
+      execution.failureDetails = { stage: execution.stage, error: toolkitFailureError(error, execution.captureFailure), bytes: null, exit: execution.exit }
+      throw error
+    } catch (error) { this.fail(execution, error) }
+  }
+  private terminalBytes(execution: Execution, start: number, end: number, bytes: Uint8Array) {
+    if (execution.ended || this.execution !== execution || end <= execution.terminalCursor) return
+    const output = this.value.diagnostics.output!
+    if (end - start !== bytes.length || start > execution.terminalCursor) { output.terminalGap = true; execution.terminalCapture = null }
+    const fresh = bytes.subarray(Math.max(0, execution.terminalCursor - start))
+    output.terminalBytes += fresh.length
+    if (execution.captureFailure && fresh.length) {
+      execution.terminalCapture ??= new ToolkitFailureCapture('toolkit-terminal', Math.max(start, execution.terminalCursor))
+      execution.terminalCapture.append(fresh)
+      output.terminal = execution.terminalCapture.value
+    }
+    execution.terminalCursor = end
+    this.publish()
   }
   private bytes(execution: Execution, start: number, end: number, bytes: Uint8Array) {
     if (execution.ended || this.execution !== execution || end <= execution.cursor) return
@@ -311,14 +381,27 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         }
         const details = parseToolkitPerformanceFailureDetails(frame.failure)
         if (typeof frame.reason !== 'string' || frame.reason !== details.error.message ||
-          !details.stage.startsWith('cli-') || (!execution.captureFailure && (details.bytes !== null || details.error.stack !== null))) {
+          !details.stage.startsWith('cli-') || (!execution.captureFailure && (details.bytes !== null || details.error.stack !== null || (details.diagnosticOutput?.length ?? 0) > 0))) {
           throw new AgentMuxError('Toolkit error origin is invalid.', 'CONTROL_PROTOCOL_ERROR')
         }
         execution.failureDetails = details
         throw new AgentMuxError(frame.reason, 'CONTROL_FAILED')
       }
-      if (frame.event !== 'result' || Object.keys(frame).sort().join() !== 'document,event,payload,schema,sequence' ||
+      if (frame.event !== 'result' || Object.keys(frame).sort().join() !== 'diagnostics,document,event,payload,schema,sequence' ||
         frame.sequence !== execution.sequence + 1) throw new AgentMuxError('Toolkit result sequence or framing is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      const diagnostic = frame.diagnostics
+      if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic) ||
+        Object.keys(diagnostic).sort().join() !== 'stderr,stderrBytes' || !Number.isSafeInteger(diagnostic.stderrBytes) || diagnostic.stderrBytes < 0) {
+        throw new AgentMuxError('Toolkit diagnostic output is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      }
+      if (diagnostic.stderr !== null) {
+        const checked = parseToolkitPerformanceFailureDetails({ stage: 'cli-stderr', error: toolkitFailureError('diagnostic', false), bytes: diagnostic.stderr, exit: null })
+        if (!execution.captureFailure || checked.bytes!.source !== 'metrics-rpc-stderr' || checked.bytes!.startByte !== 0 || checked.bytes!.endByte !== diagnostic.stderrBytes) {
+          throw new AgentMuxError('Toolkit diagnostic source is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+      }
+      this.value.diagnostics.output!.stderrBytes = diagnostic.stderrBytes
+      this.value.diagnostics.output!.stderr = diagnostic.stderr
       execution.stage = 'metrics-payload'
       const observation = parseMetricsObservation(frame.payload)
       execution.stage = 'toolkit-document'
@@ -328,7 +411,9 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       execution.sequence = frame.sequence
       this.value.observation = observation; this.value.observedAt = observation.observedAt
       this.value.document = document
-      this.value.sequence = frame.sequence; this.value.state = 'observing'; this.value.reason = null
+      this.value.sequence = frame.sequence
+      this.value.state = execution.exit ? 'unknown' : 'observing'
+      this.value.reason = execution.exit ? 'Run exited; final Toolkit result-channel bytes are still draining.' : null
       const app = observation.app
       if (app.state === 'available' && app.data && app.observedAt !== null &&
         (execution.lastAppObservedAt === null || app.observedAt > execution.lastAppObservedAt)) {
@@ -353,8 +438,10 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       run: execution.ref ? { hostId: 'local', runId: execution.ref.runId } : null, recordedAt: (this.args.now ?? Date.now)(),
       details: execution.failureDetails ?? { stage: execution.stage, error: toolkitFailureError(error, execution.captureFailure),
         bytes: execution.frame?.value ?? null, exit: null } }
+    const supplemental = [this.value.diagnostics.output?.terminal, this.value.diagnostics.output?.stderr].filter(value => value != null)
+    if (supplemental.length) failure.details = { ...failure.details, diagnosticOutput: [...(failure.details.diagnosticOutput ?? []), ...supplemental].filter((value, index, all) => all.findIndex(other => other.source === value.source) === index).slice(0, 2) }
     this.failure = failure
-    this.value.diagnostics = { captureEnabled: execution.captureFailure, failureEvidence: this.hasFailureEvidence(failure) ? 'retained' : 'none',
+    this.value.diagnostics = { ...(this.value.diagnostics.output ? { output: this.value.diagnostics.output } : {}), captureEnabled: execution.captureFailure, failureEvidence: this.hasFailureEvidence(failure) ? 'retained' : 'none',
       droppedWrites: this.value.diagnostics.droppedWrites, lastFailure: this.safeFailure(failure),
       persistence: execution.captureFailure && this.args.failures ? 'pending' : 'not-requested', issue: null, cleanupIssue: null }
     if (execution.captureFailure && this.args.failures) {
@@ -375,6 +462,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private fail(execution: Execution, error: unknown) {
     if (execution.ended || this.execution !== execution) return
     this.recordFailure(execution, error)
+    if (execution.drainTimer) { clearTimeout(execution.drainTimer); execution.drainTimer = null }
     execution.ended = true; this.manual = false
     this.value.state = 'failed'; this.value.reason = toolkitFailureError(error).message
     this.publish()
@@ -389,6 +477,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     if (!execution) return
     if ((!execution.ref && execution.creationPending) ||
       (!explicit && (execution.receiptUnconfirmed || this.value.state === 'unknown'))) {
+      execution.ready(); await execution.channel?.close(); execution.channel = null
       this.value.state = 'unknown'; this.publish(); return
     }
     if (!execution.ref && !execution.admissionSaved && !execution.receiptUnconfirmed) {
@@ -397,16 +486,21 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       this.publish(); return
     }
     execution.ended = true
+    if (execution.drainTimer) { clearTimeout(execution.drainTimer); execution.drainTimer = null }
+    execution.ready()
     const failed = this.value.state === 'failed'
     this.value.state = 'stopping'; this.publish()
     this.stopping = (async () => {
-      let operation: ToolkitPerformanceIssue['operation'] = 'open-run-port'
+      let operation: ToolkitPerformanceIssue['operation'] = 'close-result-channel'
       try {
+        await execution.channel?.close()
+        execution.channel = null
+        operation = 'open-run-port'
         if (execution.ref) {
           if (!execution.port) execution.port = await this.args.openRunPort()
           if (!execution.cleanupConfirmed) {
             operation = 'stop'
-            try { await execution.port.stop(execution.ref) } finally {
+            try { if (execution.exit === null) await execution.port.stop(execution.ref) } finally {
               const primaryOperation = operation
               operation = 'release'
               await execution.port.release(execution.ref)
