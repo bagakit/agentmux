@@ -505,7 +505,12 @@ async function waitForPath(path, deadline, isAlive) {
     const exists = await pathExists(path)
     if (Date.now() > deadline) return false
     if (exists) return true
-    if (isAlive && !(await isAlive())) return false
+    if (isAlive && !(await isAlive())) {
+      // The application can publish its receipt and exit during the OS query.
+      // Consume that final receipt without extending the original deadline.
+      const ready = await pathExists(path)
+      return ready && Date.now() <= deadline
+    }
     const remaining = deadline - Date.now()
     if (remaining <= 0) return false
     await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(20, remaining)))
