@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -103,7 +103,7 @@ describe('compiled object discovery through the actual public service and origin
     const terminalView = { runId: 'original-Run', sampledAt: 123, visible: true, readOnly: false, liveReady: true, acceptsInput: true,
       viewGrid: { cols: 80, rows: 24 }, buffer: { type: 'normal', baseY: 100, viewportY: 40, length: 124 }, mouseTrackingMode: 'none' } as const
     const region = { kind: 'agent', workspaceId: 'W', tabId: 'T', regionId: 'R', agentSessionId: 'original-SID', providerId: 'codex', executorId: 'codex', bounds, neighbors, terminalView } as const
-    const file = { kind: 'file', workspaceId: 'W', tabId: 'T', regionId: 'F', path: upstreamFixturePath("literal file"), bounds, neighbors } as const
+    const file = { kind: 'file', workspaceId: 'W', tabId: 'T', regionId: 'F', path: fixturePath("literal file"), bounds, neighbors } as const
     const browser = { kind: 'browser', workspaceId: 'W', tabId: 'T', regionId: 'B', browserId: 'original-browser', bounds, neighbors } as const
     const tab = { tabId: 'T', workspaceId: 'W', regions: [region, file, browser] }
     let viewFailure: string | undefined
@@ -155,7 +155,7 @@ describe('compiled object discovery through the actual public service and origin
     expect(AGENTMUX_CLI_COMMANDS.length).toBeGreaterThan(0)
     const playbook = agentMuxPmoPlaybook()
     expect(playbook.readOnly).toBe(true)
-    const referenced = [...playbook.document.matchAll(/agentmux ([a-z-]+(?: [a-z-]+)*)/g)]
+    const referenced = [...playbook.document.matchAll(/amux ([a-z-]+(?: [a-z-]+)*)/g)]
     expect(referenced.length).toBeGreaterThan(0)
     for (const match of referenced) {
       const path = match[1]!.split(' ')

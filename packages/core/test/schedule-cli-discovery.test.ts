@@ -24,11 +24,11 @@ describe('compiled schedule discovery and invocation', () => {
       try { await command.parse([]); acceptsEmpty = true } catch (error) {
         expect(error).toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
       }
-      const syntax = 'agentmux ' + command.method.replaceAll('.', ' ') +
+      const syntax = 'amux ' + command.method.replaceAll('.', ' ') +
         (acceptsEmpty ? ' [--data <FILE|->]' : ' --data <FILE|->')
       for (const surface of surfaces) {
         const lines = surface.stdout.split('\n').map(line => line.trim())
-        expect(lines.filter(line => line.startsWith('agentmux ' + command.method.replaceAll('.', ' ') + ' '))).toEqual([syntax])
+        expect(lines.filter(line => line.startsWith('amux ' + command.method.replaceAll('.', ' ') + ' '))).toEqual([syntax])
       }
       const leaf = await run([...command.method.split('.'), '--help'])
       expect(leaf.code, leaf.stderr).toBe(0)
