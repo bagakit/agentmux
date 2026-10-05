@@ -133,8 +133,8 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, onOpenRepo
     {!ready && !history.error && <div className="branches-empty"><strong>{history.result?.kind === 'not-a-git-repository'
       ? 'Not a Git repository' : history.enabled ? 'Reading history…' : 'History will load when visible'}</strong></div>}
     {ready && ready.commits.length === 0 && <div className="branches-empty"><strong>No commits yet</strong></div>}
-    {ready && ready.commits.length > 0 && <HistoryViewport graph={graph} history={history} selectedOid={selectedOid}
-      revealOid={revealOid} scope={scope} position={position} scrollHost={scrollHost} footer={footer}
+    {ready && ready.commits.length > 0 && <HistoryViewport graph={graph} history={history} {...(selectedOid ? { selectedOid } : {})}
+      {...(revealOid ? { revealOid } : {})} scope={scope} position={position} scrollHost={scrollHost} footer={footer}
       select={select} previewEvents={details.triggerEvents} closePreview={details.close} readAhead={readAhead} />}
     {details.preview}
   </section>

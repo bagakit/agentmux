@@ -11,6 +11,9 @@ type HistoryState = {
   error: string | null
 }
 
+/** An explicit handoff of completed facts; pending requests never move between owners. */
+export type GitHistoryWindow = Readonly<Pick<HistoryState, 'key' | 'reference' | 'result' | 'error'>>
+
 /** Component-owned read window. Hidden tabs keep completed pages and reject pending reads. */
 export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, visible: boolean) {
   const workspaceId = workspace.id
@@ -84,6 +87,21 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     return () => { generation.current += 1; busy.current = false }
   }, [key, reference, enabled, read, publish])
 
+  const captureWindow = useCallback((): GitHistoryWindow | null => {
+    const value = latest.current
+    if (scope.current.key !== key || value?.key !== key || value.reference !== scope.current.reference ||
+      (!value.result && !value.error)) return null
+    return { key, reference: value.reference, result: value.result, error: value.error }
+  }, [key])
+  const adoptWindow = useCallback((window: GitHistoryWindow): void => {
+    if (scope.current.key !== key || window.key !== key) return
+    generation.current += 1
+    busy.current = false
+    // Layout handoff precedes enabled effects. An old read closure must not issue its old ref.
+    scope.current = { ...scope.current, reference: window.reference }
+    setSelection({ key, reference: window.reference })
+    publish({ ...window, loading: false })
+  }, [key, publish])
   const selectReference = useCallback((value: string | null) => setSelection({ key, reference: value }), [key])
   const refresh = useCallback(() => read(false), [read])
   const loadMore = useCallback(() => read(true), [read])
@@ -92,6 +110,6 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
     refs: state?.key === key && state.result?.kind === 'ready' ? state.result.snapshot.refs : [],
     reference, enabled,
-    selectReference, refresh, loadMore
+    selectReference, refresh, loadMore, captureWindow, adoptWindow
   }
 }
