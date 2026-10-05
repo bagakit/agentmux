@@ -1,8 +1,11 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
+
+const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement }>)
 
 // This mounted check isolates initial control ownership. Output parsing and
 // actual xterm/Host transport retain their separate production-chain evidence.
@@ -10,7 +13,7 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
   options: Record<string, unknown>
   textarea = document.createElement('textarea')
   parser = { registerOscHandler: () => ({ dispose() {} }) }
-  constructor(options: Record<string, unknown>) { this.options = options }
+  constructor(options: Record<string, unknown>) { this.options = options; canvases.push(this) }
   open(container: HTMLElement) { container.appendChild(this.textarea) }
   onUserInput() { return { dispose() {} } }
   onData() { return { dispose() {} } }
@@ -24,7 +27,8 @@ const key = 'agentmux-mobile-terminal-intent-v1:initial-original-session'
 const connection = { state: 'connected' as const, message: '原连接' }
 const platform = { copyText: async () => true } as Parameters<typeof MobileTerminalViewer>[0]['platform']
 const roots: ReturnType<typeof createRoot>[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear() })
+beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true })
+afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear(); canvases.length = 0 })
 
 function port() {
   const write = vi.fn(), resize = vi.fn()
@@ -53,7 +57,7 @@ it('mounted initial Viewer keeps its constructor watch notice; a different SDK s
 })
 
 it('mounted first binding retains the exact durable unknown intent and original diagnostic without claiming a connection change', async () => {
-  const original = JSON.stringify({ version: 1, intentId: 'original-intent', runId: 'original-run', kind: 'input', createdAt: 12 })
+  const original = JSON.stringify({ version: 1, intentId: 'original-intent', runId: 'original-run', kind: 'input', createdAt: _reshape_fixtureEpoch(0, 0, 12) })
   localStorage.setItem(key, original)
   const p = port(), view = await mount(p.client)
   expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('重启前的终端操作回执未确认')
@@ -91,4 +95,23 @@ it('reads horizontal terminal overflow through the original touch viewport while
     expect(moves).toHaveLength(4)
     expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
   } finally { document.removeEventListener('touchmove', observe) }
+})
+
+
+it('applies explicit Host terminal colors to the retained canvas without recreating output or gaining input', async () => {
+  const p = port(), node = document.createElement('div'); document.body.append(node)
+  const root = createRoot(node); roots.push(root)
+  const first = { background: '#152537', red: '#aa3344' }, next = { background: '#f4efe5', red: '#bb2233' }
+  const render = async (terminalPalette: typeof first) => act(async () => {
+    root.render(<MobileTerminalViewer client={p.client} agentSessionId="initial-original-session" connection={connection} platform={platform} visible terminalPalette={terminalPalette} />)
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+  })
+  await render(first)
+  const canvas = canvases[0]!, textarea = canvas.textarea
+  textarea.value = 'Retained native buffer'
+  expect(canvas.options.theme).toEqual(first)
+  await render(next)
+  expect(canvases).toHaveLength(1); expect(canvases[0]).toBe(canvas); expect(canvas.options.theme).toEqual(next)
+  expect(canvas.textarea).toBe(textarea); expect(textarea.value).toBe('Retained native buffer')
+  expect(canvas.options.disableStdin).toBe(true); expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
