@@ -69,6 +69,7 @@
 @import './resume.css';
 @import './activity.css';
 @import '@agentmux/client-ui/styles/conversation-message.css';
+@import '@agentmux/client-ui/styles/conversation-resource-text.css';
 @import '@agentmux/client-ui/styles/conversation-reactions.css';
 @import '@agentmux/client-ui/styles/markdown.css';
 @import '@agentmux/client-ui/styles/conversation-image.css';
