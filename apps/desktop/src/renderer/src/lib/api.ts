@@ -357,6 +357,8 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  readRendererMemory: () => ({ process: { pid: null, creationTime: null }, memory: { sampledAt: Date.now(),
+    scope: 'renderer-v8-isolate', heap: null, unavailable: 'Renderer process observation requires the desktop app.' } }),
   notesStorage: { inspect: async () => ({ directory: new URL("preview/notes", new URL('/', new URL(import.meta.url))).pathname, catalogPath: new URL("preview/notes/notebooks.json", new URL('/', new URL(import.meta.url))).pathname, resourceChanges: [], directoryChanges: [], operation: null }), change: async () => { throw new Error('Change the Notes directory in Desktop Settings. Your preview is retained.') }, onChange: () => () => {} },
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   notebooks: {

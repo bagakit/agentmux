@@ -3,13 +3,13 @@ import { ChevronDown, Code2, Cpu, Layers, Pause, Play, Settings2, X } from 'luci
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { MetricsSource, RunUsage } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
+import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 
 export type RunContext = { label: string; context: string; state: string; workspace?: string; provider?: string }
 export const runKey = (run: Pick<RunUsage, 'hostId' | 'runId'>) => JSON.stringify([run.hostId, run.runId])
 const cpu = (n: number | null | undefined) => n == null ? '—' : `${n.toFixed(1)}%`
 const memory = (n: number | null | undefined) => n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} GiB` : n >= 1024 ? `${Math.round(n / 1024)} MiB` : `${Math.round(n)} KiB`
 const bytes = (n: number | null | undefined) => n == null ? '—' : n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GiB` : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MiB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KiB` : `${n} B`
-const roleLabel: Record<string, string> = { main: 'Main', renderer: 'Renderer', gpu: 'GPU', browser: 'Browser', utility: 'Utility', other: 'Other' }
 function time(at: number | null | undefined) { return at == null ? 'Waiting for a reading' : new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
 function readingTime(at: number | null | undefined, updateAt: number | null | undefined) {
   if (at == null) return time(at)
@@ -44,11 +44,11 @@ function Metric({ label, value, hint, values, color }: { label: string; value: s
     {values ? <Sparkline values={values} color={color} label={`${label} · ${hint} · this observation`} /> : null}<small>{hint}</small></section>
 }
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
-function RunRow({ run, context, onToggle }: { run: RunUsage; context: RunContext | undefined; onToggle(key: string, open: boolean): void }) {
+function RunRow({ run, context, onToggle, basis }: { run: RunUsage; context: RunContext | undefined; onToggle(key: string, open: boolean): void; basis: string | undefined }) {
   return <details className="performance-contributor" data-run-id={run.runId} data-run-host={run.hostId} onToggle={event => onToggle(runKey(run), event.currentTarget.open)}>
     <summary className="performance-contributor__row"><span className="performance-identity"><strong><ChevronDown size={11} className="performance-run-chevron" aria-hidden="true" /><span title={context?.label ?? run.runId}>{context?.label ?? (run.runId.length > 18 ? `${run.runId.slice(0, 8)}…${run.runId.slice(-6)}` : run.runId)}</span></strong>
       <small title={context?.context}>{context?.context ?? 'Context unavailable'} · {context?.state ?? 'unknown'}</small></span>
-      <span>{cpu(run.cpuPercent)}</span><span>{memory(run.rssKib)}</span></summary>
+      <span>{cpu(run.cpuPercent)}<small className="performance-core-equivalent">{cpuCoreLabel(run.cpuPercent, basis)}</small></span><span>{memory(run.rssKib)}</span></summary>
     <Facts><dt>Run</dt><dd>{run.runId}</dd><dt>Identity</dt><dd>{context?.label ?? 'Unattributed Run'}</dd>
       <dt>Workspace / provider</dt><dd>{context?.workspace ? `${context.workspace} · ${context.provider ?? 'Provider unavailable'}` : context?.context ?? 'Unknown'}</dd><dt>Host</dt><dd>{run.hostId}</dd>
       <dt>Processes</dt><dd>{run.processCount ?? '—'}</dd>
@@ -72,7 +72,6 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
   const [appTrend, setAppTrend] = useState<{ executionId: string | null; lastSourceAt: number | null; resumePending: boolean; points: ToolkitMetricsSnapshot['trend'] }>({ executionId: null, lastSourceAt: null, resumePending: false, points: [] })
   const observation = snapshot?.observation
   const app = observation?.app.data
-  const appGroups = useMemo(() => [...(app?.groups ?? [])].sort((a, b) => (b.cpuPercent ?? -1) - (a.cpuPercent ?? -1) || a.role.localeCompare(b.role)), [app?.groups])
   const runs = observation?.process.data ?? []
   const ranked = useMemo(() => [...runs].sort((a, b) => ((sort === 'cpu' ? b.cpuPercent : b.rssKib) ?? -1) - ((sort === 'cpu' ? a.cpuPercent : a.rssKib) ?? -1) || runKey(a).localeCompare(runKey(b))), [runs, sort])
   const ordered = useMemo(() => {
@@ -191,24 +190,23 @@ export function PerformanceOverview({ snapshot, contexts, close, paused = false,
     <div className="performance-body">
       {error || snapshot?.reason ? <p className="performance-state" data-tone="warning">{error ?? snapshot?.reason}</p> : null}
       {scope !== 'runtime' ? <>
-        {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint="10s reading peak" values={trend.map(p => p.appCpuPercent)} color="var(--green)" />
+        {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={trend.map(p => p.appCpuPercent)} color="var(--green)" />
           <Metric label="Resident memory" value={memory(app?.rssKib)} hint="Latest · RSS" values={trend.map(p => p.appRssKib)} color="var(--blue)" /></div>
           : <><div className="performance-run-summary"><Layers size={14} /><span>{activeRun ? (contextFor(activeRun)?.label ?? activeRun.runId) : 'Select a Run to inspect its processes'}</span>
             <small>{runs.length} {runs.length === 1 ? 'Run' : 'Runs'}</small></div>
-            {activeRun ? <div className="performance-metrics performance-metrics--run"><Metric label="CPU" value={cpu(activeRun.cpuPercent)} hint="10s reading peak" values={selectedTrend.map(point => point.cpu)} color="var(--green)" />
+            {activeRun ? <div className="performance-metrics performance-metrics--run"><Metric label="CPU" value={cpu(activeRun.cpuPercent)} hint={`${cpuCoreLabel(activeRun.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} values={selectedTrend.map(point => point.cpu)} color="var(--green)" />
               <Metric label="Resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" values={selectedTrend.map(point => point.rss)} color="var(--blue)" /></div> : null}</>}
         <SourceNote source={source} />
-        {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU warming up · waiting for the second sample</p> : null}
-        <div className="performance-section-heading"><strong>{scope === 'app' ? 'Contributors' : 'Run processes'}</strong>
-          {scope === 'app' ? <span>{app?.processCount ?? '—'} processes</span> : <div className="performance-sort" role="group" aria-label="Sort contributors">
-            <button type="button" aria-pressed={sort === 'cpu'} onClick={() => setSort('cpu')}>CPU</button><button type="button" aria-pressed={sort === 'rss'} onClick={() => setSort('rss')}>RSS</button></div>}</div>
-        <div className="performance-table-head"><span>{scope === 'app' ? 'Process' : 'Run'}</span><span>CPU</span><span>RSS</span></div>
-        {scope === 'app' ? (all ? appGroups : appGroups.slice(0, 5)).map(group => <div className="performance-role-row" key={group.role}><span>{roleLabel[group.role]}<small>{group.processCount}</small></span><span>{cpu(group.cpuPercent)}</span><span>{memory(group.rssKib)}</span></div>)
-          : <div ref={list} className="performance-run-list" onFocusCapture={lock} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && !openRuns.current.size) setLockedOrder(null) }}>
-            {rows.map(run => <RunRow key={runKey(run)} run={run} context={contextFor(run)} onToggle={toggleRun} />)}</div>}
-        {scope === 'runs' && !runs.length ? <p className="performance-empty">{source?.state === 'available' ? 'No observed Runs' : 'Waiting for Run readings'}</p> : null}
-        {scope === 'runs' && ranked.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${ranked.length} Runs`}<ChevronDown size={12} /></button> : null}
-        {scope === 'app' && appGroups.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${appGroups.length} groups`}<ChevronDown size={12} /></button> : null}
+        {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU unavailable · waiting for a valid interval</p> : null}
+        {scope === 'app' ? <PerformanceAttribution observation={observation} paused={paused} /> : <>
+          <div className="performance-section-heading"><strong>Run processes</strong><div className="performance-sort" role="group" aria-label="Sort contributors">
+            <button type="button" aria-pressed={sort === 'cpu'} onClick={() => setSort('cpu')}>CPU</button><button type="button" aria-pressed={sort === 'rss'} onClick={() => setSort('rss')}>RSS</button></div></div>
+          <div className="performance-table-head"><span>Run</span><span>CPU</span><span>RSS</span></div>
+          <div ref={list} className="performance-run-list" onFocusCapture={lock} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && !openRuns.current.size) setLockedOrder(null) }}>
+            {rows.map(run => <RunRow key={runKey(run)} run={run} context={contextFor(run)} onToggle={toggleRun} basis={observation?.units.cpuBasis} />)}</div>
+          {!runs.length ? <p className="performance-empty">{source?.state === 'available' ? 'No observed Runs' : 'Waiting for Run readings'}</p> : null}
+          {ranked.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${ranked.length} Runs`}<ChevronDown size={12} /></button> : null}
+        </>}
         <details className="performance-disclosure"><summary>Resource owners <span>Main & this window</span><ChevronDown size={12} /></summary><Facts>
           <dt>Main reading</dt><dd>{observation?.main.state ?? 'pending'} · {readingTime(observation?.main.lastSuccessAt, snapshot?.observedAt)}{observation?.main.reason ? ` · ${observation.main.reason}` : ''}</dd>
           <dt>Attachment owners / leases</dt><dd>{observation?.main.data ? `${observation.main.data.sessionAttachmentOwners} / ${observation.main.data.sessionAttachmentLeases}` : '—'}</dd>

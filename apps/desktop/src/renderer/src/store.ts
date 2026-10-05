@@ -3475,7 +3475,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const disposeControl = api.control.onRequest((request, signal) => request.operation === 'continuous-progress.observeInput'
       ? readContinuousProgressInput(get(), request, signal)
       : request.operation === 'metrics.renderer'
-        ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
+        ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), ...api.readRendererMemory(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
         : get().executeControl(request, signal))
     const disposeSpatialLinkIssues = api.ui.onSpatialLinkIssue(message => get().reportError(new Error(message)))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
