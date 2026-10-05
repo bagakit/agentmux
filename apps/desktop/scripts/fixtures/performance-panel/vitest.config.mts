@@ -29,7 +29,7 @@ const changes: Record<string, [string, string, string]> = {
 assert.ok(mutant === 'baseline' || changes[mutant], '已知 owning 变异，不接受空名称')
 mkdirSync(evidence, { recursive: true })
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
-export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic' }, cacheDir: resolve(evidence, 'cache'),
+export default defineConfig({ ...original, root, resolve:{...original.resolve,conditions:['browser','module','development|production']}, esbuild: { jsx: 'automatic' }, cacheDir: resolve(evidence, 'cache'),
   plugins: [{ name: 'performance-actual-source-binding', enforce: 'pre', transform(source, id) {
     const file = id.split('?')[0]!, path = relative(root, file)
     if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/')) return
@@ -39,7 +39,13 @@ export default defineConfig({ ...original, root, esbuild: { jsx: 'automatic' }, 
     if (path.endsWith('/renderer/src/App.tsx')) observeOne('function DesktopApp() {', "function DesktopApp() { globalThis.__performanceUIRecord?.('app-render')")
     if (path.endsWith('/performance/PerformancePanel.tsx')) {
       observeOne('memo(function PerformancePanel(selection: ToolkitPopoverSelection) {', "memo(function PerformancePanel(selection: ToolkitPopoverSelection) { globalThis.__performanceUIRecord?.('panel-render')")
-      observeOne('projection = state.sessions.flatMap(session => {', "globalThis.__performanceUIRecord?.('identity-projection', state.sessions.length)\n      projection = state.sessions.flatMap(session => { globalThis.__performanceUIRecord?.('identity-visit')")
+    }
+    if (path.endsWith('/performance/PerformanceOverview.tsx')) {
+      observeOne("  const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')", "  globalThis.__performanceUIRecord?.('overview-render')\n  const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')")
+    }
+    if (path.endsWith('/lib/toolkit-agent-card-facts.ts')) {
+      observeOne('const next = new Map<string, SessionSnapshot[]>()', "globalThis.__performanceUIRecord?.('identity-projection', sessions.length)\n    const next = new Map<string, SessionSnapshot[]>()")
+      observeOne('for (const session of sessions) {', "for (const session of sessions) { globalThis.__performanceUIRecord?.('identity-visit')")
     }
     const change = changes[mutant]
     if (change?.[0] === path) {

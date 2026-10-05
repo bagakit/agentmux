@@ -19,7 +19,7 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 const node = <T extends Element = HTMLElement>(selector: string) => {
   const value = document.querySelector<T>(selector); expect(value, `actual connected product node ${selector}`).not.toBeNull(); expect(value!.isConnected).toBe(true); return value!
 }
-const render = async (snapshot: ToolkitMetricsSnapshot, paused = false) => act(async () => root.render(<PerformanceOverview snapshot={snapshot} contexts={{}} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} paused={paused} />))
+const render = async (snapshot: ToolkitMetricsSnapshot, paused = false) => act(async () => root.render(<PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} paused={paused} />))
 const openRenderer = async () => act(async () => { const details = node<HTMLDetailsElement>('[data-performance-role="renderer"]'); details.open = true; details.querySelector<HTMLElement>('summary')!.focus() })
 
 it('actual Overview consumes two-level process facts with independent CPU windows, cores, RSS and isolate heap', async () => {

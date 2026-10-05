@@ -2,7 +2,6 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import { createRendererPerformance } from '../../../src/renderer/src/lib/renderer-performance'
 import type { MetricsObservation } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../src/shared/toolkit'
-import { runKey } from '../../../src/renderer/src/components/performance/PerformanceOverview'
 // 明确的有界输入；不是用户机器测量或官方链回执。
 const at = Date.now()
 const available = <T,>(data: T, observedAt = at) => ({ data, observedAt, lastSuccessAt: observedAt, state: 'available' as const, reason: null })
@@ -33,14 +32,10 @@ const observation: MetricsObservation = {
 }
 export const performanceSnapshot: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
   startedAt: at - 47000, manual: false, consumerCount: 1, sequence: 1,
-  document: null, observation, trend: Array.from({ length: 48 }, (_, i) => ({ observedAt: at - (47 - i) * 1000,
+  document: {schema:'agentmux.toolkit.result.v1',summary:'All tracked local Run processes',items:[],links:[],notice:'RSS includes shared pages.',agentCards:{fields:['avatar','name','status','provider','workspace'],items:runs.map(run=>({reference:{kind:'run',hostId:run.hostId,runId:run.runId},metrics:[]})),omittedItems:0}},
+  observation, trend: Array.from({ length: 48 }, (_, i) => ({ observedAt: at - (47 - i) * 1000,
     appCpuPercent: i < 12 ? 3.2 + i % 4 : i < 24 ? 22 + i % 5 : i < 36 ? 11 + i % 3 : 18.4,
     appRssKib: 540672 + Math.floor(i / 6) * 16384 })) }
-export const performanceContexts = Object.fromEntries(runs.slice(0, 7).map((run, i) => [runKey(run), {
-  label: ['Review resource observation and Toolkit ownership', 'Improve the Settings workspace', 'Verify keyboard interactions', 'Implement the next source slice', 'Review pending changes', 'Inspect the terminal history', 'Summarize the current evidence'][i],
-  context: ['codex · agentmux', 'claude · editor', 'codex · workspace', 'codex · agentmux', 'claude · workbench', 'codex · terminal', 'claude · docs'][i], state: i < 4 ? 'working' : 'idle 3m'
-}]))
-
 // Controlled inputs for actual product rendering only; not live machine attribution.
 function attributionSnapshot() {
   const result = structuredClone(performanceSnapshot), observation = result.observation!, app = observation.app.data!
