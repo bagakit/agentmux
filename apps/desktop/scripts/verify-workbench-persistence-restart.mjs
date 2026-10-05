@@ -95,7 +95,7 @@ const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
 if (holdForWatchdog) process.on('SIGTERM', () => {}) // Exercise the runner's final SIGKILL, not graceful Node finally.
-let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic, demandObservationCdp
+let client, session, producer, failure, result, ownedRunProcess, seedReport, seedDiagnostic, surfaceDiagnostic, bindingDiagnostic, demandObservationCdp
 let pressureProducer, pressureFinal, pressureQualification, maximumPressureGap
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
@@ -123,10 +123,10 @@ async function connectCdp(url) {
   const socket = new WebSocket(url)
   await new Promise((done, fail) => { const timer=setTimeout(()=>{ socket.close();fail(new Error('Private CDP connect timed out')) },5000);socket.addEventListener('open',()=>{clearTimeout(timer);done()},{once:true});socket.addEventListener('error',error=>{clearTimeout(timer);fail(error)},{once:true}) })
   let serial = 0
-  const pending = new Map()
+  const pending = new Map(), events = []
   socket.addEventListener('message', ({ data }) => {
     const message = JSON.parse(data), request = pending.get(message.id)
-    if (!request) return
+    if (!request) { if (demandCollaborationProof && ['Runtime.exceptionThrown', 'Log.entryAdded'].includes(message.method)) { events.push(message); if (events.length > 20) events.shift() }; return }
     pending.delete(message.id); clearTimeout(request.timer)
     if (message.error) request.fail(new Error(message.error.message)); else request.done(message.result)
   })
@@ -135,7 +135,7 @@ async function connectCdp(url) {
     const id = ++serial, timer = setTimeout(() => { pending.delete(id); fail(new Error(`CDP timed out: ${method}`)) }, 15_000)
     pending.set(id, { done, fail, timer }); socket.send(JSON.stringify({ id, method, params }))
   })
-  return { call, close: () => socket.close(), async evaluate(expression) {
+  return { call, events, close: () => socket.close(), async evaluate(expression) {
     const value = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     if (value.exceptionDetails) throw new Error(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text)
     return value.result.value
@@ -253,7 +253,36 @@ async function seedWorkbench(seed, graph) {
   }
   let target
   try { target = await waitFor('seed renderer', async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(3000) })).json()).find(item => item.type === 'page' && item.url.startsWith('file:'))) }
-  catch (error) { seedDiagnostic = { stage:'private-seed-CDP', pid:child.pid, exitCode:child.exitCode, signalCode:child.signalCode, stderr:diagnostics }; throw error }
+  catch (error) {
+    seedDiagnostic = { stage:'private-seed-CDP', pid:child.pid, exitCode:child.exitCode, signalCode:child.signalCode, stderr:diagnostics }
+    if (demandCollaborationProof) {
+      const reports = {}
+      for (const [label, path] of [['ready', join(root, 'seed-ready.json')], ['seed', reportPath], ['mainStartup', join(userData, 'crash-log.ndjson')]]) {
+        try { const text = await readFile(path, 'utf8'); reports[label] = label === 'mainStartup' ? text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : JSON.parse(text) } catch (failure) { reports[label] = { readError: failure.code ?? failure.message } }
+      }
+      let targets = [], targetsError
+      try { targets = await (await fetch(`http://${endpoint.host}/json/list`, {signal:AbortSignal.timeout(3000)})).json() }
+      catch (cause) { targetsError = cause.message }
+      const pages = []
+      for (const target of targets.filter(target => target.type === 'page')) {
+        const page = {id:target.id}; pages.push(page)
+        let observed
+        try {
+          observed = await connectCdp(target.webSocketDebuggerUrl)
+          await observed.call('Runtime.enable'); await observed.call('Log.enable')
+          page.raw = await observed.evaluate('({url:location.href,title:document.title,text:document.body?.innerText,html:document.documentElement?.outerHTML.slice(0,16000)})')
+          const frame = join(goalsEntryFixture.rawDirectory, 'failed-seed-' + (pages.length - 1) + '.png')
+          const screenshot = await observed.call('Page.captureScreenshot', {format:'png',captureBeyondViewport:false})
+          const bytes = Buffer.from(screenshot.data,'base64'); await writeFile(frame,bytes,{mode:0o600})
+          page.frame = {path:frame,sha256:hash(bytes)}
+        } catch (cause) { page.observationError = cause.message }
+        finally { if (observed) { page.events = observed.events; observed.close() } }
+      }
+      seedDiagnostic = {...seedDiagnostic,reports,targets:targets.map(({id,type,url,title})=>({id,type,url,title})),targetsError,pages}
+      const path = join(goalsEntryFixture.rawDirectory,'failed-seed-diagnostic.json');await writeFile(path,JSON.stringify(seedDiagnostic,null,2),{mode:0o600});seedDiagnostic.retained=path
+    }
+    throw error
+  }
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   try {
     await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -393,7 +422,13 @@ try {
   // the binding or put it in argv; it belongs to this one temporary private Run only.
   // Record birth identity before exec removes the wrapper path from argv. The outer watchdog can
   // reap this exact detached cat even when it kills Node before Node's finally can run.
-  await writeFile(executable, `#!/bin/sh\numask 077\nLC_ALL=C /bin/ps -p "$$" -o pid=,pgid=,lstart= > '${join(root, 'owned-run-process.txt')}'\nprintf '{"url":"%s","token":"%s","agentSessionId":"%s"}\\n' "$AGENTMUX_HOOK_URL" "$AGENTMUX_HOOK_TOKEN" "$AGENTMUX_AGENT_SESSION_ID" > '${bindingPath}'\nprintf 'Private crash proof PTY\\n'\nexec /bin/cat\n`, { mode: 0o700 })
+  const quoteShell = value => "'" + value.replaceAll("'", "'\"'\"'") + "'"
+  // The new proof's binding writer keeps authority only in env/private disk. macOS sh's
+  // builtin printf can flush its failed file buffer into the PTY after ENOSPC.
+  const bindingWriter = demandCollaborationProof
+    ? `${quoteShell(process.execPath)} -e ${quoteShell("require('node:fs').writeFileSync(process.argv[1],JSON.stringify({url:process.env.AGENTMUX_HOOK_URL,token:process.env.AGENTMUX_HOOK_TOKEN,agentSessionId:process.env.AGENTMUX_AGENT_SESSION_ID}),{mode:0o600})")} ${quoteShell(bindingPath)} || exit 73`
+    : `printf '{"url":"%s","token":"%s","agentSessionId":"%s"}\\n' "$AGENTMUX_HOOK_URL" "$AGENTMUX_HOOK_TOKEN" "$AGENTMUX_AGENT_SESSION_ID" > '${bindingPath}'`
+  await writeFile(executable, `#!/bin/sh\numask 077\nLC_ALL=C /bin/ps -p "$$" -o pid=,pgid=,lstart= > '${join(root, 'owned-run-process.txt')}'\n${bindingWriter}\nprintf 'Private crash proof PTY\\n'\nexec /bin/cat\n`, { mode: 0o700 })
   const store = new AgentMuxFileAgentSessionStore(join(userData, 'agent-sessions.json'))
   client = await connectLocalAgentMux({ store })
   session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'probe', providerId: 'codex', commandOverride: executable,
@@ -414,7 +449,19 @@ try {
     await waitFor('outer watchdog must terminate this private mutation', () => false, 105_000)
   }
   await client.dispose(); client = null
-  await waitFor('private inherited Hook binding', async () => { try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); return value.agentSessionId === session.agentSessionId ? value : null } catch { return null } })
+  try {
+    await waitFor('private inherited Hook binding', async () => { try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); return value.agentSessionId === session.agentSessionId ? value : null } catch { return null } })
+  } catch (error) {
+    if (demandCollaborationProof) {
+      // Retain exact private identity/write failure facts, never the Hook token or binding body.
+      let binding
+      try { const value = JSON.parse(await readFile(bindingPath, 'utf8')); binding = {agentSessionId:value.agentSessionId,urlPresent:typeof value.url === 'string' && value.url.length > 0,tokenPresent:typeof value.token === 'string' && value.token.length > 0} }
+      catch (cause) { binding = {readError:cause.code ?? cause.message} }
+      bindingDiagnostic = {expectedAgentSessionId:session.agentSessionId,runId:session.run.runId,observedRun:originalRun,process:await runProcessIdentity(originalRun.pid),ownedRunProcess,binding}
+      const path = join(goalsEntryFixture.rawDirectory,'failed-private-binding.json'); await writeFile(path,JSON.stringify(bindingDiagnostic,null,2),{mode:0o600}); bindingDiagnostic.retained=path
+    }
+    throw error
+  }
   await writeFile(join(workspacePath, 'split.txt'), 'Other Region stays present\n')
   await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private crash fixture' }],
     executors: { probe: { label: 'Private cat', providerId: 'codex', command: goalsEntryFixture?.executable ?? executable, args: [], env: { CODEX_HOME: codexHome, ...(demandCollaborationProof ? { HOME: goalsEntryFixture.nativeHome, AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1', AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: goalsEntryFixture.nativeRecords } : {}) }, injectAgentMuxGuide: false } },
@@ -987,7 +1034,7 @@ setInterval(tick,100);
   if (cleanupErrors.length) { failure ??= cleanupErrors[0]; cleanup.errors = cleanupErrors.map(error => error.message) }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
 }
-const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, passed: !failure,
+const receipt = { schema: 'agentmux.workbench-persistence-crash.v1', ...result, seedReport, seedDiagnostic, surfaceDiagnostic, ...(demandCollaborationProof ? {bindingDiagnostic} : {}), passed: !failure,
   goalsDirectPmoAttempt: goalsDirectPmoProof && goalsEntryFixture ? { sourceBefore: goalsEntryFixture.sourceBefore,
     observationScope: { mode: demandCollaborationProof ? 'demand-collaboration-ordinary-recovery' : 'ordinary-recovery', stepBudgetMs: 45_000, totalBudgetMs: demandCollaborationProof ? 540_000 : 240_000, stressClaimed: false, ...(demandCollaborationProof ? { originalProducerObservation: 'native-source-unknown-with-retained-cat-Run' } : {}) },
     originalOutputBeforeRestart: goalsEntryFixture.originalOutput ?? null,
