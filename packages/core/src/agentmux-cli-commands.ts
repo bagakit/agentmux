@@ -518,9 +518,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   toolkit('delete', '<id> [--input <file|->]', 'Delete a saved tool with original expected-field checks.'),
   toolkit('action', '<id> <action-id> --input <file|->', 'Run a saved action against its exact original result/admission baseline.', 2),
   toolkit('script', '<id>', 'Read the original tool script; do not execute it.'),
+  toolkit('evaluate', '<id> [--input <file|->]', 'Evaluate the declared display program; service captures its independent baseline once.'),
   toolkit('run', '<id> [--input <file|->]', 'Admit one execution; service captures omitted CAS baseline once.'),
   toolkit('stop', '<id> [--input <file|->]', 'Stop the exact admitted execution or observation.'),
-  toolkit('watch', '<id> [--capture-failure] [--failure-evidence]', 'Follow one tool result; closing releases only this reader.')
+  toolkit('watch', '<id> [--evaluate] [--capture-failure] [--failure-evidence]', 'Follow results; --evaluate evaluates the declared display program once per reader cycle. Tools without display stay passive.')
 ]
 
 export function agentMuxCliArguments(argv: readonly string[]): { args: string[]; endpoint?: string } {

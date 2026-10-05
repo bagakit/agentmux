@@ -82,8 +82,9 @@ Install a local extension directory with amux toolkit install ID --path <PACKAGE
 and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd is chosen by the Host. The saved record
 holds the directory reference and enabled/statusBar/args/cwd preferences. It does not import
 a source copy. Edit manifest.json, entry or helper files in that directory; the next explicit
-inspect/run/action captures the current files. Manifest schema is agentmux.toolkit.package.v1,
-with name, named icon, relative entry and optional actions {id,label,entry,args?}.
+inspect/run/action/evaluate captures the current files. Manifest schema is agentmux.toolkit.package.v1,
+with name, named icon, relative entry, optional actions {id,label,entry,args?} and
+optional display {entry,args?}. Inline tools use display {script,args}; display:null removes it.
 ls reports package metadata availability and configRevision; inspect reports the effective
 definition revision, content SHA256 and exact source entries. Package and execution cwd
 are separate paths. A missing package retains its configuration and original execution facts.
@@ -97,7 +98,22 @@ original identity; do not retry automatically. Closing watch releases only its r
 To explicitly continue an admission without a Run ID, use run/action --input with its
 original invocationId and complete captured parameters. This reuses its execution and
 native creation key: a retained Run is returned rather than started twice. If that Run
-is no longer retained, the original script may run now. Inspect/watch never do this.
+is no longer retained, the original script may run now. Ordinary inspect/watch never do this.
+
+
+Display is a separately declared repeatable evaluation program, not a sandbox or enforced
+read-only script. toolkit evaluate ID explicitly evaluates it; optional --input pins
+invocationId, expectedRevision and expectedLatestExecutionId in the display lane.
+Inspect returns display {state,reason,admission,latestConfirmed,sequence} only for a declared
+program or retained display facts. Optional lastSucceeded retains the last successful display
+result when a later evaluation failed. Its latest confirmed result remains while a new evaluation
+is pending or unknown. An unconfirmed action does not block or become confirmed by display.
+Display declaration is discoverable as display:true in ls descriptors.
+toolkit watch ID --evaluate opts into evaluation once for this reader cycle, joining an
+already active display evaluation; tools without display keep their existing passive behavior.
+Ordinary inspect and watch never evaluate. Closing the reader releases only that reader;
+it neither stops the Run nor clears action or display facts. Official script evaluation,
+including --evaluate readers, keeps the same explicit trusted local-user authorization as run.
 
 Saved actions have id, label, JavaScript ESM script and args, sharing the tool's fixed cwd.
 At most 16 actions share the definition budget. Action input pins invocationId,

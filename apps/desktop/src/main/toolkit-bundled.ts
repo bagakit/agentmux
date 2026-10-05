@@ -8,6 +8,7 @@ import { resolveMobileConnectionPreferences } from '../shared/toolkit-preference
 import type { PerformanceLaunch } from './toolkit-asset.js'
 
 type Manifest = { id: string; name: string; icon: string; entry: string; args: string[];
+  display?: { entry: string; args: string[] };
   actions: { id: string; label: string; entry: string; args: string[] }[] }
 const assets = new Map<string, { manifest: Manifest; sources: Map<string, string> }>()
 /** Immutable packaged bytes are read once, not again on every output fragment. */
@@ -16,7 +17,7 @@ function bundledAssets(root: string) {
   if (cached) return cached
   const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8')) as Manifest
   const sources = new Map<string, string>()
-  for (const entry of [manifest.entry, ...manifest.actions.map(action => action.entry)]) {
+  for (const entry of [manifest.entry, ...(manifest.display ? [manifest.display.entry] : []), ...manifest.actions.map(action => action.entry)]) {
     if (!/^[a-z0-9-]+\.mjs$/u.test(entry)) throw new Error('Bundled Toolkit entry must be a local script file.')
     sources.set(entry, readFileSync(join(root, entry), 'utf8'))
   }
@@ -30,6 +31,7 @@ export function bundledToolkitTools(launch: PerformanceLaunch, config: AppConfig
   const preferences = resolveMobileConnectionPreferences(config)
   const fields = { id: manifest.id, name: manifest.name, icon: manifest.icon, ...preferences,
     workspacePath: launch.cwd, script: sources.get(manifest.entry)!, args: [...prefix, ...manifest.args],
+    ...(manifest.display ? { display: { script: sources.get(manifest.display.entry)!, args: [...prefix, ...manifest.display.args] } } : {}),
     actions: manifest.actions.map(action => ({ id: action.id, label: action.label, script: sources.get(action.entry)!, args: [...prefix, ...action.args] })) }
   return [parseToolkitToolDefinition({ ...fields, revision: createHash('sha256').update(JSON.stringify(fields)).digest('hex') })]
 }
