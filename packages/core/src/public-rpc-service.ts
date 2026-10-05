@@ -1107,9 +1107,8 @@ export class AgentMuxRpcService {
     // would reject a valid capability rotation or a recipient on another Host.
     const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath)
     if (queued.delivery.state === 'delivered') return queued
-    // An admitted envelope with an unconfirmed previous attempt is not a licence
-    // to repeat input. Read its persisted receipt, preserving the current Run.
-    if (queued.delivery.reason) throw Object.assign(new AgentMuxError('Message delivery remains unconfirmed; inspect the original receipt without repeating input.', 'AGENT_PROMPT_UNCONFIRMED'), { details: queued })
+    // A diagnostic reason is not input admission. An explicit retry keeps the
+    // first condition and lets Core reconcile only the original frozen request.
     try {
       const promptCondition = await prepareGlobalMessagePrompt(queued.messageId, async recorded => {
         if (recorded.recipientRunId !== recipient.run.runId || recorded.recipientSessionId !== recipientId) {
