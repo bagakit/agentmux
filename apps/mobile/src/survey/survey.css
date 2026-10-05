@@ -14,7 +14,7 @@
 .mobile-survey .mobile-menu-row strong { font-size: 13px; font-weight: 500; }
 .mobile-survey .mobile-menu-row small { margin-top: 4px; }
 .mobile-survey-intro, .mobile-survey-context { color: var(--text-muted); }
-.mobile-survey-issue { color: var(--warning, #d8b86e); overflow-wrap: anywhere; }
+.mobile-survey-issue { color: var(--amber-text); overflow-wrap: anywhere; }
 .mobile-survey-provenance { margin-block: 8px; font-size: 11px; color: var(--text-muted); }
 .mobile-survey-provenance summary { min-height: 32px; display: list-item; align-content: center; cursor: pointer; }
 .mobile-survey-tab { padding-block: 4px; border-top: 1px solid var(--line-soft); }

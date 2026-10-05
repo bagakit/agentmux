@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ChevronRight, Link2, MessageSquare, MoreHorizontal, Pencil, ShieldCheck, ArrowLeft, Menu, SquareTerminal, Wifi, X, Compass, Target } from 'lucide-react'
+import { ChevronRight, Link2, MessageSquare, MoreHorizontal, Pencil, Info, ArrowLeft, Menu, SquareTerminal, Wifi, X, Compass, Target } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledgeSource } from '@agentmux/core/control'
 import { MobileTopicSource } from './topics/MobileTopicSource'
@@ -241,6 +241,12 @@ export function MobileApp({ client, connection, platform, native = false, focusC
 
   const exposed = sheet === null
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
+  const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'
+  // The visible conversation owns its connection feedback. Storage and projection
+  // failures remain separate facts even when the connection is also unavailable.
+  const serviceNotices = [...new Set([notice, projectionError,
+    !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
+  ].filter((message): message is string => Boolean(message)))]
   return <div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'}>
     <header className="mobile-header">
       <button className="mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><Menu size={18} /><span className="mobile-status-dot" aria-label={label} /></button>
@@ -291,13 +297,13 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal'}>
         {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {pageName} 选择已有 Agent。</p>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
-          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} />
+          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} />
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
         <MobileTerminalViewer client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
     </main>
-    {(notice || projectionError || connection.issue || hasConnected && !connected || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ShieldCheck size={15} /></span><div><p>{notice ?? projectionError ?? connection.issue ?? connection.message}</p>{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
+    {(serviceNotices.length > 0 || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><Info size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
     {workspaceVisible && <MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} />}
     <Dialog.Root open={sheet !== null} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">

@@ -4,15 +4,15 @@
 .mobile-goals h1 { font-size: 17px; margin: 0; }
 .mobile-goals h2 { font-size: 17px; margin-block: 12px 6px; }
 .mobile-goals h3 { font-size: 14px; margin-block: 0 6px; }
-.mobile-goals button, .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font: inherit; color: inherit; background: var(--surface-1, #20242c); border: 1px solid var(--line, #414650); border-radius: 8px; min-height: 44px; padding: 8px 10px; }
+.mobile-goals button, .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font: inherit; color: inherit; background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; min-height: 44px; padding: 8px 10px; }
 .mobile-goals button { cursor: pointer; }
-.mobile-goals :focus-visible:not(.ui-input) { outline: 2px solid var(--mobile-accent, #8de3ae); outline-offset: 2px; }
+.mobile-goals :focus-visible:not(.ui-input) { outline: 2px solid var(--mobile-accent); outline-offset: 2px; }
 .mobile-goals-filters input { flex: 1; min-width: 0; }
 .mobile-goals-filters select { max-width: 42%; }
 .mobile-goals-list { list-style: none; padding: 0; margin-block: 6px; }
-.mobile-goals-list li { border-bottom: 1px solid var(--line, #414650); }
+.mobile-goals-list li { border-bottom: 1px solid var(--line); }
 .mobile-goals-list button { width: 100%; text-align: left; display: grid; border: 0; border-radius: 0; background: transparent; gap: 3px; padding-block: 8px; min-height: 52px; }
-.mobile-goals-list span, .mobile-goals-list small { color: var(--text-2, #b3bbc7); font-size: 11px; }
+.mobile-goals-list span, .mobile-goals-list small { color: var(--text-2); font-size: 11px; }
 .mobile-goals-list small { white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mobile-goals article section, .mobile-goals details { margin-block: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .mobile-goals-body { white-space: pre-wrap; line-height: 1.6; }
@@ -20,7 +20,7 @@
 .mobile-goals textarea { min-height: 110px; resize: vertical; }
 .mobile-goals summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 11px; color: var(--text-3); }
 .mobile-goals dd { margin: 4px 0 8px; }
-.mobile-goals [role=status] { white-space: pre-wrap; border-left: 2px solid var(--mobile-accent, #8de3ae); padding-left: 10px; line-height: 1.5; }
+.mobile-goals [role=status] { white-space: pre-wrap; border-left: 2px solid var(--mobile-accent); padding-left: 10px; line-height: 1.5; }
 .mobile-goals pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); font-size: 13px; }
 .mobile-goal-discussion-actions { display: flex; flex-wrap: wrap; margin-block: 8px; gap: 6px; }
 .mobile-goal-create { margin-block: 6px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }

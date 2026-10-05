@@ -60,6 +60,9 @@
 .mobile-conversation__notice { color: var(--status-warning-text); flex: none; font-size: 11px; max-height: 25%; overflow: auto; }
 .mobile-conversation__notice > summary { display: flex; align-items: center; cursor: pointer; min-height: 44px; }
 .mobile-conversation__notice p { margin: 4px 0; }
+.mobile-conversation__input-state { padding: 0 12px 2px; max-height: 25%; overflow: auto; color: var(--text-3); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.mobile-conversation__input-state[data-issue='true'] { color: var(--status-warning-text); }
+.mobile-conversation__input-state p { margin: 4px 0; }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { border: 0; box-shadow: none; font-size: 13px; border-radius: 10px; padding: 8px 10px; margin-block: 4px; }
 .mobile-app .mobile-conversation .log-turn__content { font-size: 13px; line-height: 1.5; }
 .mobile-app .mobile-conversation .log-turn__content p { margin-block: 6px; }
@@ -79,18 +82,21 @@
 .mobile-captured-source { color: var(--text-muted); font-size: 10px; margin: 4px 10px; }
 .mobile-reading-action { align-self: center; padding: 4px 10px; border: 0; background: var(--surface-1); color: var(--text-muted); font-size: 11px; min-height: 44px; border-radius: 8px; }
 .mobile-reading-latest { position: sticky; top: 0; z-index: 1; }
-.mobile-send-status { min-width: 0; margin: 6px 6px 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.mobile-send-status__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; }
-.mobile-send-status__summary > span { flex: 1 1 100%; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.mobile-send-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; min-width: 0; margin: 6px 6px 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.mobile-send-status__summary { display: contents; }
+.mobile-send-status__summary > span { grid-column: 1 / -1; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
 .mobile-send-status__actions { display: flex; align-items: center; gap: 20px; }
 .mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
 .mobile-send-status p { margin: 0 0 6px; overflow-wrap: anywhere; user-select: text; }
-.mobile-send-status__diagnosis { min-width: 0; }
-.mobile-send-status__diagnosis[open] { max-height: min(32dvh, 240px); overflow: auto; overscroll-behavior: contain; }
+.mobile-send-status__diagnosis { min-width: 0; color: var(--text-2); }
+.mobile-send-status__diagnosis[open] { grid-column: 1 / -1; max-height: min(32dvh, 240px); overflow: auto; overscroll-behavior: contain; }
 .mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 8px; margin: 0 0 8px; }
+.mobile-send-status__diagnosis dt { color: var(--text-3); }
 .mobile-send-status__diagnosis dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
-.mobile-send-status summary { display: flex; align-items: center; }
+.mobile-send-status summary { display: flex; align-items: center; gap: 8px; color: var(--text-3); }
+.mobile-send-status summary::after { content: ''; width: 6px; height: 6px; flex: none; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg) translateY(-2px); }
+.mobile-send-status details[open] > summary::after { transform: rotate(225deg) translate(-1px, -1px); }
 /* Attachments stay beside the original message, with one explicit transfer action. */
 .mobile-attachments:empty { display: none; }
 .mobile-attachments { display: grid; gap: 6px; max-height: min(24dvh, 180px); overflow: auto; overscroll-behavior: contain; }
