@@ -84,6 +84,32 @@ it('projects every original Region through actual Store and IPC bridge, includin
   } finally { bridge.dispose(); dispose() }
 })
 
+it('reads Recall through the original Store IPC and Main observation without changing the workface', async () => {
+  const tab = workbench()
+  useAppStore.setState({ mainSurface: 'recall' })
+  const before = useAppStore.getState()
+  const changed = vi.fn(); const dispose = useAppStore.subscribe(changed)
+  const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
+    sendRequest: input => { void useAppStore.getState().executeControl(input).then(result => bridge.accept({ requestId: input.requestId, ok: true, result })) },
+    sendCancellation: () => { throw new Error('Unexpected cancellation') } })
+  try {
+    const result = await inspectDesktopClient(request, { pid: 123, package: packageIdentity, renderer: () => renderer,
+      generation: () => 1, runtimes: () => [runtime], execute: input => bridge.execute(input) })
+    if (result.operation !== 'inspect.client') throw new Error('wrong operation')
+    const observed = parseDesktopClientObservation(result.observation)
+    expect(observed.workbench.desktop.selection).toMatchObject({ surface: 'recall', mainSurface: 'recall' })
+    expect(observed.workbench.mainSurface).toBe('recall')
+    expect(observed.workbench.tabs[0]?.id).toBe(tab.id)
+    expect(observed.workbench.layouts).toEqual(before.layouts)
+    expect(observed.workbench.focus).toEqual({ executionSessionId: null, pmoSessionId: null })
+    expect(JSON.stringify(observed)).not.toContain('MUST NOT LEAVE')
+    expect(changed).not.toHaveBeenCalled()
+    expect(useAppStore.getState()).toBe(before)
+    expect(() => parseDesktopClientObservation({ ...observed, workbench: { ...observed.workbench,
+      desktop: { ...observed.workbench.desktop, selection: { ...observed.workbench.desktop.selection, surface: 'foreign-surface' } } } })).toThrow()
+  } finally { bridge.dispose(); dispose() }
+})
+
 it('retains the package metadata captured at startup after the canonical metadata changes', async () => {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-loaded-identity-")); roots.push(root)
   const path = join(root, 'package-identity.json')

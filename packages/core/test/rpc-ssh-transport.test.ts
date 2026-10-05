@@ -25,8 +25,8 @@ async function endpoint(value: unknown) {
   clients.push(client)
   return client.call('system.endpoint', {})
 }
-it('rejects the exact old receipt with an actionable upgrade code before admitting a business operation', async () => {
-  await expect(endpoint(old)).rejects.toMatchObject({ code: 'REMOTE_CORE_UPGRADE_REQUIRED', message: expect.stringContaining('connection settings') })
+it.each([old, { ...old, connection: 'responded' }])('rejects an exact older receipt with an actionable upgrade code before admitting a business operation: %j', async receipt => {
+  await expect(endpoint(receipt)).rejects.toMatchObject({ code: 'REMOTE_CORE_UPGRADE_REQUIRED', message: expect.stringContaining('connection settings') })
   expect(await readFile(join(directory, 'requests'), 'utf8')).toBe('system.endpoint\n')
 })
 it.each([
@@ -42,7 +42,7 @@ it('does not classify a receipt belonging to another request as an upgrade requi
   vi.stubEnv('AGENTMUX_TEST_WRONG_REQUEST', 'yes')
   await expect(endpoint(old)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
 })
-it('continues consuming the current confirmed receipt on the same SSH channel', async () => {
-  await expect(endpoint({ ...old, connection: 'responded' })).resolves.toMatchObject({ connection: 'responded' })
+it.each([null, { state: 'available' }, { state: 'unavailable', diagnostic: { code: 'ENOSPC', message: 'publication pressure; existing readers remain usable' } }])('continues consuming the current confirmed receipt on the same SSH channel with publication %j', async publication => {
+  await expect(endpoint({ ...old, connection: 'responded', publication })).resolves.toMatchObject({ connection: 'responded' })
   expect(await readFile(join(directory, 'requests'), 'utf8')).toBe('system.endpoint\nsystem.endpoint\n')
 })
