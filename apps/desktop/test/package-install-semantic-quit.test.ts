@@ -10,7 +10,7 @@ type Row = { uid: number; pid: number; ppid: number; birth: string; command: str
 type Scope = {
   root: string; home: string; app: string; candidate: string; store: string
   gui: Row | null; host: Row | null; worker: Row | null
-  hostMode: string; publicPid: number; publicStore: string
+  hostMode: string; workerMode?: string; retainNamespaceWorker?: boolean; publicPid: number; publicStore: string
   events: string[]; signals: [number, string][]; cutover: boolean
   beforeQuit?: () => Promise<void>
   afterGuiQuit?: () => void
@@ -38,7 +38,7 @@ vi.mock('node:child_process', async importOriginal => {
       const requested = args.slice(2).map(Number)
       return { stdout: JSON.stringify(rows.filter(row => requested.includes(row.pid)).map(row => ({
         uid: row.uid, pid: row.pid, ppid: row.ppid, birth: row.birth,
-        mode: row.pid === f.gui?.pid ? 'gui' : row.pid === f.host?.pid ? f.hostMode : 'node',
+        mode: row.pid === f.gui?.pid ? 'gui' : row.pid === f.host?.pid ? f.hostMode : f.workerMode ?? 'node',
         executable: `${f.app}/Contents/MacOS/AgentMux`
       }))), stderr: '' }
     }
@@ -59,7 +59,8 @@ vi.mock('node:child_process', async importOriginal => {
         const f = boundary.scope
         if (!f) throw new Error('No owned installer copy scope')
         let output = ''
-        if (command === 'ditto') {
+        if (command === 'ditto' || command === 'cp') {
+          if (command === 'cp') args = args.slice(1)
           expect(args[0]).toBe(f.candidate); expect(args[1]).toBe(join(f.home, `Applications/.AgentMux.install-${process.pid}.app`))
           await cp(args[0]!, args[1]!, { recursive: true })
         } else if (command === 'codesign') {
@@ -69,7 +70,7 @@ vi.mock('node:child_process', async importOriginal => {
           expect(args).toEqual(['-e', 'quit app id "dev.agentmux.desktop"'])
           f.events.push('normal-gui-quit'); f.gui = null
           if (f.host) f.host.ppid = 1
-          if (f.worker) f.worker.ppid = 1
+          if (f.worker?.ppid === 201) f.worker.ppid = 1
           f.afterGuiQuit?.()
         } else throw new Error(`Unowned installer command refused: ${command}`)
         child.stdout.end(output); child.stderr.end(); child.emit('exit', 0, null)
@@ -147,6 +148,7 @@ async function fixture({ host = true, worker = false, sameSource = false } = {})
     expect(pid, 'Only the original semantic owner may receive a shutdown signal').toBe(211)
     expect(signal).toBe('SIGTERM'); expect(f.gui).toBeNull(); expect(f.host?.ppid).toBe(1)
     f.signals.push([pid, String(signal)]); f.events.push('semantic-host-shutdown'); f.host = null
+    if (f.worker?.ppid === 211 && !f.retainNamespaceWorker) f.worker = null
     return true
   })
   return f
@@ -215,3 +217,56 @@ it('the default full installer preserves the GUI-only cold namespace path', asyn
   expect(outcome.error, 'An ordinary GUI exit without a semantic Host must still reach cutover').toBe('OWNED_CUTOVER_BOUNDARY')
   expect(f.events).toEqual(['normal-gui-quit', 'cutover']); expect(f.signals).toEqual([])
 })
+
+
+it('the default installer drains the original Host endpoint worker without signalling it', async () => {
+  const f = await fixture({ worker: true }); f.worker!.ppid = 211
+  f.worker!.command = ("" + (f.app) + "/Contents/MacOS/AgentMux " + (f.app) + ("/Contents/Resources/app/node_modules/@agentmux/core/dist/control-endpoint-listener-worker.js " + _hygiene_fixturePath("original-namespace")))
+  const outcome = await install(f)
+  expect(outcome.error).toBe('OWNED_CUTOVER_BOUNDARY')
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.worker).toBeNull()
+  expect(f.events.filter(event => event !== 'public-owner')).toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
+})
+
+it('unknown mode on a Host child retains that original worker and blocks cutover', async () => {
+  const f = await fixture({ worker: true }); f.worker!.ppid = 211; f.workerMode = 'unknown'
+  const outcome = await install(f)
+  expect(outcome.error).toContain('has not exited gracefully')
+  expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
+})
+
+it('the semantic shutdown waits for original children without signalling a lingering child', async () => {
+  const f = await fixture({ worker: true }); f.worker!.ppid = 211; f.retainNamespaceWorker = true
+  f.gui = null; f.host!.ppid = 1
+  const { stopSemanticHostForInstall } = await import('../scripts/package-semantic-host.mjs')
+  const plan = { currentApp: f.app, originalSource: 'a'.repeat(40), owner: { ...f.host! }, identity: { hostProcessId: 211, storePath: f.store } }
+  const ops = {
+    source: async () => 'a'.repeat(40), bootstrap: async () => plan.identity,
+    processRow: async (pid: number) => [f.host, f.worker].find(row => row?.pid === pid) ?? null,
+    processes: async () => { const rows = [f.host, f.worker].filter((row): row is Row => !!row); return {
+      serving: [], externalNode: rows.map(row => row.pid), processes: rows,
+      nodeModes: rows.map(row => ({ ...row, mode: 'node', executable: `${f.app}/Contents/MacOS/AgentMux` })) } },
+    signal: (pid: number, signal: string) => process.kill(pid, signal as NodeJS.Signals),
+    now: () => Date.now(), wait: async () => {}
+  }
+  const error = await stopSemanticHostForInstall(plan, ops).then(() => null, (error: Error) => error.message)
+  expect(error).toContain('No force kill')
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.worker?.pid).toBe(212); expect(f.cutover).toBe(false)
+})
+
+it.each(['healthy', 'UID', 'birth', 'parent', 'executable', 'mode', 'cycle'])(
+  'semantic family requires a complete bound Node chain (%s)', async change => {
+    const { semanticHostProcessIds } = await import('../scripts/package-semantic-host.mjs')
+    const app = '/Applications/AgentMux.app', uid = process.getuid!(), executable = `${app}/Contents/MacOS/AgentMux`
+    const owner = { uid, pid: 211, ppid: 1, birth: 'owner' }
+    const middle = { uid, pid: 212, ppid: 211, birth: 'middle' }, child = { uid, pid: 213, ppid: 212, birth: 'child' }
+    const rows = [owner, middle, child], modes = rows.map(row => ({ ...row, mode: 'node', executable }))
+    if (change === 'UID') modes[1]!.uid++
+    if (change === 'birth') modes[1]!.birth = 'reused'
+    if (change === 'parent') { middle.ppid = 999; modes[1]!.ppid = 999 }
+    if (change === 'executable') modes[1]!.executable = _hygiene_fixturePath("other/Electron")
+    if (change === 'mode') modes[1]!.mode = 'unknown'
+    if (change === 'cycle') { middle.ppid = 213; modes[1]!.ppid = 213 }
+    expect([...semanticHostProcessIds(app, owner, { processes: rows, nodeModes: modes })]).toEqual(
+      change === 'healthy' ? [211, 212, 213] : [211])
+  })
