@@ -856,7 +856,7 @@ function appendParticipation(demand: Demand, source: DemandParticipationSource, 
     if (JSON.stringify(original) !== JSON.stringify(parsed)) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original participation operation conflicts with its authenticated source.')
     return
   }
-  demand.participations.push({ ...parsed, id: `participation_${randomUUID()}`, operationId, recordedAt })
+  demand.participations.push({ ...parsed, id: mintObjectId(), operationId, recordedAt })
 }
 
 function resolveCreationRequester(demand: Demand, source: DemandParticipationSource, operationId: string, allowSupervisorDefault: boolean): void {
