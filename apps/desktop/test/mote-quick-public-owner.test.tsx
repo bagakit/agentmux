@@ -25,7 +25,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { MobileMoteProfile } from '../../mobile/src/navigation/MobileMoteProfile'
-import { getDeviceWorkface, emptyDeviceWorkface, DEVICE_WORKFACE_KEY } from '../../mobile/src/recovery/device-workface'
+import { getDeviceWorkface, DeviceWorkfaceStore, emptyDeviceWorkface, DEVICE_WORKFACE_KEY } from '../../mobile/src/recovery/device-workface'
 import { button, click, fixture, mount, mounted, deferred } from '../../mobile/test/conversation-fixture'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 
@@ -273,20 +273,92 @@ describe('original Quick public owner vertical slice', () => {
     expect(owner.snapshot().record.moteQuickDrafts?.find(d => d.scope.runtimeId === otherScope.runtimeId)).toEqual(other)
     expect(owner.snapshot().record.conversation.drafts).toEqual([['original-chat', '未发原对话稿']])
   })
-  it('continues one explicit healthy File Save after a known device-record budget refusal, preserving full memory input and the original durable record', async () => {
-    const f = await original(); await writeFile(f.path, originalBody + '原文'.repeat(8000))
-    const owner = getDeviceWorkface(); await owner.updateConversation({ version: 1, drafts: Array.from({ length: 31 }, (_, index) => ['large-original-draft-' + index, 'x'.repeat(65536)]), attempts: [], responses: [] })
+  it('keeps a confirmed original Host result blocked when its runtime changes during a failed device settle ACK', async () => {
+    const f = await original(), v = await f.view(), owner = getDeviceWorkface(), gate = deferred<void>(), originalEdit = owner.editMoteQuickDraft.bind(owner)
+    let waiting = false
+    vi.spyOn(owner, 'editMoteQuickDraft').mockImplementation(async (...args) => {
+      if (!waiting && args[1].attempts.some(a => a.phase === 'saved')) { waiting = true; await gate.promise; throw new Error('Original settle storage unavailable') }
+      return originalEdit(...args)
+    })
+    await choose(v.element, '新对话使用的 Agent', 'fixture'); await submit(v.element)
+    await waitFor(() => expect(waiting).toBe(true)); await choose(v.element, '接回时机', 'on-open')
+    const reads = f.rpc.mock.calls.filter(([method]) => method === 'space.ls').length
+    f.setRuntime({ runtimeId: 'replacement-runtime', ownerInstanceId: 'replacement-process', availability: 'connected' }); gate.resolve()
+    await waitFor(() => expect(v.element.textContent).not.toContain('正在保存原配置'))
+    await click(button(v.element, '复制配置与请求'))
+    const copy = JSON.parse(f.copy.mock.calls.at(-1)![0] as string)
+    expect(copy.scope.runtimeId).toBe('original-quick-runtime'); expect(copy.blockedAttemptId).toBe(copy.attempts[0].input.operationId)
+    expect(copy.attempts[0]).toMatchObject({ phase: 'unknown', result: { status: 'saved' } })
+    expect(copy.values).toEqual({ executorId: 'fixture', recovery: 'on-open' }); expect(copy.baseline.defaults).toEqual({})
+    await submit(v.element); expect(f.writes).toHaveBeenCalledTimes(1)
+    expect(f.rpc.mock.calls.filter(([method]) => method === 'space.ls')).toHaveLength(reads)
+    expect(parseMoteQuickMode(await readFile(f.path, 'utf8'))).toEqual({ status: 'valid', defaults: { executorId: 'fixture' } })
+  })
+  it.each(['capacity', 'storage'] as const)('continues two explicit memory-only File Saves after %s failure, without a backup ACK or Profile refresh', async mode => {
+    const f = await original(), body = mode === 'capacity' ? originalBody + '原文'.repeat(8000) : originalBody
+    await writeFile(f.path, body)
+    const owner = getDeviceWorkface()
+    if (mode === 'capacity') await owner.updateConversation({ version: 1, drafts: Array.from({ length: 31 }, (_, index) => ['large-original-draft-' + index, 'x'.repeat(65536)]), attempts: [], responses: [] })
     const v = await f.view(); await choose(v.element, '新对话使用的 Agent', 'fixture')
     await waitFor(() => expect(owner.snapshot().record.moteQuickDrafts?.[0]?.values.executorId).toBe('fixture'))
-    const before = localStorage.getItem(DEVICE_WORKFACE_KEY)
-    await submit(v.element); await waitFor(() => expect(v.element.textContent).toContain('原 Host 已确认保存'))
-    expect(f.writes).toHaveBeenCalledTimes(1); expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
+    const before = localStorage.getItem(DEVICE_WORKFACE_KEY), reads = f.rpc.mock.calls.filter(([method]) => method === 'space.ls').length
+    if (mode === 'storage') vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Original device storage unavailable') })
+    const first = deferred<void>(); f.writes.mockImplementationOnce(async (...args) => { await first.promise; return f.nativeWrite(...args) })
+    await submit(v.element); await waitFor(() => expect(f.writes).toHaveBeenCalledTimes(1))
+    await choose(v.element, '接回时机', 'on-open'); first.resolve()
+    await waitFor(() => expect(v.element.textContent).toContain('原 Host 已确认保存'))
+    expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
     expect(v.element.textContent).toContain('尚未进入设备备份')
     await click(button(v.element, '复制配置与请求'))
     const copied = JSON.parse(f.copy.mock.calls.at(-1)![0] as string)
-    expect(copied.attempts[0].input.baseline.document.content).toBe(originalBody + '原文'.repeat(8000))
-    expect(copied.attempts[0].input.values).toEqual({ executorId: 'fixture' }); expect(copied.attempts[0].phase).toBe('unknown'); expect(copied.attempts[0].result.status).toBe('saved')
-    expect(parseMoteQuickMode(await readFile(f.path, 'utf8'))).toEqual({ status: 'valid', defaults: { executorId: 'fixture' } })
+    expect(copied.attempts[0].input.baseline.document.content).toBe(body)
+    expect(copied.attempts[0].input.values).toEqual({ executorId: 'fixture' })
+    expect(copied.attempts[0]).toMatchObject({ phase: 'saved', result: { status: 'saved' } }); expect(copied.blockedAttemptId).toBeNull()
+    expect(copied.values).toEqual({ executorId: 'fixture', recovery: 'on-open' })
+    const firstContent = await readFile(f.path, 'utf8')
+    expect(parseMoteQuickMode(firstContent)).toEqual({ status: 'valid', defaults: { executorId: 'fixture' } })
+    const second = deferred<void>(); f.writes.mockImplementationOnce(async (...args) => { await second.promise; return f.nativeWrite(...args) })
+    await submit(v.element); await waitFor(() => expect(f.writes).toHaveBeenCalledTimes(2))
+    await choose(v.element, '接回时机', 'startup'); second.resolve()
+    await waitFor(() => expect(v.element.textContent).not.toContain('正在保存原配置'))
+    expect(v.element.textContent).toContain('原 Host 已确认保存')
+    await click(button(v.element, '复制配置与请求'))
+    const latest = JSON.parse(f.copy.mock.calls.at(-1)![0] as string)
+    expect(latest.attempts).toHaveLength(2)
+    expect(latest.attempts[0]).toEqual(copied.attempts[0])
+    expect(latest.attempts[1].input.baseline).toEqual(copied.attempts[0].result.source)
+    expect(latest.attempts[1].input.baseline.document.content).toBe(firstContent)
+    expect(latest.attempts[1].input.values).toEqual({ executorId: 'fixture', recovery: 'on-open' })
+    expect(latest.attempts[1].input.operationId).not.toBe(latest.attempts[0].input.operationId)
+    expect(latest.attempts[1]).toMatchObject({ phase: 'saved', result: { status: 'saved' } }); expect(latest.blockedAttemptId).toBeNull()
+    expect(latest.baseline).toEqual(latest.attempts[1].result.source)
+    expect(latest.values).toEqual({ executorId: 'fixture', recovery: 'startup' })
+    expect(parseMoteQuickMode(await readFile(f.path, 'utf8'))).toEqual({ status: 'valid', defaults: { executorId: 'fixture', recovery: 'on-open' } })
+    expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
+    expect(f.rpc.mock.calls.filter(([method]) => method === 'space.ls')).toHaveLength(reads)
+    expect(v.element.textContent).not.toContain('原 Quick 配置已保存')
+    expect(f.f.submit).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(f.writes).toHaveBeenCalledTimes(2)
+  })
+  it('refuses an observed keyed conflict when its conflict-copy storage fails, preserving the actual cause and producing zero File writers', async () => {
+    const f = await original(), v = await f.view(), owner = getDeviceWorkface()
+    await choose(v.element, '新对话使用的 Agent', 'fixture')
+    await waitFor(() => expect(owner.snapshot().record.moteQuickDrafts?.[0]?.values.executorId).toBe('fixture'))
+    const before = owner.snapshot().record.moteQuickDrafts![0]!, other = new DeviceWorkfaceStore(() => localStorage)
+    const canonical = { ...before, values: { recovery: 'startup' as const } }
+    await other.editMoteQuickDraft(before, canonical, owner.recordIdentity())
+    const durableBytes = localStorage.getItem(DEVICE_WORKFACE_KEY), failure = new Error('Original conflict-copy storage unavailable')
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw failure })
+    await submit(v.element); await waitFor(() => expect(v.element.textContent).not.toContain('正在保存原配置'))
+    expect(f.writes).not.toHaveBeenCalled(); expect(v.element.textContent).toContain('本次尚未发送')
+    expect(v.element.textContent).toContain('Original conflict-copy storage unavailable')
+    expect(f.writes).not.toHaveBeenCalled(); expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(durableBytes)
+    expect(JSON.parse(durableBytes!).moteQuickDrafts[0]).toEqual(canonical)
+    await click(button(v.element, '复制配置与请求'))
+    expect(JSON.parse(f.copy.mock.calls.at(-1)![0] as string).values).toEqual({ executorId: 'fixture' })
+    expect(parseMoteQuickMode(await readFile(f.path, 'utf8'))).toEqual({ status: 'valid', defaults: {} })
+    const rejected = await other.editMoteQuickDraft(before, { ...before, values: { recovery: 'on-open' } }, owner.recordIdentity()).catch(error => error)
+    expect(rejected.name).toBe('Error'); expect(rejected.cause).toBe(failure)
+    expect(rejected.message).toContain('另一页面已改原配置')
   })
   it('creates a deleted MOTE.md with empty defaults through real writers, without fabricating an unchanged document', async () => {
     const f = await original(); await rm(f.path)
