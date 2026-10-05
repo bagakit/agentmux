@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GitHistoryResult } from '../../../../../shared/git-contracts'
 import type { WorkspaceRecord } from '../../../../../shared/contracts'
 import { gitBridge } from '../../../lib/git-bridge'
@@ -102,14 +102,21 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
     setSelection({ key, reference: window.reference })
     publish({ ...window, loading: false })
   }, [key, publish])
-  const selectReference = useCallback((value: string | null) => setSelection({ key, reference: value }), [key])
+  const selectReference = useCallback((value: string | null) => {
+    if (scope.current.key !== key || scope.current.reference === value) return
+    generation.current += 1
+    busy.current = false
+    // A durable range can be selected during layout, before the old enabled effect runs.
+    scope.current = { ...scope.current, reference: value }
+    setSelection({ key, reference: value })
+  }, [key])
   const refresh = useCallback(() => read(false), [read])
   const loadMore = useCallback(() => read(true), [read])
   const owned = state?.key === key && state.reference === reference ? state : null
-  return {
+  return useMemo(() => ({
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
     refs: state?.key === key && state.result?.kind === 'ready' ? state.result.snapshot.refs : [],
     reference, enabled,
     selectReference, refresh, loadMore, captureWindow, adoptWindow
-  }
+  }), [owned, state, key, reference, enabled, selectReference, refresh, loadMore, captureWindow, adoptWindow])
 }

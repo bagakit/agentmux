@@ -122,8 +122,8 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, onOpenRepo
           <option key={ref.name} value={ref.name}>{ref.kind === 'remote' ? 'Remote · ' : ''}{referenceLabel(ref)}</option>)}
         {history.reference && !history.refs.some(ref => ref.name === history.reference) && <option value={history.reference}>{history.reference.replace(/^refs\/(heads|remotes)\//u, '')}</option>}
       </select>
-      {onOpenRepository && <button className="icon-button" title="Open repository history" aria-label="Open repository history"
-        onClick={() => onOpenRepository()}><PanelRightOpen size={13} /></button>}
+      {onOpenRepository && <button className="small-button git-history-open-repository" title="Open repository history" aria-label="Open repository history"
+        onClick={() => onOpenRepository()}><PanelRightOpen size={13} /><span>Repository history</span></button>}
       <button className="icon-button" title="Refresh history" aria-label="Refresh history" disabled={!history.enabled || history.loading}
         onClick={() => { void history.refresh() }}><RefreshCw size={13} /></button>
     </div>
