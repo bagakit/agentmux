@@ -1,23 +1,17 @@
-import { PanelsTopLeft } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 
-/** Presentation only; an empty display does not establish an empty or ended Session. */
-export function WorkbenchEmptyState({ title, detail, guidance, diagnostic, actions }: {
-  title: string
-  detail: string
-  guidance?: string
-  diagnostic?: string
-  actions?: ReactNode
+/** A confirmed empty workface. Discovery and recovery notices stay with their original owners. */
+export function WorkbenchEmptyState({ identity, name, heading, description, action, topicId }: {
+  identity?: ReactNode; name?: string | undefined; heading: string; description?: string; action: ReactNode; topicId?: string | undefined
 }) {
-  return <FullPageLoadingSurface scope="region" phase="parked" eyebrow={title} title={title} detail={detail}
-    className="workbench-empty-state" actions={actions}
-    supplement={guidance ? <p className="full-page-loading__detail">{guidance}</p> : undefined}
-    {...(diagnostic ? { details: { summary: 'View details', content: <p className="full-page-loading__detail">{diagnostic}</p> } } : {})}>
-    <div className="full-page-loading__heading">
-      <h1>{title}</h1>
-      <span className="full-page-loading__mark" aria-hidden="true"><PanelsTopLeft size={18} /></span>
+  return <div className="workbench-empty-state" data-workbench-empty-zone data-mote-empty-space={topicId}
+    onPointerDown={event => event.stopPropagation()}>
+    <div className="workbench-empty-state__content">
+      {identity ? <div className="workbench-empty-state__identity">{identity}</div> : null}
+      {name ? <span className="workbench-empty-state__name">{name}</span> : null}
+      <strong role="status">{heading}</strong>
+      {description ? <p>{description}</p> : null}
+      <div className="workbench-empty-state__action">{action}</div>
     </div>
-    <p className="full-page-loading__detail">{detail}</p>
-  </FullPageLoadingSurface>
+  </div>
 }

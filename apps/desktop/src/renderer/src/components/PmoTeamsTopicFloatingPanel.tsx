@@ -348,11 +348,11 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const selectFileReference = useCallback((topicId: string, reference: WorkbenchProjectionSelection) => {
     setFloating({ targetTopicId: topicId, targetTabId: reference.tabId, reference })
   }, [setFloating])
-  const selectDiscussion = useCallback((tabId: string, groupId?: string, explicitDisplayWorkspaceId?: string) => {
+  const selectDiscussion = useCallback((tabId: string, groupId?: string, explicitDisplayWorkspaceId?: string, explicitRecovery = false) => {
     const state = useAppStore.getState(), current = readPmoTeamsTopicFloatingState() ?? floating
     // Native input focus reports the retained entity, not a placement choice.
     // Keep even an unconfirmed raw reference until the person chooses a Group.
-    if (!groupId && current.targetTabId === tabId) return
+    if (!explicitRecovery && !groupId && current.targetTabId === tabId) return
     const tab = state.tabs[tabId]
     const topicId = pmoTeamsTopicFloatingTargetTopicId(current, state.tabs)
     // This is the display Workspace rendered by the original Workbench below,
@@ -361,7 +361,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     // The original action may have just created this Tab before React renders
     // its next catalog. Confirm against the original owner's current graph.
     const candidates = [...new Map(spatialCatalog(state, topics ?? []).locations.filter(location => location.tabId === tabId &&
-      location.displayWorkspaceId === displayWorkspaceId &&
+      (explicitRecovery || location.displayWorkspaceId === displayWorkspaceId) &&
       (!groupId || location.groupId === groupId) && location.regionId === tab?.layout.activeRegionId &&
       workbenchDisplayReferenceMatches(state.layouts[location.displayWorkspaceId], location))
       .map(({ displayWorkspaceId, groupId, tabId, regionId }) => {
@@ -371,6 +371,11 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     const exact = tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId &&
       tab.regions[tab.layout.activeRegionId] && candidates.length === 1 ? candidates[0] : null
     if (!exact) {
+      if (explicitRecovery && tab?.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === topicId) {
+        spaceActionRef.current?.abort()
+        setFloating({ targetTabId: tabId, reference: null })
+        return
+      }
       reportError(new Error('This exact discussion location is no longer confirmed. Its original content is kept; choose its current location.'))
       return
     }
@@ -543,12 +548,6 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       <button type="button" className="small-button" onClick={() => void refreshTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</button>
     </div> : null}
     {preparationIssue ? <div role="status" className="workbench-restore-notice mote-context-notice"><span>{preparationIssue}</span><button type="button" className="small-button" onClick={() => setPreparationAttempt(attempt => attempt + 1)}>Retry context</button></div> : null}
-    {visible && floating.targetTabId === undefined && !target.tabId && discussionChoices.length > 1 ?
-      <div role="status" className="workbench-restore-notice mote-context-notice">
-        <span>Choose a discussion to continue. Each original work surface is kept.</span>
-        {discussionChoices.map(tab => <button type="button" className="small-button" key={tab.id}
-          onClick={() => selectMote(target.topicId, tab.id)}>{tab.name || 'Discussion'}</button>)}
-      </div> : null}
     {projectionState?.issue ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{projectionState.issue}</span>
       {projectionState.choices.map((reference, index) => <button type="button" className="small-button" key={JSON.stringify(reference)}
@@ -559,14 +558,14 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     <div className="pmo-teams-topic-floating__body">
       <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} reference={floating.reference}
         active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
-      !target.tabId && !motes.some(topic => topic.id === target.topicId) ?
+      !target.tabId && discussionChoices.length === 0 && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
         <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open} reference={floating.reference} conversationEntry={floating.conversationEntry} onTabSelect={selectDiscussion}>
         <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? SCRATCH_WORKSPACE_ID}
           topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
           projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
           retainedTabId={target.tabId} visible={visible} interactiveResize={false}
-          onTabSelect={selectDiscussion} presentationAction={<>{profileTrigger}
+          onTabSelect={selectDiscussion} onRecoverTab={tabId => selectDiscussion(tabId, undefined, undefined, true)} presentationAction={<>{profileTrigger}
             <button type="button" className="pane-action"
             aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ArrowUpRight size={14} /></button></>} /></MoteWorkface>}
       </MoteProfilePopover>

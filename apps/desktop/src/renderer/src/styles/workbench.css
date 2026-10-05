@@ -65,6 +65,20 @@
   overscroll-behavior-inline: contain;
   scrollbar-width: none;
 }
+.workbench-tab-create { flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 128px; height: 24px; margin-inline: var(--sp-2); padding: 0 var(--sp-3); border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); white-space: nowrap; }
+.workbench-tab-create span { overflow: hidden; text-overflow: ellipsis; }
+.workbench-tab-create:hover:not(:disabled) { color: var(--text); background: var(--wash-2); }
+.workbench-tab-create:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.workbench-empty-state { flex: 1; min-width: 0; min-height: 0; height: 100%; display: grid; place-items: center; padding: clamp(20px, 5%, 48px); overflow: auto; }
+.workbench-empty-state__content { width: min(100%, 360px); display: flex; align-items: center; flex-direction: column; text-align: center; padding-block: var(--sp-5); }
+.workbench-empty-state__identity { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: var(--sp-4); }
+.workbench-empty-state__identity .project-rail-row__icon { width: 56px; height: 56px; flex: none; }
+.workbench-empty-state__identity .space-object-icon :is(svg, img) { width: 100%; height: 100%; }
+.workbench-empty-state__name { max-width: 100%; margin-bottom: var(--sp-3); color: var(--text-3); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.workbench-empty-state strong { color: var(--text); font-size: clamp(20px, 2.4vw, 26px); font-weight: 550; letter-spacing: -.035em; line-height: 1.25; }
+.workbench-empty-state p { margin: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; }
+.workbench-empty-state__action { display: flex; justify-content: center; margin-top: var(--sp-6); }
+.workbench-empty-state__action .primary-button { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 34px; padding-inline: var(--sp-5); border-radius: 9px; box-shadow: none; }
 .pane-tabbar__tabs::-webkit-scrollbar { display: none; }
 .workbench-tab-strip--overflow .pane-tabbar__tabs { padding-inline:var(--sp-7); scroll-padding-inline:var(--sp-7); }
 .workbench-tab-strip__nav {

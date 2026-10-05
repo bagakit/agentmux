@@ -5752,6 +5752,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Publish only the exact View deletion committed here, independently of cleanup receipts.
     const commitClose = (tab: WorkbenchTab | null): void => {
       let removedTab: WorkbenchTab | undefined
+      let removedTabOrder: readonly string[] = []
       let collectionChanged = false
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
@@ -5760,11 +5761,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
+        removedTabOrder = current.layouts[workspaceId]?.groups.find(group => group.id === tabGroupId)?.tabOrder ?? []
         collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
         if(removedTab) coreSpatialPersistence?.removeEntity(removedTab.id)
         return committed
       })
-      if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, error => get().reportError(error))
+      if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabOrder: removedTabOrder }, error => get().reportError(error))
       if (collectionChanged) void saveWorkbenchSelection(false)
     }
     if (!plan.closesView) {
