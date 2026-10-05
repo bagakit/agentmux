@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
@@ -404,7 +405,7 @@ describe('built-in agent providers', () => {
         options,
         evidence: {
           source: 'native-hook' as const,
-          observedAt: 1,
+          observedAt: reshapeFixtureEpoch(0, 0, 1),
           run: { runId: `${providerId}-run` },
           hookReceiptId: `${providerId}-permission`
         }
@@ -643,9 +644,9 @@ describe('built-in agent providers', () => {
     expect(mutation?.merge).toEqual({ kind: 'json-owned-key', key: 'agentmux-status' })
   })
 
-  it('declares Codex managed hooks as a marker-scoped merge so committed project hooks survive', () => {
+  it('declares Codex hooks as a current-declaration merge so committed project hooks survive', () => {
     const mutation = (new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!).mutations[0]
-    expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
+    expect(mutation?.merge).toEqual({ kind: 'json-managed-events' })
     // 子代理在途压制的产品接线：SubagentStop 必须被真正安装，否则 Provider CLI 永不发这个事件，
     // 花名册永不减一，主 Stop 被永远压住，Agent 卡在 working 出不来。start 同样必须在，否则记不上。
     const parsed = JSON.parse(mutation?.content ?? '{}') as {
@@ -661,8 +662,8 @@ describe('built-in agent providers', () => {
     const mutation = plan.mutations[0]
     expect(mutation?.path).toBe(fixturePath("tmp/work/.claude/settings.json"))
     // Claude keeps hooks under a top-level `hooks` key alongside permissions/model/MCP — like Codex,
-    // AgentMux owns only its marked command entries, so the whole file cannot be replaced.
-    expect(mutation?.merge).toEqual({ kind: 'json-managed-events', marker: 'agentmux-hook.js' })
+    // Only missing current declarations are appended; existing shared entries cannot be replaced.
+    expect(mutation?.merge).toEqual({ kind: 'json-managed-events' })
     const parsed = JSON.parse(mutation?.content ?? '{}') as {
       hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string; timeout?: number }> }>>
     }
@@ -688,8 +689,8 @@ describe('built-in agent providers', () => {
       '~/.hermes/config.yaml',
       '~/.hermes/shell-hooks-allowlist.json'
     ])
-    expect(hermesPlan?.mutations[0]?.merge).toEqual({ kind: 'yaml-managed-events', marker: 'agentmux-hook.js' })
-    expect(hermesPlan?.mutations[1]?.merge).toEqual({ kind: 'json-managed-approvals', marker: 'agentmux-hook.js' })
+    expect(hermesPlan?.mutations[0]?.merge).toEqual({ kind: 'yaml-managed-events' })
+    expect(hermesPlan?.mutations[1]?.merge).toEqual({ kind: 'json-managed-approvals' })
     // A launch env carrying HERMES_HOME repoints the install to that dir directly (no `.hermes` append) —
     // hermes reads its config dir from $HERMES_HOME, so the installer must target the same dir the process
     // will read. This is the isolation lever the real-hermes e2e leans on.

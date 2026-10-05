@@ -114,7 +114,7 @@ describe('Droid provider', () => {
       expect(merged.hooksDisabled).toBe(false)
       expect(merged).not.toHaveProperty('hooks')
       expect(merged.Stop[0].hooks[0].command).toContain('agentmux-hook.js')
-      expect(mutation.merge).toEqual({ kind: 'json-root-managed-events', marker: 'agentmux-hook.js' })
+      expect(mutation.merge).toEqual({ kind: 'json-root-managed-events' })
     })
 
     it('FACTORY_HOME_OVERRIDE 被尊重——忽略它会写出一份该 CLI 永远不读的配置', () => {
