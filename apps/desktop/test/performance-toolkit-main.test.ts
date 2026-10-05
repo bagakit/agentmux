@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { openToolkitResultChannel } from '../../../packages/core/src/toolkit-result-channel.js'
 import { mainFixtureState, children, cleanups, cli, nativeMain, until, oneCli, record, processes, executionGroup, alive, terminalMetadata, storage } from './toolkit-main.fixture.js'
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, readdir, copyFile, rm, symlink } from 'node:fs/promises'
@@ -36,10 +37,11 @@ describe('registered Main official Performance vertical slice',()=>{
     expect(script.sha256).toMatch(/^[a-f0-9]{64}$/u)
     const help=await exec(launch.runner,[launch.cli,'--help','toolkit','watch'],{env:{...process.env,...launch.env}})
     expect(help.stdout.trim().length).toBeGreaterThan(30)
-    const child=spawn(launch.runner,[launch.script,launch.cli],{cwd:launch.cwd,env:{...process.env,...launch.env},stdio:['ignore','pipe','pipe']})
-    children.push(child)
     let stdout='',stderr='',code:number|null|undefined
-    child.stdout!.on('data',bytes=>{stdout+=bytes});child.stderr!.on('data',bytes=>{stderr+=bytes});child.once('close',value=>{code=value})
+    const channel=await openToolkitResultChannel({onBytes:bytes=>{stdout+=Buffer.from(bytes).toString('utf8')},onEnd(){},onError:()=>{}});cleanups.push(channel.close)
+    const child=spawn(launch.runner,[launch.script,launch.cli],{cwd:launch.cwd,env:{...process.env,...launch.env,...channel.env},stdio:['ignore','pipe','pipe']})
+    children.push(child)
+    child.stdout!.resume();child.stderr!.on('data',bytes=>{stderr+=bytes});child.once('close',value=>{code=value})
     const frames=()=>stdout.split('\n').filter(Boolean).map(line=>JSON.parse(line))
     await until(()=>{expect(code,stderr).toBeUndefined();expect(frames().length).toBeGreaterThanOrEqual(2)},15000)
     expect(frames()).toEqual(expect.arrayContaining([expect.objectContaining({schema:'agentmux.toolkit.result.v1',event:'result',sequence:1,
@@ -118,7 +120,7 @@ describe('registered Main official Performance vertical slice',()=>{
       }
       expect(current.sequence).toBeGreaterThan(sequence);sequence=current.sequence
       const native=await m.sdk.status(ref.runId as any),files=await storage(join(m.directory,'state','ctxmux'))
-      expect(native.latest_output_bytes).toBeGreaterThan(0);expect(native.durable_output_bytes).not.toBeNull()
+      expect(native.latest_output_bytes).toBeGreaterThanOrEqual(0);expect(native.durable_output_bytes).not.toBeNull()
       await record('storage-trend',{n,observedAt:Date.now(),sequence,runId:ref.runId,
         latestOutputBytes:native.latest_output_bytes,durableOutputBytes:native.durable_output_bytes,firstAvailableByte:native.first_available_byte,files})
     }

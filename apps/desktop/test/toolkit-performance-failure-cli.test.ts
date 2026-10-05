@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { connectToolkitResultChannel } from '../../../packages/core/src/toolkit-result-channel.js'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('electron',()=>({app:{getPath:()=>_hygiene_fixturePath("tmp"),getAppPath:()=>process.cwd()}}))
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
@@ -31,7 +32,7 @@ it('normal compiled public CLI watch capture and inspect consume original Owner 
   expect(owner.current).toMatchObject({state:'observing',run:{hostId:'local',runId:'private-cli-toolkit-run'},diagnostics:{captureEnabled:true}})
   expect(frames.some(frame=>typeof frame.result?.subscriptionId==='string')).toBe(true)
  },{timeout:5000})
- const raw=Buffer.from('[bad]\n');accept({type:'terminal-output',dataBytes:raw,evidence:{outputByteRange:{startByte:0,endByte:raw.length}}})
+ const raw=Buffer.from('[bad]\n'),resultSocket=await connectToolkitResultChannel({...(port.create as any).mock.calls[0][0].env});resultSocket.on('error',()=>{});resultSocket.write(raw)
  await vi.waitFor(()=>expect(frames.some(frame=>frame.method==='system.subscription.event'&&frame.params.event.type==='snapshot'&&frame.params.event.data.diagnostics.lastFailure)).toBe(true))
  const ordinary=await runCompiledObjectCli(['toolkit','inspect','performance'],env)
  expect(ordinary.code,ordinary.stderr).toBe(0);expect(JSON.parse(ordinary.stdout).result.snapshot.diagnostics).toMatchObject({failureEvidence:'retained',lastFailure:{details:{bytes:null,error:{stack:null}}}})
