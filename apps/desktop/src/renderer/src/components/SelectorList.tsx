@@ -105,7 +105,7 @@ export function SelectorListHeader({
   return (
     <header className={className ? `selector-list__header ${className}` : 'selector-list__header'}>
       <span>
-        <strong>{title}</strong>
+        <strong title={title}>{title}</strong>
         {typeof count === 'number' ? <em>{count}</em> : null}
       </span>
       {actions ? <span className="selector-list__actions">{actions}</span> : null}

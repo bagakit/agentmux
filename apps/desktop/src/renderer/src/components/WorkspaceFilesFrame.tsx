@@ -16,38 +16,47 @@ export type WorkspaceFileActions = {
 
 /** Layout only. Domain owners supply their original file scope, actions and content. */
 export function WorkspaceFilesFrame({ workspace, visible, presentation, title, subtitle, actions,
-  explorer, explorerKey = workspace.id, fileIssue, children }: {
+  explorer, explorerKey = workspace.id, fileIssue, children, directoryFirst = false, contextPath = workspace.path }: {
   workspace: WorkspaceRecord; visible: boolean; presentation: ContentSlotPresentation
   title: string; subtitle?: string | undefined; actions?: ReactNode
   explorer: Omit<ComponentProps<typeof FileExplorer>, 'active' | 'workspaceId' | 'toolbarTarget'>
   explorerKey?: string; fileIssue?: ReactNode; children: ReactNode
+  directoryFirst?: boolean; contextPath?: string | undefined
 }) {
   const displayPath = usePathDisplay()
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
   const override = useAppStore(state => state.explorerCollapsed[workspace.id])
   const setExplorerCollapsed = useAppStore(state => state.setExplorerCollapsed)
   const collapsed = resolveExplorerCollapsed(override, presentation.explorerCollapsedByDefault)
-  return <div className="workspace-tool-explorer">
-    <div className="workspace-tool-context workspace-tool-context--collapsible workspace-tool-context--explorer">
-      <button type="button" className="workspace-tool-context__toggle" aria-expanded={!collapsed}
+  const context = <div className="workspace-tool-context workspace-tool-context--collapsible workspace-tool-context--explorer">
+      <button type="button" className={`workspace-tool-context__toggle${directoryFirst ? ' workspace-tool-context__toggle--label' : ''}`} aria-expanded={!collapsed}
         aria-label={collapsed ? 'Show file tree' : 'Hide file tree'} title={collapsed ? 'Show file tree' : 'Hide file tree'}
         onClick={() => setExplorerCollapsed(workspace.id, !collapsed)}>
         {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        {directoryFirst ? <strong>{title}</strong> : null}
       </button>
-      <span title={displayPath(workspace.path, workspace.hostId)}><strong>{title}</strong>{subtitle ? <small>{subtitle}</small> : null}</span>
+      <span title={displayPath(contextPath, workspace.hostId)}>{!directoryFirst ? <strong>{title}</strong> : null}{subtitle ? <small>{subtitle}</small> : null}</span>
       {workspace.hostId !== 'local' ? <em><RadioTower size={11} /> {workspace.hostId}</em> : null}
       <div className="workspace-tool-context__actions">{actions}<div ref={setToolbarTarget} /></div>
     </div>
+  const content = <Panel key="content" defaultSize={100 - presentation.fileTreeDefaultSize} minSize={directoryFirst ? 55 : 20}>{children}</Panel>
+  const fileContent = !collapsed ? fileIssue ?? <FileExplorer {...explorer} key={explorerKey} active={visible} workspaceId={workspace.id} toolbarTarget={toolbarTarget} /> : null
+  const files = <Panel key="files" defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}
+    maxSize={directoryFirst ? 45 : undefined} className={directoryFirst ? 'workspace-topic-files' : undefined}
+    style={collapsed ? directoryFirst ? { flexGrow: 0, flexShrink: 0, flexBasis: 'var(--topic-files-header-height)' } : { display: 'none' } : undefined}
+    aria-hidden={collapsed && !directoryFirst}>
+    {directoryFirst ? context : null}
+    {directoryFirst ? <div className="workspace-topic-files__content">{fileContent}</div> : fileContent}
+  </Panel>
+  return <div className={`workspace-tool-explorer${directoryFirst ? ' workspace-tool-explorer--directory-first' : ''}`}>
+    {!directoryFirst ? context : null}
     <PanelGroup direction="vertical" className={collapsed ? 'workspace-tools-collapsed' : 'workspace-tools-split'}
       key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}>
-      {/* Store is the sole collapse owner. Hiding the file panel keeps the content
-          in its original parent without a second library collapse state. */}
-      <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}
-        style={collapsed ? { display: 'none' } : undefined} aria-hidden={collapsed}>
-        {!collapsed ? fileIssue ?? <FileExplorer {...explorer} key={explorerKey} active={visible} workspaceId={workspace.id} toolbarTarget={toolbarTarget} /> : null}
-      </Panel>
+      {/* The store owns collapse. Keep the directory mounted in the same panel
+          so toggling Files retains its selected view, search and scroll. */}
+      {directoryFirst ? content : files}
       {!collapsed ? <PanelResizeHandle className="workspace-tools-resize-handle" /> : null}
-      <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>{children}</Panel>
+      {directoryFirst ? files : content}
     </PanelGroup>
   </div>
 }
