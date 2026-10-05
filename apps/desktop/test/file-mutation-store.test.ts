@@ -14,6 +14,7 @@ import {
   titleWorkbenchSurface
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { findFileWorkbenchSurface } from '../src/renderer/src/lib/file-workbench-state.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { revealFileExplorerPath } from '../src/renderer/src/lib/file-explorer-selection.js'
 
@@ -147,9 +148,8 @@ describe('file mutation resource reconciliation', () => {
 
     await expect(useAppStore.getState().renamePath(sourcePath, destinationPath)).resolves.toBeUndefined()
 
-    const destinationId = `file:${workspaceId}:${destinationPath}`
-    expect(useAppStore.getState().tabs[sourceId]).toBeUndefined()
-    expect(titleWorkbenchSurface(useAppStore.getState().tabs[destinationId]!)).toMatchObject({ path: destinationPath })
+    expect(useAppStore.getState().tabs[sourceId]!.titleRegionId).toBe(source.titleRegionId)
+    expect(titleWorkbenchSurface(useAppStore.getState().tabs[sourceId]!)).toMatchObject({ path: destinationPath })
     expect(useAppStore.getState().documents[documentKey(workspaceId, sourcePath)]).toBeUndefined()
     expect(useAppStore.getState().documents[documentKey(workspaceId, destinationPath)]).toBeDefined()
     expect(unobserve).toHaveBeenCalledWith(workspaceId, sourcePath)
@@ -201,10 +201,10 @@ describe('file mutation resource reconciliation', () => {
     })
 
     const moving = useAppStore.getState().renamePath('src/app', 'src/moved')
-    const destinationId = `file:${workspaceId}:${destinationPath}`
+    const destinationId = sourceId
     const destinationKey = documentKey(workspaceId, destinationPath)
     await vi.waitFor(() => {
-      expect(useAppStore.getState().tabs[destinationId]).toBeDefined()
+      expect(titleWorkbenchSurface(useAppStore.getState().tabs[destinationId]!)).toMatchObject({ path: destinationPath })
     })
 
     await useAppStore.getState().reloadDocument(destinationId)
@@ -417,7 +417,9 @@ describe('file mutation resource reconciliation', () => {
     const path = `discard-${crypto.randomUUID()}.ts`
     await useAppStore.getState().createPath({ path, kind: 'file' })
     await useAppStore.getState().openFile(path, 'pane')
-    const tabId = `file:${workspace.id}:${path}`
+    const opened = findFileWorkbenchSurface(useAppStore.getState(), workspace.id, path)
+    expect(opened).toBeDefined()
+    const tabId = opened!.tab.id
     useAppStore.getState().updateDocument(tabId, 'unsaved')
 
     await useAppStore.getState().closeTab(workspace.id, 'pane', tabId)
@@ -471,7 +473,7 @@ describe('file mutation resource reconciliation', () => {
     expect(unobserve).toHaveBeenCalledWith(workspace.id, directoryPath)
     // No document or tab was built for the directory.
     expect(state.documents[documentKey(workspace.id, directoryPath)]).toBeUndefined()
-    expect(state.tabs[`file:${workspace.id}:${directoryPath}`]).toBeUndefined()
+    expect(findFileWorkbenchSurface(state, workspace.id, directoryPath)).toBeUndefined()
     // The directory and its ancestor are revealed and selected in the file tree.
     const explorer = state.fileExplorerStates[workspace.id]!
     expect(explorer.selection.selectedPaths.has(directoryPath)).toBe(true)
