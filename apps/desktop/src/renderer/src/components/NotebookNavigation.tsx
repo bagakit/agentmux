@@ -76,7 +76,7 @@ export function NotebookCreateDialog({ open, active, onClose, onCreated, onCreat
     if (operation.busy || !name.trim()) return
     if (operation.pending) { await operation.retry(); return }
     onCreateIntent?.()
-    const notebookId = mintObjectId()
+    const notebookId = crypto.randomUUID()
     await operation.run({ kind: 'create', notebookId, name: name.trim() }, () => { setName(''); onCreated(notebookId) })
   }
   return <Dialog.Root open={open} onOpenChange={value => { if (!value) close() }}>
