@@ -27,6 +27,13 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
     parseToolkitPackageFields(value, false, 'INVALID_CLI_ARGUMENT', true)
     return { method: 'toolkit.create', params: { toolId, value } }
   }
+  if (toolId === 'performance' && (action === 'inspect' || action === 'watch') && args.length > 2) {
+    const flags = args.slice(2), allowed = action === 'watch' ? ['--capture-failure', '--failure-evidence'] : ['--failure-evidence']
+    if (new Set(flags).size !== flags.length || flags.some(flag => !allowed.includes(flag))) invalid('Use distinct Performance capture/read flags.')
+    return { method: `toolkit.${action}`, params: { toolId,
+      ...(flags.includes('--capture-failure') ? { captureFailure: true } : {}),
+      ...(flags.includes('--failure-evidence') ? { includeFailureEvidence: true } : {}) } }
+  }
   const method = `toolkit.${action}`
   if (['inspect', 'script', 'watch', 'run', 'stop', 'delete'].includes(action ?? '') && args.length === 2) return { method, params: { toolId } }
   if (action === 'action' && args.length === 5 && args[2]?.length && args[3] === '--input') {
