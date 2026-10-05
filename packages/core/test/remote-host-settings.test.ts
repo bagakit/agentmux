@@ -14,6 +14,7 @@ import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
 
 const cleanups: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -80,9 +81,55 @@ it('Hosted trust consumes one input and its real user context; wire principals c
   }
   await expect(invoke([f.input, user.principal], user)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(invoke([{ ...f.input, principal: user.principal }], user)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  await expect(hosted.call('runtime.invoke', { consumerId: 'bad:consumer', fence,
+    invocation: encodeHostedValue({ method: 'trustCreationSource', args: [f.input] }) }, user))
+    .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  for (const id of ['', 'bad\nprincipal', 'bad\0principal']) {
+    await expect(invoke([f.input], { ...user, principal: { kind: 'user', id } }))
+      .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  }
   expect(await f.target.listTrusted()).toEqual([])
   const result = await invoke([f.input], user) as { value: unknown }
   expect(decodeHostedValue(result.value)).toMatchObject({ targetRuntimeId: 'target-runtime', registeredBy: user.principal })
+})
+it('actual Unix users approve through the Desktop route and Hosted target, with durable target attribution', async () => {
+  const f = await owners()
+  f.inner.kernel.identity = () => ({ buildIdentity: 'trust-unix', protocolVersion: 1, daemonInstanceId: 'trust-unix' })
+  const owner = { runtimeId: 'target-runtime', ownerInstanceId: 'target-epoch', protocolVersion: 1 as const,
+    processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' as const }
+  const hosted = new AgentMuxHostedRuntimeService(f.client, null, () => owner)
+  cleanups.push(() => hosted.dispose())
+  const target = new AgentMuxControlServer({ socketPath: join(f.root, 'target.sock'), coreClients: f.coreClients,
+    hostedRuntime: () => hosted })
+  await target.start(); cleanups.push(() => target.stop())
+  const targetRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: target.path } })
+  cleanups.push(() => targetRpc.dispose())
+  const remote = await connectHostedAgentMux({ rpc: targetRpc })
+  cleanups.push(() => remote.dispose())
+  const desktop = new AgentMuxControlServer({ socketPath: join(f.root, 'desktop.sock'), coreClients: () => [
+    ...f.coreClients(), { hostId: 'remote', client: remote }
+  ] })
+  await desktop.start(); cleanups.push(() => desktop.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path } })
+  cleanups.push(() => rpc.dispose())
+  const managed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path }, credentials: f.credentials })
+  cleanups.push(() => managed.dispose())
+  const params = { hostId: 'remote', input: f.input }
+  await expect(managed.call('settings.hosts.trust-source', params)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(await f.target.listTrusted()).toEqual([])
+  const result = await rpc.call('settings.hosts.trust-source', params)
+  expect(result.source.registeredBy).toEqual({ kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` })
+  expect(result.source).toMatchObject({ sourceRuntimeId: f.input.sourceRuntimeId, targetRuntimeId: owner.runtimeId })
+  const read = await managed.call('settings.hosts.trusted-sources', { hostId: 'remote' })
+  expect(read.sources).toEqual([result.source])
+  const reloaded = new AgentMuxCreationAuthority({ stateDirectory: join(f.root, 'target'), runtimeId: owner.runtimeId })
+  expect(await reloaded.listTrusted()).toEqual(read.sources)
+  await expect(rpc.call('settings.hosts.trust-source', { ...params, input: { ...f.input, targetKeyFingerprint: '0'.repeat(64) } }))
+    .rejects.toMatchObject({ code: 'AGENT_CREATION_TARGET_MISMATCH' })
+  expect(await f.target.listTrusted()).toEqual(read.sources)
+  expect(await f.source.listTrusted()).toEqual([])
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.inner.kernel.attach).not.toHaveBeenCalled()
 })
 it('strict CLI/help and result consumers retain exact Host and source identities', async () => {
   const f = await owners(), authority = await f.target.identity(), source = await f.target.trust(f.input, user.principal)

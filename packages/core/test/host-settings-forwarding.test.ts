@@ -8,6 +8,8 @@ import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
+import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
@@ -35,8 +37,20 @@ it('compiled CLI crosses the Host/Desktop Unix bridge to the target inventory an
     hostExecutorOwner: new AgentMuxHostExecutorOwner({ path: join(remote.root, 'executors.json'), runtimeId: 'remote-runtime',
       catalog: () => new AgentProviderRegistry().catalog().filter(p => p.id === 'claude'), environment: () => ({ PATH: bin }) })
   })
+  remote.inner.kernel.identity = () => ({ buildIdentity: 'remote-trust', protocolVersion: 1, daemonInstanceId: 'remote-trust' })
+  const hosted = new AgentMuxHostedRuntimeService(remote.client, null, () => ({ runtimeId: 'remote-runtime',
+    ownerInstanceId: 'remote-epoch', protocolVersion: 1, processId: process.pid,
+    ctxmux: remote.client.runtimeIdentity(), availability: 'connected' }))
+  cleanups.push(() => hosted.dispose())
+  const targetServer = new AgentMuxControlServer({ socketPath: join(remote.root, 'target.sock'), coreClients: remote.coreClients,
+    hostedRuntime: () => hosted })
+  await targetServer.start(); cleanups.push(() => targetServer.stop())
+  const targetRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: targetServer.path } })
+  cleanups.push(() => targetRpc.dispose())
+  const remoteClient = await connectHostedAgentMux({ rpc: targetRpc })
+  cleanups.push(() => remoteClient.dispose())
   const gui = new AgentMuxControlServer({ socketPath: join(local.root, 'gui.sock'), coreClients: () => [
-    { hostId: 'local', client: local.client }, { hostId: 'remote', client: remote.client }
+    { hostId: 'local', client: local.client }, { hostId: 'remote', client: remoteClient }
   ] })
   await gui.start(); cleanups.push(() => gui.stop())
   // Same public connection and credential-preserving forwarding as startAgentMuxHost.
@@ -69,6 +83,7 @@ it('compiled CLI crosses the Host/Desktop Unix bridge to the target inventory an
   expect(forward).toHaveBeenCalledTimes(count)
   const trust = await cli(['settings', 'hosts', 'trust-source', '--host', 'remote', '--input', '-'], JSON.stringify(input))
   expect(trust.code, trust.stderr).toBe(0)
+  expect(JSON.parse(trust.stdout).result.source.registeredBy).toEqual({ kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` })
   const read = await cli(['settings', 'hosts', 'trusted-sources', '--host', 'remote'], '', true)
   expect(read.code, read.stderr).toBe(0)
   expect(JSON.parse(read.stdout).result).toMatchObject({ routeHostId: 'remote', authority: { runtimeId: 'remote-runtime' },
