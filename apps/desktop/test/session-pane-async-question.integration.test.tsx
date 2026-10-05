@@ -4,6 +4,9 @@ import type { Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { createClientUiRoot } from './helpers/client-ui-render';
 import { fixture, request } from './helpers/native-async-question-fixture';
+import { AgentMuxError } from '@agentmux/core';
+import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state';
+import { RuntimeController } from '../src/main/runtime-controller';
 import { useAppStore } from '../src/renderer/src/store';
 import { api } from '../src/renderer/src/lib/api';
 import type { AgentSessionControl, AppConfig, SessionSnapshot } from '../src/shared/contracts';
@@ -94,6 +97,8 @@ async function setup() {
     executorId: 'codex',
     agentSessionUpdatedAt: 1,
     promptSubmissionPredecessor: null,
+    nativeHandle: h.client.agentSession('question-session').nativeHandle,
+    nativeSessionId: h.client.agentSession('question-session').nativeHandle!.sessionId,
     createdAt: 1,
     updatedAt: 1,
     processState: 'running',
@@ -240,3 +245,55 @@ it('actual SessionPane→History reuses the same shared question card and preser
   expect(body.isConnected).toBe(true);
   expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT');
 });
+
+it('actual Pane consumes the live original Core refusal, preserves its new draft and allows only an explicit new operation', async () => {
+  const { h, send, reads } = await setup()
+  const nativeInput = h.inner.kernel.input
+  h.inner.kernel.input = async () => { throw new AgentMuxError('Original Native refused its immutable input', 'CTXMUX_input_cursor_mismatch', 'not_applied') }
+  // Lose the caller's reply, while Core retains the original Native refusal.
+  send.mockImplementationOnce(async (target, input) => {
+    try { return await h.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, ...h.invocation, authorHuman: true }) }
+    catch { throw new Error('Original RPC receipt lost') }
+  })
+  await fill(activeCard().querySelector('textarea')!, 'Original unknown answer')
+  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('unknown'))
+  const input = send.mock.calls[0]![1], exact = h.client.agentSession('question-session')
+  expect(exact.promptCompletionAdmission).toMatchObject({ submissionId: input.operationId, notApplied: true })
+  expect(h.writes).toHaveLength(0)
+  await fill(activeCard().querySelector('textarea')!, 'New explicit answer')
+  const count = reads.mock.calls.length
+  const publish = async (session: typeof exact) => {
+    await act(async () => useAppStore.setState(state => reduceRuntimeEvent(state, { type: 'core', hostId: 'local', event: { type: 'agent-session', session } })))
+    await flush()
+  }
+  await publish({ ...exact, promptCompletionAdmission: { ...exact.promptCompletionAdmission!, submissionId: 'another-operation' } })
+  expect(activeCard().dataset.questionState).toBe('unknown')
+  await publish({ ...exact, updatedAt: exact.updatedAt + 1 })
+  await vi.waitFor(() => expect(Object.values(useAppStore.getState().questionReplies['question-session']!)[0]!.phase).toBe('rejected'))
+  expect(activeCard().querySelector('.agent-question__footer button')?.textContent).toContain('Submit reply')
+  expect(activeCard().querySelector('textarea')?.value).toBe('New explicit answer')
+  expect(send).toHaveBeenCalledOnce(); expect(reads.mock.calls.length).toBe(count)
+  const projected = useAppStore.getState().sessions[0]!
+  expect(projected.kind === 'agent' && projected.promptInputNotApplied).toEqual({ submissionId: input.operationId, run: control.run })
+  // Initial host projection consumes the same Core helper as the real-time reducer.
+  const runtime = new RuntimeController(h.store, async () => { throw new Error('No connection side effect') })
+  Object.assign(runtime, { hosts: new Map([['local', { client: h.client, config: { id: 'local', kind: 'local', label: 'Private host' } }]]) })
+  vi.spyOn(runtime as any, 'connectedClient').mockResolvedValue(h.client)
+  vi.spyOn(h.client, 'runtimeProjection').mockResolvedValue({ subjects: [{ kind: 'agent', agentSession: exact, providerId: 'codex', executorId: 'codex',
+    workspacePath: h.directory, hostId: 'local', run: { ...control.run, state: 'running', observedAt: exact.updatedAt, latestOutputBytes: 0, acceptedInputBytes: 0 } }] } as any)
+  const snapshot = await runtime.resolveSession('question-session', useAppStore.getState().config!)
+  expect(snapshot?.kind === 'agent' && snapshot.promptInputNotApplied).toEqual({ submissionId: input.operationId, run: control.run })
+  await act(async () => root.render(<div>Another surface</div>)); await act(async () => root.render(pane())); await flush()
+  expect(activeCard().querySelector('textarea')?.value).toBe('New explicit answer'); expect(send).toHaveBeenCalledOnce()
+  h.inner.kernel.input = nativeInput
+  await act(async () => activeCard().querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+  expect(send.mock.calls[1]![1]).toMatchObject({ answers: [{ questionId: request.questions[1]!.id, answer: 'New explicit answer' }], afterSubmissionId: input.operationId })
+  expect(send.mock.calls[1]![1].operationId).not.toBe(input.operationId)
+  await vi.waitFor(() => expect(activeCard().dataset.questionState).toBe('submitted'))
+  // A later unrelated Core admission must clear the old projected negative fact.
+  await publish({ ...exact, updatedAt: exact.updatedAt + 2, promptCompletionAdmission: undefined })
+  expect((useAppStore.getState().sessions[0] as Extract<SessionSnapshot, {kind:'agent'}>).promptInputNotApplied).toBeUndefined()
+  expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT')
+})

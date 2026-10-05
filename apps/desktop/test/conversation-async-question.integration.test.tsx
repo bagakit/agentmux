@@ -150,6 +150,7 @@ async function bridge(h: Awaited<ReturnType<typeof fixture>>) {
   const runtime = new RuntimeController(h.store, async () => {
     throw new Error('No Runtime connection action is permitted in this test');
   });
+  Object.assign(runtime, { hosts: new Map([['local', { client: h.client, config: { id: 'local', kind: 'local', label: 'Private host' } }]]) });
   vi.spyOn(runtime as unknown as {
     connectedClient(hostId: string): Promise<DesktopRuntimeClient>;
   }, 'connectedClient').mockResolvedValue(h.client as unknown as DesktopRuntimeClient);
@@ -542,3 +543,15 @@ it('shared choices preserve the original synchronous question response without a
   });
   expect(container.querySelector('[aria-label="Native asynchronous question"]')).toBeNull();
 });
+
+it('does not settle a retained intent whose native source matches but its exact managed-Session key differs', async () => {
+  const h = await fixture(), page = await h.client.sessionHistoryPage('question-session', h.invocation)
+  const input = { source: page.source, turnId: 'question-turn', recordId: 'native-async-call', operationId: 'foreign-original',
+    expectedRun: control.run, afterSubmissionId: null, answers: [{ questionId: request.questions[0]!.id, answer: 'Keep original' }] }
+  const foreignKey = questionReplyKey('another-managed-session', input), attempt = { hostId: 'local', phase: 'unknown' as const, input }
+  useAppStore.setState({ questionReplies: { 'question-session': { [foreignKey]: attempt } } })
+  observeConversationQuestionAnswers(control, page, null, { submissionId: input.operationId, run: control.run })
+  await flush()
+  expect(useAppStore.getState().questionReplies['question-session']![foreignKey]).toBe(attempt)
+  expect(attempt.phase).toBe('unknown')
+})
