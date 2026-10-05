@@ -15,13 +15,15 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
   const draft = useSettingDraft(saved), saveState = useSettingsSave()
   const savedView = resolveGoalsPreferences(preferences)
   const view = useSettingDraft(savedView.defaultView), finished = useSettingDraft(savedView.showFinished), viewGroup = useId()
+  const supervisor = useSettingDraft(savedView.requesterAsSupervisor)
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
     const submittedView = view.beginSave(), submittedFinished = finished.beginSave()
+    const submittedSupervisor = supervisor.beginSave()
     const committed = await saveState.run(() => onSave(submitted.value, submitted.expected,
-      { defaultView: submittedView.value, showFinished: submittedFinished.value },
-      { defaultView: submittedView.expected, showFinished: submittedFinished.expected }))
-    submitted.finish(committed); submittedView.finish(committed); submittedFinished.finish(committed)
+      { defaultView: submittedView.value, showFinished: submittedFinished.value, requesterAsSupervisor: submittedSupervisor.value },
+      { defaultView: submittedView.expected, showFinished: submittedFinished.expected, requesterAsSupervisor: submittedSupervisor.expected }))
+    submitted.finish(committed); submittedView.finish(committed); submittedFinished.finish(committed); submittedSupervisor.finish(committed)
   }
   return <div className="settings-pane-stack">
     <section className="settings-group">
@@ -39,6 +41,13 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       </label>
     </section>
     <section className="settings-group">
+      <header><span>Supervisor for new goals</span><small>Saved: {savedView.requesterAsSupervisor ? 'Requester' : 'Choose manually'}</small></header>
+      <label className="browser-automation-toggle"><input type="checkbox" checked={supervisor.value} onChange={event => supervisor.setValue(event.target.checked)} aria-label="Use the requesting Agent as Supervisor" />
+        <span><strong>Use the requesting Agent as Supervisor</strong><small>Assign the original requesting Agent or PMO when a new goal is created. It also becomes an assignee and a related session. Continue starts separately.</small></span>
+      </label>
+      <p className="settings-workflows__note">Existing goals and your manual choices stay as saved. Without a confirmed source, choose a Supervisor in the goal.</p>
+    </section>
+    <section className="settings-group">
       <header><span>Common actions</span><small>Saved: {saved ? 'Collapsed' : 'Expanded'}</small></header>
       <label className="browser-automation-toggle"><input type="checkbox" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} aria-label="Collapse common actions" />
         <span><strong>Start with common actions collapsed</strong><small>Keep Goals focused on your work. Expand common actions whenever you need them.</small></span>
@@ -47,6 +56,6 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
     <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Choose, reorder and edit common actions directly in Goals. They use the same Prompts library.</p>
       <button type="button" className="small-button" onClick={onOpenGoals}>Open Goals</button>
     </div>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty || supervisor.dirty} onSave={() => void save()} />
   </div>
 }

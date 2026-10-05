@@ -28,6 +28,7 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'goals') return resolveGoalsPreferences(value as GoalsPreferences | undefined)
   if (path === 'goals.defaultView') return value ?? resolveGoalsPreferences(undefined).defaultView
   if (path === 'goals.showFinished') return value ?? resolveGoalsPreferences(undefined).showFinished
+  if (path === 'goals.requesterAsSupervisor') return value ?? resolveGoalsPreferences(undefined).requesterAsSupervisor
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
   if (path === 'moteDirectoryView') return value ?? MOTE_DIRECTORY_VIEW_DEFAULT
   if (path === 'moteDirectoryAvatarSize') return value ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT

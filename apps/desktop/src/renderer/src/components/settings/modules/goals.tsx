@@ -16,7 +16,7 @@ async function saveGoals(collapsed: boolean, expected: boolean, preferences: Req
 export const goalsSettingsModule = {
   id: 'goals', group: 'work', title: 'Goals', icon: Target,
   description: 'Choose a starting view and keep your goals in sight.',
-  keywords: 'work goals default view list board finished history common actions collapsed expanded prompt library',
+  keywords: 'work goals default view list board finished history common actions collapsed expanded prompt library requester supervisor PMO continue',
   savedSummary: config => { const saved = resolveGoalsPreferences(config.goals); return `${saved.defaultView === 'board' ? 'Board' : 'List'} · ${saved.showFinished ? 'Including finished' : 'Active goals'}` },
   Pane({ config, onClose }) {
     return <GoalsSettingsPane collapsed={config.goalsCommonActions?.collapsed} preferences={config.goals} onSave={saveGoals}

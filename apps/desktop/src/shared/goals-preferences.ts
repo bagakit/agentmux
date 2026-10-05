@@ -2,10 +2,11 @@ import type { GoalsCommonActionsConfig } from './contracts'
 
 export const GOALS_VIEW_IDS = ['list', 'board'] as const
 export type GoalsView = typeof GOALS_VIEW_IDS[number]
-export type GoalsPreferences = { defaultView?: GoalsView; showFinished?: boolean }
+export type GoalsPreferences = { defaultView?: GoalsView; showFinished?: boolean; requesterAsSupervisor?: boolean }
 
 export function resolveGoalsPreferences(value: GoalsPreferences | undefined): Required<GoalsPreferences> {
-  return { defaultView: value?.defaultView ?? 'list', showFinished: value?.showFinished ?? false }
+  return { defaultView: value?.defaultView ?? 'list', showFinished: value?.showFinished ?? false,
+    requesterAsSupervisor: value?.requesterAsSupervisor ?? true }
 }
 
 /** One default for the original Goals directory, its Settings editor and Main scalar. */
