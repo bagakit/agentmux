@@ -163,17 +163,16 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   useEffect(() => {
     if (workface === initial.current?.workface && savedPresentation.current === presentationBytes) return
     try {
-      getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute)
-      savedPresentation.current = presentationBytes
+      void getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute).then(() => { savedPresentation.current = presentationBytes }).catch(() => { setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。') })
     } catch {
       setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。')
     }
   }, [workface, presentationBytes])
 
-  const restoreNavigationStorage = () => {
+  const restoreNavigationStorage = async () => {
     try {
       const owner = getDeviceWorkface()
-      owner.replaceUnreadableWithCurrent(workface)
+      await owner.replaceUnreadableWithCurrent(workface)
       setCanPersist(true)
       setNotice('已用当前工作面替换这台设备无法读取的原记录。导航、草稿和未确认输入一起保存；Mac 上的原会话保持不变。')
     } catch { setNotice('这台设备仍无法保存导航。原记录尚未覆盖；当前仍按临时导航继续阅读。') }

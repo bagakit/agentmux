@@ -20,6 +20,8 @@ export function MobileAttachments({ client, session, connected, promptOperationI
   const [uploads, setUploads] = useState<MobileFileUpload[]>(() => (getDeviceWorkface().snapshot().record.fileUploads ?? []).map(item =>
     item.phase === 'sending' ? { ...item, phase: 'unknown', issue: '原上传回执尚未确认；核对同一操作，不会自动重传。' } : item))
   const [notice, setNotice] = useState<string | null>(null), [choosing, setChoosing] = useState(false)
+  const recordIds = useRef(new Map(uploads.map(upload => [upload.identity.operationId, getDeviceWorkface().recordIdentity()])))
+  const originalEntries = useRef(new Map((getDeviceWorkface().snapshot().record.fileUploads ?? []).map(upload => [upload.identity.operationId, upload])))
   const bytes = useRef(new Map<string, LocalAttachment>())
   const busy = useRef(new Set<string>())
   const mounted = useRef(true)
@@ -34,9 +36,10 @@ export function MobileAttachments({ client, session, connected, promptOperationI
       hostId: original?.hostId ?? null, sessionId: original?.agentSessionId ?? null,
       runId: original?.run.runId ?? null }
   }
-  const retain = (upload: MobileFileUpload, required = false) => {
+  const retain = async (upload: MobileFileUpload, required = false) => {
     if (upload.phase !== 'selected') {
-      try { getDeviceWorkface().retainFileUpload(upload) }
+      try { await getDeviceWorkface().retainFileUpload(upload, recordIds.current.get(upload.identity.operationId) ?? null, originalEntries.current.get(upload.identity.operationId))
+        originalEntries.current.set(upload.identity.operationId, upload) }
       catch (error) {
         if (required) throw new Error(`原上传操作尚未保全；本次没有上传，附件和草稿保留。${errorMessage(error)}`)
         if (mounted.current) setNotice(`附件回执仅在本次运行中保留：${errorMessage(error)}`)
@@ -45,9 +48,9 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     if (mounted.current) setUploads(items => items.some(item => item.identity.operationId === upload.identity.operationId)
       ? items.map(item => item.identity.operationId === upload.identity.operationId ? upload : item) : [...items, upload])
   }
-  const remove = (upload: MobileFileUpload) => {
+  const remove = async (upload: MobileFileUpload) => {
     try {
-      getDeviceWorkface().removeFileUpload(upload.identity.operationId)
+      await getDeviceWorkface().removeFileUpload(upload.identity.operationId, recordIds.current.get(upload.identity.operationId) ?? null)
       bytes.current.delete(upload.identity.operationId)
       setUploads(items => items.filter(item => item.identity.operationId !== upload.identity.operationId))
     } catch (error) { setNotice(errorMessage(error)) }
@@ -72,17 +75,18 @@ export function MobileAttachments({ client, session, connected, promptOperationI
         expectedRun: { runId: originalSession.run.runId }, operationId: file.id, name: file.name,
         mimeType: file.mimeType, byteLength: file.size, revision: file.revision }
       parseFileUploadParams({ ...identity, dataBase64: file.dataBase64 })
+      recordIds.current.set(file.id, getDeviceWorkface().recordIdentity())
       bytes.current.set(file.id, file)
-      retain({ runtimeId: originalScope.runtimeId, identity, phase: 'selected' })
+      await retain({ runtimeId: originalScope.runtimeId, identity, phase: 'selected' })
     } catch (error) { if (mounted.current) setNotice(errorMessage(error)) }
     finally { if (mounted.current) setChoosing(false) }
   }
   useImperativeHandle(controls, () => ({ choose }))
 
   async function add(upload: MobileFileUpload): Promise<void> {
-    if (!upload.path || !fileUploadScopeMatches(upload, scope())) throw new Error('原附件属于另一 Mac、Session 或 Run；回执已保留，当前草稿未改变。')
+    if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(upload.identity.operationId) ?? null) || !upload.path || !fileUploadScopeMatches(upload, scope())) throw new Error('原附件属于另一 Mac、Session 或 Run；回执已保留，当前草稿未改变。')
     await insert(async () => upload.path!, upload)
-    retain({ ...upload, phase: 'inserted' })
+    await retain({ ...upload, phase: 'inserted' })
     bytes.current.delete(upload.identity.operationId)
   }
   async function act(upload: MobileFileUpload, inspectOnly: boolean): Promise<void> {
@@ -92,19 +96,20 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     busy.current.add(id)
     let requested = false, confirmed: MobileFileUpload | null = null
     try {
+      if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null)) throw new Error('设备工作面已被替换；原附件仍保留，本次不上传或插入。')
       if (!current.current.connected || !originalClient?.forwardRpc) throw new Error('原 Mac 当前未连接；附件和草稿保留，可连接后再试。')
       if (upload.runtimeId !== originalScope.runtimeId || upload.identity.hostId !== originalScope.hostId || upload.identity.agentSessionId !== originalScope.sessionId) throw new Error('当前连接不属于原附件的 Mac 与 Session；本次未上传或重传。')
       if (upload.phase === 'uploaded') { await add(upload); return }
       if (!inspectOnly && !fileUploadScopeMatches(upload, originalScope)) throw new Error('原 Run 已变化；本次未上传，原文件仍保留。')
       const file = bytes.current.get(id)
       if (!inspectOnly && !file) throw new Error('本次设备选择已结束；原上传记录保留，可先核对原操作。')
-      retain({ ...upload, phase: 'sending' }, true)
+      await retain({ ...upload, phase: 'sending' }, true)
       requested = true
       let inserted = false
       const request = async () => {
         const response = inspectOnly ? await originalClient.forwardRpc!('file.upload.inspect', upload.identity)
           : await originalClient.forwardRpc!('file.upload', { ...upload.identity, dataBase64: file!.dataBase64 })
-        confirmed = uploadFromReceipt(upload, response); retain(confirmed)
+        confirmed = uploadFromReceipt(upload, response); await retain(confirmed)
         return confirmed
       }
       // Capture the maintained editor's bookmark before the asynchronous request. Its
@@ -112,16 +117,16 @@ export function MobileAttachments({ client, session, connected, promptOperationI
       if (fileUploadScopeMatches(upload, originalScope)) {
         await insert(async () => {
           const original = await request()
-          if (original.phase !== 'uploaded' || !fileUploadScopeMatches(original, scope()) || originalPrompt !== current.current.promptOperationId) return null
+          if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null) || original.phase !== 'uploaded' || !fileUploadScopeMatches(original, scope()) || originalPrompt !== current.current.promptOperationId) return null
           inserted = true; return original.path!
         }, upload)
       } else await request()
       if (inserted && confirmed) {
-        retain({ ...(confirmed as MobileFileUpload), phase: 'inserted' }); bytes.current.delete(id)
+        await retain({ ...(confirmed as MobileFileUpload), phase: 'inserted' }); bytes.current.delete(id)
       }
     } catch (error) {
       const retained = confirmed as MobileFileUpload | null
-      retain(retained?.phase === 'uploaded' ? { ...retained, issue: errorMessage(error) }
+      await retain(retained?.phase === 'uploaded' ? { ...retained, issue: errorMessage(error) }
         : { ...upload, phase: requested ? 'unknown' : upload.phase, issue: errorMessage(error) })
     } finally { busy.current.delete(id) }
   }

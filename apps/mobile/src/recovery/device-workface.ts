@@ -1,3 +1,5 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
+import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-lock'
 import { validateDeliveryLogId } from '@agentmux/core/delivery-attempt'
 import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
@@ -5,12 +7,17 @@ import type { PromptAttempt, ResponseAttempt } from '../conversation/local-draft
 import { parseMobileFileUpload, type MobileFileUpload } from '../conversation/attachments'
 import { parsePresentationRoute, type MobilePresentationRoute } from './presentation-route'
 
-export const DEVICE_WORKFACE_KEY = 'agentmux-mobile-workface-v1'
+export { DEVICE_WORKFACE_KEY } from './device-storage-lock'
 export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
 export type Navigation = { selectedSessionId: string | null; hostUrl: string; panel: MobilePanel }
 export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
   attempts: Array<[string, Omit<PromptAttempt, 'message'>]>;
-  responses: Array<[string, Pick<ResponseAttempt, 'phase'>]> }
+  responses: Array<[string, Pick<ResponseAttempt, 'phase'>]>; conflicts?: ConversationConflict[] }
+export type ConversationBucket = 'drafts' | 'attempts' | 'responses'
+export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Pick<ResponseAttempt, 'phase'>
+export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
+export type ConversationConflict = { bucket: ConversationBucket; key: string; value: ConversationValue }
+const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 export type GoalWorkSelection = { runtimeId: string; deviceHostId: string | null; sessionId: string; goalId: string }
 export type MobileGoalOperation = GoalWorkSelection & { operationId: string } & (
   | { kind: 'start'; intervalMs: number; alignmentRevision: number }
@@ -41,13 +48,14 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[] }
+  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
 const MAX_BYTES = 2 * 1024 * 1024
 const MAX_ENTRIES = 256
 export class DeviceHostMismatchError extends Error {}
+export class DeviceWorkfaceRecordChangedError extends Error {}
 
 export function emptyDeviceWorkface(): DeviceWorkface {
   return { version: 1, selectedSessionId: null, hostUrl: '', panel: 'conversation', host: null,
@@ -79,7 +87,7 @@ function origin(value: unknown): value is string {
     && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' } catch { return false }
 }
 export function parseDraftRecord(value: unknown): DraftRecord {
-  const v = record(value, ['version', 'drafts', 'attempts', 'responses'])
+  const v = record(value, ['version', 'drafts', 'attempts', 'responses', ...(Object.hasOwn(value ?? {}, 'conflicts') ? ['conflicts'] : [])])
   if (v.version !== 1) throw invalid()
   const drafts = entries(v.drafts), attempts = entries(v.attempts), responses = entries(v.responses)
   for (const [, draft] of drafts) if (!body(draft)) throw invalid()
@@ -111,6 +119,14 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     }
   }
   for (const [, item] of responses) if (!phase(record(item, ['phase']).phase)) throw invalid()
+  if (v.conflicts !== undefined) {
+    if (!Array.isArray(v.conflicts)) throw invalid()
+    for (const item of v.conflicts) {
+      const c = record(item, ['bucket', 'key', 'value'])
+      if (!['drafts', 'attempts', 'responses'].includes(String(c.bucket)) || !id(c.key)) throw invalid()
+      parseDraftRecord({ version: 1, drafts: [], attempts: [], responses: [], [String(c.bucket)]: [[c.key, c.value]] })
+    }
+  }
   return structuredClone(value) as DraftRecord
 }
 export function parseDeviceWorkface(value: unknown): DeviceWorkface {
@@ -119,7 +135,9 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalIntents')) keys.push('goalIntents')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'fileUploads')) keys.push('fileUploads')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'presentation')) keys.push('presentation')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'recordId')) keys.push('recordId')
   const v = record(value, keys)
+  if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
     || !(v.hostUrl === '' || origin(v.hostUrl))
     || !(v.panel === 'conversation' || v.panel === 'sessions' || v.panel === 'terminal')) throw invalid()
@@ -188,25 +206,35 @@ export function parseGoalWorkface(value: unknown): GoalWorkface {
   return structuredClone(value) as GoalWorkface
 }
 
-/** One device record owns navigation, drafts and intent guards. A single setItem is the commit. */
+/** One device record owns navigation, drafts and intent guards. All writers
+ * serialize read/merge/set across pages; readers never own whole-record replacement. */
 export class DeviceWorkfaceStore {
-  private goalIntentFlights = new Set<string>()
+  private goalIntentFlights = new Map<string, string | null>()
   private goalIntentListeners = new Set<() => void>()
   private goalIntentVersion = 0
   subscribeGoalIntents = (listener: () => void): (() => void) => { this.goalIntentListeners.add(listener); return () => this.goalIntentListeners.delete(listener) }
   goalIntentRevision = (): number => this.goalIntentVersion
   private notifyGoalIntents(): void { this.goalIntentVersion += 1; for (const listener of this.goalIntentListeners) listener() }
-  goalIntentRunning(operationId: string): boolean { return this.goalIntentFlights.has(operationId) }
+  goalIntentRunning(operationId: string): boolean { return this.goalIntentFlights.has(operationId) && this.goalIntentFlights.get(operationId) === this.recordIdentity() }
   private value = emptyDeviceWorkface()
   private lastRaw: string | null | undefined
   private issue: string | null = null
   private temporary = false
+  private writeUnavailable = false
+  recordIdentity(): string | null { this.refresh(); return this.value.recordId ?? null }
+  canRetrySave(): boolean { return this.issue === null || this.writeUnavailable }
   constructor(private readonly storage: () => DeviceStorage) { this.refresh() }
   private refresh(): void {
     try {
       const raw = this.storage().getItem(DEVICE_WORKFACE_KEY)
       if (raw === this.lastRaw) return
       this.lastRaw = raw
+      if (this.temporary && this.pending.length > 0 && this.issue === null) {
+        // Pending writes are normal concurrency, not a failed temporary record.
+        const latest = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
+        this.value = this.projectPending(latest)
+        return
+      }
       if (this.temporary) {
         this.issue = '设备存储已可读取或原记录已变化；当前临时工作面仍保留，尚未覆盖原字节。请先导出需要保留的内容，再明确采用当前工作面或导入备份。'
         return
@@ -219,95 +247,176 @@ export class DeviceWorkfaceStore {
   snapshot(): { record: DeviceWorkface; issue: string | null } {
     this.refresh(); return { record: structuredClone(this.value), issue: this.issue }
   }
-  private save(): void {
-    const bytes = JSON.stringify(this.value)
+  private tail: Promise<unknown> = Promise.resolve()
+  private pending: Array<(value: DeviceWorkface) => DeviceWorkface> = []
+  private projectPending(latest: DeviceWorkface): DeviceWorkface {
+    // A conflicting pending operation is refused when its own transaction runs;
+    // its optimistic projection cannot obscure the latest canonical facts.
+    return this.pending.reduce((value, apply) => {
+      try { return parseDeviceWorkface(apply(value)) } catch { return value }
+    }, latest)
+  }
+  private write(value: DeviceWorkface): void {
+    const bytes = JSON.stringify(parseDeviceWorkface(value))
     if (new TextEncoder().encode(bytes).byteLength > MAX_BYTES) throw invalid()
     this.storage().setItem(DEVICE_WORKFACE_KEY, bytes)
-    this.lastRaw = bytes; this.issue = null; this.temporary = false
+    this.lastRaw = bytes; this.issue = null; this.writeUnavailable = false
   }
-  private update(value: DeviceWorkface): void {
-    // Keep the current in-memory workface even when durable saving is unavailable.
-    this.value = parseDeviceWorkface(value)
+  private exclusive<T>(action: () => T): Promise<T> {
+    // setItem is atomic; a read/modify/write is not. All writers share this lock.
+    return withDeviceStorageLock(action)
+  }
+  private update(change: (value: DeviceWorkface) => DeviceWorkface, expectedRecordId?: string | null): Promise<void> {
+    this.refresh()
+    const recordId = expectedRecordId === undefined ? this.value.recordId ?? null : expectedRecordId
+    if ((this.value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。')
+    this.value = parseDeviceWorkface(change(this.value))
     this.temporary = true
-    if (this.issue) throw new Error(this.issue)
-    this.save()
+    const project = (value: DeviceWorkface) => {
+      if ((value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('原记录已替换。')
+      return change(value)
+    }
+    this.pending.push(project)
+    const releasePending = () => { const index = this.pending.indexOf(project); if (index >= 0) this.pending.splice(index, 1) }
+    let domainFailure = false, failedLatest: DeviceWorkface | undefined, failedRaw: string | null | undefined
+    const work = this.tail.then(() => this.exclusive(() => {
+      if (this.issue && !this.writeUnavailable) throw new Error(this.issue)
+      const raw = this.storage().getItem(DEVICE_WORKFACE_KEY)
+      const latest = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
+      let next: DeviceWorkface
+      failedLatest = latest; failedRaw = raw
+      if ((latest.recordId ?? null) !== recordId) { domainFailure = true; throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。') }
+      try { next = parseDeviceWorkface(change(latest)) } catch (error) { domainFailure = true; throw error }
+      this.write(next)
+      releasePending()
+      this.value = this.projectPending(next)
+      this.temporary = this.pending.length > 0
+    })).catch(error => {
+      releasePending()
+      if (domainFailure && failedLatest) {
+        this.lastRaw = failedRaw
+        this.value = this.projectPending(failedLatest)
+        this.temporary = this.pending.length > 0
+      }
+      if (!domainFailure && (!this.issue || this.writeUnavailable)) {
+        this.writeUnavailable = true
+        this.issue = '设备意图尚未持久保存；先前记录仍保留，当前内存与原操作可继续。刷新保障不足，请导出备份，存储恢复后重试保存。'
+      }
+      throw error
+    })
+    this.tail = work.catch(() => {})
+    return work
   }
-  updateNavigation(navigation: Navigation): void {
-    this.refresh(); this.update({ ...this.value, ...navigation })
+  updateNavigation(navigation: Navigation): Promise<void> {
+    const captured = structuredClone(navigation)
+    return this.update(value => ({ ...value, ...captured }))
   }
-  updatePresentation(navigation: Navigation, presentation: MobilePresentationRoute): void {
-    this.refresh(); this.update({ ...this.value, ...navigation, presentation: parsePresentationRoute(presentation) })
+  updatePresentation(navigation: Navigation, presentation: MobilePresentationRoute): Promise<void> {
+    const parsed = parsePresentationRoute(presentation), captured = structuredClone(navigation)
+    return this.update(value => ({ ...value, ...captured, presentation: parsed }))
   }
-  updateConversation(conversation: DraftRecord): void {
-    this.refresh(); this.update({ ...this.value, conversation: parseDraftRecord(conversation) })
+  /** Whole-record recovery/fixtures only. Draft readers use editConversation. */
+  updateConversation(conversation: DraftRecord): Promise<void> {
+    const parsed = parseDraftRecord(conversation)
+    return this.update(value => ({ ...value, conversation: parsed }))
   }
-  retainFileUpload(value: MobileFileUpload): void {
-    this.refresh()
-    const upload = parseMobileFileUpload(value), current = this.value.fileUploads ?? []
-    const previous = current.find(item => item.identity.operationId === upload.identity.operationId)
-    if (previous && (previous.runtimeId !== upload.runtimeId || JSON.stringify(previous.identity) !== JSON.stringify(upload.identity))) throw new Error('原附件的目标或内容不同；保留原记录，不覆盖或换目标。')
-    this.update({ ...this.value, fileUploads: previous ? current.map(item => item === previous ? upload : item) : [...current, upload] })
+  editConversation(edits: ConversationEdit[], recordId: string | null): Promise<void> {
+    const captured = structuredClone(edits)
+    return this.update(value => {
+      const conversation = structuredClone(value.conversation)
+      const conflicts = conversation.conflicts ?? []
+      for (const edit of captured) {
+        const items = conversation[edit.bucket] as Array<[string, ConversationValue]>
+        const at = items.findIndex(([key]) => key === edit.key), current = at < 0 ? undefined : items[at]![1]
+        if ((value.recordId ?? null) !== recordId || !sameValue(current, edit.expected) && !sameValue(current, edit.next)) {
+          if (edit.next !== undefined && !sameValue(current, edit.next)) {
+            const conflict = { bucket: edit.bucket, key: edit.key, value: edit.next }
+            if (!conflicts.some(item => sameValue(item, conflict))) conflicts.push(conflict)
+          }
+          continue
+        }
+        if (at >= 0) items.splice(at, 1)
+        if (edit.next !== undefined) items.push([edit.key, edit.next])
+      }
+      if (conflicts.length) conversation.conflicts = conflicts
+      return { ...value, conversation: parseDraftRecord(conversation) }
+    }, recordId)
   }
-  removeFileUpload(operationId: string): void {
-    this.refresh()
-    const current = this.value.fileUploads ?? []
-    const original = current.find(item => item.identity.operationId === operationId)
-    if (original?.phase === 'sending' || original?.phase === 'unknown') throw new Error('原上传回执尚未确认；记录保留，可核对原操作。')
-    this.update({ ...this.value, fileUploads: current.filter(item => item !== original) })
+  retainFileUpload(input: MobileFileUpload, expectedRecordId = this.recordIdentity(), expectedUpload?: MobileFileUpload): Promise<void> {
+    const upload = parseMobileFileUpload(input)
+    return this.update(value => {
+      const current = value.fileUploads ?? []
+      const previous = current.find(item => item.identity.operationId === upload.identity.operationId)
+      if (expectedUpload && !sameValue(previous, expectedUpload)) throw new Error('原附件记录已变化；迟到回执保留，不覆盖较新状态。')
+      if (previous && (previous.runtimeId !== upload.runtimeId || JSON.stringify(previous.identity) !== JSON.stringify(upload.identity))) throw new Error('原附件的目标或内容不同；保留原记录，不覆盖或换目标。')
+      return { ...value, fileUploads: previous ? current.map(item => item === previous ? upload : item) : [...current, upload] }
+    }, expectedRecordId)
   }
-  selectGoal(next: GoalWorkSelection | null): void {
-    this.refresh(); this.update({ ...this.value, goalWork: { selection: next === null ? null : selection(next), pending: this.value.goalWork?.pending ?? [] } })
+  removeFileUpload(operationId: string, expectedRecordId = this.recordIdentity()): Promise<void> {
+    return this.update(value => {
+      const current = value.fileUploads ?? []
+      const original = current.find(item => item.identity.operationId === operationId)
+      if (original?.phase === 'sending' || original?.phase === 'unknown') throw new Error('原上传回执尚未确认；记录保留，可核对原操作。')
+      return { ...value, fileUploads: current.filter(item => item !== original) }
+    }, expectedRecordId)
   }
-  retainGoalOperation(operation: MobileGoalOperation): void {
-    this.refresh()
-    const current = this.value.goalWork ?? { selection: null, pending: [] }
-    const existing = current.pending.find(op => op.operationId === operation.operationId)
-    if (existing && !sameGoalOperation(existing, operation)) throw new Error('原目标操作的内容不同；保留原操作，不能换目标重试。')
-    if (!existing && current.pending.some(op => op.runtimeId === operation.runtimeId && op.sessionId === operation.sessionId && op.goalId === operation.goalId
-      && (op.deviceHostId === null || operation.deviceHostId === null || op.deviceHostId === operation.deviceHostId))) throw new Error('这个原目标已有待确认操作；请先检查并重试原操作，不替换为新的操作。')
-    const pending = existing ? current.pending : [...current.pending, operation]
-    this.update({ ...this.value, goalWork: parseGoalWorkface({ ...current, pending }) })
+  selectGoal(next: GoalWorkSelection | null): Promise<void> {
+    return this.update(value => {
+      return { ...value, goalWork: { selection: next === null ? null : selection(next), pending: value.goalWork?.pending ?? [] } }
+    })
   }
-  confirmGoalOperation(operation: MobileGoalOperation): void {
-    this.refresh()
-    const current = this.value.goalWork
-    if (!current) return
-    const existing = current.pending.find(op => op.operationId === operation.operationId)
-    if (!existing || !sameGoalOperation(existing, operation)) return
-    this.update({ ...this.value, goalWork: { ...current, pending: current.pending.filter(op => op !== existing) } })
+  retainGoalOperation(operation: MobileGoalOperation): Promise<void> {
+    return this.update(value => {
+      const current = value.goalWork ?? { selection: null, pending: [] }
+      const existing = current.pending.find(op => op.operationId === operation.operationId)
+      if (existing && !sameGoalOperation(existing, operation)) throw new Error('原目标操作的内容不同；保留原操作，不能换目标重试。')
+      if (!existing && current.pending.some(op => op.runtimeId === operation.runtimeId && op.sessionId === operation.sessionId && op.goalId === operation.goalId
+        && (op.deviceHostId === null || operation.deviceHostId === null || op.deviceHostId === operation.deviceHostId))) throw new Error('这个原目标已有待确认操作；请先检查并重试原操作，不替换为新的操作。')
+      const pending = existing ? current.pending : [...current.pending, operation]
+      return { ...value, goalWork: parseGoalWorkface({ ...current, pending }) }
+    })
   }
-  private updateGoalIntents(intents: GoalIntent[]): void {
-    // Schema/identity remain strict. Device I/O cannot gate an authorized healthy Goal owner.
-    this.value = parseDeviceWorkface({ ...this.value, goalIntents: intents })
-    this.temporary = true
-    try { if (this.issue) throw new Error(this.issue); this.save() }
-    catch { this.issue = '设备意图尚未持久保存；原字节和当前内存记录保留，原 Goal 操作仍可继续。刷新保障不足，请在设备工作面中导出备份，存储恢复后明确采用当前工作面。' }
+  confirmGoalOperation(operation: MobileGoalOperation, expectedRecordId = this.recordIdentity()): Promise<void> {
+    return this.update(value => {
+      const current = value.goalWork
+      if (!current) return value
+      const existing = current.pending.find(op => op.operationId === operation.operationId)
+      if (!existing || !sameGoalOperation(existing, operation)) return value
+      return { ...value, goalWork: { ...current, pending: current.pending.filter(op => op !== existing) } }
+    }, expectedRecordId)
+  }
+  retainGoalIntent(intent: GoalIntent, expectedRecordId = this.recordIdentity()): Promise<void> {
+    const work = this.update(record => {
+      const value = parseGoalIntent(intent), current = record.goalIntents ?? []
+      const existing = current.find(item => item.operationId === value.operationId)
+      if (existing || current.some(item => sameGoalIntentScope(item, value) && (value.kind === 'create' ? item.kind === 'create' : item.kind !== 'create' && item.goalId === value.goalId))) throw new Error('原 Goal 已有待核对的操作意图；先读原目标，不替换或重复提交。')
+      return { ...record, goalIntents: [...current, value] }
+    }, expectedRecordId).catch(error => { if (error instanceof DeviceWorkfaceRecordChangedError || !this.issue) throw error }).finally(() => this.notifyGoalIntents())
+    this.goalIntentFlights.set(intent.operationId, expectedRecordId)
+    return work
+  }
+  releaseGoalIntent(intent: GoalIntent, expectedRecordId = this.recordIdentity()): void {
+    if (this.goalIntentFlights.get(intent.operationId) === expectedRecordId) this.goalIntentFlights.delete(intent.operationId)
     this.notifyGoalIntents()
   }
-  retainGoalIntent(intent: GoalIntent): void {
-    this.refresh()
-    const value = parseGoalIntent(intent), current = this.value.goalIntents ?? []
-    const existing = current.find(item => item.operationId === value.operationId)
-    if (existing || current.some(item => sameGoalIntentScope(item, value) && (value.kind === 'create' ? item.kind === 'create' : item.kind !== 'create' && item.goalId === value.goalId))) throw new Error('原 Goal 已有待核对的操作意图；先读原目标，不替换或重复提交。')
-    this.updateGoalIntents([...current, value])
-    this.goalIntentFlights.add(value.operationId)
-  }
-  releaseGoalIntent(intent: GoalIntent): void { this.goalIntentFlights.delete(intent.operationId); this.notifyGoalIntents() }
-  settleGoalIntent(intent: GoalIntent, phase: 'unknown' | 'saved' | 'confirmed'): void {
-    this.refresh()
-    const current = this.value.goalIntents ?? [], existing = current.find(item => item.operationId === intent.operationId)
-    if (!existing || !sameGoalIntent(existing, intent)) return
+  settleGoalIntent(intent: GoalIntent, phase: 'unknown' | 'saved' | 'confirmed', expectedRecordId = this.recordIdentity(), expectedIntent = this.snapshot().record.goalIntents?.find(item => item.operationId === intent.operationId)): Promise<void> {
     if (this.goalIntentRunning(intent.operationId)) throw new Error('原操作仍在等待回执，当前读取不能代签它。')
-    const next = phase === 'confirmed' ? current.filter(item => item !== existing) : current.map(item => item === existing ? { ...item, phase } : item)
-    this.updateGoalIntents(next)
+    return this.update(value => {
+      const current = value.goalIntents ?? [], existing = current.find(item => item.operationId === intent.operationId)
+      if (!existing || !sameGoalIntent(existing, intent)) return value
+      if (!sameValue(existing, expectedIntent)) throw new Error('原 Goal 意图已变化；迟到回执不能覆盖较新状态。')
+      const next = phase === 'confirmed' ? current.filter(item => item !== existing) : current.map(item => item === existing ? { ...item, phase } : item)
+      return { ...value, goalIntents: next }
+    }, expectedRecordId).catch(error => { if (error instanceof DeviceWorkfaceRecordChangedError || !this.issue) throw error }).finally(() => this.notifyGoalIntents())
   }
-  confirmHost(host: NonNullable<DeviceWorkface['host']>): void {
-    this.refresh()
-    if (!origin(host.origin) || !id(host.hostId)) throw invalid()
-    if (this.value.host && (this.value.host.hostId !== host.hostId)) {
-      throw new DeviceHostMismatchError('当前 Mac 与已保全工作面的原 Host 身份不同。原会话、草稿和未确认输入仍保留；请接回原 Mac，或明确建立另一份设备工作面。')
-    }
-    this.update({ ...this.value, host: { ...host } })
+  confirmHost(host: NonNullable<DeviceWorkface['host']>): Promise<void> {
+    return this.update(value => {
+      if (!origin(host.origin) || !id(host.hostId)) throw invalid()
+      if (value.host && (value.host.hostId !== host.hostId)) {
+        throw new DeviceHostMismatchError('当前 Mac 与已保全工作面的原 Host 身份不同。原会话、草稿和未确认输入仍保留；请接回原 Mac，或明确建立另一份设备工作面。')
+      }
+      return { ...value, host: { ...host } }
+    })
   }
   exportBackup(): string {
     this.refresh()
@@ -319,19 +428,22 @@ export class DeviceWorkfaceStore {
     if (backup.schema !== 'agentmux.mobile-workface.v1') throw invalid()
     return parseDeviceWorkface(backup.workface)
   }
-  replaceBackup(next: DeviceWorkface): void {
-    // Validate and persist before adopting: a failed import cannot replace the current workface.
-    const parsed = parseDeviceWorkface(next), bytes = JSON.stringify(parsed)
-    if (new TextEncoder().encode(bytes).byteLength > MAX_BYTES) throw invalid()
-    this.storage().setItem(DEVICE_WORKFACE_KEY, bytes)
-    this.value = parsed; this.lastRaw = bytes; this.issue = null; this.temporary = false
-    this.notifyGoalIntents()
+  replaceBackup(next: DeviceWorkface): Promise<void> {
+    const parsed = parseDeviceWorkface(next)
+    const work = this.tail.then(() => this.exclusive(() => {
+      const adopted = { ...parsed, recordId: randomClientRequestId() }
+      this.write(adopted)
+      this.value = adopted; this.temporary = false
+      this.notifyGoalIntents()
+    }))
+    this.tail = work.catch(() => {})
+    return work
   }
-  replaceUnreadableWithCurrent(navigation?: Navigation): void {
-    if (navigation) this.value = parseDeviceWorkface({ ...this.value, ...navigation })
-    this.save()
-    this.notifyGoalIntents()
+  replaceUnreadableWithCurrent(navigation?: Navigation): Promise<void> {
+    const next = navigation ? { ...this.value, ...navigation } : this.value
+    return this.replaceBackup(next)
   }
+
 }
 
 const stores = new WeakMap<object, DeviceWorkfaceStore>()

@@ -109,7 +109,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const attachmentControls = useRef<MobileAttachmentControls>(null)
   const insertion = useRef<ComposerInsertionHandle>(null)
   const available = Boolean(client && agentSessionId && reading.session && connection.state === 'connected' && !reading.disconnected)
-  const setDraft = (value: string, key = draftKey) => { drafts.current.set(key, value); local.save(); redraw(value => value + 1) }
+  const setDraft = (value: string, key = draftKey) => { drafts.current.set(key, value); void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }
   const confirmPrompt = (key: string, original: PromptAttempt, message = 'Core 已确认输入。') => {
     if (!mounted.current || attempts.current.get(key) !== original) return
     original.phase = 'confirmed'
@@ -193,9 +193,12 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
       seed = Object.freeze({ ...seed, expectedRunId: original.runId, afterSubmissionId: condition.afterSubmissionId,
         conditionAvailable: true, execution: capability.execution })
-      local.save(); redraw(value => value + 1)
+      if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入，原正文保留。')
+      redraw(value => value + 1)
+      if (attempts.current.get(originalKey) !== original) throw new Error('另一页面已保全原消息；本次未请求输入，请核对原请求和两份正文。')
       stage = 'core-submit'
-      original.inputRequested = true; local.save()
+      original.inputRequested = true; if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入。')
+      if (attempts.current.get(originalKey) !== original) throw new Error('原消息记录已改变；本次未请求输入，请核对原记录。')
       await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
         prompt: expandSemanticReferences(original.draft), authorHuman: true, ...condition,
         ...(explicit ? { allowUncertainTurn: true, ...(capability.execution === 'immediate' ? { execution: 'immediate' as const } : {}) } : {}) })
@@ -236,16 +239,20 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         original.runId = condition.expectedRun.runId
         original.request = { condition: structuredClone(condition), execution: capability.execution, explicit: original.explicit,
           runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
-        local.save()
+        if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入。')
+        if (attempts.current.get(originalKey) !== original) throw new Error('原消息记录已改变；本次未请求输入。')
       }
       const input = originalPromptRequest(originalSession, originalId, original)
       if (!input) throw Object.assign(new Error('原 Session、Run 或投递条件无法完整核实；本次未请求输入，原消息保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
       seed = Object.freeze({ ...seed, expectedRunId: input.expectedRun.runId,
         afterSubmissionId: input.afterSubmissionId, conditionAvailable: true, execution: input.execution })
       original.phase = 'sending'; original.message = '正在核对并续做原请求…'
-      local.save(); redraw(value => value + 1)
+      if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入，原正文保留。')
+      redraw(value => value + 1)
+      if (attempts.current.get(originalKey) !== original) throw new Error('另一页面已保全原消息；本次未请求输入，请核对原请求和两份正文。')
       stage = 'core-submit'
-      original.inputRequested = true; local.save()
+      original.inputRequested = true; if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入。')
+      if (attempts.current.get(originalKey) !== original) throw new Error('原消息记录已改变；本次未请求输入，请核对原记录。')
       await originalClient.submitAgentPrompt(input)
       confirmPrompt(originalKey, original)
       if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
@@ -272,9 +279,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const originalKey = requestKey
     const original: ResponseAttempt = { phase: 'sending', message: '正在发送原请求的答复…' }
     responses.current.set(originalKey, original)
-    local.save()
+    const retained = await local.save()
     redraw(value => value + 1)
     try {
+      if (!retained || responses.current.get(originalKey) !== original) throw new Error('另一页面已保全这个请求的答复；本次未重复回答。')
       await client.respondAgentInteraction({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response })
       if (!mounted.current) return
       original.phase = 'confirmed'; original.message = 'Core 已确认答复，等待原请求更新。'
@@ -285,7 +293,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         ? `答复回执未知；不会重复回答这个请求。请在原会话核对。${errorMessage(error)}`
         : `Core 已拒绝答复。${errorMessage(error)}`
       throw error
-    } finally { if (mounted.current) { local.save(); redraw(value => value + 1) } }
+    } finally { if (mounted.current) { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) } }
   }
   const describeSpeaker = useMemo(() => createSpeakerResolver({
     lookupAgent: id => {
@@ -312,13 +320,23 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前不能发送；草稿与阅读保留。' : ''}</p> : null}
       {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
       {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
-        {local.canSave ? <button type="button" onClick={() => { local.save(); redraw(value => value + 1) }}>重试保存</button> : null}
+        {local.canSave ? <button type="button" onClick={() => { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }}>重试保存</button> : null}
         <button type="button" disabled={!draft} onClick={() => {
           void platform.copyText(draft, error => setCopyNotice(`草稿未复制：${errorMessage(error)}`))
             .then(copied => { if (copied) setCopyNotice('已复制当前草稿。') })
         }}>复制当前草稿</button>
+        {local.recordChanged ? <button type="button" onClick={() => {
+          void platform.copyText(local.exportBackup(), error => setCopyNotice(`本页备份未复制：${errorMessage(error)}`))
+            .then(copied => { if (copied) setCopyNotice('已复制本页保全备份，包含原正文和操作身份。') })
+        }}>复制本页保全备份</button> : null}
         {copyNotice ? <span>{copyNotice}</span> : null}
       </aside> : null}
+      {local.conflicts.filter(item => item.key === draftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
+        {local.conflicts.filter(item => item.key === draftKey).map((item, index) => {
+          const body = typeof item.value === 'string' ? item.value : 'draft' in item.value ? item.value.draft : '原请求的答复回执尚未确认。'
+          return <div key={index}>{typeof item.value !== 'string' && <p>原请求记录保留，请核对回执。</p>}<pre>{body}</pre><button type="button" onClick={() => { void platform.copyText(body, error => setCopyNotice(errorMessage(error))) }}>复制这份保全内容</button></div>
+        })}
+      </details>}
       <div ref={feed} className="mobile-conversation__reading" onScroll={event => {
         const node = event.currentTarget
         follow.current = onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })

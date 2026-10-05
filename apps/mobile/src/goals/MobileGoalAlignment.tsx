@@ -33,7 +33,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
     if (flights.current.has('read') || humanPending) return
     if (!client?.forwardRpc) { setIssue('读取未发送：原目标公共端口暂不可用。原提案和记录保留。'); return }
     start('read')
-    const before = JSON.stringify(currentGoal.current)
+    const before = JSON.stringify(currentGoal.current), recordId = owner.recordIdentity()
     try {
       if (retained) assertGoalIntentScope(client, owner, retained)
       const result = await client.forwardRpc('goal.inspect', { goalId: goal.id })
@@ -42,7 +42,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
       const latest = JSON.stringify(current)
       const read = JSON.stringify(result.goal)
       if ((current.alignment?.revision ?? 0) > (result.goal.alignment?.revision ?? 0) || before !== latest && read !== latest && (result.goal.alignment?.revision ?? 0) <= (current.alignment?.revision ?? 0)) throw new Error('读取期间已显示较新提案或报告；迟到旧读取不能代签当前内容，请重新读取。')
-      if (retained) owner.settleGoalIntent(retained, 'confirmed')
+      if (retained) await owner.settleGoalIntent(retained, 'confirmed', recordId, retained)
       updated(result.goal, ['alignment', 'grounding', 'title', 'description', 'status', 'sessionIds'])
       setNeedsRead(false); setIssue('已读取原目标当前内容。请读过当前提案和结果后，再明确选择；原未知记录保留。')
     } catch (error) { setIssue(`读取当前提案未确认：${error instanceof Error ? error.message : String(error)}。原内容和记录保留。`) }
@@ -53,14 +53,14 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
     if (!client?.forwardRpc) { setIssue('请求未发送：原目标公共端口暂不可用，原目标与会话保留。'); return }
     start(method)
     const input = { ...params, operationId: randomClientRequestId() }
-    const present = beginPresentation()
+    const present = beginPresentation(), recordId = owner.recordIdentity()
     let retainedIntent: GoalIntent | undefined
     try {
       if (method !== 'goal.discuss') {
         const target = goalIntentScope(client, owner)
         retainedIntent = method === 'goal.confirm' ? { ...target, goalId: goal.id, operationId: input.operationId, phase: 'sending', kind: 'confirm', expectedRevision: (params as AgentMuxRpcParams<'goal.confirm'>).expectedRevision }
           : { ...target, goalId: goal.id, operationId: input.operationId, phase: 'sending', kind: 'accept', expectedAlignmentRevision: (params as AgentMuxRpcParams<'goal.accept'>).expectedAlignmentRevision, expectedSubmissionId: (params as AgentMuxRpcParams<'goal.accept'>).expectedSubmissionId, acceptGaps: (params as AgentMuxRpcParams<'goal.accept'>).acceptGaps }
-        owner.retainGoalIntent(retainedIntent)
+        await owner.retainGoalIntent(retainedIntent, recordId)
       }
       if (method === 'goal.discuss') {
         const result = await client.forwardRpc(method, input as AgentMuxRpcParams<'goal.discuss'>)
@@ -70,28 +70,28 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
       } else if (method === 'goal.confirm') {
         const result = await client.forwardRpc(method, input as AgentMuxRpcParams<'goal.confirm'>)
         if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.confirmedRevision !== alignment?.revision || result.goal.alignment?.confirmedAt !== result.receipt.confirmedAt) throw new Error('原目标确认回执未匹配当前提案。')
-        owner.releaseGoalIntent(retainedIntent!); owner.settleGoalIntent(retainedIntent!, 'confirmed')
+        owner.releaseGoalIntent(retainedIntent!, recordId); await owner.settleGoalIntent(retainedIntent!, 'confirmed', recordId, retainedIntent!)
         if ((currentGoal.current.alignment?.revision ?? 0) <= result.receipt.confirmedRevision) {
           updated(result.goal, ['alignment']); setIssue('已确认读过的当前目标提案。')
         } else setIssue('原确认回执已收到；当前已有较新提案，保留较新内容，仍需重新阅读。')
       } else {
         const result = await client.forwardRpc(method, input as AgentMuxRpcParams<'goal.accept'>)
         if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.submissionId !== grounding?.submissionId || result.receipt.alignmentRevision !== alignment?.revision || result.goal.grounding?.acceptedAt !== result.receipt.acceptedAt) throw new Error('原结果接受回执未匹配当前报告。')
-        owner.releaseGoalIntent(retainedIntent!); owner.settleGoalIntent(retainedIntent!, 'confirmed')
+        owner.releaseGoalIntent(retainedIntent!, recordId); await owner.settleGoalIntent(retainedIntent!, 'confirmed', recordId, retainedIntent!)
         if (currentGoal.current.alignment?.revision === result.receipt.alignmentRevision && currentGoal.current.grounding?.submissionId === result.receipt.submissionId) {
           updated(result.goal, ['grounding']); setIssue(result.receipt.acceptedWithGaps ? '已接受原结果，报告差距仍保留。' : '已接受当前原结果。')
         } else setIssue('原接受回执已收到；当前已有另一提案或报告，保留当前内容，不能用旧回执认可新结果。')
       }
     } catch (error) {
       if (retainedIntent) {
-        owner.releaseGoalIntent(retainedIntent)
-        try { owner.settleGoalIntent(retainedIntent, 'unknown') } catch { /* Original device bytes and intent remain available for recovery. */ }
+        owner.releaseGoalIntent(retainedIntent, recordId)
+        try { await owner.settleGoalIntent(retainedIntent, 'unknown', recordId, retainedIntent) } catch { /* Original device bytes and intent remain available for recovery. */ }
       }
       const message = error instanceof Error ? error.message : String(error)
       setRecords(values => [...values, { method, params: input, message }])
       if (method !== 'goal.discuss') setNeedsRead(true)
       setIssue(`原操作回执未确认：${message}。原提案、报告与会话保留；先读取当前内容，不会自动再次提交。`)
-    } finally { if (retainedIntent) owner.releaseGoalIntent(retainedIntent); finish(method) }
+    } finally { if (retainedIntent) owner.releaseGoalIntent(retainedIntent, recordId); finish(method) }
   }
   const acknowledgementAvailable = !needsRead && !humanPending && !pending.includes('read')
   return <section className="mobile-goal-alignment" aria-label="目标确认与原讨论">

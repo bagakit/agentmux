@@ -78,17 +78,17 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
   }
   useEffect(() => { if (connected && visible) void read() }, [occurrence])
 
-  const choose = (id: string) => {
+  const choose = async (id: string) => {
     if (!client || !agentSessionId || !connected) return
     try {
       const target = goalWorkTarget(client, owner, agentSessionId, id)
       setSelection(target)
-      owner.selectGoal(target); setNotice(undefined)
+      await owner.selectGoal(target); setNotice(undefined)
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
-  const showList = () => {
+  const showList = async () => {
     setSelection(null)
-    try { owner.selectGoal(null) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
+    try { await owner.selectGoal(null) } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
   const perform = async (operation: MobileGoalOperation) => {
     if (!client || !sourceConfirmed || !selection || operation.sessionId !== agentSessionId
@@ -96,7 +96,7 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     const token = occurrence
     flight.current = token; setWorking(token)
     try {
-      owner.retainGoalOperation(operation)
+      await owner.retainGoalOperation(operation)
       setPending(owner.snapshot().record.goalWork?.pending ?? [])
       const value = await sendGoalOperation(client, owner, operation, () => current.current === token && connected && visible)
       if (current.current === token) {

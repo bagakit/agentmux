@@ -7,7 +7,7 @@ import { assertGoalIntentScope, goalIntentScope, useGoalIntents } from './goal-i
 import { MobileRecoveryPanel } from '../recovery/MobileRecoveryPanel'
 import type { GoalCreationInput, GoalIntent, GoalIntentScope } from '../recovery/device-workface'
 
-type Creation = { input: GoalCreationInput; target: GoalIntentScope; present: () => boolean; phase: 'saving' | 'unknown' | 'not-saved' | 'pmo' | 'ready'; issue: string }
+type Creation = { recordId: string | null; input: GoalCreationInput; target: GoalIntentScope; present: () => boolean; phase: 'saving' | 'unknown' | 'not-saved' | 'pmo' | 'ready'; issue: string }
 export type GoalDiscussionReceipt = AgentMuxRpcResult<'goal.discuss'>['receipt']
 
 /** One explicit click, one caller-held identity, and the original Goal owner. */
@@ -26,7 +26,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
   useEffect(() => {
     if (flight.current || !retained || retained.kind !== 'create') return
     setRequest(previous => previous?.input.operationId === retained.operationId ? previous.phase === 'saving' && !retainedRunning ? { ...previous, phase: 'unknown' } : previous : {
-      input: retained.input, target: retained, present: () => false,
+      recordId: owner.recordIdentity(), input: retained.input, target: retained, present: () => false,
       phase: retained.phase === 'saved' ? 'pmo' : 'unknown',
       issue: retained.phase === 'saved' ? '原目标已确认保存；请明确打开这同一个目标的原讨论。' : '重启或重入后的原创建回执未知；准确 Goal ID 和请求保留，先读取同一目标，不会重复创建。'
     })
@@ -41,6 +41,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
     return () => { live = false }
   }, [client, visible, revision])
   async function discussion(value: Creation, goal: AgentMuxRpcGoal) {
+    const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === value.input.operationId)
     setRequest({ ...value, phase: 'pmo', issue: '原目标已确认保存，正在打开它的主 Mote 讨论。' })
     const input = { goalId: value.input.goalId, mode: 'open' as const, operationId: randomClientRequestId() }
     try {
@@ -48,21 +49,22 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
       const result = await client!.forwardRpc!('goal.discuss', input)
       if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== 'open') throw new Error('原讨论回执身份未匹配。')
       setRequest({ ...value, phase: 'ready', issue: result.receipt.agentSessionId ? '原目标已保存，并打开了它的原主 Mote 讨论。' : '原目标已保存，专属 Tab 已保留。Agent 尚未接上；请在 Mac 的原主 Mote 工作面选择 Agent 并启动。' })
-      owner.settleGoalIntent(intent(value), 'confirmed')
+      await owner.settleGoalIntent(intent(value), 'confirmed', value.recordId, original)
       if (value.present()) openDiscussion(result.receipt)
     } catch (error) {
       setRequest({ ...value, phase: 'pmo', issue: `原目标已保存，讨论回执未确认：${error instanceof Error ? error.message : String(error)}。原目标和可能已建立的专属 Tab 保留；明确打开仍沿同一目标，不重新创建或发送 Prompt。` })
     }
   }
   async function save(value: Creation) {
+    const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === value.input.operationId)
     try {
       const result = await client!.forwardRpc!('goal.create', value.input)
       if (result.goal.id !== value.input.goalId || result.receipt.goalId !== value.input.goalId) throw new Error('原创建回执身份未匹配。')
-      owner.releaseGoalIntent(intent(value)); owner.settleGoalIntent(intent(value), 'saved')
+      owner.releaseGoalIntent(intent(value), value.recordId); await owner.settleGoalIntent(intent(value), 'saved', value.recordId, original)
       created(result.goal, value.present); await discussion(value, result.goal)
     } catch (error) {
-      owner.releaseGoalIntent(intent(value))
-      try { owner.settleGoalIntent(intent(value), 'unknown') } catch { /* Original durable intent remains the recovery guard. */ }
+      owner.releaseGoalIntent(intent(value), value.recordId)
+      try { await owner.settleGoalIntent(intent(value), 'unknown', value.recordId, original) } catch { /* Original durable intent remains the recovery guard. */ }
       setRequest({ ...value, phase: 'unknown', issue: `创建回执未确认：${error instanceof Error ? error.message : String(error)}。准确 Goal ID 和请求保留；先读取这同一个目标，不会重复创建。` })
     }
   }
@@ -73,22 +75,23 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
     try {
       if (action === 'new') {
         if (request && request.phase !== 'ready') return
-        const value: Creation = { input: { goalId: mintObjectId(), title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: randomClientRequestId() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存待定义目标；创建不会开始执行。' }
-        setRequest(value); owner.retainGoalIntent(intent(value)); await save(value)
+        const value: Creation = { recordId: owner.recordIdentity(), input: { goalId: mintObjectId(), title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: randomClientRequestId() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存待定义目标；创建不会开始执行。' }
+        setRequest(value); await owner.retainGoalIntent(intent(value), value.recordId); await save(value)
       } else if (request && action === 'save-same' && request.phase === 'not-saved') {
         const value = { ...request, phase: 'saving' as const, issue: '正在明确保存原 ID 的同一个目标。' }
         assertGoalIntentScope(client, owner, intent(value))
-        owner.settleGoalIntent(intent(value), 'confirmed'); owner.retainGoalIntent(intent(value))
+        await owner.settleGoalIntent(intent(value), 'confirmed', value.recordId); await owner.retainGoalIntent(intent(value), value.recordId)
         const next = { ...value, present: beginPresentation() }; setRequest(next); await save(next)
       } else if (request) {
         const presentation = beginPresentation()
         try {
           assertGoalIntentScope(client, owner, intent(request))
           if (owner.goalIntentRunning(request.input.operationId)) throw new Error('原创建仍在等待回执，读取不能代签在途保存。')
+          const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === request.input.operationId)
           const result = await client.forwardRpc('goal.inspect', { goalId: request.input.goalId })
           if (result.goal === null) { setRequest({ ...request, phase: 'not-saved', issue: '原 owner 完整读取确认这个准确 ID 尚未保存。可明确保存同一 ID；不会另建实例。' }); return }
           if (result.goal.id !== request.input.goalId) throw new Error('其他目标不能代签原创建结果。')
-          owner.settleGoalIntent(intent(request), 'saved')
+          await owner.settleGoalIntent(intent(request), 'saved', request.recordId, original)
           const value = { ...request, present: presentation }
           created(result.goal, value.present); await discussion(value, result.goal)
         } catch (error) { setRequest({ ...request, issue: `读取同一目标未确认：${error instanceof Error ? error.message : String(error)}。准确 ID 和请求保留，不会再次创建。` }) }
@@ -102,7 +105,7 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
       <details><summary>新目标的项目上下文</summary><label>项目<select aria-label="新目标项目" value={projectId} disabled={busy} onChange={event => setProjectId(event.target.value)}><option value="">未分配项目</option>{projectId && !projects.some(project => project.projectId === projectId) && <option value={projectId}>原项目暂未确认</option>}{projects.map(project => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}</select></label><button type="button" onClick={() => reread(value => value + 1)}>刷新项目目录</button></details>
     </>}
     {directoryIssue && <p role="status">{directoryIssue}</p>}{deviceIssue && <p role="status">{deviceIssue}</p>}
-    {owner.snapshot().issue && <details><summary>保全设备意图</summary><MobileRecoveryPanel onRestored={() => reread(value => value + 1)} /><button type="button" onClick={() => { try { owner.replaceUnreadableWithCurrent(); setDirectoryIssue('当前工作面已保存，原 Goal 意图继续沿同一身份核对。') } catch { setDirectoryIssue('设备存储仍不可写；原字节和当前内存意图保留，可继续原 Goal 操作并导出备份。') } }}>存储恢复后保存当前工作面</button></details>}
+    {owner.snapshot().issue && <details><summary>保全设备意图</summary><MobileRecoveryPanel onRestored={() => reread(value => value + 1)} /><button type="button" onClick={async () => { try { await owner.replaceUnreadableWithCurrent(); setDirectoryIssue('当前工作面已保存，原 Goal 意图继续沿同一身份核对。') } catch { setDirectoryIssue('设备存储仍不可写；原字节和当前内存意图保留，可继续原 Goal 操作并导出备份。') } }}>存储恢复后保存当前工作面</button></details>}
     {request && request.phase !== 'ready' && <><p role="status">{request.issue}</p>
       {request.phase === 'unknown' && <button type="button" disabled={busy} onClick={() => void invoke('read')}>读取同一目标核对</button>}
       {request.phase === 'not-saved' && <button type="button" disabled={busy} onClick={() => void invoke('save-same')}>明确保存同一目标</button>}

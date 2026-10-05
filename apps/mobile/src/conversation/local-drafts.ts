@@ -1,5 +1,5 @@
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
-import { getDeviceWorkface, type DraftRecord } from '../recovery/device-workface'
+import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
 export type PromptAttempt = {
   operationId: string
@@ -27,7 +27,12 @@ function restoredMessage(value: PromptAttempt['phase'], interaction = false): st
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
   const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new Map<string, ResponseAttempt>()
   const owner = getDeviceWorkface(storage)
-  const state = { drafts, attempts, responses, canSave: true, notice: null as string | null, save }
+  const state = { drafts, attempts, responses, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false }
+  let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
+  let durableBaseline = baseline
+  let originalRecord: DeviceWorkface = owner.snapshot().record
+  let recordId: string | null = null
+  let saveRevision = 0
   try {
     const snapshot = owner.snapshot()
     if (snapshot.issue) {
@@ -35,7 +40,12 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       state.notice = '本机草稿存储暂时无法读取，原记录尚未覆盖。当前草稿和未确认输入仍保留，可继续编辑和复制；请恢复设备存储后明确保存当前工作面。'
     }
     {
+      originalRecord = snapshot.record
       const value = snapshot.record.conversation
+      baseline = value
+      durableBaseline = value
+      recordId = snapshot.record.recordId ?? null
+      state.conflicts = value.conflicts ?? []
       const savedDrafts = value.drafts, savedAttempts = value.attempts, savedResponses = value.responses
       for (const [key, draft] of savedDrafts) drafts.set(key, draft as string)
       for (const [key, item] of savedAttempts) {
@@ -51,8 +61,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     state.canSave = false
     state.notice = '本机草稿存储暂时无法读取，原记录尚未覆盖。当前仍可编辑和复制，但本次修改仅在当前运行中保留；请恢复设备存储后重新读取。'
   }
-  function save(): void {
-    try {
+  function serialize(): DraftRecord {
       const record: DraftRecord = { version: 1, drafts: [...drafts],
         attempts: [...attempts].map(([key, intent]) => [key, {
           operationId: intent.operationId, runId: intent.runId,
@@ -65,15 +74,63 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),
           ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {})
         }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase }]) }
-      owner.updateConversation(record)
-      state.canSave = true
-      state.notice = null
-    } catch {
-      // localStorage.setItem is atomic: a failed write keeps the previously durable bytes.
-      const issue = owner.snapshot().issue
-      state.canSave = issue === null
-      state.notice = issue ?? '本机草稿暂时无法保存，先前记录仍保留。当前仍可编辑和发送，但新草稿与未知回执仅在本次运行中保留；请恢复设备存储后重试保存。'
+      return record
+  }
+  function exportBackup(): string {
+    const current = owner.snapshot().record
+    const record = (current.recordId ?? null) === recordId ? current : originalRecord
+    return JSON.stringify({ schema: 'agentmux.mobile-workface.v1', workface: { ...record, conversation: serialize() } }, null, 2)
+  }
+  function save(): Promise<boolean> {
+    const captured = serialize(), revision = ++saveRevision
+    const edits: ConversationEdit[] = []
+    for (const bucket of ['drafts', 'attempts', 'responses'] as ConversationBucket[]) {
+      const before = new Map<string, ConversationValue>(baseline[bucket]), after = new Map<string, ConversationValue>(captured[bucket])
+      for (const key of new Set([...before.keys(), ...after.keys()])) {
+        if (JSON.stringify(before.get(key)) !== JSON.stringify(after.get(key))) edits.push({ bucket, key, expected: before.get(key), next: after.get(key) })
+      }
     }
+    baseline = captured
+    let operation: Promise<void>
+    try { operation = owner.editConversation(edits, recordId) } catch (error) { operation = Promise.reject(error) }
+    return operation.then(() => {
+      const snapshot = owner.snapshot(), saved = snapshot.record.conversation
+      state.conflicts = saved.conflicts ?? []
+      // Do not erase edits made while saving. Replace a conflicted attempt object,
+      // so its pending callback cannot mistake it for the canonical original.
+      const current = serialize()
+      for (const bucket of ['drafts', 'attempts', 'responses'] as ConversationBucket[]) {
+        const before = new Map<string, ConversationValue>(captured[bucket]), now = new Map<string, ConversationValue>(current[bucket])
+        const disk = new Map<string, ConversationValue>(saved[bucket])
+        for (const key of new Set([...before.keys(), ...disk.keys()])) {
+          if (JSON.stringify(now.get(key)) !== JSON.stringify(before.get(key))) continue
+          const value = disk.get(key)
+          if (bucket === 'drafts') { if (value === undefined) drafts.delete(key); else drafts.set(key, value as string) }
+          else if (bucket === 'attempts') {
+            if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
+            if (value === undefined) attempts.delete(key)
+            else { const intent = value as Omit<PromptAttempt, 'message'>, phase = intent.phase === 'sending' ? 'unknown' : intent.phase; attempts.set(key, { ...intent, phase, message: restoredMessage(phase) }) }
+          } else {
+            if (JSON.stringify(value) === JSON.stringify(now.get(key))) continue
+            if (value === undefined) responses.delete(key)
+            else { const phase = (value as ResponseAttempt).phase; responses.set(key, { phase, message: restoredMessage(phase, true) }) }
+          }
+        }
+      }
+      durableBaseline = saved
+      if (revision === saveRevision) { baseline = saved; recordId = snapshot.record.recordId ?? null }
+      state.canSave = true
+      state.recordChanged = false
+      state.notice = state.conflicts.length ? '另一页面已更新同一条记录；原请求和两份正文均保留。请核对保全内容，不会自动重投。' : null
+      return true
+    }).catch(error => {
+      const issue = owner.snapshot().issue
+      if (revision === saveRevision) baseline = durableBaseline
+      state.recordChanged = error instanceof DeviceWorkfaceRecordChangedError
+      state.canSave = !state.recordChanged && owner.canRetrySave()
+      state.notice = error instanceof DeviceWorkfaceRecordChangedError ? error.message : issue ?? '本机草稿暂时无法保存，先前记录仍保留。当前仍可编辑和发送，但新草稿与未知回执仅在本次运行中保留；请恢复设备存储后重试保存。'
+      return !(error instanceof DeviceWorkfaceRecordChangedError)
+    })
   }
   return state
 }
