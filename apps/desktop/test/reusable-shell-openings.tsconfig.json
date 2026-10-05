@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "reusable-shell-openings.test.tsx",
+    "reusable-shell-openings-native.test.tsx",
+    "launcher-prewarm-recovery.test.tsx",
+    "terminal-create-confirmation-ipc.test.ts",
+    "../src/renderer/src/global.d.ts"
+  ]
+}

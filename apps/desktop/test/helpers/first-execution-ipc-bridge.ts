@@ -8,8 +8,9 @@ import { AgentMuxError, AgentMuxMemoryAgentSessionStore, type AgentMuxClient, ty
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AgentSessionControl, AppConfig } from '../../src/shared/contracts'
 import type { ConfigStore } from '../../src/main/config-store'
-import type { ScratchTopics } from '../../src/main/scratch-topics'
-import type { WorkspaceFiles } from '../../src/main/workspace-files'
+import { ScratchTopics } from '../../src/main/scratch-topics'
+import { WorkspaceFiles } from '../../src/main/workspace-files'
+import { LocalExecutionHost } from '@agentmux/core'
 import { RuntimeController } from '../../src/main/runtime-controller'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
@@ -72,9 +73,9 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
   try { release = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
-    configStore: { get: async () => config } as unknown as ConfigStore,
+    configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
-    scratchTopics: actual?.scratchTopics ?? {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles }) }
+    scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
   catch (error) { await rm(root, { recursive: true, force: true }); throw error }
   const dispose = async () => { try { await release() } finally { await rm(root, { recursive: true, force: true }) } }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
