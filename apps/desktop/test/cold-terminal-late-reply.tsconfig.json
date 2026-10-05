@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "cold-terminal-late-reply.test.ts",
+    "cold-terminal-late-reply-native.test.tsx",
+    "session-launch-lifecycle.test.ts",
+    "reusable-shell-disposal.test.tsx",
+    "../src/renderer/src/global.d.ts"
+  ]
+}
