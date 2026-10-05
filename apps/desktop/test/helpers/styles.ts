@@ -31,11 +31,20 @@ function importOrder(): string[] {
   return order
 }
 
-function stylesheetPath(specifier: string): string {
+function stylesheetPath(specifier: string, from = STYLES_DIR): string {
   // A Source-qualified UI suite reads the very shared style imported by the app, without
   // requiring an unrelated package build or a stale dist copy in an isolated worktree.
   if (specifier.startsWith('@agentmux/client-ui/styles/')) return join(STYLES_DIR, '..', '..', '..', '..', '..', '..', 'packages', 'client-ui', 'src', 'styles', specifier.slice('@agentmux/client-ui/styles/'.length))
-  return specifier.startsWith('.') ? join(STYLES_DIR, specifier) : require.resolve(specifier)
+  return specifier.startsWith('.') ? join(from, specifier) : require.resolve(specifier)
+}
+
+/** Include client theme imports in their real cascade position, not just the outer manifest. */
+function importedStyles(file: string, ancestors: string[] = []): string {
+  if (ancestors.includes(file)) throw new Error(`Circular stylesheet import: ${file}`)
+  const text = readFileSync(file, 'utf8')
+  if (!text.trim()) throw new Error(`Empty stylesheet: ${file}`)
+  return text.replace(/@import\s+(['"])([^'"]+\.css)\1\s*;/g, (_, _quote: string, specifier: string) =>
+    importedStyles(stylesheetPath(specifier, dirname(file)), [...ancestors, file]))
 }
 
 /**
@@ -58,8 +67,13 @@ export function stripCssComments(css: string): string {
 /** 全部样式文件，按层叠顺序拼成一张表。 */
 export function allStyles(): string {
   return importOrder()
-    .map((name) => readFileSync(stylesheetPath(name), 'utf8'))
+    .map(readStyleSheet)
     .join('\n')
+}
+
+/** One actual client entry, including its imported palette, without asserting the unrelated manifest. */
+export function readStyleSheet(specifier: string): string {
+  return importedStyles(stylesheetPath(specifier))
 }
 
 /** 全部样式文件，剥掉注释——判「规则在不在场」一律用这个，见 `stripCssComments`。 */

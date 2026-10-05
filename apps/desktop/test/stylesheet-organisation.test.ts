@@ -46,7 +46,7 @@ describe('样式表的组织', () => {
     expect(documented.sort()).toEqual([...styleFiles().map((file) => file.name), 'index.css'].sort())
   })
 
-  it('全局主题值只在 tokens.css 定义，appearance selector 可读取同一主题', () => {
+  it('Desktop 主题适配只在 tokens.css 定义，共享 palette 由该入口引入', () => {
     const files = styleFiles()
     expect(files.length).toBeGreaterThan(1)
     const rootDefinitions: string[] = []
@@ -61,6 +61,7 @@ describe('样式表的组织', () => {
     }
     expect(rootDefinitions.length).toBeGreaterThan(0)
     expect([...new Set(rootDefinitions)]).toEqual(['tokens.css'])
+    expect(files.find(file => file.name === 'tokens.css')?.text).toContain("@import '@agentmux/client-ui/styles/palette.css'")
   })
 
   it('单文件不超过 400 行——超出的按表面继续拆，不靠注释分节假装分层', () => {
