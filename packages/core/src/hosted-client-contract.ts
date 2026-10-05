@@ -49,6 +49,7 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
   forwardRpc?: AgentMuxHostedForwardRpc
+  subscribeRpc?: AgentMuxHostedSubscribeRpc
   disconnect(): void
   runtimeIdentity(): AgentMuxRuntimeIdentity
   catalog(): AgentCatalogEntry[]
@@ -70,6 +71,12 @@ export type AgentMuxHostedForwardRpc = <M extends import('./public-rpc.js').Agen
   method: M, params: import('./public-rpc.js').AgentMuxRpcParams<M>,
   context?: import('./public-rpc-service.js').AgentMuxRpcCallContext
 ) => Promise<import('./public-rpc.js').AgentMuxRpcResult<M>>
+
+/** Borrow the existing public transport for a read lease; no Runtime event or second owner. */
+export type AgentMuxHostedSubscribeRpc = <M extends import('./public-rpc.js').AgentMuxRpcStreamMethod>(
+  method: M, params: import('./public-rpc.js').AgentMuxRpcStreamParams<M>,
+  handlers: import('./public-rpc-client.js').AgentMuxRpcSubscriptionOptions<M>
+) => Promise<import('./public-rpc-client.js').AgentMuxRpcSubscription>
 
 export type AgentMuxHostedBootstrap = {
   owner: AgentMuxRuntimeOwnerIdentity

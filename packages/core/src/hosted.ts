@@ -8,5 +8,8 @@ export type {
 export type {
   AgentMuxHostedClient, AgentMuxHostedMethod, AgentMuxHostedInvocation,
   AgentMuxHostedBootstrap, AgentMuxHostedRpcPort, AgentMuxHostedStreamEvent,
-  AgentMuxHostedSubscription, AgentMuxHostedOutputRpcPort, AgentMuxHostedOutputObservation
+  AgentMuxHostedSubscription, AgentMuxHostedOutputRpcPort, AgentMuxHostedOutputObservation, AgentMuxHostedSubscribeRpc
 } from './hosted-client-contract.js'
+
+export { parseAppearanceObservation } from './public-rpc-settings-observation.js'
+export type { AgentMuxAppearanceObservation } from './public-rpc-settings-observation.js'

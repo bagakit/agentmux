@@ -100,3 +100,5 @@ export * from './delivery-attempt-store.js'
 
 export { createInputPerformanceRecorder, hostedCarrierPerformance } from './performance-diagnostics.js'
 export type { ClientPerformanceDiagnostics, InputPerformanceSnapshot, HostedCarrierCost, InputObservationReference, InputPerformanceSender } from './performance-diagnostics.js'
+
+export type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort } from './public-rpc-settings-observation.js'

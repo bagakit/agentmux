@@ -7,7 +7,7 @@ import type { AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEv
   AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle, AgentSessionHistoryObservationOptions } from './types.js'
 import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentMuxHostedClient, type AgentMuxHostedRpcPort,
   type AgentMuxHostedBootstrap, type AgentMuxHostedMethod, type AgentMuxHostedInvocation,
-  type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc,
+  type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
@@ -21,10 +21,13 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 /** A consumer connection to the Host. Disposing this object never owns the Core or a Run. */
 export async function connectHostedAgentMux(options: {
   rpc: AgentMuxHostedRpcPort; consumerId?: string; waitForReady?: boolean; expectedStorePath?: string;
-  expectedRuntimeId?: string; forwardRpc?: AgentMuxHostedForwardRpc
+  expectedRuntimeId?: string; forwardRpc?: AgentMuxHostedForwardRpc; subscribeRpc?: AgentMuxHostedSubscribeRpc
 }): Promise<AgentMuxHostedClient> {
   const consumerId = options.consumerId ?? randomClientRequestId(), rpc = options.rpc
   const publisher = new AgentMuxClientEventPublisher()
+  const publicReaders = new Set<AgentMuxHostedSubscription>()
+  const publicOpenings = new Set<AbortController>()
+  let publicReaderEpoch = 0
   let controlOwner: AgentMuxRuntimeOwnerIdentity | undefined, controlConnecting: Promise<void> | undefined, controlEpoch = 0
   const acceptOwner = (owner: AgentMuxRuntimeOwnerIdentity): void => {
     if (controlOwner && (controlOwner.runtimeId !== owner.runtimeId || controlOwner.ownerInstanceId !== owner.ownerInstanceId)) controlEpoch++
@@ -521,11 +524,43 @@ export async function connectHostedAgentMux(options: {
   const client: Record<string, unknown> = {
     connect,
     runtimeOwnerIdentity: () => controlOwner ? structuredClone(controlOwner) : null,
-    disconnect: () => { eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
+    disconnect: () => { publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); for (const reading of publicReaders) void reading.dispose().catch(() => {}); publicReaders.clear(); eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
       for (const reading of attached.values()) void reading.stream.dispose(); attached.clear();
       for (const read of [...histories]) releaseHistory(read) },
     ...(options.forwardRpc ? { forwardRpc: async (method: Parameters<AgentMuxHostedForwardRpc>[0], params: Parameters<AgentMuxHostedForwardRpc>[1], context: Parameters<AgentMuxHostedForwardRpc>[2] = {}) => {
       await connectControl(); return await options.forwardRpc!(method, params, { ...context, runtimeFence: fence() }) } } : {}),
+    ...(options.subscribeRpc ? { subscribeRpc: async (...[method, params, handlers]: Parameters<AgentMuxHostedSubscribeRpc>) => {
+      if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
+      const epoch = publicReaderEpoch, controller = new AbortController()
+      let acquired: AgentMuxHostedSubscription | undefined, ended = false
+      const active = () => !disposed && epoch === publicReaderEpoch && !controller.signal.aborted
+      const abort = () => controller.abort()
+      const release = () => { publicOpenings.delete(controller); handlers.signal?.removeEventListener('abort', abort); controller.abort() }
+      handlers.signal?.addEventListener('abort', abort, { once: true })
+      if (handlers.signal?.aborted) controller.abort()
+      publicOpenings.add(controller)
+      try {
+        const subscription = await options.subscribeRpc!(method, params, { ...handlers, signal: controller.signal,
+          onInitial: value => { if (active()) handlers.onInitial(value) },
+          onEvent: value => { if (active()) handlers.onEvent(value) },
+          onFrame: value => { if (active()) handlers.onFrame?.(value) },
+          onEnd: error => {
+            const report = active(); ended = true
+            if (acquired) publicReaders.delete(acquired)
+            release(); if (report) handlers.onEnd?.(error)
+          }
+        })
+        publicOpenings.delete(controller)
+        if (disposed || epoch !== publicReaderEpoch || handlers.signal?.aborted || !ended && controller.signal.aborted) {
+          release(); await subscription.dispose()
+          throw new AgentMuxError('Hosted reader was cancelled or disconnected.', 'CONTROL_CANCELLED')
+        }
+        acquired = { ...subscription, dispose: async () => { publicReaders.delete(acquired!); release(); await subscription.dispose() } }
+        if (ended) { release(); return acquired }
+        publicReaders.add(acquired)
+        return acquired
+      } catch (error) { release(); throw error }
+    } } : {}),
     providers: { catalog: () => structuredClone(requireBootstrap().catalog), get: (id: string) => {
       const catalog = requireBootstrap().catalog.find(value => value.id === id)
       if (!catalog) throw new AgentMuxError(`Unknown Agent Provider: ${id}`, 'UNKNOWN_PROVIDER')
@@ -575,10 +610,11 @@ export async function connectHostedAgentMux(options: {
     },
     dispose: async () => {
       if (disposed) return
-      disposed = true; eventEpoch++; controlEpoch++; openingReaders.clear()
+      disposed = true; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); eventEpoch++; controlEpoch++; openingReaders.clear()
       if (retry) clearTimeout(retry)
       const finalFence = controlOwner ? { runtimeId: controlOwner.runtimeId, ownerInstanceId: controlOwner.ownerInstanceId } : undefined
-      const resources = [stream, ...[...attached.values()].map(value => value.stream)].filter((value): value is AgentMuxHostedSubscription => Boolean(value))
+      const resources = [...publicReaders, stream, ...[...attached.values()].map(value => value.stream)].filter((value): value is AgentMuxHostedSubscription => Boolean(value))
+      publicReaders.clear()
       for (const read of [...histories]) releaseHistory(read)
       const ownedOutputs = [...outputs]; outputs.clear()
       stream = undefined; publisher.dispose()

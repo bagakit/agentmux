@@ -1,3 +1,4 @@
+import { parseAppearanceObservation } from './public-rpc-settings-observation.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -161,6 +162,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
     } else if (typeof p.transferId !== 'string' || !p.transferId) throw new AgentMuxError('Runtime opening lacks its snapshot transfer identity.', 'CONTROL_PROTOCOL_ERROR')
     return p
   }
+  if (method === 'settings.appearance.watch') { rpcRecord(p, ['observation'], 'CONTROL_PROTOCOL_ERROR'); return { observation: parseAppearanceObservation(p.observation) } }
   if (method === 'system.metrics.watch') return { observation: parseMetricsObservation(p.observation) }
   if (method === 'toolkit.watch') {
     rpcRecord(p, ['toolId'], 'CONTROL_PROTOCOL_ERROR')
@@ -196,7 +198,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
   return p
 }
 function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: unknown, afterByte: number,
-  params: Record<string, unknown>): Record<string, unknown> {
+  params: Record<string, unknown>, appearancePrevious?: Pick<import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation, 'sourceId' | 'revision'>): Record<string, unknown> {
   const event = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
@@ -218,6 +220,10 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   if ((method === 'runtime.events' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') && event.type === 'snapshot') {
     return { ...event, data: parseHostedTransferChunk(event.data) }
+  }
+  if (method === 'settings.appearance.watch' && event.type === 'snapshot') {
+    const observation = parseAppearanceObservation(event.data, appearancePrevious)
+    return { ...event, data: observation }
   }
   if (method === 'system.metrics.watch' && event.type === 'snapshot') return { ...event, data: parseMetricsObservation(event.data) }
   if (method === 'toolkit.watch' && event.type === 'snapshot') {
@@ -260,6 +266,7 @@ class RpcClient implements AgentMuxRpcClient {
       params: { ...body, ...(credentials ? { caller: credentials } : {}), ...(runtimeFence ? { runtimeFence } : {}) } }
     const controller = new AbortController()
     let opened = false, responseSeen = false, responseDelivered = false, subscriptionId: string | undefined, sequence = 0
+    let appearancePrevious: Pick<import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation, 'sourceId' | 'revision'> | undefined
     let initial: unknown, outputCursor = typeof body.afterByte === 'number' ? body.afterByte : 0
     let reader: Reader | undefined, finalReader: Reader | undefined, opening: Promise<Reader> | undefined
     let unavailableTransport: AgentMuxError | undefined
@@ -303,6 +310,10 @@ class RpcClient implements AgentMuxRpcClient {
             const result = rpcRecord(response.result, ['subscriptionId', 'method', 'initial'], 'CONTROL_PROTOCOL_ERROR')
             if (typeof result.subscriptionId !== 'string' || !result.subscriptionId || result.method !== method) throw new AgentMuxError('Subscription response belongs to another reader.', 'CONTROL_PROTOCOL_ERROR')
             initial = streamInitial(method as AgentMuxRpcStreamMethod, result.initial, body, credentials)
+            if (method === 'settings.appearance.watch') {
+              const observation = (initial as AgentMuxRpcStreamInitial<'settings.appearance.watch'>).observation
+              appearancePrevious = { sourceId: observation.sourceId, revision: observation.revision }
+            }
             subscriptionId = result.subscriptionId; opened = true
             // A validated opening establishes the original lease even when the
             // caller releases it inside its first callback.
@@ -319,7 +330,11 @@ class RpcClient implements AgentMuxRpcClient {
           const p = rpcRecord(notification.params, ['subscriptionId', 'method', 'sequence', 'event'], 'CONTROL_PROTOCOL_ERROR')
           if (p.subscriptionId !== subscriptionId || p.method !== method || p.sequence !== sequence + 1) throw new AgentMuxError('Subscription notification identity or sequence is invalid.', 'CONTROL_PROTOCOL_ERROR')
           sequence++
-          const event = streamEvent(method as AgentMuxRpcStreamMethod, p.event, initial, outputCursor, rpcRecord(params))
+          const event = streamEvent(method as AgentMuxRpcStreamMethod, p.event, initial, outputCursor, rpcRecord(params), appearancePrevious)
+          if (method === 'settings.appearance.watch' && event.type === 'snapshot') {
+            const observation = event.data as import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation
+            appearancePrevious = { sourceId: observation.sourceId, revision: observation.revision }
+          }
           if (event.type === 'output') outputCursor = (event.data as { endByte: number }).endByte
           handlers!.onFrame?.(notification)
           if (finished) return

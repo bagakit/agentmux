@@ -463,6 +463,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('app.snapshot', '[--include SOURCE,...] [filters]', 'Observe Project/Workspace/Topic/Mote/Space/Zone/Executor/Session/Goal globally.', { ...FILTERS, '--include': 'data' }, f => ({ ...filters(f), ...(f.values.has('--include') ? { include: value(f, '--include', true)!.split(',') } : {}) }), 'Known sources remain when another source is unavailable. Topic/SOUL/Wiki come from real filesystem owners; unknown is explicit. No current Space or cwd is used as a global filter.'),
   command('app.focus', '--surface space|focus|goals|survey|recall [--input preserve|target]', 'Select a main Surface without silently stealing conversation input.', { '--surface': 'value', '--input': 'value', ...OP }, f => ({ ...operation(f), target: { kind: 'surface', surface: value(f, '--surface', true) }, inputPolicy: value(f, '--input') ?? 'preserve' })),
   { ...empty('mote.playbook.pmo', 'Read the PMO work manual using the actual public commands.'), local: true },
+  { ...empty('settings.appearance.watch', 'Observe the original client appearance snapshot and later changes; cancel only this reader.'), stream: true,
+    details: 'Opening contains the current owner sourceId and revision. Later snapshots are newer values from that owner; they are observations, not configuration writes. Disconnect preserves the last confirmed theme; reopen to read the current owner.' },
   settings('settings.inspect', '[target]', 'Read supported host settings.'),
   settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts', 'themes'] as const).flatMap(resource => [

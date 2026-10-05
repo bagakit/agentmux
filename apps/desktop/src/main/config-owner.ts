@@ -6,6 +6,7 @@ import { configNameChanges, configNameValue, type NamedChange, type NameChangeAu
 /** One commit queue around the existing Main fact; long host/Git/dialog work is never an updater. */
 export class ConfigOwner {
   private tail: Promise<void> = Promise.resolve()
+  private readonly observers = new Set<(saved: AppConfig, previous: AppConfig) => void>()
   constructor(private readonly ports: {
     read(): AppConfig
     prepare?(current: AppConfig, next: AppConfig): AppConfig | Promise<AppConfig>
@@ -15,6 +16,12 @@ export class ConfigOwner {
   }) {}
 
   get current(): AppConfig { return this.ports.read() }
+
+  /** Observation only; consumers borrow the committed owner fact and release their own lease. */
+  subscribe(listener: (saved: AppConfig, previous: AppConfig) => void): () => void {
+    this.observers.add(listener)
+    return () => { this.observers.delete(listener) }
+  }
 
   /** Capture current configuration and reserve admission after all prior saves, without holding the queue during execution. */
   inspect<T>(capture: (current: AppConfig) => T): Promise<T> {
@@ -54,6 +61,10 @@ export class ConfigOwner {
         if (unchanged) return current
         const saved = await this.ports.save(next)
         this.ports.publish(saved)
+        for (const observer of this.observers) {
+          try { observer(saved, current) }
+          catch { console.warn('Configuration observer failed after a successful commit; configuration and healthy Runs remain available.') }
+        }
         return saved
       }
       return this.ports.nameAudit

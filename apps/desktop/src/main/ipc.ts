@@ -1,3 +1,4 @@
+import { themeObservation } from './theme-observation.js'
 import { readInputObservation } from '@agentmux/core/control'
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
@@ -1780,6 +1781,7 @@ export async function registerIpc(args: {
     nativeAgentHistoryResource: (params, context) => args.runtime.nativeAgentHistoryResource(params, config, context?.signal),
     ...(rpcHttp ? { http: rpcHttp } : {}),
     metrics,
+    appearance: themeObservation(configOwner),
     toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal, options) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal, options),
       execute: (request, signal, context) => nameChangeRequests.run({
       context: context ?? unknownNameContext(request.operation), operationId: request.requestId

@@ -1,5 +1,5 @@
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSettingsResourceFields,
-  type AgentMuxControlSettingsResourceJson } from './control.js'
+import type { AgentMuxControlSettingsResourceFields, AgentMuxControlSettingsResourceJson } from './control.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from './public-rpc-frame.js'
 import { AgentMuxError } from './errors.js'
 
 // The reviewed resource envelope admits eight container levels, not arbitrary object graphs.
@@ -7,7 +7,7 @@ const MAX_DEPTH = 8
 const invalid = (code: string): never => { throw new AgentMuxError('Settings resource JSON is invalid or exceeds its budget.', code) }
 
 export function settingsResourceBudget(value: unknown, code: string): void {
-  if (Buffer.byteLength(JSON.stringify(value)) > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) invalid(code)
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > AGENTMUX_RPC_MAX_MESSAGE_BYTES) invalid(code)
 }
 
 function json(value: unknown, code: string, depth: number): AgentMuxControlSettingsResourceJson {

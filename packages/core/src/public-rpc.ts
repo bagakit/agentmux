@@ -177,6 +177,7 @@ export type AgentMuxRpcOutputInitial = {
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
 type NativeParams = TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+  'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string }
   'notebook.apply': import('./notebook-catalog.js').NotebookWrite
@@ -223,6 +224,7 @@ type NativeParams = TopicParameterMap & HostSettingsParameterMap & FileParameter
   'system.subscription.cancel': { subscriptionId: string }
 }
 type NativeResult = TopicResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+  'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null }
   'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
@@ -293,6 +295,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_RPC_HOST_SETTINGS_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
+  'settings.appearance.watch': 'long',
   'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
@@ -306,7 +309,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
-export type AgentMuxRpcStreamMethod = 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' |
+export type AgentMuxRpcStreamMethod = 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' |
   AgentMuxHostedStreamMethod
 export type AgentMuxRpcStreamParams<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcParams<M> &
   (M extends 'agent.output' ? { follow?: boolean } : Record<never, never>)
@@ -315,6 +318,7 @@ type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
   'browser.follow': { runOperation: import('./control.js').AgentMuxControlBrowserOperation | null;
     gap: { droppedThrough: number } | null }
   'toolkit.watch': { toolId: string }
+  'settings.appearance.watch': { observation: import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation }
   'system.metrics.watch': { observation: import('./metrics.js').MetricsObservation }
 }
 export type AgentMuxRpcStreamInitial<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcStreamInitialMap[M]
@@ -324,14 +328,14 @@ export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | (M extends AgentMuxHostedStreamMethod ? Extract<AgentMuxHostedStreamEvent, { type: 'snapshot' }>
     : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }
-    : { type: 'snapshot'; data: M extends 'toolkit.watch' ? import('./toolkit.js').ToolkitSnapshot : import('./metrics.js').MetricsObservation })
+    : { type: 'snapshot'; data: M extends 'toolkit.watch' ? import('./toolkit.js').ToolkitSnapshot : M extends 'settings.appearance.watch' ? import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation : import('./metrics.js').MetricsObservation })
 
 export function isAgentMuxRpcMethod(value: unknown): value is AgentMuxRpcMethod {
   return typeof value === 'string' && (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, value) ||
     Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, value))
 }
 export function isAgentMuxRpcStream(method: AgentMuxRpcMethod, params: Record<string, unknown>): method is AgentMuxRpcStreamMethod {
-  return method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' ||
+  return method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
     method === 'agent.output' || method === 'runtime.events' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch'
 }
