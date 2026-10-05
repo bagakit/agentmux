@@ -30,3 +30,5 @@
 .mobile-goals summary::after { content: '⌄'; margin-left: auto; padding-inline: 6px; }
 .mobile-goals details[open] > summary::after { transform: rotate(180deg); }
 .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font-size: 16px; min-width: 0; }
+.mobile-goal-editor-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mobile-goal-unknown > details pre { max-height: 35vh; overflow-y: auto; }

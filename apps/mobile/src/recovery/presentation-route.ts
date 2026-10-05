@@ -9,7 +9,10 @@ export type MobilePresentationRoute = {
   primary: MobilePrimaryWorkface | 'survey'; showSession: boolean; showGoalWork: boolean
   identity: MobileObjectReference | null
   profile: { identity: MobileObjectReference; sourcePath: string | null } | null
+  goals?: MobileGoalsContext
 }
+export type MobileGoalsContext = { goalId: string | null; mode: 'detail' | 'edit';
+  discussion: { goalId: string; tabId: string; agentSessionId: string | null } | null }
 const sourcePaths = ['MOTE.md', 'BEHAVIOR.md', 'SOUL.md', 'topic.md']
 function invalid(): never { throw new Error('设备原工作面引用无法完整核实；原记录保留。') }
 function object(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
@@ -52,7 +55,7 @@ export function retainObjectReference(identity: MobileObjectIdentity | null): Mo
       ...(content ? { contentReference: content } : {}) } } : {}) }
 }
 export function parsePresentationRoute(value: unknown): MobilePresentationRoute {
-  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'])
+  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['goals'])
   if (!['goals', 'topics', 'mote', 'focus', 'space', 'survey'].includes(String(v.primary)) ||
     typeof v.showSession !== 'boolean' || typeof v.showGoalWork !== 'boolean' || v.showGoalWork && !v.showSession) invalid()
   if (v.identity !== null) parseIdentity(v.identity)
@@ -60,6 +63,16 @@ export function parsePresentationRoute(value: unknown): MobilePresentationRoute 
     const p = object(v.profile, ['identity', 'sourcePath'])
     parseIdentity(p.identity)
     if (p.sourcePath !== null && !sourcePaths.includes(String(p.sourcePath))) invalid()
+  }
+  if (v.goals !== undefined) {
+    const goals = object(v.goals, ['goalId', 'mode', 'discussion'])
+    if (!(goals.goalId === null || text(goals.goalId, 256)) || !['detail', 'edit'].includes(String(goals.mode))
+      || goals.goalId === null && (goals.mode !== 'detail' || goals.discussion !== null)) invalid()
+    if (goals.discussion !== null) {
+      const discussion = object(goals.discussion, ['goalId', 'tabId', 'agentSessionId'])
+      if (discussion.goalId !== goals.goalId || !text(discussion.tabId, 256)
+        || !(discussion.agentSessionId === null || text(discussion.agentSessionId, 256))) invalid()
+    }
   }
   return structuredClone(value) as MobilePresentationRoute
 }
