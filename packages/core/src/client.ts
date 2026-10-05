@@ -2626,7 +2626,7 @@ export class AgentMuxClient {
         throw new AgentMuxError('This Provider does not support automatic native history observation. Explicit Refresh remains available.', 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED')
       }
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
-      unsubscribe = this.onEvent((event) => {
+      unsubscribe = this.publisher.onStatusEvent((event) => {
         // Only a true locator binding change can invalidate this watch. Ordinary
         // updatedAt/status/PTY events must never cause a rebind or a page read.
         if (event.type !== 'agent-session' || event.session.agentSessionId !== agentSessionId ||
