@@ -11,7 +11,7 @@ import { BrowserProfileManager } from '../../../src/main/browser-profile-manager
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
-import { NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL, type BrowserBounds, type BrowserSnapshot, type BrowserViewport } from '../../../src/shared/contracts'
+import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL, type BrowserBounds, type BrowserSnapshot, type BrowserViewport } from '../../../src/shared/contracts'
 import type { NativeOverlayRegion } from '../../../src/shared/native-overlay'
 
 const exec = promisify(execFile)
@@ -86,6 +86,9 @@ export async function installMoteNative(options: Options) {
     receipt.browserInputs.push({ at: Date.now(), ...input })
     if (!window.webContents.isDestroyed()) window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input)
   })
+  browsers.onNativeVisibilityChange = visibility => {
+    if (!window.webContents.isDestroyed()) window.webContents.send(NATIVE_BROWSER_VISIBILITY_CHANNEL, visibility)
+  }
   browsers.onNativeInput = (owner, input) => nativeChrome.forwardBrowserInput(owner, input)
   const handled: string[] = []
   const requireSender = (event: IpcMainInvokeEvent | IpcMainEvent) => {
@@ -185,6 +188,7 @@ export async function installMoteNative(options: Options) {
   handle('browser:close', (id: string) => browsers.close(id))
   handle('browser:cancelElementSelection', (id: string) => browsers.cancelElementSelection(id))
   handle('browser:setAnnotationMarkers', (id: string, navigationId: string, markers: Parameters<BrowserViewManager['setAnnotationMarkers']>[2]) => browsers.setAnnotationMarkers(id, navigationId, markers))
+  handle('ui:nativeBrowserVisibility', () => browsers.nativeBrowserVisibility())
   handle('ui:publishNativeOverlays', async (regions: NativeOverlayRegion[]) => {
     const published = clone(regions)
     const value = await nativeChrome.update(regions)
@@ -304,6 +308,14 @@ export async function installMoteNative(options: Options) {
     assert.ok(binding && !binding.contents.isDestroyed(), 'Read the original actual native Browser owner')
     return await binding.contents.executeJavaScript('window.nativeFixture?.facts()')
   }
+  async function pageActionGeometry(id: string) {
+    const binding = bindings.get(id)
+    assert.ok(binding && !binding.contents.isDestroyed(), 'Observe only the original actual Browser action')
+    const control = await binding.contents.executeJavaScript(`(()=>{const e=document.getElementById('native-proof-action'),r=e.getBoundingClientRect(),point={x:r.x+r.width/2,y:r.y+r.height/2};return {owner:window.nativeFixture.owner,point,hit:document.elementFromPoint(point.x,point.y)===e}})()`)
+    assert.equal(control.owner, id); assert.equal(control.hit, true)
+    return { ...control, bounds: binding.view.getBounds(), zoomFactor: binding.contents.getZoomFactor(),
+      navigationId: binding.snapshot.navigationId, webContentsId: binding.contents.id }
+  }
   async function withPageDebugger<T>(binding: BrowserBinding, work: (command: (method: string, params: Record<string, unknown>) => Promise<any>) => Promise<T>): Promise<T> {
     const debuggerApi = binding.contents.debugger, attachedHere = !debuggerApi.isAttached()
     if (attachedHere) debuggerApi.attach('1.3')
@@ -369,9 +381,9 @@ export async function installMoteNative(options: Options) {
     await saveReceipt()
     return observation
   }
-  async function verifyChromeControl(bounds: BrowserBounds, label: string) {
+  async function verifyChromeControl(bounds: BrowserBounds, label: string, worldPoint?: { x: number; y: number }, action: 'click' | 'move' = 'click') {
     labelName(label)
-    const observation: any = { label, action: 'original-chrome-click', passed: false, before: owners(),
+    const observation: any = { label, action: `original-chrome-${action}`, passed: false, before: owners(),
       mechanism: 'Trusted DevTools input to the exact actual topmost Chrome WebContents. Production NativeOverlaySurfaces forwards the real input-event to the original Renderer; no manual UI callback, physical hardware or OS-composition claim.' }
     receipt.inputs.push(observation)
     try {
@@ -382,7 +394,10 @@ export async function installMoteNative(options: Options) {
       assert.equal(projection.interactive, true); assert.equal(projection.paintStage, 'Chrome image')
       assert.equal(view.getVisible(), true); assert.equal(BrowserWindow.fromWebContents(contents), window)
       assert.deepEqual(view.getBounds(), bounds)
-      const point = { x: bounds.width / 2, y: bounds.height / 2 }, world = { x: bounds.x + point.x, y: bounds.y + point.y }
+      const point = worldPoint ? { x: worldPoint.x - bounds.x, y: worldPoint.y - bounds.y }
+        : { x: bounds.width / 2, y: bounds.height / 2 }
+      assert.ok(inside(point, { x: 0, y: 0, width: bounds.width, height: bounds.height }), 'The observed original Chrome point is within its exact owner')
+      const world = { x: bounds.x + point.x, y: bounds.y + point.y }
       const topmost = [...nativeChildren()].reverse().find(candidate => candidate.getVisible() && inside(world, candidate.getBounds()))
       assert.equal(topmost, view, 'Native control input must hit the actual topmost original Chrome owner')
       Object.assign(observation, { region: clone(projection.region), webContentsId: contents.id, ownerWindowId: window.id,
@@ -393,7 +408,7 @@ export async function installMoteNative(options: Options) {
       if (attachedHere) debuggerApi.attach('1.3')
       try {
         await debuggerApi.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
-        for (const type of ['mousePressed', 'mouseReleased']) await debuggerApi.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
+        if (action === 'click') for (const type of ['mousePressed', 'mouseReleased']) await debuggerApi.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
         await pause(80)
       } finally {
         contents.off('input-event', onInput)
@@ -402,8 +417,10 @@ export async function installMoteNative(options: Options) {
       observation.nativeEvents = events
       receipt.chromeInputEvents.push({ label, webContentsId: contents.id, events })
       assert.ok(events.some(input => input.type === 'mouseMove'))
-      assert.ok(events.some(input => input.type === 'mouseDown'))
-      assert.ok(events.some(input => input.type === 'mouseUp'))
+      if (action === 'click') {
+        assert.ok(events.some(input => input.type === 'mouseDown'))
+        assert.ok(events.some(input => input.type === 'mouseUp'))
+      } else assert.ok(events.every(input => input.type !== 'mouseDown' && input.type !== 'mouseUp'), 'Hover has no hidden click')
       observation.after = owners(); observation.passed = true
     } catch (error) {
       observation.failure = { name: (error as Error).name, message: (error as Error).message, stack: (error as Error).stack }
@@ -507,6 +524,7 @@ export async function installMoteNative(options: Options) {
     disposed = true
     for (const channel of handled) ipcMain.removeHandler(channel)
     ipcMain.off('mote-native:page-url', pageUrl)
+    browsers.onNativeVisibilityChange = undefined
     browsers.onNativeInput = undefined
     nativeChrome.dispose()
     browsers.dispose()
@@ -521,6 +539,6 @@ export async function installMoteNative(options: Options) {
     assert.equal(receipt.afterDispose.resources.browserViews, 0)
     await saveReceipt()
   }
-  return { receipt, browsers, nativeChrome, fixturePageUrl, owners, pageFacts, verifyPageInput, verifyChromeControl,
+  return { receipt, browsers, nativeChrome, fixturePageUrl, owners, pageFacts, pageActionGeometry, verifyPageInput, verifyChromeControl,
     verifyPageHover: (id: string, label: string) => verifyPageInput(id, label, 'move'), verifyPageEscape, captureNativeFrames, captureOsWindow, dispose }
 }

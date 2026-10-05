@@ -42,7 +42,7 @@ const binding = {
       return code
     }
     // Bind original bytes before asset loaders or the private API-boundary transform.
-    if (file.startsWith(repository + '/') && !file.includes('/node_modules/') && !inputs.has(file)) inputs.set(file, hash(await readFile(file)))
+    if (file.startsWith('/') && (file.startsWith(repository + '/') || file.includes('/node_modules/')) && !inputs.has(file)) inputs.set(file, hash(await readFile(file)))
     return null
   }, buildEnd() {
     // Vite records transitive PostCSS @import dependencies as watched files, even when they are
@@ -83,7 +83,7 @@ try {
   // Only the Renderer consumes current public Source exports. The native slice
   // above keeps its separately bound compiled SDK dependency scope.
   const aliases = []
-  for (const name of ['core', 'demand', 'layout']) {
+  for (const name of ['core', 'demand', 'layout', 'identity']) {
     const directory = join(repository, 'packages', name), manifestFile = join(directory, 'package.json')
     const bytes = await readFile(manifestFile), manifest = JSON.parse(bytes)
     inputs.set(manifestFile, hash(bytes))
@@ -102,6 +102,7 @@ try {
   }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
     resolve: { alias: aliases },
+    worker: { format: 'es' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     css: { postcss: { plugins: [stylesheetBinding] } },
     plugins: [binding, { name: 'private-mote-public-api-boundary', enforce: 'pre', transform(code, id) {
@@ -159,6 +160,9 @@ try {
     'Review the actual full images against the Mote shortcut SSOT. Capture success is not aesthetic approval. Exact imported source/style and compiled identities are in receipt.json.', ''].join('\n'))
 } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {
+  // Preserve actually consumed bytes even when compilation or the first owning assertion fails.
+  result.inputs = Object.fromEntries([...inputs].map(([file, digest]) => [relative(repository, file), digest]))
+  result.compiledSdkInputs = Object.fromEntries([...compiledSdkInputs].map(([file, code]) => [relative(repository, file), hash(code)]))
   const remaining = await listProbeProcesses(-1, privateRoot)
   result.cleanup = { remaining, privateRootRemoved: false }
   if (remaining.length === 0) { await rm(privateRoot, { recursive: true }); result.cleanup.privateRootRemoved = true }

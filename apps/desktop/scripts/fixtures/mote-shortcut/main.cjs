@@ -82,6 +82,7 @@ app.whenReady().then(async () => {
       assert.equal(current.ui.entryTarget, target)
       assert.equal(current.ui.panelTarget, target)
       assert.equal(current.ui.panelTopic, topic)
+      assert.equal(current.ui.panelRegion, current.tabs[target].layout.activeRegionId, 'The selected original discussion keeps its exact Region')
       assert.equal(current.ui.expanded, 'true')
       assert.equal(current.ui.panelVisible, true)
       assert.equal(current.ui.globalChrome, 0, 'Projection cannot copy Goals/Focus global chrome')
@@ -97,8 +98,10 @@ app.whenReady().then(async () => {
       assert.deepEqual(current.ui.choices.map(one => one.topicId).sort(), ['launcher:custom-coordinator', 'launcher:custom-research', 'launcher:leader'])
       assert.equal(current.ui.choices.length, 3, 'One choice per real object, regardless of Tab/Session count')
       assert.deepEqual(current.ui.actions.map(action => action.label).sort(),
-        ['Show archived Motes', 'Show Mote avatars only', 'Open Mote Space', 'Close Mote'].sort())
-      for (const action of current.ui.actions) {
+        ['Show archived Motes', 'Show Mote avatars only', 'Close Mote'].sort())
+      assert.equal(current.ui.spaceActions.length, 1, 'The original Tab row has exactly one Open in Space action')
+      assert.equal(current.ui.spaceActions[0].label, 'Open in Space')
+      for (const action of [...current.ui.actions, ...current.ui.spaceActions]) {
         assert.ok(action.width >= 20 && action.height >= 20, 'Original actions retain their actual hit areas')
         assert.ok(action.right <= win.getContentBounds().width && action.bottom <= win.getContentBounds().height)
       }
@@ -159,6 +162,91 @@ app.whenReady().then(async () => {
       ;(result.nativeEntryClearance ??= []).push({ label, entry: bounds, owner: entryOwner, points, near,
         closeInput, reopenInput, closedTarget: closed.ui.entryTarget, reopenedTarget: reopened.ui.panelTarget, owners: finalOwners })
     }
+    const firstPressInsidePreview = async (label, hoverFirst = false) => {
+      const browserId = 'private-browser-inside'
+      const stages = panel + '.querySelectorAll("[data-native-browser-stage=private-browser-inside]")'
+      await until('('+stages+').length===1 && (()=>{const v=('+stages+')[0].querySelector("video");return !!v?.srcObject && v.videoWidth>0 && v.videoHeight>0 && v.readyState>=2})()')
+      const preview = await read(`(()=>{const stage=(${stages})[0],video=stage.querySelector('video'),r=stage.getBoundingClientRect();const canvas=document.createElement('canvas');canvas.width=3;canvas.height=3;const ctx=canvas.getContext('2d');ctx.drawImage(video,0,0,3,3);return {presentationId:stage.dataset.browserPresentationId,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},videoWidth:video.videoWidth,videoHeight:video.videoHeight,streamActive:video.srcObject.active,tracks:video.srcObject.getTracks().map(track=>({id:track.id,readyState:track.readyState})),paused:video.paused,trackIds:video.srcObject.getTracks().map(track=>track.id),totalVideoFrames:video.getVideoPlaybackQuality().totalVideoFrames,pixels:[...ctx.getImageData(0,0,3,3).data],notice:stage.parentElement.querySelector('[role=status]')?.textContent?.trim()||'',navigationId:window.moteProof.facts().tabs['custom-browser-tab'].regions['custom-browser-region'].navigationId}})()`)
+      const proof = { label, preview, sourceBefore: native.owners(), pageBefore: await native.pageFacts(browserId), before: await facts() }
+      ;(result.nativeFirstPress ??= []).push(proof)
+      assert.equal(preview.presentationId, 'mote-floating-tab-slot:["__scratch__","original-mote-group","custom-browser-tab"]:browser:["__scratch__","original-mote-group","custom-browser-tab","custom-browser-region"]')
+      assert.ok(preview.bounds.width>0 && preview.bounds.height>0)
+      assert.equal(preview.notice, '', 'The actual original preview has no unconfirmed service window')
+      assert.equal(preview.streamActive,true,'The same actual preview MediaStream remains active')
+      assert.ok(preview.tracks.length>0 && preview.tracks.every(track=>track.readyState==='live'),'Every original preview track remains live')
+      assert.equal(preview.paused,false,'The actual original video remains playing')
+      assert.ok(preview.totalVideoFrames>0, 'The actual media element has presented an original compositor frame')
+      assert.ok(preview.pixels.some((_,i,a)=>i%4===0 && a[i]>220 && a[i+1]>240 && a[i+2]>225 && a[i+3]===255), 'The live preview contains actual nonblack original page paint')
+      const registration = native.receipt.presentationOperations.filter(one=>one.method==='browser:registerPresentation' && one.args[0].occurrence.presentationId===preview.presentationId).at(-1)
+      assert.ok(registration?.result?.leaseId)
+      const leaseId=registration.result.leaseId, arm=native.receipt.presentationOperations.filter(one=>one.method==='browser:armPresentationCapture' && one.args[0]===leaseId).at(-1)
+      assert.ok(arm?.result?.captureId)
+      const captureId=arm.result.captureId, ack=native.receipt.presentationOperations.find(one=>one.method==='browser:ackPresentationCapture' && one.args[0]===captureId && one.args[1].outcome==='ready')
+      assert.ok(ack); assert.deepEqual([...ack.args[1].trackIds].sort(), [...preview.trackIds].sort())
+      proof.capture = { leaseId, captureId, readyAck: ack }
+      await capture(label+'-live-preview')
+      proof.foregroundBefore = { pid: process.pid, windowId: win.id, focused: win.isFocused(), visible: win.isVisible() }
+      assert.equal(proof.sourceBefore.window.pid, process.pid); assert.equal(proof.sourceBefore.window.id, win.id)
+      if (!win.isFocused() && process.platform==='darwin') {
+        const script="ObjC.import('AppKit');function run(args){const pid=Number(args[0]),target=$.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);if(!target)throw Error('Exact private application PID missing');const before=$.NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;const accepted=target.activateWithOptions(1);return JSON.stringify({targetPID:pid,beforePID:Number(before),accepted:Boolean(accepted),targetBundleURL:ObjC.unwrap(target.bundleURL.absoluteString)})}"
+        proof.privateActivation=JSON.parse(require('node:child_process').execFileSync('/usr/bin/osascript',['-l','JavaScript','-e',script,String(process.pid)],{encoding:'utf8',timeout:5000}))
+        assert.equal(proof.privateActivation.targetPID, process.pid)
+        win.focus()
+      }
+      const focusDeadline=Date.now()+1500
+      while(!win.isFocused() && Date.now()<focusDeadline) await pause(20)
+      proof.foregroundAtFirstPress={focused:win.isFocused(),pid:process.pid,windowId:win.id}
+      assert.equal(win.isFocused(),true,'The exact private Window must really be foreground before a first press')
+      const action=await native.pageActionGeometry(browserId),r=preview.bounds,scale=Math.min(r.width/preview.videoWidth,r.height/preview.videoHeight)
+      const world={x:r.x+(r.width-preview.videoWidth*scale)/2+action.point.x*action.zoomFactor/action.bounds.width*preview.videoWidth*scale,
+        y:r.y+(r.height-preview.videoHeight*scale)/2+action.point.y*action.zoomFactor/action.bounds.height*preview.videoHeight*scale}
+      assert.equal(action.webContentsId,proof.sourceBefore.browsers.find(one=>one.browserId===browserId).webContentsId)
+      const domHit=await read(`(()=>{const stage=(${stages})[0];return stage.contains(document.elementFromPoint(${world.x},${world.y}))})()`)
+      assert.equal(domHit,true,'The observed original preview point hits the exact original stage')
+      const zoom=win.webContents.getZoomFactor(),owners=await waitNative(one=>one.chrome.some(chrome=>chrome.drawn&&chrome.interactive&&chrome.region.browserStages?.some(stage=>stage.browserId===browserId)))
+      const popup=owners.chrome.filter(chrome=>chrome.region.browserStages?.some(stage=>stage.browserId===browserId))
+      assert.equal(popup.length,1)
+      if (hoverFirst) {
+        const hoverStart=native.receipt.presentationOperations.length
+        proof.previewHover=await native.verifyChromeControl(popup[0].bounds,label+'-hover-through-original-chrome',{x:world.x*zoom,y:world.y*zoom},'move')
+        assert.equal(proof.previewHover.passed,true,JSON.stringify(proof.previewHover.failure))
+        await pause(230)
+        proof.afterHover=await facts(); proof.pageAfterHover=await native.pageFacts(browserId)
+        assert.equal(proof.afterHover.floating.open,false,'Actual hover keeps the original popover preview unpinned')
+        assert.equal(await read(panel+'.dataset.motePresentation'),'preview')
+        assert.equal(proof.afterHover.ui.panelTarget,'custom-browser-tab')
+        assert.deepEqual(proof.pageAfterHover,proof.pageBefore,'Hover does not inject original-page input')
+        proof.hoverOperations=native.receipt.presentationOperations.slice(hoverStart)
+        assert.equal(proof.hoverOperations.filter(one=>one.method==='browser:activatePresentation').length,0,'Hover has no prepare, commit or select')
+        await capture(label+'-hover-preview')
+      }
+      const operationStart=native.receipt.presentationOperations.length
+      proof.action=action; proof.world=world
+      proof.chromeInput=await native.verifyChromeControl(popup[0].bounds,label+'-first-press',{x:world.x*zoom,y:world.y*zoom})
+      assert.equal(proof.chromeInput.passed,true,JSON.stringify(proof.chromeInput.failure))
+      const deadline=Date.now()+1500
+      do {proof.pageAfter=await native.pageFacts(browserId);if(proof.pageAfter.clicks===proof.pageBefore.clicks+1)break;await pause(25)} while(Date.now()<deadline)
+      proof.operations=native.receipt.presentationOperations.slice(operationStart)
+      assert.equal(proof.pageAfter.clicks,proof.pageBefore.clicks+1,'The first preview press reaches the same original page exactly once, without a second click')
+      assert.equal(proof.pageAfter.lastTrusted,true)
+      assert.deepEqual(proof.pageAfter.events.slice(proof.pageBefore.events.length),[
+        {type:'mousedown',target:'native-proof-action',trusted:true},{type:'mouseup',target:'native-proof-action',trusted:true},{type:'click',target:'native-proof-action',trusted:true}])
+      const prepare=proof.operations.filter(one=>one.method==='browser:activatePresentation' && one.args[1].kind==='prepare-first-press')
+      const commit=proof.operations.filter(one=>one.method==='browser:activatePresentation' && one.args[1].kind==='commit-first-press')
+      assert.equal(prepare.length,1); assert.equal(commit.length,1)
+      assert.equal(prepare[0].args[0],leaseId);assert.equal(prepare[0].args[1].captureId,captureId);assert.equal(prepare[0].args[1].navigationId,action.navigationId)
+      assert.equal(prepare[0].result?.outcome,'prepared');assert.equal(commit[0].args[0],leaseId)
+      assert.equal(commit[0].args[1].inputScopeId,prepare[0].result.inputScopeId);assert.equal(commit[0].result?.outcome,'input-dispatched')
+      assert.equal(proof.operations.filter(one=>one.method==='browser:activatePresentation'&&one.args[1].kind==='select').length,0,'No fixture preselects a Browser input owner')
+      proof.after=await facts();proof.sourceAfter=await waitNative(one=>one.browsers.some(browser=>browser.browserId===browserId&&browser.drawn&&browser.bounds.width>0))
+      assert.equal(proof.after.floating.open,true,'Only the actual first page press naturally pins the preview')
+      assert.equal(await read(panel+'.dataset.motePresentation'),'pinned')
+      for(const key of ['tabs','layouts','activeWorkspaceId','mainSurface','drafts','outbox','runs']) assert.deepEqual(proof.after[key],proof.before[key],'A first preview press preserves '+key)
+      assert.deepEqual(proof.after.focus.execution,proof.before.focus.execution)
+      const behind=one=>one.browsers.filter(browser=>browser.browserId==='private-browser-behind').map(({browserId,webContentsId,bounds,drawn,attached})=>({browserId,webContentsId,bounds,drawn,attached}))
+      assert.deepEqual(behind(proof.sourceAfter),behind(proof.sourceBefore),'The original background Browser owner remains healthy')
+      proof.passed=true
+    }
     const choose = async (topic, target) => {
       const choice = panel + '.querySelector(' + JSON.stringify('[data-mote-topic-id="' + topic + '"]') + ')'
       const geometry = await read('(()=>{const e=' + choice + ',scroller=e.closest(".mote-chooser__choices"),r=e.getBoundingClientRect(),s=scroller.getBoundingClientRect();return {x:s.x+s.width/2,y:s.y+s.height/2,deltaX:r.right>s.right?r.right-s.right:r.x<s.x?r.x-s.x:0}})()')
@@ -170,12 +258,12 @@ app.whenReady().then(async () => {
       if (target) {
         await until(panel + '.dataset.moteTargetTopic===' + JSON.stringify(topic))
         if ((await facts()).ui.panelTarget !== target) {
-          const toggle = panel + '.querySelector("button[aria-label=\'Show Mote discussions\']")'
-          if (await read(toggle + '?.getAttribute("aria-expanded")==="false"')) {
-            await click(toggle)
-            await until(toggle + '?.getAttribute("aria-expanded")==="true"')
-          }
-          await click(panel + '.querySelector(' + JSON.stringify('button[data-workbench-tab-id="' + target + '"]') + ')')
+          const originalTab = (await facts()).tabs[target]
+          assert.equal(originalTab?.topicId, topic, 'The requested original discussion belongs to this exact Mote')
+          const title = originalTab.name || 'Discussion'
+          const matches = 'Array.from(' + panel + '.querySelectorAll(".mote-context-notice button")).filter(button => button.textContent === ' + JSON.stringify(title) + ' && button.getClientRects().length > 0)'
+          assert.equal(await read(matches + '.length'), 1, 'Choose a discussion exposes exactly this original discussion by its unique visible name')
+          await click('(()=>{const buttons=' + matches + ';if(buttons.length!==1)throw new Error("Original discussion choice is no longer unique");return buttons[0]})()')
         }
         return visible(target, topic)
       }
@@ -299,7 +387,7 @@ app.whenReady().then(async () => {
       await until('!/could not be read/i.test(' + panel + '.textContent)')
       await choose('launcher:custom-coordinator', 'custom-mote-tab')
       const beforeFull = await facts()
-      await click(panel + '.querySelector("button[aria-label=\'Open Mote Space\']")')
+      await click('(()=>{const buttons=' + panel + '.querySelectorAll("button[aria-label=\'Open in Space\']");if(buttons.length!==1)throw new Error("The original Open in Space action must be unique");return buttons[0]})()')
       await until('!' + panel + '?.matches(":popover-open") && window.moteProof.facts().mainSurface==="workbench"')
       current = await facts()
       assert.equal(current.activeWorkspaceId, '__scratch__')
@@ -324,8 +412,10 @@ app.whenReady().then(async () => {
       await until('!' + panel + '?.matches(":popover-open")')
       result.step = 'native-browser-inside-popover-composition-and-input'
       await pin(); await choose('launcher:custom-coordinator', 'custom-browser-tab')
-      await waitNative(owners => owners.browsers.some(one => one.browserId === 'private-browser-inside' && one.drawn && one.bounds.width > 0 && !one.loading) && owners.chrome.length > 0 && owners.chrome.every(one => one.interactive))
+      await waitNative(owners => owners.chrome.length > 0 && owners.chrome.every(one => one.interactive))
       await verifyNativeEntryClearance('browser-inside-mote')
+      await firstPressInsidePreview('browser-inside-mote')
+      await waitNative(owners => owners.browsers.some(one => one.browserId === 'private-browser-inside' && one.drawn && one.bounds.width > 0 && !one.loading) && owners.chrome.length > 0 && owners.chrome.every(one => one.interactive))
       const insideOs = await native.captureOsWindow('browser-inside-mote')
       const insideFrames = await native.captureNativeFrames('browser-inside-mote')
       assert.equal(insideFrames.passed, true, JSON.stringify(insideFrames.failure))
@@ -338,17 +428,13 @@ app.whenReady().then(async () => {
       await close()
       await move(await pointFor(entry))
       await until(panel + '?.matches(":popover-open") && ' + panel + '.dataset.motePresentation==="preview"')
+      await firstPressInsidePreview('browser-inside-mote-reopened-preview', true)
       await waitNative(owners => owners.browsers.some(one => one.browserId === 'private-browser-inside' && one.drawn) && owners.chrome.length > 0 && owners.chrome.every(one => one.interactive))
-      const bridgePoint = await read('(()=>{const e=' + entry + '.getBoundingClientRect();return {x:e.x+e.width/2,y:e.y-3}})()')
-      await move(bridgePoint)
-      const insideHover = await native.verifyPageHover('private-browser-inside', 'browser-inside-mote-hover-bridge')
+      const insideHover = await native.verifyPageHover('private-browser-inside', 'browser-inside-mote-native-hover-after-first-press')
       assert.equal(insideHover.passed, true, JSON.stringify(insideHover.failure))
       await pause(230)
       await visible('custom-browser-tab', 'launcher:custom-coordinator')
-      assert.equal(await read(panel + '.dataset.motePresentation'), 'preview')
-      const insidePreviewClick = await native.verifyPageInput('private-browser-inside', 'browser-inside-mote-explicit-pin')
-      assert.equal(insidePreviewClick.passed, true, JSON.stringify(insidePreviewClick.failure))
-      await until(panel + '.dataset.motePresentation==="pinned"')
+      assert.equal((await facts()).floating.open, true, 'The one actual first page press pins the preview before later native hover')
       result.step = 'native-original-editor-ordinary-escape'
       // Real DevTools composition starts in the page, but CDP raw Escape reports
       // before-input-event.isComposing=false. Keep that diagnostic separately; it
