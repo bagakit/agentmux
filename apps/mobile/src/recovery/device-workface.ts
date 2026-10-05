@@ -13,6 +13,8 @@ import { mobileGoalDraftKey, parseMobileGoalDraft, parseMobileGoalDrafts, parseM
   MobileGoalDraftInvalidError, type MobileGoalDraft, type MobileGoalDraftCommit } from './goal-drafts'
 import { mobileKnowledgeDraftKey, parseMobileKnowledgeDraft, parseMobileKnowledgeDrafts, parseMobileKnowledgeDraftConflicts,
   MobileKnowledgeDraftInvalidError, type MobileKnowledgeDraft, type MobileKnowledgeDraftCommit } from './knowledge-drafts'
+import { moteFileDraftKey, parseMoteFileDraft, parseMoteFileDrafts, parseMoteFileDraftConflicts,
+  MoteFileDraftInvalidError, MoteFileDraftCapacityError, type MoteFileDraft, type MoteFileDraftCommit } from './mote-file-drafts'
 
 export { DEVICE_WORKFACE_KEY } from './device-storage-lock'
 export type MobilePanel = 'conversation' | 'sessions' | 'terminal'
@@ -58,7 +60,8 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[] }
+  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
+  moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -163,6 +166,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalDraftConflicts')) keys.push('goalDraftConflicts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'knowledgeDrafts')) keys.push('knowledgeDrafts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'knowledgeDraftConflicts')) keys.push('knowledgeDraftConflicts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'moteFileDrafts')) keys.push('moteFileDrafts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'moteFileDraftConflicts')) keys.push('moteFileDraftConflicts')
   const v = record(value, keys)
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
@@ -177,6 +182,8 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (v.goalDraftConflicts !== undefined) parseMobileGoalDraftConflicts(v.goalDraftConflicts)
   if (v.knowledgeDrafts !== undefined) parseMobileKnowledgeDrafts(v.knowledgeDrafts)
   if (v.knowledgeDraftConflicts !== undefined) parseMobileKnowledgeDraftConflicts(v.knowledgeDraftConflicts)
+  if (v.moteFileDrafts !== undefined) parseMoteFileDrafts(v.moteFileDrafts)
+  if (v.moteFileDraftConflicts !== undefined) parseMoteFileDraftConflicts(v.moteFileDraftConflicts)
   if (Object.hasOwn(v, 'presentation')) parsePresentationRoute(v.presentation)
   if (v.fileUploads !== undefined) {
     if (!Array.isArray(v.fileUploads) || v.fileUploads.length > MAX_ENTRIES) throw invalid()
@@ -395,6 +402,27 @@ export class DeviceWorkfaceStore {
       const draft = committed.knowledgeDrafts?.find(item => mobileKnowledgeDraftKey(item.topicId, item.entryId, item.scope) === key) ?? null
       const applied = sameValue(draft, captured)
       const conflict = applied ? null : committed.knowledgeDraftConflicts?.find(item => sameValue(item, captured)) ?? null
+      return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
+    })
+  }
+  /** One exact Mote file draft; business writes still belong to the public Files owner. */
+  editMoteFileDraft(expected: MoteFileDraft | null, next: MoteFileDraft, recordId: string | null): Promise<MoteFileDraftCommit> {
+    const captured = parseMoteFileDraft(next), previous = expected === null ? null : parseMoteFileDraft(expected)
+    const key = moteFileDraftKey(captured.scope)
+    if (previous && moteFileDraftKey(previous.scope) !== key) throw new MoteFileDraftInvalidError('原文件、Mote 或 Host 不同；正文保留，本次保存未发送。')
+    return this.update(value => {
+      const drafts = value.moteFileDrafts ?? [], current = drafts.find(item => moteFileDraftKey(item.scope) === key) ?? null
+      let result: DeviceWorkface
+      if (!sameValue(current, previous) && !sameValue(current, captured)) {
+        const conflicts = value.moteFileDraftConflicts ?? []
+        result = { ...value, moteFileDraftConflicts: conflicts.some(item => sameValue(item, captured)) ? conflicts : [...conflicts, captured] }
+      } else result = { ...value, moteFileDrafts: [...drafts.filter(item => moteFileDraftKey(item.scope) !== key), captured] }
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BYTES) throw new MoteFileDraftCapacityError('设备原工作面超过备份范围；本次设备更新未应用，原记录与当前正文保留。')
+      return result
+    }, recordId, committed => {
+      const draft = committed.moteFileDrafts?.find(item => moteFileDraftKey(item.scope) === key) ?? null
+      const applied = sameValue(draft, captured)
+      const conflict = applied ? null : committed.moteFileDraftConflicts?.find(item => sameValue(item, captured)) ?? null
       return { recordId: committed.recordId ?? null, applied, draft: structuredClone(draft), conflict: structuredClone(conflict) }
     })
   }

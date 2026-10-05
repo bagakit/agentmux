@@ -1,25 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxMotePresentation } from '@agentmux/core/control'
-import type { FileReadResult } from '@agentmux/core/files'
+import { parseFileReadResult, type FileReadResult } from '@agentmux/core/files'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileObjectIdentity } from './MobileIdentity'
+import { isMoteFilePath, moteFileSources } from '../recovery/mote-file-drafts'
+import { createBrowserPlatform } from '../platform/browser'
+import { MobileMoteFileEditor } from './MobileMoteFileEditor'
 
 type Props = { identity: MobileObjectIdentity; client: AgentMuxHostedClient | null; visible?: boolean;
   sourcePath?: string | null; onSourceChange?(path: string | null): void;
+  copyText?: ClientUiPlatform['copyText'];
   onOpenGoals?(agentSessionId: string): void; onBackChange?(back: (() => void) | null): void }
-const sources = [
-  { path: 'MOTE.md', label: 'MOTE.md' },
-  { path: 'BEHAVIOR.md', label: '合作方式 · BEHAVIOR.md' },
-  { path: 'SOUL.md', label: '自我设定 · SOUL.md' },
-  { path: 'topic.md', label: '原摘要 · topic.md' }
-] as const
-/** Saved facts and original source files only. This surface cannot create, configure or operate a Run. */
+/** Original source text and saved facts. This surface cannot create, configure or operate a Run. */
 export function MobileMoteProfile(props: Props) {
   const content = props.identity.mote?.contentReference ?? props.identity.mote?.facts?.content
   return <MoteProfile key={JSON.stringify([props.identity.mote?.spaceId, content?.hostId, content?.workspaceId, content?.workspacePath, content?.zoneId])} {...props} />
 }
-function MoteProfile({ identity, client, visible = true, sourcePath, onSourceChange, onOpenGoals, onBackChange }: Props) {
+function MoteProfile({ identity, client, visible = true, sourcePath, onSourceChange, onOpenGoals, onBackChange, copyText }: Props) {
   const spaceId = identity.mote?.spaceId
   const reference = identity.mote?.contentReference ?? identity.mote?.facts?.content ?? null
   const [facts, setFacts] = useState<AgentMuxMotePresentation | null>(() => identity.mote?.facts ? { ...identity.mote.facts, content: reference } : null)
@@ -28,6 +27,8 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
   const controlled = sourcePath !== undefined
   const selected = controlled ? sourcePath : localSource
   const [files, setFiles] = useState<Record<string, FileReadResult>>({})
+  const [observations, setObservations] = useState<Record<string, FileReadResult>>({})
+  const [editing, setEditing] = useState(false)
   const [fileIssue, setFileIssue] = useState('')
   const intent = useRef(0)
   const originalContent = useRef(reference)
@@ -56,15 +57,17 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
     return () => { current = false }
   }, [client, spaceId, visible, refresh])
   const changeSource = useCallback((path: string | null) => {
+    setEditing(false)
     if (!controlled) setLocalSource(path)
     onSourceChange?.(path)
   }, [controlled, onSourceChange])
   const backToProfile = useCallback(() => { intent.current += 1; setReading(false); changeSource(null) }, [changeSource])
-  useEffect(() => {
+  const backToReading = useCallback(() => setEditing(false), [])
+  useLayoutEffect(() => {
     if (!visible || !onBackChange) return
-    onBackChange(selected ? backToProfile : null)
+    onBackChange(selected ? editing ? backToReading : backToProfile : null)
     return () => onBackChange?.(null)
-  }, [Boolean(selected), visible, onBackChange, backToProfile])
+  }, [Boolean(selected), editing, visible, onBackChange, backToProfile, backToReading])
   const content = facts?.content ?? originalContent.current
   const loadSource = useCallback(async (path: string) => {
     const token = ++intent.current
@@ -73,9 +76,16 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
     }
     setReading(true); setFileIssue('')
     try {
-      const read = await client.forwardRpc('file.read', { zoneId: content.zoneId, spaceId, path,
-        expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } })
+      const owner = client.runtimeOwnerIdentity?.()
+      const params = { zoneId: content.zoneId, spaceId, path,
+        expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }
+      const read = parseFileReadResult(await client.forwardRpc('file.read', params), params)
       if (token !== intent.current) return
+      const currentOwner = client.runtimeOwnerIdentity?.()
+      if (owner && (!currentOwner || currentOwner.runtimeId !== owner.runtimeId || currentOwner.ownerInstanceId !== owner.ownerInstanceId)) {
+        setFileIssue('原 Host 读取归属已变化；原引用与已确认正文保留，请重新核对原文件。'); return
+      }
+      setObservations(previous => ({ ...previous, [path]: read }))
       if (read.result.status === 'read') {
         setFiles(previous => ({ ...previous, [path]: read }))
         setFileIssue('')
@@ -95,11 +105,17 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
     {issue && <p role="status">{issue}</p>}
     {queryDiagnostic && <details><summary>上次资料查询诊断</summary><p>{queryDiagnostic}</p></details>}
     {facts?.issue && <p role="status">{facts.issue}</p>}
-    {selected ? <section className="mobile-mote-source" aria-label="原 Mote 文件阅读">
+    {selected && editing && spaceId && content && isMoteFilePath(selected) ? <MobileMoteFileEditor
+      key={JSON.stringify([spaceId, selected, content])} target={{ spaceId, path: selected, reference: content,
+        observation: observations[selected] ?? files[selected] ?? null }} client={client} visible={visible}
+      copyText={copyText ?? createBrowserPlatform().copyText} onClose={backToReading}
+      onRead={() => { void loadSource(selected) }}
+      onSaved={() => { void loadSource(selected); setRefresh(value => value + 1) }} /> : selected ? <section className="mobile-mote-source" aria-label="原 Mote 文件阅读">
       <button type="button" className="mobile-text-button" onClick={backToProfile}>返回 Profile</button>
       <h3>{selected}</h3>
       <button type="button" className="mobile-text-button" onClick={() => { void loadSource(selected) }}>刷新原文件</button>
       {reading && <p role="status">正在读取原文件…</p>}
+      {spaceId && content && isMoteFilePath(selected) && <button type="button" className="mobile-text-button" onClick={() => setEditing(true)}>编辑原稿</button>}
       {fileIssue && <p role="status">{fileIssue}</p>}
       {document && <><AgentMarkdown content={document.content} sourcePath={document.path} {...(read?.resource?.workspacePath ? { workspaceRoot: read.resource.workspacePath } : {})} />
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
@@ -111,7 +127,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       {main && <details><summary>主对话原引用</summary><dl>{Object.entries(main).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
       {facts?.quickMode.status === 'unconfirmed' && <p role="status">{facts.quickMode.message}</p>}
       {main && onOpenGoals && <button type="button" className="mobile-menu-row" onClick={() => onOpenGoals(main.sessionId)}><span>主对话的目标与结果</span></button>}
-      <div className="mobile-mote-profile__sources"><h3>原资料</h3>{sources.map(source => <button type="button" className="mobile-menu-row" key={source.path} aria-label={source.label} onClick={() => changeSource(source.path)}><span>{source.label}</span></button>)}</div>
+      <div className="mobile-mote-profile__sources"><h3>原资料</h3>{moteFileSources.map(source => <button type="button" className="mobile-menu-row" key={source.path} aria-label={source.label} onClick={() => changeSource(source.path)}><span>{source.label}</span></button>)}</div>
       <p>资料来自已保存的原文件；当前讨论保留原上下文。</p>
       <button type="button" className="mobile-text-button" onClick={() => setRefresh(value => value + 1)}>刷新原资料</button>
     </>}
