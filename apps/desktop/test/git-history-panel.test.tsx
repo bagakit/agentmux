@@ -434,7 +434,9 @@ describe('History viewport work and controlled boundary', () => {
     history.mockResolvedValue(page(chain(100)))
     await render()
     const before = controls
-    await render(); await render(false); await render(true)
+    await render()
+    expect(controls).toBe(before)
+    await render(false); await render(true)
     expect(controls.loadMore).toBe(before.loadMore)
     expect(controls.refresh).toBe(before.refresh)
     expect(controls.selectReference).toBe(before.selectReference)
@@ -538,11 +540,28 @@ describe('History viewport work and controlled boundary', () => {
     expect(originalOwner.captureWindow()?.key).toBe(captured.key)
   })
 
+  it('selects a durable reference during layout before the old enabled effect can read All branches', async () => {
+    const reference = 'refs/heads/main'
+    history.mockResolvedValue(page(chain(100), false, { ...snapshot, selectedRef: reference }))
+    function Restored() {
+      const value = useGitHistory(workspace, true)
+      useLayoutEffect(() => { value.selectReference(reference) }, [value.selectReference])
+      return createElement(GitHistoryPanel, { workspace, history: value, onSelectCommit: () => {} })
+    }
+    await act(async () => root.render(createElement(Restored)))
+    expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: reference })
+    expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe(reference)
+    expect(rows()).toHaveLength(21)
+  })
+
   it('opens repository history as a separate explicit action without selecting a fabricated latest commit', async () => {
     history.mockResolvedValue(page(chain(100)))
     const openRepository = vi.fn(), choose = vi.fn()
     function Owner() { const value = useGitHistory(workspace, true); return createElement(GitHistoryPanel, { workspace, history: value, onSelectCommit: choose, onOpenRepository: openRepository }) }
     await act(async () => root.render(createElement(Owner)))
+    const entry = host.querySelector<HTMLElement>('[aria-label="Open repository history"]')!
+    expect(entry.textContent).toBe('Repository history')
+    expect(getComputedStyle(entry).flexShrink).toBe('0')
     await click('Open repository history')
     expect(openRepository).toHaveBeenCalledExactlyOnceWith()
     expect(choose).not.toHaveBeenCalled()
