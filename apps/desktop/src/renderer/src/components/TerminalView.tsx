@@ -4,7 +4,7 @@ import { createTerminalInteractionObservation } from '../lib/terminal-interactio
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
-import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal } from '@agentmux/core/control'
+import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal, RendererTerminalWriteContext } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
@@ -499,6 +499,7 @@ export function TerminalView({
     // A const the closures below can capture without TypeScript re-widening it to null.
     const terminalRoot = root
     const terminalGeneration = ++terminalGenerationRef.current
+    const performanceInstance = rendererPerformance.allocateTerminalInstance()
     let linkPreviewWrites = 0
     viewportMemoryRef.current = { kind: 'latest' }
     setHydrating(true)
@@ -612,15 +613,18 @@ export function TerminalView({
         setLinkPreview({ ...preview, placement })
       }, 350)
     }
-    async function writeTerminal(data: string | Uint8Array): Promise<void> {
+    async function writeTerminal(data: string | Uint8Array, cause: RendererTerminalWriteContext['cause']): Promise<void> {
       const observationStarted = rendererPerformance.start()
       const observationVisible = visibleRef.current
+      const observationContext: RendererTerminalWriteContext = { hostId: session.control.hostId,
+        sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id,
+        runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance, cause }
       linkPreviewWrites++
       clearLinkPreview()
       try {
         await terminalWrite(terminal, data)
       } finally {
-        rendererPerformance.terminalWrite(observationVisible, data, observationStarted)
+        rendererPerformance.terminalWrite(observationVisible, data, observationStarted, observationContext)
         linkPreviewWrites--
         if (terminalGenerationRef.current === terminalGeneration) clearLinkPreview()
       }
@@ -949,16 +953,16 @@ export function TerminalView({
       setHasOutput(true)
     }
 
-    const writeOutput = async (data: Uint8Array): Promise<void> => {
+    const writeOutput = async (data: Uint8Array, cause: 'live' | 'history'): Promise<void> => {
       if (disposed) return
-      await writeTerminal(data)
+      await writeTerminal(data, cause)
       kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, kittyOutputDecoder.decode(data, { stream: true }))
       if (!disposed) setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
     }
     const writeHistoricalOutput = async (data: Uint8Array): Promise<void> => {
       historicalOutputDepth++
       try {
-        await writeOutput(data)
+        await writeOutput(data, 'history')
       } finally {
         historicalOutputDepth--
       }
@@ -1017,14 +1021,14 @@ export function TerminalView({
             if (checkpoint.restoreScrollbackRows !== null) terminal.options.scrollback = checkpoint.restoreScrollbackRows
             try {
               await restoreTerminalCheckpoint(step.restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), async (data) => {
-                if (!disposed) await writeTerminal(data)
+                if (!disposed) await writeTerminal(data, 'checkpoint')
               })
               if (disposed) return
               if (checkpoint.size.cols !== checkpoint.restoreSize.cols || checkpoint.size.rows !== checkpoint.restoreSize.rows) {
                 viewport.acceptOwnerSize(checkpoint.size)
               }
               await restoreTerminalCheckpoint(step.restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes), async (data) => {
-                if (!disposed) await writeTerminal(data)
+                if (!disposed) await writeTerminal(data, 'checkpoint')
               })
             } finally {
               terminal.options.scrollback = scrollback
@@ -1058,9 +1062,9 @@ export function TerminalView({
               if (composed.gap) throw new Error('Refresh does not cover this Region’s displayed byte cursor.')
               if (composed.dataBytes.byteLength) await hydrateTerminalReplay([
                 { dataBytes: composed.dataBytes, endByte: composed.cursor }
-              ], writeOutput)
+              ], data => writeOutput(data, 'history'))
               cursor = composed.cursor
-            } else cursor = await hydrateTerminalReplay(batch, writeOutput) ?? cursor
+            } else cursor = await hydrateTerminalReplay(batch, data => writeOutput(data, 'history')) ?? cursor
           }
         }
         resizeRevision = snapshot.resizeRevision
@@ -1161,7 +1165,7 @@ export function TerminalView({
         geometrySteps = 0
         const data = composed.dataBytes
         const nextCursor = composed.cursor
-        await writeOutput(data)
+        await writeOutput(data, 'live')
         cursor = nextCursor
         if (liveOutputQueue.length > 0) await yieldTerminalWork()
       }

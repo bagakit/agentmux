@@ -131,6 +131,9 @@
 .performance-work-cell > strong { font-size:var(--fs-meta); font-weight:550; }
 .performance-work-cell small { display:block; color:var(--text-3); font-size:var(--fs-meta); line-height:1.4; }
 .performance-work-cell > span { font-variant-numeric:tabular-nums; padding-top:var(--sp-2); }
+.performance-work-cell { min-width:0; }
+.performance-peak { overflow-wrap:anywhere; }
+.performance-peak > span { display:block; }
 @media(max-width:400px) {
  .performance-resource-row,.performance-attribution > .performance-table-head { grid-template-columns:minmax(0,1fr) 90px 68px; }
  .performance-heat-cell { padding-inline:var(--sp-1); }
