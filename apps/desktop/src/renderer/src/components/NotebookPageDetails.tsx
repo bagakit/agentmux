@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, MoreHorizontal, ArrowUpRight, ChevronRight, FolderInput, History, Link, Save } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notebookFingerprint, notebookPageArchiveRoot, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -14,6 +14,17 @@ import { spatialSources } from '../../../shared/space-addresses'
 import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
+
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeActionOpenFolderIcon = semanticIconComponent('action.open-folder')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
+const ThemeActionMoreIcon = semanticIconComponent('action.more')
+const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
+const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+const ThemeActionSaveIcon = semanticIconComponent('action.save')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+
 
 export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const visible = useWorkbenchPresentationActive()
@@ -62,26 +73,26 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const events = library?.trail.filter(event => event.noteId === page.noteId).slice().reverse() ?? []
   const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored' }
   return <header className="notebook-page-heading" aria-label="Page details">
-    <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}>{book?.name ?? page.notebookId}<ChevronRight size={12} /></button>
+    <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}>{book?.name ?? page.notebookId}<ThemeNavigationDisclosureIcon size={12} /></button>
     <TextInput className="notebook-page-title" aria-label="Page title" value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
       onFocus={() => setEditing(true)} onChange={event => setTitle(event.target.value)} onBlur={() => { setEditing(false); if (cancelTitle.current) { cancelTitle.current = false; return } void rename() }}
       onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') { cancelTitle.current = true; setTitle(page.title); event.currentTarget.blur() } }} />
     <div className="notebook-page-actions">{(['move', 'sources', 'history'] as const).map(kind => {
-      const Icon = kind === 'move' ? FolderInput : kind === 'sources' ? Link : History
+      const Icon = kind === 'move' ? ThemeActionOpenFolderIcon : kind === 'sources' ? ThemeObjectLinkIcon : ThemeObjectHistoryIcon
       return <button className="note-text-button" key={kind} aria-label={kind === 'move' ? 'Move page' : kind === 'sources' ? 'Page sources' : 'Page history'} aria-expanded={panel === kind}
         onClick={() => { if (kind === 'move') { setDestination(page.notebookId); setParentId(page.parentNoteId ?? '') } setPanel(panel === kind ? null : kind) }}><Icon size={13} /><span>{kind === 'move' ? 'Move' : kind === 'sources' ? `Sources${page.sources.length ? ` · ${page.sources.length}` : ''}` : 'History'}</span></button>
     })}
-      <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button type="button" className="note-text-button" aria-label="Page options" title="Page options"><MoreHorizontal size={15} /></button></Menu.Trigger>
+      <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button type="button" className="note-text-button" aria-label="Page options" title="Page options"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger>
         <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
           <Menu.Item className="tab-context-menu__item" disabled={operation.busy || Boolean(operation.issue)} title={archiveRoot?.title}
             onSelect={() => void operation.run({ kind: archiveRoot ? 'restore' : 'archive', noteId: archiveRoot?.noteId ?? page.noteId })}>
-            {archiveRoot ? <ArchiveRestore size={14} /> : <Archive size={14} />}<span>{archiveRoot ? restoreLabel : 'Archive page'}</span>
+            {archiveRoot ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}<span>{archiveRoot ? restoreLabel : 'Archive page'}</span>
           </Menu.Item>
         </Menu.Content></Menu.Portal>
       </Menu.Root>
     </div>
-    {archiveRoot ? <div className="notebook-archive-status" role="status"><Archive size={13} /><span>{archiveRoot.noteId === page.noteId ? 'Archived' : `Archived with ${archiveRoot.title}`}</span>
-      <button type="button" className="note-text-button" title={archiveRoot.title} disabled={operation.busy || Boolean(operation.issue)} onClick={() => void operation.run({ kind: 'restore', noteId: archiveRoot.noteId })}><ArchiveRestore size={13} />{restoreLabel}</button>
+    {archiveRoot ? <div className="notebook-archive-status" role="status"><ThemeActionArchiveIcon size={13} /><span>{archiveRoot.noteId === page.noteId ? 'Archived' : `Archived with ${archiveRoot.title}`}</span>
+      <button type="button" className="note-text-button" title={archiveRoot.title} disabled={operation.busy || Boolean(operation.issue)} onClick={() => void operation.run({ kind: 'restore', noteId: archiveRoot.noteId })}><ThemeActionRestoreIcon size={13} />{restoreLabel}</button>
     </div> : null}
     <NotebookOperationIssue operation={operation} />
     {panel === 'move' ? <form className="notebook-page-panel notebook-move" aria-label="Move Note page" onSubmit={event => { event.preventDefault(); void move() }}>
@@ -89,11 +100,11 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
         {Object.values(library?.notebooks ?? {}).map(book => <option key={book.notebookId} value={book.notebookId}>{book.name}</option>)}</select></label>
       <label>Under page<select aria-label="Parent page" value={parentId} disabled={operation.busy || Boolean(operation.issue)} onChange={event => setParentId(event.target.value)}><option value="">Notebook root</option>
         {notebookPageRows(allPages, destination).filter(row => !excluded.has(row.page.noteId)).map(row => <option key={row.page.noteId} value={row.page.noteId}>{'　'.repeat(row.depth)}{row.page.title}</option>)}</select></label>
-      <div><button className="note-text-button" type="submit" disabled={operation.busy || Boolean(operation.issue)}><Save size={13} />Move page</button><button className="note-text-button" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
+      <div><button className="note-text-button" type="submit" disabled={operation.busy || Boolean(operation.issue)}><ThemeActionSaveIcon size={13} />Move page</button><button className="note-text-button" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
     </form> : null}
     {panel === 'sources' ? <section className="notebook-page-panel" aria-label="Saved web sources">
       {page.sources.length ? page.sources.map(source => <button className="notebook-source" key={source.sourceId} onClick={() => void openSource(source)} aria-label={`Open source ${source.title || source.url}`}>
-        <Link size={14} /><span><strong>{source.title || source.url}</strong><small>{source.url}</small><small>{new Date(source.recordedAt).toLocaleString()}{source.operator ? ` · ${source.operator.kind} · ${source.operator.id}` : ''}</small></span><ArrowUpRight size={13} /></button>) : <p>No webpage was attached to this note.</p>}
+        <ThemeObjectLinkIcon size={14} /><span><strong>{source.title || source.url}</strong><small>{source.url}</small><small>{new Date(source.recordedAt).toLocaleString()}{source.operator ? ` · ${source.operator.kind} · ${source.operator.id}` : ''}</small></span><ThemeActionOpenExternalIcon size={13} /></button>) : <p>No webpage was attached to this note.</p>}
       {sourceIssue ? <p role="status">{sourceIssue} Retry the same source above.</p> : null}
     </section> : null}
     {panel === 'history' ? <section className="notebook-page-panel notebook-history" aria-label="Note history">{events.map(event => <div key={event.eventId}>

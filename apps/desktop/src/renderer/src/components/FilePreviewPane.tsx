@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, FolderOpen, Minus, Plus, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
@@ -9,6 +9,13 @@ import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { usePreviewObjectUrl, useWorkspaceFilePreview, type ReadyFilePreview } from '../lib/use-workspace-file-preview'
 import { FilePathLabel } from './FilePathLabel'
 import { FilePreviewState } from './FilePreviewState'
+
+const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
+const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+
 
 const PdfContent = lazy(async () => ({ default: (await import('./PdfContent')).PdfContent }))
 type LoadedPreview = ReadyFilePreview & { url: string }
@@ -100,9 +107,9 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
         <div className="file-preview__controls" role="group" aria-label="Image zoom">
           <button className="small-button" aria-pressed={zoom === 'fit'} disabled={!natural} title="Fit image (F or 0)" onClick={() => changeZoom('fit')}>Fit</button>
           <button className="small-button" aria-pressed={zoom === 1} disabled={!natural} title="Original size (1)" onClick={() => changeZoom(1)}>1:1</button>
-          <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><Minus size={13} /></button>
+          <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><ThemeActionCollapseIcon size={13} /></button>
           <output aria-label="Image zoom level">{natural ? `${Math.round(scale * 100)}%` : '—'}</output>
-          <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" disabled={!natural || scale >= 20} onClick={() => changeZoom(scale * 1.25)}><Plus size={13} /></button>
+          <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" disabled={!natural || scale >= 20} onClick={() => changeZoom(scale * 1.25)}><ThemeActionZoomInIcon size={13} /></button>
         </div>
         <span className="file-preview__metadata">{natural ? `${natural.width.toLocaleString()} × ${natural.height.toLocaleString()}` : 'Dimensions unconfirmed'}{byteLength !== undefined ? ` · ${formatFileBytes(byteLength)}` : ''}</span>
       </footer>
@@ -146,10 +153,10 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
     <header className="editor-header file-preview__header">
       <FilePathLabel path={surface.path} />
       <div className="editor-header__actions">
-        {!binary || onRetryBinary ? <button className="icon-button" aria-label="Reload file preview" title="Reload file preview" onClick={() => binary ? onRetryBinary?.() : reload()}><RefreshCw size={13} /></button> : null}
+        {!binary || onRetryBinary ? <button className="icon-button" aria-label="Reload file preview" title="Reload file preview" onClick={() => binary ? onRetryBinary?.() : reload()}><ThemeActionRefreshIcon size={13} /></button> : null}
         {canOpenExternally ? <>
-          <button className="icon-button" aria-label="Open file in system application" title="Open in system application" onClick={() => void external('openSystem')}><ArrowUpRight size={13} /></button>
-          <button className="icon-button" aria-label={revealInFileManagerLabel()} title={revealInFileManagerLabel()} onClick={() => void external('reveal')}><FolderOpen size={13} /></button>
+          <button className="icon-button" aria-label="Open file in system application" title="Open in system application" onClick={() => void external('openSystem')}><ThemeActionOpenExternalIcon size={13} /></button>
+          <button className="icon-button" aria-label={revealInFileManagerLabel()} title={revealInFileManagerLabel()} onClick={() => void external('reveal')}><ThemeObjectFolderOpenIcon size={13} /></button>
         </> : null}
       </div>
     </header>

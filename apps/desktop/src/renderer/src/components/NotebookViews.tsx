@@ -1,4 +1,4 @@
-import { FileText, GitBranch, LayoutGrid, ListTree } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
@@ -9,11 +9,17 @@ import { useAppStore } from '../store'
 import { NotebookDirectoryContextMenu, type NoteTalkHandler } from './NotebookDirectoryContextMenu'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
+const ThemeObjectTreeIcon = semanticIconComponent('object.tree')
+const ThemeLayoutGridIcon = semanticIconComponent('layout.grid')
+const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const ThemeFileTextIcon = semanticIconComponent('file.text')
+
+
 export type NotebookDirectoryView = 'tree' | 'cards' | 'graph'
 export function NotebookViewPicker({ value, onChange, active }: { value: NotebookDirectoryView; onChange(value: NotebookDirectoryView): void; active: boolean }) {
   return <div className="recall-view-picker">
     <SurfaceModeSwitch value={value} onChange={onChange} active={active} ariaLabel="Notebook presentation"
-      options={([['tree', 'Tree', ListTree], ['cards', 'Cards', LayoutGrid], ['graph', 'Graph', GitBranch]] as const).map(([view, label, Icon]) => ({
+      options={([['tree', 'Tree', ThemeObjectTreeIcon], ['cards', 'Cards', ThemeLayoutGridIcon], ['graph', 'Graph', ThemeObjectBranchIcon]] as const).map(([view, label, Icon]) => ({
         value: view, ariaLabel: `${label} view`, label: <><Icon size={14} aria-hidden="true" /><span>{label}</span></>
       }))} />
   </div>
@@ -25,7 +31,7 @@ function sourceLabel(page: NotebookPage) {
 }
 export function NotebookCards({ pages, onOpen, onTalk }: { pages: NotebookPage[]; onOpen(page: NotebookPage): void; onTalk?: NoteTalkHandler | undefined }) {
   return <NotebookDirectoryContextMenu pages={pages} onTalk={onTalk}><div className="recall-note-cards" aria-label="Notebook cards">{pages.map(page => <button key={page.noteId} className="recall-note-card" title={`${page.title}\n${sourceLabel(page)}`} data-note-id={page.noteId} onClick={() => onOpen(page)}>
-    <FileText size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
+    <ThemeFileTextIcon size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
   </button>)}</div></NotebookDirectoryContextMenu>
 }
 const emptyNoteFiles: ReturnType<typeof noteFilesFromDocuments> = {}
@@ -44,7 +50,7 @@ export function NotebookGraph({ pages, onOpen, onTalk, active = true }: { pages:
           const start = { x: from.x + (sameRow ? right ? 200 : 0 : 100), y: from.y + (sameRow ? 40 : down ? 80 : 0) }, end = { x: to.x + (sameRow ? right ? 0 : 200 : 100), y: to.y + (sameRow ? 40 : down ? 0 : 80) }
           return <path key={edge.id} data-edge-kind={edge.kind} data-edge-from={edge.from} data-edge-to={edge.to} d={self ? `M ${from.x + 100} ${from.y} c -65 -30 65 -30 30 0` : `M ${start.x} ${start.y} Q ${(start.x + end.x) / 2 + (sameRow ? 0 : 28)} ${(start.y + end.y) / 2 - (sameRow ? 26 : 0)} ${end.x} ${end.y}`} markerEnd="url(#recall-graph-arrow)"><title>{edge.detail}</title></path> })}
       </svg>
-      {pages.map(page => { const position = positions.get(page.noteId)!; return <button key={page.noteId} className="recall-graph-node" title={`${page.title}\n${sourceLabel(page)}`} data-note-id={page.noteId} style={{ left: position.x, top: position.y }} onClick={() => onOpen(page)}><FileText size={15} /><strong>{page.title}</strong><small>{sourceLabel(page)}</small></button> })}
+      {pages.map(page => { const position = positions.get(page.noteId)!; return <button key={page.noteId} className="recall-graph-node" title={`${page.title}\n${sourceLabel(page)}`} data-note-id={page.noteId} style={{ left: position.x, top: position.y }} onClick={() => onOpen(page)}><ThemeFileTextIcon size={15} /><strong>{page.title}</strong><small>{sourceLabel(page)}</small></button> })}
     </div></NotebookDirectoryContextMenu></div>
   </section>
 }

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
+
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 function resourceKey(workspaceId: string): string {
   const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)
@@ -43,7 +46,7 @@ export function HtmlFilePreview({ workspaceId, path, content }: { workspaceId: s
   }, [owner, workspaceId, path, content])
   if (owner.valid && failure?.owner === owner) return <div className="file-preview-state" role="alert">
     <strong>HTML preview could not load</strong><span>{failure.message}</span>
-    <button className="small-button" aria-label="Retry preview" onClick={() => setAttempt(value => value + 1)}><RefreshCw size={13} /> Retry preview</button>
+    <button className="small-button" aria-label="Retry preview" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={13} /> Retry preview</button>
   </div>
   if (!owner.valid || ready?.owner !== owner) return <div className="file-preview-state" role="status">Preparing HTML preview…</div>
   return <div className="file-html-preview">

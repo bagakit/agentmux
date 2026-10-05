@@ -2,10 +2,20 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
-import { ChevronDown, CornerDownRight, Heading1, Link2, List, IndentDecrease, IndentIncrease, Quote } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
+
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeActionReplyIcon = semanticIconComponent('action.reply')
+const ThemeObjectHeadingIcon = semanticIconComponent('object.heading')
+const ThemeObjectListIcon = semanticIconComponent('object.list')
+const ThemeActionQuoteIcon = semanticIconComponent('action.quote')
+const ThemeActionIndentIcon = semanticIconComponent('action.indent')
+const ThemeActionOutdentIcon = semanticIconComponent('action.outdent')
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+
 
 type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; onOpen: (source: NoteSource, blockId: string) => void }
 const ReferenceContext = createContext<ReferenceContextValue | null>(null)
@@ -44,9 +54,9 @@ function NoteReferenceView({ node }: NodeViewProps) {
   const resolution = resolveNoteBlock(context.knowledge, reference.target), key = targetKey(reference.target)
   const cycle = context.trail.includes(key)
   return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false}>
-    <div className="note-reference__source"><Link2 size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
+    <div className="note-reference__source"><ThemeObjectLinkIcon size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
       {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`}
-        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{resolution.source.location.path}<CornerDownRight size={12} /></button> : null}
+        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{resolution.source.location.path}<ThemeActionReplyIcon size={12} /></button> : null}
     </div>
     {cycle ? <p className="note-knowledge-notice" role="status">This reference is circular. The original reference is preserved.</p>
       : resolution.status !== 'resolved' ? <p className="note-knowledge-notice" role="status">{resolution.message}</p>
@@ -175,20 +185,20 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     <div className="note-editor__tools" role="toolbar" aria-label="Note block tools">
       <div className="note-editor__tool-group" role="group" aria-label="Block style">
-        <button type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><Heading1 size={15} /></button>
-        <button type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={15} /></button>
-        <button type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote size={15} /></button>
+        <button type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></button>
+        <button type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => editor?.chain().focus().toggleBulletList().run()}><ThemeObjectListIcon size={15} /></button>
+        <button type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><ThemeActionQuoteIcon size={15} /></button>
       </div>
       <div className="note-editor__tool-group" role="group" aria-label="Block structure">
-        <button type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><IndentIncrease size={15} /></button>
-        <button type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><IndentDecrease size={15} /></button>
+        <button type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><ThemeActionIndentIcon size={15} /></button>
+        <button type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><ThemeActionOutdentIcon size={15} /></button>
         <button type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
           if (!editor || !foldId) return
           if (folded.current.has(foldId)) folded.current.delete(foldId); else folded.current.add(foldId)
           editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
-        }}><ChevronDown size={15} /></button>
+        }}><ThemeNavigationDownIcon size={15} /></button>
       </div>
-      <button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><Link2 size={14} /><span>Reference block</span></button>
+      <button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><ThemeObjectLinkIcon size={14} /><span>Reference block</span></button>
     </div>
     {picker ? <section className="note-reference-picker" aria-label="Choose an original block">
       <TextInput aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />

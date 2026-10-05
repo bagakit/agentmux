@@ -1,11 +1,17 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useDeferredValue, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, ChevronsUpDown, Search } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { Node } from 'jsonc-parser'
 import { readJsonPreview } from '../lib/file-json-preview'
 import { readDelimitedPreview, type DelimitedDialect } from '../lib/file-delimited-preview'
 import { FilePreviewState } from './FilePreviewState'
 import '../styles/file-data-preview.css'
+
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionChooseIcon = semanticIconComponent('action.choose')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 const PAGE_SIZE = 50
 const JSON_CHILD_PAGE = 100
@@ -66,8 +72,8 @@ function DelimitedContent({ content, delimiter }: { content: string; delimiter: 
       <label>Separator <select aria-label="Table separator" value={dialect} onChange={event => { setDialect(event.target.value as DelimitedDialect); setPage(0) }}>
         <option value="auto">Auto</option><option value=",">Comma</option><option value=";">Semicolon</option><option value={'\t'}>Tab</option><option value="|">Pipe</option>
       </select></label>
-      <label className="file-data-preview__search"><Search size={12} aria-hidden="true" /><TextInput aria-label="Filter table rows" placeholder="Filter rows" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
-      <button className="small-button" aria-pressed={header} onClick={() => { setHeader(value => !value); setPage(0) }}><ChevronsUpDown size={12} />Header row</button>
+      <label className="file-data-preview__search"><ThemeActionSearchIcon size={12} aria-hidden="true" /><TextInput aria-label="Filter table rows" placeholder="Filter rows" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
+      <button className="small-button" aria-pressed={header} onClick={() => { setHeader(value => !value); setPage(0) }}><ThemeActionChooseIcon size={12} />Header row</button>
     </div>
     <div className="file-data-preview__scroll" tabIndex={0} aria-label="Table content">
       {rows.length ? <table>
@@ -81,9 +87,9 @@ function DelimitedContent({ content, delimiter }: { content: string; delimiter: 
     <footer className="file-data-preview__bar">
       <span>{rows.length.toLocaleString()} {rows.length === 1 ? 'row' : 'rows'} · {parsed.columns} columns{parsed.truncated ? ' · first 5,000 source rows' : ''}</span>
       <div className="file-preview__controls" role="group" aria-label="Table pages">
-        <button className="icon-button" aria-label="Previous table page" disabled={activePage === 0} onClick={() => setPage(activePage - 1)}><ChevronLeft size={13} /></button>
+        <button className="icon-button" aria-label="Previous table page" disabled={activePage === 0} onClick={() => setPage(activePage - 1)}><ThemeNavigationBackIcon size={13} /></button>
         <output>{activePage + 1} / {pageCount}</output>
-        <button className="icon-button" aria-label="Next table page" disabled={activePage + 1 >= pageCount} onClick={() => setPage(activePage + 1)}><ChevronRight size={13} /></button>
+        <button className="icon-button" aria-label="Next table page" disabled={activePage + 1 >= pageCount} onClick={() => setPage(activePage + 1)}><ThemeNavigationDisclosureIcon size={13} /></button>
       </div>
     </footer>
   </section>

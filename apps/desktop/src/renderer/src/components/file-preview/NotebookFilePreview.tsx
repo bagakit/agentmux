@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { MarkdownCodeBlock } from '@agentmux/client-ui/components/MarkdownCodeBlock'
 import type { NotebookCell, NotebookMime, NotebookPreview, NotebookReply, NotebookRequest } from '../../lib/file-formats/data-notebook'
@@ -7,6 +7,10 @@ import { FilePreviewState } from '../FilePreviewState'
 import { DataTree } from './StructuredDataPreview'
 import { StaticMarkupPreview } from './StaticMarkupPreview'
 import './NotebookFilePreview.css'
+
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+
 
 let nextJob = 0
 function NotebookImage({ item, alt }: { item: NotebookMime; alt: string }) {
@@ -112,7 +116,7 @@ export function NotebookFilePreview({ content, visible = true, ownerKey = '' }: 
     <div className="file-data-preview__bar"><span>Notebook · Read-only preview{parsed.language ? ` · ${parsed.language}` : ''}</span><span>No kernel execution</span></div>
     {parsed.page === page ? <NotebookCells key={page} preview={parsed} /> : <FilePreviewState title="Reading cells" detail="Loading the selected notebook page." />}
     <footer className="file-data-preview__bar"><span>{parsed.cellCount.toLocaleString()} cells{parsed.previewCellCount < parsed.cellCount ? ' · preview limit reached' : ''}</span><div className="file-preview__controls" role="group" aria-label="Notebook pages">
-      <button className="icon-button" aria-label="Previous notebook page" disabled={page === 0} onClick={() => showPage(page - 1)}><ChevronLeft size={13} /></button><output>{page + 1} / {parsed.pages}</output><button className="icon-button" aria-label="Next notebook page" disabled={page + 1 >= parsed.pages} onClick={() => showPage(page + 1)}><ChevronRight size={13} /></button>
+      <button className="icon-button" aria-label="Previous notebook page" disabled={page === 0} onClick={() => showPage(page - 1)}><ThemeNavigationBackIcon size={13} /></button><output>{page + 1} / {parsed.pages}</output><button className="icon-button" aria-label="Next notebook page" disabled={page + 1 >= parsed.pages} onClick={() => showPage(page + 1)}><ThemeNavigationDisclosureIcon size={13} /></button>
     </div></footer>
   </section>
 }
