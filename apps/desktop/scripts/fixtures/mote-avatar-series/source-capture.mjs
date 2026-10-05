@@ -32,7 +32,7 @@ let coreRoot = path.join(root,'packages/core')
 const sourceMutation = { name:'bounded-source-mutation', setup(plugin) {
   plugin.onLoad({filter:/\.ts$/}, async args => {
     const targets = {
-      'source-owner-disconnected': ['apps/desktop/src/main/mote-avatar-control.ts', 'constructor(private readonly sources: MoteAvatarSeriesOwner)', 'constructor(_sources: MoteAvatarSeriesOwner)'],
+      'source-owner-disconnected': ['apps/desktop/src/main/mote-avatar-control.ts', 'constructor(private readonly sources: MoteAvatarSeriesOwner, private readonly writer?: MoteAvatarWriter)', 'constructor(_sources: MoteAvatarSeriesOwner, private readonly writer?: MoteAvatarWriter)'],
       'host-forward-disconnected': ['apps/host/src/host.ts', 'forwardControl: async', 'detachedAvatarProbeForwardControl: async'],
       'exact-source-ignored': ['apps/desktop/src/main/mote-avatar-series.ts', 'read.series.entries.find(entry => entry.entryId === locator.entryId)', 'read.series.entries[0]']
     }
