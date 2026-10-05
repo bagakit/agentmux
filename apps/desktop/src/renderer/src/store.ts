@@ -8357,9 +8357,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         !ownsSessionLaunch(launchOwner?.surface, 'terminal', sessionId) ||
         (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
       ) {
-        await api.sessions.stop(session.control).catch((cleanupError) => {
-          if (get().sessions.some((item) => item.id === session.id)) get().reportError(cleanupError)
-        })
+        // A closed/replaced presentation cannot authorize Stop for this confirmed Run.
+        // Keep it discoverable without reviving that Region or replacing newer facts.
+        set((current) => current.sessions.some((item) => item.id === session.id)
+          ? current
+          : { sessions: [...current.sessions, session] })
         return
       }
       set((current) => {
