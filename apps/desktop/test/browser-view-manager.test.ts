@@ -34,6 +34,7 @@ const fakeElectron = vi.hoisted(() => {
     readonly enableDeviceEmulation = vi.fn((parameters: Record<string, unknown>) => {
       this.deviceEmulation = parameters
     })
+    readonly executeJavaScript = vi.fn(async (_code: string) => true)
     readonly openDevTools = vi.fn()
     executeJavaScriptInIsolatedWorldImpl = async (_worldId: number, scripts: Array<{ code: string }>): Promise<unknown> =>
       scripts[0]?.code.includes('Select an element') ? null : true
@@ -1794,4 +1795,65 @@ it('clears a cached reported favicon when the original Browser changes document'
     expect(next.faviconDataUrl).toBeUndefined(); expect(next.error).toBeNull()
     expect(next.url).toBe('https://other.example/second')
   } finally { manager.close('new-document-icon') }
+})
+
+
+it('reobserves a still-declared native favicon after same-URL navigate and ordinary reload without another icon event', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window), url = 'https://page.example/unchanged'
+  try {
+    await manager.create('reloaded-icon', url)
+    const contents = fixture.children[0]!.webContents
+    contents.session.fetch.mockImplementation(async () => new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/real.svg'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    await manager.navigate('reloaded-icon', url)
+    await vi.waitFor(() => expect(contents.session.fetch).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    await manager.reload('reloaded-icon')
+    await vi.waitFor(() => expect(contents.session.fetch).toHaveBeenCalledTimes(3))
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    expect(contents.executeJavaScript).toHaveBeenCalledTimes(2)
+    expect(contents.executeJavaScript.mock.calls[0]![0]).toContain('link[rel~="icon" i]')
+    expect(contents.executeJavaScript.mock.calls[0]![0]).toContain('https://page.example/real.svg')
+    expect((await manager.create('reloaded-icon', 'about:blank')).url).toBe(url)
+  } finally { manager.close('reloaded-icon') }
+})
+
+it('keeps generic artwork when the same URL reload removes its earlier declared favicon', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window), url = 'https://page.example/dynamic'
+  try {
+    await manager.create('removed-icon', url)
+    const contents = fixture.children[0]!.webContents
+    contents.session.fetch.mockImplementation(async () => new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/old.svg'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    contents.executeJavaScript.mockResolvedValue(false)
+    await manager.navigate('removed-icon', url)
+    await vi.waitFor(() => expect(contents.executeJavaScript).toHaveBeenCalledOnce())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const current = await manager.create('removed-icon', 'about:blank')
+    expect(contents.session.fetch).toHaveBeenCalledOnce()
+    expect(current.faviconDataUrl).toBeUndefined(); expect(current.url).toBe(url); expect(current.error).toBeNull()
+  } finally { manager.close('removed-icon') }
+})
+
+it('keeps a later native favicon when an earlier reload declaration check returns late', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window), url = 'https://page.example/late-declaration'
+  try {
+    await manager.create('late-declaration-icon', url)
+    const contents = fixture.children[0]!.webContents
+    contents.session.fetch.mockImplementation(async () => new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/original.svg'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    let finish!: (confirmed: boolean) => void
+    contents.executeJavaScript.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    await manager.reload('late-declaration-icon')
+    contents.session.fetch.mockImplementation(async () => new Response('<svg id="later"/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/later.svg'])
+    const later = 'data:image/svg+xml;base64,' + Buffer.from('<svg id="later"/>').toString('base64')
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: later } }))
+    finish(false)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect((await manager.create('late-declaration-icon', 'about:blank')).faviconDataUrl).toBe(later)
+  } finally { manager.close('late-declaration-icon') }
 })
