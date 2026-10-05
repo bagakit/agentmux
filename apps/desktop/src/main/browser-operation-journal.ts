@@ -142,7 +142,7 @@ export class BrowserOperationJournal {
   private readonly maxOperations: number
   private readonly maxEvents: number
   private loadWarning: string | undefined
-  private saveWarning: string | undefined
+  private saveWarning: { revision: number; message: string } | undefined
   /** 序号属于实际事件引用；裁剪可从中间移除事件，不能从数组下标反推。重启后重新发号。 */
   private sequenced = 0
   private readonly eventEpoch = randomUUID()
@@ -366,7 +366,7 @@ export class BrowserOperationJournal {
 
   /** Useful for the Browser rail when the disk journal is unavailable. */
   getPersistenceWarning(): string | undefined {
-    return this.saveWarning ?? this.loadWarning
+    return this.saveWarning?.message ?? this.loadWarning
   }
 
   /**
@@ -585,9 +585,15 @@ export class BrowserOperationJournal {
         if (this.dirtyOperations.size === 0 && this.dirtyEvents.size === 0) this.saveWarning = undefined
         return true
       } catch (error) {
-        // A late failure of an older snapshot cannot undo a newer exact ACK.
-        if (this.dirtyOperations.size > 0 || this.dirtyEvents.size > 0) {
-          this.saveWarning = `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}`
+        // Only still-pending captured facts can fail; a late older failure cannot replace
+        // a newer failure belonging to another operation or a newer snapshot.
+        const pendingCapturedFacts = operations.some(captured => {
+          const pending = this.dirtyOperations.get(captured.id)
+          return pending?.metadata === captured.metadata || captured.steps.some(changed => pending?.steps.get(changed.sequence) === changed)
+        }) || events.some(([sequence, event]) => this.dirtyEvents.get(event.operationId)?.get(sequence) === event)
+        if (pendingCapturedFacts && changes.revision >= (this.saveWarning?.revision ?? 0)) {
+          this.saveWarning = { revision: changes.revision,
+            message: `Browser activity history could not be saved: ${error instanceof Error ? error.message : String(error)}` }
         }
         return false
       }
