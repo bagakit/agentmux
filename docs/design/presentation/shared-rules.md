@@ -101,7 +101,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 
 主题系统采用“运行时 CSS 真值 + 类型化语义边界 + 可选适配层”的三层结构：
 
-- `styles/tokens.css` 是全站主题值的唯一真值。颜色、字号、间距、圆角、阴影和动效都在这里定义；
+- `packages/client-ui/src/styles/palette.css` 是跨客户端基础色、语义颜色、焦点与表面阴影的唯一来源。Desktop 的 `styles/tokens.css` 导入该来源，并继续持有 Desktop 字号、间距、圆角、动效与宿主几何；Mobile 保留触屏几何适配，不复制共享主题值。
   其他样式表只能消费既有 token，不得定义第二套全局主题值。用 `:root[data-appearance]` 等选择器读取已有外观，是消费既有主题，不是声明新的主题真值。
 - 组件只依赖语义角色（例如 surface、text、line、success、danger、focus），不依赖具体色号或某个
   页面名称。组件自己的几何规则留在所属 surface 文件，不能把业务状态写进主题 token。
@@ -118,7 +118,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
   的“以后可能用到” token 应删除。
 
 这套规则吸收了现有 CSS 的单一入口、语义映射与类型边界这三条成熟实践，但不把任何宿主 UI 框架
-引入核心包。共享 UI 包只消费这组语义契约，不能拥有第二套主题值；Gallery 与产品使用同一外观解析和系统偏好监听，不能把缺少外观属性当作跟随系统。
+引入核心包。共享 UI 组件与宿主均消费上述唯一来源，不各自保留一份主题值；Gallery 与产品使用同一外观解析和系统偏好监听，不能把缺少外观属性当作跟随系统。
 
 设计语言要能被执行，前提是它在代码里**有一个可引用的名字**。散落的字面值不是"细微调整"，是把设计决策
 藏进 2000 多行样式表里：改一档字号要靠 grep，改错一处没人发现。因此三类尺度全部收进 token，
@@ -379,7 +379,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 ```
 styles/
   index.css       入口：@import 的顺序即层叠顺序
-  tokens.css  唯一全局主题值——颜色、字号、间距、圆角、阴影、动效
+  tokens.css  导入共享颜色、焦点与表面阴影；持有 Desktop 字号、间距、圆角、动效与宿主几何
   base.css  reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
   chrome.css  Titlebar、Project Rail、Tabbar 与窗口 chrome
   space-tree.css  Space 查找、分类、折叠与目录 pins 归属
