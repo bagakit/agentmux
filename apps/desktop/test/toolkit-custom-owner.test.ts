@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), getAppPath: () => process.cwd() } }))
@@ -44,6 +45,107 @@ function fixture(output = '工具_ACK', initialState: 'running' | 'exited' = 'ex
     liveBytes: (data: Uint8Array, startByte: number) => accept({ type: 'terminal-output', run: { runId: 'exact-tool-run' }, dataBytes: data,
       evidence: { outputByteRange: { startByte, endByte: startByte + data.byteLength } } } as any) }
 }
+
+describe('Toolkit display evaluation lanes', () => {
+  const displayed = { ...tool, display: { script: "console.log('display_ACK')", args: [] } }
+  it('keeps undeclared tools and plain watch passive', async () => {
+    const f = fixture(), seen = vi.fn()
+    const reader = await f.custom.subscribe(tool.id, seen, vi.fn(), new AbortController().signal, { evaluateOnDisplay: true })
+    expect(f.port.create).not.toHaveBeenCalled()
+    expect((await f.custom.get(tool.id)).display).toBeUndefined()
+    await expect(f.custom.evaluate(tool.id, undefined, new AbortController().signal)).rejects.toMatchObject({ code: 'SETTING_RESOURCE_NOT_FOUND' })
+    reader.dispose(); await f.custom.dispose()
+  })
+  it('evaluates current display beside the intact original unknown admission', async () => {
+    const f = fixture('current_display_ACK', 'exited', displayed)
+    const old: ToolkitAdmission = { executionId: 'original-unconfirmed', invocationId: 'original-invocation', definition: tool,
+      expectedLatestExecutionId: null, target: { workspacePath: tool.workspacePath }, run: null, startedAt: _reshape_fixtureEpoch(0, 0, 1), text: '', action: null, state: 'unknown', reason: 'old action unknown' }
+    f.receipts.set(tool.id, { admission: old, latestConfirmed: null })
+    const before = await f.custom.get(tool.id)
+    const reader = await f.custom.subscribe(tool.id, vi.fn(), vi.fn(), new AbortController().signal)
+    expect(f.port.create).not.toHaveBeenCalled()
+    const evaluation = f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    await expect(evaluation).resolves.toMatchObject({ display: { state: 'succeeded' } })
+    const current = await evaluation
+    expect(current.admission).toEqual(before.admission)
+    expect(current.display).toMatchObject({ state: 'succeeded', admission: null, latestConfirmed: { text: 'current_display_ACK', action: null } })
+    expect(f.port.create).toHaveBeenCalledOnce()
+    expect((f.port.create as any).mock.calls[0][0].args).toContain(displayed.display.script)
+    expect(f.receipts.get(tool.id)).toMatchObject({ admission: before.admission, display: { admission: null, latestConfirmed: { text: 'current_display_ACK' } } })
+    reader.dispose(); await f.custom.dispose()
+  })
+  it('shares exactly one visible cycle across readers and has no hidden polling', async () => {
+    const f = fixture('one_cycle', 'exited', displayed), options = { evaluateOnDisplay: true }
+    const [one, two] = await Promise.all([f.custom.subscribe(tool.id, vi.fn(), vi.fn(), new AbortController().signal, options),
+      f.custom.subscribe(tool.id, vi.fn(), vi.fn(), new AbortController().signal, options)])
+    await flush(); expect(f.port.create).toHaveBeenCalledOnce()
+    one.dispose()
+    const three = await f.custom.subscribe(tool.id, vi.fn(), vi.fn(), new AbortController().signal, options)
+    await flush(); expect(f.port.create).toHaveBeenCalledOnce()
+    two.dispose(); three.dispose(); await flush(); expect(f.port.create).toHaveBeenCalledOnce()
+    const next = await f.custom.subscribe(tool.id, vi.fn(), vi.fn(), new AbortController().signal, options)
+    await flush(); expect(f.port.create).toHaveBeenCalledTimes(2)
+    next.dispose(); await f.custom.dispose()
+  })
+  it('continues the original unknown display creation instead of admitting another identity', async () => {
+    const f = fixture('retained_display', 'exited', displayed)
+    ;(f.port.create as any).mockRejectedValueOnce(new Error('lost-display-create-reply'))
+    const unknown = await f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    expect(unknown.display).toMatchObject({ state: 'unknown', admission: { run: null } })
+    const original = unknown.display!.admission!
+    const resumed = await f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    expect(resumed.display).toMatchObject({ state: 'succeeded', latestConfirmed: { executionId: original.executionId, invocationId: original.invocationId } })
+    expect((f.port.create as any).mock.calls.map(([input]: any[]) => input.createOperationId)).toEqual([original.executionId, original.executionId])
+    await f.custom.dispose()
+  })
+  it('retains the last successful display after a failed result and owner restart', async () => {
+    const f = fixture('previous_success', 'exited', displayed)
+    const success = await f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    f.begin(); f.final('failed_update')
+    await f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    f.exit(7); await flush()
+    const failure = await f.custom.get(tool.id)
+    expect(failure.display).toMatchObject({ state: 'failed', lastSucceeded: success.display!.latestConfirmed, latestConfirmed: { exitCode: 7 } })
+    const restored = new CustomToolkitOwner({ config: f.owner, receipts: f.storage, openRunPort: async () => f.port, runner: process.execPath, env: {} })
+    expect((await restored.get(tool.id)).display).toMatchObject({ state: 'failed', lastSucceeded: failure.display!.lastSucceeded,
+      latestConfirmed: failure.display!.latestConfirmed, admission: null })
+    await f.custom.dispose(); await restored.dispose()
+  })
+  it('coalesces concurrent automatic requests before either admission is registered', async () => {
+    const f = fixture('shared_current', 'exited', displayed)
+    const [one, two] = await Promise.all([f.custom.evaluate(tool.id, undefined, new AbortController().signal), f.custom.evaluate(tool.id, undefined, new AbortController().signal)])
+    expect(f.port.create).toHaveBeenCalledOnce()
+    expect(one.display!.latestConfirmed!.executionId).toBe(two.display!.latestConfirmed!.executionId)
+    await f.custom.dispose()
+  })
+  it('never treats an already confirmed stopped display as a success after cleanup recovery', async () => {
+    const f = fixture('old_success', 'exited', displayed)
+    const first = await f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    f.begin(); f.final('stopped_display')
+    const running = await f.custom.evaluate(tool.id, undefined, new AbortController().signal)
+    ;(f.port.remove as any).mockRejectedValueOnce(new Error('exact-remove-unconfirmed'))
+    await f.custom.stop(tool.id, running.display!.admission!.executionId)
+    const incomplete = await f.custom.get(tool.id)
+    expect(incomplete.display!.latestConfirmed!.state).toBe('stopped')
+    const restored = new CustomToolkitOwner({ config: f.owner, receipts: f.storage, openRunPort: async () => f.port, runner: process.execPath, env: {} })
+    const final = await restored.get(tool.id)
+    expect(final.display).toMatchObject({ state: 'stopped', admission: null, lastSucceeded: first.display!.latestConfirmed })
+    expect(parseToolkitSnapshot(final)).toEqual(final)
+    expect((f.receipts.get(tool.id) as any).display.lastSucceeded.state).toBe('succeeded')
+    await f.custom.dispose(); await restored.dispose()
+  })
+  it('does not let the first reader cancellation take away another visible reader evaluation', async () => {
+    const f = fixture('shared_visible', 'exited', displayed), held = deferred()
+    const saving = f.owner.inspect(async () => { await held.promise })
+    const first = new AbortController(), second = new AbortController()
+    const one = await f.custom.subscribe(tool.id, vi.fn(), vi.fn(), first.signal, { evaluateOnDisplay: true })
+    const two = await f.custom.subscribe(tool.id, vi.fn(), vi.fn(), second.signal, { evaluateOnDisplay: true })
+    first.abort(); held.release(); await saving; await flush()
+    expect(f.port.create).toHaveBeenCalledOnce()
+    expect((await f.custom.get(tool.id)).display).toMatchObject({ state: 'succeeded', latestConfirmed: { text: 'shared_visible' } })
+    one.dispose(); two.dispose(); await f.custom.dispose()
+  })
+})
 
 describe('custom Toolkit owner admission and terminal facts', () => {
   it('keeps get/watch read-only and captures an extremely fast script final snapshot without LF or recursive attach', async () => {

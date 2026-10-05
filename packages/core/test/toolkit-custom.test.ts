@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -102,8 +103,8 @@ describe('custom Toolkit public data and authored CLI', () => {
   })
   it('only accepts owner-confirmed success and bounded text attached to the captured target', () => {
     const result = { executionId: 'execution-one', invocationId: input.invocationId, definition, expectedLatestExecutionId: null, action: null,
-      target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'run-one' }, startedAt: 10,
-      state: 'succeeded', reason: null, endedAt: 12, exitCode: 0, text: '' }
+      target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'run-one' }, startedAt: reshapeFixtureEpoch(0, 0, 10),
+      state: 'succeeded', reason: null, endedAt: reshapeFixtureEpoch(0, 0, 12), exitCode: 0, text: '' }
     const parsed = parseToolkitSnapshot({ ...snapshot(), state: 'succeeded', latestConfirmed: result })
     expect(parsed.kind).toBe('script')
     if (parsed.kind !== 'script') throw new Error('Expected the real script result discriminator.')
@@ -149,7 +150,7 @@ describe('custom Toolkit public data and authored CLI', () => {
     expect(() => parseToolkitToolFields({ ...fields, actions: [{ ...action, target: fixturePath("other") }] })).toThrow()
     const original = { executionId: 'original', invocationId: 'original-request', definition: { ...unconfigured, id: definition.id, revision: definition.revision },
       expectedLatestExecutionId: null, target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'original-run' },
-      startedAt: 10, endedAt: 12, state: 'succeeded', reason: null, exitCode: 0, text: 'original' }
+      startedAt: reshapeFixtureEpoch(0, 0, 10), endedAt: reshapeFixtureEpoch(0, 0, 12), state: 'succeeded', reason: null, exitCode: 0, text: 'original' }
     expect(parseToolkitSnapshot({ ...snapshot(), definition: original.definition, state: 'succeeded', latestConfirmed: original }))
       .toEqual({ ...snapshot(), definition: original.definition, state: 'succeeded', latestConfirmed: original })
   })
@@ -171,7 +172,9 @@ describe('custom Toolkit public data and authored CLI', () => {
     await server.start(); cleanup.push(() => server.stop())
     const client = await publicClient(join(dir, 'action.sock'))
     await expect(client.call('toolkit.action', { operationId: base.requestId, toolId: definition.id, actionId: 'refresh', input: command.params.input })).resolves.toEqual({ snapshot: snapshot() })
-    expect(execute).toHaveBeenCalledExactlyOnceWith(request, expect.any(AbortSignal))
+    expect(execute).toHaveBeenCalledExactlyOnceWith(request, expect.any(AbortSignal), expect.objectContaining({
+      actor: { kind: 'device', id: `local-user:${process.getuid!()}`, verified: true }, entryPoint: 'toolkit.action', transport: 'unix'
+    }))
   })
   it('reads and watches a custom tool through real Control sockets without executing it', async () => {
     const path = join(await directory(), 'control.sock'), execute = vi.fn(async () => ({ operation: 'toolkit.get' as const, snapshot: snapshot() }))

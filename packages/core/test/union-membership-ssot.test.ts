@@ -1,3 +1,4 @@
+import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -181,6 +182,7 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'toolkit.action': true,
   'toolkit.script': true,
   'toolkit.run': true,
+  'toolkit.evaluate': true,
   'toolkit.stop': true,
   'toolkit.watch': true,
   'browser.task.assets': true,
@@ -217,8 +219,8 @@ function storedSession(): AgentMuxStoredAgentSession {
     hookBindingId: 'hook-binding-1',
     hookToken: 'hook-token-1',
 
-    createdAt: 100,
-    updatedAt: 200,
+    createdAt: reshapeFixtureEpoch(0, 0, 100),
+    updatedAt: reshapeFixtureEpoch(0, 0, 200),
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' }
   }
 }
@@ -227,7 +229,7 @@ function storedSession(): AgentMuxStoredAgentSession {
 function sessionWithPermissionKind(kind: unknown): Record<string, unknown> {
   return {
     ...storedSession(),
-    semanticStatus: { state: 'waiting', source: 'native-hook', observedAt: 200, detail: 'PermissionRequest' },
+    semanticStatus: { state: 'waiting', source: 'native-hook', observedAt: reshapeFixtureEpoch(0, 0, 200), detail: 'PermissionRequest' },
     pendingInteraction: {
       request: {
         kind: 'permission',
@@ -237,7 +239,7 @@ function sessionWithPermissionKind(kind: unknown): Record<string, unknown> {
         options: [{ id: 'option-1', label: 'Proceed', kind }],
         evidence: {
           source: 'native-hook',
-          observedAt: 200,
+          observedAt: reshapeFixtureEpoch(0, 0, 200),
           run: { runId: 'daemon-1' },
           hookReceiptId: 'receipt-1'
         }
@@ -263,7 +265,7 @@ function sessionWithDegradedReason(reason: unknown): Record<string, unknown> {
       reason,
       submissionId: 'prompt-submit-1',
       run: { runId: 'daemon-1' },
-      observedAt: 200
+      observedAt: reshapeFixtureEpoch(0, 0, 200)
     }
   }
 }
