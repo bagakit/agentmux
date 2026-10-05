@@ -292,3 +292,52 @@ describe('registered Main custom Toolkit actual CLI vertical', () => {
     await m.core.stopTerminal(healthy.control.run); await m.core.releaseRunAttachment(healthy.control.run); await m.core.removeTerminal(healthy.control.run)
   })
 })
+
+
+describe('original Toolkit creation recovery through actual CLI and Native', () => {
+  it.each(['entry', 'action'] as const)('continues a lost %s create reply after owner restart without a second retained Run or side effect', async mode => {
+    const m = await nativeMain(), counter = join(m.directory, 'work', 'original-counter')
+    const script = "import { appendFile } from 'node:fs/promises'; await appendFile('original-counter','1'); process.stdout.write('original_native_ACK')"
+    const definition = (await m.rpc.call('toolkit.create', { toolId: 'original', value: { name: 'Original', icon: 'terminal', enabled: true,
+      statusBar: 'icon', workspacePath: join(m.directory, 'work'), script: mode === 'entry' ? script : "console.log('entry')", args: [],
+      actions: mode === 'action' ? [{ id: 'link', label: 'Read original link', script, args: [] }] : [] } })).definition
+    let source: ToolkitScriptSnapshot | null = null
+    if (mode === 'action') {
+      await oneCli('toolkit', 'run', 'original')
+      await until(async () => { source = await get('original'); expect(source.admission).toBeNull(); expect(source.state).toBe('succeeded') })
+    }
+    const originalPort = m.runtime.toolkitRunPort.bind(m.runtime)
+    let lostRun = '', dispatches = 0
+    vi.spyOn(m.runtime, 'toolkitRunPort').mockImplementation(async () => {
+      const port = await originalPort()
+      return { ...port, create: async (input, listener) => { dispatches++; const run = await port.create(input, listener); lostRun = run.runId; throw new Error('lost-original-create-response') } }
+    })
+    const invocationId = crypto.randomUUID(), input = mode === 'entry'
+      ? { invocationId, expectedRevision: definition.revision, expectedLatestExecutionId: null }
+      : { invocationId, expectedRevision: definition.revision, sourceExecutionId: source!.latestConfirmed!.executionId, expectedAdmissionExecutionId: null }
+    const carrier = join(m.directory, 'original-request.json'); await writeFile(carrier, JSON.stringify(input))
+    const args = mode === 'entry' ? ['toolkit', 'run', 'original', '--input', carrier] : ['toolkit', 'action', 'original', 'link', '--input', carrier]
+    await oneCli(...args)
+    const unknown = await get('original'), original = unknown.admission!
+    expect(unknown).toMatchObject({ state: 'unknown', admission: { run: null, invocationId } })
+    expect(dispatches).toBe(1)
+    await until(async () => expect(await readFile(counter, 'utf8')).toBe('1'))
+    const instance = await m.sdk.daemonInstance()
+    await m.restart()
+    expect(await m.sdk.daemonInstance()).toBe(instance)
+    const passive = await get('original')
+    expect(passive.admission).toMatchObject({ executionId: original.executionId, run: null })
+    expect((await m.core.listRuns()).map(run => run.runId)).toContain(lostRun)
+    expect(await readFile(counter, 'utf8')).toBe('1')
+    await oneCli(...args)
+    let finished!: ToolkitScriptSnapshot
+    await until(async () => { finished = await get('original'); expect(finished.admission).toBeNull(); expect(finished.state).toBe('succeeded') })
+    expect(finished.latestConfirmed).toMatchObject({ executionId: original.executionId, invocationId, text: 'original_native_ACK', run: { runId: lostRun } })
+    expect(await readFile(counter, 'utf8')).toBe('1')
+    await oneCli(...args)
+    expect((await get('original')).latestConfirmed).toEqual(finished.latestConfirmed)
+    expect(await readFile(counter, 'utf8')).toBe('1')
+    expect(await m.core.listRuns()).toEqual([])
+    await record('original-creation-recovery', { mode, instance, lostRun, unknown, passive, finished, counter: '1' })
+  })
+})

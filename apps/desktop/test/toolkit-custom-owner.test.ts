@@ -644,18 +644,22 @@ describe('saved Toolkit actions share captured admission and Raw execution', () 
     await expect(f.custom.action('quota', 'refresh', request, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
     expect(f.port.create).toHaveBeenCalledTimes(3)
   })
-  it('returns the same unknown admission for an exact repeated action without creating a second Run', async () => {
+  it('explicitly continues an unknown action with its original creation key and request identities', async () => {
     const f = fixture('main', 'exited', { ...tool, actions: [refresh] })
     const first = await f.custom.run('quota', f.input(), new AbortController().signal)
     const request = input(f.config.toolkit.tools[0]!, first.latestConfirmed!.executionId)
-    f.port.create = vi.fn().mockRejectedValueOnce(new Error('owned-create-outcome-unconfirmed'))
+    const create = f.port.create
+    f.port.create = vi.fn().mockRejectedValueOnce(new Error('owned-create-outcome-unconfirmed')).mockImplementation(create)
     const unknown = await f.custom.action('quota', 'refresh', request, new AbortController().signal)
     expect(unknown).toMatchObject({ state: 'unknown', latestConfirmed: first.latestConfirmed,
       admission: { invocationId: request.invocationId, action: { id: 'refresh' } } })
-    expect(await f.custom.action('quota', 'refresh', request, new AbortController().signal)).toEqual(unknown)
-    expect(f.port.create).toHaveBeenCalledOnce()
+    const continued = await f.custom.action('quota', 'refresh', request, new AbortController().signal)
+    expect(continued).toMatchObject({ state: 'succeeded', admission: null,
+      latestConfirmed: { executionId: unknown.admission!.executionId, invocationId: request.invocationId, action: unknown.admission!.action } })
+    expect(f.port.create).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(f.port.create).mock.calls.map(([input]) => input.createOperationId)).toEqual([unknown.admission!.executionId, unknown.admission!.executionId])
     await expect(f.custom.action('quota', 'other', request, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
-    expect(f.port.create).toHaveBeenCalledOnce()
+    expect(f.port.create).toHaveBeenCalledTimes(2)
   })
   it('rejects actions from stale configuration and same-config replaced results without changing admission', async () => {
     const f = fixture('main', 'exited', { ...tool, actions: [refresh] })
@@ -694,5 +698,70 @@ describe('saved Toolkit actions share captured admission and Raw execution', () 
       operation: 'toolkit.update', toolId: 'quota', changes: { actions: [] }, expected: { actions: [] } }, f.owner)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
     expect(f.config.toolkit.tools[0]!.actions).toEqual([refresh])
     expect(f.port.create).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('explicit original Toolkit creation continuation', () => {
+  it('keeps restored unbound entry reads passive and joins concurrent explicit continuation', async () => {
+    const f = fixture('original_ACK'), input = f.input(), create = f.port.create
+    f.port.create = vi.fn().mockRejectedValueOnce(new Error('lost-create-reply')).mockImplementation(create)
+    const unknown = await f.custom.run('quota', input, new AbortController().signal)
+    const original = unknown.admission!
+    const restored = new CustomToolkitOwner({ config: f.owner, receipts: f.storage, openRunPort: async () => f.port, runner: process.execPath, env: {} })
+    expect(await restored.get('quota')).toMatchObject({ state: 'unknown', admission: { executionId: original.executionId, run: null } })
+    const reader = await restored.subscribe('quota', vi.fn(), vi.fn(), new AbortController().signal)
+    expect(f.port.create).toHaveBeenCalledOnce()
+    const held = deferred()
+    f.port.create = vi.fn(async (request, listener) => { await held.promise; return await create(request, listener) })
+    const one = restored.run('quota', input, new AbortController().signal)
+    const two = restored.run('quota', input, new AbortController().signal)
+    await flush(); expect(f.port.create).toHaveBeenCalledOnce()
+    held.release()
+    const results = await Promise.all([one, two])
+    for (const value of results) expect(value).toMatchObject({ state: 'succeeded', admission: null,
+      latestConfirmed: { executionId: original.executionId, invocationId: input.invocationId, text: 'original_ACK' } })
+    expect(f.port.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ createOperationId: original.executionId }), expect.any(Function))
+    reader.dispose(); await restored.dispose()
+  })
+  it('continues the original captured program after configuration changes without using its replacement', async () => {
+    const f = fixture('captured_ACK'), input = f.input(), create = f.port.create
+    f.port.create = vi.fn().mockRejectedValueOnce(new Error('lost-create')).mockImplementation(create)
+    const original = await f.custom.run('quota', input, new AbortController().signal)
+    await f.owner.update(current => ({ ...current, toolkit: { ...current.toolkit, tools: [{ ...current.toolkit!.tools![0]!, revision: 'replacement', script: 'replacementProgram()' }] } }))
+    const value = await f.custom.run('quota', input, new AbortController().signal)
+    expect(value.latestConfirmed?.executionId).toBe(original.admission!.executionId)
+    const continued = vi.mocked(f.port.create).mock.calls[1]![0]
+    expect(continued.args).toContain(tool.script); expect(continued.args).not.toContain('replacementProgram()')
+  })
+  it('keeps an original unknown creation when closing before its continuation dispatch', async () => {
+    const f = fixture(), input = f.input()
+    f.port.create = vi.fn().mockRejectedValue(new Error('lost-original'))
+    const original = await f.custom.run('quota', input, new AbortController().signal), held = deferred()
+    const restored = new CustomToolkitOwner({ config: f.owner, receipts: f.storage, openRunPort: async () => { await held.promise; return f.port }, runner: process.execPath, env: {} })
+    const continuing = restored.run('quota', input, new AbortController().signal)
+    await flush(); const closing = restored.dispose(); held.release(); await Promise.all([continuing, closing])
+    expect(await restored.get('quota')).toMatchObject({ state: 'unknown', admission: { executionId: original.admission!.executionId, run: null }, latestConfirmed: null })
+    expect(f.port.create).toHaveBeenCalledOnce(); expect(f.port.remove).not.toHaveBeenCalled()
+  })
+  it('reading a confirmed entry never continues a different unknown admission', async () => {
+    const f = fixture('original'), originalInput = f.input()
+    const first = await f.custom.run('quota', originalInput, new AbortController().signal)
+    f.port.create = vi.fn().mockRejectedValue(new Error('lost-next-create'))
+    const next = await f.custom.run('quota', f.input(first.latestConfirmed!.executionId), new AbortController().signal)
+    const value = await f.custom.run('quota', originalInput, new AbortController().signal)
+    expect(value.admission).toEqual(next.admission)
+    expect(value.latestConfirmed).toEqual(first.latestConfirmed)
+    expect(f.port.create).toHaveBeenCalledOnce()
+  })
+  it('retains the original unknown admission when an explicit continuation still fails', async () => {
+    const f = fixture(), input = f.input()
+    f.port.create = vi.fn().mockRejectedValue(new Error('native-creation-conflict'))
+    const original = await f.custom.run('quota', input, new AbortController().signal)
+    const repeated = await f.custom.run('quota', input, new AbortController().signal)
+    expect(repeated).toMatchObject({ state: 'unknown', reason: 'native-creation-conflict', latestConfirmed: null,
+      admission: { executionId: original.admission!.executionId, invocationId: input.invocationId, run: null } })
+    await expect(f.custom.run('quota', { ...input, expectedLatestExecutionId: 'another-result' }, new AbortController().signal)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+    expect(f.port.create).toHaveBeenCalledTimes(2)
   })
 })

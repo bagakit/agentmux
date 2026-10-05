@@ -116,7 +116,7 @@ export async function nativeMain() {
     await rm(directory,{recursive:true,force:true})
   })
   dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
-    progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{} as any,workspaceFiles:{dispose:async()=>{}} as any})
+    progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
   const ownDaemons=(await processes()).filter(p=>p.command.includes('ctxmuxd --socket '+join(directory,'ctxmux.sock')))
   expect(ownDaemons).toHaveLength(1)
   const daemon=ownDaemons[0]!, executable=daemon.command.slice(0,daemon.command.indexOf(' --socket '))
@@ -133,7 +133,7 @@ export async function nativeMain() {
     // Reopen the actual durable stores and same private Native. Never recreate defaults or the daemon.
     store=new ConfigStore(join(directory,'config.json'));config=await store.get();sender=makeSender();detachRenderer=runtime.attach(sender as any)
     dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
-      progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{} as any,workspaceFiles:{dispose:async()=>{}} as any})
+      progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
     rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
     await record('fixture-restart',{directory,phase:'registered',runtimeInstance:await sdk.daemonInstance()})
   }
