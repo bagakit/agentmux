@@ -2,7 +2,7 @@ import { mkdir, open } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError, durableWriteFile } from '@agentmux/core'
 import { parseToolkitPerformanceFailure, TOOLKIT_PERFORMANCE_FAILURE_MAX_BYTES,
-  type ToolkitPerformanceFailure } from '@agentmux/core/control'
+  type ToolkitPerformanceFailure } from '@agentmux/core/toolkit-performance-failure'
 type Write = { body: string; resolve(): void; reject(error: unknown): void }
 
 /** One latest explicit capture; at most one active and one replaceable pending write. */
