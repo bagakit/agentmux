@@ -1,3 +1,4 @@
+import { readInputObservation } from './performance-diagnostics.js'
 import type { ClientPerformanceDiagnostics, InputPerformanceSnapshot } from './performance-diagnostics.js'
 import type { RendererPerformanceSnapshot } from './renderer-performance.js'
 export type * from './renderer-performance.js'
@@ -123,14 +124,18 @@ const terminalInteractionParser = record({ observedSinceAt: number,
   lastEvent: nullable(record({ kind: v => { if (!['keydown', 'wheel'].includes(v as string)) invalid() },
     observedAt: number, delayMs: nullable(number), visible: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean,
     buffer: v => { if (!['normal', 'alternate'].includes(v as string)) invalid() }, mouseTrackingMode: identity })) })
+const inputParentParser: Parser = value => { if (!readInputObservation(value)) invalid() }
+const inputPhasesParser = record(Object.fromEntries(['queued','current-run','operation','native-input','received','connected-client','host-call','reply-ready'].map(key => [key, nullable(number)])))
 const inputEntryParser = record({ id: count, sessionId: nullable(identity), runId: identity,
+  hostId: nullable(identity), ownerInstanceId: nullable(identity), sender: nullable(record({ webContentsId: count, window: nullable(windowParser) })),
+  parent: nullable(inputParentParser), parentMatch: v => { if (!['absent','unique','ambiguous','unknown-omitted'].includes(v as string)) invalid() }, phases: inputPhasesParser,
   kind: v => { if (!['user','mouse','protocol','paste','semantic','terminal'].includes(v as string)) invalid() }, bytes: nullable(count),
-  enqueuedAt: number, stage: v => { if (!['queued','current-run','operation','native-input'].includes(v as string)) invalid() },
+  enqueuedAt: number, stage: v => { if (!['queued','current-run','operation','native-input','received','connected-client','host-call','reply-ready'].includes(v as string)) invalid() },
   stageMs: number, totalMs: number, result: v => { if (!['pending','completed','failed'].includes(v as string)) invalid() } })
 const inputPerformanceParser = record({ startedAt: number, started: count, completed: count, failed: count, pending: count,
   kinds: record({ user: count, mouse: count, protocol: count, paste: count, semantic: count, terminal: count }),
   queueWait: timingParser, currentRun: timingParser, operation: timingParser, nativeInput: timingParser,
-  active: boundedArray(64, inputEntryParser), omittedActive: count, recent: boundedArray(32, inputEntryParser), omittedRecent: count })
+  active: boundedArray(64, inputEntryParser), omittedActive: count, recent: boundedArray(32, inputEntryParser), omittedRecent: count, oldestPendingMs: nullable(number) })
 const clientPerformanceParser = record({ processId: count, observedAt: number, input: inputPerformanceParser,
   carrier: record({ encoded: timingParser, decodedFrames: timingParser, decodedValues: timingParser,
     encodedBytes: count, encodedFrames: count, decodedBytes: count, rejected: count }) })
@@ -166,6 +171,7 @@ const slowEventsParser: Parser = value => {
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
   consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }), sessionEvents: timingParser,
+  inputRequestDetails: inputPerformanceParser,
   inputRequests: record(Object.fromEntries(['user', 'protocol', 'paste'].map(kind => [kind, record({ started: count, completed: count, failed: count, pending: count, wall: timingParser })]))),
   overlay: record({ triggers: record({ initial: count, demand: count, mutation: count, resize: count, scroll: count, toggle: count, font: count, collect: count }),
     scheduled: count, coalesced: count, candidates: count, geometryReads: count, nativeDemandCount: nullable(count),

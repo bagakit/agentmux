@@ -1,3 +1,4 @@
+import { readInputObservation, type InputObservationReference, type InputPerformanceSender, type InputPerformanceHandle } from '@agentmux/core/control'
 import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
 import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
@@ -417,12 +418,12 @@ export class RuntimeController {
     this.terminalViewColors = { ...colors }
   }
 
-  private readonly terminalInputPerformance = createInputPerformanceRecorder()
+  private readonly inputPerformance = createInputPerformanceRecorder()
   private readonly performanceObservation = new MainPerformanceDiagnostics()
 
   async performanceDiagnostics(signal: AbortSignal) {
     return this.performanceObservation.observe([...this.hosts.values()], () => ({ processId: process.pid, observedAt: Date.now(),
-      input: this.terminalInputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }), signal)
+      input: this.inputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }), signal)
   }
 
   resourceOwnerCounts(): { sessionAttachmentOwners: number; sessionAttachmentLeases: number } {
@@ -1547,22 +1548,36 @@ export class RuntimeController {
     })
   }
 
-  async write(control: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<void> {
-    const client = await this.connectedClient(control.hostId, 'runtime')
-    if (control.kind === 'agent') await client.writeAgent({
-      agentSessionId: control.agentSessionId, expectedRun: control.run, data, source
-    })
-    else await this.writeTerminalInput(client, control, data)
+  async write(control: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'],
+    observation?: InputObservationReference, sender?: InputPerformanceSender): Promise<void> {
+    const parent = readInputObservation(observation)
+    const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
+      hostId: control.hostId, runId: control.run.runId, kind: source === 'terminal-protocol' ? 'protocol' : 'user',
+      bytes: typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength, parent, sender: sender ?? null, stage: 'received' })
+    try {
+      const client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, 'runtime'))
+      try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
+      await diagnostic.measure('host-call', () => control.kind === 'agent' ? client.writeAgent({
+        agentSessionId: control.agentSessionId, expectedRun: control.run, data, source, ...(parent ? { observation: parent } : {})
+      }).then(() => {}) : this.writeTerminalInput(client, control, data, diagnostic, parent))
+      diagnostic.stage('reply-ready'); diagnostic.settle(true)
+    } catch (error) { diagnostic.settle(false); throw error }
   }
 
-  async paste(control: SessionControl, text: string, terminalData: string): Promise<void> {
-    const client = await this.connectedClient(control.hostId, 'runtime')
-    if (control.kind === 'agent') {
-      await client.pasteAgent({ agentSessionId: control.agentSessionId,
-        expectedRun: control.run, text, terminalData })
-    } else {
-      await this.writeTerminalInput(client, control, terminalData)
-    }
+  async paste(control: SessionControl, text: string, terminalData: string,
+    observation?: InputObservationReference, sender?: InputPerformanceSender): Promise<void> {
+    const parent = readInputObservation(observation)
+    const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
+      hostId: control.hostId, runId: control.run.runId, kind: 'paste', bytes: Buffer.byteLength(terminalData), parent,
+      sender: sender ?? null, stage: 'received' })
+    try {
+      const client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, 'runtime'))
+      try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
+      await diagnostic.measure('host-call', () => control.kind === 'agent' ? client.pasteAgent({ agentSessionId: control.agentSessionId,
+        expectedRun: control.run, text, terminalData, ...(parent ? { observation: parent } : {}) }).then(() => {})
+        : this.writeTerminalInput(client, control, terminalData, diagnostic, parent))
+      diagnostic.stage('reply-ready'); diagnostic.settle(true)
+    } catch (error) { diagnostic.settle(false); throw error }
   }
 
   async submitPrompt(
@@ -2235,11 +2250,12 @@ export class RuntimeController {
   private async writeTerminalInput(
     client: AgentMuxClient,
     control: Extract<SessionControl, { kind: 'terminal' }>,
-    data: AgentMuxRunInputData
+    data: AgentMuxRunInputData,
+    diagnostic: InputPerformanceHandle,
+    parent: InputObservationReference | null
   ): Promise<void> {
     const key = terminalInputKey(control.hostId, control.runId)
-    const diagnostic = this.terminalInputPerformance.begin({ sessionId: null, runId: control.runId, kind: 'terminal',
-      bytes: typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength })
+    diagnostic.stage('queued')
     const previous = this.terminalInputTails.get(key) ?? Promise.resolve()
     const operation = previous.catch(() => {}).then(async () => {
       diagnostic.dequeue()
@@ -2253,12 +2269,14 @@ export class RuntimeController {
       }
       diagnostic.stage('operation')
       try {
+        const ownerInstanceId = client.runtimeIdentity().instanceId
+        diagnostic.executionOwner(ownerInstanceId)
         const accepted = await diagnostic.measure('native-input', () => client.writeTerminal(control.run, {
-          ownerInstanceId: client.runtimeIdentity().instanceId,
+          ownerInstanceId,
           operationId: randomUUID(),
           expectedByte,
           data
-        }))
+        }, parent ?? undefined))
         if (accepted.acceptedThroughByte !== null) {
           this.terminalInputCursors.set(key, accepted.acceptedThroughByte)
         }
@@ -2266,7 +2284,7 @@ export class RuntimeController {
         this.terminalInputCursors.delete(key)
         throw error
       }
-    }).then(() => { diagnostic.settle(true) }, error => { diagnostic.settle(false); throw error })
+    })
     const tail = operation.then(() => {}, () => {})
     this.terminalInputTails.set(key, tail)
     void tail.finally(() => {

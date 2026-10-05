@@ -1,3 +1,4 @@
+import { readInputObservation } from '@agentmux/core/control'
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
 import { parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
@@ -371,6 +372,11 @@ export async function registerIpc(args: {
     if (args.window.isDestroyed() || args.window.webContents.isDestroyed() || args.window.webContents.isLoadingMainFrame()) return null
     const generation = args.runtime.rendererGeneration(args.window.webContents)
     return generation === null ? null : { windowId: args.window.id, webContentsId: args.window.webContents.id, generation }
+  }
+  const inputSender = (event: IpcMainInvokeEvent): import('@agentmux/core/control').InputPerformanceSender => {
+    let window: import('@agentmux/core/control').MetricsWindow | null = null
+    try { if (event.sender === args.window.webContents) window = currentMetricsWindow() } catch { /* Optional observation cannot gate input. */ }
+    return { webContentsId: event.sender.id, window }
   }
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
@@ -1333,13 +1339,15 @@ export async function registerIpc(args: {
     requireTrustedSender('continuousProgress:pauseForInput', event)
     await args.progressLoops.pauseTarget(control, 'Paused for your draft or queued message. Resume explicitly after sending or clearing it.')
   })
-  handle('sessions:write', async (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']): Promise<SessionInputWriteResult> => {
+  handleWithEvent('sessions:write', async (event, session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
     if (source === 'user' && data.length > 0) pauseUserProgress(session, 'Paused for your terminal input.')
-    return await sessionInputWriteResult(() => args.runtime.write(session, data, source))
+    return await sessionInputWriteResult(() => args.runtime.write(session, data, source, readInputObservation(observation) ?? undefined,
+      inputSender(event)))
   })
-  handle('sessions:paste', async (session: SessionControl, text: string, terminalData: string): Promise<SessionInputWriteResult> => {
+  handleWithEvent('sessions:paste', async (event, session: SessionControl, text: string, terminalData: string, observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
     if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
-    return await sessionInputWriteResult(() => args.runtime.paste(session, text, terminalData))
+    return await sessionInputWriteResult(() => args.runtime.paste(session, text, terminalData, readInputObservation(observation) ?? undefined,
+      inputSender(event)))
   })
   handleWithEvent('sessions:recordDeliveryFailure', async (event, input: DeliveryAttempt) => {
     requireTrustedSender('sessions:recordDeliveryFailure', event)

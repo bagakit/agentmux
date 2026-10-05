@@ -1,4 +1,4 @@
-import { createInputPerformanceRecorder, hostedCarrierPerformance, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
+import { createInputPerformanceRecorder, hostedCarrierPerformance, readInputObservation, readInputObservationField, type InputObservationReference, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { deliveryFailure, newDeliveryLogId, type DeliveryAttempt, type DeliveryAttemptLookup, type DeliveryInputPhase } from './delivery-attempt.js'
 import type { AgentMuxRunStorageObservation } from './run-storage-observation.js'
@@ -3065,19 +3065,23 @@ export class AgentMuxClient {
 
   async writeTerminal(
     ref: AgentMuxRunRef,
-    operation: AgentMuxRunInputOperation
+    operation: AgentMuxRunInputOperation,
+    observation?: InputObservationReference
   ): Promise<AgentMuxRunInputAck> {
     this.requireConnected()
-    const accepted = await this.kernel.input(ref.runId, operation)
-    const acceptedThroughByte = accepted.run.acceptedInputBytes
-    if (acceptedThroughByte === null) {
-      throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
-    }
-    return {
-      runId: ref.runId,
-      appliedByteRange: accepted.appliedByteRange,
-      acceptedThroughByte
-    }
+    const diagnostic = this.inputPerformance.begin({ sessionId: null, runId: ref.runId, kind: 'terminal',
+      bytes: typeof operation.data === 'string' ? Buffer.byteLength(operation.data) : operation.data.byteLength,
+      parent: readInputObservation(observation), stage: 'operation' })
+    try { const identity = this.runtimeIdentity(); diagnostic.executionOwner(operation.ownerInstanceId, identity.hostId) } catch { /* Read-only identity cannot gate input. */ }
+    try {
+      const accepted = await diagnostic.measure('operation', () => diagnostic.measure('native-input', () => this.kernel.input(ref.runId, operation)))
+      const acceptedThroughByte = accepted.run.acceptedInputBytes
+      if (acceptedThroughByte === null) {
+        throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
+      }
+      diagnostic.settle(true)
+      return { runId: ref.runId, appliedByteRange: accepted.appliedByteRange, acceptedThroughByte }
+    } catch (error) { diagnostic.settle(false); throw error }
   }
 
   async resizeTerminal(ref: AgentMuxRunRef, cols: number, rows: number): Promise<AgentMuxRunAppliedSize> {
@@ -4656,7 +4660,7 @@ export class AgentMuxClient {
     if (input.source !== 'user' && input.source !== 'terminal-protocol') {
       throw new AgentMuxError('Native input must declare its user or terminal-protocol source.', 'INVALID_AGENT_INPUT_SOURCE')
     }
-    return await this.writeAgentInput(session, input.data, input.source, 'write')
+    return await this.writeAgentInput(session, input.data, input.source, 'write', readInputObservationField(input))
   }
 
   async pasteAgent(input: AgentMuxAgentPasteInput): Promise<AgentMuxRunInputAck> {
@@ -4668,7 +4672,7 @@ export class AgentMuxClient {
     const plan = this.providers.get(session.providerId).planPromptInput(input.text)
     return await this.writeAgentInput(session, plan.kind === 'render-then-submit'
       ? plan.payload
-      : input.terminalData, 'user', 'paste')
+      : input.terminalData, 'user', 'paste', readInputObservationField(input))
   }
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
@@ -6725,7 +6729,8 @@ export class AgentMuxClient {
     requestedSession: AgentMuxAgentSession,
     data: AgentMuxRunInputData,
     source: AgentMuxAgentWriteInput['source'],
-    inputKind: 'write' | 'paste' | 'posture'
+    inputKind: 'write' | 'paste' | 'posture',
+    observation?: InputObservationReference | null
   ): Promise<AgentMuxRunInputAck> {
     // Capture before waiting on the input lane: a later request cannot inherit this operation.
     const requestId = source === 'user' && !requestedSession.pendingInteraction?.nativeInput &&
@@ -6751,7 +6756,7 @@ export class AgentMuxClient {
           acceptedThroughByte: cursor
         }
       }, {
-        kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : 'user', bytes: 0
+        kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : 'user', bytes: 0, parent: observation ?? null
       })
     }
     // Capture only observers present when this write entered. Whole mouse controls may
@@ -6808,8 +6813,10 @@ export class AgentMuxClient {
       await observeNativeInput('unknown')
       let result: Awaited<ReturnType<typeof this.kernel.input>>
       try {
+        const ownerInstanceId = this.kernel.identity().daemonInstanceId
+        diagnostic.executionOwner(ownerInstanceId)
         result = await diagnostic.measure('native-input', () => this.kernel.input(session.run.runId, {
-          ownerInstanceId: this.kernel.identity().daemonInstanceId, operationId, expectedByte, data
+          ownerInstanceId, operationId, expectedByte, data
         }))
       } catch (error) {
         for (const observation of protocolObservers) observation.protocolInput!.invalid = true
@@ -6866,7 +6873,7 @@ export class AgentMuxClient {
         acceptedThroughByte: result.run.acceptedInputBytes
       }
     }, {
-      kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : mousePreparation ? 'mouse' : 'user', bytes: Buffer.byteLength(data)
+      kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : mousePreparation ? 'mouse' : 'user', bytes: Buffer.byteLength(data), parent: observation ?? null
     })
   }
 
@@ -6956,7 +6963,7 @@ export class AgentMuxClient {
   private async serializeAgentInput<T>(
     requestedSession: AgentMuxAgentSession,
     operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun, diagnostic: InputPerformanceHandle) => Promise<T>,
-    diagnosticInput: { kind: 'semantic'; bytes: null } | { kind: 'user' | 'mouse' | 'protocol' | 'paste'; bytes: number },
+    diagnosticInput: ({ kind: 'semantic'; bytes: null } | { kind: 'user' | 'mouse' | 'protocol' | 'paste'; bytes: number }) & { parent?: InputObservationReference | null },
     renderObservation?: AbortController,
     protocolInput?: AgentPromptProtocolInputBoundary,
     onQueued?: (next?: AbortController) => void,
@@ -6977,7 +6984,8 @@ export class AgentMuxClient {
     // Transfer the original ACK observation synchronously, without an unobserved gap.
     onQueued?.(renderObservation)
     const diagnostic = this.inputPerformance.begin({ sessionId: agentSessionId, runId: requestedSession.run.runId,
-      kind: diagnosticInput.kind, bytes: diagnosticInput.bytes })
+      kind: diagnosticInput.kind, bytes: diagnosticInput.bytes, parent: diagnosticInput.parent ?? null })
+    try { const identity = this.runtimeIdentity(); diagnostic.executionOwner(identity.instanceId, identity.hostId) } catch { /* Observation cannot gate input. */ }
     const previous = lane.tail
     beginPromptPreparationPhase(protocolInput, 'input-lane')
     let result!: T

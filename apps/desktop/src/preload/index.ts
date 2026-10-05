@@ -1,3 +1,4 @@
+import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
 import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
@@ -437,8 +438,14 @@ const api: AgentMuxPreloadApi = {
     replay: (attachmentId: string, afterByte: number) =>
       ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
-    write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
-    paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
+    write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference) => {
+      const parent = readInputObservation(observation)
+      return ipcRenderer.invoke('sessions:write', session, data, source, ...(parent ? [parent] : []))
+    },
+    paste: (session: SessionControl, text: string, terminalData: string, observation?: import('@agentmux/core/control').InputObservationReference) => {
+      const parent = readInputObservation(observation)
+      return ipcRenderer.invoke('sessions:paste', session, text, terminalData, ...(parent ? [parent] : []))
+    },
     recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
     submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch) =>
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch),

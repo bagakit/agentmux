@@ -18,6 +18,8 @@ import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './brow
 export * from './browser-task-control.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
 export * from './metrics.js'
+export { createInputPerformanceRecorder, readInputObservation } from './performance-diagnostics.js'
+export type { InputObservationReference, InputPerformanceSnapshot, InputPerformanceSender, InputPerformanceHandle } from './performance-diagnostics.js'
 import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolkit.js'
 export * from './toolkit.js'
 export type * from './space-control.js'

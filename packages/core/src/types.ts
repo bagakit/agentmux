@@ -268,6 +268,8 @@ export type AgentMuxAgentWriteInput = {
   data: AgentMuxRunInputData
   /** Protocol replies are not user attempts to answer a pending request. */
   source: 'user' | 'terminal-protocol'
+  /** Optional read-only correlation; never a native operation or input requirement. */
+  observation?: import('./performance-diagnostics.js').InputObservationReference
 }
 
 /** A terminal paste edits the current Run's draft without submitting a prompt. */
@@ -278,6 +280,8 @@ export type AgentMuxAgentPasteInput = {
   text: string
   /** Actual encoding emitted by this terminal client's paste operation. */
   terminalData: string
+  /** Optional read-only correlation; malformed metadata is ignored. */
+  observation?: import('./performance-diagnostics.js').InputObservationReference
 }
 
 export type AgentMuxRunInputOperation = {

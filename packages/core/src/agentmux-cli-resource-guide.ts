@@ -108,6 +108,13 @@ Source identity, availability and each source's actual observation time remain v
 system metrics get returns the first bounded frame and releases its own reader; a
 pending Renderer has not failed. Watch frames may update different sources: use the
 app source observation time and process intervalMs to identify actual CPU intervals.
+Input diagnostics preserve an optional Renderer parent {observerId,source,sequence}; it is
+an untrusted correlation label, never identity, an operation ID or an input receipt. Compare
+Host/Session/Run and execution owner too. Main sender/window facts are captured independently.
+Stages and oldestPendingMs use each process's own monotonic clock; nested wall times are
+not additive. Duplicate parents are ambiguous; omitted coverage cannot prove uniqueness
+or the oldest pending age. active/recent remain bounded, and bad optional metadata is discarded
+without changing original input bytes, FIFO, results or errors.
 
 Data-only script results may use schema agentmux.toolkit.result.v1 with summary, items
 [{label,value}], links [{label,url}] and notice. Optional agentCards contains fields,
