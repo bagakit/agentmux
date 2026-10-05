@@ -1,5 +1,5 @@
 import { DiagnosticEvidenceQuery } from '@agentmux/diagnostic-evidence'
-import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
+import { parseDiagnosticEvidenceParams, parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { inspectDiagnosticEvidence } from './diagnostic-evidence-service.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { parseDeliveryAttempt, validateDeliveryLogId, type DeliveryAttemptLookup } from './delivery-attempt.js'
@@ -707,8 +707,31 @@ export class AgentMuxRpcService {
         const observation = await owner.client.observeRunStorage({ runId })
         result = { ...observation, runtime: { ...observation.runtime, hostId } }; break
       }
-      case 'system.diagnostics.inspect':
-        result = await inspectDiagnosticEvidence(this.diagnosticQuery, parseDiagnosticEvidenceParams(p), this.ports, caller, context.signal); break
+      case 'system.diagnostics.inspect': {
+        const input = parseDiagnosticEvidenceParams(p)
+        // Discovery reads registered contracts only. An attached client cannot replace
+        // an original local journal, authority or reader for an already-owned domain.
+        const local = await inspectDiagnosticEvidence(this.diagnosticQuery, {}, this.ports, caller, context.signal)
+        if ((!input.target || !local.capabilities.some(capability => capability.domain === input.target?.domain)) && this.ports.forwardControl) {
+          try {
+            const forwarded = parseDiagnosticEvidenceResult(await this.ports.forwardControl('system.diagnostics.inspect', structuredClone(input), context), input)
+            if (input.target) { result = forwarded; break }
+            const capabilities = new Map(local.capabilities.map(capability => [capability.domain, capability]))
+            for (const capability of forwarded.capabilities) if (!capabilities.has(capability.domain)) capabilities.set(capability.domain, capability)
+            const discovery = { ...local, capabilities: [...capabilities.values()], issues: [...local.issues, ...forwarded.issues],
+              completeness: local.completeness === 'complete' && forwarded.completeness === 'complete' ? 'complete' as const : 'partial' as const,
+              budget: { ...local.budget } }
+            for (let i = 0; i < 4; i++) discovery.budget.usedBytes = Buffer.byteLength(JSON.stringify(discovery))
+            result = parseDiagnosticEvidenceResult(discovery, input); break
+          } catch (error) {
+            // A transport absence permits local observations. A remote refusal,
+            // cancellation or corrupt response does not authorize another read.
+            if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error
+          }
+        }
+        result = input.target ? await inspectDiagnosticEvidence(this.diagnosticQuery, input, this.ports, caller, context.signal) : local
+        break
+      }
       case 'agent.native.ls': {
         const hostId = rpcString(p.hostId, 'Native Session Host'), executorId = rpcString(p.executorId, 'Native Session Executor')
         if (p.workspacePath !== undefined && (typeof p.workspacePath !== 'string' || !isAbsolute(p.workspacePath) || p.workspacePath.includes('\0'))) {
