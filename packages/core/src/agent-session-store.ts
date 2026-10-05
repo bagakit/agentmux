@@ -9,6 +9,8 @@ import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:f
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
+import type { DatabaseSync } from 'node:sqlite'
+import { openSessionDatabase, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -25,6 +27,7 @@ import {
   normalizeNativeTranscriptPath
 } from './agent-native-locator.js'
 import type {
+  AgentFuturePromptIntent,
   AgentActivityCommit,
   AgentActivityObservation,
   AgentHookReceipt,
@@ -126,7 +129,15 @@ export type AgentMuxAgentSessionStore = {
   withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T>
   /** Flush the current exact binding; reading bytes alone does not acknowledge persistence. */
   confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void>
+  /** Explicit complete business-fact export; ordinary control reads use metadata. */
   load(): Promise<readonly unknown[]>
+  loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]>
+  readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
+  readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null>
+  listFuturePromptIntents(agentSessionId: string, options?: { afterIntentId?: string; limit?: number }): Promise<AgentMuxFuturePromptPage>
+  /** Metadata and, when supplied, one exact intent change commit under the same Session CAS. */
+  compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
+    signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
@@ -162,6 +173,43 @@ export type AgentMuxAgentSessionStore = {
     mutation: AgentTimelineMutation,
     signal?: AbortSignal
   ): Promise<AgentTimelineCommit>
+}
+
+export type AgentMuxSessionFutureChange = {
+  intentId: string
+  expected: AgentFuturePromptIntent | null
+  next: AgentFuturePromptIntent | null
+}
+export type AgentMuxFuturePromptPage = {
+  intents: Array<{ intentId: string; intent: AgentFuturePromptIntent }>
+  nextIntentId: string | null
+}
+
+/** Only the accumulated business dictionary is separated; no second public DTO is defined here. */
+export function agentSessionMetadata(session: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
+  const { futurePromptIntents: _future, ...metadata } = session
+  return metadata
+}
+
+function futurePromptPage(entries: Array<{ intentId: string; intent: AgentFuturePromptIntent }>, limit: number): AgentMuxFuturePromptPage {
+  const selected: typeof entries = []
+  let bytes = 0
+  for (const entry of entries.slice(0, limit)) {
+    const size = Buffer.byteLength(JSON.stringify(entry))
+    if (selected.length && bytes + size > 4 * 1024 * 1024) break
+    selected.push(entry); bytes += size
+  }
+  return { intents: selected, nextIntentId: selected.length < entries.length ? selected.at(-1)!.intentId : null }
+}
+function futurePageLimit(limit = 16): number {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16) throw new AgentMuxError('Future-message read window must be between 1 and 16.', 'INVALID_CONTROL_REQUEST')
+  return limit
+}
+function nativeBindingKey(session: AgentMuxStoredAgentSession): string | null {
+  const handle = session.nativeHandle
+  return !handle ? null : handle.kind === 'provider'
+    ? JSON.stringify(['provider', handle.providerId, handle.sessionId])
+    : JSON.stringify(['acp', handle.adapterId, handle.sessionId])
 }
 
 function record(value: unknown, name: string): Record<string, unknown> {
@@ -1701,6 +1749,10 @@ export async function loadAgentSessions(
   return normalizeAgentSessions(await store.load())
 }
 
+export async function loadAgentSessionMetadata(store: AgentMuxAgentSessionStore): Promise<AgentMuxStoredAgentSession[]> {
+  return normalizeAgentSessions(await store.loadMetadata())
+}
+
 export function agentLifecycleOperationIdentity(kind: 'create' | 'resume' | 'stop' | 'reopen', agentSessionId: string, requestedOperationId: string): string {
   return createHash('sha256').update(JSON.stringify(['agentmux-agent-lifecycle-v1', kind, agentSessionId, requestedOperationId])).digest('base64url')
 }
@@ -1724,7 +1776,7 @@ function reopenCorrelations(reservations: readonly AgentMuxLifecycleReservation[
 
 /** One bounded catalogue, derived from the existing durable Store. */
 export async function loadSessionHistorySources(store: AgentMuxAgentSessionStore): Promise<AgentSessionHistoryDescriptor[]> {
-  const [sessions, retired, correlations] = await Promise.all([loadAgentSessions(store), store.loadRetiredAgentSessions(), store.loadReopenCorrelations()])
+  const [sessions, retired, correlations] = await Promise.all([loadAgentSessionMetadata(store), store.loadRetiredAgentSessions(), store.loadReopenCorrelations()])
   const activeIds = new Set(sessions.map(session => session.agentSessionId))
   const pending = new Map(correlations.map(correlation => [JSON.stringify(correlation.expectedRetirement), correlation]))
   return [
@@ -1913,13 +1965,59 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void> {
     const current = this.sessions.get(agentSessionId)
-    if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession)) {
+    if (!current || current.run.runId !== expectedRun.runId || !sameSession(agentSessionMetadata(current), agentSessionMetadata(expectedSession))) {
       throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
     }
   }
 
   async load(): Promise<readonly unknown[]> {
     return [...this.sessions.values()].map((session) => structuredClone(session))
+  }
+
+  async loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]> {
+    return [...this.sessions.values()].map(session => structuredClone(agentSessionMetadata(session)))
+  }
+  async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
+    const value = this.sessions.get(agentSessionId)
+    return value ? structuredClone(agentSessionMetadata(value)) : null
+  }
+  async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
+    return structuredClone(this.sessions.get(agentSessionId)?.futurePromptIntents?.[intentId] ?? null)
+  }
+  async listFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<AgentMuxFuturePromptPage> {
+    const limit = futurePageLimit(options.limit)
+    const entries = Object.entries(this.sessions.get(agentSessionId)?.futurePromptIntents ?? {})
+    const index = options.afterIntentId === undefined ? -1 : entries.findIndex(([id]) => id === options.afterIntentId)
+    if (options.afterIntentId !== undefined && index < 0) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
+    return futurePromptPage(entries.slice(index + 1, index + 2 + limit).map(([intentId, intent]) => ({ intentId, intent: structuredClone(intent) })), limit)
+  }
+  async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
+    signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void> {
+    signal?.throwIfAborted()
+    const id = expected?.agentSessionId ?? next?.agentSessionId
+    if (!id || expected && next && expected.agentSessionId !== next.agentSessionId) throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    const current = this.sessions.get(id) ?? null
+    if (!sameSession(current ? agentSessionMetadata(current) : null, expected)) throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
+    if (future && !isDeepStrictEqual(current?.futurePromptIntents?.[future.intentId] ?? null, future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
+    const reservation = this.reservations.get(id)
+    if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+    if (!next) { this.sessions.delete(id); this.timelines.delete(id); return }
+    const normalized = normalizeStoredAgentSession(agentSessionMetadata(next))
+    const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
+    const all = normalizeAgentSessions([...values, normalized])
+    assertUnboundRetiredRuns(all, this.retiredRuns); assertRetiredAgentSessions(all, this.retiredRuns, this.retiredAgentSessions)
+    let intents = current?.futurePromptIntents
+    if (future) {
+      string(future.intentId, 'future intent id')
+      const value = future.next === null ? null : normalizeStoredAgentSession({ ...normalized,
+        futurePromptIntents: { [future.intentId]: future.next } }).futurePromptIntents![future.intentId]!
+      // The Store owns this map and all reads clone their result. Mutate one entry only
+      // after validation; copying every unrelated key would recreate the same growth cost.
+      intents ??= {}
+      if (future.next === null) delete intents[future.intentId]
+      else intents[future.intentId] = value!
+    }
+    this.sessions.set(id, { ...normalized, ...(intents === undefined ? {} : { futurePromptIntents: intents }) })
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -2284,50 +2382,50 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
 
 const requireNative = createRequire(import.meta.url)
 
-/** Only the post-replacement phase carries this receipt. It is not a success acknowledgement. */
+function sessionStorageFailure(error: unknown, stage: string, cleanup: unknown[] = []): Error {
+  // Keep business and durability receipts intact: their identity controls Run retention.
+  const failure = error instanceof AgentMuxError || error instanceof Error && error.name === 'AbortError'
+    ? error : new AgentMuxError('Session persistence is unavailable. Keep its original binding and retry the same operation.',
+      'AGENT_SESSION_STORE_UNAVAILABLE', JSON.stringify({ stage, cause: error instanceof Error
+        ? { name: error.name, message: error.message, ...('code' in error ? { code: error.code } : {}), ...('errcode' in error ? { errcode: error.errcode } : {}) }
+        : String(error) }))
+  if (failure !== error) Object.defineProperty(failure, 'cause', { value: error, configurable: true })
+  if (cleanup.length) Object.defineProperty(failure, 'cleanup', { value: cleanup, configurable: true })
+  return failure
+}
+
+/** Confirmed readable replacement or unknown COMMIT outcome; neither is a durable success ACK. */
 export class AgentMuxSessionDurabilityError extends AgentMuxError {
-  readonly replacementApplied = true
-  constructor(cause: DurableWriteError) {
-    super('The Session is readable, but its durable save is not confirmed. Its Run is retained; retry save confirmation.',
-      'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED', cause.cause instanceof Error ? cause.cause.message : String(cause.cause))
+  readonly replacementApplied: boolean
+  constructor(cause: unknown, readonly commitOutcome: 'applied' | 'unknown' = 'applied') {
+    super(commitOutcome === 'applied'
+      ? 'The Session is readable, but its durable save is not confirmed. Its Run is retained; retry save confirmation.'
+      : 'The Session commit outcome is unknown. Its Run is retained; read its original binding and retry save confirmation.',
+      'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED', JSON.stringify({ commitOutcome, cause: cause instanceof Error ? { name: cause.name, message: cause.message, ...('code' in cause ? { code: cause.code } : {}), ...('errcode' in cause ? { errcode: cause.errcode } : {}) } : String(cause) }))
+    this.replacementApplied = commitOutcome === 'applied'
+    Object.defineProperty(this, 'cause', { value: cause, configurable: true })
   }
 }
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
-  private lockReleaseFailure: AgentMuxError | null = null
+  private pendingLockRelease: (() => Promise<void>) | null = null
   /** 已报过的抢救事件（键是隔离文件的内容寻址路径），防同一份坏字节在一次加载里刷多条告警。 */
   private readonly reportedSalvages = new Set<string>()
 
-  // Only membership needed by a Timeline append is retained. Session bodies remain owned by the original document.
-  private timelineMembership: { identity: string; active: Set<string>; retired: Map<string, AgentMuxRetiredAgentSession> } | null = null
-
-  private async documentIdentity(): Promise<string | null> {
-    try {
-      const metadata = await stat(this.path, { bigint: true })
-      if (!metadata.isFile()) throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
-      return [metadata.dev, metadata.ino, metadata.size, metadata.mtimeNs, metadata.ctimeNs].join(':')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-  }
-
-  private rememberTimelineMembership(document: AgentSessionStoreDocument, identity: string): void {
-    this.timelineMembership = { identity, active: new Set(document.sessions.map(session => session.agentSessionId)),
-      retired: new Map(document.retiredAgentSessions.map(session => [session.agentSessionId, session])) }
-  }
+  private database: DatabaseSync | undefined
+  private dirty = false
 
   private async timelineMutationAllowed(mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted()
-    const identity = await this.documentIdentity()
-    if (identity === null) { this.timelineMembership = null; return false }
-    if (this.timelineMembership?.identity !== identity) await this.read(signal)
-    signal?.throwIfAborted()
-    const membership = this.timelineMembership
-    if (!membership) throw new AgentMuxError('The original Session membership changed during observation; retry this exact Timeline mutation.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
-    const retired = membership.retired.get(mutation.agentSessionId)
-    return membership.active.has(mutation.agentSessionId) || !!retired && acceptedRetiredActivity([retired], mutation)
+    if (this.db.prepare('SELECT 1 FROM sessions WHERE id=?').get(mutation.agentSessionId)) return true
+    const row = this.db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(mutation.agentSessionId)
+    return !!row && acceptedRetiredActivity([JSON.parse(String(row.json)) as AgentMuxRetiredAgentSession], mutation)
+  }
+
+  private get db(): DatabaseSync {
+    if (!this.database) throw new Error('Session database requires its original owner lock.')
+    return this.database
   }
 
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
@@ -2352,106 +2450,136 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void> {
     await this.enqueue(async () => {
-      const document = await this.read()
-      const current = document.sessions.find(session => session.agentSessionId === agentSessionId)
-      if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession)) {
+      const current = this.sessionMetadata(this.db, agentSessionId)
+      if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, agentSessionMetadata(expectedSession))) {
         throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
       }
-      await this.write(document)
+      this.dirty = true // A previous lost sync ACK must be confirmed, even without new rows.
     })
   }
 
   async load(): Promise<readonly unknown[]> {
-    // Loading is a read path.  Taking the writer lock here solely to sweep orphan Timeline files
-    // made every short-lived CLI (`list`, `inspect`, `output`) contend with the Desktop's high-rate
-    // semantic-status writes, so a lifecycle create could exhaust its retry budget without another
-    // writer ever being stuck.  Read the atomically-replaced document first, then make cleanup an
-    // opportunistic sidecar: if a writer currently owns the lock, leave the orphan for a later load.
     await this.tail
-    const document = await this.read()
-    const result = document.sessions.map((session) => structuredClone(session))
+    const result = await this.withReadDatabase(db => db.prepare('SELECT id FROM sessions ORDER BY rowid').all()
+      .map(row => this.completeSession(db, String(row.id))!), document => document.sessions)
     await this.sweepOrphanTimelines()
     return result
   }
 
   private async sweepOrphanTimelines(): Promise<void> {
-    let release: (() => Promise<void>) | null = null
+    let release: (() => Promise<void>) | undefined
     try {
-      // One attempt is deliberate: cleanup is maintenance, never a reason to block a read caller.
       release = await this.acquireLock(undefined, 1)
-      const document = await this.read()
-      await this.maintainTimelineFiles(document)
+      const current = await readCurrentSessionDatabase(this.path)
+      if (!current) return // Partial original-file rescue is not authoritative membership for deletion.
+      current.close()
+      await this.maintainTimelineFiles(await this.read())
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_SESSION_STORE_BUSY') throw error
-    } finally {
-      await release?.()
-    }
+    } finally { await release?.() }
+  }
+
+  async loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]> {
+    await this.tail
+    return await this.withReadDatabase(db => this.sessionCatalog(db), document => document.sessions.map(agentSessionMetadata))
+  }
+
+  async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
+    await this.tail
+    return await this.withReadDatabase(db => this.sessionMetadata(db, agentSessionId),
+      document => {
+        const value = document.sessions.find(session => session.agentSessionId === agentSessionId)
+        return value ? agentSessionMetadata(value) : null
+      })
+  }
+
+  async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
+    await this.tail
+    return await this.withReadDatabase(db => this.futureIntent(db, agentSessionId, intentId),
+      document => structuredClone(document.sessions.find(session => session.agentSessionId === agentSessionId)?.futurePromptIntents?.[intentId] ?? null))
+  }
+
+  async listFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<AgentMuxFuturePromptPage> {
+    await this.tail
+    const limit = futurePageLimit(options.limit)
+    return await this.withReadDatabase(db => {
+      const cursor = options.afterIntentId === undefined ? null : db.prepare(
+        'SELECT ordinal FROM future_intents WHERE session_id=? AND intent_id=?').get(agentSessionId, options.afterIntentId)
+      if (options.afterIntentId !== undefined && !cursor) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
+      const rows = db.prepare('SELECT intent_id, json FROM future_intents WHERE session_id=? AND ordinal>? ORDER BY ordinal LIMIT ?')
+        .all(agentSessionId, cursor ? Number(cursor.ordinal) : 0, limit + 1)
+      return futurePromptPage(rows.map(row => ({ intentId: String(row.intent_id), intent: JSON.parse(String(row.json)) as AgentFuturePromptIntent })), limit)
+    }, document => {
+      const entries = Object.entries(document.sessions.find(session => session.agentSessionId === agentSessionId)?.futurePromptIntents ?? {})
+      const index = options.afterIntentId === undefined ? -1 : entries.findIndex(([id]) => id === options.afterIntentId)
+      if (options.afterIntentId !== undefined && index < 0) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
+      return futurePromptPage(entries.slice(index + 1, index + 2 + limit).map(([intentId, intent]) => ({ intentId, intent })), limit)
+    })
+  }
+
+  async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
+    signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void> {
+    await this.enqueue(async () => { await this.swapSession(expected, next, false, signal, future) }, signal)
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
     await this.tail
-    return (await this.read()).retiredRuns.map((run) => ({ ...run }))
+    return await this.withReadDatabase(db => db.prepare('SELECT json FROM retired_runs ORDER BY rowid').all()
+      .map(row => runRef(JSON.parse(String(row.json)))), document => document.retiredRuns)
   }
 
   async loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]> {
     await this.tail
-    return structuredClone((await this.read()).retiredAgentSessions)
+    return await this.withReadDatabase(db => db.prepare('SELECT json FROM retired_sessions ORDER BY rowid').all()
+      .map(row => retiredAgentSession(JSON.parse(String(row.json)))), document => structuredClone(document.retiredAgentSessions))
   }
 
   async loadReopenCorrelations() {
     await this.tail
-    return reopenCorrelations((await this.read()).reservations)
+    return await this.withReadDatabase(db => reopenCorrelations(db.prepare("SELECT json FROM reservations WHERE json_extract(json,'$.kind')='reopen'").all()
+      .map(row => lifecycleReservation(JSON.parse(String(row.json))))), document => reopenCorrelations(document.reservations))
   }
 
   async loadCreationSessionId(createOperationId: string): Promise<string | null> {
     await this.tail
-    const document = await this.read()
-    return creationSessionId(document.sessions, document.reservations, createOperationId)
+    return await this.withReadDatabase(db => creationSessionId(
+      db.prepare('SELECT json FROM sessions WHERE creation_operation=?').all(createOperationId).map(row => normalizeStoredAgentSession(JSON.parse(String(row.json)))),
+      db.prepare("SELECT json FROM reservations WHERE json_extract(json,'$.kind')='create'").all().map(row => lifecycleReservation(JSON.parse(String(row.json)))), createOperationId),
+      document => creationSessionId(document.sessions, document.reservations, createOperationId))
   }
 
   async loadCreationCorrelation(agentSessionId: string) {
     await this.tail
-    const reservation = (await this.read()).reservations.find(value => value.agentSessionId === agentSessionId)
-    return reservation?.kind === 'create' ? structuredClone(reservation) : null
+    return await this.withReadDatabase(db => {
+      const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(agentSessionId)
+      const value = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
+      return value?.kind === 'create' ? value : null
+    }, document => {
+      const value = document.reservations.find(value => value.agentSessionId === agentSessionId)
+      return value?.kind === 'create' ? structuredClone(value) : null
+    })
   }
 
-  async compareAndSwap(
-    expected: AgentMuxStoredAgentSession | null,
-    next: AgentMuxStoredAgentSession | null,
-    signal?: AbortSignal
-  ): Promise<void> {
-    await this.enqueue(async () => {
-      signal?.throwIfAborted()
-      const agentSessionId = expected?.agentSessionId ?? next?.agentSessionId
-      if (!agentSessionId || (expected && next && expected.agentSessionId !== next.agentSessionId)) {
-        throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
-      }
-      const document = await this.read(signal)
-      const sessions = new Map(document.sessions.map((item) => [item.agentSessionId, item]))
-      const current = sessions.get(agentSessionId) ?? null
-      if (!sameSession(current, expected)) {
-        throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
-      }
-      const reservation = document.reservations.find((item) => item.agentSessionId === agentSessionId)
-      if (
-        reservation &&
-        (next === null || expected === null || next.run.runId !== expected.run.runId)
-      ) {
-        throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
-      }
-      if (next) sessions.set(agentSessionId, normalizeStoredAgentSession(next))
-      else sessions.delete(agentSessionId)
-      const normalized = normalizeAgentSessions([...sessions.values()])
-      assertUnboundRetiredRuns(normalized, document.retiredRuns)
-      assertRetiredAgentSessions(
-        normalized,
-        document.retiredRuns,
-        document.retiredAgentSessions
-      )
-      if (next && !expected) await this.removeTimelineFile(agentSessionId)
-      await this.write({ ...document, sessions: normalized }, signal)
-      if (!next) await this.removeTimelineFile(agentSessionId).catch(() => {})
-    }, signal)
+  async compareAndSwap(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null, signal?: AbortSignal): Promise<void> {
+    await this.enqueue(async () => { await this.swapSession(expected, next, true, signal) }, signal)
+  }
+
+  private async swapSession(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
+    complete: boolean, signal?: AbortSignal, future?: AgentMuxSessionFutureChange): Promise<void> {
+    signal?.throwIfAborted()
+    const id = expected?.agentSessionId ?? next?.agentSessionId
+    if (!id || expected && next && expected.agentSessionId !== next.agentSessionId) throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    const current = complete ? this.completeSession(this.db, id) : this.sessionMetadata(this.db, id)
+    if (!sameSession(current, expected)) throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
+    const reservation = this.db.prepare('SELECT 1 FROM reservations WHERE id=?').get(id)
+    if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+    if (future && !isDeepStrictEqual(this.futureIntent(this.db, id, future.intentId), future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
+    if (next && !expected) await this.removeTimelineFile(id)
+    if (next) this.saveSession(this.db, normalizeStoredAgentSession(complete ? next : agentSessionMetadata(next)), complete)
+    else this.deleteSession(this.db, id)
+    if (future && !isDeepStrictEqual(future.expected, future.next)) this.saveFutureIntent(this.db, id, future)
+    this.dirty = true
+    if (!next) await this.removeTimelineFile(id).catch(() => {})
   }
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
@@ -2723,37 +2851,118 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return structuredClone(result)
   }
 
-  private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
-    let raw: Buffer
-    const identity = await this.documentIdentity()
+  private async withReadDatabase<T>(read: (db: DatabaseSync) => T,
+    rescue: (document: AgentSessionStoreDocument) => T): Promise<T> {
+    if (this.database) return read(this.database)
+    let db: DatabaseSync | null = null
+    let failure: unknown
     try {
-      signal?.throwIfAborted()
-      const metadata = await stat(this.path)
-      if (!metadata.isFile()) {
-        throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
-      }
-      // 先拿到字节再解析。瞬时读取错误（EACCES/EIO）在此抛出并原样上抛——绝不进入抢救路径，
-      // 否则一次权限抖动就会把一份完好的文件截断进降级态。只有「字节到手但内容坏了」才算真损坏。
-      raw = await readFile(this.path, { signal })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {
-          version: 5,
-          sessions: [],
-          reservations: [],
-          retiredRuns: [],
-          retiredAgentSessions: []
+      db = await readCurrentSessionDatabase(this.path)
+      if (!db) {
+        let raw: Buffer | undefined
+        try { raw = await readFile(this.path) } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         }
+        if (raw) {
+          try { this.strictOriginalDocument(raw) } catch {
+            // Damaged original bytes remain the original rescue source. A partial salvage is
+            // readable, observable and never published as a successful physical conversion.
+            return rescue(await this.parseStoreDocument(raw))
+          }
+        }
+        await this.enqueue(async () => {})
+        db = await readCurrentSessionDatabase(this.path)
+        if (!db) throw new AgentMuxError('Session persistence identity is unconfirmed; retry the original read.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
       }
-      throw error
+      db.exec('BEGIN'); const result = read(db); db.exec('COMMIT'); return result
+    } catch (error) { failure = sessionStorageFailure(error, 'read'); throw failure }
+    finally {
+      try { db?.close() } catch (error) {
+        if (failure !== undefined) throw sessionStorageFailure(failure, 'read', [error])
+        throw sessionStorageFailure(error, 'read-close')
+      }
     }
-    const document = await this.parseStoreDocument(raw, signal)
-    // A read outside the write lock may straddle an atomic replacement. Never stamp old membership with a new inode.
-    try {
-      if (identity !== null && identity === await this.documentIdentity()) this.rememberTimelineMembership(document, identity)
-      else this.timelineMembership = null
-    } catch { this.timelineMembership = null }
-    return document
+  }
+
+  private strictOriginalDocument(raw: Buffer): AgentSessionStoreDocument {
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw)) as Record<string, unknown>
+    if (!value || value.version !== 5) throw new AgentMuxError('Agent Session store is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    return this.strictStoreDocument(value)
+  }
+
+  private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
+    signal?.throwIfAborted()
+    return await this.withReadDatabase(db => ({ version: 5,
+      sessions: this.sessionCatalog(db),
+      reservations: db.prepare('SELECT json FROM reservations ORDER BY rowid').all().map(row => lifecycleReservation(JSON.parse(String(row.json)))),
+      retiredRuns: db.prepare('SELECT json FROM retired_runs ORDER BY rowid').all().map(row => runRef(JSON.parse(String(row.json)))),
+      retiredAgentSessions: db.prepare('SELECT json FROM retired_sessions ORDER BY rowid').all().map(row => retiredAgentSession(JSON.parse(String(row.json))))
+    }), document => document)
+  }
+
+  private sessionCatalog(db: DatabaseSync): AgentMuxStoredAgentSession[] {
+    return db.prepare('SELECT json FROM sessions ORDER BY rowid').all().map(row => normalizeStoredAgentSession(JSON.parse(String(row.json))))
+  }
+
+  private sessionMetadata(db: DatabaseSync, id: string): AgentMuxStoredAgentSession | null {
+    const row = db.prepare('SELECT json FROM sessions WHERE id=?').get(id)
+    return row ? normalizeStoredAgentSession(JSON.parse(String(row.json))) : null
+  }
+  private futureIntent(db: DatabaseSync, id: string, intentId: string): AgentFuturePromptIntent | null {
+    const row = db.prepare('SELECT json FROM future_intents WHERE session_id=? AND intent_id=?').get(id, intentId)
+    return row ? JSON.parse(String(row.json)) as AgentFuturePromptIntent : null
+  }
+  private completeSession(db: DatabaseSync, id: string): AgentMuxStoredAgentSession | null {
+    const current = this.sessionMetadata(db, id)
+    if (!current) return null
+    const present = db.prepare('SELECT future_present FROM sessions WHERE id=?').get(id)!.future_present
+    if (!present) return current
+    const entries = db.prepare('SELECT intent_id, json FROM future_intents WHERE session_id=? ORDER BY ordinal').all(id)
+    return { ...current, futurePromptIntents: Object.fromEntries(entries.map(row => [String(row.intent_id), JSON.parse(String(row.json))])) }
+  }
+  private saveFutureIntent(db: DatabaseSync, id: string, change: AgentMuxSessionFutureChange): void {
+    string(change.intentId, 'future intent id')
+    if (change.next === null) { db.prepare('DELETE FROM future_intents WHERE session_id=? AND intent_id=?').run(id, change.intentId); return }
+    const metadata = this.sessionMetadata(db, id)
+    if (!metadata) throw new AgentMuxError('Future intent has no current Session owner.', 'STALE_AGENT_SESSION')
+    const intent = normalizeStoredAgentSession({ ...metadata, futurePromptIntents: { [change.intentId]: change.next } }).futurePromptIntents![change.intentId]!
+    const existing = db.prepare('SELECT ordinal FROM future_intents WHERE session_id=? AND intent_id=?').get(id, change.intentId)
+    const ordinal = existing ? Number(existing.ordinal) : Number(db.prepare('SELECT COALESCE(MAX(ordinal),0)+1 AS next FROM future_intents WHERE session_id=?').get(id)!.next)
+    db.prepare('INSERT INTO future_intents VALUES (?, ?, ?, ?) ON CONFLICT(session_id,intent_id) DO UPDATE SET json=excluded.json')
+      .run(id, change.intentId, ordinal, JSON.stringify(intent))
+    db.prepare('UPDATE sessions SET future_present=1 WHERE id=?').run(id)
+  }
+  private deleteSession(db: DatabaseSync, id: string): void {
+    db.prepare('DELETE FROM sessions WHERE id=?').run(id)
+    db.prepare('DELETE FROM future_intents WHERE session_id=?').run(id)
+    db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
+    db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
+  }
+  private saveSession(db: DatabaseSync, session: AgentMuxStoredAgentSession, replaceFuture: boolean): void {
+    const id = session.agentSessionId, metadata = agentSessionMetadata(session)
+    const retired = db.prepare('SELECT 1 FROM retired_sessions WHERE id=?').get(id)
+    if (retired) throw new AgentMuxError('Retired Agent Session conflicts with current identity.', 'INVALID_AGENT_SESSION_STORE')
+    for (const run of [session.run, ...session.retiredRuns]) {
+      const bound = db.prepare('SELECT session_id FROM run_bindings WHERE run_id=?').get(run.runId)
+      if (bound && bound.session_id !== id) throw new AgentMuxError('Run conflicts with another current or retired Session.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const native = nativeBindingKey(session)
+    if (native) {
+      const bound = db.prepare('SELECT session_id FROM native_bindings WHERE native_key=?').get(native)
+      if (bound && bound.session_id !== id) throw new AgentMuxError('Native identity conflicts with another Session.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const present = replaceFuture || session.futurePromptIntents !== undefined ? Number(session.futurePromptIntents !== undefined)
+      : Number(db.prepare('SELECT future_present FROM sessions WHERE id=?').get(id)?.future_present ?? 0)
+    db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json,future_present=excluded.future_present,creation_operation=excluded.creation_operation')
+      .run(id, JSON.stringify(metadata), present, session.creation?.createOperationId ?? null)
+    db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
+    for (const run of [session.run, ...session.retiredRuns]) db.prepare('INSERT INTO run_bindings VALUES (?, ?)').run(run.runId, id)
+    db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
+    if (native) db.prepare('INSERT INTO native_bindings VALUES (?, ?)').run(native, id)
+    if (replaceFuture || session.futurePromptIntents !== undefined) {
+      db.prepare('DELETE FROM future_intents WHERE session_id=?').run(id)
+      for (const [intentId, intent] of Object.entries(session.futurePromptIntents ?? {})) this.saveFutureIntent(db, id, { intentId, expected: null, next: intent })
+    }
   }
 
   /**
@@ -2944,28 +3153,36 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
 
-  private async write(
-    document: AgentSessionStoreDocument,
-    signal?: AbortSignal,
-    pruneTimelines = false
-  ): Promise<void> {
+  private async write(document: AgentSessionStoreDocument, signal?: AbortSignal, pruneTimelines = false): Promise<void> {
     signal?.throwIfAborted()
-    this.timelineMembership = null
-    const content = `${JSON.stringify(document, null, 2)}\n`
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    try {
-      await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true, ...(signal ? { signal } : {}) })
-    } catch (error) {
-      if (error instanceof DurableWriteError && error.phase === 'after-replace') throw new AgentMuxSessionDurabilityError(error)
-      throw error
-    }
-    // The caller still holds the original store writer lock, so no compliant writer can replace this identity here.
-    // Cache bookkeeping is advisory: failure must not turn a confirmed durable write into an unknown transaction.
-    try {
-      const identity = await this.documentIdentity()
-      if (identity !== null) this.rememberTimelineMembership(document, identity)
-    } catch { this.timelineMembership = null }
+    this.writeDocument(this.db, document)
+    this.dirty = true
     if (pruneTimelines) await this.maintainTimelineFiles(document)
+  }
+
+  private writeDocument(db: DatabaseSync, document: AgentSessionStoreDocument): void {
+    // Lifecycle operations explicitly inspect metadata identities and reconcile their ownership;
+    // preserved future bodies never join this catalog or its JSON serialization.
+    const nextIds = new Set(document.sessions.map(session => session.agentSessionId))
+    for (const row of db.prepare('SELECT id FROM sessions').all()) if (!nextIds.has(String(row.id))) this.deleteSession(db, String(row.id))
+    for (const [table, values, id] of [
+      ['reservations', document.reservations, (value: AgentMuxLifecycleReservation) => value.agentSessionId],
+      ['retired_runs', document.retiredRuns, (value: AgentMuxRunRef) => value.runId],
+      ['retired_sessions', document.retiredAgentSessions, (value: AgentMuxRetiredAgentSession) => value.agentSessionId]
+    ] as const) {
+      const entries = new Map(values.map(value => [(id as (value: unknown) => string)(value), JSON.stringify(value)]))
+      for (const row of db.prepare(`SELECT id, json FROM ${table}`).all()) {
+        const key = String(row.id), next = entries.get(key)
+        if (next === undefined) db.prepare(`DELETE FROM ${table} WHERE id=?`).run(key)
+        else if (next !== row.json) db.prepare(`UPDATE ${table} SET json=? WHERE id=?`).run(next, key)
+        entries.delete(key)
+      }
+      for (const [key, json] of entries) db.prepare(`INSERT INTO ${table} VALUES (?, ?)`).run(key, json)
+    }
+    // Lifecycle transitions can exchange current/retired ownership in this same transaction.
+    db.exec('DELETE FROM run_bindings; DELETE FROM native_bindings')
+    for (const run of document.retiredRuns) db.prepare('INSERT INTO run_bindings VALUES (?, NULL)').run(run.runId)
+    for (const session of document.sessions) this.saveSession(db, session, false)
   }
 
   private async maintainTimelineFiles(document: AgentSessionStoreDocument): Promise<void> {
@@ -3102,22 +3319,52 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async enqueue(operation: () => Promise<void>, signal?: AbortSignal): Promise<void> {
-    const current = this.tail.catch(() => {}).then(async () => {
+    const current = this.tail.then(async () => {
       signal?.throwIfAborted()
-      if (this.lockReleaseFailure) throw this.lockReleaseFailure
+      if (this.pendingLockRelease) {
+        // Retry cleanup of the same owned handle in-band. A prior close error is not a permanent
+        // sentence for a healthy Store, nor permission to unlock another writer's inode.
+        await this.pendingLockRelease()
+        this.pendingLockRelease = null
+      }
       const release = await this.acquireLock(signal)
+      let committed = false
+      let failure: unknown
+      let stage = 'open'
       try {
+        this.database = await openSessionDatabase(this.path, (db, raw) => this.writeDocument(db, this.strictOriginalDocument(raw)))
+        this.dirty = false
+        stage = 'begin'; this.db.exec('BEGIN IMMEDIATE')
+        stage = 'mutation'
         await operation()
+        signal?.throwIfAborted()
+        stage = 'commit'; this.db.exec('COMMIT'); committed = true
+        if (this.dirty) {
+          try { await syncSessionDatabase(this.path) } catch (error) { throw new AgentMuxSessionDurabilityError(error) }
+        }
+      } catch (error) {
+        // A failed SQLite COMMIT can leave the old transaction active (known rollback), or
+        // an uncertain durable outcome. Neither proves Native input was not applied.
+        failure = !committed && this.database && !this.database.isTransaction && this.dirty
+          ? new AgentMuxSessionDurabilityError(error, 'unknown') : sessionStorageFailure(error, stage)
+        throw failure
       } finally {
-        await release().catch((error) => {
-          const failure = new AgentMuxError(
-            'Agent Session store lock cleanup failed; this Store instance cannot write again.',
-            'AGENT_SESSION_STORE_LOCK_RELEASE_FAILED',
-            error instanceof Error ? error.message : String(error)
-          )
-          this.lockReleaseFailure = failure
-          process.emitWarning(failure.message, { code: failure.code })
+        const cleanup: unknown[] = [], database = this.database
+        try { if (database?.isTransaction) database.exec('ROLLBACK') } catch (error) { cleanup.push(error) }
+        let closed = false
+        try { database?.close(); closed = true } catch (error) { cleanup.push(error) }
+        this.database = undefined
+        const finishRelease = async () => { if (!closed) { database?.close(); closed = true }; await release() }
+        await finishRelease().catch(error => {
+            const failure = new AgentMuxError('Agent Session store lock cleanup is unconfirmed; retry the same operation to release its original handle.',
+              'AGENT_SESSION_STORE_LOCK_RELEASE_FAILED', error instanceof Error ? error.message : String(error))
+            this.pendingLockRelease = finishRelease; process.emitWarning(failure.message, { code: failure.code })
         })
+        if (cleanup.length) {
+          if (failure !== undefined) throw sessionStorageFailure(failure, stage, cleanup)
+          if (committed) throw new AgentMuxSessionDurabilityError(sessionStorageFailure(cleanup[0], 'close', cleanup.slice(1)))
+          throw sessionStorageFailure(cleanup[0], 'close', cleanup.slice(1))
+        }
       }
     })
     this.tail = current.then(() => {}, () => {})

@@ -110,7 +110,7 @@ import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
   AgentMuxFileAgentSessionStore,
   AgentMuxSessionDurabilityError,
-  loadAgentSessions,
+  loadAgentSessionMetadata,
   agentLifecycleOperationIdentity,
   loadSessionHistorySources,
   type AgentMuxAgentSessionStore,
@@ -1009,8 +1009,8 @@ export class AgentMuxClient {
       screenEvidence: this.screenEvidence,
       requireAgentSession: (agentSessionId) => this.requireAgentSession(agentSessionId),
       assertAgentRun: (session, run) => { this.assertAgentRun(session, run) },
-      updateExactAgentSession: (agentSessionId, expectedRun, update) =>
-        this.updateExactAgentSession(agentSessionId, expectedRun, update)
+      updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId) =>
+        this.updateExactAgentSession(agentSessionId, expectedRun, update, futureIntentId)
     })
   }
 
@@ -1794,7 +1794,7 @@ export class AgentMuxClient {
 
   /** Current durable identities, without replacing the active registry or probing Runs. */
   async readAgentSessions(): Promise<AgentMuxAgentSession[]> {
-    const durable = await loadAgentSessions(this.store)
+    const durable = await loadAgentSessionMetadata(this.store)
     // A prepared creation can have an actual started Run before its commit is acknowledged.
     // Expose that real projection as explicitly unconfirmed; durable identities always take precedence.
     return [...durable, ...this.registry.list().filter(session => session.creation?.persistence === 'unconfirmed' &&
@@ -1805,30 +1805,13 @@ export class AgentMuxClient {
   async readAgentFuturePromptIntent(agentSessionId: string, intentId: string): Promise<import('./types.js').AgentFuturePromptIntent | null> {
     safeId(intentId, 'Future message intent id')
     const session = this.requireAgentSession(agentSessionId)
-    const intent = session.futurePromptIntents?.[intentId]
-    return intent ? structuredClone(intent) : null
+    return await this.store.readFuturePromptIntent(session.agentSessionId, intentId)
   }
 
   /** A bounded read window over all original future identities, including inactive history. */
-  async listAgentFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<{
-    intents: Array<{ intentId: string; intent: import('./types.js').AgentFuturePromptIntent }>; nextIntentId: string | null
-  }> {
-    const limit = options.limit ?? 16
-    // 16 individual 64KiB prompts plus their original message bodies fit one Hosted read transfer.
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16) throw new AgentMuxError('Future-message read window must be between 1 and 16.', 'INVALID_CONTROL_REQUEST')
-    const entries = Object.entries(this.requireAgentSession(agentSessionId).futurePromptIntents ?? {})
-    const index = options.afterIntentId === undefined ? -1 : entries.findIndex(([id]) => id === options.afterIntentId)
-    if (options.afterIntentId !== undefined && index < 0) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
-    const selected: typeof entries = []
-    let bytes = 0
-    for (const entry of entries.slice(index + 1, index + 1 + limit)) {
-      const size = Buffer.byteLength(JSON.stringify({ intentId: entry[0], intent: entry[1] }))
-      // Bound this read response, never retained intent count or subsequent windows.
-      if (selected.length && bytes + size > 4 * 1024 * 1024) break
-      selected.push(entry); bytes += size
-    }
-    return { intents: selected.map(([intentId, intent]) => ({ intentId, intent: structuredClone(intent) })),
-      nextIntentId: index + 1 + selected.length < entries.length ? selected.at(-1)![0] : null }
+  async listAgentFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<import('./agent-session-store.js').AgentMuxFuturePromptPage> {
+    const session = this.requireAgentSession(agentSessionId)
+    return await this.store.listFuturePromptIntents(session.agentSessionId, options)
   }
 
   /** Resolve durable creation bindings before choosing an identity for a new operation. No process or input is started. */
@@ -1890,7 +1873,7 @@ export class AgentMuxClient {
   }
 
   private retainUnconfirmedLifecycle(error: unknown, expected: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
-    if (!(error instanceof AgentMuxSessionDurabilityError) || !error.replacementApplied) throw error
+    if (!(error instanceof AgentMuxSessionDurabilityError)) throw error
     const readable = this.registry.get(expected.agentSessionId)
     if (!sameRun(readable.run, expected.run) || readable.providerId !== expected.providerId ||
       readable.hostId !== expected.hostId || readable.workspacePath !== expected.workspacePath) throw error
@@ -2163,7 +2146,7 @@ export class AgentMuxClient {
     }
     if (wantsCurrent && canDiscover) {
       const epoch = this.connectionEpoch
-      original = (await loadAgentSessions(this.store)).find(value => value.agentSessionId === agentSessionId)
+      original = (await this.store.readMetadata(agentSessionId)) ?? undefined
       if (!original || original.hostId !== descriptor.hostId || original.providerId !== session.providerId ||
         original.workspacePath !== session.workspacePath || !sameNativeHandle(original.nativeHandle, retained)) {
         throw new AgentMuxError('The native Session binding changed before discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
@@ -2171,10 +2154,9 @@ export class AgentMuxClient {
       const expected = original
       const checkStored = async (): Promise<AgentMuxStoredAgentSession> => {
         signal.throwIfAborted()
-        const records = await loadAgentSessions(this.store)
-        const current = records.find(value => value.agentSessionId === agentSessionId)
+        const current = await this.store.readMetadata(agentSessionId)
         if (sharedOwner) {
-          const owner = records.find(value => value.agentSessionId === sharedOwner!.agentSessionId)
+          const owner = await this.store.readMetadata(sharedOwner.agentSessionId)
           if (!owner || owner.hostId !== sharedOwner.hostId || owner.providerId !== sharedOwner.providerId ||
             owner.workspacePath !== sharedOwner.workspacePath || owner.createdAt !== sharedOwner.createdAt ||
             !sameRun(owner.run, sharedOwner.run) || !sameNativeHandle(owner.nativeHandle, sharedOwner.nativeHandle)) {
@@ -2259,7 +2241,7 @@ export class AgentMuxClient {
           } catch (error) {
             if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION_BINDING') throw error
           }
-          const durableOwner = (await loadAgentSessions(this.store)).find(value => value.hostId === expected.hostId &&
+          const durableOwner = (await loadAgentSessionMetadata(this.store)).find(value => value.hostId === expected.hostId &&
             value.nativeHandle?.kind === 'provider' && value.nativeHandle.providerId === handle!.providerId &&
             value.nativeHandle.sessionId === handle!.sessionId)
           if (indexedOwner?.agentSessionId !== durableOwner?.agentSessionId) {
@@ -2448,7 +2430,7 @@ export class AgentMuxClient {
         throw new AgentMuxError('This Provider does not expose native conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
       }
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
-      const contentSigningSecret = (await read(loadAgentSessions(this.store))).find(value => value.agentSessionId === agentSessionId)?.hookToken
+      const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
       const page = await read(provider.readSessionHistoryPage({
         agentSessionId, ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), source, limit, signal: controller.signal,
         command: resolveAgentExecutable(options.commandOverride, provider.executable),
@@ -2489,7 +2471,7 @@ export class AgentMuxClient {
       const identity = { agentSessionId, source, ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
         recordId: input.recordId, partIndex: input.partIndex }
       if (isNativeContentReference(input.expectedReference)) {
-        const contentSigningSecret = (await read(loadAgentSessions(this.store))).find(value => value.agentSessionId === agentSessionId)?.hookToken
+        const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
         const context = { agentSessionId, ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), source, signal: controller.signal,
           command: resolveAgentExecutable(input.commandOverride, provider.executable), args: input.args ?? [], env: input.env ?? {},
           workspacePath: session.workspacePath, ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }
@@ -3176,9 +3158,8 @@ export class AgentMuxClient {
   private async currentStoredAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession> {
     // Do not mutate/reload the active registry or trust a connect-time capability cache. Session
     // persistence is read at the admission boundary; no Session write/Provider probe.
-    const session = (await loadAgentSessions(this.store)).find((candidate) =>
-      candidate.agentSessionId === agentSessionId && candidate.hostId === 'local')
-    if (!session) throw new AgentMuxError('Agent Session is unknown.', 'UNKNOWN_AGENT_SESSION')
+    const session = await this.store.readMetadata(agentSessionId)
+    if (!session || session.hostId !== 'local') throw new AgentMuxError('Agent Session is unknown.', 'UNKNOWN_AGENT_SESSION')
     return session
   }
 
@@ -3270,7 +3251,7 @@ export class AgentMuxClient {
   ): Promise<void> {
     // Admission runs inside the existing journal lock. The SessionStore is a separate authority,
     // not an atomic transaction with this journal; no Provider probe or Session write is added.
-    const sessions = await loadAgentSessions(this.store)
+    const sessions = await loadAgentSessionMetadata(this.store)
     const current = sessions.find((session) => session.hostId === 'local' && session.agentSessionId === author)
     if (!current) throw new AgentMuxError('Dispatch caller Session is unknown.', 'UNKNOWN_AGENT_SESSION')
     this.resolveMessageAuthor(capability, author, current)
@@ -3599,7 +3580,7 @@ export class AgentMuxClient {
         if (durableCreate) {
           if (!persisted) {
             try {
-              const canonical = (await loadAgentSessions(this.store)).find(value => value.agentSessionId === agentSessionId)
+              const canonical = (await this.store.readMetadata(agentSessionId))
               if (canonical?.run.runId === run.runId && canonical.creation?.intentDigest === intentDigest && canonical.hookBindingId === session.hookBindingId) {
                 persisted = this.registry.rememberStartedCreation(canonical); preservePreparedCreation = false
               }
@@ -3743,7 +3724,7 @@ export class AgentMuxClient {
     try { committed = await this.registry.commitLifecycle(reservation, session) }
     catch (error) {
       try {
-        const saved = (await loadAgentSessions(this.store)).find(value => value.agentSessionId === seed.agentSessionId)
+        const saved = (await this.store.readMetadata(seed.agentSessionId))
         if (saved?.run.runId === run.runId && saved.creation?.intentDigest === seed.creation?.intentDigest &&
           saved.hookBindingId === seed.hookBindingId && saved.hookToken === seed.hookToken) committed = this.registry.rememberStartedCreation(saved)
       } catch { /* An unknown commit preserves the original prepared identity and actual Run. */ }
@@ -4021,7 +4002,7 @@ export class AgentMuxClient {
     let settle!: () => void
     this.reopenSettlements.set(operationId, new Promise<void>(resolve => { settle = resolve }))
     try {
-      const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === input.agentSessionId)
+      const canonical = (await this.store.readMetadata(input.agentSessionId))
       if (canonical) {
         const run = await this.kernel.status(canonical.run.runId)
         if (canonical.reopenedFrom?.observedAt !== input.expectedRetiredAt || run.lifecycleOperationId !== operationId) {
@@ -4062,7 +4043,7 @@ export class AgentMuxClient {
     delete next.nativePromptPredecessor
     try { await this.registry.commitLifecycle(reservation, next) }
     catch (error) {
-      const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === prepared.agentSessionId)
+      const canonical = (await this.store.readMetadata(prepared.agentSessionId))
       if (!canonical || canonical.run.runId !== run.runId || JSON.stringify(canonical.reopenedFrom) !== JSON.stringify(next.reopenedFrom)) throw error
       await this.registry.load('local')
     }
@@ -4319,7 +4300,7 @@ export class AgentMuxClient {
           const recoveredCommit = !persisted
           if (!persisted) {
             try {
-              const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === current.agentSessionId)
+              const canonical = (await this.store.readMetadata(current.agentSessionId))
               if (canonical?.run.runId === run.runId && canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
                 canonical.reopenedFrom.run.runId === retirement!.run.runId) {
                 await this.registry.load('local')
@@ -4673,7 +4654,7 @@ export class AgentMuxClient {
         message: previous?.message ?? { userContent: input.prompt, ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
           ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(input.sourceDevice ? { sourceDevice: structuredClone(input.sourceDevice) } : {}) } }
       return { ...current, futurePromptIntents: intents, updatedAt: Date.now() }
-      })
+      }, intentId)
     })
   }
 
@@ -4885,7 +4866,7 @@ export class AgentMuxClient {
               completePromptPreparationPhase(protocolInput)
               plan = provider.planPromptInput(outbound, { intent: 'question-reply', ...(terminalScreen ? { terminalScreen } : {}) })
             }
-            const savedMessage = input.expectedFutureIntent ? current.futurePromptIntents?.[input.expectedFutureIntent.intentId]?.message : undefined
+            const savedMessage = input.expectedFutureIntent ? (await this.store.readFuturePromptIntent(current.agentSessionId, input.expectedFutureIntent.intentId))?.message : undefined
             // Timer transport is not the producer. Inherit only the original saved
             // authenticated source; retain this request's exact content for admission.
             const admittedMessage = input.expectedFutureIntent ? {
@@ -6221,19 +6202,18 @@ export class AgentMuxClient {
   private async updateExactAgentSession(
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
-    update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession
+    update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
+    futureIntentId?: string
   ): Promise<AgentMuxStoredAgentSession> {
     try {
-      return await this.registry.update(agentSessionId, expectedRun, update)
+      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId)
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
-      const hostId = this.requireAgentSession(agentSessionId).hostId
-      await this.registry.load(hostId)
-      const canonical = this.requireAgentSession(agentSessionId)
+      const canonical = await this.registry.refresh(agentSessionId, expectedRun)
       if (!sameRun(canonical.run, expectedRun)) {
         throw new AgentMuxError('Agent Session changed while semantic state was persisted.', 'STALE_AGENT_SESSION')
       }
-      return await this.registry.update(agentSessionId, expectedRun, update)
+      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId)
     }
   }
 
