@@ -399,20 +399,20 @@ describe('AgentHookServer', () => {
     ])
   })
 
-  it('caps bindings and keeps bearer tokens scoped to one binding', async () => {
+  it('admits bindings beyond a retained-count threshold and keeps bearer tokens scoped to one binding', async () => {
     const events: NativeHookEnvelope[] = []
     const server = new AgentHookServer((event) => { events.push(event) }, 0)
     servers.push(server)
     await server.start()
-    const bindings = Array.from({ length: 256 }, (_, index) => (
-      server.createBinding(`semantic-${index}`, index % 2 === 0 ? 'codex' : 'claude')
-    ))
-    expect(() => server.createBinding('semantic-overflow', 'pi')).toThrowError(
-      expect.objectContaining({ code: 'HOOK_BINDING_LIMIT' })
-    )
+    const bindings: ReturnType<AgentHookServer['createBinding']>[] = []
+    expect(() => {
+      for (let index = 0; index < 300; index++) bindings.push(server.createBinding(`semantic-${index}`, index % 2 === 0 ? 'codex' : 'claude'))
+    }).not.toThrow()
+    expect(bindings).toHaveLength(300)
 
     await Promise.all(bindings.slice(0, 2).map(async (binding, index) => {
       await binding.bindRun(`run-${index}`)
+      await expect(binding.bindRun(`foreign-run-${index}`)).rejects.toMatchObject({ code: 'HOOK_RUN_MISMATCH' })
       const response = await fetch(binding.endpoint.url, {
         method: 'POST',
         headers: {

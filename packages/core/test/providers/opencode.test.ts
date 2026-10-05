@@ -325,7 +325,7 @@ describe('OpenCode provider', () => {
 //
 // 判据必须是「铸新 token 的站点数 == 装 hook 的站点数」，不能是「有没有出现过 ensureManagedHooks」：
 // 后者在只有 launch 装、resume 不装时照旧通过。同时**不能**把恢复那个站点算进来——
-// `restoreHookBindings` 传的是 session 里存着的旧 `hookToken`（第四个实参），复用原凭证，
+// `restoreHookBinding` 传的是 session 里存着的旧 `hookToken`（第四个实参），复用原凭证，
 // 磁盘那份仍然对得上，重装反而是多余的写盘。所以这里按"有没有第四个实参"区分两类站点。
 //
 // 剥掉注释再断言：本仓踩过「标识符只活在注释里，删掉真代码测试依然绿」的假绿。
