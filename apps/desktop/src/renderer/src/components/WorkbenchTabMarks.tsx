@@ -1,6 +1,14 @@
-import { Bot, FileCode2, GitCompareArrows, Globe2, PanelsTopLeft, SquareTerminal } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkbenchTabMark } from '../lib/workbench-tab-marks'
 import { AgentAvatar } from './AgentAvatar'
+
+const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
+const ThemeFileCodeIcon = semanticIconComponent('file.code')
+const ThemeGitCompareIcon = semanticIconComponent('git.compare')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
+const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+
 
 /**
  * 标签上的标记簇：把 `workbenchTabMarks` 算出的标记序列画出来。
@@ -44,20 +52,20 @@ function WorkbenchTabMarkIcon({ mark }: { mark: WorkbenchTabMark }) {
         </i>
       )
     case 'terminal':
-      return <SquareTerminal size={12} />
+      return <ThemeObjectTerminalIcon size={12} />
     case 'file':
-      return <FileCode2 size={12} />
+      return <ThemeFileCodeIcon size={12} />
     case 'git':
     case 'git-diff':
-      return <GitCompareArrows size={12} />
+      return <ThemeGitCompareIcon size={12} />
     case 'browser':
       // 被 Agent 驱动的那一格画 Bot，不是地球——它与旁边闲着的 Browser 必须一眼分得开，这正是
       // 这个标记存在的全部理由（页面内角标只在人看着那一页时成立）。`title` 让悬停也说得出来。
       return mark.driving
-        ? <Bot size={12} className="workbench-tab__driving-mark"><title>Agent driving</title></Bot>
-        : <Globe2 size={12} />
+        ? <ThemeObjectAgentIcon size={12} className="workbench-tab__driving-mark"><title>Agent driving</title></ThemeObjectAgentIcon>
+        : <ThemeObjectBrowserIcon size={12} />
     case 'launcher':
-      return <PanelsTopLeft size={12} />
+      return <ThemeObjectLauncherIcon size={12} />
     default: {
       const unhandled: never = mark
       throw new Error(`Unhandled workbench tab mark: ${JSON.stringify(unhandled)}`)
