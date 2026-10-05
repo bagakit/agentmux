@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { LucideIcon } from 'lucide-react'
+import type { SemanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
@@ -30,7 +30,7 @@ export type SettingsModule = {
   title: string
   description: string
   keywords: string
-  icon: LucideIcon
+  icon: SemanticIconComponent
   savedSummary(config: AppConfig): string
   Pane: ComponentType<SettingsPaneProps>
 }
