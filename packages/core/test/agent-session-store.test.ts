@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -722,31 +723,9 @@ describe('semantic session persistence boundary', () => {
       }
     })).toThrow('does not match its Agent Run boundary')
 
-    const store: AgentMuxAgentSessionStore = {
-      async load() { return [storedSession(), storedSession()] },
-      async loadRetiredRuns() { return [] },
-      async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
-  async confirmDurability() { throw new Error('Read-only Store fixture cannot confirm a write') },
-  async loadRetiredAgentSessions() { return [] },
-  async loadReopenCorrelations() { return [] },
-      async compareAndSwap() {},
-      async reserveLifecycle() {},
-      async claimStaleLifecycles() { return [] },
-      async releaseLifecycle() {},
-      async retireRuns() {},
-      async commitLifecycle() {},
-      async loadTimeline(agentSessionId) {
-        return { agentSessionId, revision: 0, items: [] }
-      },
-      async applyTimelineMutation(mutation) {
-        return {
-          agentSessionId: mutation.agentSessionId,
-          revision: 0,
-          changed: false,
-          mutation
-        }
-      }
-    }
+    const store: AgentMuxAgentSessionStore = Object.assign(new AgentMuxMemoryAgentSessionStore(), {
+      async load() { return [storedSession(), storedSession()] }
+    })
     await expect(loadAgentSessions(store)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
   })
 
@@ -1172,8 +1151,10 @@ describe('并发写同一份 store 的锁竞争', () => {
       expect(rejected.map((error) => (error as { code?: string })?.code ?? String(error))).toEqual([])
 
       // 不只是「没抛错」——每个槽位都得真的落在盘上，证明锁确实轮转过而不是有人被跳过。
-      const document = JSON.parse(await readFile(path, 'utf8')) as { reservations: Array<{ reservationId: string }> }
-      expect(document.reservations.map((entry) => entry.reservationId).sort()).toEqual(
+      const persisted = new DatabaseSync(path, { readOnly: true })
+      const reservationIds = persisted.prepare('SELECT json FROM reservations').all().map(row => JSON.parse(String(row.json)).reservationId)
+      persisted.close()
+      expect(reservationIds.sort()).toEqual(
         writers.map((_writer, index) => `race-reservation-${index}`).sort()
       )
     } finally {
@@ -1208,14 +1189,12 @@ describe('Agent Session store corruption salvage', () => {
     }
   }
 
-  /** 用 Store 自己把 count 条真会话写盘，拿到的正是生产写路径产出的规范字节。 */
+  /** Seed the retained original v5 form before its first new owner; current SQLite I/O faults have separate native coverage. */
   async function seedSalvage(count: number): Promise<{ path: string; root: string }> {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-salvage-'))
     const path = join(root, 'agent-sessions.json')
-    const store = new AgentMuxFileAgentSessionStore(path)
-    for (let index = 0; index < count; index += 1) {
-      await store.compareAndSwap(null, salvageSession(index))
-    }
+    await writeFile(path, JSON.stringify({ version: 5, sessions: Array.from({ length: count }, (_, index) => normalizeStoredAgentSession(salvageSession(index))),
+      reservations: [], retiredRuns: [], retiredAgentSessions: [] }, null, 2) + '\n', { mode: 0o600 })
     return { path, root }
   }
 
@@ -1359,8 +1338,9 @@ describe('Agent Session store corruption salvage', () => {
       const before = await readFile(path)
       await chmod(path, 0o000)
       try {
-        await expect(new AgentMuxFileAgentSessionStore(path).load())
-          .rejects.toMatchObject({ code: 'EACCES' })
+        const error = await new AgentMuxFileAgentSessionStore(path).load().catch(error => error)
+        expect(error).toMatchObject({ code: 'AGENT_SESSION_STORE_UNAVAILABLE', cause: { code: 'EACCES' } })
+        expect(error.detail).toContain('EACCES')
       } finally {
         await chmod(path, 0o600)
       }

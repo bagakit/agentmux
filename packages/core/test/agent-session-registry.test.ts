@@ -23,6 +23,20 @@ function session(run = 'run-1'): AgentMuxStoredAgentSession {
 }
 
 describe('semantic session registry concurrency', () => {
+  it('confirms original metadata through the real Registry without loading or losing retained future facts', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore(), original = { ...session(), futurePromptIntents: {
+      retained: { operationId: 'retained-save', prompt: 'original', active: true, message: { userContent: 'original' } }
+    } }
+    await store.compareAndSwap(null, original)
+    const registry = new AgentMuxAgentSessionRegistry(store); await registry.load('local')
+    expect(registry.get(original.agentSessionId)).not.toHaveProperty('futurePromptIntents')
+    const fullReads = vi.spyOn(store, 'load')
+    await expect(registry.confirmDurability(original.agentSessionId, original.run)).resolves.toMatchObject({ run: original.run })
+    expect(fullReads).not.toHaveBeenCalled()
+    expect(await store.readFuturePromptIntent(original.agentSessionId, 'retained')).toEqual(original.futurePromptIntents.retained)
+    expect(await store.load()).toEqual([original])
+  })
+
   it('does not confuse a user-retired Session with abandoned or other Session Runs', async () => {
     const registry = new AgentMuxAgentSessionRegistry(new AgentMuxMemoryAgentSessionStore())
     const current = session()
@@ -79,7 +93,7 @@ describe('semantic session registry concurrency', () => {
     const registry = new AgentMuxAgentSessionRegistry(store)
     await registry.put(session())
     const known = registry.get('semantic-1')
-    const read = vi.spyOn(store, 'load').mockResolvedValueOnce([])
+    const read = vi.spyOn(store, 'readMetadata').mockResolvedValueOnce(null)
     try {
       await expect(registry.refresh('semantic-1', { runId: 'run-1' }))
         .rejects.toMatchObject({ code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' })
@@ -132,15 +146,27 @@ describe('semantic session registry concurrency', () => {
       withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
       confirmDurability: (id, run, expected) => memory.confirmDurability(id, run, expected),
       async load() { return await memory.load() },
+      loadMetadata: memory.loadMetadata.bind(memory),
+      readMetadata: memory.readMetadata.bind(memory),
+      readFuturePromptIntent: memory.readFuturePromptIntent.bind(memory),
+      listFuturePromptIntents: memory.listFuturePromptIntents.bind(memory),
+      loadCreationSessionId: memory.loadCreationSessionId.bind(memory),
+      loadCreationCorrelation: memory.loadCreationCorrelation.bind(memory),
+      prepareCreate: memory.prepareCreate.bind(memory),
+      claimCreate: memory.claimCreate.bind(memory),
+      prepareReopen: memory.prepareReopen.bind(memory),
+      releaseReopenOwner: memory.releaseReopenOwner.bind(memory),
+      claimReopen: memory.claimReopen.bind(memory),
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
       async loadReopenCorrelations() { return await memory.loadReopenCorrelations() },
-      async compareAndSwap(expected, next) {
+      compareAndSwap: memory.compareAndSwap.bind(memory),
+      async compareAndSwapMetadata(expected, next) {
         if (next?.run.runId === 'run-2') {
           enteredTransition()
           await transitionRelease
         }
-        await memory.compareAndSwap(expected, next)
+        await memory.compareAndSwapMetadata(expected, next)
       },
       async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
       async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },
@@ -178,10 +204,22 @@ describe('semantic session registry concurrency', () => {
       withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
       confirmDurability: (id, run, expected) => memory.confirmDurability(id, run, expected),
       async load() { return await memory.load() },
+      loadMetadata: memory.loadMetadata.bind(memory),
+      readMetadata: memory.readMetadata.bind(memory),
+      readFuturePromptIntent: memory.readFuturePromptIntent.bind(memory),
+      listFuturePromptIntents: memory.listFuturePromptIntents.bind(memory),
+      loadCreationSessionId: memory.loadCreationSessionId.bind(memory),
+      loadCreationCorrelation: memory.loadCreationCorrelation.bind(memory),
+      prepareCreate: memory.prepareCreate.bind(memory),
+      claimCreate: memory.claimCreate.bind(memory),
+      prepareReopen: memory.prepareReopen.bind(memory),
+      releaseReopenOwner: memory.releaseReopenOwner.bind(memory),
+      claimReopen: memory.claimReopen.bind(memory),
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
       async loadReopenCorrelations() { return await memory.loadReopenCorrelations() },
-      async compareAndSwap(expected, next, signal) {
+      async compareAndSwap(expected, next, signal) { compareCalls += 1; await memory.compareAndSwap(expected, next, signal) },
+      async compareAndSwapMetadata(expected, next, signal) {
         compareCalls += 1
         if (block) {
           blocked()
@@ -194,7 +232,7 @@ describe('semantic session registry concurrency', () => {
             })
           })
         }
-        await memory.compareAndSwap(expected, next, signal)
+        await memory.compareAndSwapMetadata(expected, next, signal)
       },
       async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
       async claimStaleLifecycles(value) { return await memory.claimStaleLifecycles(value) },

@@ -9,11 +9,11 @@ class Store extends AgentMuxMemoryAgentSessionStore {
   pending = false
   failed = false
   resolve
-  async load() {
+  async loadMetadata() {
     this.loads++
     if (this.pending) await new Promise(resolve => { this.resolve = resolve })
     if (this.failed) throw new Error('private catalog observation failure')
-    return super.load()
+    return super.loadMetadata()
   }
 }
 const store = new Store()
