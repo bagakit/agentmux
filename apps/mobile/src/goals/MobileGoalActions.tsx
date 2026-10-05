@@ -8,8 +8,9 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   client: AgentMuxHostedClient | null; goal: AgentMuxRpcGoal; visible: boolean
   updated(goal: AgentMuxRpcGoal, fields: Array<keyof AgentMuxRpcGoal>): void; deleted(id: string): void
 }) {
-  const [expanded, expand] = useState(false), [executors, setExecutors] = useState<AgentMuxRpcResult<'app.snapshot'>['executors']>([])
-  const [executorId, setExecutorId] = useState(goal.assigneeExecutorId ?? ''), [sessionId, setSessionId] = useState('')
+  const [expanded, expand] = useState(false), [sessions, setSessions] = useState<AgentMuxRpcResult<'app.snapshot'>['sessions']>([])
+  const [assigneeIds, setAssigneeIds] = useState((goal.assigneeSessionIds ?? []).join(', ')), [sessionId, setSessionId] = useState('')
+  const [supervisorId, setSupervisorId] = useState(goal.supervisorSessionId ?? '')
   const [discoveryIssue, setDiscoveryIssue] = useState(''), [revision, refresh] = useState(0)
   const [messages, setMessages] = useState<Array<{ operationId: string; text: string; action: string; request: Record<string, unknown> }>>([])
   const [pending, setPending] = useState(false), [confirmDelete, setConfirmDelete] = useState(false)
@@ -17,9 +18,9 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   useEffect(() => {
     if (!expanded || !visible || !client?.forwardRpc) return
     let live = true
-    void client.forwardRpc('app.snapshot', { include: ['executors'] }).then(result => {
-      if (live) { setExecutors(result.executors); setDiscoveryIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n')) }
-    }).catch(error => { if (live) setDiscoveryIssue(`读取执行者目录失败：${error instanceof Error ? error.message : String(error)}。原选择与准确 ID 输入保留，可刷新重试。`) })
+    void client.forwardRpc('app.snapshot', { include: ['sessions'] }).then(result => {
+      if (live) { setSessions(result.sessions); setDiscoveryIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n')) }
+    }).catch(error => { if (live) setDiscoveryIssue(`读取会话目录失败：${error instanceof Error ? error.message : String(error)}。原选择与准确 ID 输入保留，可刷新重试。`) })
     return () => { live = false }
   }, [client, expanded, visible, revision])
   const execute = async (action: 'assign' | 'start' | 'handoff' | 'delete') => {
@@ -36,13 +37,13 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
         const result = await client.forwardRpc('goal.delete', params)
         deleted(result.goal.id)
       } else if (action === 'assign') {
-        const params = { ...common, assigneeExecutorId: executorId || null, start: false }; request = params
+        const params = { ...common, assigneeSessionIds: assigneeIds.split(',').map(value => value.trim()).filter(Boolean), supervisorSessionId: supervisorId.trim() || null, expectedUpdatedAt: goal.updatedAt, start: false }; request = params
         const result = await client.forwardRpc('goal.assign', params)
-        updated(result.goal, ['assigneeExecutorId', 'activityLog']); report('执行者分配已保存，未开始执行。')
+        updated(result.goal, ['assigneeSessionIds', 'supervisorSessionId', 'sessionIds', 'activityLog']); report('负责人分配已保存，未开始执行。')
       } else if (action === 'handoff') {
-        const params = { ...common, assigneeExecutorId: executorId || null, ...(sessionId ? { sessionId } : {}) }; request = params
+        const params = { ...common, assigneeSessionIds: assigneeIds.split(',').map(value => value.trim()).filter(Boolean), supervisorSessionId: supervisorId.trim() || null, expectedUpdatedAt: goal.updatedAt, ...(sessionId ? { sessionId } : {}) }; request = params
         const result = await client.forwardRpc('goal.handoff', params)
-        updated(result.goal, ['assigneeExecutorId', 'sessionIds', 'activityLog']); report('交接关系已保存，未自动发送新任务。')
+        updated(result.goal, ['assigneeSessionIds', 'supervisorSessionId', 'sessionIds', 'activityLog']); report('交接关系已保存，未自动发送新任务。')
       } else {
         const params = { ...common, ...(sessionId ? { sessionId } : {}) }; request = params
         const result = await client.forwardRpc('goal.start', params)
@@ -54,12 +55,13 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   }
   return <details onToggle={event => expand(event.currentTarget.open)}><summary>分配、执行与删除</summary>
     {discoveryIssue && <p role="status">{discoveryIssue}</p>}
-    <label>执行者<TextInput aria-label="分配 Executor ID" list={`goal-executors-${goal.id}`} value={executorId} onChange={event => setExecutorId(event.target.value)} placeholder="准确 Executor ID，清空表示未分配" /></label>
-    <datalist id={`goal-executors-${goal.id}`}>{executors.map(executor => <option key={executor.executorId} value={executor.executorId}>{executor.label} · {executor.providerId} · {executor.availability}</option>)}</datalist>
-    <button onClick={() => refresh(value => value + 1)}>刷新执行者目录</button>
-    <button disabled={pending} onClick={() => { void execute('assign') }}>保存执行者分配</button>
+    <label>负责人会话<TextInput aria-label="分配 Session IDs" list={`goal-assignees-${goal.id}`} value={assigneeIds} onChange={event => setAssigneeIds(event.target.value)} placeholder="准确 Session ID，多个用逗号分隔，清空表示未分配" /></label>
+    <datalist id={`goal-assignees-${goal.id}`}>{sessions.map(item => <option key={item.session.agentSessionId} value={item.session.agentSessionId}>{item.session.agentSessionId} · {item.session.providerId}</option>)}</datalist>
+    <label>Supervisor 会话<TextInput aria-label="Supervisor Session ID" value={supervisorId} onChange={event => setSupervisorId(event.target.value)} placeholder="单一负责人 Session ID，清空表示不指定" /></label>
+    <button onClick={() => refresh(value => value + 1)}>刷新会话目录</button>
+    <button disabled={pending} onClick={() => { void execute('assign') }}>保存负责人分配</button>
     <label>执行或交接的会话<TextInput aria-label="执行 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} placeholder="可选准确 Session ID" /></label>
-    <p>填写会话时明确指向它；不填写时，开始执行沿目标的原分配处理，可能复用关联会话或启动新 Agent。交接只更新原执行者与会话关系。</p>
+    <p>填写会话时明确指向它；不填写时，开始执行需有唯一准确负责人。交接只保存明确负责人和历史关系，不启动或重绑循环。</p>
     <button disabled={pending} onClick={() => { void execute('start') }}>开始执行此目标</button>
     <button disabled={pending} onClick={() => { void execute('handoff') }}>保存交接关系</button>
     <details><summary>删除目标</summary><p>删除此目标，保留原 Agent 会话。</p>

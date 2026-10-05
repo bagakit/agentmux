@@ -373,7 +373,8 @@ export type AgentMuxDemand = {
   priority: AgentMuxDemandPriority
   projectId: string | null
   projectName: string | null
-  assigneeExecutorId?: string | null
+  assigneeSessionIds: string[]
+  supervisorSessionId: string | null
   tags?: string[]
   plannedStartAt?: number | null
   targetAt?: number | null
@@ -381,6 +382,8 @@ export type AgentMuxDemand = {
   phaseIndex?: number | null
   activityLog?: string[]
   activities?: AgentMuxDemandActivity[]
+  participations: import('@agentmux/demand').DemandParticipation[]
+  creationOrigin?: import('@agentmux/demand').DemandCreationOrigin
   sessionIds: string[]
   contentRefs?: DemandContentReference[]
   createdAt: number
@@ -410,6 +413,8 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
   projectId?: string
   priority?: AgentMuxDemandPriority
   status?: AgentMuxDemandStatus
+  assigneeSessionIds?: string[]
+  supervisorSessionId?: string | null
   sessionIds?: string[]
   contentRefs?: DemandContentReference[]
   decision?: AgentMuxDemandDecision
@@ -418,7 +423,7 @@ export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   operation: 'demand.update'
   expectedUpdatedAt?: number
   demandId: string
-  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
+  patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding' }
@@ -427,9 +432,12 @@ export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'deman
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
   operation: 'demand.assign'
   demandId: string
+  sessionId?: string
   projectId?: string | null
-  assigneeExecutorId?: string | null
+  assigneeSessionIds?: string[]
+  supervisorSessionId?: string | null
   start: boolean
+  expectedUpdatedAt?: number
 }
 export type AgentMuxControlDemandStartRequest = RequestBase & {
   operation: 'demand.start'
@@ -445,8 +453,10 @@ export type AgentMuxControlDemandContinuationActionRequest = RequestBase & {
 export type AgentMuxControlDemandHandoffRequest = RequestBase & {
   operation: 'demand.handoff'
   demandId: string
-  assigneeExecutorId?: string | null
+  assigneeSessionIds?: string[]
+  supervisorSessionId?: string | null
   sessionId?: string
+  expectedUpdatedAt?: number
 }
 export type AgentMuxControlDemandDeleteRequest = RequestBase & {
   operation: 'demand.delete'

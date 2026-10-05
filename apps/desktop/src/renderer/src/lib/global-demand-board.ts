@@ -19,7 +19,10 @@ export type DemandRecord = {
   priority: DemandPriority
   projectId: string | null
   projectName: string | null
-  assigneeExecutorId?: string | null
+  assigneeSessionIds?: string[]
+  supervisorSessionId?: string | null
+  participations?: import('@agentmux/demand').DemandParticipation[]
+  creationOrigin?: import('@agentmux/demand').DemandCreationOrigin
   tags?: string[]
   plannedStartAt?: number | null
   targetAt?: number | null

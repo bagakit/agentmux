@@ -1,3 +1,4 @@
+import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { randomUUID } from 'node:crypto'
 import { mintObjectId } from '@agentmux/identity'
@@ -7,6 +8,7 @@ import {
   DEMAND_RECEIPT_SCHEMA,
   DEMAND_STORE_SCHEMA,
   type CreateDemandInput,
+  type DemandCreateOptions,
   type Demand,
   type DemandActivity,
   type DemandActivityInspection,
@@ -149,6 +151,10 @@ function parseDemand(value: unknown, label: string): Demand {
     'parentDemandId',
     'phaseIndex',
     'sessionIds',
+    'assigneeSessionIds',
+    'supervisorSessionId',
+    'participations',
+    'creationOrigin',
     'contentRefs',
     'activities',
     'decisions',
@@ -156,7 +162,7 @@ function parseDemand(value: unknown, label: string): Demand {
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -167,6 +173,13 @@ function parseDemand(value: unknown, label: string): Demand {
   const parentDemandId = record.parentDemandId === undefined ? null : nullableString(record.parentDemandId, `${label}.parentDemandId`)
   const phaseIndex = record.phaseIndex === undefined || record.phaseIndex === null ? null : (typeof record.phaseIndex === 'number' && Number.isSafeInteger(record.phaseIndex) && record.phaseIndex >= 0 ? record.phaseIndex : (() => { throw new Error(`${label}.phaseIndex must be a non-negative integer`) })())
   const activities = record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`))
+  const sessionIds = stringArray(record.sessionIds, `${label}.sessionIds`)
+  const assigneeSessionIds = record.assigneeSessionIds === undefined ? [] : stringArray(record.assigneeSessionIds, `${label}.assigneeSessionIds`)
+  const supervisorSessionId = record.supervisorSessionId === undefined ? null : nullableString(record.supervisorSessionId, `${label}.supervisorSessionId`)
+  if (assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId)) throw new Error(`${label} has inconsistent collaboration relations`)
+  const participations = parseDemandParticipations(record.participations ?? [])
+  const creationOrigin = record.creationOrigin === undefined ? undefined : parseDemandCreationOrigin(record.creationOrigin)
+  if (creationOrigin?.requesterParticipationId && !participations.some(item => item.id === creationOrigin.requesterParticipationId)) throw new Error(`${label} references an absent original requester`)
   return {
     id: nonEmptyString(record.id, `${label}.id`),
     title: nonEmptyString(record.title, `${label}.title`),
@@ -181,7 +194,8 @@ function parseDemand(value: unknown, label: string): Demand {
     targetAt,
     parentDemandId,
     phaseIndex,
-    sessionIds: stringArray(record.sessionIds, `${label}.sessionIds`),
+    sessionIds, assigneeSessionIds, supervisorSessionId, participations,
+    ...(creationOrigin === undefined ? {} : { creationOrigin }),
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
     activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
@@ -314,7 +328,9 @@ export class DemandStore {
     return { revision: snapshot.revision, records: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null }
   }
 
-  async create(input: CreateDemandInput): Promise<DemandReceipt> {
+  async create(input: CreateDemandInput, options: DemandCreateOptions = {}): Promise<DemandReceipt> {
+    rejectProvenanceInput(input)
+    const operationId = options.operationId ?? `demand-create-${randomUUID()}`
     return this.mutate('create', (snapshot) => {
       const title = inputString(input.title, 'title')
       if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
@@ -332,26 +348,33 @@ export class DemandStore {
         priority: ensurePriority(input.priority, 'priority') ?? 'normal',
         projectId: input.projectId ?? null,
         projectName: input.projectName ?? null,
-        executorId: input.executorId ?? null,
+        executorId: null,
         tags: [...(input.tags ?? [])],
         plannedStartAt: input.plannedStartAt ?? null,
         targetAt: input.targetAt ?? null,
         parentDemandId: input.parentDemandId ?? null,
         phaseIndex: input.phaseIndex ?? null,
-        sessionIds: [...(input.sessionIds ?? [])],
+        sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])],
+        assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
+        supervisorSessionId: input.supervisorSessionId ?? null,
+        participations: [],
+        ...(options.creationOrigin ? { creationOrigin: { operationId, requesterAsSupervisor: options.creationOrigin.requesterAsSupervisor,
+          requesterParticipationId: null, supervisorDefaultPending: options.creationOrigin.requesterAsSupervisor && !Object.hasOwn(input, 'supervisorSessionId') } } : {}),
         ...(input.contentRefs === undefined ? {} : { contentRefs: [...input.contentRefs] }),
         activities: [],
         decisions: [],
         createdAt: now,
         updatedAt: now,
       }
+      if (options.participation) appendParticipation(demand, options.participation, operationId, now)
       validateNewDemand(demand, this.storePath)
       snapshot.demands.push(demand)
       return demand
-    })
+    }, undefined, operationId)
   }
 
   async update(id: string, patch: UpdateDemandInput, options: DemandTitleMutationOptions = {}): Promise<DemandReceipt> {
+    rejectProvenanceInput(patch)
     patch = structuredClone(patch)
     return this.mutate('update', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
@@ -372,7 +395,15 @@ export class DemandStore {
       if (patch.priority !== undefined) demand.priority = ensurePriority(patch.priority, 'priority') ?? demand.priority
       if (patch.projectId !== undefined) demand.projectId = patch.projectId
       if (patch.projectName !== undefined) demand.projectName = patch.projectName
-      if (patch.executorId !== undefined) demand.executorId = patch.executorId
+      if (patch.sessionIds !== undefined) demand.sessionIds = [...patch.sessionIds]
+      if (patch.assigneeSessionIds !== undefined) {
+        demand.assigneeSessionIds = [...patch.assigneeSessionIds]
+        demand.sessionIds = [...new Set([...demand.sessionIds, ...patch.assigneeSessionIds])]
+      }
+      if (Object.hasOwn(patch, 'supervisorSessionId')) {
+        demand.supervisorSessionId = patch.supervisorSessionId ?? null
+        if (demand.creationOrigin) demand.creationOrigin.supervisorDefaultPending = false
+      }
       if (patch.tags !== undefined) demand.tags = [...patch.tags]
       if (patch.plannedStartAt !== undefined) demand.plannedStartAt = patch.plannedStartAt
       if (patch.targetAt !== undefined) demand.targetAt = patch.targetAt
@@ -402,10 +433,24 @@ export class DemandStore {
       } catch (error) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, error instanceof Error ? error.message : String(error), error)
       }
+      if (options.participation) appendParticipation(demand, options.participation, options.operationId ?? `demand-participation-${randomUUID()}`, Date.now())
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
     }, patch.title === undefined ? undefined : { ...options, targetId: id, requested: typeof patch.title === 'string' ? patch.title : null }, options.operationId)
+  }
+
+  async recordParticipation(id: string, source: DemandParticipationSource, options: { operationId: string; expectedUpdatedAt?: number }): Promise<DemandReceipt> {
+    const parsed = parseDemandParticipationSource(source)
+    return this.mutate('participation', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      const previous = demand.participations.find(item => item.operationId === options.operationId && item.kind === parsed.kind && item.agentSessionId === parsed.agentSessionId)
+      if (!previous && options.expectedUpdatedAt !== undefined && options.expectedUpdatedAt !== demand.updatedAt) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed. Inspect the original Goal before recording its source.')
+      appendParticipation(demand, parsed, options.operationId, Date.now())
+      if (!previous) demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, options.operationId)
   }
 
   async proposeAlignment(id: string, proposal: DemandAlignmentProposal): Promise<DemandReceipt> {
@@ -479,6 +524,7 @@ export class DemandStore {
     return this.mutate('unlink-session', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
       demand.sessionIds = demand.sessionIds.filter((entry) => entry !== sessionId)
+      validateNewDemand(demand, this.storePath)
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     })
@@ -492,7 +538,7 @@ export class DemandStore {
     return this.update(id, { projectId: null, projectName: null })
   }
 
-  async addActivity(id: string, input: Omit<DemandActivity, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
+  async addActivity(id: string, input: Omit<DemandActivity, 'id' | 'createdAt'> & { id?: string; createdAt?: number }, options: { participation?: DemandParticipationSource } = {}): Promise<DemandReceipt> {
     if (input.kind === 'name-change' || input.nameChange !== undefined || input.nameChangeId !== undefined) {
       throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Name change activities are created only by the title owner.')
     }
@@ -508,6 +554,7 @@ export class DemandStore {
       }
       parseActivity(activity, 'activity')
       demand.activities.push(activity)
+      if (options.participation) appendParticipation(demand, options.participation, input.operationId ?? activity.id, activity.createdAt)
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, input.operationId, input.operationId === undefined ? undefined : { targetId: id, kind: input.kind, message: input.message, actorId: input.actorId })
@@ -771,4 +818,20 @@ async function enqueue<T>(root: string, fn: () => Promise<T>): Promise<T> {
     release()
     if (queues.get(root) === chained) queues.delete(root)
   }
+}
+
+function rejectProvenanceInput(value: object): void {
+  if (['participations', 'creationOrigin', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
+    throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original Goal provenance is authored only by the trusted host; assign accurate Sessions.')
+  if (Object.hasOwn(value, 'executorId')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Executor is creation configuration, not a Goal assignee. Assign accurate Sessions.')
+}
+function appendParticipation(demand: Demand, source: DemandParticipationSource, operationId: string, recordedAt: number): void {
+  const parsed = parseDemandParticipationSource(source)
+  const previous = demand.participations.find(item => item.operationId === operationId && item.kind === parsed.kind && item.agentSessionId === parsed.agentSessionId)
+  if (previous) {
+    const { id: _id, operationId: _operation, recordedAt: _time, ...original } = previous
+    if (JSON.stringify(original) !== JSON.stringify(parsed)) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original participation operation conflicts with its authenticated source.')
+    return
+  }
+  demand.participations.push({ ...parsed, id: `participation_${randomUUID()}`, operationId, recordedAt })
 }

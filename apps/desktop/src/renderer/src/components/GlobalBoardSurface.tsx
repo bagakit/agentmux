@@ -37,7 +37,6 @@ function GoalRow({ demand, selected, sessionContext, acknowledgementFailed, onSe
   </div>
 }
 
-const EMPTY_EXECUTORS: Record<string, { label: string }> = {}
 export function GlobalBoardSurface() {
   const config = useAppStore((state) => state.config)
   const demands = useAppStore((state) => state.demands)
@@ -47,14 +46,17 @@ export function GlobalBoardSurface() {
   const creation = useSyncExternalStore(subscribeDirectGoalRequest, directGoalRequest, directGoalRequest)
   const requestDemandPmoTask = useAppStore((state) => state.requestDemandPmoTask)
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)
-  const executors = config?.executors ?? EMPTY_EXECUTORS
+  const sessions = useAppStore(state => state.sessions)
+  const names = useAppStore(state => state.agentNames)
+  const assigneeIds = [...new Set([...sessions.filter(session => session.kind === 'agent').flatMap(session => session.control?.agentSessionId ? [session.control.agentSessionId] : []), ...Object.values(demands).flatMap(demand => demand.assigneeSessionIds ?? [])])].sort()
+  const assigneeName = (id: string) => { const session = sessions.find(session => session.id === id || session.kind === 'agent' && session.control?.agentSessionId === id); return names[session?.id ?? id] ?? session?.label ?? `${id} · Unavailable` }
   const [query, setQuery] = useState('')
   const [view, setView] = useState(() => resolveGoalsPreferences(config?.goals).defaultView)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<DemandStatus | 'all'>('all')
   const [projectFilter, setProjectFilter] = useState('all')
   const [routingFilter, setRoutingFilter] = useState<'all' | 'unassigned' | 'assigned'>('all')
-  const [executorFilter, setExecutorFilter] = useState('all')
+  const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [showHistory, setShowHistory] = useState(() => resolveGoalsPreferences(config?.goals).showFinished)
   const [moteErrors, setMoteErrors] = useState<Record<string, { message: string; mode: 'open' | 'grill' | 'grounding' }>>({})
   const [motePending, setMotePending] = useState<Record<string, 'open' | 'grill' | 'grounding'>>({})
@@ -72,18 +74,18 @@ export function GlobalBoardSurface() {
   const filteredDemands = useMemo(() => projectedDemands.filter((demand) => {
     const normalized = query.trim().toLocaleLowerCase()
     const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
-    const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeExecutorId : Boolean(demand.projectId && demand.assigneeExecutorId))
+    const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
     const matchesHistory = showHistory || statusFilter !== 'all' || (demand.status !== 'done' && demand.status !== 'cancelled')
-    return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (executorFilter === 'all' || demand.assigneeExecutorId === executorFilter)
-  }), [executorFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
+    return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.includes(assigneeFilter))
+  }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
   const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
   const appliedFilters = [
     ...(statusFilter !== 'all' ? [{ label: GOAL_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
     ...(projectFilter !== 'all' ? [{ label: projects.find((project) => project.id === projectFilter)?.name ?? 'Project unavailable', clear: () => setProjectFilter('all') }] : []),
     ...(routingFilter !== 'all' ? [{ label: routingFilter === 'unassigned' ? 'Needs routing' : 'Assigned', clear: () => setRoutingFilter('all') }] : []),
-    ...(executorFilter !== 'all' ? [{ label: executors[executorFilter]?.label ?? executorFilter, clear: () => setExecutorFilter('all') }] : [])
+    ...(assigneeFilter !== 'all' ? [{ label: assigneeName(assigneeFilter), clear: () => setAssigneeFilter('all') }] : [])
   ]
-  function clearConditions() { setQuery(''); setStatusFilter('all'); setProjectFilter('all'); setRoutingFilter('all'); setExecutorFilter('all'); setFiltersOpen(false); queueMicrotask(() => searchRef.current?.focus()) }
+  function clearConditions() { setQuery(''); setStatusFilter('all'); setProjectFilter('all'); setRoutingFilter('all'); setAssigneeFilter('all'); setFiltersOpen(false); queueMicrotask(() => searchRef.current?.focus()) }
 
   function closeDetail() {
     const row = surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]') ?? selectedRowRef.current
@@ -104,7 +106,7 @@ export function GlobalBoardSurface() {
     if (query.trim() && !DIRECT_GOAL_TITLE.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) setQuery('')
     if (statusFilter !== 'all' && statusFilter !== 'backlog') setStatusFilter('all')
     if (routingFilter === 'assigned') setRoutingFilter('all')
-    if (executorFilter !== 'all') setExecutorFilter('all')
+    if (assigneeFilter !== 'all') setAssigneeFilter('all')
     if (projectFilter !== 'all' && !project) setProjectFilter('all')
     void startDirectGoal(project)
   }
@@ -127,7 +129,7 @@ export function GlobalBoardSurface() {
         <label>Work status<select aria-label="Filter work status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">All active</option>{DEMAND_STATUS_IDS.map((status) => <option key={status} value={status}>{GOAL_STATUS_LABELS[status]}</option>)}</select></label>
         <label>Project<select aria-label="Filter project" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">All projects</option>{projectFilter !== 'all' && !projects.some(project => project.id === projectFilter) ? <option value={projectFilter} disabled>Project unavailable</option> : null}{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
         <label>Routing<select aria-label="Filter routing" value={routingFilter} onChange={(event) => setRoutingFilter(event.target.value as typeof routingFilter)}><option value="all">All</option><option value="unassigned">Needs routing</option><option value="assigned">Assigned</option></select></label>
-        <label>Executor<select aria-label="Filter executor" value={executorFilter} onChange={(event) => setExecutorFilter(event.target.value)}><option value="all">Any executor</option>{Object.entries(executors).map(([id, executor]) => <option key={id} value={id}>{executor.label}</option>)}</select></label>
+        <label>Assignee<select aria-label="Filter assignee" value={assigneeFilter} onChange={event => setAssigneeFilter(event.target.value)}><option value="all">Any assignee</option>{assigneeIds.map(id => <option key={id} value={id}>{assigneeName(id)}</option>)}</select></label>
       </div> : null}
       {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<X size={11} /></button>)}</div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>

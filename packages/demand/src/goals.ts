@@ -125,3 +125,5 @@ export function groundingAcceptanceIssue(alignment: DemandAlignment | undefined,
   }
   return null
 }
+
+export { parseDemandParticipations, parseDemandCreationOrigin } from './collaboration.js'

@@ -123,7 +123,7 @@ export type AgentMuxRpcEndpoint =
 export type AgentMuxRpcSessionTarget = AgentMuxAgentSessionLookup | { kind: 'self' }
 export type AgentMuxRpcUnavailable = { code: string; message: string; recovery: string }
 export type AgentMuxRpcGoalFilters = {
-  goalId?: string; projectId?: string; agentSessionId?: string; executorId?: string;
+  goalId?: string; projectId?: string; agentSessionId?: string; assigneeSessionId?: string; supervisorSessionId?: string;
   status?: string; since?: number; limit?: number
 }
 /** Route identity belongs to the selected service; native Session facts stay unchanged. */
@@ -137,7 +137,7 @@ export type AgentMuxRpcAgentInspection = {
 }
 export type AgentMuxRpcSnapshotParams = {
   projectId?: string; workspaceId?: string; topicId?: string; agentSessionId?: string;
-  goalId?: string; executorId?: string; status?: string; since?: number; limit?: number;
+  goalId?: string; executorId?: string; assigneeSessionId?: string; supervisorSessionId?: string; status?: string; since?: number; limit?: number;
   include?: Array<'projects' | 'workspaces' | 'topics' | 'motes' | 'spaces' | 'zones' |
     'executors' | 'agents' | 'sessions' | 'goals' | 'decisions' | 'activity'>
 }
