@@ -1,3 +1,4 @@
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { useEffect, useRef, useState } from 'react'
@@ -76,8 +77,8 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
         <label>Notebook<select aria-label="Recall destination notebook" value={receipt?.notebook?.notebookId ?? notebookId} disabled={busy || Boolean(receipt)} onChange={event => setNotebookId(event.target.value)}>
           {Object.values(library?.notebooks ?? {}).map(book => <option key={book.notebookId} value={book.notebookId}>{book.name}</option>)}
         </select></label>
-        <label>Finding<textarea aria-label="Recall finding" value={draft.note} rows={6} placeholder="What do you want to remember?"
-          onChange={event => { if (target) useLauncherState.getState().setDraft(target.draftId, 'note', event.target.value) }} /></label>
+        <label>Finding<ComposerTextarea aria-label="Recall finding" value={draft.note} rows={6} placeholder="What do you want to remember?"
+          onValueChange={value => { if (target) useLauncherState.getState().setDraft(target.draftId, 'note', value) }} /></label>
         {source ? <details className="topic-knowledge-sources"><summary>{source.title || 'Original source'}</summary><p>{source.url}</p></details> : null}
         {saved ? <p role="status" className="survey-relation-notice">Saved to {library?.notebooks[receipt.notebook?.notebookId ?? '']?.name ?? 'Recall'}.
           {draft.note !== receipt.draft ? ' Your newer input is still kept as a draft.' : ''}</p> : null}
