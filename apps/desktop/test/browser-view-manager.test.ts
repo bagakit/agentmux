@@ -48,6 +48,7 @@ const fakeElectron = vi.hoisted(() => {
     })
     readonly capturePage = vi.fn(async () => await this.capturePageImpl())
     readonly session = {
+      fetch: vi.fn<typeof fetch>(),
       on: vi.fn(), removeListener: vi.fn(),
       checkHandler: null as null | ((...args: any[]) => boolean),
       requestHandler: null as null | ((...args: any[]) => void),
@@ -1702,4 +1703,95 @@ it('native chrome demand follows successful physical Browser owner bounds and re
   expect(changes.mock.calls.at(-1)?.[0].bounds).toEqual([])
   expect(manager.nativeBrowserVisibility().bounds).toEqual([])
   manager.dispose()
+})
+
+
+describe('reported Browser favicon ownership', () => {
+  it('fetches relative SVG and absolute PNG through the original Profile session and publishes only data artwork', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await manager.create('icon', 'https://page.example/sub/page', null, 'work')
+    const contents = fixture.children[0]!.webContents
+    contents.session.fetch.mockResolvedValueOnce(new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['../real.svg'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ type: 'updated', browser: { faviconDataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/) } }))
+    expect(contents.session.fetch).toHaveBeenCalledWith('https://page.example/real.svg', expect.objectContaining({ credentials: 'include', signal: expect.any(AbortSignal) }))
+    contents.emit('page-favicon-updated', ['../real.svg'])
+    expect(contents.session.fetch).toHaveBeenCalledOnce()
+    const current = await manager.create('icon', 'about:blank')
+    expect(current.profileId).toBe('work'); expect(current.faviconDataUrl).toMatch(/^data:image\/svg\+xml;base64,/)
+    contents.session.fetch.mockResolvedValueOnce(new Response(png(), { headers: { 'content-type': 'image/png' } }))
+    contents.emit('page-favicon-updated', ['https://cdn.example/icon.png'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.stringMatching(/^data:image\/png;base64,/) } }))
+    expect(contents.session.fetch.mock.calls.at(-1)![0]).toBe('https://cdn.example/icon.png')
+    await manager.release('icon')
+  })
+
+  it('rejects a late icon after navigation while keeping the current Browser usable', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await manager.create('late-icon', 'https://page.example/old')
+    const contents = fixture.children[0]!.webContents
+    let finish!: (response: Response) => void
+    contents.session.fetch.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    contents.emit('page-favicon-updated', ['https://page.example/slow.svg'])
+    const previousSignal = contents.session.fetch.mock.calls[0]![1]!.signal!
+    await manager.navigate('late-icon', 'https://page.example/current')
+    expect(previousSignal.aborted).toBe(true)
+    finish(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const current = await manager.create('late-icon', 'about:blank')
+    expect(current.url).toBe('https://page.example/current'); expect(current.error).toBeNull(); expect(current.faviconDataUrl).toBeUndefined()
+    await manager.release('late-icon')
+  })
+
+  it('retains candidate Profile favicon events and ignores replaced or released native owners', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await manager.create('profile-icon', 'https://page.example/first')
+    const original = fixture.children[0]!.webContents
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => {
+      contents.finishLoad(url)
+      contents.session.fetch.mockResolvedValue(new Response(png(), { headers: { 'content-type': 'image/png' } }))
+      contents.emit('page-favicon-updated', ['https://page.example/profile.png'])
+    }
+    await manager.switchProfile('profile-icon', 'work')
+    const candidate = fixture.children[0]!.webContents
+    expect(candidate).not.toBe(original)
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { profileId: 'work', faviconDataUrl: expect.stringMatching(/^data:image\/png;base64,/) } }))
+    original.emit('page-favicon-updated', ['https://page.example/obsolete.png'])
+    expect(original.session.fetch).not.toHaveBeenCalled()
+    let finish!: (response: Response) => void
+    candidate.session.fetch.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    candidate.emit('page-favicon-updated', ['https://page.example/release.svg'])
+    const signal = candidate.session.fetch.mock.calls.at(-1)![1]!.signal!
+    await manager.release('profile-icon')
+    const sent = fixture.sent.length
+    expect(signal.aborted).toBe(true)
+    finish(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(fixture.sent).toHaveLength(sent)
+  })
+})
+
+it('aborts pending favicon observation on explicit Browser close', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  await manager.create('closed-icon', 'https://page.example/first')
+  const contents = fixture.children[0]!.webContents
+  contents.session.fetch.mockReturnValue(new Promise(() => {}))
+  contents.emit('page-favicon-updated', ['https://page.example/slow'])
+  const signal = contents.session.fetch.mock.calls[0]![1]!.signal!
+  manager.close('closed-icon')
+  expect(signal.aborted).toBe(true)
+})
+
+it('clears a cached reported favicon when the original Browser changes document', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  try {
+    await manager.create('new-document-icon', 'https://page.example/first')
+    const contents = fixture.children[0]!.webContents
+    contents.session.fetch.mockResolvedValue(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/icon.svg'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    const next = await manager.navigate('new-document-icon', 'https://other.example/second')
+    expect(next.faviconDataUrl).toBeUndefined(); expect(next.error).toBeNull()
+    expect(next.url).toBe('https://other.example/second')
+  } finally { manager.close('new-document-icon') }
 })
