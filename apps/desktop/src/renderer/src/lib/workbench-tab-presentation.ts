@@ -8,7 +8,7 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
   const surface = titleWorkbenchSurface(tab)
   switch (surface.kind) {
     case 'git':
-      return 'Git history'
+      return surface.history || !surface.selection ? 'Git history' : `Commit ${surface.selection.commitOid.slice(0, 8)}`
     case 'git-diff':
       return `${surface.comparison.file.path.split('/').at(-1) ?? surface.comparison.file.path} · Diff`
     case 'file':

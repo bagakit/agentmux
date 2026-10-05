@@ -62,6 +62,10 @@ export type GitWorkbenchSurface = {
   workspaceId: string
   scope: { hostId: string; repoPath: string; workspacePath: string }
   selection: { commitOid: string; parentOid: string | null } | null
+  /** Present only for repository browsing; a fixed commit opens directly into its details. */
+  history?: { reference: string | null; focusOid?: string }
+  /** Repository-relative fixed file; selection owns its immutable comparison. */
+  file?: { path: string; origPath: string | null }
 }
 
 export type GitDiffWorkbenchSurface = {

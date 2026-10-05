@@ -42,7 +42,8 @@ function candidateForSurface(
       // carry no releasable native owner in this budget. All three are intentionally not candidates.
       return null
     case 'git':
-      return null
+      if (!surface.selection || !surface.file) return null
+      // Inline fixed diffs own the same rebuildable Monaco/payload resource as a Diff Region.
     case 'git-diff':
       return {
         id: surface.regionId, kind: 'monaco', visible,

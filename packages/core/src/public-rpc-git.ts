@@ -21,10 +21,10 @@ export type GitResultMap = {
   'git.diff': GitFileDiff
 }
 export type GitMethod = keyof GitParameterMap
-export type GitOpenParams = GitTarget & GitCommitDetailsInput
+export type GitOpenParams = GitTarget & { oid?: string; parentOid?: string }
 export type GitOpenResult = {
   workspaceId: string
-  read: { kind: 'ready'; snapshot: GitCommitSnapshot }
+  read: { kind: 'ready'; snapshot: GitCommitSnapshot | Pick<GitHistorySnapshot, 'hostId' | 'repoPath'> }
   presentation: { tabId: string; regionId: string }
 }
 export interface AgentMuxRpcGitOwner {
@@ -129,7 +129,14 @@ export function parseGitParams<M extends GitMethod>(method: M, value: unknown, c
   return p as GitParameterMap[M]
 }
 export function parseGitOpenParams(value: unknown, code = 'INVALID_CONTROL_REQUEST'): GitOpenParams {
-  return parseGitParams('git.commit', value, code)
+  const p = rpcRecord(value, ['workspaceId', 'expectedResource', 'oid', 'parentOid'], code)
+  parseTarget(p, code)
+  if (p.oid !== undefined) oid(p.oid, code)
+  if (p.parentOid !== undefined) {
+    if (p.oid === undefined) invalid('A comparison parent requires an exact commit OID.', code)
+    oid(p.parentOid, code)
+  }
+  return p as GitOpenParams
 }
 function commit(value: unknown, code: string, details = false): Record<string, unknown> {
   const p = rpcRecord(value, ['oid', 'parents', 'subject', 'author', 'authoredAt', 'refs',
@@ -199,11 +206,14 @@ export function parseGitOpenResult(value: unknown, params?: GitOpenParams): GitO
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['workspaceId', 'read', 'presentation'], code)
   identity(p.workspaceId, code)
   const read = rpcRecord(p.read, ['kind', 'snapshot'], code)
-  if (read.kind !== 'ready') invalid('The fixed Git commit read was not confirmed.', code)
-  const snapshot = parseGitCommitSnapshot(read.snapshot)
+  if (read.kind !== 'ready') invalid('The original Git read was not confirmed.', code)
+  const rawSnapshot = rpcRecord(read.snapshot, undefined, code)
+  const fixed = Object.hasOwn(rawSnapshot, 'commitOid')
+  const snapshot = fixed ? parseGitCommitSnapshot(rawSnapshot) : rpcRecord(rawSnapshot, ['hostId', 'repoPath'], code)
+  if (!fixed) { identity(snapshot.hostId, code); absolutePath(snapshot.repoPath, code) }
   const presentation = rpcRecord(p.presentation, ['tabId', 'regionId'], code)
   identity(presentation.tabId, code); identity(presentation.regionId, code)
   if (params && (p.workspaceId !== params.workspaceId || snapshot.hostId !== params.expectedResource.hostId ||
-      snapshot.commitOid !== params.oid || params.parentOid !== undefined && snapshot.parentOid !== params.parentOid)) invalid('Git presentation belongs to another requested commit.', code)
+      (params.oid === undefined ? fixed : !fixed || snapshot.commitOid !== params.oid || params.parentOid !== undefined && snapshot.parentOid !== params.parentOid))) invalid('Git presentation belongs to another requested reading target.', code)
   return p as GitOpenResult
 }

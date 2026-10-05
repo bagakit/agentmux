@@ -110,12 +110,12 @@ import {
 import { DESKTOP_SESSION_ATTRIBUTE } from '../../../shared/desktop-actions'
 
 const GitWorkbenchPane = lazy(async () => {
-  const module = await import('./GitWorkbenchPane')
+  const module = await import('../features/git/GitWorkbenchPane')
   return { default: module.GitWorkbenchPane }
 })
 
 const GitBranchDiffPane = lazy(async () => {
-  const module = await import('./GitBranchDiffPane')
+  const module = await import('../features/git/diff/GitBranchDiffPane')
   return { default: module.GitBranchDiffPane }
 })
 
@@ -588,8 +588,8 @@ function SurfaceContent({
     )
   }
   if (surface.kind === 'git') {
-    return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git" title="Loading history" detail="Opening the repository history." />}>
-      <GitWorkbenchPane surface={surface} visible={surfaceVisible} />
+    return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git" title="Opening Git" detail="Restoring the saved Git reading target." />}>
+      <GitWorkbenchPane surface={surface} released={monacoReleased} visible={surfaceVisible} />
     </Suspense>
   }
   if (surface.kind === 'git-diff') {
