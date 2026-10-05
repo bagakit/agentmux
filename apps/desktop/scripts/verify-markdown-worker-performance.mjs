@@ -12,6 +12,7 @@ const evidence = join(root, `.bagakit/editor-format-implementation/evidence/mark
 const temporary = await mkdtemp(_hygiene_fixturePath("tmp/amx-markdown-chromium-")), sources = {}, sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const report = { passed: false, boundary: 'Actual MarkdownMath/MarkdownCodeBlock and production Worker assets compiled by Vite in private ordinary Chromium; timer-gap/DOM/safety/termination probe. No installed App or FileRegion claim.', sources }
 try {
+  for (const name of ['verify-markdown-worker-performance.mjs', 'probe-process.mjs']) sources['apps/desktop/scripts/' + name] = sha(await readFile(join(root, 'apps/desktop/scripts', name)))
   const out = join(temporary, 'out')
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, esbuild: { jsx: 'automatic' },
     resolve: { alias: library ? ['MarkdownMath', 'MarkdownCodeBlock'].map(component => ({ find: `../../../src/components/${component}.js`, replacement: join(root,`packages/client-ui/dist/components/${component}.js`) })) : [] },
@@ -21,6 +22,7 @@ try {
   await copyFile(join(fixture, 'main.cjs'), main); sources[relative(root,join(fixture,'main.cjs'))] = sha(await readFile(main))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   report.outcome = await runProbeProcess(require('electron'), [main, join(out,'index.html'), join(temporary,'profile'), output], { temporaryRoot: temporary, cwd: root, env, timeoutMs: 90_000 })
+  assert.equal(report.outcome.timedOut, false); assert.equal(report.outcome.interruption, null)
   report.native = JSON.parse(await readFile(output,'utf8'))
   assert.equal(report.outcome.exitCode,0,report.native.failure?.message); assert.equal(report.native.passed,true)
   for (const [file, digest] of Object.entries(sources)) assert.equal(sha(await readFile(join(root,file))),digest,'Stable candidate '+file)
