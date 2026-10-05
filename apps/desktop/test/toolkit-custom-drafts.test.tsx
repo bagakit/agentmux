@@ -5,7 +5,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ToolkitToolDefinition } from '@agentmux/core/control'
 import { useToolkitDrafts, toolkitDraftDirty } from '../src/renderer/src/components/settings/use-toolkit-drafts'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { deferred } from './helpers/config-owner-fixture'
+// A pending write needs no Main/Runtime fixture in this Renderer consumer test.
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
 
 const dom = composerDOM()
 const tool = (id: string): ToolkitToolDefinition => ({ id, revision: `revision-${id}`, name: id, icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("work"), script: 'console.log(1)', args: [] })
@@ -153,6 +158,34 @@ describe('single-resource Toolkit authored drafts in an actual mounted consumer'
     expect(drafts.entries.a!.value.actions).toEqual([{...action,label:'Later action',args:['later','']}])
     expect(toolkitDraftDirty(drafts.entries.a!)).toBe(true)
     expect(drafts.entries.a!.value.script).toBe(saved.script)
+  })
+  it('captures absent display as null and preserves later display edits during a pending save', async () => {
+    const saved=tool('a'),display={script:'console.log("Display submitted")',args:['literal']},held=deferred<ToolkitToolDefinition>(),update=vi.fn(()=>held.promise)
+    await dom.render(<Consumer tools={[saved]}/>)
+    await act(async()=>drafts.edit('a',{display}))
+    let saving:Promise<boolean>
+    await act(async()=>{saving=drafts.save('a',{add:vi.fn(),update})})
+    expect(update).toHaveBeenCalledWith('a',{display},{display:null})
+    await act(async()=>{drafts.edit('a',{display:{...display,args:['later','']}});held.resolve({...saved,display,revision:'a-display'});await saving!})
+    expect(drafts.entries.a!.expected!.display).toEqual(display)
+    expect(drafts.entries.a!.value.display).toEqual({...display,args:['later','']})
+    expect(drafts.entries.a!.value.script).toBe(saved.script)
+    expect(toolkitDraftDirty(drafts.entries.a!)).toBe(true)
+  })
+  it('preserves authored display source against a CLI whole-field change and allows disabling with null', async () => {
+    const display={script:'console.log("Original display")',args:[]},saved={...tool('a'),display}
+    await dom.render(<Consumer tools={[saved]}/>)
+    await act(async()=>drafts.edit('a',{display:{...display,script:'console.log("Authored display")'}}))
+    await dom.render(<Consumer tools={[{...saved,display:{...display,script:'console.log("CLI display")'},icon:'zap',revision:'a-cli'}]}/>)
+    const update=vi.fn(async()=>{throw new Error('resource-conflict')})
+    await act(async()=>{await drafts.save('a',{add:vi.fn(),update})})
+    expect(update).toHaveBeenCalledWith('a',{display:{...display,script:'console.log("Authored display")'}},{display})
+    expect(drafts.entries.a!.value.icon).toBe('zap')
+    await act(async()=>drafts.edit('a',{display:null}))
+    const disable=vi.fn(async()=>({...saved,display:null,revision:'a-disabled'}))
+    await act(async()=>{await drafts.save('a',{add:vi.fn(),update:disable})})
+    expect(disable).toHaveBeenCalledWith('a',{display:null},{display})
+    expect(drafts.entries.a!.value.display).toBeNull()
   })
   it('protects authored nested actions against a CLI whole-field change while adopting a clean sibling',async()=> {
     const action={id:'refresh',label:'Original action',script:'console.log(2)',args:['']},saved={...tool('a'),actions:[action]}
