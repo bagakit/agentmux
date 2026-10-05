@@ -92,7 +92,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(launch).toHaveBeenCalledOnce()
     expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
     expect(useAppStore.getState().warmTerminal?.creation?.issue?.code).toBe('CTXMUX_IO')
-    expect(useAppStore.getState().tabs.launcher?.regions.input.kind).toBe('launcher')
+    expect(useAppStore.getState().tabs.launcher?.regions.input?.kind).toBe('launcher')
     launch.mockResolvedValue(shell() as never)
     await dom.click('.launcher-terminal-recovery-actions button')
     expect(launch.mock.calls[1]![0]).toEqual(originalRequest)
@@ -117,49 +117,55 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it('retains its pending promotion across foreign preview requests and a competing explicit claim', async () => {
+  it('retains its original pending request while a competing Region independently opens', async () => {
     let reject!: (error: Error) => void
     const launch = vi.spyOn(api.sessions, 'launchTerminal').mockImplementationOnce(() => new Promise((_yes, no) => { reject = no }))
+      .mockResolvedValue(shell('second-independent-run') as never)
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell('second-independent-run') as never)
     await render()
     const originalRequest = launch.mock.calls[0]![0]
     const other = createWorkbenchTab('other-launcher', { regionId: 'other', kind: 'launcher', workspaceId: 'workspace' })
-    await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [other.id]: other }, config: { ...useAppStore.getState().config!,
+    await act(async () => useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [other.id]: other },
+      layouts: { workspace: createWorkspaceLayout('group', ['launcher', other.id]) }, config: { ...useAppStore.getState().config!,
       workspaces: [...useAppStore.getState().config!.workspaces, { id: 'foreign', name: 'Foreign', hostId: 'local', path: _hygiene_fixturePath("other"), kind: 'folder' }] } }))
     let promotion!: Promise<void>
     await act(async () => { promotion = useAppStore.getState().promoteWarmTerminal('group', { tabId: 'launcher', regionId: 'input' }) })
     expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
     await act(async () => useAppStore.getState().prewarmTerminal('foreign', 'region:foreign'))
-    await expect(useAppStore.getState().promoteWarmTerminal('group', { tabId: other.id, regionId: 'other' })).rejects.toThrow('already opening')
+    await act(async () => { await useAppStore.getState().promoteWarmTerminal('group', { tabId: other.id, regionId: 'other' }) })
+    expect(useAppStore.getState().tabs[other.id]?.regions.other).toMatchObject({ kind: 'terminal', phase: 'attached', sessionId: 'second-independent-run' })
+    expect(launch.mock.calls[1]![0]).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("repo") })
+    expect(launch.mock.calls[1]![0].createOperationId).not.toBe(originalRequest.createOperationId)
     await act(async () => { reject(unknown()); await expect(promotion).rejects.toMatchObject({ code: 'CTXMUX_IO' }) })
-    expect(launch).toHaveBeenCalledOnce()
+    expect(launch).toHaveBeenCalledTimes(2)
     expect(useAppStore.getState().warmTerminal?.creation?.request).toEqual(originalRequest)
     expect(useAppStore.getState().warmTerminal?.creation?.issue?.code).toBe('CTXMUX_IO')
-    expect(useAppStore.getState().warmTerminal?.claimingLauncherId).toBeUndefined()
+    expect(useAppStore.getState().warmTerminal?.claimToken).toBeUndefined()
     expect(dom.container.querySelector('.launcher-terminal-recovery-actions button')).not.toBeNull()
   })
 
-  it('claims a late same-operation confirmation once when two original Launchers try to open it', async () => {
+  it('claims a late same-operation confirmation once while another Launcher opens its own Run', async () => {
     let resolve!: (value: never) => void
     const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValueOnce(unknown())
-      .mockImplementationOnce(() => new Promise(yes => { resolve = yes }))
+      .mockImplementationOnce(() => new Promise(yes => { resolve = yes })).mockResolvedValue(shell('second-independent-run') as never)
     const stop = vi.spyOn(api.sessions, 'stop')
     vi.spyOn(api.sessions, 'refresh').mockResolvedValue(shell() as never)
     await render()
     const other = createWorkbenchTab('other-launcher', { regionId: 'other', kind: 'launcher', workspaceId: 'workspace' })
-    let first!: Promise<void>, second!: Promise<void>
+    let first!: Promise<void>
     await act(async () => {
-      useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [other.id]: other } })
+      useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [other.id]: other }, layouts: { workspace: createWorkspaceLayout('group', ['launcher', other.id]) } })
       first = useAppStore.getState().promoteWarmTerminal('group', { tabId: 'launcher', regionId: 'input' })
-      second = useAppStore.getState().promoteWarmTerminal('group', { tabId: other.id, regionId: 'other' })
-      const secondResult = expect(second).rejects.toThrow('already opening')
+      await useAppStore.getState().promoteWarmTerminal('group', { tabId: other.id, regionId: 'other' })
+      expect(useAppStore.getState().tabs[other.id]?.regions.other).toMatchObject({ kind: 'terminal', sessionId: 'second-independent-run' })
       resolve(shell() as never)
       await first
-      await secondResult
     })
-    expect(launch).toHaveBeenCalledTimes(2)
+    expect(launch).toHaveBeenCalledTimes(3)
     expect(launch.mock.calls[1]![0]).toEqual(launch.mock.calls[0]![0])
+    expect(launch.mock.calls[2]![0].createOperationId).not.toBe(launch.mock.calls[0]![0].createOperationId)
     expect(useAppStore.getState().tabs.launcher?.regions.input).toMatchObject({ kind: 'terminal', sessionId: 'same-original-run' })
-    expect(useAppStore.getState().tabs[other.id]?.regions.other.kind).toBe('launcher')
+    expect(useAppStore.getState().tabs[other.id]?.regions.other).toMatchObject({ kind: 'terminal', sessionId: 'second-independent-run' })
     expect(stop).not.toHaveBeenCalled()
   })
 
@@ -196,7 +202,7 @@ describe('the real Launcher keeps and reconciles its original shell creation', (
     const launch = vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValue(unknown())
     await render()
     const originalRequest = launch.mock.calls[0]![0]
-    const restored = (hostId: string) => ({ hostId, event: { type: 'connection-state' as const, state: 'restored' as const,
+    const restored = (hostId: string) => ({ type: 'core' as const, hostId, event: { type: 'connection-state' as const, state: 'restored' as const,
       evidence: { source: 'run-process' as const, observedAt: 10 } }, endpointWarning: null })
     await act(async () => {
       useAppStore.setState({ runtimeEndpointWarnings: [] })

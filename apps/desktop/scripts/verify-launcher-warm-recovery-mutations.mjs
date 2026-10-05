@@ -30,14 +30,14 @@ const mutations = [
   { label: 'healthy-foreign-slot-replaced', file: store,
     before: '    if (existing) return\n', after: '' },
   { label: 'pending-original-slot-discarded', file: store,
-    before: 'warmTerminal: { ...held, claimingLauncherId },', after: 'warmTerminal: null,' },
+    before: '      set({ warmTerminal: { ...held, claimToken } })', after: '      set({ warmTerminal: null })' },
   { label: 'late-confirmation-resurrects-view', file: store,
-    before: `      if (launcher && (get().tabs[launcher.tabId]?.regions[launcher.regionId] !== launcherSurface ||
-        !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launcher.tabId))) return
+    before: `          if (launcher && (get().tabs[launcher.tabId]?.regions[launcher.regionId] !== launcherSurface ||
+            !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launcher.tabId))) return
 `, after: '' },
-  { label: 'late-confirmation-double-claim', file: store,
-    before: `      if (live.claimingLauncherId) throw new Error('This reusable shell is already opening. Check its original request after that opening settles.')
-`, after: '' }
+  { label: 'claim-reservation-discarded', file: store,
+    before: `      set({ warmTerminal: { ...held, claimToken } })
+`, after: '      set({ warmTerminal: { ...held } })\n' }
 ]
 
 // A real call outside the definition is required for each repaired boundary.
