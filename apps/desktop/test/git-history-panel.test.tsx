@@ -476,6 +476,10 @@ describe('History viewport work and controlled boundary', () => {
     await act(async () => root.render(createElement(Controlled, { selectedOid: target, revealOid: target })))
     expect(rows()).toContain(target)
     expect(scroll().scrollTop).toBeGreaterThan(1200)
+    await move(0)
+    await act(async () => root.render(createElement(Controlled, { selectedOid: target })))
+    await act(async () => root.render(createElement(Controlled, { selectedOid: target, revealOid: target })))
+    expect(scroll().scrollTop).toBeGreaterThan(1200)
   })
 
   it('opens repository history as a separate explicit action without selecting a fabricated latest commit', async () => {
