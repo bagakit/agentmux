@@ -115,6 +115,8 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 
 主题编辑、预览、文件往返、冲突与保存反馈归[设置行为](../behavior/settings-and-observation.md#主题编辑与文件交换)，设置呈现归[设置呈现](settings-and-observation.md#主题编辑器)。真实产品操作、生产变异、独立技术 review 与完整原图审美分别证明各自结论，构建和概念图不能代签。
 
+Terminal 的经典配色复用原生调色板目录与原设置 owner，以原作者的完整 ANSI 定义为来源。Dracula、Nord、Gruvbox Dark、Solarized Dark 和 Solarized Light 分别明确命名，保持原 Graphite / Catppuccin 选择；显式配色不随 App 明暗或主题变化改写。Workspace theme 是用户明确选择的配对项。静态预览、Desktop 与 Mobile 原生 Terminal、Main 的默认前景/背景及公开设置发现/写入消费同一目录，不另建经典配色存储、字体设置或执行插件。配色切换在现有实例内生效，保 buffer、阅读位置、选区、输入与原 Attachment；原 ANSI、警告/危险输出仍须辨认。
+
 设计语言要能被执行，前提是它在代码里**有一个可引用的名字**。散落的字面值不是"细微调整"，是把设计决策
 藏进 2000 多行样式表里：改一档字号要靠 grep，改错一处没人发现。因此三类尺度全部收进 token，
 **样式表里不再出现裸字面值**。
