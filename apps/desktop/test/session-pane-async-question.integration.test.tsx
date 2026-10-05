@@ -26,6 +26,8 @@ vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({
   SessionResultReview: () => null
 }));
+import * as questionOwner from '../src/renderer/src/lib/conversation-question';
+import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply';
 import { SessionPane } from '../src/renderer/src/components/SessionPane';
 const original = useAppStore.getState(),
   control: AgentSessionControl = {
@@ -44,9 +46,10 @@ async function flush() {
 }
 const pane = () => <SessionPane sessionId="question-session" surfaceKind="agent" interactiveResize={false}
   visible={true} readOnly={false} linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} />
-async function setup() {
+async function setup(withRecordedAnswer = false) {
   const h = await fixture();
-  const page = await h.client.sessionHistoryPage('question-session', h.invocation);
+  const originalPage = await h.client.sessionHistoryPage('question-session', h.invocation);
+  const page = withRecordedAnswer ? { ...originalPage, items: [...originalPage.items, { id: 'already-recorded-answer', kind: 'user-message' as const, contentParts: [], questionAnswers: [{ questionId: request.questions[1]!.id, answer: 'Native answer' }] }] } : originalPage;
   const config: AppConfig = {
     version: 9,
     hosts: [{
@@ -296,4 +299,23 @@ it('actual Pane consumes the live original Core refusal, preserves its new draft
   await publish({ ...exact, updatedAt: exact.updatedAt + 2, promptCompletionAdmission: undefined })
   expect((useAppStore.getState().sessions[0] as Extract<SessionSnapshot, {kind:'agent'}>).promptInputNotApplied).toBeUndefined()
   expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT')
+})
+
+it('keeps the actual Activity observation quiet on unrelated rerenders but confirms a newly retained original intent against its unchanged page', async () => {
+  const observe = vi.spyOn(questionOwner, 'observeConversationQuestionAnswers')
+  const { page, reads, send } = await setup(true)
+  const observations = observe.mock.calls.length, readCount = reads.mock.calls.length
+  expect(observations).toBeGreaterThan(0)
+  await act(async () => root.render(pane())); await flush()
+  expect(observe.mock.calls.length).toBe(observations)
+  await act(async () => useAppStore.setState(state => ({ questionReplies: { ...state.questionReplies, foreign: {} },
+    sessions: state.sessions.map(session => ({ ...session, updatedAt: session.updatedAt + 1 })) }))); await flush()
+  expect(observe.mock.calls.length).toBe(observations)
+  const input = { source: page.source, turnId: 'question-turn', recordId: 'native-async-call', operationId: 'late-retained-original',
+    expectedRun: control.run, afterSubmissionId: null, answers: [{ questionId: request.questions[1]!.id, answer: 'Original exact answer' }] }
+  const key = questionReplyKey(control.agentSessionId, input)
+  await act(async () => useAppStore.setState(state => ({ questionReplies: { ...state.questionReplies,
+    [control.agentSessionId]: { [key]: { hostId: control.hostId, input, phase: 'unknown' } } } }))); await flush()
+  await vi.waitFor(() => expect(useAppStore.getState().questionReplies[control.agentSessionId]?.[key]?.phase).toBe('confirmed'))
+  expect(reads.mock.calls.length).toBe(readCount); expect(send).not.toHaveBeenCalled()
 })
