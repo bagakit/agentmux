@@ -81,14 +81,16 @@ type Internals = {
   registry: { load(hostId: string): Promise<void> }
 }
 
-async function connectedClient(pending?: AgentMuxInteractionRequest, providerId: 'codex' | 'claude' = 'codex'): Promise<{
+async function connectedClient(pending?: AgentMuxInteractionRequest, providerId: 'codex' | 'claude' = 'codex', nativeSessionId?: string): Promise<{
   client: AgentMuxClient
   writes: string[]
   store: AgentMuxMemoryAgentSessionStore
   state: Internals
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, storedSession(pending, providerId))
+  const original = storedSession(pending, providerId)
+  if (nativeSessionId) original.nativeHandle = { kind: 'provider', providerId, sessionId: nativeSessionId }
+  await store.compareAndSwap(null, original)
   const client = new AgentMuxClient({ store })
   const state = client as unknown as Internals
   await state.registry.load('local')
@@ -571,5 +573,62 @@ describe('typed response claims after another Core legally advances the same Run
       await completeNativeRequest(h.client)
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
     } finally { await h.dispose() }
+  })
+})
+
+
+describe('Claude terminal takeover completion', () => {
+  const nativeSessionId = 'native-confirmation-owned-source'
+  function request(kind: 'permission' | 'question'): AgentMuxInteractionRequest {
+    const evidence = { source: 'native-hook' as const, observedAt: 1, run: { runId: RUN_ID }, hookReceiptId: 'original-claude-request' }
+    return kind === 'permission'
+      ? { ...permission('claude-terminal-permission'), toolName: 'Bash', toolInput: '{"command":"false"}' }
+      : { kind: 'question', id: 'claude-terminal-question', agentSessionId: AGENT_SESSION_ID,
+          nativeToolCallId: 'claude-terminal-question-call', questions: [{ id: 'q', prompt: 'Choose?', options: [{ id: 'a', label: 'First' }] }], evidence }
+  }
+  async function complete(client: AgentMuxClient, pending: AgentMuxInteractionRequest, eventName: string, overrides: Record<string, unknown> = {}) {
+    return await (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
+      receiptId: 'claude-terminal-' + eventName + '-' + pending.id, agentSessionId: AGENT_SESSION_ID, providerId: 'claude', runId: RUN_ID,
+      payload: { hook_event_name: eventName, session_id: nativeSessionId, tool_name: pending.kind === 'question' ? 'AskUserQuestion' : 'Bash',
+        tool_use_id: pending.nativeToolCallId, ...(eventName === 'PostToolUseFailure' ? { error: 'Private executed tool failed' } : { tool_response: 'Private completed result' }), ...overrides }
+    }, new AbortController().signal)
+  }
+  it.each(['permission', 'question'] as const)('settles the original %s after accepted native input and exact failed-tool completion', async kind => {
+    const pending = request(kind), h = await connectedClient(pending, 'claude', nativeSessionId)
+    const events: import('../src/types.js').AgentMuxClientEvent[] = []
+    h.client.onEvent(event => events.push(event))
+    try {
+      await h.client.writeAgent(nativeWrite())
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toMatchObject({ request: { id: pending.id }, nativeInput: { delivery: 'accepted' } })
+      await complete(h.client, pending, 'PostToolUseFailure')
+      const current = h.client.agentSession(AGENT_SESSION_ID)
+      expect(current.pendingInteraction).toBeUndefined()
+      expect(current.nativeHandle?.sessionId).toBe(nativeSessionId)
+      expect(current.run.runId).toBe(RUN_ID)
+      expect(current.hookReceipt?.eventName).toBe('PostToolUseFailure')
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toBeUndefined()
+      expect(events.some(event => event.type === 'agent-session' && !event.session.pendingInteraction && event.session.run.runId === RUN_ID)).toBe(true)
+      expect(h.writes).toEqual(['\u001b'])
+    } finally { await h.client.dispose() }
+  })
+  it('retains success completion after native takeover without writing a second answer', async () => {
+    const pending = request('permission'), h = await connectedClient(pending, 'claude', nativeSessionId)
+    try {
+      await h.client.writeAgent(nativeWrite())
+      await complete(h.client, pending, 'PostToolUse')
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+      expect(h.writes).toEqual(['\u001b'])
+    } finally { await h.client.dispose() }
+  })
+  it.each(['foreign-source', 'wrong-call', 'wrong-kind', 'child'] as const)('keeps the current request when failed-tool completion belongs to %s', async changed => {
+    const pending = request('permission'), h = await connectedClient(pending, 'claude', nativeSessionId)
+    try {
+      const overrides = changed === 'foreign-source' ? { session_id: 'foreign-native-source' }
+        : changed === 'wrong-call' ? { tool_use_id: 'another-native-call' }
+        : changed === 'wrong-kind' ? { tool_name: 'AskUserQuestion' } : { agent_id: 'a-child' }
+      await complete(h.client, pending, 'PostToolUseFailure', overrides)
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request.id).toBe(pending.id)
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
   })
 })

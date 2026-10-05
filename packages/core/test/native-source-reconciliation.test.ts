@@ -675,3 +675,23 @@ it('coalesces a burst into one pending shared-source validation and preserves th
   expect(f.writes).not.toHaveBeenCalled()
   observer.dispose()
 })
+
+
+it.each(['native-witness-unavailable', 'native-main-ambiguous'] as const)('rechecks %s on the next applicable Hook and retains only confirmed witness reuse', async reason => {
+ const f = await fixture(), provider = f.client.providers.get('codex')
+ const discover = vi.spyOn(provider, 'discoverNativeSession').mockRejectedValueOnce(
+   reason === 'native-main-ambiguous' ? new (await import('../src/errors.js')).AgentMuxError('Several private mains', 'AGENT_NATIVE_IDENTITY_AMBIGUOUS') : new Error('Private transient observation unavailable'))
+ const witness = Reflect.get(f.client, 'hookNativeWitness') as (session: AgentMuxStoredAgentSession, envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal) => Promise<{ handle?: import('../src/types.js').AgentNativeSessionHandle; reason?: string }>
+ const envelope = { agentSessionId: SID, providerId: 'codex', runId: RUN, receiptId: 'private-recheck', payload: { hook_event_name: 'PostToolUse', session_id: NATIVE } } as const
+ const first = await witness.call(f.client, f.session, envelope, new AbortController().signal)
+ expect(first.reason).toBe(reason)
+ const recovered = await witness.call(f.client, f.session, { ...envelope, receiptId: 'private-next-hook' }, new AbortController().signal)
+ expect(recovered.handle?.sessionId).toBe(NATIVE)
+ expect(recovered.reason).toBeUndefined()
+ const cached = await witness.call(f.client, f.session, { ...envelope, receiptId: 'private-later-hook' }, new AbortController().signal)
+ expect(cached).toEqual(recovered)
+ expect(discover).toHaveBeenCalledTimes(2)
+ expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe('retained-old')
+ expect(f.client.agentSession(SID).run.runId).toBe(RUN)
+ expect(f.events).toEqual([])
+})
