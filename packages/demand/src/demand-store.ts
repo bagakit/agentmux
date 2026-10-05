@@ -9,6 +9,8 @@ import {
   type CreateDemandInput,
   type Demand,
   type DemandActivity,
+  type DemandActivityInspection,
+  type DemandActivityRead,
   type DemandDecision,
   type DemandReceipt,
   type DemandStoreListener,
@@ -44,6 +46,7 @@ class SnapshotWriteError extends DemandStoreError {
 }
 
 type TitleAttempt = DemandTitleMutationOptions & { targetId: string; requested: string | null }
+type ActivityAttempt = { targetId: string; kind: string; message: string; actorId: string | null }
 
 export type OpenDemandStoreOptions = {
   root: string
@@ -103,7 +106,7 @@ function stringArray(value: unknown, label: string): string[] {
 
 function parseActivity(value: unknown, label: string): DemandActivity {
   const record = object(value, label)
-  exactKeys(record, ['id', 'kind', 'message', 'createdAt', 'actorId', 'nameChangeId'], label, ['nameChangeId'])
+  exactKeys(record, ['id', 'kind', 'message', 'createdAt', 'actorId', 'operationId', 'nameChangeId'], label, ['operationId', 'nameChangeId'])
   if (record.nameChangeId !== undefined && record.kind !== 'name-change') throw new Error(`${label}.nameChangeId requires the owner activity kind`)
   return {
     id: nonEmptyString(record.id, `${label}.id`),
@@ -111,6 +114,7 @@ function parseActivity(value: unknown, label: string): DemandActivity {
     message: nonEmptyString(record.message, `${label}.message`),
     createdAt: timestamp(record.createdAt, `${label}.createdAt`),
     actorId: nullableString(record.actorId, `${label}.actorId`),
+    ...(record.operationId === undefined ? {} : { operationId: nonEmptyString(record.operationId, `${label}.operationId`) }),
     ...(record.nameChangeId === undefined ? {} : { nameChangeId: nonEmptyString(record.nameChangeId, `${label}.nameChangeId`) }),
   }
 }
@@ -201,6 +205,8 @@ function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
     if (new Set(demands.map((demand) => demand.id)).size !== demands.length) {
       throw new Error('snapshot.demands contains duplicate IDs')
     }
+    const activityOperations = demands.flatMap(demand => demand.activities.flatMap(activity => activity.operationId === undefined ? [] : [activity.operationId]))
+    if (new Set(activityOperations).size !== activityOperations.length) throw new Error('snapshot.activities contains duplicate operation IDs')
     if (record.nameHistory !== undefined && !Array.isArray(record.nameHistory)) throw new Error('snapshot.nameHistory must be an array')
     const nameHistory = (record.nameHistory ?? [] as unknown[]).map(parseDemandNameChange)
     const names = new Map(nameHistory.map(change => [change.id, change]))
@@ -497,17 +503,43 @@ export class DemandStore {
         kind: input.kind,
         message: input.message,
         actorId: input.actorId,
+        ...(input.operationId === undefined ? {} : { operationId: input.operationId }),
         createdAt: input.createdAt ?? Date.now(),
       }
       parseActivity(activity, 'activity')
       demand.activities.push(activity)
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
-    })
+    }, undefined, input.operationId, input.operationId === undefined ? undefined : { targetId: id, kind: input.kind, message: input.message, actorId: input.actorId })
   }
 
   async appendActivity(id: string, input: Omit<DemandActivity, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
     return this.addActivity(id, input)
+  }
+
+  async inspectActivity(id: string, operationId: string): Promise<DemandActivityInspection> {
+    nonEmptyString(operationId, 'activity.operationId')
+    return enqueue(this.root, async () => {
+      const release = await this.acquireLock()
+      try {
+        const snapshot = await this.readSnapshot()
+        const demand = findDemand(snapshot, id, this.storePath)
+        await this.confirmSnapshot()
+        return { demandId: id, operationId, activity: clone(demand.activities.find(activity => activity.operationId === operationId) ?? null), diskDurability: 'confirmed' }
+      } finally { await release() }
+    })
+  }
+
+  async readActivities(id: string): Promise<DemandActivityRead> {
+    return enqueue(this.root, async () => {
+      const release = await this.acquireLock()
+      try {
+        const snapshot = await this.readSnapshot()
+        const demand = findDemand(snapshot, id, this.storePath)
+        await this.confirmSnapshot()
+        return { demandId: id, activities: clone(demand.activities), diskDurability: 'confirmed' }
+      } finally { await release() }
+    })
   }
 
   async addDecision(id: string, input: Omit<DemandDecision, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
@@ -532,7 +564,7 @@ export class DemandStore {
     return this.addDecision(id, input)
   }
 
-  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand, titleAttempt?: TitleAttempt, requestedOperationId?: string): Promise<DemandReceipt> {
+  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand, titleAttempt?: TitleAttempt, requestedOperationId?: string, activityAttempt?: ActivityAttempt): Promise<DemandReceipt> {
     if (requestedOperationId !== undefined && (typeof requestedOperationId !== 'string' || !requestedOperationId.trim() || requestedOperationId.length > 4096 || requestedOperationId.includes('\0')))
       throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'A Goal operation ID must be a non-empty string.')
     let context: DemandNameChangeRecord['context'] | undefined
@@ -554,6 +586,16 @@ export class DemandStore {
       try {
         let snapshot = await this.readSnapshot()
         const operationId = titleAttempt?.operationId ?? requestedOperationId ?? `demand-op-${snapshot.revision + 1}-${randomUUID()}`
+        if (activityAttempt) {
+          const originalDemand = snapshot.demands.find(demand => demand.activities.some(activity => activity.operationId === operationId))
+          const previousActivity = originalDemand?.activities.find(activity => activity.operationId === operationId)
+          if (previousActivity) {
+            if (originalDemand!.id !== activityAttempt.targetId || previousActivity.kind !== activityAttempt.kind || previousActivity.message !== activityAttempt.message || previousActivity.actorId !== activityAttempt.actorId)
+              throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The activity operation ID already belongs to a different Goal, payload or authenticated author.')
+            await this.confirmSnapshot()
+            return { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: snapshot.revision, demand: projectNameHistory(snapshot).demands.find(demand => demand.id === originalDemand!.id)!, replayed: true }
+          }
+        }
         const original = titleAttempt ? findDemand(snapshot, titleAttempt.targetId, this.storePath) : undefined
         const previous = titleAttempt ? snapshot.nameHistory.find(change => change.operationId === operationId) : undefined
         if (previous) {

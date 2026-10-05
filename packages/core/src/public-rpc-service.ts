@@ -596,6 +596,9 @@ export class AgentMuxRpcService {
         location: caller ? { workspacePath: caller.session.workspacePath, hostId: caller.hostId,
           callerSessionId: caller.agentSessionId, callerRunId: caller.session.run.runId, callerCwd: caller.session.workspacePath } : {}
       }
+      if (request.operation === 'demand.activity.append' && !nameContext.actor.verified) {
+        throw new AgentMuxError('Activity append requires an authenticated original Agent, person or device.', 'CONTROL_PERMISSION_DENIED')
+      }
       if (request.operation === 'agent.rename' || request.operation === 'space.rename') {
         const agentOwner = request.operation === 'agent.rename' ? await this.owner(request.agentSessionId) : null
         const target = request.operation === 'agent.rename' ? { kind: 'agent-session', id: request.agentSessionId } : { kind: 'tab', id: request.tabId }
@@ -877,9 +880,13 @@ export class AgentMuxRpcService {
         }
         const goals = await this.goals(p)
         const limit = rpcCount(p.limit, 100, 1000)
-        result = { activity: goals.flatMap(goal => (goal.activityLog ?? []).map(message => ({
-          goalId: goal.id, message, updatedAt: goal.updatedAt
-        }))).slice(-limit) }; break
+        const records = await Promise.all(goals.map(async goal => {
+          const read = await this.execute(this.request('demand.activity.read', { demandId: goal.id }))
+          if (read.operation !== 'demand.activity.read' || read.demandId !== goal.id || read.diskDurability !== 'confirmed') throw new AgentMuxError('The original Goal activity observation is unconfirmed. Inspect the original operation; the Goal and Agent are retained.', 'CONTROL_PROTOCOL_ERROR')
+          return read.activities.map(activity => ({ goalId: goal.id, ...activity }))
+        }))
+        result = { activity: records.flat()
+          .filter(activity => p.since === undefined || activity.createdAt >= Number(p.since)).slice(-limit), diskDurability: 'confirmed' }; break
       }
       case 'app.snapshot': {
         if (this.ports.forwardControl) {
@@ -1089,7 +1096,7 @@ export class AgentMuxRpcService {
             (!p.agentSessionId || goal.sessionIds.includes(String(p.agentSessionId))) && (!p.executorId || goal.assigneeExecutorId === p.executorId) &&
             (!p.status || goal.status === p.status) && (p.since === undefined || goal.updatedAt >= rpcCount(p.since, 0)))
           observation.goals = rpcControlResult('goal.ls', { operation: 'demand.list', demands: goals }).goals as AgentMuxRpcSnapshot['goals']
-          observation.activity = goals.flatMap(goal => (goal.activityLog ?? []).map(message => ({ goalId: goal.id, message, updatedAt: goal.updatedAt })))
+          observation.activity = goals.flatMap(goal => (goal.activities ?? []).map(activity => ({ goalId: goal.id, ...activity })))
           for (const goal of wanted('decisions') ? goals : []) {
             try { const decisions = await this.execute(this.request('demand.decision-log', { demandId: goal.id }))
               if (decisions.operation === 'demand.decision-log') observation.decisions.push({ goalId: goal.id, decisions: decisions.decisions })

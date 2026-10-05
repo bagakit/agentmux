@@ -4625,6 +4625,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
       return { operation: request.operation, demand: record, goalContinuations: await api.continuousProgress.goals(request.demandId) }
     }
+    if (request.operation === 'demand.activity.append') {
+      const saved = await api.demands.activity(request.demandId, { kind: request.kind, message: request.message, actorId: null, operationId: request.requestId }, request.requestId)
+      const activity = saved.demand.activities.find(item => item.operationId === request.requestId)
+      if (!activity) throw controlFailure('CONTROL_FAILED', 'The original activity commit is unconfirmed. Inspect this same operation; the Goal and Agent are retained.')
+      set(state => ({ demands: { ...state.demands, [saved.demand.id]: demandRecordFromFilesystem(saved.demand, state.demands[saved.demand.id]) } }))
+      return { operation: request.operation, demand: demandRecord(request.demandId), activity,
+        receipt: { demandId: request.demandId, requestId: request.requestId, activityId: activity.id, diskDurability: 'confirmed', replayed: saved.replayed === true } }
+    }
+    if (request.operation === 'demand.activity.inspect') {
+      const inspected = await api.demands.inspectActivity(request.demandId, request.requestId)
+      return { operation: request.operation, demandId: inspected.demandId, requestId: inspected.operationId, activity: inspected.activity, diskDurability: inspected.diskDurability }
+    }
+    if (request.operation === 'demand.activity.read') {
+      return { operation: request.operation, ...await api.demands.readActivities(request.demandId) }
+    }
     if (request.operation === 'demand.discuss') {
       await get().refreshDemand(request.demandId)
       const tabId = request.mode === 'open' ? await get().openDemandPmo(request.demandId) : await get().requestDemandPmoTask(request.demandId, request.mode)

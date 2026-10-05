@@ -836,7 +836,15 @@ export async function registerIpc(args: {
   handle('demands:delete', async (id: string) => await demands.delete(id))
   handle('demands:linkSession', async (id: string, sessionId: string) => await demands.linkSession(id, sessionId))
   handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))
-  handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>) => await demands.addActivity(id, input))
+  handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>, controlRequestId?: string) => {
+    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
+      request => request.operation === 'demand.activity.append' && request.demandId === id && request.kind === input.kind && request.message === input.message && request.requestId === input.operationId)
+    if (!admitted.context.actor.verified) throw Object.assign(new Error('Activity author is unconfirmed. Original Goal and Agent remain available; authenticate and inspect the original operation.'), { code: 'CONTROL_PERMISSION_DENIED' })
+    return await demands.addActivity(id, { kind: input.kind, message: input.message, actorId: admitted.context.actor.id,
+      ...(input.operationId === undefined ? {} : { operationId: input.operationId }) })
+  })
+  handle('demands:inspectActivity', async (id: string, operationId: string) => await demands.inspectActivity(id, operationId))
+  handle('demands:readActivities', async (id: string) => await demands.readActivities(id))
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 

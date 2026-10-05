@@ -1,5 +1,6 @@
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { parseNotesStorageOperation } from './notes-storage.js'
+import { parseControlDemandActivity } from './control-codec.js'
 import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
@@ -137,7 +138,7 @@ function dispatch(value: unknown, params: Record<string, unknown>): void {
   if (params.replyMessageId !== undefined && !(p.events as Array<Record<string, unknown>>).some(event => event.replyMessageId === params.replyMessageId && event.kind === params.kind)) fail()
 }
 function activity(value: unknown): void {
-  array(value, item => { const p = record(item, ['goalId', 'message', 'updatedAt']); string(p.goalId); text(p.message); count(p.updatedAt) })
+  array(value, item => { const p = record(item, ['goalId', 'id', 'kind', 'message', 'createdAt', 'actorId', 'operationId', 'nameChangeId']); string(p.goalId); parseControlDemandActivity(p) })
 }
 
 /** Finite native DTO consumption. Existing Session, message, Goal and catalog
@@ -326,7 +327,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
-      case 'goal.activity': record(p, ['activity']); activity(p.activity); break
+      case 'goal.activity': record(p, ['activity', 'diskDurability']); activity(p.activity); member(p.diskDurability, ['confirmed']); break
       case 'app.snapshot': {
         record(p, ['projects', 'workspaces', 'topics', 'motes', 'spaces', 'zones', 'executors', 'agents', 'sessions', 'goals', 'decisions', 'activity', 'unavailable'])
         controlResult('list.projects', { projects: p.projects }); controlResult('list.agents', { agents: p.executors }); controlResult('list.active-agents', { agents: p.agents })

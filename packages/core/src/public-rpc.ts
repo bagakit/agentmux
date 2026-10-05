@@ -49,6 +49,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'goal.start': 'demand.start', 'goal.continuation-action': 'demand.continuation-action', 'goal.handoff': 'demand.handoff',
   'goal.link-session': 'demand.link-session', 'goal.link-project': 'demand.link-project',
   'goal.decisions': 'demand.decision-log', 'goal.focus': 'focus',
+  'goal.activity.append': 'demand.activity.append', 'goal.activity.inspect': 'demand.activity.inspect',
   'app.inspect': 'inspect.client', 'app.focus': 'focus',
   'settings.inspect': 'settings.get', 'settings.set': 'settings.set',
   'settings.hosts.ls': 'settings.hosts.list', 'settings.hosts.test': 'settings.hosts.test',
@@ -98,6 +99,7 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
       confirmation?: import('./control.js').AgentMuxDemandDecision['confirmation']; wikiVersion?: string;
       decision?: Omit<import('./control.js').AgentMuxDemandDecision, 'recordedAt' | 'sourceSessionId'> }
   : M extends 'goal.focus' ? { goalId: string; input?: 'preserve' | 'target' }
+  : M extends 'goal.activity.append' | 'goal.activity.inspect' ? GoalKeys<BusinessParams<M>> & { operationId: string }
   : M extends 'settings.browser-links.forget' ? { input: unknown }
   : M extends 'settings.prompts.inspect' ? { id: string; keyword?: never } | { keyword: string; id?: never }
   : M extends 'settings.executors.inspect' ? { id: string }
@@ -146,7 +148,7 @@ export type AgentMuxRpcSnapshot = {
   agents: import('./control.js').AgentMuxControlActiveAgent[];
   sessions: AgentMuxRpcAgentObservation[]; goals: AgentMuxRpcGoal[];
   decisions: Array<{ goalId: string; decisions: import('./control.js').AgentMuxDemandDecision[] }>;
-  activity: Array<{ goalId: string; message: string; updatedAt: number }>;
+  activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>;
   unavailable: Array<AgentMuxRpcUnavailable & { source: string }>
 }
 export type AgentMuxRpcWorkspace = {
@@ -248,7 +250,7 @@ type NativeResult = TopicResultMap & HostSettingsResultMap & FileResultMap & Git
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
   'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>>
   'app.snapshot': AgentMuxRpcSnapshot
-  'goal.activity': { activity: Array<{ goalId: string; message: string; updatedAt: number }> }
+  'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed' }
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
   'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded'; publication: import('./control-endpoint-state.js').AgentMuxControlEndpointState | null }
