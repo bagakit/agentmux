@@ -197,6 +197,10 @@
     "./toolkit-result-document": {
       "types": "./dist/toolkit-result-document.d.ts",
       "import": "./dist/toolkit-result-document.js"
+    },
+    "./diagnostic-evidence": {
+      "types": "./dist/diagnostic-evidence.d.ts",
+      "import": "./dist/diagnostic-evidence.js"
     }
   },
   "bin": {
@@ -226,7 +230,8 @@
     "json-rpc-2.0": "1.8.1",
     "@agentmux/relay": "workspace:*",
     "stream-json": "3.7.0",
-    "@agentmux/identity": "workspace:*"
+    "@agentmux/identity": "workspace:*",
+    "@agentmux/diagnostic-evidence": "workspace:*"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

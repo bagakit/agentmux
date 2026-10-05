@@ -201,6 +201,7 @@ type NativeParams = TopicParameterMap & HostSettingsParameterMap & FileParameter
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
   'agent.output': { agentSessionId: string; afterByte?: number; follow?: boolean }
+  'system.diagnostics.inspect': import('./diagnostic-evidence.js').AgentMuxDiagnosticEvidenceInspectParams
   'message.delivery.inspect': { logId: string; hostId?: string }
   'message.delivery.report': { hostId: string; record: import('./delivery-attempt.js').DeliveryAttempt }
   'message.inbox.check': { limit: number }
@@ -244,6 +245,7 @@ type NativeResult = TopicResultMap & HostSettingsResultMap & FileResultMap & Git
   'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
+  'system.diagnostics.inspect': import('./diagnostic-evidence.js').AgentMuxDiagnosticEvidenceResult
   'message.delivery.inspect': import('./delivery-attempt.js').DeliveryAttemptLookup
   'message.delivery.report': import('./delivery-attempt.js').DeliveryAttemptLookup
   'message.inbox.check': Awaited<ReturnType<AgentMuxClient['checkDeliveries']>>
@@ -287,6 +289,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.history.resource': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
+  'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',

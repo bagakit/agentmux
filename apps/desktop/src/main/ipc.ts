@@ -302,7 +302,7 @@ export async function registerIpc(args: {
       releaseHtmlPreviews()
     }
   }
-  const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts')) }
+  const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts'), { clientJournal: true }) }
   const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const git = new GitService((id) => args.runtime.executionHost(id))

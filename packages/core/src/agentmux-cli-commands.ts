@@ -1,3 +1,4 @@
+import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
 import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams } from './mote-preferences.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
@@ -472,6 +473,17 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.workspaces.register', '--input <file|->', 'Register an existing directory; this does not run Git, focus or start an Agent.'),
   settings('settings.browser-links.ls', '', 'List remembered system-application link choices.'),
   settings('settings.browser-links.forget', '<scheme>|--input <file|->', 'Forget one exact remembered scheme decision.', 1),
+  command('system.diagnostics.inspect', '--list | --domain DOMAIN --host-id HOST (--logid ID | --session-id SID --run-id RUN) [--authority ID] [--include-raw] [--no-related] [--max-reads N --max-depth N --max-bytes N --deadline-ms N]', 'Inspect bounded original diagnostic evidence and explicit relations; no sampling or recovery.',
+    { '--list': 'boolean', '--domain': 'data', '--host-id': 'data', '--logid': 'data', '--session-id': 'data', '--run-id': 'data', '--authority': 'data', '--include-raw': 'boolean', '--no-related': 'boolean', '--max-reads': 'value', '--max-depth': 'value', '--max-bytes': 'value', '--deadline-ms': 'value' }, f => {
+      if (f.booleans.has('--list')) { if (f.values.size || f.booleans.size !== 1) invalid('--list accepts no query options.'); return {} }
+      const domain = id(f, '--domain'), hostId = id(f, '--host-id')
+      if (domain !== 'native-recorder-failure' && (f.values.has('--session-id') || f.values.has('--run-id'))) invalid('Delivery evidence requires an exact logid.')
+      if (domain === 'native-recorder-failure' && (f.values.has('--logid') || f.values.has('--authority'))) invalid('Native evidence requires the exact Session and Run.')
+      const target = domain === 'native-recorder-failure' ? { domain, hostId, agentSessionId: id(f, '--session-id'), runId: id(f, '--run-id') }
+        : { domain, hostId, logId: id(f, '--logid'), ...(f.values.has('--authority') ? { authority: { kind: domain === 'delivery.client' ? 'client-journal' : 'core-runtime', id: id(f, '--authority') } } : {}) }
+      const budget = numbers(f, { '--max-reads': 'maxReads', '--max-depth': 'maxDepth', '--max-bytes': 'maxBytes', '--deadline-ms': 'deadlineMs' })
+      return parseDiagnosticEvidenceParams({ target, includeRaw: f.booleans.has('--include-raw'), includeRelated: !f.booleans.has('--no-related'), ...(Object.keys(budget).length ? { budget } : {}) }) as unknown as Record<string, unknown>
+    }),
   command('system.storage', '--host HOST --run RUN', 'Read original Runtime storage failure, watermarks and effective capacity for one exact Run.', { '--host': 'data', '--run': 'data' }, f => ({ hostId: id(f, '--host'), runId: id(f, '--run') })),
   command('system.doctor', '[--workspace PATH]', 'Read original Runtime and Provider diagnostics through their owners.', { '--workspace': 'data' }, f => fields(f, { '--workspace': 'workspacePath' })),
   { ...command('system.endpoint', '[--stdio | --inspect]', 'Describe the endpoint, inspect its current owner publication, or relay strict RPC stdio.', { '--stdio': 'boolean', '--inspect': 'boolean' }, f => { if (f.booleans.has('--stdio') && f.booleans.has('--inspect')) throw new AgentMuxError('--stdio and --inspect are mutually exclusive.', 'INVALID_CLI_ARGUMENT'); return { stdio: f.booleans.has('--stdio'), inspect: f.booleans.has('--inspect') } }), local: true },

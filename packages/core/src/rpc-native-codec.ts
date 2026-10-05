@@ -1,3 +1,4 @@
+import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
 import { parseNotesStorageOperation } from './notes-storage.js'
 import { parseControlDemandActivity } from './control-codec.js'
@@ -156,6 +157,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {
+      case 'system.diagnostics.inspect': return parseDiagnosticEvidenceResult(value, input) as unknown as Record<string, unknown>
       case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
       case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>
       case 'agent.native.confirm': {
