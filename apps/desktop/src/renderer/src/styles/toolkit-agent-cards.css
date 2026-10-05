@@ -1,0 +1,22 @@
+/* Shared data-only Toolkit cards: the original Agent face and bounded identity facts. */
+.toolkit-agent-cards { display:grid; gap:var(--sp-4); margin:var(--sp-4) 0; }
+.toolkit-agent-cards > .toolkit-agent-card { padding:var(--sp-4) 0; border-bottom:1px solid var(--line-soft); }
+.toolkit-agent-card { display:grid; min-width:0; gap:var(--sp-3); text-align:left; }
+.toolkit-agent-card__identity { display:grid; grid-template-columns:minmax(0,1fr); align-items:center; gap:var(--sp-1) var(--sp-3); min-width:0; }
+.toolkit-agent-card__identity:has(> [data-card-field=avatar]) { grid-template-columns:18px minmax(0,1fr); }
+.toolkit-agent-card__identity > [data-card-field=avatar] { grid-column:1; grid-row:1 / span 2; align-self:center; }
+.toolkit-agent-card__name,.toolkit-agent-card__facts { grid-column:-2 / -1; min-width:0; }
+.toolkit-agent-card__name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-body); font-weight:500; }
+.toolkit-agent-card__name > small { display:block; font-size:var(--fs-meta); font-weight:400; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; }
+.toolkit-agent-card__facts { display:flex; color:var(--text-3); font-size:var(--fs-meta); overflow:hidden; }
+.toolkit-agent-card__facts:empty { display:none; }
+.toolkit-agent-card__facts > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.toolkit-agent-card__facts > span + span::before { content:'·'; margin-inline:var(--sp-2); }
+.toolkit-agent-card__facts > [data-card-field=status],.toolkit-agent-card__facts > [data-card-field=provider] { flex:none; }
+.toolkit-agent-card__metrics { display:grid; gap:var(--sp-2); font-size:var(--fs-meta); }
+.toolkit-agent-card__metrics > span { display:flex; justify-content:space-between; gap:var(--sp-4); min-width:0; }
+.toolkit-agent-card__metrics > span > span { color:var(--text-3); overflow-wrap:anywhere; }
+.toolkit-agent-card__metrics strong { font-weight:500; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+/* Full Custom cards may opt into IDs; keep those configured facts readable on narrow surfaces. */
+.toolkit-agent-cards .toolkit-agent-card__facts { flex-wrap:wrap; row-gap:var(--sp-1); }
+.toolkit-agent-cards .toolkit-agent-card__facts > span { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
