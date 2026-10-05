@@ -178,6 +178,16 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-mote-source .md :is(h1, h2, h3) { color: var(--text); font-size: 16px; line-height: 1.5; margin: 18px 0 10px; }
 .mobile-mote-source .md pre { max-width: 100%; overflow-x: auto; }
 .mobile-mote-source > details p { font-size: 11px; margin: 4px 0; }
+.mobile-mote-file-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.mobile-mote-file-editor h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.mobile-mote-file-editor > p, .mobile-mote-file-editor__checked > p { margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.mobile-mote-file-editor :is(form, label, article, details, .mobile-mote-file-editor__checked) { min-width: 0; max-width: 100%; }
+.mobile-mote-file-editor form, .mobile-mote-file-editor label { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.mobile-mote-file-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; font-size: 16px; line-height: 1.6; min-height: 160px; }
+.mobile-mote-file-editor__actions { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.mobile-mote-file-editor button { min-height: 44px; max-width: 100%; overflow-wrap: anywhere; }
+.mobile-mote-file-editor details { overflow-wrap: anywhere; color: var(--text-3); font-size: 12px; line-height: 1.6; }
+.mobile-mote-file-editor pre { max-width: 100%; overflow-x: auto; white-space: pre; font-size: 12px; }
 .is-refreshing { animation: mobile-spatial-spin 1s linear infinite; }
 @keyframes mobile-spatial-spin {
 to { transform: rotate(360deg); } }

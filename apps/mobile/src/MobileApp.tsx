@@ -319,7 +319,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <button className="mobile-menu-row" onClick={() => setSheet('connection')}><Wifi size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ChevronRight size={16} /></button></div>
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
-          <MobileMoteProfile identity={profileIdentity} client={client} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
+          <MobileMoteProfile identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
             openSession(id, profileIdentity); setShowGoalWork(true); setSheet(null)
           }} />
         </> : sheet === 'actions' ? <>
