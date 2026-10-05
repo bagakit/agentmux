@@ -1,3 +1,4 @@
+import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
 import { themeObservation } from './theme-observation.js'
 import { MoteAvatarSeriesOwner } from './mote-avatar-series.js'
 import { MoteAvatarControl } from './mote-avatar-control.js'
@@ -581,6 +582,17 @@ export async function registerIpc(args: {
   // `(_event, input)`，于是 input 恒为 undefined——`defaultPath` 永远送不到，选择器每次都开在
   // 上一次的位置而不是这个 workspace。tsc 沉默是因为 TArgs 是**从 listener 反推**的：多写一个
   // 形参只会让它推出「这个频道传两个值」，而不是报错。判据在 ipc-parity.test.ts 里。
+  handleWithEvent('ui:exportTheme', async (event, document: unknown) => {
+    requireTrustedSender('ui:exportTheme', event)
+    return await exportThemeFile(document, {
+      chooseFile: async filename => {
+        const selection = await dialog.showSaveDialog(args.window, { defaultPath: filename,
+          filters: [{ name: 'AgentMux theme', extensions: ['json'] }] })
+        return selection.canceled || !selection.filePath ? null : selection.filePath
+      },
+      writeFile: writeThemeFile
+    })
+  })
   handle('ui:chooseFiles', async (input: { defaultPath?: string } | undefined) => {
     const selection = await dialog.showOpenDialog(args.window, {
       properties: ['openFile', 'multiSelections'],

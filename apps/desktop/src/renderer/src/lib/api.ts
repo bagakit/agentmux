@@ -1,3 +1,4 @@
+import { serializeThemeFile } from '@agentmux/client-ui/theme'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { unwrapSessionInputWriteResult } from '../../../shared/session-input-result'
 import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
@@ -806,6 +807,15 @@ const mockApi: AgentMuxDesktopApi = {
     openExternal: async () => {},
     // No native dialog outside Electron; dismissing is the honest answer.
     chooseFiles: async () => null,
+    exportTheme: async document => {
+      const text = serializeThemeFile(document)
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+      const link = window.document.createElement('a')
+      link.href = url; link.download = `${document.id}.agentmux-theme.json`
+      window.document.body.append(link)
+      try { link.click() } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 0) }
+      return { status: 'download-requested' }
+    },
     savePastedImage: async () => { throw new Error('Pasting images requires the desktop app.') },
     // No main process to confine a read to the pasted directory, so null is the honest answer: the
     // conversation renderer treats it exactly as "not a readable pasted image" and keeps the plain-text

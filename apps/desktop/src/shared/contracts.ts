@@ -1,3 +1,4 @@
+import type { ThemeDocument } from '@agentmux/client-ui/theme'
 import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core'
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
@@ -1541,6 +1542,8 @@ export type HostCreationTrustSnapshot = {
   target: AgentMuxRpcResult<'settings.hosts.trusted-sources'>
 }
 
+export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
+
 export type AgentMuxDesktopApi = {
   /** Fixed-size synchronous V8-isolate observation; no process dump or object scan. */
   readRendererMemory(): import('@agentmux/core/control').RendererMemorySnapshot
@@ -1701,6 +1704,8 @@ export type AgentMuxDesktopApi = {
     writeClipboardText(text: string): Promise<void>
     writeClipboardImage(image: BrowserPng): Promise<void>
     openExternal(url: string): Promise<void>
+    /** Export a validated, complete theme through the native save dialog; cancellation never writes. */
+    exportTheme(document: ThemeDocument): Promise<ThemeFileExportResult>
     /** Native file picker. Returns absolute paths, or null when dismissed. */
     chooseFiles(input?: { defaultPath?: string }): Promise<string[] | null>
     /** Persists pasted image bytes and returns the path an Agent can read them from. */

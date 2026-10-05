@@ -95,6 +95,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:listAgentSkills': 'Agent skills',
   'ui:listWorkspaceSkills': 'Workspace agent skills',
   'ui:savePastedImage': 'pasted image',
+  'ui:exportTheme': 'theme file export',
   'ui:revealCrashLog': 'crash log',
   'ui:notifyAgentAttention': 'notification',
   'ui:setAgentAttentionCount': 'Dock badge',

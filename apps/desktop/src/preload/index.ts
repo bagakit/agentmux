@@ -314,6 +314,7 @@ const api: AgentMuxPreloadApi = {
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
     writeClipboardImage: (image: BrowserPng) => ipcRenderer.invoke('ui:writeClipboardImage', image),
     openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url),
+    exportTheme: document => ipcRenderer.invoke('ui:exportTheme', document),
     chooseFiles: (input?: { defaultPath?: string }) => ipcRenderer.invoke('ui:chooseFiles', input),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
