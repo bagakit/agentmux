@@ -1,17 +1,22 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { api } from '../../lib/api'
 import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { useSettingDraft } from './use-setting-draft'
+import { useSettingDraftRecord } from './use-setting-draft'
+import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_IDS, type MessageToolInitialLayout } from '../../../../shared/contracts'
 
-export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
+export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean; messageToolInitialLayout: MessageToolInitialLayout }
+
+export function GeneralSettingsPane({ copyPathsAsAbsolute, messageToolInitialLayout, onSave }: {
   copyPathsAsAbsolute: boolean | undefined
-  onSave: (copyPathsAsAbsolute: boolean, expected: boolean) => Promise<void>
+  messageToolInitialLayout?: MessageToolInitialLayout
+  onSave: (value: GeneralSettingsValues, expected: GeneralSettingsValues) => Promise<void>
 }) {
   const saved = copyPathsAsAbsolute === true
-  const draft = useSettingDraft(saved)
-  const absolute = draft.value, setAbsolute = draft.setValue
+  const savedLayout = messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT
+  const draft = useSettingDraftRecord({ copyPathsAsAbsolute: saved, messageToolInitialLayout: savedLayout })
+  const layoutGroup = useId()
   const saveState = useSettingsSave()
   const [reveal, setReveal] = useState<CrashLogRevealResult | null>(null)
   const [pending, setPending] = useState(false)
@@ -40,12 +45,24 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
       <section className="settings-group">
         <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <label className="browser-automation-toggle">
-          <input type="checkbox" checked={absolute} onChange={(event) => setAbsolute(event.target.checked)} />
+          <input type="checkbox" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />
           <span>
             <strong>Show and copy the full absolute path instead of <code>~</code></strong>
             <small>By default, project paths abbreviate your own home directory as <code>~/proj/app</code>. This preference also applies to tooltips and Copy Path actions. Remote paths and paths belonging to another user stay complete.</small>
           </span>
         </label>
+      </section>
+      <section className="settings-group">
+        <header><span>Message Tool</span><small>Saved: {savedLayout === 'one-line' ? 'One line' : 'Two lines'}</small></header>
+        <fieldset className="settings-reading-width">
+          <legend>Initial layout</legend>
+          {MESSAGE_TOOL_INITIAL_LAYOUT_IDS.map(layout => <label key={layout} data-selected={draft.value.messageToolInitialLayout === layout}>
+            <input type="radio" name={layoutGroup} value={layout} checked={draft.value.messageToolInitialLayout === layout}
+              onChange={() => draft.setField('messageToolInitialLayout', layout)} />
+            <span><strong>{layout === 'one-line' ? 'One line' : 'Two lines'}</strong><small>{layout === 'one-line' ? 'Keep tools compact beside the input' : 'Show a separate tool row below the input'}</small></span>
+          </label>)}
+        </fieldset>
+        <p className="settings-workflows__note">New Agent message tools start with this layout. You can switch the layout at any time.</p>
       </section>
       <section className="settings-card">
         <dl className="settings-footnote">

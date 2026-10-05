@@ -5,6 +5,8 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SessionViewMode } from '../lib/session-state'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
+import { useAppStore } from '../store'
+import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../shared/contracts'
 
 import { ComposerLayoutToggle, type ComposerToolPhase as ToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 export { nextToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
@@ -25,7 +27,8 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState('')
-  const [phase, setMode] = useState<ToolDockPhase>('collapsed')
+  const [phase, setMode] = useState<ToolDockPhase>(() =>
+    (useAppStore.getState().config?.messageToolInitialLayout ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT) === 'two-line' ? 'current' : 'collapsed')
   const mode = layoutControl ? phase : 'current'
   async function discoverSkills() {
     setLoading(true); setError('')
