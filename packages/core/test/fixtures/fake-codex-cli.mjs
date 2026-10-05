@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, realpathSync, writeFileSync, writeSync } from 'node:fs'
+import { join } from 'node:path'
 const args = process.argv.slice(2)
 const nonFlags = args.filter((arg) => !arg.startsWith('-'))
 const resumeIndex = nonFlags.indexOf('resume')
@@ -38,6 +39,31 @@ if (
   !process.env.PATH?.split(':').includes(process.env.AGENTMUX_CLI.slice(0, -'/amux'.length))
 ) {
   throw new Error('AgentMux did not provide its managed CLI environment')
+}
+
+// Continuity tests use the real Provider process witness. Keep its original
+// main record open in this actual CLI process across a semantic owner restart.
+let nativeRecordPath
+let nativeRecordDescriptor
+let nativeOrdinal = 0
+let nativeTurnGeneration = 0
+const writeNativeBoundary = (type) => {
+  if (nativeRecordDescriptor === undefined) return
+  writeSync(nativeRecordDescriptor, `${JSON.stringify({ timestamp: new Date().toISOString(),
+    ordinal: ++nativeOrdinal, type: 'event_msg', payload: { type,
+      turn_id: `fixture-turn-${nativeTurnGeneration}`, thread_id: `native-${agentSessionId}` }
+  })}\n`)
+}
+if (process.env.AGENTMUX_FAKE_NATIVE_RECORD === '1' && process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
+  const directory = join(process.env.HOME, '.codex', 'sessions')
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  nativeRecordPath = join(realpathSync(directory), `rollout-${agentSessionId}.jsonl`)
+  nativeRecordDescriptor = openSync(nativeRecordPath, 'w', 0o600)
+  writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'session_meta', payload: {
+    id: `native-${agentSessionId}`, source: 'cli', cwd: process.cwd()
+  } })}\n`)
+  writeNativeBoundary('task_started')
+  process.once('exit', () => closeSync(nativeRecordDescriptor))
 }
 
 /**
@@ -128,7 +154,7 @@ const decodeTerminalInput = (data) => {
 const writeDiagnostic = (value) => {
   // DECSC/DECRC belong to ctxmux's basic VT checkpoint model as well as xterm.
   // CSI s/u would leave the native model's cursor on the diagnostic row.
-  process.stdout.write(`\u001b7\u001b[24;1H${value}\u001b[K\u001b8`)
+  process.stdout.write(`\u001b7\u001b[${nativeRecordPath ? 5 : 24};1H${value}\u001b[K\u001b8`)
 }
 const writeComposerFrame = (value) => {
   process.stdout.write('\u001b[?2026h\u001b[22;3H')
@@ -154,7 +180,8 @@ const writeReadyFrame = () => {
   tuiReady = true
   controlledReadyPending = false
   process.stdout.write('codex-composer-ready-frame\n')
-  process.stdout.write('\u001b[?2026h\u001b[22;1H\u001b[1m›\u001b[0m \u001b[K\u001b[22;3H\u001b[?25h\u001b[?2026l')
+  const footer = nativeRecordPath ? '\u001b[23;1H? for shortcuts\u001b[K\u001b[24;1H\u001b[K' : ''
+  process.stdout.write(`\u001b[?2026h\u001b[22;1H\u001b[1m›\u001b[0m \u001b[K${footer}\u001b[22;3H\u001b[?25h\u001b[?2026l`)
 }
 const writeAssistantMarkerWithoutComposer = () => {
   process.stdout.write('\u001b[2J\u001b[5;1H› assistant text only\u001b[22;1Hstatus\u001b[22;7H')
@@ -162,10 +189,11 @@ const writeAssistantMarkerWithoutComposer = () => {
 }
 const publishStop = async () => {
   stopGeneration += 1
+  writeNativeBoundary('task_complete')
   await request({
     receiptId: `stop-${agentSessionId}-${stopGeneration}`,
     eventName: 'Stop',
-    payload: { session_id: `native-${agentSessionId}` }
+    payload: { session_id: `native-${agentSessionId}`, ...(nativeRecordPath ? { transcript_path: nativeRecordPath } : {}) }
   })
 }
 const settleTurn = async () => {
@@ -271,6 +299,8 @@ process.stdin.on('data', (data) => {
       process.stdout.write(`codex-submit:${submitted}:accepted\n`)
       if (submitted === 'exit') process.exit(0)
       tuiReady = false
+      nativeTurnGeneration += 1
+      writeNativeBoundary('task_started')
       // 不能裸 `void`：settleTurn 里有 await 的网络投递，它抛出时会变成没人看的 unhandled
       // rejection，而症状出现在**另一侧**——packed-consumer 永远等不到 settleTurn 本该写的标记。
       // 那个组合让一次投递失败伪装成 handshake 超时，实测追了五层才定位。所以让它响亮地死。
@@ -307,7 +337,7 @@ if (process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
   await request({
     receiptId: `session-start-${agentSessionId}`,
     eventName: 'SessionStart',
-    payload: { session_id: `native-${agentSessionId}`, prompt }
+    payload: { session_id: `native-${agentSessionId}`, prompt, ...(nativeRecordPath ? { transcript_path: nativeRecordPath } : {}) }
   })
   if (process.env.AGENTMUX_FAKE_SELF_CONTEXT === '1') {
     const { execFile } = await import('node:child_process')

@@ -200,6 +200,35 @@ describe('failed Hosted event lease release', () => {
 })
 
 describe('semantic Host observation consumers', () => {
+  it('delivers the current publication failure to a late Hosted listener and clears only that fact on recovery', async () => {
+    const f = fixture(), state = { state: 'unavailable' as const, diagnostic: { code: 'ENOSPC', message: 'The original publication is under pressure.' } }
+    f.service.publishControlEndpointState(state)
+    const bridge = rpcPort(f.service), client = await connectHostedAgentMux({ rpc: bridge.port })
+    try {
+      const first: AgentMuxClientEvent[] = [], late: AgentMuxClientEvent[] = []
+      client.onEvent(event => first.push(event))
+      await vi.waitFor(() => expect(first).toMatchObject([{ ...state, type: 'control-endpoint-state' }]))
+      client.onEvent(event => late.push(event))
+      expect(first).toHaveLength(1)
+      await vi.waitFor(() => expect(late).toMatchObject([{ ...state, type: 'control-endpoint-state' }]))
+      f.service.publishControlEndpointState({ state: 'available' })
+      await vi.waitFor(() => expect(late).toHaveLength(2))
+      expect(late[1]).toMatchObject({ type: 'control-endpoint-state', state: 'available' })
+      expect(client.runtimeOwnerIdentity()?.availability).toBe('connected')
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    } finally { await client.dispose(); await f.service.dispose() }
+  })
+  it('contains invalid publication evidence within the observation while retaining the healthy Hosted lease', async () => {
+    const f = fixture(), bridge = rpcPort(f.service), client = await connectHostedAgentMux({ rpc: bridge.port }), events: AgentMuxClientEvent[] = []
+    try {
+      client.onEvent(event => events.push(event))
+      f.emit({ type: 'control-endpoint-state', state: 'unavailable', diagnostic: { code: 'ENOSPC', message: 'Untrusted fact' }, evidence: { source: 'run-process', observedAt: 1 } } as AgentMuxClientEvent)
+      await vi.waitFor(() => expect(events).toMatchObject([{ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR' }]))
+      expect(client.runtimeOwnerIdentity()?.availability).toBe('connected')
+      await expect(client.runtimeProjection()).resolves.toMatchObject({ hostId: 'local' })
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+    } finally { await client.dispose(); await f.service.dispose() }
+  })
   it('reports an invalid JS callback on the actual Hosted observation path while healthy consumers continue', async () => {
     const f = fixture(), bridge = rpcPort(f.service)
     const client = await connectHostedAgentMux({ rpc: bridge.port, consumerId: 'consumer-a' })
