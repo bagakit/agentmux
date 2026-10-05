@@ -21,3 +21,30 @@
 .recall-directory-state p { margin: 0; line-height: 1.7; font-size: 13px; }
 .global-recall-surface .survey-page-list { min-height: 0; }
 .global-recall-surface .survey-tabs { gap: 12px; }
+.recall-view-picker { display: flex; gap: 3px; padding: 3px; width: fit-content; border: 1px solid var(--line-soft); border-radius: 8px; margin: 18px 0 24px; }
+.recall-view-picker button { display: flex; align-items: center; gap: 7px; padding: 7px 11px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; }
+.recall-view-picker button:hover, .recall-view-picker button[aria-pressed="true"] { background: var(--wash-2); color: var(--text); }
+.recall-note-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; width: 100%; }
+.recall-note-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-height: 156px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-1); color: var(--text-3); text-align: left; cursor: pointer; }
+.recall-note-card:hover { border-color: var(--line); background: var(--wash-1); }
+.recall-note-card strong { color: var(--text); font-size: 14px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.recall-note-card span { font-size: 12px; }
+.recall-note-card small { margin-top: auto; color: var(--text-3); font-size: 10px; overflow-wrap: anywhere; }
+.recall-graph { width: 100%; min-width: 0; }
+.recall-graph-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; font-size: 11px; color: var(--text-2); }
+.recall-graph-legend span { display: flex; align-items: center; gap: 7px; }
+.recall-graph-legend i { width: 22px; border-top: 1px solid var(--text-3); }
+.recall-graph-legend i[data-reference] { border-top: 2px dashed var(--blue); }
+.recall-graph-coverage { color: var(--text-3); font-size: 11px; line-height: 1.7; max-width: 680px; }
+.recall-graph-scroll { overflow: auto; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--wash-1); }
+.recall-graph-canvas { position: relative; min-width: 100%; }
+.recall-graph-canvas > svg { position: absolute; inset: 0; overflow: visible; color: var(--text-3); }
+.recall-graph-canvas path[data-edge-kind] { fill: none; stroke: var(--text-3); stroke-width: 1.2; opacity: .65; }
+.recall-graph-canvas path[data-edge-kind="reference"] { stroke: var(--blue); stroke-width: 1.7; stroke-dasharray: 5 4; opacity: .9; }
+.recall-graph-node { position: absolute; display: grid; grid-template-columns: 16px 1fr; gap: 8px; width: 200px; min-height: 80px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--text-2); text-align: left; cursor: pointer; box-shadow: 0 2px 5px #00000008; }
+.recall-graph-node:hover { border-color: var(--blue); }
+.recall-graph-node strong { min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 550; line-height: 1.5; }
+.recall-graph-node small { grid-column: 2; color: var(--text-3); font-size: 10px; overflow-wrap: anywhere; }
+.recall-preserved-workbench { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.recall-preserved-workbench[hidden] { display: none; }
+.global-recall-surface .survey-notebook-home:has(.recall-graph), .global-recall-surface .survey-notebook-home:has(.recall-note-cards) { max-width: 980px; width: 100%; box-sizing: border-box; }
