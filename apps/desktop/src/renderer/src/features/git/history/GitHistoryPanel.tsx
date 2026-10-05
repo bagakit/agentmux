@@ -163,7 +163,8 @@ const HistoryViewport = memo(function HistoryViewport({ graph, history, selected
     revealed.current = null
   }, [scope, position, virtualizer])
   useLayoutEffect(() => {
-    if (!history.enabled || !revealOid || revealed.current === revealOid) return
+    if (!revealOid) { revealed.current = null; return }
+    if (!history.enabled || revealed.current === revealOid) return
     const index = graph.rows.findIndex(row => row.commit.oid === revealOid)
     if (index < 0) return
     virtualizer.scrollToIndex(index, { align: 'center' })
