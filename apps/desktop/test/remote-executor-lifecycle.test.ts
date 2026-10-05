@@ -6,7 +6,8 @@ import { AgentMuxHostExecutorOwner } from '../../../packages/core/src/executor-o
 import { AgentMuxMemoryAgentSessionStore } from '../../../packages/core/src/agent-session-store.js'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
-import type { AppConfig } from '../src/shared/contracts.js'
+import type { DesktopRuntimeClient } from '../src/main/desktop-host.js'
+import type { AppConfig, HostConfig } from '../src/shared/contracts.js'
 
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 const closes: Array<() => unknown | Promise<unknown>> = []
@@ -31,11 +32,11 @@ function mainFixture(kind: 'local' | 'ssh', template: boolean) {
     observeSessionHistory: vi.fn(async () => { throw reached }), replySessionQuestion: vi.fn(async () => { throw reached }),
     resumeAgent: vi.fn(async () => { throw reached }), reopenAgent: vi.fn(async () => { throw reached }),
     ensureAgentContinuity: vi.fn(async () => { throw reached }) }
-  const host = kind === 'ssh' ? { id: 'target', kind, label: 'Target', hostname: 'target.invalid' } : { id: 'target', kind, label: 'Local' }
+  const host: HostConfig = kind === 'ssh' ? { id: 'target', kind, label: 'Target', hostname: 'target.invalid' } : { id: 'local', kind, label: 'Local' }
   const config = { hosts: [host], executors: template ? { 'target-wrapper': local } : {}, workspaces: [],
     appearance: { terminalTheme: 'graphite' } } as unknown as AppConfig
   const main = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), async () => { throw new Error('No substitute owner') })
-  main.commit({ hosts: [{ id: host.id, config: host, client: client as unknown as AgentMuxClient,
+  main.commit({ hosts: [{ id: host.id, config: host, client: client as unknown as DesktopRuntimeClient,
     executionHost: { kind, dispose: async () => {} } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   closes.push(() => main.dispose())
   const control = { kind: 'agent' as const, hostId: host.id, agentSessionId: session.agentSessionId, run: session.run }
@@ -54,12 +55,13 @@ function mainFixture(kind: 'local' | 'ssh', template: boolean) {
 }
 
 for (const operation of ['page', 'resource', 'observe', 'question', 'resume', 'reopen', 'recover'] as const) {
-  it(`Main ${operation} rejects a same-ID SSH-to-local rebind before sending private configuration to the old client`, async () => {
-    const f = mainFixture('ssh', true)
+  it(`Main ${operation} rejects a same-ID rebind at its actual preparation boundary before invoking the old client`, async () => {
+    const history = operation === 'page' || operation === 'resource' || operation === 'observe'
+    const f = mainFixture(history ? 'local' : 'ssh', true)
     const rebind = () => {
-      const replacement = { ...f.host, kind: 'local' as const }
+      const replacement = f.host.kind === 'local' ? { ...f.host, label: 'Replacement' } : { ...f.host, hostname: 'replacement.invalid' }
       f.main.commit({ hosts: [{ id: f.host.id, config: replacement,
-        client: { ...f.client } as unknown as AgentMuxClient, executionHost: { kind: 'local', dispose: async () => {} } as never }],
+        client: { ...f.client } as unknown as DesktopRuntimeClient, executionHost: { kind: replacement.kind, dispose: async () => {} } as never }],
         removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     }
     if (operation === 'page' || operation === 'resource' || operation === 'observe') {
@@ -227,7 +229,9 @@ it('a temporary native observation released during configuration resolution cann
   Object.assign(f.inner.kernel, { status: async () => ({ runId: f.stored.run.runId, workspacePath: f.stored.workspacePath,
     program: '/bin/sh', args: [], pid: 99, state: { type: 'running' }, latestOutputBytes: 0, firstAvailableByte: 0,
     acceptedInputBytes: 0, nativeService: null, cols: 80, rows: 24 }) })
-  vi.spyOn(f.core.providers.get('claude'), 'discoverNativeSession').mockResolvedValue({
+  const provider = f.core.providers.get('claude')
+  expect(provider.discoverNativeSession).toBeTypeOf('function')
+  vi.spyOn(provider as typeof provider & { discoverNativeSession: NonNullable<typeof provider.discoverNativeSession> }, 'discoverNativeSession').mockResolvedValue({
     handle: { kind: 'provider', providerId: 'claude', sessionId: 'native-main', transcriptPath: f.path }, assertCurrent: async () => {}
   })
   vi.spyOn(f.store, 'compareAndSwapMetadata').mockRejectedValueOnce(Object.assign(new Error('Controlled save failure'), { code: 'EIO' }))
