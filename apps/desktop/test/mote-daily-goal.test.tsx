@@ -865,8 +865,9 @@ it('collaboration public Source CLI saves exact relations atomically and reaches
     await act(async () => root.render(<GlobalBoardSurface />))
     const assigneeLine = [...container.querySelectorAll('.goal-collaboration__line')].find(line => line.querySelector('strong')?.textContent === 'Assignees')!
     const assigneeMembers = [...assigneeLine.querySelectorAll<HTMLButtonElement>('.goal-collaboration__member')]
-    expect(assigneeMembers.map(member => member.title.split(' · ')[0])).toEqual(['Original supervisor', 'Peer owner'])
+    expect(assigneeMembers.map(member => member.title.split(' · ')[0])).toEqual(['Original supervisor', 'peer-agent'])
     expect(assigneeMembers.map(member => member.title.split('\n')[1])).toEqual(['progress-agent', 'peer-agent'])
+    expect(assigneeMembers.map(member => member.disabled)).toEqual([false, true])
     expect(assigneeLine.querySelector('[aria-label="Choose Goal assignees"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Goal assignee"]')).toBeNull()
     await act(async () => (container.querySelector('[aria-label="Goal filters"]') as HTMLButtonElement).click())
