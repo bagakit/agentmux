@@ -5,9 +5,11 @@ import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
 import {
   LoaderCircle,
+  Info,
   NotebookText,
   Pin,
-  Plus
+  Plus,
+  RefreshCw
 } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -90,6 +92,8 @@ export function WorkspaceTopicsPanel({
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [categoryRefresh, setCategoryRefresh] = useState<{ spaceId: string; busy: boolean; error: string | null } | null>(null)
+  const categoryRefreshState = categoryRefresh?.spaceId === categorySpaceId ? categoryRefresh : null
   const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
   const [moveTarget, setMoveTarget] = useState<{ topicId: string; title: string } | null>(null)
   const manualIcons = useAppStore(state => state.spaceObjectIcons)
@@ -126,6 +130,25 @@ export function WorkspaceTopicsPanel({
   const currentTopic = projected?.find(topic => topic.id === topicId)
   const paths = useTopicSessionPaths(workspace, topics ?? NO_TOPICS)
   const openWorkSurfaces = useMemo(() => openTopicWorkSurfaces(layout, tabs), [layout, tabs])
+
+  async function refreshCategoryDescription(): Promise<void> {
+    const spaceId = categorySpaceId!
+    setCategoryRefresh({ spaceId, busy: true, error: null })
+    try {
+      const result = await api.topics.call('topic.category.ls', {})
+      const original = result.categories.find(item => item.spaceId === spaceId && (!category || item.categoryId === category.categoryId))
+      if (original && !original.readError) {
+        // Only the Host description is refreshed. Membership, navigation and workfaces retain their owners.
+        useAppStore.setState(state => state.topicCategories.find(item => item.spaceId === spaceId) !== category ? state : ({
+          topicCategories: state.topicCategories.some(item => item.spaceId === spaceId)
+            ? state.topicCategories.map(item => item.spaceId === spaceId ? original : item)
+            : [...state.topicCategories, original] }))
+      }
+      setCategoryRefresh({ spaceId, busy: false, error: original?.readError ?? (original ? null : 'The original Category description is still unavailable. Restore its source, then refresh to retry.') })
+    } catch (cause) {
+      setCategoryRefresh({ spaceId, busy: false, error: presentError(cause) })
+    }
+  }
 
   async function createTopic(): Promise<void> {
     if (pending) return
@@ -245,7 +268,7 @@ export function WorkspaceTopicsPanel({
     <section ref={panel} className="surface-tool-summary workspace-topics-panel workspace-topics-panel--index">
       <SelectorListHeader
         className="workspace-topic-index-header"
-        title="Topics"
+        title={category?.title ?? 'All Topics'}
         count={userTopics?.length ?? null}
         actions={
           <button
@@ -262,7 +285,14 @@ export function WorkspaceTopicsPanel({
           </button>
         }
       />
-      {categorySpaceId && (!category || category.readError) ? <div className="surface-inline-error" role="status">{category?.readError ?? 'The selected Category description is still restoring.'} Existing Topics and discussions remain available.</div> : null}
+      {categorySpaceId && (!category || category.readError) ? <div className="workspace-topic-category-status" role="status">
+        <Info size={14} aria-hidden="true" />
+        <span>{categoryRefreshState?.error ?? category?.readError ?? 'The selected Category description is still restoring.'} Existing Topics and discussions remain available.</span>
+        <button type="button" className="icon-button" aria-label="Refresh category description" title="Refresh category description"
+          disabled={categoryRefreshState?.busy} onClick={() => void refreshCategoryDescription()}>
+          <RefreshCw size={13} className={categoryRefreshState?.busy ? 'spin' : undefined} />
+        </button>
+      </div> : null}
       {topics === null ? (
         <div className="workspace-topic-state" role="status">
           <LoaderCircle className="spin" size={16} aria-hidden="true" />
@@ -271,7 +301,7 @@ export function WorkspaceTopicsPanel({
       ) : projected?.length === 0 ? (
         <div className="workspace-topic-state workspace-topic-state--empty">
           <span className="workspace-topic-state__icon" aria-hidden="true"><NotebookText size={16} /></span>
-          <span><strong>No Topics yet</strong><small>Create a Topic to keep its goal, references and Agent sessions together.</small></span>
+          <span><strong>{category ? 'No Topics in this category' : 'No Topics yet'}</strong><small>Create a Topic to keep its knowledge and discussions together.</small></span>
           <button className="small-button" type="button" disabled={pending !== null} onClick={() => void createTopic()}>
             {pending === 'create' ? <LoaderCircle className="spin" size={12} /> : <Plus size={12} />}
             {pending === 'create' ? 'Creating…' : 'Create Topic'}
@@ -379,7 +409,7 @@ export function WorkspaceTopicsPanel({
                     <SelectorRow
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
                         : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
-                      title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
+                      title={<><span title={topic.title}>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
