@@ -171,19 +171,29 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
   const acquiring = (async () => {
     try {
       const handle = await api.sessions.observeHistory(control, observation => {
-        if (!current() || observation.agentSessionId !== entry.agentSessionId) return
+        if (!current() || observation.agentSessionId !== entry.agentSessionId || sourceChanged(entry)) return
         if (observation.kind === 'unavailable') {
-          entry.observationError = Object.assign(new Error(observation.message), { code: observation.code })
-          entry.observationHandle?.dispose()
-          entry.observationHandle = null
+          const changed = observation.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
+          entry.observationError = changed ? changedSourceError(observation.message)
+            : Object.assign(new Error(observation.message), { code: observation.code })
+          if (changed) {
+            entry.observationHandle?.dispose()
+            entry.observationHandle = null
+          }
           notifySubscribers(entry)
           return
         }
         const source = entry.observationHandle?.source
         if (source && !sameSource(source, observation.source)) {
           entry.observationError = changedSourceError('Native source changed. The current window is kept; refresh its source.')
+          entry.observationHandle?.dispose()
+          entry.observationHandle = null
           notifySubscribers(entry)
           return
+        }
+        if (entry.observationError) {
+          entry.observationError = null
+          notifySubscribers(entry)
         }
         scheduleRevalidation(control, entry)
       }, { signal: controller.signal })
@@ -191,10 +201,10 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
       if (!replacing && entry.historyPage && !sameSource(entry.historyPage.source, handle.source)) {
         handle.dispose()
         entry.observationError = changedSourceError('Native source changed. The current window is kept; refresh its source.')
-      } else if (entry.observationError) handle.dispose()
+      } else if (sourceChanged(entry)) handle.dispose()
       else entry.observationHandle = handle
     } catch (error) {
-      if (current()) entry.observationError = error instanceof Error ? error : new Error(String(error))
+      if (current() && !sourceChanged(entry)) entry.observationError = error instanceof Error ? error : new Error(String(error))
     } finally {
       if (current()) notifySubscribers(entry)
     }
