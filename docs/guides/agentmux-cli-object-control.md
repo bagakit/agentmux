@@ -184,10 +184,11 @@ amux message pending stop --session '<session-id>' --pending-id '<pending-id>'
 
 Endpoint、Host 路由与源身份的行为边界见[公共控制合同](../design/behavior/public-control.md#endpointhost-路由与源身份)；下文按直接连接服务与经配置 Host 两种任务入口操作，准确参数以当前 `--help`／`--skill` 为准。
 
-命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint 与 `connection: "not-attempted"`，不连接、不创建服务，也不证明机器可达或 Agent 健康。直接 RPC 调用该方法得到 `connection: "responded"`，只证明本次服务响应。
+命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint 与 `connection: "not-attempted"`，不连接、不创建服务，也不证明机器可达或 Agent 健康。`system endpoint --inspect` 经原服务只读查询入口发布状态；RPC 回执的 `connection: "responded"` 只证明本次响应，`publication` 描述该语义 owner 的入口，未注入入口观测时为 `null`。入口发布失败与 Run 状态分别核对；已有连接仍可工作时，原 owner 自动重试发布并保留最初故障及当前重试诊断，不重放业务输入。
 
 ```sh
 amux system endpoint
+amux system endpoint --inspect
 amux --endpoint "unix:$CONTROL_SOCKET" agent ls
 amux --endpoint 'http://127.0.0.1:8787/' app snapshot
 amux --endpoint 'ssh://user@host/' app inspect
