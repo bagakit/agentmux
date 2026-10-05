@@ -1,0 +1,10 @@
+{
+  "extends": "./reusable-shell-openings.tsconfig.json",
+  "include": [
+    "reusable-shell-disposal.test.tsx",
+    "reusable-shell-disposal-native.test.tsx",
+    "reusable-shell-openings.test.tsx",
+    "launcher-prewarm-recovery.test.tsx",
+    "../src/renderer/src/global.d.ts"
+  ]
+}
