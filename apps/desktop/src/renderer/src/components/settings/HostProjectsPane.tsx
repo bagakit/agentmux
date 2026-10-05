@@ -116,9 +116,9 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       : <p className="settings-group-note">Folders belong to the saved {host.label} connection{host.kind === 'ssh' ? ` (${host.hostname})` : ''}.
         {connectionChanged ? ' Your connection edits are still drafts; adding a folder does not save them.' : ' Registering a folder does not start an Agent.'}</p>}
     <form className="host-projects__form" hidden={!adding} onSubmit={event => { event.preventDefault(); void register(true) }}>
-      <label className="host-projects__path"><span>Folder path</span><input value={path} placeholder="Project directory"
+      <label className="host-projects__path"><span>Folder path</span><TextInput value={path} placeholder="Project directory"
         onChange={event => setPath(event.target.value)} /></label>
-      <label><span>Name <small>optional</small></span><input value={name} placeholder="Project name" onChange={event => setName(event.target.value)} /></label>
+      <label><span>Name <small>optional</small></span><TextInput value={name} placeholder="Project name" onChange={event => setName(event.target.value)} /></label>
       <label><span>Start after opening <small>optional</small></span><select value={executorId} onChange={event => setExecutorId(event.target.value)}>
         <option value="">Open without an Agent</option>
         {executorId && !executors.some(executor => executor.id === executorId) ? <option value={executorId}>Saved Agent configuration unavailable</option> : null}
