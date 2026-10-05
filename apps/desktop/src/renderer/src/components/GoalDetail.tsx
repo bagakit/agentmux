@@ -1,10 +1,12 @@
 import { ArrowLeft, ArrowUpRight, MoreHorizontal, Trash2 } from 'lucide-react'
+import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { GoalCommonProperties, GoalProperties } from './GoalProperties'
 import { ConfirmationDialog } from './ConfirmationDialog'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 import { GoalExecution } from './GoalExecution'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
 
@@ -19,6 +21,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const failedPatch = useRef<Parameters<typeof updateDemand>[1]>({})
   const [saveError, setSaveError] = useState<string | null>(Object.keys(draft).length ? 'Review the retained draft and retry saving.' : null)
   const [deleteRequested, setDeleteRequested] = useState(false)
+  const actionsRef = useRef<HTMLButtonElement>(null)
   const [intentOpen, setIntentOpen] = useState(draft.description !== undefined)
   useEffect(() => { if (!titleDirty) setTitle(demand.title) }, [demand.title, titleDirty])
   useEffect(() => { if (!descriptionDirty) setDescription(demand.description) }, [demand.description, descriptionDirty])
@@ -30,7 +33,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={(value) => { draftRef.current.description = value; onDraftChange?.('description', value); setDescription(value); setDescriptionDirty(true) }} onBlur={() => { if (descriptionDirty) void update({ description }) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   return <aside className="goals-detail" data-goal-detail-id={demand.id} aria-label={`Goal workspace for ${demand.title}`}>
-    <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ArrowLeft size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ArrowUpRight size={13} />{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}</button> : null}<details className="goals-detail__menu"><summary aria-label="Goal actions"><MoreHorizontal size={15} /></summary><button type="button" onClick={() => setDeleteRequested(true)}><Trash2 size={13} />Delete goal</button></details></header>
+    <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ArrowLeft size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ArrowUpRight size={13} />{motePending === 'open' ? 'Opening discussion…' : 'Open discussion'}</button> : null}<Menu.Root modal={false}><Menu.Trigger asChild><button ref={actionsRef} type="button" className="goals-button goals-detail__menu" aria-label="Goal actions"><MoreHorizontal size={15} /></button></Menu.Trigger><Menu.Portal container={resolveOverlayContainer()}><div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} aria-label="Goal actions"><Menu.Item className="tab-context-menu__item goals-delete-action" onSelect={() => { actionsRef.current?.focus(); setDeleteRequested(true) }}><Trash2 size={13} />Delete goal</Menu.Item></Menu.Content></div></Menu.Portal></Menu.Root></header>
     <article className="goals-document">
       <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
       <GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} />
