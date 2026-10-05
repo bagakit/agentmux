@@ -295,7 +295,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     }
     setLocationChoice(null)
     setRecallCapture({ draftId: `survey-new-note:${zoneId}:${browser.browserId}:${encodeURIComponent(browser.url)}`,
-      source: { sourceId: crypto.randomUUID(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
+      source: { sourceId: mintObjectId(), url: browser.url, title: browser.title || itemTitle(catalog!.zones.find(zone => zone.zoneId === zoneId)!), recordedAt: Date.now(),
         position: { zoneId, tabId: reference.tabId, regionId: reference.regionId } } })
   }
 

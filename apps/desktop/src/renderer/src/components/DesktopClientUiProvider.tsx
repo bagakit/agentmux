@@ -56,7 +56,12 @@ const desktopPlatform: ClientUiPlatform = {
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
   renderProjectLabel: project => <SenderProject project={project} />,
   renderIcon: (name, size) => <SemanticIcon name={name} size={size} />,
-  renderObjectLink: reference => <InlineObjectLink {...reference} />
+  renderObjectLink: reference => <InlineObjectLink {...reference} />,
+  renderMarkdownDiagram: ({ code, language, visible }) => <Suspense fallback={<span role="status">Preparing diagram…</span>}>
+    {language === 'dot' || language === 'gv' ? <DotFilePreview content={code} visible={visible} />
+      : language === 'drawio' ? <DrawioFilePreview content={code} visible={visible} />
+      : <DiagramFilePreview kind={language} content={code} visible={visible} />}
+  </Suspense>
 }
 
 /** Electron IO, the Desktop identity surface and its workface focus policy stay in this client. */

@@ -7,6 +7,8 @@ import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
 import { objectLinkReference, splitObjectLinkReferences } from '../lib/object-link-reference.js'
 import { useObjectLinkRenderer, type ClientUiPlatform } from '../platform.js'
+import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
+import { MarkdownMath } from './MarkdownMath.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -72,6 +74,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     if (node.kind === 'text') return <TextWithFileReferences key={key} text={node.text} context={context} />
     if (node.kind === 'break') return <br key={key} />
     if (node.kind === 'code') return <code key={key} className="md-code"><TextWithFileReferences text={node.text} context={{ ...context, renderObjectLink: undefined }} /></code>
+    if (node.kind === 'math') return <MarkdownMath key={key} expression={node.text} source={node.source} visible={context.visible && !context.readOnly} />
     if (node.kind === 'strong') return <strong key={key}><Inline nodes={node.children} context={context} /></strong>
     if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} context={context} /></em>
     if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} context={context} /></del>
@@ -185,7 +188,7 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
 }) {
   const renderObjectLink = useObjectLinkRenderer()
   const isInput = inputMode && !documentMode
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly,
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, visible,
     ...(!readOnly && !documentMode && renderObjectLink ? { renderObjectLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),

@@ -14,7 +14,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
-import { isFileMethod, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
+import { isFileMethod, parseFileCreateParams, parseFileCreateResult, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
 import { isGitMethod, parseGitParams, parseGitResult } from './public-rpc-git.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
@@ -146,7 +146,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
     if (isGitMethod(method)) return parseGitResult(method, value, parseGitParams(method, params)) as unknown as Record<string, unknown>
-    if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
+    if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.create' ? parseFileCreateResult(value, parseFileCreateParams(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
