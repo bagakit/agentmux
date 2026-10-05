@@ -56,7 +56,9 @@ it('admits the largest legal escaped error and fragments within the derived file
  const capture=new ToolkitFailureCapture('metrics-rpc-stdout',0);capture.append(Buffer.alloc(20000,65))
  const failure={schema:'agentmux.performance.failure.v1',executionId:'execution',run:{hostId:'local',runId:'run'},recordedAt:1000,details:{
   stage:'cli-eof',error:{message:'\x01'.repeat(4096),stack:'\x01'.repeat(8192),code:'\x01'.repeat(128),messageTruncated:false,stackTruncated:false},bytes:capture.value,exit:{code:1,signal:'\x01'.repeat(128)}}}
- expect(Buffer.byteLength(JSON.stringify(failure))).toBeGreaterThan(80*1024)
+ const terminal=new ToolkitFailureCapture('toolkit-terminal',0),stderr=new ToolkitFailureCapture('metrics-rpc-stderr',0);terminal.append(Buffer.alloc(20000,65));stderr.append(Buffer.alloc(20000,66))
+ Object.assign(failure.details,{diagnosticOutput:[terminal.value,stderr.value]})
+ expect(Buffer.byteLength(JSON.stringify(failure))).toBeGreaterThan(96*1024)
  expect(()=>parseToolkitPerformanceFailure(failure)).not.toThrow()
 })
 
