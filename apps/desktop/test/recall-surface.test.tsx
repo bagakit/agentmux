@@ -592,7 +592,7 @@ it('inherits the selected Notebook through the real generic Launcher Note action
   expect(dom.container.querySelector('.survey-navigation [data-survey-zone-id]')).toBeNull(); healthy()
 })
 
-it('keeps every existing Note Region on an ambiguous directory reopen rather than creating another Tab', async () => {
+it('keeps every existing Note Region on an ambiguous directory reopen without an original active selection', async () => {
   const files = new Map<string, string>()
   vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { files.set(input.path, input.content); return { status: 'written', revision: 'same-note' } })
   vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: files.get(path)!, revision: 'same-note' } }))
@@ -602,6 +602,8 @@ it('keeps every existing Note Region on an ambiguous directory reopen rather tha
   const duplicated = addWorkbenchRegion(tab, selected.regionId, 'right', { ...region, regionId: 'second-note-location' })
   await act(async () => useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: duplicated } }))
   await dom.click(`[aria-label="Notebook directory: ${(await api.notebooks.read()).notebooks[page.notebookId]!.name}"]`)
+  // The directory now preserves a known active Region. This case explicitly has no original choice.
+  await act(async () => useAppStore.getState().setRecallZoneSelection(null))
   const originalTabs = useAppStore.getState().tabs, catalog = await api.notebooks.read()
   await dom.click('.survey-notebook-page')
   await vi.waitFor(() => expect(dom.container.querySelector('.survey-error')?.textContent).toContain('already open in multiple locations'))
