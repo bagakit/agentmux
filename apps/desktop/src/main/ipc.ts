@@ -1766,7 +1766,7 @@ export async function registerIpc(args: {
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     ...(rpcHttp ? { http: rpcHttp } : {}),
     metrics,
-    toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal),
+    toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal, options) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal, options),
       execute: (request, signal, context) => nameChangeRequests.run({
       context: context ?? unknownNameContext(request.operation), operationId: request.requestId
     }, () => toolkit.execute(request, signal)) },
