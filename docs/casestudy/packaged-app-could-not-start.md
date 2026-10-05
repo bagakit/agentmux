@@ -26,7 +26,7 @@ STOPS：受影响包的 sandbox preload、Desktop API bridge、Renderer 挂载�
 
 旧包内无带内恢复。可执行的止血是从已合入 main 的启动修复构建并按原安装 owner 安全替换 App；不删除配置或 Session、不关闭健康 Native。既有证书认证已完成，后续交付须消费修正后的有效身份解析及真实 staged-App 签名校验，保留原证书身份，不再重复要求用户认证。
 
-后续现场安装副本 `9587a54` 已显示工作面，原 Native 的进程出生身份未变；但该副本实际为 `Signature=adhoc`。这只证明该副本的界面可见，不能计作本轮证书签名交付，也不能推出全部 Session 已恢复；正常证书签名更新仍待完成。
+后续现场安装副本 `9587a54` 包含启动修复 `369a4cc`，实际 preload 只保留 Electron 的裸 require，已显示原工作面；原 Native 的进程出生身份未变。这是启动修复已被当前安装实例消费的证据。该副本实际为 `Signature=adhoc`，不能计作本轮证书签名交付，也不能推出全部 Session 已恢复；正常证书签名更新仍待完成。
 
 ## 引入时间线
 
@@ -68,6 +68,10 @@ git log --follow --format='%H %s' -- apps/desktop/scripts/macos-signing.mjs
 签名次因的直接原因有两处：有效身份行的警告后缀被锚定正则漏掉；Apple 实际生成的默认 designated requirement 使用 `certificate leaf = H"<原证书哈希>"`，旧判断却只认 `anchor H"<原证书哈希>"`。原证书是 self-signed，两种形状都可绑定同一原证书，不能以文本形状不同判定签名身份改变。
 
 这部分的根因是交付资格把证书链诊断、代码签名信任及工具输出形状当成同一个判据。[Apple 的有效身份枚举实现](https://github.com/apple-oss-distributions/SecurityTool/blob/main/identity_find.c)可以同时打印证书链警告；证书单独执行 X.509 校验所得的 `AnchorTrusted=0`，也不等于真实签名的 [`certificate leaf trusted`](https://github.com/apple-oss-distributions/Security/blob/main/OSX/libsecurity_codesigning/lib/reqinterp.cpp) 不成立。先前用简化身份行和单一 requirement 文本作反例，没有经过原证书、真实 Mach-O 签名及实际 strict 校验，因而没发现这两处误拒。原证书本机反例才将这些事实分开；证书链诊断的具体原因仍未确定。
+
+正常证书签名候选 `11684542` 随后两次在 Electron Framework 上收到 `internal error in Code Signing subsystem`，均停在安装前，当前可用副本没有被替换。真实 Framework 的窄签名在约 960 MB 可用空间时通过；另一份保持 Electron 实际布局的样本在签名前可用空间约 238 MB 时失败。该失败文件原地保留，磁盘资源恢复后，使用同一文件、原证书和原生产签名流程再次签名，开始时可用空间约 2.19 GB、全过程最低约 1.91 GB，签名及严格原身份／trusted-leaf 校验均通过。
+
+这一组同对象前后证据使签名失败与资源压力高度关联，但工具只返回通用内部错误，没有暴露底层 errno，不能把历史错误精确写成 ENOSPC。真实文件写入及测试另已直接报 ENOSPC；macOS Data 与 VM 共享 APFS 容器，交换文件的变化也会影响可用空间。较早采样、清理后的余量、小 Mach-O 签名成功和源码资格不能代替真实大产物签名时的资源条件，也不能据此重新认定原证书不受信任。
 
 ## 改进措施
 
