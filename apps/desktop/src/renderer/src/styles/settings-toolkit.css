@@ -172,3 +172,6 @@
 .toolkit-package__preview .toolkit-result__script { margin-block: var(--sp-3); height: 220px; }
 
 @media (forced-colors: active) { .toolkit-library__search:focus-within { border-color: Highlight; } }
+
+.toolkit-editor__display { display:grid; gap:var(--sp-3); }
+.toolkit-editor__display > button { justify-self:start; }

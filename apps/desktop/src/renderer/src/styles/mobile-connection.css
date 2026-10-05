@@ -42,3 +42,6 @@
 .phone-connection__footer > button:last-child { padding:7px; }
 
 .phone-connection__code-state { margin:14px 0 -8px; color:var(--amber-text); font-size:var(--fs-meta); }
+
+.phone-connection__previous { margin-top:12px; background:transparent; border:1px solid var(--line-soft); }
+.phone-connection__previous > summary { color:var(--amber-text); font-weight:500; }

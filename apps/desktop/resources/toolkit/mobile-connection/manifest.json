@@ -6,6 +6,10 @@
   "args": [
     "status"
   ],
+  "display": {
+    "entry": "query.mjs",
+    "args": ["link"]
+  },
   "actions": [
     {
       "id": "link",
