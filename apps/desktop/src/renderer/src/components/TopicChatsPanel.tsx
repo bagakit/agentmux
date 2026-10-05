@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
@@ -11,6 +11,9 @@ import { useAppStore } from '../store'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
 import { TopicKnowledgePanel } from './TopicKnowledgePanel'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+
+const ThemeActionCreateConversationIcon = semanticIconComponent('action.create-conversation')
+
 
 /** The secondary directory reads the same original Zone projection as the workbench. */
 export function TopicChatsPanel({ workspace, topic, visible }: { workspace: WorkspaceRecord; topic: ScratchTopicSnapshot; visible: boolean }) {
@@ -43,7 +46,7 @@ export function TopicChatsPanel({ workspace, topic, visible }: { workspace: Work
     {knowledgeOpened ? <div className="topic-chats-panel__knowledge" hidden={view !== 'knowledge'}><TopicKnowledgePanel workspace={workspace} topic={topic} /></div> : null}
     <div className="topic-chats-panel__chats" hidden={view !== 'chats'}>
       <SelectorListHeader title="Chats" count={chatIds.length} actions={<button type="button" className="icon-button"
-        aria-label="New Chat in this Topic" title="New Chat in this Topic" onClick={() => void openChat()}><Plus size={14} /></button>} />
+        aria-label="New Chat in this Topic" title="New Chat in this Topic" onClick={() => void openChat()}><ThemeActionCreateConversationIcon size={14} /></button>} />
       {error || object.issues.length ? <div className="surface-inline-error" role="status">{error ?? object.issues.join(' ')} Existing discussions are kept.</div> : null}
       <div className="topic-chats-panel__list">{chatIds.map(id => {
         const tab = tabs[id]

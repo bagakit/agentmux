@@ -1,6 +1,6 @@
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
-import { Clock3, Pencil, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FileDocument } from '@agentmux/core'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -9,6 +9,13 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherState, type MoteIdeaDraft } from '../lib/launcher-state'
 import { CalendarScheduleControl } from './CalendarScheduleControl'
 import '../styles/mote-idea-controls.css'
+
+const ThemeObjectIdeaIcon = semanticIconComponent('object.idea')
+const ThemeObjectScheduleIcon = semanticIconComponent('object.schedule')
+const ThemeActionApproveIcon = semanticIconComponent('action.approve')
+const ThemeActionDisapproveIcon = semanticIconComponent('action.disapprove')
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+
 
 const EMPTY_IDEA_DRAFT: MoteIdeaDraft = { direction: '', includeDiscussion: false, feedback: {} }
 /** Unsent view inputs use the original Launcher presentation owner, never a suggestion feed. */
@@ -63,7 +70,7 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
           finish(prepareMoteIdeaDraft(scope, reference, input, material, () => alive.current && current.current.input === capturedInput && current.current.material === capturedMaterial &&
             (current.current.reference === capturedReference || !!capturedReference && sameWorkbenchProjectionSelection(current.current.reference ?? null, capturedReference))),
             'Request prepared in a new Launcher. Review it, choose the Agent and model, then Start.')
-        }}><Sparkles size={16} /></button><button type="button" className="icon-button" aria-label={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} title={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} disabled={pending || !input.direction.trim()} onClick={() => void prepareArrangement()}><Clock3 size={16} /></button><span>{pending ? 'Reading selected sources…' : 'One request, or an arrangement you choose.'}</span></div>
+        }}><ThemeObjectIdeaIcon size={16} /></button><button type="button" className="icon-button" aria-label={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} title={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} disabled={pending || !input.direction.trim()} onClick={() => void prepareArrangement()}><ThemeObjectScheduleIcon size={16} /></button><span>{pending ? 'Reading selected sources…' : 'One request, or an arrangement you choose.'}</span></div>
       </div>
     </details>
     {arrangement ? <div ref={arranged} className="mote-idea-controls__arrangement">
@@ -74,14 +81,14 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
     {material ? <details className="mote-details__idea-feedback"><summary>Tell Mote what helps</summary>
       <div className="mote-details__cooperation">
         <p className="mote-details__hint mote-details__source" title={material.revision}>Feedback on {material.path.split('/').at(-1)} · this saved revision</p>
-        <div className="mote-idea-controls__actions" role="group" aria-label="Idea feedback response"><button type="button" className="icon-button" aria-label="Useful" title="Useful" aria-pressed={feedback.vote === 'useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'useful' ? '' : 'useful' })}><ThumbsUp size={16} /></button><button type="button" className="icon-button" aria-label="Less useful" title="Less useful" aria-pressed={feedback.vote === 'less-useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'less-useful' ? '' : 'less-useful' })}><ThumbsDown size={16} /></button></div>
+        <div className="mote-idea-controls__actions" role="group" aria-label="Idea feedback response"><button type="button" className="icon-button" aria-label="Useful" title="Useful" aria-pressed={feedback.vote === 'useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'useful' ? '' : 'useful' })}><ThemeActionApproveIcon size={16} /></button><button type="button" className="icon-button" aria-label="Less useful" title="Less useful" aria-pressed={feedback.vote === 'less-useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'less-useful' ? '' : 'less-useful' })}><ThemeActionDisapproveIcon size={16} /></button></div>
         <label>Your feedback<ComposerTextarea aria-label="Idea feedback comment" rows={2} value={feedback.comment} onValueChange={value => updateFeedback({ ...feedback, comment: value })} /></label>
         <button type="button" className="icon-button" aria-label="Review feedback in SOUL" title="Review feedback in SOUL" onClick={() => {
           if (pending) { setIssue('The current action is still in progress. Your feedback is kept.'); return }
           const { input: capturedInput, material: capturedMaterial } = current.current
           finish(stageMoteIdeaFeedback(scope, material, feedback, onOpenPath, () => alive.current && current.current.input === capturedInput && current.current.material === capturedMaterial),
             'Feedback staged in the original SOUL. Review it and Save to use it in new Sessions.')
-        }}><Pencil size={16} /></button>
+        }}><ThemeActionEditIcon size={16} /></button>
         <p className="mote-details__hint">Keeps the original SOUL text and this note. Correct facts through the note's original editor.</p>
       </div>
     </details> : null}

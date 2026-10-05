@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Link2, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useState } from 'react'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import type { GitProjectIdentityResult } from '../../../shared/git-contracts'
@@ -11,6 +11,10 @@ import { projectGroupsFor, projectGroupMember } from '../lib/cross-device-projec
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import type { WorkspaceProject } from '../lib/workspace-projects'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 
 export function ProjectGroupDialog({ projects, seed, editing, related, observations, onClose }: {
   projects: readonly WorkspaceProject[]
@@ -52,8 +56,8 @@ export function ProjectGroupDialog({ projects, seed, editing, related, observati
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface project-group-dialog" aria-busy={busy}
         onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
-        <header className="confirmation-dialog__heading"><Link2 size={15} /><Dialog.Title className="confirmation-dialog__title">{editing ? 'Edit project group' : 'Create project group'}</Dialog.Title>
-          <Dialog.Close className="icon-button" disabled={busy} aria-label="Close project group editor"><X size={14} /></Dialog.Close></header>
+        <header className="confirmation-dialog__heading"><ThemeObjectLinkIcon size={15} /><Dialog.Title className="confirmation-dialog__title">{editing ? 'Edit project group' : 'Create project group'}</Dialog.Title>
+          <Dialog.Close className="icon-button" disabled={busy} aria-label="Close project group editor"><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">Organize projects together. Files and sessions stay on their devices.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void submit() }}>
           <label className="project-group-dialog__name">Group name<TextInput autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} placeholder="Group name" /></label>

@@ -1,8 +1,19 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Archive, ArchiveRestore, BookOpen, Maximize2, NotebookPen, Pencil, Pin, Plus, Shapes } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionEditIcon = semanticIconComponent('action.edit')
+const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
+const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeActionCreateDiscussionIcon = semanticIconComponent('action.create-discussion')
+const ThemeObjectNoteIcon = semanticIconComponent('object.note')
+const ThemeLayoutExpandIcon = semanticIconComponent('layout.expand')
+const ThemeActionPinIcon = semanticIconComponent('action.pin')
+const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
+const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+
 
 /** Radix handles pointer menus; these object menus also expose the standard keyboard gesture. */
 export function useSpaceObjectMenu() {
@@ -73,21 +84,21 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={event => {
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
-        {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><Pencil size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
+        {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><ThemeActionEditIcon size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
         {onChangeIcon && target ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => target && onChangeIcon(target))}>
-          <Shapes size={14} /><span>{target.avatarTarget || target.imageTarget ? 'Change avatar…' : 'Change icon…'}</span>
+          <ThemeObjectShapesIcon size={14} /><span>{target.avatarTarget || target.imageTarget ? 'Change avatar…' : 'Change icon…'}</span>
         </ContextMenu.Item> : null}
         {moteActions ? <>
           <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onEdit)}>
-            <NotebookPen size={14} /><span>Edit persona</span>
+            <ThemeActionEditNoteIcon size={14} /><span>Edit persona</span>
           </ContextMenu.Item>
           {moteActions.onNewDiscussion || moteActions.onMaterials || moteActions.onOpenSpace ? <ContextMenu.Separator className="tab-context-menu__separator" /> : null}
-          {moteActions.onNewDiscussion ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onNewDiscussion!)}><Plus size={14} /><span>New discussion</span></ContextMenu.Item> : null}
-          {moteActions.onMaterials ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onMaterials!)}><BookOpen size={14} /><span>Open materials</span></ContextMenu.Item> : null}
-          {moteActions.onOpenSpace ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onOpenSpace!)}><Maximize2 size={14} /><span>Open in Space</span></ContextMenu.Item> : null}
+          {moteActions.onNewDiscussion ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onNewDiscussion!)}><ThemeActionCreateDiscussionIcon size={14} /><span>New discussion</span></ContextMenu.Item> : null}
+          {moteActions.onMaterials ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onMaterials!)}><ThemeObjectNoteIcon size={14} /><span>Open materials</span></ContextMenu.Item> : null}
+          {moteActions.onOpenSpace ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onOpenSpace!)}><ThemeLayoutExpandIcon size={14} /><span>Open in Space</span></ContextMenu.Item> : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
           <ContextMenu.Item className="tab-context-menu__item" onSelect={moteActions.onTogglePin}>
-            <Pin size={14} /><span>{moteActions.pinned ? 'Unpin Mote' : 'Pin Mote'}</span>
+            <ThemeActionPinIcon size={14} /><span>{moteActions.pinned ? 'Unpin Mote' : 'Pin Mote'}</span>
           </ContextMenu.Item>
         </> : null}
         {moteArchive ? <ContextMenu.Item className="tab-context-menu__item" disabled={moteArchive.disabled ?? false}
@@ -149,7 +160,7 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
               acknowledged = true; recover()
             }, relinquish)
           }}>
-          {moteArchive.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          {moteArchive.archived ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}
           <span>{moteArchive.reason ?? (moteArchive.archived ? 'Restore Mote' : 'Archive Mote')}</span>
         </ContextMenu.Item> : null}
       </ContextMenu.Content>

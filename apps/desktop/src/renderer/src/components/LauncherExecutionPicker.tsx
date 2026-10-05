@@ -1,8 +1,13 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import { Check, Folder, Plus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
+
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeActionManageProjectsIcon = semanticIconComponent('action.manage-projects')
+
 
 /** Browsing a machine is local to the disclosure; only an exact project selects execution. */
 export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled, onSelect, onManageProjects }: {
@@ -30,12 +35,12 @@ export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled,
       {projects.map(project => <button key={project.id} type="button" className="launcher-target__project"
         data-workspace-id={project.id} aria-pressed={project.id === selected?.id} disabled={disabled}
         onClick={() => onSelect(project.id)} title={`${project.name}\n${displayPath(project.path, project.hostId)}`}>
-        <Folder size={14} aria-hidden="true" /><span><strong>{project.name}</strong><small>{displayPath(project.path, project.hostId)}</small></span>
-        {project.id === selected?.id ? <Check size={14} aria-label="Selected project" /> : null}
+        <ThemeObjectFolderIcon size={14} aria-hidden="true" /><span><strong>{project.name}</strong><small>{displayPath(project.path, project.hostId)}</small></span>
+        {project.id === selected?.id ? <ThemeStatusSelectedIcon size={14} aria-label="Selected project" /> : null}
       </button>)}
       {projects.length === 0 ? <p role="status">{workspaces.some(project => project.hostId === hostId)
         ? 'No matching projects.' : 'No project registered on this machine yet.'}</p> : null}
     </div>
-    <button type="button" className="launcher-target__manage" onClick={onManageProjects}><Plus size={13} />Manage projects</button>
+    <button type="button" className="launcher-target__manage" onClick={onManageProjects}><ThemeActionManageProjectsIcon size={13} />Manage projects</button>
   </section>
 }

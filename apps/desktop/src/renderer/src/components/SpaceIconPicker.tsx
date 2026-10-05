@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Check, ImagePlus, RotateCcw, Smile, Shapes, Library } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconId, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { DEFAULT_MOTE_FACE, isMoteFace, MOTE_AVATAR_INPUT_MAX_BYTES, type MoteAvatarInput } from '../../../shared/mote-avatars'
 import { api } from '../lib/api'
@@ -13,6 +13,13 @@ import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeObjectProfileIcon = semanticIconComponent('object.profile')
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
+const ThemeActionAddImageIcon = semanticIconComponent('action.add-image')
+const ThemeActionRotateResetIcon = semanticIconComponent('action.rotate-reset')
+const ThemeObjectLibraryIcon = semanticIconComponent('object.library')
 
 /** Shared chooser; drafts stay local until Save, authored metadata has the existing store owner. */
 export function SpaceIconPicker({ target, onClose, returnFocus }: {
@@ -120,9 +127,9 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         {supportsImages && target ? <>
           {target.avatarTarget ? <><div className="mote-avatar-source mote-avatar-source--series" role="group" aria-label="Mote avatar style">
             <LiquidSelectionSurface selected={mode} active={target !== null} targetAttribute="data-avatar-source" />
-            <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source('face')}><Smile size={15} />Make a face<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
-            <button type="button" data-avatar-source="alternative" aria-pressed={mode === 'alternative'} disabled={busy} onClick={() => source('alternative')}><Shapes size={15} />Icon or image<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
-            <button type="button" data-avatar-source="series" aria-pressed={editingSeries} disabled={busy} onClick={() => source('series')}><Library size={15} />Series<Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+            <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source('face')}><ThemeObjectProfileIcon size={15} />Make a face<ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+            <button type="button" data-avatar-source="alternative" aria-pressed={mode === 'alternative'} disabled={busy} onClick={() => source('alternative')}><ThemeObjectShapesIcon size={15} />Icon or image<ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+            <button type="button" data-avatar-source="series" aria-pressed={editingSeries} disabled={busy} onClick={() => source('series')}><ThemeObjectLibraryIcon size={15} />Series<ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
           </div>
           <MoteFaceEditor face={faceDraft} visible={editingFace} disabled={busy} onChange={select} />
           </> : null}
@@ -134,7 +141,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
               <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
                 avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.key} />
             </div>}
-            <label className="small-button mote-avatar-file"><ImagePlus size={15} />Upload image
+            <label className="small-button mote-avatar-file"><ThemeActionAddImageIcon size={15} />Upload image
               <input aria-label={target.avatarTarget ? 'Choose Mote image' : `Choose image for ${target.name}`}  type="file" accept="image/png,image/jpeg" disabled={busy}
                 onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void prepare(file) }} />
               <span>PNG or JPG · up to 8 MB</span>
@@ -149,7 +156,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
               onClick={() => select(id)}><Icon size={18} /></button>)}
         </div> : null}
         <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={mode === 'alternative' && !preview && draft === null}
-          disabled={busy} onClick={() => { select(null); setMode('alternative') }}><RotateCcw size={13} />Restore automatic</button>
+          disabled={busy} onClick={() => { select(null); setMode('alternative') }}><ThemeActionRotateResetIcon size={13} />Restore automatic</button>
         {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; review the current avatar before saving again.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         <footer>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>

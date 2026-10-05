@@ -1,10 +1,18 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowLeft, File, Folder, LoaderCircle, RefreshCw, X } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { WorkspaceDirectoryEntry, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
+const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
+const ThemeObjectFileIcon = semanticIconComponent('object.file')
+
 
 /** Reads this selected Workspace's existing file owner; no local picker or attachment transfer. */
 export function LauncherFileReferences({ workspace, hostLabel, onSelect, onClose }: {
@@ -42,18 +50,18 @@ export function LauncherFileReferences({ workspace, hostLabel, onSelect, onClose
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface launcher-file-references">
         <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">Reference a project file</Dialog.Title>
-          <Dialog.Close className="icon-button" aria-label="Close project file picker"><X size={14} /></Dialog.Close></header>
+          <Dialog.Close className="icon-button" aria-label="Close project file picker"><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">{workspace.name} · {hostLabel ?? workspace.hostId}</Dialog.Description>
         <div className="launcher-file-references__directory"><button type="button" className="icon-button" disabled={!directory}
-          aria-label="Parent directory" onClick={() => setDirectory(directory.split('/').slice(0, -1).join('/'))}><ArrowLeft size={14} /></button>
+          aria-label="Parent directory" onClick={() => setDirectory(directory.split('/').slice(0, -1).join('/'))}><ThemeNavigationBackIcon size={14} /></button>
           <span title={fullPath(directory)}>{directory || workspace.path}</span>
           <button type="button" className="icon-button" aria-label="Refresh project files" onClick={() => setRevision(value => value + 1)}>
-            {loading ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}</button></div>
+            {loading ? <ThemeStatusLoadingIcon size={14} className="spin" /> : <ThemeActionRefreshIcon size={14} />}</button></div>
         <div className="launcher-target__projects" aria-busy={loading}>
           {entries?.map(entry => <button type="button" key={entry.path} className="launcher-target__project" data-reference-path={entry.path}
             title={`${entry.name}\n${fullPath(entry.path)}`}
             onClick={() => { if (entry.isDirectory) setDirectory(entry.path); else { onSelect(entry.path); onClose() } }}>
-            {entry.isDirectory ? <Folder size={14} /> : <File size={14} />}<span><strong>{entry.name}</strong></span>
+            {entry.isDirectory ? <ThemeObjectFolderIcon size={14} /> : <ThemeObjectFileIcon size={14} />}<span><strong>{entry.name}</strong></span>
           </button>)}
           {entries?.length === 0 ? <p>No files in this directory.</p> : null}
           {loading ? <p role="status">{entries ? 'Refreshing this directory…' : 'Reading this project…'}</p> : null}

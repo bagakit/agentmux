@@ -1,6 +1,11 @@
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState, type ReactNode } from 'react'
 import { useAppStore } from '../store'
+
+const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const ThemeActionCreateIcon = semanticIconComponent('action.create')
+
 
 /** Disclosure occupies the object's existing type slot, never a second gutter. */
 export function SpaceDisclosure({ icon, expanded, label, disabled = false, onToggle }: {
@@ -9,7 +14,7 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
   return <button type="button" className="space-disclosure" data-space-disclosure
     aria-label={label} title={label} aria-expanded={expanded} disabled={disabled} onClick={onToggle}>
     <span className="space-disclosure__type">{icon}</span>
-    <span className="space-disclosure__hint" aria-hidden="true">{expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}</span>
+    <span className="space-disclosure__hint" aria-hidden="true">{expanded ? <ThemeNavigationDownIcon size={10} /> : <ThemeNavigationDisclosureIcon size={10} />}</span>
   </button>
 }
 
@@ -40,6 +45,6 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
     {activity}
     {actions}
     {onCreate ? <button type="button" className="icon-button space-section-add" aria-label={createLabel} title={createLabel}
-      disabled={busy} onClick={() => void create()}>{createIcon ?? <Plus size={13} />}</button> : null}
+      disabled={busy} onClick={() => void create()}>{createIcon ?? <ThemeActionCreateIcon size={13} />}</button> : null}
   </div>
 }

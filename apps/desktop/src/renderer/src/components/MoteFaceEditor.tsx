@@ -1,7 +1,10 @@
-import { Check } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_FACE_PARTS, type MoteFace as MoteFaceChoice } from '../../../shared/mote-avatars'
 import { MoteFace } from './MoteFace'
 import { MoteIdentityMotion } from './MoteIdentityMotion'
+
+const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+
 
 const labels = { shape: 'Face', palette: 'Color', eyes: 'Eyes', brows: 'Brows', mouth: 'Mouth', accessory: 'Detail', nose: 'Nose', marking: 'Marks' } as const
 export function MoteFaceEditor({ face, disabled, onChange, visible = true }: { face: MoteFaceChoice; visible?: boolean; disabled: boolean; onChange(face: MoteFaceChoice): void }) {
@@ -13,7 +16,7 @@ export function MoteFaceEditor({ face, disabled, onChange, visible = true }: { f
         aria-label={`${labels[part]} · ${value}`} title={`${labels[part]} · ${value}`} aria-pressed={(face[part] ?? 'none') === value} disabled={disabled}
         data-mote-face-part={part} data-mote-face-value={value} onClick={() => onChange({ ...face, [part]: value })}>
         {part !== 'palette' ? <span className="mote-face-editor__sample" aria-hidden="true"><MoteFace face={{ ...face, [part]: value }} /></span> : <span className="mote-face-editor__color" data-palette={value} aria-hidden="true" /> }
-        <Check size={12} className="mote-avatar-selection-mark" aria-hidden="true" />
+        <ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" />
       </button>)}</div>
     </fieldset>)}
   </div>

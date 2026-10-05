@@ -2,13 +2,17 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { Plus, RefreshCw } from 'lucide-react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { moveKnowledgeTopic, refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { useAppStore } from '../store'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+
+const ThemeActionCreateCategoryIcon = semanticIconComponent('action.create-category')
+const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+
 
 export type TopicMoveTarget = { topicId: string; title: string }
 type TopicMoveDialogProps = { target: TopicMoveTarget | null; onClose(): void; onMoved?(): void }
@@ -94,8 +98,8 @@ function TopicMoveContent({ target, onClose, onMoved }: TopicMoveDialogProps & {
             {loading ? <p role="status" className="topic-knowledge-hint">Reading Topic and categories…</p> : null}
             {!loading && !destinations.some(category => !category.readError) ? <p className="topic-knowledge-hint">{destinations.length ? 'No destination category is available. Refresh or create a category.' : 'Create a category to give this Topic a new home.'}</p> : null}
             <div className="topic-move-dialog__actions">
-              <button type="button" className="small-button" disabled={busy || loading} onClick={() => setCreating(true)}><Plus size={13} />New category…</button>
-              <button type="button" className="small-button" aria-label="Refresh Topic and categories" disabled={busy || loading} onClick={() => void reload()}><RefreshCw size={13} />Refresh</button>
+              <button type="button" className="small-button" disabled={busy || loading} onClick={() => setCreating(true)}><ThemeActionCreateCategoryIcon size={13} />New category…</button>
+              <button type="button" className="small-button" aria-label="Refresh Topic and categories" disabled={busy || loading} onClick={() => void reload()}><ThemeActionRefreshIcon size={13} />Refresh</button>
             </div>
             {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
             <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!canMove}>{busy ? 'Moving…' : 'Move Topic'}</button></footer>
