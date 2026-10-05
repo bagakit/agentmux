@@ -126,6 +126,8 @@ Toolkit 包是独立本地扩展目录，manifest 声明名称、图标、脚本
 
 包 manifest 使用 `agentmux.toolkit.package.v1`，声明名称、既有具名图标、相对入口与结果动作；当前文件集有界为 128 个普通文件 / 1 MiB，保相对导入布局。每次运行的文件快照由本地 owner 持有，源码或配置改变产生新的有效版本；在途与 unknown 的快照保留，只有精确执行终局和 Run 清理已确认后才回收。外部命令、环境和动态查询仍属于当前用户环境，不承诺沙箱或全环境可复现。原 inline 脚本创作仍是有效能力，但包安装不把源码副本写入 AppConfig。
 
+- **Performance 失败证据沿原 owner 读取**：原 Toolkit `inspect/watch` 返回失败发生阶段、原异常、原执行与已确认 Run；当前 Run 被正常清理后，失败引用仍归原执行。外层 LF/JSON、typed payload 与脚本内 CLI/RPC 是不同来源，不能从相同语法文案猜阶段。普通读取既不采原字节，也不返回已留存的原片段、stack 或任意诊断原错误文本（含诊断读写与 cleanup message）；安全投影以 `null` 表达未返回的原文，保留结构化阶段、来源、错误码和已知事实，既有执行 `reason` 语义保留。读取原材料须独立显式请求 `includeFailureEvidence`（CLI `--failure-evidence`），安全投影仍标明未取得、已留存但未返回或已返回。显式新观察的 `captureFailure` 可保有限片段、准确范围与缺段，已有观察不为取证被重启或停止，消费方核实际开启状态。只保原 Performance 最新失败，写盘最多一个在途和一个可替换待写项，被新材料替换的待写明确计数，不因慢盘无限积压。诊断写入/读取和 cleanup 问题与 primary 分开，保留原操作、错误码及确知的替换前后阶段，缺证为未知；运行事件保原来源、时刻及 Run，不猜 attach 因果。内存留证、当前写盘 ACK 与重启后实际读到的文件各自表达；留证失败不封闭健康能力。这不是任意 Run 原字节入口，也不改变 Runtime 权限。通用记录与跨领域读取边界沿 [Diagnostic Evidence 设计](../diagnostic-evidence.md)。
+
 ## 资源与 Activity 观测
 Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Provider 与当前 Agent 状态；空闲时显示可理解的 idle 时长。资源数值与 Agent 语义状态分开，缺失数据保持未知。Activity 展开行只补充能帮助定位的上下文，不重复左侧 Agents 入口。
 
