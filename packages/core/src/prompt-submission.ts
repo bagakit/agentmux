@@ -313,6 +313,9 @@ export class AgentPromptSubmissionCoordinator {
             const predecessor = previous === undefined ? null : previous.submissionId
             if (predecessor !== submissionId &&
               (predecessor === undefined || predecessor !== condition.afterSubmissionId)) {
+              if (predecessor !== undefined) throw new AgentMuxError(
+                'This attempt wrote no input because the original prompt condition changed. The original message and delivery history are kept; inspect the conversation before composing a new message.',
+                'AGENT_PROMPT_CONDITION_CHANGED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
               throw new AgentMuxError('A later prompt admission has replaced this message\'s original condition. Its delivery is unknown; your message and the current Run are kept.',
                 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
             }
