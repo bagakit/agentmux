@@ -34,10 +34,10 @@ async function materialize(source: string, destination: string, ancestry: readon
   }
   // An installed Desktop has already materialized dependencies and strips workspace
   // dependency declarations. A source package resolves the same declared closure.
-  if (Object.keys(manifest.dependencies ?? {}).length === 0) {
+  if (core && Object.keys(manifest.dependencies ?? {}).length === 0) {
     try { await cp(join(source, 'node_modules'), join(destination, 'node_modules'), { recursive: true, dereference: true }) }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  } else for (const name of Object.keys(manifest.dependencies!).sort()) {
+  } else for (const name of Object.keys(manifest.dependencies ?? {}).sort()) {
     await materialize(await resolveDependency(source, name), join(destination, 'node_modules', name), [...ancestry, canonical])
   }
 }
