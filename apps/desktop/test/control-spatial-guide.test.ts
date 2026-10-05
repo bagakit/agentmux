@@ -17,7 +17,7 @@ import {
 
 // T-006「简短通用的空间操作引导」的验收。注入引导有两个面：**启动提示**（`AGENTMUX_RUNTIME_GUIDE`
 // 经 `composeAgentLaunchPrompt` 注入，负责让 Agent **发现**这些能力存在），与 **skill**（`AGENTMUX_CLI_SKILL`
-// 经 `agentmux --skill` 产出，负责**确切用法**）。目标的四件事各配一个会咬的守卫，且尽量从 SSOT 派生，
+// 经 `amux --skill` 产出，负责**确切用法**）。目标的四件事各配一个会咬的守卫，且尽量从 SSOT 派生，
 // 不把命令表手抄第二份——命令名称、对象与描述都来自实际的 `AGENTMUX_CLI_COMMANDS`。
 //
 // 关键设计：内容守卫直接 import 源码常量，**不经 dist**——`@agentmux/core` 解析到 dist，而 dist 相对
@@ -34,7 +34,7 @@ function commandRegistry(): Map<string, string> {
 
 /** 匹配完整对象路径，避免把 browser run / browser task run 都误认成一个 browser 动词。 */
 function taughtCommands() {
-  return [...AGENTMUX_CLI_SKILL.matchAll(/^\s*agentmux ([^\n]+)/gm)].map(match => {
+  return [...AGENTMUX_CLI_SKILL.matchAll(/^\s*amux ([^\n]+)/gm)].map(match => {
     const line = match[1]!
     // Discover the object path through the real global-option parser and registry matcher.
     // Argument syntax is checked separately on the runnable spatial examples below.
@@ -83,7 +83,7 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(moveCommands.length).toBeGreaterThan(0) // 扫描非空
     // 注入的确切用法面必须教出每一个移动动词——新增一个移动动词到注册表却不在 skill 教，这里红。
     for (const method of moveCommands) {
-      expect(AGENTMUX_CLI_SKILL).toContain(`agentmux ${method.replaceAll('.', ' ')} --region`)
+      expect(AGENTMUX_CLI_SKILL).toContain(`amux ${method.replaceAll('.', ' ')} --region`)
     }
     // 且它教的是"移动/搬出"，不是"再开一份"——promote 不碰 Run。
     const section = skillSection('## Move a Region into its own Tab', '## Read what is in a direction')
@@ -105,7 +105,7 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(taught.length).toBeGreaterThan(0) // 扫描非空
     for (const { line, command } of taught) expect(command, line).toBeDefined()
     for (const method of registry.keys()) {
-      const syntax = `agentmux ${method.replaceAll('.', ' ')}`
+      const syntax = `amux ${method.replaceAll('.', ' ')}`
       expect(AGENTMUX_CLI_HELP).toContain(syntax)
       expect(AGENTMUX_CLI_SKILL).toContain(syntax)
     }
@@ -117,13 +117,13 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(registry.has('settings.executors.ls')).toBe(true)
     // 启动提示（发现面）：让 Agent 知道自定义 executor 能按名开出来。
     expect(launchGuide).toMatch(/executor .*configured|configured .*executor|found by name/i)
-    expect(AGENTMUX_CLI_SKILL).toMatch(/configured executor[\s\S]{0,120}agentmux settings executors ls[\s\S]{0,80}exact ID/i)
+    expect(AGENTMUX_CLI_SKILL).toMatch(/configured executor[\s\S]{0,120}amux settings executors ls[\s\S]{0,80}exact ID/i)
   })
 
   it('空间示例经实际 CLI parser 接受，不把旧 flag 或虚构目的地教给 Agent', async () => {
     const section = skillSection('## Choose a split from the visible layout', 'Agent-first workflow:')
     expect(section.length).toBeGreaterThan(0)
-    const examples = [...section.matchAll(/^agentmux ([^\n]+)$/gm)].map(match => match[1]!)
+    const examples = [...section.matchAll(/^amux ([^\n]+)$/gm)].map(match => match[1]!)
     expect(examples.length).toBeGreaterThan(0)
     for (const example of examples) {
       const parsed = await parseAgentMuxCliInvocation(example.split(' '))
@@ -133,7 +133,7 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
 
   it('驱动已开的 Browser 可发现：启动提示点出这件事，skill 教确切用法', () => {
     // 与上面「移动动词」同形的两面咬合。这个能力特别需要发现面：它挂在一个**顶层动词**上
-    // （`agentmux browser run`），不像 open 的子命令那样会被顺带提到。Agent 不知道它存在，
+    // （`amux browser run`），不像 open 的子命令那样会被顺带提到。Agent 不知道它存在，
     // 就只会退回去让用户自己看页面——或者更糟，去猜坐标点击。
     //
     // 发现面（启动提示）：说得出"已经开着的 Browser 可以被驱动"，且点出"按读到的元素动"。
@@ -145,7 +145,7 @@ describe('T-006 注入引导：可发现自定义 Executor 与移动命令', () 
     expect(launchGuide, '启动提示抄了命令行语法，与 skill 争夺唯一真相').not.toContain('browser run --browser')
 
     // 用法面（skill）：教出确切命令与授权前提。
-    expect(AGENTMUX_CLI_SKILL, 'skill 没教 browser run 的确切用法').toContain('agentmux browser run --browser')
+    expect(AGENTMUX_CLI_SKILL, 'skill 没教 browser run 的确切用法').toContain('amux browser run --browser')
     expect(AGENTMUX_CLI_SKILL, 'skill 没说授权开关在哪，Agent 撞到拒绝时无路可走').toContain('Settings › Browser')
   })
 

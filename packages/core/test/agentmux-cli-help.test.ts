@@ -29,7 +29,7 @@ describe('compiled object-first CLI help and discovery', () => {
     for (const command of nested) {
       const help = await run([...command.method.split('.'), '--help'])
       expect(help.code, help.stderr).toBe(0)
-      expect(help.stdout).toContain('Usage: agentmux ' + command.method.replaceAll('.', ' '))
+      expect(help.stdout).toContain('Usage: amux ' + command.method.replaceAll('.', ' '))
       expect(help.stdout).toContain(command.summary)
     }
   })
@@ -48,6 +48,9 @@ describe('compiled object-first CLI help and discovery', () => {
       ['agent', 'open', '--executor', 'E', '--session', 'S', '--zone', 'Z']
     ]
     for (const args of invalid) await expect(parseAgentMuxCliInvocation(args)).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
+    await expect(parseAgentMuxCliInvocation(['unknown', 'command'])).rejects.toMatchObject({
+      code: 'INVALID_CLI_ARGUMENT', message: 'Unknown command. Run amux --help.'
+    })
   })
 
   it('routes compiled nested confirmation params through the original dispatcher and retains an unavailable owner detail', async () => {
@@ -79,10 +82,10 @@ describe('compiled object-first CLI help and discovery', () => {
     expect(AGENTMUX_CLI_COMMANDS.length).toBeGreaterThan(0)
     for (const command of AGENTMUX_CLI_COMMANDS) {
       const spelling = command.method.replaceAll('.', ' ')
-      expect(result.stdout).toContain('agentmux ' + spelling)
+      expect(result.stdout).toContain('amux ' + spelling)
       const leaf = await run(['--help', ...command.method.split('.')])
       expect(leaf.code, command.method + ': ' + leaf.stderr).toBe(0)
-      expect(leaf.stdout).toContain('Usage: agentmux ' + spelling)
+      expect(leaf.stdout).toContain('Usage: amux ' + spelling)
       expect(leaf.stdout).toContain(command.summary)
     }
     const groups = [...new Set(AGENTMUX_CLI_COMMANDS.filter(command => command.method.includes('.')).map(command => command.method.split('.')[0]!))]
@@ -90,7 +93,7 @@ describe('compiled object-first CLI help and discovery', () => {
     for (const group of groups) {
       const help = await run([group, '--help'])
       expect(help.code, help.stderr).toBe(0)
-      expect(help.stdout).toContain('agentmux ' + group + ' ')
+      expect(help.stdout).toContain('amux ' + group + ' ')
     }
   }, 120_000)
 
@@ -98,9 +101,11 @@ describe('compiled object-first CLI help and discovery', () => {
     const result = await run(['--skill'])
     expect(result.code, result.stderr).toBe(0)
     expect(result.stdout.trim()).toBe(AGENTMUX_CLI_SKILL.trim())
+    expect(result.stdout).toMatch(/^---\nname: amux\n/u)
+    expect(result.stdout).not.toMatch(/\bagentmux[ \t]+/u)
     expect(AGENTMUX_CLI_COMMANDS.length).toBeGreaterThan(0)
-    for (const command of AGENTMUX_CLI_COMMANDS) expect(result.stdout).toContain('agentmux ' + command.method.replaceAll('.', ' '))
-    for (const old of ['agentmux pmo ', 'agentmux list ', 'agentmux demand ', 'agentmux open ', 'agentmux focus ', 'agentmux send ', 'agentmux roles ', 'agentmux toolkit add ', 'agentmux settings get ']) {
+    for (const command of AGENTMUX_CLI_COMMANDS) expect(result.stdout).toContain('amux ' + command.method.replaceAll('.', ' '))
+    for (const old of ['amux pmo ', 'amux list ', 'amux demand ', 'amux open ', 'amux focus ', 'amux send ', 'amux roles ', 'amux toolkit add ', 'amux settings get ']) {
       expect(result.stdout).not.toContain(old)
     }
     expect(result.stdout).not.toContain('--request-id')
@@ -149,13 +154,15 @@ describe('compiled object-first CLI help and discovery', () => {
     } })
     const version = await run(['--version'])
     expect(version.code).toBe(0)
-    expect(version.stdout.trim()).toBe('agentmux ' + packageManifest.version)
+    expect(version.stdout.trim()).toBe('amux ' + packageManifest.version)
   })
 
   it('rejects extra global help arguments and nonexistent command paths honestly', async () => {
     const unknown = await run(['--help', 'unknown', 'command'])
     expect(unknown.code).toBe(1)
-    expect(JSON.parse(unknown.stderr).error.code).toBe('INVALID_CLI_ARGUMENT')
+    expect(JSON.parse(unknown.stderr)).toMatchObject({
+      error: { code: 'INVALID_CLI_ARGUMENT', message: 'Unknown command. Run amux --help.' }
+    })
     expect(agentMuxCommandHelp('pmo')).toBeNull()
     expect(agentMuxCommandHelp('demand')).toBeNull()
   })

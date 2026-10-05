@@ -7,7 +7,7 @@ describe('global object discovery has one executable registration', () => {
     const help = agentMuxCommandHelp('app.snapshot')
     expect(help?.length).toBeGreaterThan(0)
     for (const source of ['Project', 'Workspace', 'Topic', 'Mote', 'Space', 'Zone', 'Executor', 'Session', 'Goal']) expect(help).toContain(source)
-    for (const path of ['agent inspect', 'goal activity', 'space inspect']) expect(AGENTMUX_CLI_HELP).toContain('agentmux ' + path)
+    for (const path of ['agent inspect', 'goal activity', 'space inspect']) expect(AGENTMUX_CLI_HELP).toContain('amux ' + path)
     expect(agentMuxCommandHelp('pmo')).toBeNull()
   })
   it('carries actual global filters and has no inferred current Workspace', async () => {

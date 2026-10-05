@@ -171,8 +171,9 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ operation: 'mote.playbook.pmo', result: { readOnly: true, format: 'markdown' } })
     const document = JSON.parse(result.stdout).result.document
     expect(document).toContain('PMO is a coordination role and working method')
-    expect(document).toContain('agentmux app snapshot')
-    expect(document).toContain('agentmux agent open')
+    expect(document).toContain('amux app snapshot')
+    expect(document).toContain('amux agent open')
+    expect(document).not.toMatch(/\bagentmux[ \t]+/u)
     expect(document).toContain('space inspect --operation-id')
     expect(fixture.requests).toEqual([])
     expect(await readFile(soul, 'utf8')).toBe('user soul\n')
