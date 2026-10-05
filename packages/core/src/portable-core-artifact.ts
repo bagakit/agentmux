@@ -60,7 +60,7 @@ export async function createPortableCoreArtifact(directory: string, packageRoot 
   }
   // Desktop's local bin may use Electron. The remote entry point always uses the
   // original qualified Node executable; its deployment wrapper is written remotely.
-  await writeFile(join(root, 'bin', 'agentmux'), '#!/usr/bin/env node\nimport "../dist/agentmux.js"\n', { mode: 0o755 })
+  await writeFile(join(root, 'bin', 'amux'), '#!/usr/bin/env node\nimport "../dist/agentmux.js"\n', { mode: 0o755 })
   let sourceCommit: string | null = null
   try {
     const release = JSON.parse(await readFile(join(packageRoot, 'release.json'), 'utf8')) as { sourceCommit?: string }
