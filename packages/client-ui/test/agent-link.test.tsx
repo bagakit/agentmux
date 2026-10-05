@@ -23,7 +23,7 @@ afterEach(async () => {
 const adapter: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body,
   bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null,
   renderProjectLabel: () => null, renderIcon: () => null,
-  renderAgentLink: reference => <button data-reference={reference.agentSessionId} data-uri={reference.uri}>{reference.label ?? reference.agentSessionId}</button> }
+  renderObjectLink: reference => <button data-reference={Object.values(reference.target)[1]} data-kind={reference.target.kind} data-uri={reference.uri}>{reference.label ?? Object.values(reference.target)[1]}</button> }
 const uri = 'amux://agent/original%2FSID%20%E4%B8%AD%E6%96%87'
 const sid = 'original/SID 中文'
 const refs = () => Array.from(container.querySelectorAll<HTMLElement>('[data-reference]'))
@@ -39,8 +39,8 @@ describe('Agent references in the shared production conversation', () => {
     expect(refs()).toHaveLength(1); expect(refs()[0]!.textContent).toBe('review agent')
     expect(refs()[0]!.dataset.reference).toBe(sid)
   })
-  it('keeps code, inert previews, other object kinds and invalid or nested URLs literal', async () => {
-    const unsafe = ['amux://agent/%ZZ', 'amux://agent/a?send=x', 'amux://agent/a#b', 'amux://agent/%61', 'amux://tab/a', 'https://example.test/?link=amux://agent/a']
+  it('keeps code, inert previews, invalid or nested URLs literal', async () => {
+    const unsafe = ['amux://agent/%ZZ', 'amux://agent/a?send=x', 'amux://agent/a#b', 'amux://agent/%61', 'https://example.test/?link=amux://agent/a']
     await render(<ClientUiProvider platform={adapter}><AgentMarkdown content={unsafe.join(' ')} /></ClientUiProvider>)
     expect(refs()).toHaveLength(0)
     await render(<ClientUiProvider platform={adapter}><AgentMarkdown content={`\`${uri}\`\n\n\`\`\`text\n${uri}\n\`\`\`\n\n[${uri}](https://example.test)`} /></ClientUiProvider>)
@@ -58,4 +58,13 @@ describe('Agent references in the shared production conversation', () => {
     await click(container.querySelector<HTMLElement>('button.md-link--file')!)
     expect(openWorkspaceFile).toHaveBeenCalledWith('src/main.ts', { line: 7 }, expect.anything())
   })
+})
+
+it('shares Core parsing for every canonical object kind and keeps document mode inert', async () => {
+  const uris=['amux://region/region%3Aoriginal','amux://tab/original','amux://space/original','amux://zone/original']
+  await render(<ClientUiProvider platform={adapter}><AgentMarkdown content={uris.map(uri=>`${uri} [label](${uri})`).join('\n\n')} /></ClientUiProvider>)
+  expect(refs().map(node=>node.dataset.kind)).toEqual(['region','region','tab','tab','space','space','zone','zone'])
+  expect(refs().map(node=>node.dataset.uri)).toEqual(uris.flatMap(uri=>[uri,uri]))
+  await render(<ClientUiProvider platform={adapter}><AgentMarkdown content={uris.join(' ')} documentMode /></ClientUiProvider>)
+  expect(refs()).toHaveLength(0)
 })

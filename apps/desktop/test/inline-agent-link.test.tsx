@@ -85,3 +85,53 @@ describe('Desktop Agent links in the shared production conversation', () => {
     expect(document.querySelector('.inline-agent-link__details')).toBeNull()
   })
 })
+
+const regionUri = 'amux://region/region%3Alauncher%3A0ef42075-2820-47b9-afcf-66bb99ea2eb8'
+describe('Desktop spatial links in the shared production conversation', () => {
+  it('renders the exact Region as a compact object action in bare and Markdown prose and copies the unmodified message', async () => {
+    const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+    const raw = `打开 ${regionUri}，或者 [原工作格](${regionUri})。`
+    await render(<DesktopClientUiProvider><ConversationMessage content={raw} speaker={{role:'human',id:'human'}} /></DesktopClientUiProvider>)
+    const links = [...container.querySelectorAll<HTMLButtonElement>('button[data-object-link-open]')]
+    expect(links).toHaveLength(2)
+    expect(links[0]!.textContent).toContain('Region'); expect(links[0]!.title).toContain('region:launcher:0ef42075-2820-47b9-afcf-66bb99ea2eb8')
+    expect(links[1]!.textContent).toBe('原工作格')
+    expect(container.querySelector('button button')).toBeNull()
+    await click(links[0]!); expect(open).toHaveBeenCalledExactlyOnceWith(regionUri)
+    await click(container.querySelector<HTMLElement>('[aria-label="Copy Region link"]')!); expect(copy).toHaveBeenLastCalledWith(regionUri)
+    await click(container.querySelector<HTMLElement>('[aria-label="Copy message"]')!); expect(copy).toHaveBeenLastCalledWith(raw)
+  })
+  it('keeps each other existing spatial kind exact and reports failed open and copy through the original error owner', async () => {
+    const error = new Error('Original object unavailable'), report = vi.fn(); useAppStore.setState({reportError:report})
+    const open = vi.spyOn(api.ui, 'openObjectLink').mockRejectedValue(error)
+    vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValue(error)
+    await render(<DesktopClientUiProvider><AgentMarkdown content={'amux://tab/tab%3Aoriginal amux://space/space%3Aoriginal amux://zone/zone%3Aoriginal'} /></DesktopClientUiProvider>)
+    const links=[...container.querySelectorAll<HTMLButtonElement>('button[data-object-link-open]')]
+    expect(links).toHaveLength(3)
+    for(const [index,kind] of ['Tab','Space','Zone'].entries()){
+      expect(links[index]!.textContent).toContain(kind); expect(links[index]!.disabled).toBe(false)
+      await click(links[index]!);expect(open).toHaveBeenLastCalledWith(`amux://${kind.toLowerCase()}/${kind.toLowerCase()}%3Aoriginal`)
+    }
+    await click(container.querySelector<HTMLElement>('[aria-label="Copy Tab link"]')!)
+    expect(report).toHaveBeenCalledTimes(4);expect(report).toHaveBeenLastCalledWith(error)
+    expect(container.querySelector('[aria-label="Tab link copied"]')).toBeNull()
+  })
+  it('binds copy success to the exact URI across the same mounted link and a late reply', async () => {
+    let resolveCopy!: () => void
+    vi.spyOn(api.ui, 'writeClipboardText').mockImplementationOnce(() => new Promise<void>(resolve => { resolveCopy = resolve }))
+    const view = (uri: string) => <DesktopClientUiProvider><AgentMarkdown content={uri} /></DesktopClientUiProvider>
+    await render(view(regionUri))
+    const original = container.querySelector('[data-object-link-open]')
+    expect(original).not.toBeNull()
+    await click(container.querySelector<HTMLElement>('[aria-label="Copy Region link"]')!)
+    const replacement = 'amux://region/region%3Aother'
+    await render(view(replacement))
+    expect(container.querySelector('[data-object-link-open]')).toBe(original)
+    await act(async () => resolveCopy())
+    expect(container.querySelector('[aria-label="Region link copied"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Copy Region link"]')).not.toBeNull()
+    await click(container.querySelector<HTMLElement>('[aria-label="Copy Region link"]')!)
+    expect(container.querySelector('[aria-label="Region link copied"]')).not.toBeNull()
+  })
+
+})
