@@ -1,6 +1,6 @@
 import { SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-catalog.js'
 import { iconShapes } from './icon-assets.js'
-import type { ThemeValue } from './schema.js'
+import { themeColorSchema, type ThemeValue } from './schema.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string }>()
@@ -74,9 +74,14 @@ function attributes(attributes: Readonly<Record<string, string>>): string {
   // Only trusted geometry or validated path data reaches here. Escaping remains explicit for serialization.
   return Object.entries(attributes).map(([key, value]) => ` ${key}="${value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')}"`).join('')
 }
+/** Native backgrounds project trusted geometry using the theme's existing bounded color contract. */
+export function iconSvgDataUrl(shapes: readonly IconShape[], style: ThemeValue['iconStyle'], color: string): string {
+  const validatedColor = themeColorSchema.parse(color)
+  const nodes = shapes.map(([tag, attrs]) => `<${tag}${attributes(attrs)}/>`).join('')
+  const svg = `<svg xmlns="${SVG_NS}" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${validatedColor}" stroke-width="${style.strokeWidth}" stroke-linecap="${style.linecap}" stroke-linejoin="${style.linejoin}" color="${validatedColor}">${nodes}</svg>`
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
+}
 /** A native mask projects the same geometry, never a separate editable icon mapping. */
 export function iconMaskDataUrl(shapes: readonly IconShape[], style: ThemeValue['iconStyle']): string {
-  const nodes = shapes.map(([tag, attrs]) => `<${tag}${attributes(attrs)}/>`).join('')
-  const svg = `<svg xmlns="${SVG_NS}" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="${style.strokeWidth}" stroke-linecap="${style.linecap}" stroke-linejoin="${style.linejoin}" color="black">${nodes}</svg>`
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
+  return iconSvgDataUrl(shapes, style, '#000000')
 }

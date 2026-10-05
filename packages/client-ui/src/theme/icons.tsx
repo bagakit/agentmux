@@ -3,7 +3,7 @@ import type { SemanticIconId } from './icon-catalog.js'
 import { semanticIconHref } from './icon-sprite.js'
 export * from './icon-catalog.js'
 export { iconShapes } from './icon-assets.js'
-export { semanticIconHref, createSemanticIconElement, iconMaskDataUrl, updateIconSprite, removeIconSprite } from './icon-sprite.js'
+export { semanticIconHref, createSemanticIconElement, iconMaskDataUrl, iconSvgDataUrl, updateIconSprite, removeIconSprite } from './icon-sprite.js'
 
 export type SemanticIconProps = { size?: number } & SVGProps<SVGSVGElement>
 export type SemanticIconComponent = ComponentType<SemanticIconProps>

@@ -22,9 +22,9 @@ export const THEME_COLOR_PROPERTIES = {
 } as const
 export type ThemeColorRole = keyof typeof THEME_COLOR_PROPERTIES
 export const THEME_COLOR_ROLES = Object.keys(THEME_COLOR_PROPERTIES) as [ThemeColorRole, ...ThemeColorRole[]]
-const color = z.string().regex(/^#[0-9a-f]{6}$/i, 'Use a six-digit hexadecimal color.')
+export const themeColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i, 'Use a six-digit hexadecimal color.')
 export const themeVariantSchema = z.object({
-  colors: z.record(z.enum(THEME_COLOR_ROLES), color),
+  colors: z.record(z.enum(THEME_COLOR_ROLES), themeColorSchema),
   font: z.enum(THEME_FONT_IDS),
   radius: z.number().min(0).max(16),
   elevation: z.enum(THEME_ELEVATION_IDS)
