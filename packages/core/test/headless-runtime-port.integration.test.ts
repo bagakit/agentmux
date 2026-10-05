@@ -121,7 +121,7 @@ describe('Headless public Core Runtime port over real private Unix owner', () =>
     })
     await complete; await reader.dispose(); await raw.dispose()
     expect(replay.length).toBeGreaterThan(0)
-    await client.signalAgent(session.agentSessionId, 'SIGINT')
+    await client.signalAgent(session.agentSessionId, session.run, 'SIGINT')
     await until(() => events.filter(event => event.type === 'terminal-output').map(event => event.data).join(''), value => value.includes('codex-interrupt'), 'portable interrupt')
     const ended = await client.createAgent({ providerId: 'codex', executorId: 'codex', workspacePath: scope.root,
       injectAgentMuxGuide: false, createOperationId: 'native-exit-create', commandOverride: command,

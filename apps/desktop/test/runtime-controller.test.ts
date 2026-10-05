@@ -263,7 +263,7 @@ const runtimeFixture = vi.hoisted(() => {
   }
 })
 
-vi.mock('@agentmux/core', async () => {
+vi.mock('@agentmux/core', async (importOriginal) => {
   const { loadSessionHistorySources } = await import('../../../packages/core/src/agent-session-store.js')
   const { agentInteractionResponseUnavailableReason } = await import('@agentmux/core/agent-interaction-state')
   const { agentPromptPredecessor, validateAgentPromptCondition } = await import('@agentmux/core/prompt-condition')
@@ -278,6 +278,7 @@ vi.mock('@agentmux/core', async () => {
     }
   }
   return {
+    ...await importOriginal<typeof import('@agentmux/core')>(),
     AgentMuxError,
     loadSessionHistorySources,
     agentInteractionResponseUnavailableReason,
@@ -458,6 +459,7 @@ describe('RuntimeController configuration transaction', () => {
       await input
       await controller.paste(control, 'original paste', 'terminal paste')
       await controller.interrupt(control)
+      expect((client as any).signalAgent).toHaveBeenCalledExactlyOnceWith('original-agent', control.run, 'SIGINT')
       expect(client.connect).not.toHaveBeenCalled()
       expect(client.connectRuntime).toHaveBeenCalledTimes(3)
       expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' }, data: 'original input', source: 'user' })
