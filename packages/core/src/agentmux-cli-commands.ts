@@ -513,7 +513,7 @@ export function agentMuxCliRequestsHelp(command: AgentMuxCliCommand, args: reado
 export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promise<AgentMuxCliInvocation> {
   const { args, endpoint } = agentMuxCliArguments(argv)
   const match = agentMuxCliMatch(args)
-  if (!match) invalid('Unknown command. Run agentmux --help.')
+  if (!match) invalid('Unknown command. Run amux --help.')
   const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
   return { command, params: await match!.command.parse(match!.tail), ...(endpoint === undefined ? {} : { endpoint }) }
 }

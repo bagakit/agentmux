@@ -61,7 +61,7 @@ Paths are preserved including trailing spaces; no shell expansion or trimming oc
 The owner interprets the optional name and reports changed=false for an unchanged registration.
 
 Browser-link forget accepts a literal scheme or --input carrying exactly {"scheme": string}.
-Use agentmux settings browser-links forget --input <file|-> for the JSON carrier.
+Use amux settings browser-links forget --input <file|-> for the JSON carrier.
 An empty scheme and option-looking scheme are literal values; use JSON for a stored key
 that argv cannot represent, such as NUL. Forget removes the current choice, not a choice
 captured by an earlier list. An absent choice is unchanged and the next link asks again.
@@ -76,7 +76,7 @@ Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
 Delete input uses {"expected":{...}} with complete saved editable fields.
 Revisions are owner-issued, never editable. Performance is read-only.
 
-Install a local extension directory with agentmux toolkit install ID --path <PACKAGE_DIRECTORY>
+Install a local extension directory with amux toolkit install ID --path <PACKAGE_DIRECTORY>
 and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd is chosen by the Host. The saved record
 holds the directory reference and enabled/statusBar/args/cwd preferences. It does not import
 a source copy. Edit manifest.json, entry or helper files in that directory; the next explicit

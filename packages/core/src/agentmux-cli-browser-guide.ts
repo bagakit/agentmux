@@ -4,8 +4,8 @@ const capabilityExamples = () => (['observe', 'act', 'wait'] as const)
   .flatMap(effect => browserPageCapabilityNames(effect).slice(0, 1)).map(name => `\`${name}\``).join(', ')
 
 export const AGENTMUX_BROWSER_TARGET_GUIDE = `First inspect the exact Tab/Region and read its typed Browser id with
-\`agentmux space inspect --tab TAB\` or \`agentmux space inspect --region REGION\`.
-Use \`agentmux browser targets\` to discover original available Browser targets.
+\`amux space inspect --tab TAB\` or \`amux space inspect --region REGION\`.
+Use \`amux browser targets\` to discover original available Browser targets.
 If the target is absent, unavailable or driving is refused, report that exact result.
 Do not guess another Browser or use GUI input to get around that result.
 Opening a Browser preserves the current Workbench selection and eligible input;
@@ -38,19 +38,19 @@ export const AGENTMUX_BROWSER_PROGRAM_GUIDE = `Run a program in an open Browser
 ${AGENTMUX_BROWSER_TARGET_GUIDE}
 
 Usage:
-  agentmux browser run --browser <browser-id> [--operation-id <operation-id>] < program.js
-  echo 'return await snapshot()' | agentmux browser run --browser <browser-id>
-  agentmux browser history [--browser <browser-id>]
-  agentmux browser inspect --operation-id <operation-id>
-  agentmux browser stop --operation-id <operation-id>
-  agentmux browser replay --browser <browser-id> --operation-id <operation-id> [--preview | --step <n> | --run]
+  amux browser run --browser <browser-id> [--operation-id <operation-id>] < program.js
+  echo 'return await snapshot()' | amux browser run --browser <browser-id>
+  amux browser history [--browser <browser-id>]
+  amux browser inspect --operation-id <operation-id>
+  amux browser stop --operation-id <operation-id>
+  amux browser replay --browser <browser-id> --operation-id <operation-id> [--preview | --step <n> | --run]
 
 The program is read from stdin as a whole — there is no --code flag, because a real program
 contains quotes, backslashes and newlines that every shell layer would re-escape.
 
 It runs as an async function body in an isolated subprocess, so \`await\` and \`return\` both
 work, and a runaway program cannot take AgentMux down with it. Page functions (${capabilityExamples()}, …)
-are injected into that subprocess; \`agentmux --skill\` lists them.
+are injected into that subprocess; \`amux --skill\` lists them.
 Elements are addressed by the refs a snapshot hands you — never coordinates.
 \`snapshot(options)\` and \`snapshotText(options)\` accept \`scope: "page"|"viewport"\`,
 \`within\` (a unique CSS region in the main document), \`withinRef\` (an issued ref's actual document),
@@ -77,8 +77,8 @@ steps remain explicit review gates.
 
 That id only arrives with the final receipt, which is too late to ask about a program still
 running. Pass \`--operation-id <id>\` to choose it yourself, and it is addressable from the moment
-the program starts: \`agentmux browser inspect --operation-id <id>\` says how it is going, and
-\`agentmux browser stop --operation-id <id>\` stops it. Neither needs the same connection, the same
+the program starts: \`amux browser inspect --operation-id <id>\` says how it is going, and
+\`amux browser stop --operation-id <id>\` stops it. Neither needs the same connection, the same
 process, or the Browser id — the operation, not the request, is what those two address, so a
 disconnect does not take the operation with it. Asking about an id we have no record of is a
 successful answer of nothing, not a failure; stopping one that has already finished answers

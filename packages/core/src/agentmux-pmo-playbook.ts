@@ -3,7 +3,7 @@ import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 function reference(method: string): string {
   const command = AGENTMUX_CLI_COMMANDS.find(entry => entry.method === method)
   if (!command) throw new Error(`PMO manual references an unregistered command: ${method}`)
-  return `agentmux ${command.method.replaceAll('.', ' ')}${command.usage ? ' ' + command.usage : ''}`
+  return `amux ${command.method.replaceAll('.', ' ')}${command.usage ? ' ' + command.usage : ''}`
 }
 
 /** Read-only document rendering; no service connection or user filesystem access. */

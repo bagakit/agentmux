@@ -5,7 +5,7 @@ import { AGENTMUX_SETTINGS_RESOURCE_GUIDE, AGENTMUX_TOOLKIT_GUIDE, AGENTMUX_GOAL
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 
 export { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
-const syntax = (entry: AgentMuxCliCommand) => `agentmux ${entry.method.replaceAll('.', ' ')}${entry.usage ? ' ' + entry.usage : ''}`
+const syntax = (entry: AgentMuxCliCommand) => `amux ${entry.method.replaceAll('.', ' ')}${entry.usage ? ' ' + entry.usage : ''}`
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
 const GIT_GUIDE = `Discover the original workspace ID, hostId and path with agentmux app snapshot.
@@ -68,24 +68,24 @@ an explicit location. Default input is preserve. Missing positions do not prove 
 Inspect unknown results before another action; do not start a replacement Agent to open a link.
 
 ## Choose a split from the visible layout
-Read the exact presentation with agentmux space inspect --region REGION before choosing
+Read the exact presentation with amux space inspect --region REGION before choosing
 where to open. Decide from the visible view so both the old and new content stay readable
 with the least disturbance. Use the registered --region and --split destination options:
 
-agentmux agent open --executor EXECUTOR --region REGION --split right --prompt TASK --operation-id OPERATION
+amux agent open --executor EXECUTOR --region REGION --split right --prompt TASK --operation-id OPERATION
 
-Before opening a configured executor, use agentmux settings executors ls to find its exact ID.
-For a remote execution target, use agentmux settings executors discover --host HOST and
+Before opening a configured executor, use amux settings executors ls to find its exact ID.
+For a remote execution target, use amux settings executors discover --host HOST and
 choose that Host's Executor ID. For a new remote Agent below the local view, select its saved
 Workspace independently:
 
-agentmux agent open --executor EXECUTOR --execution-workspace WORKSPACE --region REGION --split down --prompt TASK --operation-id OPERATION
+amux agent open --executor EXECUTOR --execution-workspace WORKSPACE --region REGION --split down --prompt TASK --operation-id OPERATION
 
 Split directions are left, right, up and down.
 Opening a split and navigating to an existing Tab are separate operations.
 
 ## Open a file beside an exact Region
-agentmux file open --path PATH --zone ZONE --tab TAB --region REGION --split right --display-workspace WORKSPACE --group GROUP --operation-id OPERATION
+amux file open --path PATH --zone ZONE --tab TAB --region REGION --split right --display-workspace WORKSPACE --group GROUP --operation-id OPERATION
 
 The Tab, anchor Region, direction (left/right/up/down), Display Workspace and Group
 are one exact destination. Omitting the Tab/Region/split tuple selects the new-Tab
@@ -94,8 +94,8 @@ The reply names the actual File Region; the anchor is not the new Region's ident
 File opening stays in the background unless --focus is explicit.
 
 ## Choose a new Tab for a complete workface
-agentmux agent open --executor EXECUTOR --zone ZONE --new-tab --display-workspace WORKSPACE --group GROUP --prompt TASK --operation-id OPERATION
-agentmux file open --path PATH --zone ZONE --display-workspace WORKSPACE --group GROUP --operation-id OPERATION
+amux agent open --executor EXECUTOR --zone ZONE --new-tab --display-workspace WORKSPACE --group GROUP --prompt TASK --operation-id OPERATION
+amux file open --path PATH --zone ZONE --display-workspace WORKSPACE --group GROUP --operation-id OPERATION
 
 Choose the actual Zone/resource and exact display Group. Omitting the Tab/Region/split
 tuple selects the File new-Tab destination path, which may reuse an existing matching
@@ -103,8 +103,8 @@ presentation; File does not take the Agent's --new-tab flag.
 Inspect the returned order rather than claiming that the new Tab is beside your own.
 
 ## Move a Region into its own Tab
-agentmux space promote --region REGION --operation-id OPERATION
-agentmux space mv --from-region REGION --expect-session SID --zone ZONE --new-tab --operation-id OPERATION
+amux space promote --region REGION --operation-id OPERATION
+amux space mv --from-region REGION --expect-session SID --zone ZONE --new-tab --operation-id OPERATION
 
 promote and mv move an existing presentation; they do not duplicate it or change the
 execution cwd, Host, Session or Run. A move never starts, stops, or restarts a Run.
@@ -112,7 +112,7 @@ For mv, use --from-display-workspace and --from-group if the source Region has s
 display placements. Name the exact source; do not choose the first location from a SID.
 
 ## Read what is in a direction
-Read the Region's actual neighbors with agentmux space inspect --region REGION.
+Read the Region's actual neighbors with amux space inspect --region REGION.
 A split in that direction names the visible Region beside you. When nothing is split there,
 left and right may name an adjacent Tab. These are not the same place.
 Up and down never name a Tab. No neighbor is an explicit answer, not a failed observation.
@@ -125,7 +125,7 @@ created, displayed, readable and focused are distinct facts.
 After any move inspect the result to confirm where it landed, using the returned exact
 Region and display placement. Use --display-workspace and --group when the presentation
 needs those selectors; a resource ID alone does not prove a unique display location.
-For a lost or unknown Agent creation/move reply, read agentmux space inspect --operation-id OPERATION first.
+For a lost or unknown Agent creation/move reply, read amux space inspect --operation-id OPERATION first.
 For File open, retain its operation and inspect the original file resource and actual File Regions;
 operation inspection does not certify its missing original receipt. Today's display does not
 prove a past submission. An unknown operation remains unconfirmed; do not blindly retry
@@ -135,11 +135,11 @@ const DEVICE_GUIDE = `Device ls/link/revoke require a local Unix user; managed A
 Device link returns the current complete public offer URL; open it on a phone on the same local network.
 Device hello names only the device bound to its completed encrypted handshake.
 No pairing code, local OS approval or certificate installation is part of the connection flow.
-After a missing revocation reply, read agentmux device ls and compare the exact deviceId facts.
+After a missing revocation reply, read amux device ls and compare the exact deviceId facts.
 Never automatically replay a device revocation.`
 
 const COMMON = `Public methods use the same typed JSON-RPC service over Unix, HTTP, encrypted Relay or SSH.
-Select one transport with agentmux --endpoint <descriptor> <object> <action>.
+Select one transport with amux --endpoint <descriptor> <object> <action>.
 Run system endpoint to discover the default without connecting.
 Endpoint, Host route and execution identity are separate:
 --endpoint selects one AgentMux service, not an execution destination.
@@ -152,15 +152,15 @@ Use routeHostId with agent context --host; its hostId is the route and sourceHos
 Keep the same endpoint for discovery and follow-up. Host IDs are not global machine IDs.
 
 Direct remote service (build-node is a normal SSH alias):
-  agentmux --endpoint 'ssh://user@build-node/' agent ls
-  agentmux --endpoint 'ssh://user@build-node/' agent context --host local --session SID
+  amux --endpoint 'ssh://user@build-node/' agent ls
+  amux --endpoint 'ssh://user@build-node/' agent context --host local --session SID
 Via this service's configured remote Host (use the actual returned routeHostId):
-  agentmux agent ls
-  agentmux agent context --host build-host --session SID
-Find configured route IDs with agentmux settings hosts ls. A listed configuration is not a connection check.
+  amux agent ls
+  amux agent context --host build-host --session SID
+Find configured route IDs with amux settings hosts ls. A listed configuration is not a connection check.
 system endpoint reports connection=not-attempted and does not verify reachability or Agent health.
 An RPC system.endpoint response reports connection=responded; this certifies that response only.
-SSH uses the remote agentmux system endpoint --stdio bridge and requires an existing remote service.
+SSH uses the remote amux system endpoint --stdio bridge and requires an existing remote service.
 The ssh URI may specify URI-encoded socket and command query parameters; system SSH owns aliases and credentials.
 
 RPC wire IDs only correlate transport messages; --operation-id is the business identity.
@@ -168,7 +168,7 @@ Ordinary commands print one canonical JSON receipt; readers print complete order
 Typed errors retain their code and details. Partial/unknown facts are not successful writes.
 
 IDs and TEXT are literal data, including option-looking values. Use --flag=value where needed.
-For help about a positional-data command, use agentmux --help <object> <action>.
+For help about a positional-data command, use amux --help <object> <action>.
 Without a complete success reply, the commit result is unconfirmed.
 Read current state before deciding; do not automatically retry the write.
 A current read cannot certify an earlier lost receipt. Save requests are not disk ACKs.
@@ -181,13 +181,13 @@ Unknown observations retain the healthy Agent and its durable work surface.
 
 ${AGENTMUX_AGENT_MESSAGING_GUIDANCE}`
 
-export const AGENTMUX_CLI_HELP = `agentmux — object-first Agent and Desktop control
+export const AGENTMUX_CLI_HELP = `amux — object-first Agent and Desktop control
 
-Usage: agentmux [--endpoint <descriptor>] <object> <action> [arguments]
-       agentmux whoami
-       agentmux --help [object [action]]
-       agentmux --skill
-       agentmux --version
+Usage: amux [--endpoint <descriptor>] <object> <action> [arguments]
+       amux whoami
+       amux --help [object [action]]
+       amux --skill
+       amux --version
 
 Commands:
 ${list(AGENTMUX_CLI_COMMANDS)}
@@ -216,11 +216,11 @@ const capabilities = (effect: Parameters<typeof browserPageCapabilityNames>[0]) 
   browserPageCapabilityNames(effect).map(name => `\`${name}\``).join(', ')
 
 export const AGENTMUX_CLI_SKILL = `---
-name: agentmux
+name: amux
 description: Use the public object-first CLI to observe and operate AgentMux through its typed service.
 ---
 
-Start with \`agentmux whoami\` to learn your verified identity, presentation and capabilities.
+Start with \`amux whoami\` to learn your verified identity, presentation and capabilities.
 Discover before acting: \`app snapshot\` gives global resource facts; \`agent ls\` lists
 real Sessions, \`settings executors ls\` lists saved execution choices, and \`space ls\`
 lists display/resource bindings. Do not substitute the current Workspace for global discovery.
