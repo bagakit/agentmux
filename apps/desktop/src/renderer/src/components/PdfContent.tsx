@@ -83,7 +83,11 @@ export function PdfContent({ data, name, visible = true }: { data: Uint8Array; n
       void loading?.destroy().catch(() => {})
     }
     cancel.current = () => { update({ phase: 'cancelled' }); release() }
-    void Promise.all([import('pdfjs-dist'), import('pdfjs-dist/web/pdf_viewer.mjs')]).then(([engine, components]) => {
+    // PDF.js's viewer reads globalThis.pdfjsLib during module evaluation.
+    // The engine must finish initializing before the viewer can be imported.
+    void import('pdfjs-dist').then(async engine => {
+      if (disposed) return
+      const components = await import('pdfjs-dist/web/pdf_viewer.mjs')
       if (disposed) return
       engine.GlobalWorkerOptions.workerSrc = workerUrl
       const eventBus = new components.EventBus()
