@@ -16,7 +16,7 @@ import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { recoveryOperationId, recoveryReferenceNote, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, rereadUnobservedSession, unobservedRecoveryReference, ownsRecoverySource, type RecoverySource } from '../src/renderer/src/lib/session-recovery-actions'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { AgentLaunchInput, AgentLaunchResult, AgentTimelineSnapshot, ScratchTopicSnapshot } from '../src/shared/contracts'
-import { parseAgentMuxCliInvocation } from '../../../packages/core/dist/agentmux-cli-commands.js'
+import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands.js'
 import { split } from 'shlex'
 
 const dom = composerDOM(), source: RecoverySource = { hostId: 'local', agentSessionId: 'original', workspaceId: 'workspace', tabId: 'original-tab', regionId: 'original-region', displayWorkspaceId: 'workspace', groupId: 'original-group', diagnostic: 'Native identity is not confirmed.' }
@@ -127,6 +127,8 @@ describe('actual SessionPane explicit recovery actions', () => {
     await act(async () => { await vi.waitFor(() => expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)) })
     const input = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0]
     expect(input.agentMuxNote).toContain('--source native'); expect(input.agentMuxNote).toContain('Do not execute those steps or switch into takeover'); expect(input.prompt).toContain('Do not continue or execute')
+    expect(input.agentMuxNote).toContain("amux agent history --host 'local' --session 'original' --source native")
+    expect(input.agentMuxNote).toContain("Optional diagnostics: amux agent inspect --session 'original'.")
   })
   it('sends analysis only to the exact chosen Mote using one original operation identity and keeps both drafts', async () => {
     const old = useAppStore.getState().tabs['original-tab'], drafts = useAppStore.getState().agentComposerDrafts
@@ -223,12 +225,12 @@ describe('actual SessionPane explicit recovery actions', () => {
     for (const other of [{ ...source, hostId: 'remote' }, { ...source, agentSessionId: 'other' }, { ...source, regionId: 'other-region' }]) expect(await recoveryOperationId(other, 'analyze')).not.toBe(id)
     expect(recoveryReferenceNote({ ...source, hostId: "host'with quote" }, 'analyze', 'captured')).toContain("--host 'host'\\''with quote'")
   })
-  it('parses real emitted read commands with the compiled production CLI, preserving exact Host/SID and no invented inspect flag', async () => {
+  it('parses real emitted read commands with the production CLI parser, preserving exact Host/SID and no invented inspect flag', async () => {
     const note = recoveryReferenceNote({ ...source, hostId: "remote'host", agentSessionId: 'exact-original' }, 'analyze', 'native')
-    const history = note.split('\n').find(line => line.startsWith('agentmux agent history '))!
+    const history = note.split('\n').find(line => line.startsWith('amux agent history '))!
     const parsed = await parseAgentMuxCliInvocation(split(history).slice(1))
     expect(parsed.command.method).toBe('agent.history'); expect(parsed.params).toMatchObject({ hostId: "remote'host", agentSessionId: 'exact-original', source: 'native', limit: 20, maxBytes: 32768 })
-    const inspect = note.match(/Optional diagnostics: (agentmux agent inspect .*?)\. This inspect/)![1]!
+    const inspect = note.match(/Optional diagnostics: (amux agent inspect .*?)\. This inspect/)![1]!
     const diagnostic = await parseAgentMuxCliInvocation(split(inspect).slice(1))
     expect(diagnostic.command.method).toBe('agent.inspect'); expect(diagnostic.params).toEqual({ target: { kind: 'agent-session', agentSessionId: 'exact-original' } })
     expect(note).toContain('not Host-qualified'); expect(note).toContain('Do not infer a cross-Host binding')
