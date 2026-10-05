@@ -228,6 +228,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
   await writeFile(join(coreRuntime, 'release.json'), JSON.stringify({ sourceCommit: source.commit, sourceTree: source.tree }) + '\n')
   await writeEmbeddedCoreCli(join(coreRuntime, 'bin', 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
+  await symlink('amux', join(coreRuntime, 'bin', 'agentmux'))
   const coreManifest = JSON.parse(await readFile(join(coreRoot, 'package.json'), 'utf8'))
   await writeFile(join(coreRuntime, 'package.json'), `${JSON.stringify({
     name: coreManifest.name,
@@ -275,6 +276,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await mkdir(outBin, { recursive: true })
   await cp(join(coreRoot, 'bin'), outBin, { recursive: true })
   await writeEmbeddedCoreCli(join(outBin, 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
+  await symlink('amux', join(outBin, 'agentmux'))
   await Promise.all([
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
     chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 0o755),
