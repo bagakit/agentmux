@@ -19,6 +19,22 @@ function respond(worker: any) {
   const { id, input } = worker.postMessage.mock.calls.at(-1)[0]
   worker.onmessage({ data: { id, result: { html: input.source } } })
 }
+it('correlates reused Worker replies without secure-context crypto APIs', async () => {
+  vi.stubGlobal('crypto', undefined)
+  const tasks = ['first', 'second', 'third'].map(request)
+  const outcomes = Promise.allSettled(tasks.map(task => task.result))
+  expect(workers).toHaveLength(2)
+  const firstId = workers[0].postMessage.mock.calls[0][0].id
+  const secondId = workers[1].postMessage.mock.calls[0][0].id
+  respond(workers[0])
+  const thirdId = workers[0].postMessage.mock.calls[1][0].id
+  expect(new Set([firstId, secondId, thirdId]).size).toBe(3)
+  workers[0].onmessage({ data: { id: firstId, result: { html: 'stale reply' } } })
+  expect(workers[0].terminate).not.toHaveBeenCalled()
+  respond(workers[0]); respond(workers[1])
+  expect((await outcomes).map(result => result.status === 'fulfilled' ? result.value.html : result.reason)).toEqual(['first', 'second', 'third'])
+  for (const worker of workers) expect(worker.terminate).toHaveBeenCalledOnce()
+})
 it('runs a 100-block FIFO burst with two reusable Workers and retires both when empty', async () => {
   const tasks = Array.from({ length: 100 }, (_, index) => request(`job-${index}`))
   expect(workers).toHaveLength(2)
