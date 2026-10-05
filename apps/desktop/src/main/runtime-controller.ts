@@ -28,6 +28,7 @@ import {
   type AgentExecutorId,
   type AgentProviderId,
   type AgentSessionHistoryPage,
+  type AgentMuxAgentResumeInput,
   type AgentSessionHistoryDescriptor,
   type AgentSessionHistoryResourceRequest,
   type AgentSessionHistoryResourceReadResult,
@@ -1176,6 +1177,16 @@ export class RuntimeController {
     return timeline
   }
 
+  /** Remote invocation configuration stays private to its Core; local templates keep their existing meaning. */
+  private sessionExecutorOptions(hostId: string, client: AgentMuxClient, config: AppConfig,
+    session: { executorId: AgentExecutorId; providerId: AgentProviderId; creation?: { executorRevision?: string } }): Pick<AgentMuxAgentResumeInput, 'commandOverride' | 'args' | 'env'> {
+    const host = this.hosts.get(hostId)
+    if (!host || host.client !== client) throw new AgentMuxError('The original Runtime Host connection changed. Keep its Session and retry through the current connection.', 'CONTROL_UNAVAILABLE')
+    if (host.config.kind === 'ssh' || session.creation?.executorRevision !== undefined) return {}
+    const executor = requireSessionExecutor(config, session)
+    return { commandOverride: executor.command, args: executor.args, env: executor.env }
+  }
+
   async sessionHistoryPage(
     control: SessionHistoryReference,
     options: SessionHistoryPageOptions | undefined,
@@ -1190,13 +1201,13 @@ export class RuntimeController {
     const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
     if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
     if (!descriptor.history) throw new Error('No native history locator was retained for this Session.')
-    const executor = requireSessionExecutor(config, descriptor.history)
+    const executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
     const page = await host.client.sessionHistoryPage(control.agentSessionId, {
       ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
       ...(options?.limit === undefined ? {} : { limit: options.limit }),
       ...(options?.refreshNativeSource === undefined ? {} : { refreshNativeSource: options.refreshNativeSource }),
       ...(options?.nativeSource === undefined ? {} : { nativeSource: options.nativeSource }),
-      commandOverride: executor.command, args: executor.args, env: executor.env
+      ...executor
     })
     if (this.hosts.get(control.hostId) !== host) {
       throw new Error('History host configuration changed while reading. Reopen conversation history.')
@@ -1218,13 +1229,13 @@ export class RuntimeController {
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
     const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
     if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
-    const executor = requireSessionExecutor(config, descriptor.history)
+    const executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
     // Renderer supplies a recorded locator, never an invocation or an arbitrary file read.
     const result = await host.client.sessionHistoryResource(control.agentSessionId, {
       source: input.source, recordId: input.recordId, partIndex: input.partIndex, expectedReference: input.expectedReference,
       ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
       ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
-      commandOverride: executor.command, args: executor.args, env: executor.env
+      ...executor
     })
     if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
     if (result.agentSessionId !== control.agentSessionId || result.source.providerId !== input.source.providerId ||
@@ -1271,10 +1282,10 @@ export class RuntimeController {
       const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
       controller.signal.throwIfAborted()
       if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
-      const executor = requireSessionExecutor(config, descriptor.history)
+      const executor = this.sessionExecutorOptions(control.hostId, host.client, config, descriptor.history)
       const acquired = await host.client.observeSessionHistory(control.agentSessionId, observation => {
         if (!disposed) listener(observation)
-      }, { commandOverride: executor.command, args: executor.args, env: executor.env, signal: controller.signal })
+      }, { ...executor, signal: controller.signal })
       handle = acquired
       if (disposed || this.hosts.get(control.hostId) !== host) {
         acquired.dispose()
@@ -1627,9 +1638,9 @@ export class RuntimeController {
       ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) }
     return await this.trackHostLifecycleOperation(hostId, async () => {
       const client = await this.connectedClient(hostId)
-      const executor = requireSessionExecutor(config, client.agentSession(agentSessionId))
+      const executor = this.sessionExecutorOptions(hostId, client, config, client.agentSession(agentSessionId))
       return await client.replySessionQuestion({ ...condition, ...original, agentSessionId,
-        commandOverride: executor.command, args: executor.args, env: executor.env,
+        ...executor,
         authorHuman: true, sourceChannel: 'question-reply' })
     })
   }
@@ -1670,9 +1681,9 @@ export class RuntimeController {
     const client = await this.connectedClient(target.hostId), before = await client.statusAgent(target.agentSessionId)
     const matches = (session: typeof before.session) => session.agentSessionId === target.agentSessionId && session.hostId === target.hostId && session.providerId === target.providerId && session.workspacePath === target.workspacePath
     if (!matches(before.session)) return { known: false, reason: 'The original quiet follow-up target is unconfirmed.' }
-    const executor = requireSessionExecutor(config, before.session)
     const timeline = await client.sessionTimeline(target.agentSessionId)
-    const page = await client.sessionHistoryPage(target.agentSessionId, { limit: 100, refreshNativeSource: true, requireCurrentSource: true, signal, commandOverride: executor.command, args: executor.args, env: executor.env })
+    const executor = this.sessionExecutorOptions(target.hostId, client, config, before.session)
+    const page = await client.sessionHistoryPage(target.agentSessionId, { limit: 100, refreshNativeSource: true, requireCurrentSource: true, signal, ...executor })
     signal.throwIfAborted()
     const after = await client.statusAgent(target.agentSessionId)
     signal.throwIfAborted()
@@ -1759,10 +1770,10 @@ export class RuntimeController {
       if (!descriptor || descriptor.state !== 'retired' || descriptor.retiredAt !== expectedRetiredAt || !descriptor.history) {
         throw new AgentMuxError('The original Session retirement changed. Read its history again before continuing.', 'STALE_AGENT_SESSION')
       }
-      const executor = requireSessionExecutor(config, descriptor.history)
+      const executor = this.sessionExecutorOptions(reference.hostId, client, config, descriptor.history)
       dispatched = true
       const canonical = await client.reopenAgent({ agentSessionId: reference.agentSessionId, expectedRetiredAt, operationId,
-        args: executor.args, env: executor.env, commandOverride: executor.command })
+        ...executor })
       if (canonical.agentSessionId !== reference.agentSessionId || canonical.providerId !== descriptor.history.providerId ||
         canonical.executorId !== descriptor.history.executorId || canonical.workspacePath !== descriptor.history.workspacePath ||
         JSON.stringify(canonical.nativeHandle) !== JSON.stringify(descriptor.history.nativeHandle)) {
@@ -1802,15 +1813,13 @@ export class RuntimeController {
       if (status.run.runId !== control.run.runId) {
         throw new AgentMuxError('Agent Session changed before explicit resume.', 'STALE_AGENT_SESSION')
       }
-      const executor = requireSessionExecutor(config, status.session)
+      const executor = this.sessionExecutorOptions(control.hostId, client, config, status.session)
       const resumed = await client.resumeAgent({
         agentSessionId: control.agentSessionId,
         operationId,
         prompt,
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
-        args: executor.args,
-        env: executor.env,
-        commandOverride: executor.command
+        ...executor
       })
       if (resumed.agentSessionId !== control.agentSessionId) {
         throw new AgentMuxError('Agent resume returned another Session identity.', 'LAUNCH_RESULT_MISMATCH')
@@ -1932,7 +1941,6 @@ export class RuntimeController {
     }
     // Target-owned Sessions reattach without a local template or a fresh command probe.
     // Core resolves its own Executor only if Level B recovery needs a new native Run.
-    const executor = stored.creation?.executorRevision ? undefined : requireSessionExecutor(config, stored)
     const scratch = config.workspaces.find((workspace) => (
       workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
     ))
@@ -1949,13 +1957,13 @@ export class RuntimeController {
         advisory = `Wiki directory association is unconfirmed: ${error instanceof Error ? error.message : String(error)} Agent continuity and input remain available. Retry the original directory repair before the next resume.`
       } finally { clearTimeout(timer) }
     }
+    const executor = this.sessionExecutorOptions(control.hostId, client, config, stored)
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
       operationId,
-      ...(executor ? { args: executor.args, env: {
-        ...executor.env, ...(scratchTopicId ? { AGENTMUX_WIKI_DIR: stored.workspacePath } : {})
-      }, commandOverride: executor.command } : {})
+      ...executor,
+      ...(executor.env && scratchTopicId ? { env: { ...executor.env, AGENTMUX_WIKI_DIR: stored.workspacePath } } : {})
     })
     if (result.kind === 'conflict' && result.reason === 'session-run-changed' && result.currentRun) {
       // A prior recovery whose reply was lost may already own the canonical Run.

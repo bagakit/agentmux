@@ -208,6 +208,7 @@ function sameNativeHandle(a: AgentNativeSessionHandle | undefined, b: AgentNativ
 type NativeHistoryBinding = {
   session: AgentSessionHistoryMetadata
   provider: AgentProvider
+  executorOptions: Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>
   handle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
   readonly transient: boolean
   matches(current: AgentSessionHistoryMetadata, hostId: string, run?: AgentMuxRunRef): boolean
@@ -2104,6 +2105,30 @@ export class AgentMuxClient {
     return descriptor
   }
 
+  /** Resolve private launch/read configuration on its executing Host, never through a client projection. */
+  private async sessionExecutorOptions<T extends Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>>(
+    session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation'>, input: T, historyAgentSessionId?: string
+  ): Promise<T> {
+    const explicit = input.commandOverride !== undefined || input.args !== undefined || input.env !== undefined
+    let targetOwned = session.creation?.executorRevision !== undefined
+    // History locators intentionally carry no creation authority. Only explicit SDK
+    // overrides need this exact active-Session read; ordinary remote reads add no I/O.
+    // A retired locator retains the original explicit SDK read configuration contract.
+    if (historyAgentSessionId !== undefined && explicit) {
+      const retained = await this.store.readMetadata(historyAgentSessionId)
+      targetOwned ||= retained?.executorId === session.executorId && retained.providerId === session.providerId &&
+        retained.creation?.executorRevision !== undefined
+    }
+    if (!targetOwned && explicit) return input
+    if (!this.hostExecutorOwner) {
+      if (targetOwned) throw new AgentMuxError('The target Executor owner is unavailable. The original Session and Run are retained; restore its Host configuration.', 'CONTROL_UNAVAILABLE')
+      return input
+    }
+    const { config } = await this.hostExecutorOwner.resolve(session.executorId)
+    if (config.providerId !== session.providerId) throw new AgentMuxError('The target Executor Provider differs from the retained Session. Its original native identity and Run are retained.', 'EXECUTOR_PROVIDER_CONFLICT')
+    return { ...input, commandOverride: config.command, args: config.args, env: config.env }
+  }
+
   /** Resolve current-source intent once; ordinary durable history remains independent of Runtime. */
   private async nativeHistoryBinding(
     agentSessionId: string,
@@ -2132,14 +2157,16 @@ export class AgentMuxClient {
           await binding.assertCurrent()
           signal.throwIfAborted()
         }
+        const executorOptions = await this.sessionExecutorOptions(binding.session, options, agentSessionId)
         await assertCurrent()
-        return { ...binding, assertCurrent }
+        return { ...binding, executorOptions, assertCurrent }
       }
     }
     const descriptor = await this.historyDescriptor(agentSessionId)
     if (options.cursor === undefined && this.registry.has(agentSessionId)) this.hookNativeWitnesses.delete(this.registry.get(agentSessionId).run.runId)
     const session = descriptor.history
     if (!session) throw new AgentMuxError('No native history locator was retained for this Session.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+    const executorOptions = await this.sessionExecutorOptions(session, options, agentSessionId)
     const provider = this.providers.get(session.providerId)
     if (purpose === 'read' ? !provider.readSessionHistoryPage : !provider.observeSessionHistory) {
       throw new AgentMuxError('This Provider does not support this native history operation. Explicit reading remains available when supported.',
@@ -2223,8 +2250,8 @@ export class AgentMuxClient {
           return current
         }
         const discovered = await provider.discoverNativeSession!({ processId: firstRun.pid,
-          command: resolveAgentExecutable(options.commandOverride, provider.executable),
-          args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath, signal })
+          command: resolveAgentExecutable(executorOptions.commandOverride, provider.executable),
+          args: executorOptions.args ?? [], env: executorOptions.env ?? {}, workspacePath: session.workspacePath, signal })
         signal.throwIfAborted()
         if (!discovered || discovered.handle.kind !== 'provider' || discovered.handle.providerId !== session.providerId ||
           normalizeNativeSessionId(discovered.handle.sessionId) !== discovered.handle.sessionId ||
@@ -2414,7 +2441,7 @@ export class AgentMuxClient {
       if (strictWitness) await strictWitness()
     }
     await assertCurrent()
-    return { session, provider, handle: acceptedHandle, get transient() { return transient }, matches, assertCurrent }
+    return { session, provider, executorOptions, handle: acceptedHandle, get transient() { return transient }, matches, assertCurrent }
   }
 
   /** Read existing Provider conversation history without controlling the Session's Run. */
@@ -2448,6 +2475,7 @@ export class AgentMuxClient {
     try {
       const binding = await read(this.nativeHistoryBinding(agentSessionId, options, controller.signal, 'read'))
       const { session, provider, handle } = binding
+      options = { ...options, ...binding.executorOptions }
       if (!provider.readSessionHistoryPage) {
         throw new AgentMuxError('This Provider does not expose native conversation history.', 'AGENT_SESSION_HISTORY_UNSUPPORTED')
       }
@@ -2487,6 +2515,7 @@ export class AgentMuxClient {
         retained.history?.nativeHandle?.sessionId !== input.source.nativeSessionId
       const binding = await read(this.nativeHistoryBinding(agentSessionId, { ...input, ...(matchesPrevious ? { nativeSource: 'previous' as const } : {}) }, controller.signal, 'read'))
       const { session, provider, handle } = binding
+      input = { ...input, ...binding.executorOptions }
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
       if (source.providerId !== input.source.providerId || source.nativeSessionId !== input.source.nativeSessionId)
         throw new AgentMuxError('The resource belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
@@ -2592,6 +2621,7 @@ export class AgentMuxClient {
     try {
       const binding = await Promise.race([this.nativeHistoryBinding(agentSessionId, options, controller.signal, 'observe'), cancelled])
       const { session, provider, handle, matches } = binding
+      options = { ...options, ...binding.executorOptions }
       if (!provider.observeSessionHistory) {
         throw new AgentMuxError('This Provider does not support automatic native history observation. Explicit Refresh remains available.', 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED')
       }
@@ -4161,6 +4191,8 @@ export class AgentMuxClient {
       if (oldRun?.state.type === 'running') {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
+      // Continuity already froze this configuration together with its capability probe.
+      if (!knownCapability) input = await this.sessionExecutorOptions(current, input)
       const provider = this.providers.get(current.providerId)
       if (reopening && provider.catalog.resumeStrategy.kind !== 'provider-native') {
         throw new AgentMuxError('This Provider does not support continuing its retired native conversation.', 'AGENT_RESUME_UNAVAILABLE')
@@ -4494,12 +4526,7 @@ export class AgentMuxClient {
       handle?.kind === 'provider' &&
       handle.providerId === current?.providerId &&
       (catalog.resumeStrategy.locator !== 'transcript-path' || Boolean(handle.transcriptPath))
-    if (canProbe && current?.creation?.executorRevision) {
-      if (!this.hostExecutorOwner) throw new AgentMuxError('The target Executor owner is unavailable for this native recovery. The original Session is retained.', 'CONTROL_UNAVAILABLE')
-      const { config } = await this.hostExecutorOwner.resolve(current.executorId)
-      if (config.providerId !== current.providerId) throw new AgentMuxError('The target Executor Provider differs from the retained Session.', 'EXECUTOR_PROVIDER_CONFLICT')
-      input = { ...input, commandOverride: config.command, args: config.args, env: config.env }
-    }
+    if (canProbe && current) input = await this.sessionExecutorOptions(current, input)
     const capability = canProbe
       ? await this.probeAgent(current!.providerId, input.commandOverride)
       : null
@@ -4710,6 +4737,7 @@ export class AgentMuxClient {
       input.signal?.throwIfAborted()
       const binding = await read(this.nativeHistoryBinding(input.agentSessionId, input, controller.signal, 'read'))
       const { provider, handle } = binding
+      input = { ...input, ...binding.executorOptions }
       const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
       if (source.providerId !== input.source.providerId || source.nativeSessionId !== input.source.nativeSessionId) {
         throw new AgentMuxError('The question belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
