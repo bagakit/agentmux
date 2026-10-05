@@ -133,6 +133,8 @@ export type AgentMuxAgentSessionStore = {
   load(): Promise<readonly unknown[]>
   loadMetadata(): Promise<readonly AgentMuxStoredAgentSession[]>
   readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
+  /** Resolve one original active/retired source and its reopen correlation, without catalog discovery. */
+  readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null>
   readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null>
   listFuturePromptIntents(agentSessionId: string, options?: { afterIntentId?: string; limit?: number }): Promise<AgentMuxFuturePromptPage>
   /** Metadata and, when supplied, one exact intent change commit under the same Session CAS. */
@@ -1777,6 +1779,13 @@ function reopenCorrelations(reservations: readonly AgentMuxLifecycleReservation[
 /** One bounded catalogue, derived from the existing durable Store. */
 export async function loadSessionHistorySources(store: AgentMuxAgentSessionStore): Promise<AgentSessionHistoryDescriptor[]> {
   const [sessions, retired, correlations] = await Promise.all([loadAgentSessionMetadata(store), store.loadRetiredAgentSessions(), store.loadReopenCorrelations()])
+  return sessionHistorySources(sessions, retired, correlations)
+}
+
+function sessionHistorySources(
+  sessions: readonly AgentMuxStoredAgentSession[], retired: readonly AgentMuxRetiredAgentSession[],
+  correlations: readonly ReturnType<typeof reopenCorrelations>[number][]
+): AgentSessionHistoryDescriptor[] {
   const activeIds = new Set(sessions.map(session => session.agentSessionId))
   const pending = new Map(correlations.map(correlation => [JSON.stringify(correlation.expectedRetirement), correlation]))
   return [
@@ -1980,6 +1989,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
     const value = this.sessions.get(agentSessionId)
     return value ? structuredClone(agentSessionMetadata(value)) : null
+  }
+  async readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null> {
+    const active = this.sessions.get(agentSessionId)
+    const retired = active ? undefined : this.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)
+    const reservation = this.reservations.get(agentSessionId)
+    return sessionHistorySources(active ? [active] : [], retired ? [retired] : [],
+      reservation ? reopenCorrelations([reservation]) : [])[0] ?? null
   }
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
     return structuredClone(this.sessions.get(agentSessionId)?.futurePromptIntents?.[intentId] ?? null)
@@ -2491,6 +2507,23 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         const value = document.sessions.find(session => session.agentSessionId === agentSessionId)
         return value ? agentSessionMetadata(value) : null
       })
+  }
+
+  async readHistorySource(agentSessionId: string): Promise<AgentSessionHistoryDescriptor | null> {
+    await this.tail
+    return await this.withReadDatabase(db => {
+      const active = this.sessionMetadata(db, agentSessionId)
+      if (active) return sessionHistorySources([active], [], [])[0]!
+      const row = db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
+      if (!row) return null
+      const retired = retiredAgentSession(JSON.parse(String(row.json)))
+      const pending = db.prepare('SELECT json FROM reservations WHERE id=?').get(agentSessionId)
+      return sessionHistorySources([], [retired], pending ? reopenCorrelations([lifecycleReservation(JSON.parse(String(pending.json)))]) : [])[0]!
+    }, document => sessionHistorySources(
+      document.sessions.filter(session => session.agentSessionId === agentSessionId),
+      document.retiredAgentSessions.filter(session => session.agentSessionId === agentSessionId),
+      reopenCorrelations(document.reservations.filter(reservation => reservation.agentSessionId === agentSessionId))
+    )[0] ?? null)
   }
 
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
