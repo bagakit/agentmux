@@ -209,6 +209,10 @@
     "./mote-avatar-series": {
       "types": "./dist/mote-avatar-series.d.ts",
       "import": "./dist/mote-avatar-series.js"
+    },
+    "./mote-avatar-write": {
+      "types": "./dist/mote-avatar-write.d.ts",
+      "import": "./dist/mote-avatar-write.js"
     }
   },
   "bin": {

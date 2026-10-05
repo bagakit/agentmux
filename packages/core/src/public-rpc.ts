@@ -1,4 +1,5 @@
-import { AGENTMUX_RPC_MOTE_AVATAR_METHODS, type MoteAvatarSeriesParameterMap, type MoteAvatarSeriesResultMap, type MoteAvatarSeriesMethod } from './mote-avatar-series.js'
+import { AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS, type MoteAvatarParameterMap, type MoteAvatarResultMap, type MoteAvatarMethod } from './mote-avatar-write.js'
+import { AGENTMUX_RPC_MOTE_AVATAR_METHODS } from './mote-avatar-series.js'
 import { AGENTMUX_RPC_TOPIC_METHODS } from './public-rpc-topics.js'
 import type { TopicParameterMap, TopicResultMap, TopicMethod } from './public-rpc-topics.js'
 import { AGENTMUX_RPC_FILE_METHODS } from './public-rpc-files.js'
@@ -177,7 +178,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = MoteAvatarSeriesParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = MoteAvatarParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string }
@@ -224,7 +225,7 @@ type NativeParams = MoteAvatarSeriesParameterMap & TopicParameterMap & HostSetti
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = MoteAvatarSeriesResultMap & TopicResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = MoteAvatarResultMap & TopicResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null }
@@ -273,8 +274,8 @@ type NativeResult = MoteAvatarSeriesResultMap & TopicResultMap & HostSettingsRes
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = MoteAvatarSeriesParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | MoteAvatarSeriesMethod | TopicMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = MoteAvatarParameterMap & TopicParameterMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | MoteAvatarMethod | TopicMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -290,6 +291,7 @@ export type AgentMuxRpcSpacePresentation = {
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_MOTE_AVATAR_METHODS,
+  ...AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS,
   ...AGENTMUX_RPC_TOPIC_METHODS,
   ...AGENTMUX_RPC_FILE_METHODS,
   ...AGENTMUX_RPC_GIT_METHODS,

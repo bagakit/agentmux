@@ -325,6 +325,12 @@ export class ScratchTopics {
     }
   }
 
+  /** Bounded original Mote proof shared by native appearance and the original image owner. */
+  async avatarTargetDirectory(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<string> {
+    await this.requireAvatarObject(workspace, topicId, objectKey)
+    return await this.avatarMoteDirectory(workspace, topicId)
+  }
+
   /** Exact appearance reads need neither the Wiki nor a full library/collaborator snapshot. */
   async topicAppearanceIdentity(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<
     Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath'> & { physicalDirectoryPath: string }> {

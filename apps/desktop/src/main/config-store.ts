@@ -1,6 +1,6 @@
 import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../shared/notes-library.js'
-import { mkdir, readFile } from 'node:fs/promises'
+import { constants, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
@@ -148,6 +148,7 @@ const appearanceSchema = z.object({
   customThemes: z.custom<Record<string, unknown>>(value => value !== null && typeof value === 'object' &&
     !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)).optional(),
   spaceObjectIcons: z.record(z.string(), z.unknown()).optional(),
+  spaceObjectIconRevisions: z.record(z.string(), z.unknown()).optional(),
   agentAvatars: z.record(z.string().min(1), z.object({
     tint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
     badge: z.enum(AGENT_AVATAR_BADGE_IDS).optional()
@@ -1092,6 +1093,26 @@ export class ConfigStore {
 
   async save(value: AppConfig): Promise<AppConfig> {
     return await this.write(value, { enforceExecutorBinding: true })
+  }
+
+  /** A native appearance publication needs the actual file and parent-directory ACK. */
+  async confirmSaved(value: AppConfig): Promise<void> {
+    const expected = Buffer.from(`${JSON.stringify(this.validate(value), null, 2)}\n`)
+    const operation = this.saveTail.then(async () => {
+      const handle = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+      try {
+        const before = await handle.stat()
+        if (!before.isFile()) throw new Error('The original configuration file is unconfirmed.')
+        const bytes = await handle.readFile(), after = await handle.stat()
+        if (!bytes.equals(expected) || after.size !== before.size || after.mtimeMs !== before.mtimeMs)
+          throw new Error('Configuration changed before this save could be durably confirmed. Its current values are retained.')
+        await handle.sync()
+      } finally { await handle.close() }
+      const parent = await open(dirname(this.path), constants.O_RDONLY | constants.O_NOFOLLOW)
+      try { await parent.sync() } finally { await parent.close() }
+    })
+    this.saveTail = operation.then(() => {}, () => {})
+    await operation
   }
 
   /** Validate and normalize at the owner boundary before preparing any Runtime change. */

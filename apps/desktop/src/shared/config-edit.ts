@@ -97,6 +97,8 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
       for (const key of new Set([...Object.keys(old), ...Object.keys(next)])) {
         const previous = old[key], choice = next[key], currentChoice = live[key]
         if (configValuesEqual(previous, choice) || configValuesEqual(currentChoice, choice)) continue
+        if (!configValuesEqual(current.appearance.spaceObjectIconRevisions?.[key], before.appearance.spaceObjectIconRevisions?.[key]))
+          throw new ConfigConflict(`${path}[${JSON.stringify(key)}]`)
         if (!configValuesEqual(currentChoice, previous)) throw new ConfigConflict(`${path}[${JSON.stringify(key)}]`)
         if (!Object.hasOwn(next, key)) delete result[key]
         else Object.defineProperty(result, key, { value: choice, enumerable: true, configurable: true, writable: true })

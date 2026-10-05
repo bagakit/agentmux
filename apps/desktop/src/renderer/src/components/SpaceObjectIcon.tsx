@@ -57,7 +57,7 @@ function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: S
       if (!read.entry.reported) { read.entry.reported = true; useAppStore.getState().reportError(new Error(message)) }
     })
     return () => { current = false; read.release() }
-  }, [workspaceId, topicId, choice, fileName, identity, objectKey])
+  }, [workspaceId, topicId, fileName, identity, objectKey])
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image"
     data-space-avatar={fileName} title={issue ?? 'Mote avatar'} aria-hidden="true">
     <span className="mote-image-follow">{image?.identity === identity ? <img className="space-object-icon__avatar" src={image.url} alt="" draggable={false} /> : <MoteIcon size={14} />}</span>
@@ -91,9 +91,10 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
     {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <ThemeObjectNotebookIcon size={14} />}
   </span>
   if (manualIcon && typeof manualIcon === 'object') {
-    if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={manualIcon} fallback={<ThemeObjectNotebookIcon size={14} />} />
+    const image = manualIcon.kind === 'series' ? manualIcon.image : manualIcon
+    if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={image} fallback={<ThemeObjectNotebookIcon size={14} />} />
     if (!avatarWorkspaceId || !avatarTopicId || !avatarObjectKey) return <span className="space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image" title="Saved avatar target is unavailable" aria-hidden="true"><MoteIcon size={14} /></span>
-    return <MoteAvatar kind={kind} workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={manualIcon} objectKey={avatarObjectKey} />
+    return <MoteAvatar kind={kind} workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={image} objectKey={avatarObjectKey} />
   }
   if (manualIcon !== null) {
     const { Icon, label } = SPACE_ICON_CATALOG[manualIcon]
