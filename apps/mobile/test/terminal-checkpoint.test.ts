@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
@@ -5,13 +6,14 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentMuxRunAttachment, type AgentMuxClientEvent } from '@agentmux/core'
 import type { Terminal as HeadlessTerminal } from '@xterm/headless'
 import { createMobileTerminalReader, type MobileTerminalCanvas, type MobileTerminalReading } from '../src/terminal/reader'
 import { session } from './conversation-fixture'
 
-const require = createRequire(resolve('packages/core/package.json'))
+const repository = fileURLToPath(new URL('../../../', import.meta.url))
+const require = createRequire(resolve(repository, 'packages/core/package.json'))
 const { Terminal } = require('@xterm/headless') as { Terminal: typeof HeadlessTerminal }
 const encode = (text: string) => new TextEncoder().encode(text)
 function contents(terminal: HeadlessTerminal, kind: 'active' | 'normal' = 'active') {
@@ -102,13 +104,14 @@ it('restores the local history policy on a failed parser write and leaves the or
 it('hydrates one real private Core21 checkpoint without changing its live Run, accepted Input or PTY geometry', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amx-mobile-checkpoint-'))
   await mkdir(join(root, 'home/codex'), { recursive: true })
-  for (const [key, value] of Object.entries({ HOME: join(root, 'home'), CODEX_HOME: join(root, 'home/codex'),
+  const originalHomes = Object.fromEntries(['HOME', 'home', 'CODEX_HOME'].map(key => [key, process.env[key]]))
+  for (const [key, value] of Object.entries({
     AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') })) vi.stubEnv(key, value)
   const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')) })
   const sourceFiles = ['apps/mobile/src/terminal/reader.ts', 'apps/mobile/test/terminal-checkpoint.test.ts',
     'packages/core/src/terminal-continuation.ts', 'packages/client-ui/src/terminal/replay.ts']
   const sourceHashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file =>
-    [file, createHash('sha256').update(await readFile(resolve(file))).digest('hex')])))
+    [file, createHash('sha256').update(await readFile(resolve(repository, file))).digest('hex')])))
   const source = await sourceHashes()
   let evidence: Record<string, unknown> | undefined
   let original: Awaited<ReturnType<AgentMuxClient['createAgent']>> | undefined, reader: ReturnType<typeof createMobileTerminalReader> | undefined
@@ -172,7 +175,9 @@ it('hydrates one real private Core21 checkpoint without changing its live Run, a
       parsedCursor: reader.facts().cursor, latestOutputBytes: snapshot.run.latestOutputBytes,
       before: { runId: before.runId, pid: before.pid, state: before.state, cols: before.cols, rows: before.rows, acceptedInputBytes: before.acceptedInputBytes },
       after: { runId: after.runId, pid: after.pid, state: after.state, cols: after.cols, rows: after.rows, acceptedInputBytes: after.acceptedInputBytes },
-      forbidden, normalBufferLines: contents(terminal, 'normal').length, activeBuffer: terminal.buffer.active.type, normalAndAlternateBuffersMatchReference: true }
+      forbidden, normalBufferLines: contents(terminal, 'normal').length, activeBuffer: terminal.buffer.active.type, normalAndAlternateBuffersMatchReference: true,
+      inheritedHomesUnchanged: Object.entries(originalHomes).every(([key, value]) => process.env[key] === value) }
+    expect(evidence.inheritedHomesUnchanged).toBe(true)
   } finally {
     try {
       try { await reader?.dispose() }
@@ -182,7 +187,7 @@ it('hydrates one real private Core21 checkpoint without changing its live Run, a
       finally {
         terminal.dispose(); reference.dispose()
         try {
-          const cleanup = await import(pathToFileURL(resolve('apps/desktop/scripts/probe-process.mjs')).href) as {
+          const cleanup = await import(pathToFileURL(resolve(repository, 'apps/desktop/scripts/probe-process.mjs')).href) as {
             listProbeProcesses(group: number, root: string): Promise<number[]>
             signalOwnedProbeProcess(pid: number, root: string, signal: NodeJS.Signals): Promise<boolean>
           }
@@ -193,7 +198,8 @@ it('hydrates one real private Core21 checkpoint without changing its live Run, a
           const processes = await cleanup.listProbeProcesses(process.pid + 1_000_000_000, root)
           expect(processes).toEqual([])
           if (evidence) evidence.cleanup = processes
-        } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) }
+          await rm(root, { recursive: true, force: true })
+        } finally { vi.unstubAllEnvs() }
       }
     }
   }
