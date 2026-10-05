@@ -41,8 +41,9 @@
 .toolkit-workbench__body { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: var(--sp-7); }
 .toolkit-library, .toolkit-workbench__detail { min-width: 0; }
 .toolkit-library__search { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); padding-inline: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-3); }
-.toolkit-library__search:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.toolkit-library__search:focus-within { border-color: var(--focus-line); }
 .toolkit-library__search input { width: 100%; min-width: 0; flex: 1; border: 0; background: transparent; padding: var(--sp-3) 0; color: var(--text); font: var(--fs-body)/1.5 var(--font-sans); }
+.toolkit-library__search input:focus-visible { outline: none; }
 .toolkit-library__search button { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .toolkit-library__search button:hover { background: var(--wash-3); }
 .toolkit-library__search button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
@@ -169,3 +170,5 @@
 .toolkit-package__source-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .toolkit-package__preview { min-width: 0; }
 .toolkit-package__preview .toolkit-result__script { margin-block: var(--sp-3); height: 220px; }
+
+@media (forced-colors: active) { .toolkit-library__search:focus-within { border-color: Highlight; } }
