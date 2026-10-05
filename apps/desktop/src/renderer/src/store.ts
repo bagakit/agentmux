@@ -3,7 +3,7 @@ import { fileWorkbenchIdentity } from './lib/file-workbench-state'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
 import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
-import { moteDefaultExecutor, moteDefaultConversation } from './lib/mote-quick-preferences'
+import { moteDefaultExecutor, moteDefaultConversation, recentMoteAgentsAfterVisit, restoredRecentMoteAgents, type MoteRecentAgent } from './lib/mote-quick-preferences'
 import { showMoteConversation } from './lib/mote-conversation-mode'
 import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '../../shared/goal-pmo-origin'
 import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
@@ -564,6 +564,8 @@ type AppState = {
   activeWorkspaceId: string | null
   /** 用户拖出来的 Topic 顺序。是一份偏好，不是真相来源——磁盘上没有的不会因它出现。 */
   scratchTopicOrder: string[]
+  recentMoteAgents: Record<string, MoteRecentAgent>
+  rememberMoteAgent(reference: WorkbenchProjectionSelection): void
   setScratchTopicOrder(order: readonly string[]): void
   documents: Record<string, FileDocument>
   retainedDocumentDrafts: Record<string, FileDocument[]>
@@ -2461,6 +2463,7 @@ type PersistedAppState = {
   restoredWorkbench?: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
   scratchTopicOrder?: string[]
+  recentMoteAgents?: Record<string, MoteRecentAgent>
   noticeReadReceipts?: Record<string, Record<string, string>>
   displacedAgentSessionIds?: string[]
   agentNames?: Record<string, string>
@@ -2705,6 +2708,7 @@ function selectPersistedInputs(state: AppState) {
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
     scratchTopicOrder: state.scratchTopicOrder,
+    recentMoteAgents: state.recentMoteAgents,
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
     // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
     agentNames: state.agentNames,
@@ -3455,6 +3459,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   pendingAgentLaunches: {},
   activeWorkspaceId: null,
   scratchTopicOrder: [],
+  recentMoteAgents: {},
+  rememberMoteAgent(reference) {
+    const current = get(), recentMoteAgents = recentMoteAgentsAfterVisit(current, reference)
+    if (recentMoteAgents !== current.recentMoteAgents) set({ recentMoteAgents })
+  },
   documents: {},
   retainedDocumentDrafts: {},
   dirtyDocuments: {},
@@ -4423,9 +4432,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const surface = tab ? titleWorkbenchSurface(tab) : null
     const activeRegion = tab?.regions[tab.layout.activeRegionId]
     const focusedSessionId = activeRegion && isSessionSurface(activeRegion) ? activeRegion.sessionId : null
+    const recentMoteAgents = activeRegion ? recentMoteAgentsAfterVisit(current, { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId: activeRegion.regionId }) : current.recentMoteAgents
     set((state) => ({
       regionCaretFocus: null, workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null,
       retainedSpatialFocus: null, activeWorkspaceId: workspaceId, mainSurface: 'workbench',
+      recentMoteAgents,
       layouts: {
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout, tabGroupId, tabId)
@@ -5777,7 +5788,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         removedTabOrder = current.layouts[workspaceId]?.groups.find(group => group.id === tabGroupId)?.tabOrder ?? []
         collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
         if(removedTab) coreSpatialPersistence?.removeEntity(removedTab.id)
-        return committed
+        const removedTabId = removedTab?.id
+        if (!removedTabId || !Object.values(current.recentMoteAgents).some(agent => agent.tabId === removedTabId)) return committed
+        return { ...committed, recentMoteAgents: Object.fromEntries(
+          Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTabId)) }
       })
       if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabOrder: removedTabOrder }, error => get().reportError(error))
       if (collectionChanged) void saveWorkbenchSelection(false)
@@ -5914,13 +5928,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!tab || !tabGroupId || !tab.regions[regionId]) return
     const surface = tab.regions[regionId]
     const focusedSessionId = isSessionSurface(surface) ? surface.sessionId : null
+    const recentMoteAgents = recentMoteAgentsAfterVisit(get(), { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId })
     if (cause === 'floating-pointer') {
       // The borrowed View owns its local Region, native input and semantic lane. A click inside it
       // does not navigate the main workbench or authorize another Zone's launcher.
       set((state) => {
         const local = focusedSessionId ? focusSessionContext(state, focusedSessionId, undefined,
           { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) : state.agentFocus
-        return { regionCaretFocus: null, ...(local !== state.agentFocus ? { agentFocus: local } : {}) }
+        return { regionCaretFocus: null, recentMoteAgents, ...(local !== state.agentFocus ? { agentFocus: local } : {}) }
       })
       return
     }
@@ -5930,6 +5945,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
     set((state) => ({
       workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
+      recentMoteAgents,
       tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
       layouts: {
         ...state.layouts,
@@ -10246,7 +10262,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

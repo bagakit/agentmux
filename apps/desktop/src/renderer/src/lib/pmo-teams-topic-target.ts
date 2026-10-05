@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { PMO_TEAMS_TOPIC_ID, PMO_TEAMS_TOPIC_TITLE, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
-import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
+import { createPmoTeamsTopicTargetSelector, pmoTeamsTopicFloatingTargetTopicId, pmoTeamsTopicFloatingAgentIssue, type PmoTeamsTopicFloatingState } from './pmo-teams-topic-floating'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { sessionStatusLabel } from './session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from './workbench-session-subscriptions'
@@ -52,20 +52,21 @@ export function usePmoTeamsTopicTarget(floating: PmoTeamsTopicFloatingState) {
   const reference = floating.reference
   const regionId = reference ? reference.tabId === tabId ? reference.regionId : undefined
     : reference === null ? undefined : tab?.layout.activeRegionId
-  const region = regionId ? tab?.regions[regionId] : undefined
-  const session = region?.kind === 'agent'
-    ? sessions.find((session) => session.id === region.sessionId && session.kind === 'agent')
-    : undefined
+  const rawRegion = regionId ? tab?.regions[regionId] : undefined
+  const observedSession = rawRegion?.kind === 'agent'
+    ? sessions.find((session) => session.id === rawRegion.sessionId && session.kind === 'agent') : undefined
+  const identityIssue = pmoTeamsTopicFloatingAgentIssue(floating, tab, observedSession)
+  const region = identityIssue ? undefined : rawRegion, session = identityIssue ? undefined : observedSession
   const topics = useAppStore(state => scratchTopicsForWorkspace(state.scratchTopicSnapshots,
     state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)))
   const moteName = useMemo(() => topics?.find(topic => topic.id === topicId)?.title ??
     (topicId === PMO_TEAMS_TOPIC_ID ? PMO_TEAMS_TOPIC_TITLE : 'Saved Mote'), [topics, topicId])
-  const name = useMemo(() => tab
+  const name = useMemo(() => identityIssue ? moteName : tab
     ? workbenchTabDisplayName(tab, sessions, names, timelines)
-    : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, moteName])
-  const statusText = selectionUnconfirmed ? 'Choose discussion' : moteTargetStatus(tab, session, tabId, regionId ?? null)
+    : tabId ? 'Saved context' : moteName, [tab, tabId, sessions, names, timelines, moteName, identityIssue])
+  const statusText = identityIssue ? 'Original Agent retained' : selectionUnconfirmed ? 'Restoring discussion' : moteTargetStatus(tab, session, tabId, regionId ?? null)
   const label = name === moteName ? moteName : `${moteName} · ${name}`
-  return { topicId, tabId, tab, region, session, name, moteName, label, statusText }
+  return { topicId, tabId, tab, region, session, name, moteName, label, statusText, identityIssue }
 }
 
 export type PmoTeamsTopicTarget = ReturnType<typeof usePmoTeamsTopicTarget>
