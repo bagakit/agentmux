@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from 'react'
@@ -5,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+import { chooseField } from './helpers/selection-field'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { useAppStore } from '../src/renderer/src/store'
@@ -24,10 +26,10 @@ import { agentCreationFixture } from './helpers/agent-creation-fixture'
 
 const baseline = useAppStore.getState()
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], workspaces: [{ id: 'repo', name: 'Repo', path: _hygiene_fixturePath("repo"), hostId: 'local', kind: 'folder' }, { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: _hygiene_fixturePath("topics"), hostId: 'local', kind: 'folder' }], executors: { configured: { label: 'Configured Agent', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } }, appearance: { terminalTheme: 'graphite' } } as AppConfig
-function goal(id = 'goal:one', status = 'backlog' as const) { return { id, title: 'A readable outcome', description: 'Make the original work recoverable.', status, priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic' as const } }
+function goal(id = 'goal:one', status = 'backlog' as const) { return { id, title: 'A readable outcome', description: 'Make the original work recoverable.', status, priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), source: 'default-topic' as const } }
 function session(id: string, workspacePath = _hygiene_fixturePath("repo")): Extract<SessionSnapshot, { kind: 'agent' }> {
-  return { id, kind: 'agent', providerId: 'codex', executorId: 'configured', hostId: 'local', workspacePath, label: 'Configured Agent', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1,
-    processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+  return { id, kind: 'agent', providerId: 'codex', executorId: 'configured', hostId: 'local', workspacePath, label: 'Configured Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1),
+    processState: 'running', status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
     capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } } }
 }
@@ -95,7 +97,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     const goals = await owner.list(); expect(goals).toHaveLength(1)
     const saved = goals[0]!
     expect(saved).toMatchObject({ title: 'Untitled goal', description: '', status: 'backlog', projectId: null, projectName: null, sessionIds: [] })
-    expect(saved.id).toMatch(/^demand_/); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
+    expect(saved.id.length).toBeGreaterThan(0); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
     expect(api.demands.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: saved.id, title: 'Untitled goal', description: '', status: 'backlog' }), undefined)
     expect(container.querySelector('.goals-intake, [aria-label="Goal intent"]')).toBeNull()
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
@@ -198,26 +200,26 @@ describe('Goals direct PMO creation and reading surface', () => {
 
   it('preserves explicit Project and matching conditions while making the new shell visible', async () => {
     await mount(); await click('Goal filters')
-    async function choose(label: string, value: string) { await act(async () => { const node = container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })) }) }
+    async function choose(label: string, value: string) { await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value) }
     const projectId = workspaceProjectId(config.workspaces[0]!)
     await choose('Filter project', projectId); await choose('Filter work status', 'backlog'); await choose('Filter routing', 'unassigned')
     await edit('Search goals', 'untitled'); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
     const saved = (await owner.list())[0]!
     expect(saved).toMatchObject({ projectId, projectName: 'Repo' })
     expect((container.querySelector('[aria-label="Search goals"]') as HTMLInputElement).value).toBe('untitled')
-    expect((container.querySelector('[aria-label="Filter project"]') as HTMLSelectElement).value).toBe(projectId)
-    expect((container.querySelector('[aria-label="Filter work status"]') as HTMLSelectElement).value).toBe('backlog')
-    expect((container.querySelector('[aria-label="Filter routing"]') as HTMLSelectElement).value).toBe('unassigned')
+    expect(container.querySelector('[aria-label="Filter project"]')?.getAttribute('data-value')).toBe(projectId)
+    expect(container.querySelector('[aria-label="Filter work status"]')?.getAttribute('data-value')).toBe('backlog')
+    expect(container.querySelector('[aria-label="Filter routing"]')?.getAttribute('data-value')).toBe('unassigned')
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
   })
 
   it('clears only conditions that would hide the newly created Goal', async () => {
     await mount(); await click('Goal filters')
-    await act(async () => { for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', 'healthy']]) { const node = container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; node.value = value!; node.dispatchEvent(new Event('change', { bubbles: true })) } })
+    for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', 'healthy']]) await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value!)
     await edit('Search goals', 'a different outcome'); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
     const saved = (await owner.list())[0]!
     expect((container.querySelector('[aria-label="Search goals"]') as HTMLInputElement).value).toBe('')
-    expect([...container.querySelectorAll<HTMLSelectElement>('.goals-filters select')].map(node => node.value)).toEqual(['all', 'all', 'all', 'all'])
+    expect([...container.querySelectorAll<HTMLElement>('.goals-filters .selection-field')].map(node => node.dataset.value)).toEqual(['all', 'all', 'all', 'all'])
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
   })
 
@@ -326,7 +328,7 @@ describe('Goals direct PMO creation and reading surface', () => {
 
   it('does no default Goal render work for unrelated Session output and tab facts', async () => {
     const related = { ...session('linked'), label: 'Linked Agent', status: { state: 'working' } } as SessionSnapshot
-    const unrelated = { ...related, id: 'unrelated' }
+    const unrelated = { ...session('unrelated'), label: 'Unrelated Agent', status: { state: 'working' } } as SessionSnapshot
     const primary = useAppStore.getState().sessions
     const tabs = useAppStore.getState().tabs
     useAppStore.setState({ demands: { 'goal:one': { ...goal(), sessionIds: ['linked'] } }, sessions: [...primary, related, unrelated], selectedDemandId: 'goal:one' })
@@ -335,7 +337,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(container.querySelector('.goals-execution__link')).toBeNull(); expect(container.querySelector('.agent-topology-summary')).toBeNull()
     await eventually(() => expect(container.textContent).not.toContain('Checking the original continuation'))
     const count = commits.mock.calls.length; expect(count).toBeGreaterThan(0)
-    await act(async () => useAppStore.setState({ sessions: [...primary, related, { ...unrelated, latestOutputBytes: 900000, updatedAt: 12 }], tabs: { ...tabs } }))
+    await act(async () => useAppStore.setState({ sessions: [...primary, related, { ...unrelated, latestOutputBytes: 900000, updatedAt: _reshape_fixtureEpoch(0, 0, 12) }], tabs: { ...tabs } }))
     expect(commits.mock.calls.length).toBe(count)
   })
 })

@@ -102,19 +102,19 @@ async function directScenes() {
  await evaluate('goalsVisual.seedDirect();goalsVisual.appearance("light")');await size(1280)
  assert.equal(await evaluate('document.querySelectorAll("[data-demand-id]").length'),0)
  if(scope!=='direct-reading-only')await capture('1280-light-direct-empty',1280)
- await click(button('Goal filters'));await evaluate(`(()=>{const e=document.querySelector('[aria-label="Filter project"]');e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`);await click(button('Goal filters'))
+ await click(button('Goal filters'));await click(button('Filter project'));await click(`document.querySelector('[role="menuitemradio"]:not([data-value="all"])')`);await click(button('Goal filters'))
  await evaluate('goalsVisual.appearance("dark")');await click('document.querySelector("button[data-new-goal]")')
  await waitFor('goalsVisual.directFacts().request===null && Boolean(goalsVisual.directFacts().tabId)')
  const created=await evaluate('goalsVisual.directFacts()')
  assert.deepEqual(created.creates,[created.goal.id]);assert.equal(created.goal.description,'');assert.equal(created.goal.status,'backlog');assert.equal(created.goal.alignment,undefined);assert.equal(created.topicId,created.pmoTopic)
- assert.equal(created.launches.length,1);assert.ok(created.launches[0].prompt.includes(`existing Goal ${created.goal.id}`));assert.ok(created.launches[0].prompt.includes('existing undefined Goal draft'));assert.equal(created.floating.targetTabId,created.tabId)
+ assert.equal(created.launches.length,1);assert.equal(created.launches[0].prompt,'Clarify goal');assert.ok(created.launches[0].agentMuxNote.includes(`existing Goal ${created.goal.id}`));assert.ok(created.launches[0].agentMuxNote.includes('existing undefined Goal draft'));assert.equal(created.floating.targetTabId,created.tabId)
  assert.equal(await evaluate('document.querySelector("[data-demand-id]").classList.contains("goals-row--undefined")'),true)
  result.observations.push({scene:'actual-new-goal',facts:created});await visibleDirectPmo(created.tabId)
  await waitFor('document.querySelectorAll("[data-pmo-teams-topic-floating] .conversation-native-thread__record").length===2')
  const native = await evaluate(`({ records: document.querySelectorAll('[data-pmo-teams-topic-floating] .conversation-native-thread__record').length,
    meaningfulAnswer: document.querySelector('[data-pmo-teams-topic-floating] .conversation-native-thread')?.textContent.includes('你希望通过这次尝试，解决什么问题？') ?? false,
    rulers: document.querySelectorAll('[data-pmo-teams-topic-floating] .activity-ruler').length })`)
- assert.deepEqual(native, { records: 2, meaningfulAnswer: true, rulers: 0 }, 'Actual public reader consumes both nonempty preview records without an empty observation ruler')
+ assert.deepEqual(native, { records: 2, meaningfulAnswer: true, rulers: 1 }, 'Actual public reader consumes both nonempty preview records with the shared conversation ruler')
  result.observations.push({scene:'direct-preview-native-body',native,wireBoundary:'Exact captured Renderer request; Core guide/Notes and real CLI delivery excluded'})
  await capture('1280-dark-direct-goal-pmo',1280)
  await size(620);assert.equal((await evaluate('goalsVisual.directFacts()')).goal.id,created.goal.id);await visibleDirectPmo(created.tabId);await capture('620-dark-direct-goal-pmo',620)
@@ -129,7 +129,7 @@ async function directScenes() {
  const readback=await evaluate('goalsVisual.directFacts()');assert.equal(readback.goal.id,unknown.request.id);assert.deepEqual(readback.creates,[unknown.request.id]);assert.equal(readback.launches.length,1)
  await click(button('Close Mote'));await evaluate('goalsVisual.seedDirect("pmo");goalsVisual.appearance("dark")');await size(620);await click('document.querySelector("button[data-new-goal]")')
  await waitFor('goalsVisual.directFacts().request?.phase==="pmo" && !goalsVisual.directFacts().request.pending')
- const failed=await evaluate('goalsVisual.directFacts()');assert.equal(failed.surface.kind,'launcher');assert.ok(failed.draft.includes(`existing Goal ${failed.goal.id}`));assert.equal(failed.floating.targetTabId,failed.tabId)
+ const failed=await evaluate('goalsVisual.directFacts()');assert.equal(failed.surface.kind,'launcher');assert.equal(failed.draft,'Clarify goal');assert.ok(failed.draftNote.includes(`existing Goal ${failed.goal.id}`));assert.equal(failed.floating.targetTabId,failed.tabId)
  assert.equal(failed.tabName,'PMO · '+failed.goal.title)
  result.observations.push({scene:'pmo-failure',facts:failed});await visibleDirectPmo(failed.tabId);await visibleDirectLauncherFooter();await capture('620-dark-direct-pmo-unknown',620)
  await click(button('Close Mote'));await evaluate('goalsVisual.restoreDirectService()');await click(button('重试专属讨论'));await waitFor('goalsVisual.directFacts().request===null')
@@ -147,7 +147,10 @@ app.whenReady().then(async()=>{
   await phase('loading-compiled-renderer');await win.loadFile(html);await phase('loaded-compiled-renderer');win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   await phase('waiting-for-original-mounted-goals');await waitFor('Boolean(window.goalsVisual) && document.querySelectorAll("[data-demand-id]").length===6');await phase('original-goals-mounted')
   const originalRuns=await evaluate('goalsVisual.facts().runs');assert.ok(originalRuns.length>0,'Original preview Runs exist')
-  if(scope==='project-links-only'||scope==='project-file-display-only'){
+  if(scope==='cohesion-only'){
+   const key=async(key,windowsVirtualKeyCode)=>{for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key,windowsVirtualKeyCode});await paint()}
+   await require('./cohesion.cjs')({evaluate,size,click,capture,button,key,paint,waitFor,result})
+  }else if(scope==='project-links-only'||scope==='project-file-display-only'){
    await require('./project-links.cjs')({evaluate,size,click,capture,waitFor,result,fileDisplayOnly:scope==='project-file-display-only'})
   }else if(scope==='goal-main-mote-only'){
    await require('./main-mote.cjs')({evaluate,size,click,capture,waitFor,result,visibleDirectPmo})

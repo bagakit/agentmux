@@ -9,18 +9,26 @@ import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from './probe
 
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..'), require = createRequire(import.meta.url)
 const copy = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-goals-maturity-mutation-"))), copiedDesktop = join(copy, 'apps/desktop')
-assert.ok(process.argv.slice(2).every(flag=>['--return-only','--density-only'].includes(flag)), 'Unknown maturity mutation mode')
+assert.ok(process.argv.slice(2).every(flag=>['--return-only','--density-only','--cohesion-only'].includes(flag)), 'Unknown maturity mutation mode')
 const densityOnly=process.argv.includes('--density-only')
+const cohesionOnly=process.argv.includes('--cohesion-only')
+assert.ok(!cohesionOnly || process.argv.slice(2).length === 1, 'Cohesion mutations are one bounded mode')
 const evidenceRoot=process.env.AGENTMUX_GOALS_MUTATION_EVIDENCE_ROOT||join(repository,'.tmp/goals-page-maturity-mutations')
 const evidence = join(evidenceRoot, ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
 const densityBaseline=process.env.AGENTMUX_GOALS_DENSITY_BASELINE||join(process.env.AGENTMUX_GOALS_EVIDENCE_ROOT||join(repository,'.tmp/goals-surface'),'density-baseline.json')
 const component = 'src/renderer/src/components/GlobalBoardSurface.tsx', alignment = 'src/renderer/src/components/GoalAlignment.tsx', css = 'src/renderer/src/styles/goals.css'
-const inputs = [component, alignment, css, 'src/renderer/src/components/GoalsCommonActions.tsx', 'src/renderer/src/components/GoalProperties.tsx', 'src/renderer/src/lib/goal-presentation.ts', 'src/renderer/src/lib/workspace-projects.ts', ...(!densityOnly?['test/goals-page-maturity.test.tsx']:[]), 'scripts/fixtures/goals-surface/entry.tsx', 'scripts/fixtures/goals-surface/maturity.cjs']
+const inputs = [component, alignment, css, 'src/renderer/src/components/GoalDetail.tsx', 'src/renderer/src/components/GoalsCommonActions.tsx', 'src/renderer/src/components/GoalProperties.tsx', 'src/renderer/src/lib/goal-presentation.ts', 'src/renderer/src/lib/workspace-projects.ts', ...(!densityOnly?['test/goals-page-maturity.test.tsx']:[]), 'scripts/fixtures/goals-surface/entry.tsx', 'scripts/fixtures/goals-surface/maturity.cjs']
 const original = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(desktop, file))])))
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const hashes = values => Object.fromEntries([...values].map(([file, bytes]) => [file, digest(bytes)]))
-const receipt = { schema: 'agentmux.goals-page-maturity-mutations.v1', mode:densityOnly?'density':'maturity', passed: false, sharedTreeMutations: 0, userRunTouched: false, sourceBefore: hashes(original), cases: [] }
-const unitCases = [
+const receipt = { schema: 'agentmux.goals-page-maturity-mutations.v1', mode:cohesionOnly?'cohesion':densityOnly?'density':'maturity', passed: false, sharedTreeMutations: 0, userRunTouched: false, sourceBefore: hashes(original), cases: [] }
+const unitCases = cohesionOnly ? [
+  { label: 'menu-escape-closes-original-goal', file: component, before: `    if ((event.target as HTMLElement).closest('[role="menu"], [role="dialog"]')) return\n`, after: '', test: 'dismisses Goal actions and delete confirmation', assertion: 'Menu Escape keeps the original Goal open' },
+  { label: 'chosen-status-filter-disconnected', file: component, before: 'onValueChange={value => setStatusFilter(value as typeof statusFilter)}', after: "onValueChange={value => setStatusFilter('all')}", test: 'keeps the selected filter and Goal', assertion: 'Chosen work status filters the current original Goals' },
+  { label: 'filtered-board-hides-match-behind-empty-columns', file: component, before: "const visibleStatuses = statusFilter === 'all' ? DEMAND_STATUS_IDS : [statusFilter]", after: 'const visibleStatuses = DEMAND_STATUS_IDS', test: 'keeps the selected filter and Goal', assertion: 'Explicit status filtering presents only its matching board column' },
+  { label: 'modal-menu-leaks-pointer-lock', file: 'src/renderer/src/components/GoalDetail.tsx', before: '<Menu.Root modal={false}>', after: '<Menu.Root>', test: 'dismisses Goal actions and delete confirmation', assertion: 'Goal actions menu keeps the surrounding workbench nonmodal' },
+  { label: 'delete-cancel-loses-action-focus', file: 'src/renderer/src/components/GoalDetail.tsx', before: 'actionsRef.current?.focus(); setDeleteRequested(true)', after: 'setDeleteRequested(true)', test: 'dismisses Goal actions and delete confirmation', assertion: 'Cancelling delete returns focus to Goal actions' }
+] : [
   { label: 'current-row-fact-disconnected', file: component, before: 'goalNextStep(demand)', after: "'Open a goal'", test: 'states current facts in nonempty rows', assertion: 'Goal rows describe actual current target/result facts' },
   { label: 'selected-goal-common-owner-uncompacted', file: component, before: 'contextCompact={Boolean(selectedDemandId)}', after: 'contextCompact={false}', test: 'temporarily compacts the same common instance', assertion: 'Selected Goal compacts entry without replacing its draft owner' },
   { label: 'opaque-project-binding-dropped', file: alignment, before: '.find(project => project.id === demand.projectId)', after: '.find(() => false)', test: 'opens opaque Project evidence through its preferred Workspace', assertion: 'Opaque Project resolves the preferred Workspace in the actual file pipeline' }
@@ -84,7 +92,7 @@ async function mutate(mutation, run) {
 }
 try {
   await mkdir(evidence, { recursive: true }); await mkdir(copiedDesktop, { recursive: true })
-  for (const directory of ['src', 'resources', 'scripts/fixtures/goals-surface', ...(!densityOnly?['test/helpers']:[])]) await cp(join(desktop, directory), join(copiedDesktop, directory), { recursive: true })
+  for (const directory of ['src', 'resources', 'scripts/lib', 'scripts/fixtures/goals-surface', ...(!densityOnly?['test/helpers']:[])]) await cp(join(desktop, directory), join(copiedDesktop, directory), { recursive: true })
   if(!densityOnly)await cp(join(desktop, 'test/goals-page-maturity.test.tsx'), join(copiedDesktop, 'test/goals-page-maturity.test.tsx'))
   await symlink(join(desktop, 'node_modules'), join(copiedDesktop, 'node_modules')); await symlink(join(repository, 'node_modules'), join(copy, 'node_modules')); await symlink(join(repository, 'packages'), join(copy, 'packages'))
   for (const file of ['package.json', 'tsconfig.base.json', 'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts']) await cp(join(repository, file), join(copy, file))
@@ -98,8 +106,11 @@ try {
     for (const mutation of unitCases) await mutate(mutation, unit)
   }
   if(densityOnly){const bytes=await readFile(densityBaseline);receipt.densityBaseline={path:densityBaseline,sha256:digest(bytes),sourceCommit:JSON.parse(bytes).sourceCommit}}
-  receipt.renderBaseline = await render('render-baseline-green',densityOnly?'density-start-only':undefined); assert.equal(receipt.renderBaseline.outcome.exitCode, 0, JSON.stringify(receipt.renderBaseline.render.failure)); assert.equal(receipt.renderBaseline.render.passed, true)
-  for (const mutation of densityOnly?densityCases:renderCases.filter(item => !returnOnly || item.label === 'returned-focus-under-scrollbar')) await mutate(mutation, render)
+  if (!cohesionOnly) {
+    receipt.renderBaseline = await render('render-baseline-green',densityOnly?'density-start-only':undefined); assert.equal(receipt.renderBaseline.outcome.exitCode, 0, JSON.stringify(receipt.renderBaseline.render.failure)); assert.equal(receipt.renderBaseline.render.passed, true)
+    for (const mutation of densityOnly?densityCases:renderCases.filter(item => !returnOnly || item.label === 'returned-focus-under-scrollbar')) await mutate(mutation, render)
+  }
+  if(cohesionOnly)assert.equal(receipt.cases.length,5,'All five concrete interaction faults proved behavioral RED and exact restore GREEN')
   if(densityOnly)assert.equal(receipt.cases.length,2,'Exactly two actual production density seams proved assertion RED and exact restore GREEN')
   receipt.sourceAfter = hashes(new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(desktop, file))])))); assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
   receipt.copyAfter = hashes(new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(copiedDesktop, file))])))); assert.deepEqual(receipt.copyAfter, receipt.sourceBefore)
