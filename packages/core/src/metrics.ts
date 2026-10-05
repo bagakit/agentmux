@@ -134,6 +134,11 @@ const inputPerformanceParser = record({ startedAt: number, started: count, compl
 const clientPerformanceParser = record({ processId: count, observedAt: number, input: inputPerformanceParser,
   carrier: record({ encoded: timingParser, decodedFrames: timingParser, decodedValues: timingParser,
     encodedBytes: count, encodedFrames: count, decodedBytes: count, rejected: count }) })
+/** Validate one source before combining it with independent local and Host facts. */
+export function parseClientPerformanceDiagnostics(value: unknown): ClientPerformanceDiagnostics {
+  clientPerformanceParser(value)
+  return value as ClientPerformanceDiagnostics
+}
 const diagnosticsParser = record({ main: clientPerformanceParser,
   hosts: boundedArray(64, record({ hostId: identity, data: nullable(clientPerformanceParser), unavailable: nullable(text) })),
   omittedHosts: count, storage: nullable(record({ location: literal('main-user-home-volume'), availableBytes: count, totalBytes: count })), storageUnavailable: nullable(text), eventLoop: record({ resolutionMs: literal(20), generation: count, count, meanMs: nullable(number), maxMs: nullable(number) }) })
