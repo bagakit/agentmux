@@ -98,7 +98,10 @@ describe('public metrics Control owner', () => {
     const phases: boolean[] = []
     const dispose = vi.fn(() => phases.push(serverSocket.destroyed))
     const { owner, path } = await server({ async subscribe(push) { push(observation()); return { dispose } } })
-    ;(owner as unknown as { server: Server }).server.once('connection', socket => { serverSocket = socket })
+    const accept = (owner as unknown as { accept(socket: Socket): void }).accept
+    vi.spyOn(owner as unknown as { accept(socket: Socket): void }, 'accept').mockImplementation(socket => {
+      serverSocket = socket; accept.call(owner, socket)
+    })
     const socket = await raw(path, 'metrics.get')
     const frame = await firstFrame(socket)
     expect(frame).toMatchObject({ jsonrpc: '2.0', id: base.requestId, result: { observation: { process: { data: [{ runId: 'healthy-run' }] } } } })
@@ -113,9 +116,11 @@ describe('public metrics Control owner', () => {
       for (let i = 0; i < 50; i++) push({ ...observation(), observedAt: 1000 + i })
       return { dispose }
     } })
-    ;(owner as unknown as { server: Server }).server.once('connection', socket => {
+    const accept = (owner as unknown as { accept(socket: Socket): void }).accept
+    vi.spyOn(owner as unknown as { accept(socket: Socket): void }, 'accept').mockImplementation(socket => {
       serverSocket = socket
       ;(socket as any)._writableState.highWaterMark = 1
+      accept.call(owner, socket)
     })
     const frames: any[] = [], ended = vi.fn()
     const subscription = await metricsWatch(path, { onFrame: value => frames.push(value), onEnd: ended })
