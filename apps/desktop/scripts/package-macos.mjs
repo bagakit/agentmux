@@ -25,7 +25,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
-import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
+import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload, semanticHostProcessIds } from './package-semantic-host.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -750,14 +750,10 @@ async function quitInstalledApplication(appPath, originalOwners = [], semanticHo
   const semanticOwner = semanticHost ? (await inspectSemanticHostForInstall(semanticHost)).row : null
   // Only this positively identified namespace has a separate shutdown owner.
   // Other Main workers and unreadable modes retain their ordinary birth pins.
-  const guiOwners = scope => scope.serving.filter(pid => {
-    if (!semanticOwner || pid !== semanticOwner.pid) return true
-    const row = scope.processes.find(candidate => candidate.pid === pid)
-    const mode = scope.nodeModes.find(candidate => candidate.pid === pid)
-    return !(row?.birth === semanticOwner.birth && mode?.mode === 'node' &&
-      mode.uid === semanticOwner.uid && mode.birth === row.birth && mode.ppid === row.ppid &&
-      mode.executable === join(appPath, 'Contents/MacOS/AgentMux'))
-  })
+  const guiOwners = scope => {
+    const semantic = semanticOwner ? semanticHostProcessIds(appPath, semanticOwner, scope) : new Set()
+    return scope.serving.filter(pid => !semantic.has(pid))
+  }
   const scope = await scopedProcesses(appPath, originalOwners)
   const running = guiOwners(scope), { crashReporter, processes } = scope
   const previousOwners = processes.filter(row => running.includes(row.pid))
@@ -908,7 +904,8 @@ export async function installApplication(appPath, { intent = installIntent, home
       semanticHost = await prepareSemanticHostReload(currentPath, next)
       // A semantic worker may still be parented by the GUI. Its explicit
       // namespace owner above, rather than general Node classification, owns exit.
-      running = running.filter(pid => pid !== semanticHost?.owner.pid)
+      const semantic = semanticHost ? semanticHostProcessIds(currentPath, semanticHost.owner, previousScope) : new Set()
+      running = running.filter(pid => !semantic.has(pid))
     }
     if (running.length > 0) before = await qualifyUi(currentPath, null, { outgoing: true })
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)

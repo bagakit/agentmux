@@ -76,6 +76,28 @@ const operations = { bootstrap, processRow, processes: observeApplicationProcess
   source: packageSource, bundleImage, processImage,
   signal: (pid, signal) => process.kill(pid, signal), wait, now: () => Date.now() }
 
+/** Only bound Node ancestry belongs to the already-confirmed semantic namespace. */
+export function semanticHostProcessIds(app, owner, processes) {
+  const rows = new Map(processes.processes.map(row => [row.pid, row]))
+  const modes = new Map(processes.nodeModes.map(mode => [mode.pid, mode]))
+  const bound = row => {
+    const mode = row && modes.get(row.pid)
+    return mode?.mode === 'node' && mode.uid === owner.uid && mode.birth === row.birth &&
+      mode.ppid === row.ppid && mode.executable === scope(app).executable
+  }
+  const root = owner && rows.get(owner.pid), selected = new Set()
+  if (!root || root.birth !== owner.birth || !bound(root)) return selected
+  for (const row of rows.values()) {
+    let ancestor = row
+    const visited = new Set()
+    while (ancestor && bound(ancestor) && !visited.has(ancestor.pid)) {
+      if (ancestor.pid === owner.pid) { selected.add(row.pid); break }
+      visited.add(ancestor.pid); ancestor = rows.get(ancestor.ppid)
+    }
+  }
+  return selected
+}
+
 export async function prepareSemanticHostReload(currentApp, candidateApp, ops = operations) {
   const originalSource = await ops.source(currentApp), candidateSource = await ops.source(candidateApp)
   if (originalSource === candidateSource) return null
@@ -107,11 +129,16 @@ export async function inspectSemanticHostForInstall(plan, ops = operations) {
 export async function stopSemanticHostForInstall(plan, ops = operations) {
   if (!plan) return null
   const { processes, row } = await inspectSemanticHostForInstall(plan, ops)
-  fail(processes.serving.filter(pid => pid !== row.pid).length === 0 && processes.externalNode.includes(row.pid),
+  const namespace = semanticHostProcessIds(plan.currentApp, row, processes)
+  const original = processes.processes.filter(process => namespace.has(process.pid))
+  fail(processes.serving.filter(pid => !namespace.has(pid)).length === 0 && processes.externalNode.includes(row.pid),
     'The original GUI has not exited normally; its Semantic Host and Runs are retained.')
   ops.signal(row.pid, 'SIGTERM')
   const deadline = ops.now() + 10000
-  while (await ops.processRow(row.pid)) {
+  while ((await Promise.all(original.map(async process => {
+    const current = await ops.processRow(process.pid)
+    return current?.birth === process.birth
+  }))).some(Boolean)) {
     fail(ops.now() < deadline, 'The Semantic Host has not completed normal shutdown. No force kill or Native signal was attempted.')
     await ops.wait(100)
   }
