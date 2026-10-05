@@ -62,6 +62,22 @@ async function publicFixture() {
 }
 
 describe('public durable Dispatch authority', () => {
+  it('admits only exact deduplicated participants when the unrelated Session catalogue is unavailable', async () => {
+    const f = await publicFixture()
+    await f.queue.append(message('source'))
+    await f.queue.append(message('question', 'worker', 'owner', 'source'))
+    const catalog = vi.spyOn(f.store, 'loadMetadata').mockRejectedValue(new Error('unrelated catalogue unavailable'))
+    const read = vi.spyOn(f.store, 'readMetadata')
+    await f.client.openDispatch({ ...f.input('owner'), sourceMessageId: 'source' })
+    read.mockClear()
+    const reported = await f.client.recordDispatchEvent({ ...f.input('worker'), sourceMessageId: 'source', replyMessageId: 'question', kind: 'question' })
+    // Caller capture precedes the queue lock; its capability/Run is checked again
+    // inside the lock. Repeated sender/recipient references share one exact read.
+    expect(read.mock.calls.map(([id]) => id).sort()).toEqual(['owner', 'worker', 'worker'])
+    expect(catalog).not.toHaveBeenCalled()
+    expect(reported.events).toEqual([expect.objectContaining({ replyMessageId: 'question', kind: 'question' })])
+    expect((await f.client.showDispatch({ ...f.input('owner'), sourceMessageId: 'source' })).events).toEqual(reported.events)
+  })
   it('persists open and report facts before replaying them through a fresh journal owner', async () => {
     const f = await publicFixture()
     await f.queue.append(message('source'))
