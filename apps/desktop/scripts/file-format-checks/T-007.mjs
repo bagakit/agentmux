@@ -8,6 +8,7 @@ export const sources = [
   'packages/client-ui/src/lib/markdown-render.ts', 'packages/client-ui/src/lib/markdown-render-job.ts', 'packages/client-ui/src/lib/markdown-render.worker.ts'
 ]
 export const mutations = [
+  { label: 'markdown-job-requires-secure-context-crypto', file: 'packages/client-ui/src/lib/markdown-render-job.ts', before: 'id: String(++nextJobId)', after: 'id: crypto.randomUUID()' },
   { label: 'math-grammar-disconnected', file: sources[0], before: '.use(remarkMath)', after: '' },
   { label: 'markdown-host-starts-hidden', file: sources[2], before: 'inView && diagram && renderDiagram', after: 'diagram && renderDiagram' },
   { label: 'code-grammar-disconnected', file: sources[4], before: 'return highlighter.highlight(code, { language, ignoreIllegals: true }).value', after: 'return code' },

@@ -4,6 +4,8 @@ type Job = { id: string; input: MarkdownRenderInput; signal: AbortSignal; resolv
 type Slot = { worker: Worker; job: Job | null }
 const queue: Job[] = [], slots = new Set<Slot>()
 const CONCURRENCY = 2
+// Correlation is local to this pool, including replies from a reused Worker.
+let nextJobId = 0
 const cancelled = () => new DOMException('Markdown preview cancelled.', 'AbortError')
 
 function retire(slot: Slot) {
@@ -60,7 +62,7 @@ export function requestMarkdownRender(input: MarkdownRenderInput, signal: AbortS
   const message = markdownRenderLimit(input)
   if (message) return Promise.resolve({ message })
   return new Promise((resolve, reject) => {
-    const job: Job = { id: crypto.randomUUID(), input, signal, resolve, reject, abort() {
+    const job: Job = { id: String(++nextJobId), input, signal, resolve, reject, abort() {
       const index = queue.indexOf(job)
       if (index >= 0) queue.splice(index, 1)
       const slot = [...slots].find(candidate => candidate.job === job)
