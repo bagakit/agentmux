@@ -121,7 +121,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
       onCompositionStart={event => { composing.current = true; dismiss(); ime.compositionStart(event.currentTarget.value) }}
       onCompositionUpdate={event => ime.compositionUpdate(event.currentTarget.value)}
       onCompositionEnd={event => { composing.current = false; setFiltering(true); ime.compositionEnd(event.currentTarget.value) }}
-      onFocus={event => { onFocus?.(event); if (!composing.current) { setOpen(true); void reload() } }}
+      onFocus={event => { onFocus?.(event); if (!composing.current) { setFiltering(false); setOpen(true); void reload() } }}
       onClick={event => { onClick?.(event); if (!open && !composing.current) { setOpen(true); void reload() } }}
       onBlur={event => { onBlur?.(event); if (!panel.current?.contains(event.relatedTarget as Node)) dismiss() }}
       onContextMenu={event => { event.stopPropagation(); dismiss(); onContextMenu?.(event) }}
