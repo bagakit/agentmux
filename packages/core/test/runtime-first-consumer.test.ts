@@ -22,11 +22,12 @@ it('public Runtime-first factory preserves controls during observation and the o
     AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') }
   const fixture = join(core, 'test/fixtures/runtime-first-consumer.mjs')
   try {
-    for (let attempt = 0; ; attempt++) {
+    const startupDeadline = Date.now() + 30_000
+    for (;;) {
       if (spawnError) throw spawnError
       if (daemon.exitCode !== null) throw new Error(`Private daemon exited: ${stderr}`)
       try { if (!(await stat(socket)).isSocket()) throw new Error('Private daemon is still starting'); await exec(join(native, 'ctxmux'), ['--socket', socket, 'ping'], { timeout: 1000 }); break }
-      catch (error) { if (attempt === 200) throw error; await new Promise(resolve => setTimeout(resolve, 10)) }
+      catch (error) { if (Date.now() >= startupDeadline) throw new Error(`Private daemon did not become ready: ${stderr}`, { cause: error }); await new Promise(resolve => setTimeout(resolve, 20)) }
     }
     const identity = join(root, 'identity.json')
     const first = await exec(process.execPath, [fixture, 'first', identity], { cwd: core, env, timeout: 30000, maxBuffer: 128 * 1024 })
