@@ -7,10 +7,10 @@ export const sources = [
   'apps/desktop/src/renderer/src/lib/file-formats/format-support.ts',
   'apps/desktop/src/renderer/src/lib/file-formats/monaco-format-adapter.ts',
   'apps/desktop/src/renderer/src/components/FileSourceEditor.tsx', 'apps/desktop/src/renderer/src/components/EditorPane.tsx',
-  'packages/core/test/helpers/workface-cli.ts', 'packages/core/test/helpers/object-cli-receipt.ts',
+  'packages/core/test/helpers/workface-cli.ts', 'packages/core/test/helpers/object-cli-receipt.ts', 'packages/core/test/helpers/object-cli-rpc.ts',
   'packages/core/src/space-control.ts', 'packages/core/src/control.ts', 'packages/core/src/space-control-parser.ts',
   'packages/core/src/rpc-business-codec.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/agentmux.ts',
-  'packages/core/src/agentmux-cli-commands.ts', 'packages/core/bin/agentmux',
+  'packages/core/src/agentmux-cli-commands.ts', 'packages/core/bin/amux',
   'apps/desktop/src/shared/workspace-file-format.ts'
 ]
 export const mutations = [
