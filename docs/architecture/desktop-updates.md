@@ -47,7 +47,7 @@ Source releases and the installer fingerprint the actual ctxmux artifact directo
 
 ### Running application and Runtime continuity
 
-The installer compares the actual installed and candidate host artifacts before requesting quit. For an existing workbench, an unchanged Native fingerprint does not replace the public SDK's positive confirmation of the serving Runtime and original Runs. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
+The installer compares the actual installed and candidate host artifacts before requesting quit. For an existing workbench, an unchanged Native fingerprint does not replace the public SDK's positive confirmation of the serving Runtime and original Runs. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. The confirmed semantic Host and its bound Node descendants belong to that namespace, rather than the GUI quit barrier. The installer signals only the Host after normal GUI exit and waits for its original workers to close themselves; unknown modes, changed identities and other GUI workers remain protected. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
 
 ### Native handoff
 
