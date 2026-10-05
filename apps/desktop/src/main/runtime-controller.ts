@@ -2137,14 +2137,38 @@ export class RuntimeController {
 
   private async authorizedCallerHost(input: { agentSessionId: string; capability: string }): Promise<RuntimeHost> {
     const hosts = [...this.hosts.values()]
-    let lastError: unknown
-    for (const host of hosts) {
-      try {
-        await host.client.authorizeAgentCaller(input.capability, input.agentSessionId)
-        return host
-      } catch (error) { lastError = error }
+    // A known exact route avoids unrelated handshakes. Its projection is only a hint:
+    // confirm the nonsecret durable identity before sending the capability to its owner.
+    const known = hosts.filter(host => (host.config.kind !== 'ssh' || runtimeOwner(host.client)?.availability === 'connected') &&
+      host.client.agentSessions().some(session => session.agentSessionId === input.agentSessionId))
+    const scopes = known.length === 1 ? known : hosts
+    const observed = await Promise.allSettled(scopes.map(async host => {
+      this.assertObservationHostConnection(host.config.id, host)
+      const ownerRuntimeId = runtimeOwner(host.client)?.runtimeId
+      const sessions = await host.client.readAgentSessions()
+      return { host, ownerRuntimeId, owns: sessions.some(session => session.hostId === 'local' && session.agentSessionId === input.agentSessionId) }
+    }))
+    const owners = observed.flatMap(result => result.status === 'fulfilled' && result.value.owns ? [result.value] : [])
+    if (owners.length > 1) {
+      throw new AgentMuxError('The caller Session has multiple authoritative Host routes. Select its original owner; no capability was sent.', 'AMBIGUOUS_AGENT_SESSION')
     }
-    throw lastError instanceof Error ? lastError : new AgentMuxError('Agent caller capability could not be verified.', 'AGENT_CAPABILITY_INVALID')
+    const unconfirmed = observed.find(result => result.status === 'rejected')
+    if (unconfirmed?.status === 'rejected') {
+      throw unconfirmed.reason instanceof AgentMuxError ? unconfirmed.reason
+        : new AgentMuxError('The caller Session owner could not be confirmed. Refresh the original Host without replaying this operation.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+    }
+    const owner = owners[0]
+    if (!owner) throw new AgentMuxError('The caller Session has no confirmed owner.', 'UNKNOWN_AGENT_SESSION')
+    const assertOwner = () => {
+      if (this.hosts.get(owner.host.config.id) !== owner.host || runtimeOwner(owner.host.client)?.runtimeId !== owner.ownerRuntimeId) {
+        throw new AgentMuxError('The caller Host changed while resolving its owner. Read the original owner again.', 'RUNTIME_OWNER_MISMATCH')
+      }
+      this.assertObservationHostConnection(owner.host.config.id, owner.host)
+    }
+    assertOwner()
+    await owner.host.client.authorizeAgentCaller(input.capability, input.agentSessionId)
+    assertOwner()
+    return owner.host
   }
 
 
