@@ -1523,3 +1523,111 @@ it('consumes the reported original Browser favicon through the real event reduce
   expect(row.querySelector('img')).toBeNull()
   expect(useAppStore.getState().surveyZoneSelection).toBe(selected); healthy()
 })
+
+async function surveyContext(zoneId: string, gesture: 'pointer' | 'key' | 'shift-f10' = 'pointer') {
+  const button = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)?.querySelector<HTMLButtonElement>('.survey-item')
+  expect(button).toBeDefined()
+  await act(async () => {
+    button!.focus()
+    if (gesture === 'pointer') expect(button!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 50, clientY: 50 }))).toBe(false)
+    else button!.dispatchEvent(new KeyboardEvent('keydown', { key: gesture === 'key' ? 'ContextMenu' : 'F10', shiftKey: gesture === 'shift-f10', bubbles: true, cancelable: true }))
+  })
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-context-zone-id]')?.getAttribute('data-survey-context-zone-id')).toBe(zoneId))
+  return button!
+}
+async function surveyContextAction(label: string) {
+  const menu = document.querySelector('[data-survey-context-zone-id]')!
+  const item = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')].find(item => item.textContent === label)
+  expect(item, label).toBeDefined()
+  await act(async () => { item!.click(); await new Promise(resolve => setTimeout(resolve, 0)) })
+}
+
+it.each(['pointer', 'key', 'shift-f10'] as const)('survey item context menu opens and cancels without navigating (%s)', async gesture => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const clicked = useAppStore.getState().surveyZoneSelection!.zoneId
+  await choose(); const before = useAppStore.getState()
+  await dom.click('[aria-label="Hide Survey items"]')
+  const button = await surveyContext(clicked, gesture)
+  expect(document.querySelector('[data-survey-context-zone-id]')!.textContent).toContain('New Agent')
+  expect(document.querySelector('[data-survey-context-zone-id]')!.textContent).not.toContain('Save current panel')
+  expect(document.querySelector('[data-survey-context-zone-id]')!.textContent).not.toContain('Browser tools')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  await act(async () => document.querySelector('[data-survey-context-zone-id]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-context-zone-id]')).toBeNull())
+  await vi.waitFor(() => expect(document.activeElement).toBe(button))
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection); healthy()
+})
+
+it('survey item context menu renames the unselected original row and leaves text editing native', async () => {
+  const second = createWorkbenchTab('second-research', { ...pageC, workspaceId: otherWorkspace.id })
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, otherWorkspace] },
+    tabs: { ...state.tabs, [second.id]: second }, layouts: { ...state.layouts, [otherWorkspace.id]: createWorkspaceLayout('other-group', [second.id]) } }))
+  await realNameOwner(); await renderApp(); await enterSurvey(); await choose()
+  const clicked = catalog().tabs.find(tab => tab.tabId === second.id)!.zoneId!
+  await act(async () => { expect(useAppStore.getState().setSurveyZoneCollected(clicked, true)).toBe(true) })
+  const held = useAppStore.getState().surveyZoneSelection, otherZoneId = held!.zoneId
+  expect(clicked).not.toBe(otherZoneId)
+  await surveyContext(clicked); await surveyContextAction('Rename exploration')
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Exploration name"]')).not.toBeNull())
+  const field = dom.container.querySelector<HTMLInputElement>('[aria-label="Exploration name"]')!
+  expect(field.closest<HTMLElement>('[data-survey-zone-id]')!.dataset.surveyZoneId).toBe(clicked)
+  expect(document.activeElement).toBe(field)
+  expect(field.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))).toBe(true)
+  expect(document.querySelector('[data-survey-context-zone-id]')).toBeNull()
+  await fill(field, 'Renamed right-clicked item'); await submit(field.closest('form')!)
+  await vi.waitFor(() => expect(useAppStore.getState().surveyExplorationNames[clicked]).toBe('Renamed right-clicked item'))
+  expect(useAppStore.getState().surveyExplorationNames[otherZoneId]).not.toBe('Renamed right-clicked item')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held); healthy()
+})
+
+it('survey item context menu creates an Agent launcher in the unselected original Zone', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const clicked = useAppStore.getState().surveyZoneSelection!.zoneId
+  await choose(); const owner = vi.spyOn(useAppStore.getState(), 'openLauncher')
+  await surveyContext(clicked); await surveyContextAction('New Agent')
+  await vi.waitFor(() => expect(owner).toHaveBeenCalledOnce()); expect(owner.mock.calls[0]![0]).toMatchObject({ zoneId: clicked, reveal: false })
+  const state = useAppStore.getState(), ref = state.surveyZoneSelection!.active!
+  expect(state.surveyZoneSelection?.zoneId).toBe(clicked)
+  expect(state.tabs[ref.tabId]!.space?.zoneId).toBe(clicked)
+  expect(state.tabs[ref.tabId]!.regions[ref.regionId]?.kind).toBe('launcher'); healthy()
+})
+
+it('survey item context menu captures research from the unselected original Zone through the knowledge owner', async () => {
+  const call = knowledgeTransport()
+  await renderApp(); await enterSurvey(); await choose()
+  await dom.click('[aria-label="New webpage"]'); const held = useAppStore.getState().surveyZoneSelection
+  await surveyContext(originalZoneId()); await surveyContextAction('Save research to Topic…')
+  await vi.waitFor(() => expect(captureDialog()).not.toBeNull())
+  await selectValue(captureDialog().querySelector('select')!, 'view:a'); await dialogButton(captureDialog(), 'Continue')
+  await dialogButton(knowledgeDialog(), 'Save knowledge')
+  expect(call).toHaveBeenLastCalledWith('topic.knowledge.write', expect.objectContaining({ topicId: 'view:a', sources: [{ kind: 'survey', zoneId: originalZoneId() }, { kind: 'url', url: pageA.url }, { kind: 'url', url: pageB.url }] }))
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held); healthy()
+})
+
+it('survey item context menu creates a Note from its original Browser and removes only its collection', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const clicked = useAppStore.getState().surveyZoneSelection!, ref = clicked.active!
+  await choose(); const before = useAppStore.getState()
+  await surveyContext(clicked.zoneId); await surveyContextAction('New Note')
+  await vi.waitFor(() => expect(document.querySelector('.survey-recall-capture')).not.toBeNull())
+  // The creation draft pins the original Browser; cancelling performs no write.
+  expect(document.querySelector('.survey-recall-capture')!.textContent).toContain('Save finding')
+  await dialogButton(document.querySelector('.survey-recall-capture')!, 'Cancel')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  await surveyContext(clicked.zoneId); await surveyContextAction('Keep in Survey')
+  expect(useAppStore.getState().surveyCollectedZones[clicked.zoneId]).not.toBe(true)
+  expect(useAppStore.getState().surveyCollectedZones[originalZoneId()]).toBe(true)
+  expect(useAppStore.getState().tabs[ref.tabId]).toBe(before.tabs[ref.tabId])
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
+})
+
+it('survey item context menu retargets the original invoker during consecutive right clicks', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const clicked = useAppStore.getState().surveyZoneSelection!.zoneId, held = useAppStore.getState().surveyZoneSelection
+  await surveyContext(clicked)
+  const latest = await surveyContext(originalZoneId())
+  await act(async () => document.querySelector('[data-survey-context-zone-id]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await vi.waitFor(() => expect(document.activeElement).toBe(latest))
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held); healthy()
+})
