@@ -24,12 +24,18 @@ function PreparedMarkup({ content, title }: { content: string; title: string }) 
       setPrepared({ content, error: 'This output exceeds the static preview budget. Use Source to read the complete output.' })
       return
     }
-    void import('dompurify').then(({ default: purifier }) => {
+    void import('dompurify').then(({ default: createPurifier }) => {
       if (!current) return
+      // DOMPurify's URI regexp also checks SVG geometry attributes. Apply our
+      // stricter offline rule only to URLs, on an instance owned by this output.
+      const purifier = createPurifier(window)
+      purifier.addHook('uponSanitizeAttribute', (_node, attribute) => {
+        if (['href', 'xlink:href', 'src', 'poster', 'background'].includes(attribute.attrName) &&
+          !/^(?:#|data:image\/(?:png|jpeg|gif|webp);base64,)/i.test(attribute.attrValue.trim())) attribute.keepAttr = false
+      })
       const clean = purifier.sanitize(content, {
         FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'base', 'meta', 'link', 'foreignObject', 'animate', 'set'],
-        FORBID_ATTR: ['srcdoc', 'target', 'action', 'formaction', 'autofocus'],
-        ALLOWED_URI_REGEXP: /^(?:#|data:image\/(?:png|jpeg|gif|webp);base64,)/i
+        FORBID_ATTR: ['srcdoc', 'srcset', 'target', 'action', 'formaction', 'autofocus']
       })
       if (current) setPrepared({ content, html: `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer"><style>body{margin:8px;color:#333;font:14px system-ui;overflow-wrap:anywhere}img,svg{max-width:100%}pre{white-space:pre-wrap}</style></head><body>${clean}</body></html>` })
     }).catch(error => { if (current) setPrepared({ content, error: String(error) }) })
