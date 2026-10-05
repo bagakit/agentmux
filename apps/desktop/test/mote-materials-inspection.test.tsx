@@ -16,10 +16,10 @@ const button = (name: string) => [...details().querySelectorAll<HTMLButtonElemen
 const readResult = (params: FileReadParams, content = '# Saved material\nSource: my own observation.'): FileReadResult => ({
   resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path },
   result: { status: 'read', document: { path, content, revision } } })
-// Profile confirms only SOUL; material assertions count only the explicitly selected material.
+// Profile reads its own context; material assertions count only the explicitly selected material.
 function mockMaterials() {
   const read = vi.fn<(params: FileReadParams) => Promise<FileReadResult>>()
-  vi.spyOn(api.files, 'readPublic').mockImplementation(params => params.path === 'SOUL.md'
+  vi.spyOn(api.files, 'readPublic').mockImplementation(params => ['SOUL.md', 'BEHAVIOR.md'].includes(params.path)
     ? Promise.resolve({ resource: null, result: { status: 'unknown', code: 'BEHAVIOR_FIXTURE_UNSET', message: 'No saved behavior fixture.' } }) : read(params))
   return read
 }
@@ -32,6 +32,14 @@ afterEach(async () => { await app.dispose() })
 async function inspect() { await moteClick(details().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')!); await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!) }
 
 describe('Profile inspection consumes the original public File domain', () => {
+  it('does not present the original working guide as an idea', async () => {
+    vi.mocked(api.files.readDirectory).mockResolvedValue([path, rootPath + '/AGENTS.md'].map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false })))
+    await app.mount()
+    await moteClick(details().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')!)
+    expect([...details().querySelectorAll('.mote-details__note')].map(node => node.textContent)).toHaveLength(1)
+    expect(details().querySelector('.mote-details__note')?.textContent).toContain('my-original-material.md')
+    expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+  })
   it('reads only a selected file through the typed seam, keeps its revision and opens correction through original Editor', async () => {
     const read = mockMaterials().mockImplementation(async params => readResult(params))
     const privateRead = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: '# Original editor content', revision } })
