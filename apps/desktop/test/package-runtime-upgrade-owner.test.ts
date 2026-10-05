@@ -1,3 +1,4 @@
+const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath, fixturePsBirth: _hygiene_fixturePsBirth } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
@@ -53,6 +54,9 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   const run = { id: 'original-run', pid: 12345, backend: 'pty', acceptedInputBytes: 2, outputBytes: 50 }
   let signalled = false, mapped = binaries[0]!, currentLock = lock
   let extraLock = false, wrongInode = false, changeBirth = false, mappingReads = 0
+  const startSeconds = String(Math.floor(Date.now() / 1000))
+  let startMicroseconds = 123456, kernelReads = 0, insideBirthDrift = false, missingBirth = false, kernelUid = uid
+  let displayBirth = birth
   let insideImage: string | undefined, insideLock: string | undefined
   let version = 'ctxmuxd 0.1.0 (protocol 18, handoff opaque-public-declaration)\n'
   let outgoingVersion = version
@@ -76,9 +80,10 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
       return { stdout: version }
     }
     if (executable === '/usr/bin/codesign') return { stdout: '', stderr: `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` }
-    if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40) }) }
+    if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40),
+      pid, uid: kernelUid, startSeconds, startMicroseconds: missingBirth ? undefined : startMicroseconds + (insideBirthDrift && kernelReads++ > 0 ? 1 : 0) }) }
     if (executable === '/usr/bin/tar') return { stdout: '' }
-    if (executable === '/bin/ps') return { stdout: changeBirth ? `${birth}-changed` : birth }
+    if (executable === '/bin/ps') return { stdout: changeBirth ? `${displayBirth}-changed` : displayBirth }
     if (executable === '/usr/sbin/lsof') {
       if (args.includes('-U')) return { stdout: `p${pid}\nu${uid}\nf7u\ntunix\nn${socket}\n` }
       mappingReads++
@@ -98,7 +103,12 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   })
   return { root, old, candidate, configured, state, lock, receiptPath, binaries, signal,
     async prepare() { const plan = await installer.prepareRuntimeUpgrade(old, candidate); plans.push(plan); return plan },
-    multipleLocks() { extraLock = true }, badImageInode() { wrongInode = true }, driftBirth() { changeBirth = true },
+    multipleLocks() { extraLock = true }, badImageInode() { wrongInode = true },
+    driftBirth() { changeBirth = true; startMicroseconds++ },
+    driftBirthInsideObservation() { insideBirthDrift = true },
+    changeDisplayBirth(value: string) { displayBirth = value },
+    missingKernelBirth() { missingBirth = true }, wrongKernelUid() { kernelUid++ },
+    kernelBirth: `${startSeconds}:123456`,
     async driftState() { currentLock = join(root, 'different-state/state.lock'); await mkdir(dirname(currentLock)); await writeFile(currentLock, '') },
     async driftDuringObservation(kind: 'image' | 'state') {
       const path = join(root, 'inside-observation', kind === 'image' ? 'ctxmuxd' : 'state.lock'); await mkdir(dirname(path))
@@ -154,6 +164,26 @@ it('rejects another birth identity before handoff without signaling or rewriting
   expect(outcome.error).toContain('process identity changed'); expect(f.signal).not.toHaveBeenCalled()
   expect(await readFile(f.receiptPath)).toEqual(bytes)
 })
+it('rejects same-PID same-second microsecond birth drift inside an owner observation', async () => {
+  const f = await fixture(); f.driftBirthInsideObservation()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error.message', 'The Runtime process changed while its serving authority was being observed.')
+  expect(f.signal).not.toHaveBeenCalled()
+})
+it('uses exact kernel birth even when the displayed date changes locale and timezone', async () => {
+  const f = await fixture(); f.changeDisplayBirth('unavailable localized date in another timezone')
+  const plan = await f.prepare()
+  expect(plan.owner.birth).toBe(f.kernelBirth)
+  expect(hooks.exec.mock.calls.filter(([command]) => command === '/bin/ps')).toHaveLength(0)
+  expect(f.signal).not.toHaveBeenCalled()
+})
+it.each(['missing birth', 'different UID'])('keeps the owner unconfirmed for %s in kernel process facts', async kind => {
+  const f = await fixture()
+  if (kind === 'missing birth') f.missingKernelBirth(); else f.wrongKernelUid()
+  const result = await f.prepare().then(plan => ({ plan }), error => ({ error }))
+  expect(result).toHaveProperty('error')
+  expect(f.signal).not.toHaveBeenCalled()
+})
 it('records only the confirmed actual post-exec image and serving state, retaining identity and original Run', async () => {
   const f = await fixture(), plan = await f.prepare(), mappedPath = await f.alternatePostImage()
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
@@ -174,7 +204,7 @@ it('does not claim same-native success from a signal while the original file rem
   manifest.binaries[0].sha256 = sha(await readFile(f.binaries[1]!)); await writeFile(manifestPath, JSON.stringify(manifest))
   const plan = await f.prepare(), bytes = await readFile(f.receiptPath)
   f.signal.mockImplementation(() => true)
-  let clock = 0; vi.spyOn(Date, 'now').mockImplementation(() => clock += 16000)
+  let clock = _reshape_fixtureEpoch(0, 0, 0); vi.spyOn(Date, 'now').mockImplementation(() => clock += 16000)
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('old-confirmed'); expect(outcome.signalSent).toBe(true)
   expect(outcome.error).toContain('has not mapped'); expect(await readFile(f.receiptPath)).toEqual(bytes)
@@ -202,7 +232,7 @@ it.each(['inode', 'bytes'] as const)('rejects candidate %s drift during its actu
   f.driftDuringVersion(kind)
   // A broken pre-signal guard may reach the post-signal polling branch. Bound
   // that owning counterexample too, so the RED is a behavioral assertion.
-  let clock = 0; vi.spyOn(Date, 'now').mockImplementation(() => clock += 16000)
+  let clock = _reshape_fixtureEpoch(0, 0, 0); vi.spyOn(Date, 'now').mockImplementation(() => clock += 16000)
   const outcome = await installer.finishRuntimeUpgrade(plan, f.candidate)
   expect(outcome.status).toBe('old-confirmed'); expect(outcome.error).toContain('changed while its version response')
   expect(outcome.signalSent).toBe(false); expect(f.versionCalls()).toBe(2); expect(f.signal).not.toHaveBeenCalled()
