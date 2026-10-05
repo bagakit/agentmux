@@ -14,6 +14,11 @@ export type RunUsage = {
   cpuPercent: number | null; rssKib: number | null; rootRssKib: number | null
   descendantsRssKib: number | null; descendantProcessCount: number | null
 }
+/** Totals of the same claimed PID batch; availability and observation time belong to process. */
+export type RunUsageTotals = {
+  coverage: { trackedRuns: number; observedRoots: number; missingRoots: number }
+  processCount: number | null; cpuPercent: number | null; rssKib: number | null
+}
 export type AppProcessRole = 'main' | 'renderer' | 'browser' | 'gpu' | 'utility' | 'other'
 export type AppUsageGroup = { role: AppProcessRole; processCount: number; cpuPercent: number | null; rssKib: number }
 export type AppProcessType = string
@@ -56,7 +61,7 @@ export type MetricsObservation = {
   scope: { kind: 'unix-host'; hostId: 'local'; hostname: string; mainPid: number }
   window: MetricsWindow | null
   units: { cpu: 'percent'; cpuBasis: 'one-logical-core'; rss: 'KiB'; storage: 'bytes'; cpuAggregate: '10s-reading-peak'; rssAggregate: 'latest' }
-  process: MetricsSource<RunUsage[]>; app: MetricsSource<AppUsage>
+  process: MetricsSource<RunUsage[]>; runTotals: RunUsageTotals | null; app: MetricsSource<AppUsage>
   runtime: MetricsSource<RuntimeUsage[]>; main: MetricsSource<MainResourceOwnerCounts>
   diagnostics: MetricsSource<PerformanceDiagnostics>
   renderer: MetricsSource<MetricsRenderer>
@@ -197,6 +202,13 @@ export function parseMetricsRendererResult(value: unknown): MetricsRendererResul
 const runParser = record({ runId: identity, hostId: identity, rootPid: count,
   processCount: nullable(count), cpuPercent: nullable(number), rssKib: nullable(number), rootRssKib: nullable(number),
   descendantsRssKib: nullable(number), descendantProcessCount: nullable(count) })
+const runTotalsParser: Parser = value => {
+  record({ coverage: record({ trackedRuns: count, observedRoots: count, missingRoots: count }),
+    processCount: nullable(count), cpuPercent: nullable(number), rssKib: nullable(number) })(value)
+  const totals = value as RunUsageTotals
+  if (totals.coverage.trackedRuns !== totals.coverage.observedRoots + totals.coverage.missingRoots) invalid()
+  if (totals.coverage.missingRoots > 0 && [totals.processCount, totals.cpuPercent, totals.rssKib].some(v => v !== null)) invalid()
+}
 const appRoleParser: Parser = v => { if (!['main','renderer','browser','gpu','utility','other'].includes(v as string)) invalid() }
 const appProcessShape = record({ pid: positiveCount, creationTime: number, role: appRoleParser,
   type: v => { identity(v); if ((v as string).length > 128) invalid() },
@@ -234,11 +246,13 @@ const observationParser = record({ schema: literal('agentmux.metrics.v1'), obser
   scope: record({ kind: literal('unix-host'), hostId: literal('local'), hostname: identity, mainPid: count }),
   window: nullable(windowParser), units: record({ cpu: literal('percent'), cpuBasis: literal('one-logical-core'), rss: literal('KiB'), storage: literal('bytes'),
     cpuAggregate: literal('10s-reading-peak'), rssAggregate: literal('latest') }),
-  process: source(array(runParser)), app: source(appParser), runtime: source(array(runtimeParser)),
+  process: source(array(runParser)), runTotals: nullable(runTotalsParser), app: source(appParser), runtime: source(array(runtimeParser)),
   diagnostics: source(diagnosticsParser), main: source(mainParser), renderer: source(record({ window: windowParser, process: rendererProcessParser, memory: rendererMemoryParser, counts: countsParser, performance: performanceParser })) })
 export function parseMetricsObservation(value: unknown): MetricsObservation {
   observationParser(value)
   const result = value as MetricsObservation
+  if ((result.process.data === null) !== (result.runTotals === null)) invalid()
+  if (result.runTotals && result.runTotals.coverage.trackedRuns !== result.process.data!.length) invalid()
   const rendererWindow = result.renderer.data?.window
   if (rendererWindow && (!result.window || rendererWindow.windowId !== result.window.windowId ||
     rendererWindow.webContentsId !== result.window.webContentsId || rendererWindow.generation !== result.window.generation)) invalid()

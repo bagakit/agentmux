@@ -44,6 +44,7 @@ export function createResourceMetricsPort(args: {
           scope: { kind: 'unix-host', hostId: 'local', hostname: hostname(), mainPid: process.pid }, window,
           units: { cpu: 'percent', cpuBasis: 'one-logical-core', rss: 'KiB', storage: 'bytes', cpuAggregate: '10s-reading-peak', rssAggregate: 'latest' },
           process: source(sample.processObservedAt === null ? null : sample.runs, sample.processObservedAt, sample.unavailable),
+          runTotals: sample.processObservedAt === null ? null : sample.runTotals,
           app: source(sample.appObservedAt === null ? null : sample.app, sample.appObservedAt, sample.app?.unavailable ?? null),
           runtime: source(sample.runtime, sample.runtimeObservedAt, sample.runtimeUnavailable),
           diagnostics: source(sample.diagnostics.data, sample.diagnostics.observedAt, sample.diagnostics.unavailable),

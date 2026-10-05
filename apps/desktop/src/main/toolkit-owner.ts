@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitSnapshot, type AgentMuxToolkitPort,
+import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitResultDocument, parseToolkitSnapshot, type AgentMuxToolkitPort,
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import { bundledToolkitTools, bundledToolkitScript } from './toolkit-bundled.js'
@@ -30,7 +30,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private execution: Execution | null = null
   private value: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: null,
     run: null, state: 'idle', reason: null, startedAt: null, observedAt: null, observation: null,
-    manual: false, consumerCount: 0, sequence: 0, trend: [] }
+    document: null, manual: false, consumerCount: 0, sequence: 0, trend: [] }
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
     enabled(): boolean; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>; mainPid?: number; now?: () => number }) {}
   get current(): ToolkitMetricsSnapshot {
@@ -145,7 +145,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     const execution = this.newExecution(id)
     this.execution = execution
     this.value = { ...this.value, executionId: execution.id, run: null, state: 'starting', reason: null,
-      startedAt: (this.args.now ?? Date.now)(), observation: null, observedAt: null, sequence: 0, trend: [] }
+      startedAt: (this.args.now ?? Date.now)(), observation: null, document: null, observedAt: null, sequence: 0, trend: [] }
     this.publish()
     const work = async () => {
       const launch = this.args.launch()
@@ -220,12 +220,14 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       const frame = JSON.parse(line)
       if (frame.schema !== 'agentmux.toolkit.result.v1') throw new AgentMuxError('Toolkit result schema is invalid.', 'CONTROL_PROTOCOL_ERROR')
       if (frame.event === 'error') throw new AgentMuxError(String(frame.reason).slice(0,4096), 'CONTROL_FAILED')
-      if (frame.event !== 'result' || Object.keys(frame).sort().join() !== 'event,payload,schema,sequence' ||
+      if (frame.event !== 'result' || Object.keys(frame).sort().join() !== 'document,event,payload,schema,sequence' ||
         frame.sequence !== execution.sequence + 1) throw new AgentMuxError('Toolkit result sequence or framing is invalid.', 'CONTROL_PROTOCOL_ERROR')
       const observation = parseMetricsObservation(frame.payload)
+      const document = parseToolkitResultDocument(frame.document)
       if (observation.scope.mainPid !== (this.args.mainPid ?? process.pid)) throw new AgentMuxError('Tool observation belongs to another Main owner.', 'CONTROL_PROTOCOL_ERROR')
       execution.sequence = frame.sequence
       this.value.observation = observation; this.value.observedAt = observation.observedAt
+      this.value.document = document
       this.value.sequence = frame.sequence; this.value.state = 'observing'; this.value.reason = null
       const app = observation.app
       if (app.state === 'available' && app.data && app.observedAt !== null &&

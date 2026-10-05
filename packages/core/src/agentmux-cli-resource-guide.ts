@@ -102,7 +102,19 @@ this capability does not provide a sandbox, secret storage, scheduling or remote
 
 Performance consumes public metrics. Run holds one manual observation until stop; watch
 owns an independent lease. Stop ends its exact observation, never Agents or other leases.
-Source identity, availability and each source's actual observation time remain visible.`
+Source identity, availability and each source's actual observation time remain visible.
+
+Data-only script results may use schema agentmux.toolkit.result.v1 with summary, items
+[{label,value}], links [{label,url}] and notice. Optional agentCards contains fields,
+items [{reference,metrics:[{label,value}]}] and omittedItems. Fields are unique choices
+from avatar,name,status,provider,workspace,host,sessionId,runId. Reference is exactly
+{kind:"session",hostId,sessionId} or {kind:"run",hostId,runId}; the client resolves
+identity from its original owner. Output cannot define avatars, HTML, actions or capabilities.
+Documents allow 128 cards, 16 metrics per card and 32768 UTF-8 bytes; text values retain
+the 4096-code-unit limit. Missing/ambiguous identity keeps metrics and the exact reference.
+Performance inspect/watch returns the same public document as its existing CLI script.
+runTotals inherits process source availability/time; CPU is the 10s peak of same-batch
+unique-PID sums, RSS is the latest PID sum, and missing roots make full totals unknown.`
 
 export const AGENTMUX_GOAL_CREATE_GUIDE = `Project identity must come from app snapshot, never a Space or Workspace ID.
 The original Goal owner records routing risk (low/medium/high/unknown), confirmation
