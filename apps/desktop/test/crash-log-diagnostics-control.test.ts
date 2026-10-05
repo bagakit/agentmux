@@ -1,3 +1,4 @@
+const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { execFile } from 'node:child_process'
@@ -12,7 +13,7 @@ import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/co
 import type { AppConfig, HostConfig } from '../src/shared/contracts.js'
 import type { RuntimePreparation } from '../src/main/runtime-controller.js'
 import type { ScratchTopics } from '../src/main/scratch-topics.js'
-import type { WorkspaceFiles } from '../src/main/workspace-files.js'
+import { WorkspaceFiles } from '../src/main/workspace-files.js'
 
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
@@ -51,6 +52,7 @@ import { registerIpc } from '../src/main/ipc.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 import { CrashLog } from '../src/main/crash-log.js'
+import { registerWorkbenchStartupCapture } from '../src/main/workbench-startup-capture.js'
 import { reportQuitDisposalFailure } from '../src/main/quit-disposal-failure.js'
 import { runOwnerDisposals } from '../src/main/owner-disposal.js'
 
@@ -59,7 +61,7 @@ afterEach(async () => { vi.mocked(shell.showItemInFolder).mockReset(); vi.restor
 const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'host-settings' } as const
 const remote: HostConfig = { id: '--help', kind: 'ssh', label: 'Saved connection', hostname: 'private.invalid', user: 'original', port: 22 }
 
-async function registered() {
+async function registered(onRendererStartupFailure?: (input: unknown) => boolean) {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-host-settings-')); directories.push(root); ipc.root = root
   const store = new ConfigStore(join(root, 'config.json'))
   const config = await store.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [DEFAULT_CONFIG.hosts[0]!, remote],
@@ -77,7 +79,8 @@ async function registered() {
   ipc.handlers.clear(); ipc.execute = undefined
   const dispose = await registerIpc({ window: { isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as unknown as ScratchTopics,
-    workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    workspaceFiles: new WorkspaceFiles(id => runtime.executionHost(id)),
+    ...(onRendererStartupFailure ? { onRendererStartupFailure } : {}) })
   const execute = ipc.execute!
   const native = ipc.handlers.get('ui:revealCrashLog')!
   expect(execute).toBeTypeOf('function'); expect(native).toBeTypeOf('function')
@@ -86,6 +89,8 @@ async function registered() {
     expect(sender.send.mock.calls.some(([channel]) => channel === 'notebook:changed')).toBe(true)
     expect(sender.send.mock.calls.some(([channel]) => channel === 'spatial:changed')).toBe(true)
   })
+  // The registered Notes reader joins its real startup reconciliation before measuring diagnostics-only traffic.
+  await ipc.handlers.get('notesStorage:inspect')!({ sender } as unknown as IpcMainInvokeEvent)
   return { config, runtime, prepare, commit, attach, sender, dispose, execute,
     root, native: () => native({ sender } as unknown as IpcMainInvokeEvent),
     bytes: () => readFile(store.filePath, 'utf8') }
@@ -213,6 +218,53 @@ describe('registered Main crash log diagnostics share one fixed-path owner', () 
       expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(path)
       expect(await readFile(path, 'utf8')).toBe(bytes)
     } finally { await server.stop(); await f.dispose() }
+  })
+
+  it('original startup capture reaches trusted Main IPC and actual public RPC/CLI without exposing its body', async () => {
+    let capture: ReturnType<typeof registerWorkbenchStartupCapture> | undefined
+    const f = await registered(input => capture?.recordRenderer(input) ?? false)
+    const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
+    const path = join(f.root, 'crash-log.ndjson'), log = new CrashLog(path)
+    const contents = Object.assign(f.sender, { getOSProcessId: () => 919 })
+    capture = registerWorkbenchStartupCapture({ contents, preloadPath: _hygiene_fixturePath("private/preload.cjs"),
+      origin: () => ({ mode: 'prod', filePath: _hygiene_fixturePath("private/index.html") }), activeAttempt: () => 'original-loader-token',
+      startupAttemptId: 'original-main-attempt', pid: 42, appVersion: 'private-proof', packageIdentity: null,
+      sink: record => log.append(record), stderr: () => {} })
+    const handler = ipc.handlers.get('ui:recordStartupFailure')!
+    expect(handler).toBeTypeOf('function')
+    const failure = { attemptId: 'original-loader-token', event: 'renderer-import-error',
+      error: { name: 'Error', message: 'ORIGINAL_BOOTSTRAP_IMPORT_PRIVATE_BODY' } }
+    expect(() => handler({ sender: {} } as IpcMainInvokeEvent, failure)).toThrow('Untrusted Workbench startup diagnostic sender')
+    expect(handler({ sender: f.sender, senderFrame: {} } as unknown as IpcMainInvokeEvent, failure)).toBe(false)
+    expect(handler({ sender: f.sender, senderFrame: f.sender.mainFrame } as unknown as IpcMainInvokeEvent,
+      { ...failure, attemptId: 'old-loader-token' })).toBe(false)
+    const socket = join(f.root, 'startup-control.sock'), server = new core.AgentMuxControlServer({ execute: f.execute }, socket)
+    await server.start()
+    const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+    const before = f.prepare.mock.calls.length
+    try {
+      expect(handler({ sender: f.sender, senderFrame: f.sender.mainFrame } as unknown as IpcMainInvokeEvent, failure)).toBe(true)
+      await vi.waitFor(async () => { expect(await readFile(path, 'utf8')).toContain('ORIGINAL_BOOTSTRAP_IMPORT_PRIVATE_BODY') })
+      const receipt = await rpc.call('system.crash-log.inspect', {})
+      expect(receipt).toEqual({ path, outcome: 'present' })
+      expect(JSON.stringify(receipt)).not.toContain('ORIGINAL_BOOTSTRAP')
+      const record = JSON.parse((await readFile(path, 'utf8')).trim())
+      expect(record).toMatchObject({ kind: 'workbench-startup-failure', sourceEvent: 'renderer-import-error',
+        attemptId: 'original-loader-token', startupAttemptId: 'original-main-attempt', pid: 42, rendererPid: 919, packageIdentity: null })
+      const cli = fileURLToPath(new URL('../../../packages/core/dist/agentmux.js', import.meta.url))
+      const execute = promisify(execFile)
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
+      const invoke = async (action: 'inspect' | 'reveal') => {
+        const output = await execute(process.execPath, [cli, 'system', 'crash-log', action], {
+          env: { ...env, AGENTMUX_RPC_ENDPOINT: `unix:${socket}`, AGENTMUX_ENV: '1' }, timeout: 10_000 })
+        expect(output.stdout).not.toContain('ORIGINAL_BOOTSTRAP')
+        return JSON.parse(output.stdout.split('\n').find(line => line.startsWith('{'))!)
+      }
+      expect(await invoke('inspect')).toMatchObject({ ok: true, result: receipt })
+      expect(await invoke('reveal')).toMatchObject({ ok: true, result: { path, requested: true } })
+      expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(path)
+      expect(f.prepare.mock.calls.length).toBe(before)
+    } finally { capture.dispose(); await rpc.dispose(); await server.stop(); await f.dispose() }
   })
 
 })
