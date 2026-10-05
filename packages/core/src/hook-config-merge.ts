@@ -1,18 +1,8 @@
 import { isDeepStrictEqual } from 'node:util'
-import { isMap, isSeq, parseDocument, YAMLMap, YAMLSeq } from 'yaml'
+import { isAlias, isMap, isSeq, parseDocument, visit, YAMLMap, YAMLSeq } from 'yaml'
 import { AgentMuxError } from './errors.js'
 
-/**
- * How a managed Hook mutation is combined with the file already on disk.
- *
- * A provider's Hook config is frequently *shared* — antigravity writes into the same
- * `~/.gemini/config/hooks.json` the real Gemini CLI reads, a workspace `.codex/hooks.json`
- * may hold project-committed Codex hooks, and hermes' `~/.hermes/config.yaml` carries the user's
- * model, credentials, and their own shell hooks. Overwriting such a file wholesale destroys every
- * foreign entry (for YAML, every comment too). A merge strategy lets the installer inject only
- * AgentMux-owned content while preserving everything else, so install/uninstall are non-destructive
- * on shared files.
- */
+/** The Provider declares current native entries; shared entries are never swept. */
 export type AgentHookMergeStrategy =
   | AgentHookOwnedKeyMerge
   | AgentHookManagedEventsMerge
@@ -20,366 +10,229 @@ export type AgentHookMergeStrategy =
   | AgentHookYamlManagedEventsMerge
   | AgentHookManagedApprovalsMerge
 
-/**
- * AgentMux owns exactly one top-level key of a JSON object (e.g. antigravity's `agentmux-status`
- * bundle under the shared Gemini hooks root). Install replaces that one key and preserves every
- * sibling key; a reinstall overwrites the same key, so it never accumulates duplicates.
- */
-export type AgentHookOwnedKeyMerge = {
-  kind: 'json-owned-key'
-  key: string
-}
-
-/**
- * AgentMux owns command entries that must live *inside* a shared schema whose only recognised
- * top-level field is `hooks` (Codex rejects unknown top-level fields). Install sweeps AgentMux
- * entries — matched by the stable `marker` substring in their command — out of every event bucket,
- * then appends the fresh entries, preserving foreign buckets and foreign entries within our buckets.
- * Non-`hooks` top-level keys carried by the owned content (e.g. `description`) are also applied,
- * while foreign top-level keys are preserved.
- */
-export type AgentHookManagedEventsMerge = {
-  kind: 'json-managed-events'
-  marker: string
-}
-
-/**
- * The same ownership rule as `json-managed-events`, for a file whose **event buckets are at the
- * root** — there is no `hooks` wrapper to descend into.
- *
- * droid's `~/.factory/hooks.json` is that shape: its schema is
- * `object({ PreToolUse: array(...).optional(), …, hooksDisabled: boolean().optional() })`, so an
- * event name *is* a top-level key. Merging such a file with `json-managed-events` is not a
- * near-miss — it is data loss with a silent symptom: the wrapper-based merge finds no `hooks`
- * object, so it sweeps nothing, copies every root key of ours over the user's own bucket of the
- * same name, and then writes an empty `hooks: {}` the CLI does not recognise. The user's
- * hand-written `PreToolUse` audit hook disappears on the next launch.
- *
- * The keys AgentMux owns are exactly the event names its own content declares; every other root
- * key (`hooksDisabled`, `showHookOutput`, a foreign event bucket) is preserved, and within a
- * shared bucket foreign entries stay ahead of ours — same guarantees as the wrapper variant.
- */
-export type AgentHookRootManagedEventsMerge = {
-  kind: 'json-root-managed-events'
-  marker: string
-}
-
-/**
- * The YAML analogue of `json-managed-events`, for hermes' `~/.hermes/config.yaml`. That file holds
- * the user's model, credentials, and their own `hooks:` — and comments they wrote — so the merge is
- * comment-preserving: it edits the parsed YAML document in place rather than re-emitting it. AgentMux
- * owns command entries under `hooks.<event>`, matched by the `marker` substring in their `command`;
- * install sweeps our entries out of every bucket, drops any bucket left empty, then appends the fresh
- * entries after any foreign entries. Foreign keys, foreign hooks, and comments survive untouched.
- */
-export type AgentHookYamlManagedEventsMerge = {
-  kind: 'yaml-managed-events'
-  marker: string
-}
-
-/**
- * AgentMux owns `approvals` array entries in hermes' `~/.hermes/shell-hooks-allowlist.json`, matched
- * by the `marker` substring in their `command`. hermes gates a shell hook on an exact `(event, command)`
- * approval, so the installer must add ours without a TTY prompt. Install sweeps our stale approvals and
- * appends the fresh ones, preserving every foreign approval verbatim (its `approved_at` timestamp and
- * all). Our entries carry only `{event, command}` — hermes never reads more at runtime — which keeps
- * the merge pure so the installer's unchanged-hash guard still works.
- */
-export type AgentHookManagedApprovalsMerge = {
-  kind: 'json-managed-approvals'
-  marker: string
-}
+/** An explicitly exclusive native key. Every sibling remains outside AgentMux's ownership. */
+export type AgentHookOwnedKeyMerge = { kind: 'json-owned-key'; key: string }
+/** Append missing current declarations under hooks.<event>, preserving every existing entry. */
+export type AgentHookManagedEventsMerge = { kind: 'json-managed-events' }
+/** The same declaration rule where native event buckets live at the root. */
+export type AgentHookRootManagedEventsMerge = { kind: 'json-root-managed-events' }
+/** Edit the existing YAML document, preserving foreign nodes and comments. */
+export type AgentHookYamlManagedEventsMerge = { kind: 'yaml-managed-events' }
+/** Native approvals identify a declaration by the exact (event, command) pair. */
+export type AgentHookManagedApprovalsMerge = { kind: 'json-managed-approvals' }
 
 type JsonObject = Record<string, unknown>
+const SERIALIZE = (value: unknown): string => JSON.stringify(value, null, 2) + '\n'
 
-const SERIALIZE = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`
-
-/**
- * Parse a Hook config file that AgentMux is about to merge into.
- *
- * `null` (absent) and blank files are an empty object — there is nothing to lose. A file with
- * real but unparseable content is a hard error: silently treating it as `{}` would clobber a
- * user's hand-edited config, which is exactly the data loss the merge exists to prevent.
- */
+function object(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+function targetShape(message: string): never {
+  throw new AgentMuxError(message, 'HOOK_TARGET_UNPARSEABLE')
+}
+function invalidPlan(message: string): never {
+  throw new AgentMuxError(message, 'INVALID_HOOK_PLAN')
+}
 function parseCurrentObject(current: string | null): JsonObject {
   if (current === null || current.trim() === '') return {}
   let parsed: unknown
-  try {
-    parsed = JSON.parse(current)
-  } catch {
-    throw new AgentMuxError('Managed Hook target is not valid JSON; refusing to overwrite it.', 'HOOK_TARGET_UNPARSEABLE')
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new AgentMuxError('Managed Hook target is not a JSON object; refusing to overwrite it.', 'HOOK_TARGET_UNPARSEABLE')
-  }
-  return parsed as JsonObject
+  try { parsed = JSON.parse(current) }
+  catch { return targetShape('Managed Hook target is not valid JSON; refusing to overwrite it.') }
+  if (!object(parsed)) return targetShape('Managed Hook target is not a JSON object; refusing to overwrite it.')
+  return parsed
 }
-
 function parseOwnedObject(content: string): JsonObject {
   let parsed: unknown
-  try {
-    parsed = JSON.parse(content)
-  } catch {
-    throw new AgentMuxError('Managed Hook owned content is not valid JSON.', 'INVALID_HOOK_PLAN')
+  try { parsed = JSON.parse(content) }
+  catch { return invalidPlan('Managed Hook owned content is not valid JSON.') }
+  if (!object(parsed)) return invalidPlan('Managed Hook owned content must be a JSON object.')
+  return parsed
+}
+function commandEntry(value: unknown): boolean {
+  return object(value) && typeof value.command === 'string' && value.command.trim().length > 0
+}
+function declarations(value: unknown): Record<string, JsonObject[]> {
+  if (!object(value) || Object.keys(value).length === 0) return invalidPlan('Managed Hook plan declares no event entries.')
+  const entries: Record<string, JsonObject[]> = Object.create(null)
+  for (const [event, definitions] of Object.entries(value)) {
+    if (!event || !Array.isArray(definitions) || definitions.length === 0) return invalidPlan('Managed Hook event declarations must be nonempty arrays.')
+    for (const definition of definitions) {
+      if (!object(definition) || !(commandEntry(definition) ||
+          (Array.isArray(definition.hooks) && definition.hooks.length > 0 && definition.hooks.every(commandEntry)))) {
+        return invalidPlan('Managed Hook declaration must contain complete native command entries.')
+      }
+    }
+    entries[event] = definitions as JsonObject[]
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new AgentMuxError('Managed Hook owned content must be a JSON object.', 'INVALID_HOOK_PLAN')
-  }
-  return parsed as JsonObject
+  return entries
 }
 
-/** True when a single hook definition carries an AgentMux-managed command (flat or nested). */
-function definitionOwnsMarker(definition: unknown, marker: string): boolean {
-  if (typeof definition !== 'object' || definition === null) return false
-  const record = definition as JsonObject
-  if (typeof record.command === 'string' && record.command.includes(marker)) return true
-  if (Array.isArray(record.hooks)) {
-    return record.hooks.some((hook) =>
-      typeof hook === 'object' && hook !== null &&
-      typeof (hook as JsonObject).command === 'string' &&
-      ((hook as JsonObject).command as string).includes(marker)
-    )
+/** A current declaration's presence is not ownership of the containing user entry. */
+function containsDeclaration(actual: unknown, expected: JsonObject): boolean {
+  if (!object(actual)) return false
+  if (!Array.isArray(expected.hooks)) return isDeepStrictEqual(actual, expected)
+  const { hooks: expectedHooks, ...expectedScope } = expected
+  const { hooks: actualHooks, ...actualScope } = actual
+  if (!Array.isArray(actualHooks) || !isDeepStrictEqual(actualScope, expectedScope)) return false
+  // Foreign siblings remain untouched. Preserve the declared command order and multiplicity.
+  let position = 0
+  return (expectedHooks as unknown[]).every(leaf => {
+    while (position < actualHooks.length) {
+      if (isDeepStrictEqual(actualHooks[position++], leaf)) return true
+    }
+    return false
+  })
+}
+function currentHooks(current: JsonObject): JsonObject {
+  if (!Object.hasOwn(current, 'hooks')) return {}
+  if (!object(current.hooks)) return targetShape('Managed Hook target hooks must be a JSON object; retaining the target.')
+  return current.hooks
+}
+function currentBucket(current: JsonObject, event: string): unknown[] {
+  if (!Object.hasOwn(current, event)) return []
+  if (!Array.isArray(current[event])) return targetShape('Managed Hook target event must be an array; retaining the target.')
+  return current[event]
+}
+function mergeEventBuckets(current: JsonObject, owned: Record<string, JsonObject[]>): { value: JsonObject; changed: boolean } {
+  let value = { ...current }
+  let changed = false
+  for (const [event, definitions] of Object.entries(owned)) {
+    const bucket = currentBucket(current, event)
+    const missing = definitions.filter(definition => !bucket.some(entry => containsDeclaration(entry, definition)))
+    if (missing.length) { value = { ...value, [event]: [...bucket, ...missing] }; changed = true }
   }
-  return false
+  return { value, changed }
 }
-
-/** Drop AgentMux-managed definitions from one event bucket, keeping foreign definitions in order. */
-function sweepManagedDefinitions(definitions: unknown, marker: string): unknown[] {
-  if (!Array.isArray(definitions)) return []
-  return definitions.filter((definition) => !definitionOwnsMarker(definition, marker))
+function inspectEvents(current: JsonObject, owned: Record<string, JsonObject[]>): { present: boolean; current: boolean } {
+  let count = 0, satisfied = 0
+  for (const [event, definitions] of Object.entries(owned)) {
+    const bucket = currentBucket(current, event)
+    for (const definition of definitions) {
+      ++count
+      if (bucket.some(entry => containsDeclaration(entry, definition))) ++satisfied
+    }
+  }
+  return { present: satisfied > 0, current: satisfied === count }
 }
-
 function applyOwnedKey(current: string | null, owned: JsonObject, key: string): string {
-  if (!(key in owned)) {
-    throw new AgentMuxError(`Managed Hook owned content is missing its owned key "${key}".`, 'INVALID_HOOK_PLAN')
-  }
+  if (!Object.hasOwn(owned, key)) return invalidPlan('Managed Hook owned content is missing its owned key.')
   return SERIALIZE({ ...parseCurrentObject(current), [key]: owned[key] })
 }
-
-/**
- * Sweep AgentMux entries out of every current bucket, then append the fresh ones after whatever
- * foreign entries share a bucket. Shared by both managed-events strategies — they differ only in
- * *where* the buckets live (under `hooks`, or at the root), never in who owns what inside one.
- */
-function mergeEventBuckets(current: JsonObject, owned: JsonObject, marker: string): JsonObject {
-  const next: JsonObject = {}
-  // Sweep our marker out of every existing bucket first so relaunches never accumulate duplicates
-  // and a bucket we no longer own stops firing our command; foreign-only buckets are preserved.
-  for (const [event, definitions] of Object.entries(current)) {
-    const foreign = sweepManagedDefinitions(definitions, marker)
-    if (foreign.length > 0) next[event] = foreign
+function applyManagedEvents(current: string | null, owned: JsonObject, root = false): string {
+  const parsed = parseCurrentObject(current)
+  const expected = declarations(root ? owned : owned.hooks)
+  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed), expected)
+  if (!merged.changed && current !== null) return current
+  if (root) return SERIALIZE(merged.value)
+  let result: JsonObject = { ...parsed, hooks: merged.value }
+  // A fragment does not grant ownership of an existing user's metadata key.
+  for (const [key, value] of Object.entries(owned)) {
+    if (key !== 'hooks' && !Object.hasOwn(result, key)) result = { ...result, [key]: value }
   }
-  // Inject the fresh managed entries after any foreign entries that share the bucket.
-  for (const [event, ourDefinitions] of Object.entries(owned)) {
-    const foreign = next[event]
-    const preserved = Array.isArray(foreign) ? foreign : []
-    next[event] = [...preserved, ...(Array.isArray(ourDefinitions) ? ourDefinitions : [])]
-  }
-  return next
-}
-
-function applyManagedEvents(current: string | null, owned: JsonObject, marker: string): string {
-  const result = parseCurrentObject(current)
-  // AgentMux owns non-`hooks` labels it declares (e.g. `description`); foreign top-level keys survive.
-  for (const [label, value] of Object.entries(owned)) {
-    if (label !== 'hooks') result[label] = value
-  }
-  const currentHooks = typeof result.hooks === 'object' && result.hooks !== null && !Array.isArray(result.hooks)
-    ? (result.hooks as JsonObject)
-    : {}
-  const ownedHooks = typeof owned.hooks === 'object' && owned.hooks !== null && !Array.isArray(owned.hooks)
-    ? (owned.hooks as JsonObject)
-    : {}
-  result.hooks = mergeEventBuckets(currentHooks, ownedHooks, marker)
   return SERIALIZE(result)
 }
 
-/**
- * The root-bucket variant: the event names are top-level keys, so the merge operates on the file's
- * own root rather than descending into `hooks`.
- *
- * Root keys that are **not** arrays are settings, not buckets (droid's `hooksDisabled` /
- * `showHookOutput`), so they are carried through verbatim — sweeping them as buckets would delete
- * the user's own switches. Everything else follows the shared per-bucket ownership rule.
- */
-function applyRootManagedEvents(current: string | null, owned: JsonObject, marker: string): string {
-  const parsed = parseCurrentObject(current)
-  const settings: JsonObject = {}
-  const buckets: JsonObject = {}
-  for (const [key, value] of Object.entries(parsed)) {
-    if (Array.isArray(value)) buckets[key] = value
-    else settings[key] = value
-  }
-  return SERIALIZE({ ...settings, ...mergeEventBuckets(buckets, owned, marker) })
+function yamlDocument(current: string | null) {
+  const doc = parseDocument(current === null || current.trim() === '' ? '{}' : current)
+  if (doc.errors.length || !isMap(doc.contents)) return targetShape('Managed Hook target must be a valid YAML mapping; retaining the target.')
+  return doc
 }
-
-/** True when a YAML hook definition node carries an AgentMux-managed command. */
-function yamlDefinitionOwnsMarker(node: unknown, marker: string): boolean {
-  if (!isMap(node)) return false
-  const command = node.get('command')
-  return typeof command === 'string' && command.includes(marker)
+function yamlHooks(doc: ReturnType<typeof yamlDocument>): YAMLMap | undefined {
+  const hooks = doc.get('hooks', true)
+  if (hooks === undefined) return undefined
+  if (!isMap(hooks)) return targetShape('Managed Hook target hooks must be a YAML mapping; retaining the target.')
+  return hooks
 }
-
-/**
- * Merge AgentMux command entries into a YAML `hooks:` block while preserving comments, foreign keys,
- * foreign hooks, and formatting. Edits the parsed document in place — never re-serialises from a plain
- * object — so the user's credentials-bearing `~/.hermes/config.yaml` round-trips faithfully. Pure and
- * deterministic on identical input, as the installer's unchanged-hash guard requires.
- */
-function applyYamlManagedEvents(current: string | null, owned: JsonObject, marker: string): string {
-  const doc = current === null || current.trim() === ''
-    ? parseDocument('{}')
-    : parseDocument(current)
-  if (doc.errors.length > 0) {
-    throw new AgentMuxError('Managed Hook target is not valid YAML; refusing to overwrite it.', 'HOOK_TARGET_UNPARSEABLE')
+function yamlBucket(hooks: YAMLMap | undefined, event: string): YAMLSeq | undefined {
+  const bucket = hooks?.get(event, true)
+  if (bucket === undefined) return undefined
+  if (!isSeq(bucket)) return targetShape('Managed Hook target event must be a YAML sequence; retaining the target.')
+  return bucket
+}
+function yamlEntry(node: unknown): unknown {
+  // Unknown aliases/tags are preserved, never interpreted as a declaration or deleted.
+  if (!isMap(node)) return undefined
+  let opaque = false
+  visit(node, { Node: (_key, value) => {
+    if (isAlias(value) || value.tag !== undefined) opaque = true
+  } })
+  if (opaque) return undefined
+  try { return node.toJSON() } catch { return undefined }
+}
+function applyYamlManagedEvents(current: string | null, owned: JsonObject): string {
+  const expected = declarations(owned.hooks), doc = yamlDocument(current)
+  let hooks = yamlHooks(doc), changed = false
+  for (const [event, definitions] of Object.entries(expected)) {
+    let bucket = yamlBucket(hooks, event)
+    const existing = bucket?.items.map(yamlEntry) ?? []
+    const missing = definitions.filter(definition => !existing.some(entry => containsDeclaration(entry, definition)))
+    if (!missing.length) continue
+    if (!hooks) { hooks = new YAMLMap(); doc.set('hooks', hooks) }
+    if (!bucket) { bucket = new YAMLSeq(); hooks.set(event, bucket) }
+    for (const definition of missing) bucket.add(doc.createNode(definition))
+    changed = true
   }
-  const root = doc.contents
-  if (!isMap(root)) {
-    throw new AgentMuxError('Managed Hook target is not a YAML mapping; refusing to overwrite it.', 'HOOK_TARGET_UNPARSEABLE')
-  }
-  // Use the Document-level get/set/delete for the root `hooks` key: they take a plain string key,
-  // whereas the parsed root map's own set() demands a ParsedNode key. The isMap(root) guard above has
-  // already rejected a non-mapping document, so these operate on the mapping we verified.
-  const existingHooks = doc.get('hooks', true)
-  let hooks: YAMLMap
-  if (isMap(existingHooks)) {
-    hooks = existingHooks
-  } else {
-    hooks = new YAMLMap()
-    doc.set('hooks', hooks)
-  }
-  // Sweep our marker out of every existing bucket first so relaunches never accumulate duplicates and
-  // a bucket we no longer own stops firing our command; foreign entries and foreign-only buckets survive.
-  for (const pair of [...hooks.items]) {
-    const bucket = pair.value
-    if (isSeq(bucket)) {
-      bucket.items = bucket.items.filter((node) => !yamlDefinitionOwnsMarker(node, marker))
-      if (bucket.items.length === 0) hooks.delete(pair.key)
-    }
-  }
-  // Inject the fresh managed entries after any foreign entries that share the bucket.
-  const ownedHooks = typeof owned.hooks === 'object' && owned.hooks !== null && !Array.isArray(owned.hooks)
-    ? (owned.hooks as JsonObject)
-    : {}
-  for (const [event, definitions] of Object.entries(ownedHooks)) {
-    const existingBucket = hooks.get(event, true)
-    let bucket: YAMLSeq
-    if (isSeq(existingBucket)) {
-      bucket = existingBucket
-    } else {
-      bucket = new YAMLSeq()
-      hooks.set(event, bucket)
-    }
-    for (const definition of (Array.isArray(definitions) ? definitions : [])) {
-      const entry = new YAMLMap()
-      for (const [key, value] of Object.entries(definition as JsonObject)) entry.set(key, value)
-      bucket.add(entry)
-    }
-  }
-  // Leave the file free of an empty `hooks:` stub if we neither found nor added anything.
-  if (hooks.items.length === 0) doc.delete('hooks')
-  // lineWidth: 0 disables line-folding so a long command stays on one physical line — hermes gates on
-  // an exact command-string match, and a folded scalar would still round-trip but is needlessly fragile.
+  if (!changed && current !== null) return current
   return doc.toString({ lineWidth: 0 })
 }
-
-function applyManagedApprovals(current: string | null, owned: JsonObject, marker: string): string {
-  const result = parseCurrentObject(current)
-  const currentApprovals = Array.isArray(result.approvals) ? result.approvals : []
-  // Keep every foreign approval verbatim (timestamps and all); drop our own stale entries so a fresh
-  // install neither duplicates nor leaves a moved-execPath approval behind.
-  const foreign = currentApprovals.filter((entry) =>
-    !(typeof entry === 'object' && entry !== null &&
-      typeof (entry as JsonObject).command === 'string' &&
-      ((entry as JsonObject).command as string).includes(marker)))
-  const ours = Array.isArray(owned.approvals) ? owned.approvals : []
-  result.approvals = [...foreign, ...ours]
-  return SERIALIZE(result)
+function approvalDeclarations(owned: JsonObject): JsonObject[] {
+  if (!Array.isArray(owned.approvals) || owned.approvals.length === 0 ||
+      !owned.approvals.every(entry => object(entry) && commandEntry(entry) && typeof entry.event === 'string' && entry.event.trim().length)) {
+    return invalidPlan('Managed Hook plan must declare complete native approval pairs.')
+  }
+  return owned.approvals as JsonObject[]
+}
+function currentApprovals(parsed: JsonObject): unknown[] {
+  if (!Object.hasOwn(parsed, 'approvals')) return []
+  if (!Array.isArray(parsed.approvals)) return targetShape('Managed Hook target approvals must be an array; retaining the target.')
+  return parsed.approvals
+}
+function containsApproval(current: unknown[], expected: JsonObject): boolean {
+  return current.some(entry => object(entry) && entry.event === expected.event && entry.command === expected.command)
+}
+function applyManagedApprovals(current: string | null, owned: JsonObject): string {
+  const expected = approvalDeclarations(owned), parsed = parseCurrentObject(current)
+  const approvals = currentApprovals(parsed), missing = expected.filter(entry => !containsApproval(approvals, entry))
+  if (!missing.length && current !== null) return current
+  return SERIALIZE({ ...parsed, approvals: [...approvals, ...missing] })
 }
 
-/**
- * Compute the next file content for a managed Hook mutation. Pure and deterministic: the installer
- * calls it during preview (to hash the result) and again during install, relying on identical output
- * for identical current content so its unchanged-hash guard still detects concurrent edits.
- */
-export function renderMergedHookContent(
-  current: string | null,
-  ownedContent: string,
-  strategy: AgentHookMergeStrategy
-): string {
+/** Deterministic preparation; unknown shared entries never acquire deletion authority. */
+export function renderMergedHookContent(current: string | null, ownedContent: string, strategy: AgentHookMergeStrategy): string {
   const owned = parseOwnedObject(ownedContent)
   switch (strategy.kind) {
-    case 'json-owned-key':
-      return applyOwnedKey(current, owned, strategy.key)
-    case 'json-managed-events':
-      return applyManagedEvents(current, owned, strategy.marker)
-    case 'json-root-managed-events':
-      return applyRootManagedEvents(current, owned, strategy.marker)
-    case 'yaml-managed-events':
-      return applyYamlManagedEvents(current, owned, strategy.marker)
-    case 'json-managed-approvals':
-      return applyManagedApprovals(current, owned, strategy.marker)
+    case 'json-owned-key': return applyOwnedKey(current, owned, strategy.key)
+    case 'json-managed-events': return applyManagedEvents(current, owned)
+    case 'json-root-managed-events': return applyManagedEvents(current, owned, true)
+    case 'yaml-managed-events': return applyYamlManagedEvents(current, owned)
+    case 'json-managed-approvals': return applyManagedApprovals(current, owned)
   }
 }
 
-/** Read ownership through the same markers and keys used by installation, ignoring foreign facts. */
-export function inspectManagedHookContent(
-  current: string,
-  ownedContent: string,
-  strategy: AgentHookMergeStrategy
-): { present: boolean; current: boolean } {
+/** Exact current declarations only; neither historical ownership nor native activation. */
+export function inspectManagedHookContent(current: string, ownedContent: string, strategy: AgentHookMergeStrategy): { present: boolean; current: boolean } {
   const owned = parseOwnedObject(ownedContent)
-  let actual: unknown
-  let expected: unknown
   switch (strategy.kind) {
     case 'json-owned-key': {
       const parsed = parseCurrentObject(current)
-      if (!Object.hasOwn(owned, strategy.key)) throw new AgentMuxError('Managed Hook owned key is absent.', 'INVALID_HOOK_PLAN')
+      if (!Object.hasOwn(owned, strategy.key)) return invalidPlan('Managed Hook owned key is absent.')
       return { present: Object.hasOwn(parsed, strategy.key), current: isDeepStrictEqual(parsed[strategy.key], owned[strategy.key]) }
     }
+    case 'json-managed-events': return inspectEvents(currentHooks(parseCurrentObject(current)), declarations(owned.hooks))
+    case 'json-root-managed-events': return inspectEvents(parseCurrentObject(current), declarations(owned))
     case 'yaml-managed-events': {
-      const doc = parseDocument(current.trim() ? current : '{}')
-      if (doc.errors.length || !isMap(doc.contents)) throw new AgentMuxError('Managed Hook target is not a YAML mapping.', 'HOOK_TARGET_UNPARSEABLE')
-      const hooks = doc.get('hooks', true)
-      if (hooks !== undefined && !isMap(hooks)) throw new AgentMuxError('Managed Hook target hooks must be a YAML mapping.', 'HOOK_TARGET_UNPARSEABLE')
-      actual = isMap(hooks) ? Object.fromEntries(hooks.items.flatMap(pair => {
-        const definitions = isSeq(pair.value) ? pair.value.items.filter(node => yamlDefinitionOwnsMarker(node, strategy.marker)) : []
-        return definitions.length ? [[String(pair.key), definitions.map(node => isMap(node) ? node.toJSON() : null)]] : []
-      })) : {}
-      expected = managedEvents(owned.hooks, strategy.marker)
-      break
+      const expected = declarations(owned.hooks), hooks = yamlHooks(yamlDocument(current))
+      let count = 0, satisfied = 0
+      for (const [event, definitions] of Object.entries(expected)) {
+        const bucket = yamlBucket(hooks, event)?.items.map(yamlEntry) ?? []
+        for (const definition of definitions) { ++count; if (bucket.some(entry => containsDeclaration(entry, definition))) ++satisfied }
+      }
+      return { present: satisfied > 0, current: satisfied === count }
     }
     case 'json-managed-approvals': {
-      const parsed = parseCurrentObject(current)
-      if (parsed.approvals !== undefined && !Array.isArray(parsed.approvals)) throw new AgentMuxError('Managed Hook target approvals must be an array.', 'HOOK_TARGET_UNPARSEABLE')
-      expected = Array.isArray(owned.approvals) ? owned.approvals : []
-      const declarations = expected as JsonObject[]
-      actual = Array.isArray(parsed.approvals) ? parsed.approvals.filter(entry => definitionOwnsMarker(entry, strategy.marker))
-        .map(entry => Object.fromEntries(Object.keys(declarations[0] ?? {}).map(key => [key, (entry as JsonObject)[key]]))) : []
-      break
+      const expected = approvalDeclarations(owned), approvals = currentApprovals(parseCurrentObject(current))
+      const satisfied = expected.filter(entry => containsApproval(approvals, entry)).length
+      return { present: satisfied > 0, current: satisfied === expected.length }
     }
-    case 'json-managed-events': {
-      const hooks = parseCurrentObject(current).hooks
-      if (hooks !== undefined && (!hooks || typeof hooks !== 'object' || Array.isArray(hooks))) {
-        throw new AgentMuxError('Managed Hook target hooks must be a JSON object.', 'HOOK_TARGET_UNPARSEABLE')
-      }
-      actual = managedEvents(hooks, strategy.marker)
-      expected = managedEvents(owned.hooks, strategy.marker)
-      break
-    }
-    case 'json-root-managed-events':
-      actual = managedEvents(parseCurrentObject(current), strategy.marker)
-      expected = managedEvents(owned, strategy.marker)
-      break
   }
-  if (Object.keys(expected as object).length === 0) throw new AgentMuxError('Managed Hook plan declares no owned entries.', 'INVALID_HOOK_PLAN')
-  return { present: Object.keys(actual as object).length > 0, current: isDeepStrictEqual(actual, expected) }
-}
-
-function managedEvents(value: unknown, marker: string): JsonObject {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(Object.entries(value).flatMap(([event, definitions]) => {
-    const managed = Array.isArray(definitions) ? definitions.filter(definition => definitionOwnsMarker(definition, marker)) : []
-    return managed.length ? [[event, managed]] : []
-  }))
 }

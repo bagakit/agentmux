@@ -54,7 +54,7 @@ export const GEMINI_HOOKS: AgentNativeHookSpecification = {
  * ——两者是**不同文件**，互不覆盖。写错一个就会让装 Gemini 顺手改掉用户 Antigravity 的行为。
  *
  * settings.json 是用户的主配置（本机实测同时含 `security` 与 `mcpServers`），所以必须走
- * `json-managed-events` 合并：它按 marker 只清扫自有条目，foreign 顶层键与 foreign hook 定义全部保留。
+ * `json-managed-events` 合并：仅补当前准确声明，保留 foreign 顶层键与全部原 Hook 定义。
  */
 export function createGeminiManagedHookPlan(homeOverride?: string): AgentManagedHookPlan {
   const home = homeOverride ? resolve(homeOverride) : homedir()
@@ -71,7 +71,7 @@ export function createGeminiManagedHookPlan(homeOverride?: string): AgentManaged
       path: join(home, '.gemini', 'settings.json'),
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-managed-events', marker: 'agentmux-hook.js' }
+      merge: { kind: 'json-managed-events' }
     }]
   }
 }
