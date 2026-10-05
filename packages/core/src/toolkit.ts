@@ -4,6 +4,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION } f
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { parseToolkitResultDocument, type ToolkitResultDocument } from './toolkit-result-document.js'
 export * from './toolkit-result-document.js'
+export * from './toolkit-performance-failure.js'
 
 export const TOOLKIT_STATES = ['idle', 'starting', 'observing', 'paused', 'stopping', 'failed', 'unknown'] as const
 export type ToolkitState = typeof TOOLKIT_STATES[number]
