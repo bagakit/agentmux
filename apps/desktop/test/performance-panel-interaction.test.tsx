@@ -39,7 +39,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   release = vi.fn(); publish = () => {}
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_toolId, callback) => { publish = callback; callback(observation); return { dispose: release } })
-  vi.spyOn(api.toolkit, 'script').mockResolvedValue({ toolId: 'performance', path: _hygiene_fixturePath("fixture/official/performance.sh"), sha256: 'a'.repeat(64), text: 'exec agentmux metrics watch\n' })
+  vi.spyOn(api.toolkit, 'script').mockResolvedValue({ toolId: 'performance', path: _hygiene_fixturePath("fixture/official/performance.sh"), sha256: 'a'.repeat(64), text: 'exec amux metrics watch\n' })
   vi.spyOn(api.toolkit, 'run'); vi.spyOn(api.toolkit, 'stop'); vi.spyOn(api.config, 'save')
   const sessions = Array.from({ length: 128 }, (_, i) => {
     const session = composerSession(`unrelated-${i}`)
@@ -67,6 +67,17 @@ async function mountApp() { await act(async () => root.render(<App />)) }
 async function hover() { await act(async () => { node('.performance-trigger').dispatchEvent(new PointerEvent('pointerover', { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 140)) }) }
 function draft() { return node<HTMLTextAreaElement>('[data-prompt-editor] textarea') }
 
+it('renders the public amux metrics command through the actual App script source reader', async () => {
+  await mountApp()
+  await click('.performance-trigger')
+  await click('.performance-actions > button:first-child')
+  expect(api.toolkit.script).toHaveBeenCalledTimes(1)
+  const source = node<HTMLTextAreaElement>('[aria-label="Official Performance script source"]')
+  expect(source.readOnly).toBe(true)
+  expect(source.value).toBe('exec amux metrics watch\n')
+  expect(api.toolkit.run).not.toHaveBeenCalled(); expect(api.toolkit.stop).not.toHaveBeenCalled(); expect(api.config.save).not.toHaveBeenCalled()
+})
+
 it('通过 actual App Settings 左侧入口与右侧 Toolkit，并让 script、Pause/Resume 与原 Toolkit 配置可达', async () => {
   await mountApp()
   expect(vi.mocked(api.toolkit.observe).mock.calls).toHaveLength(0)
@@ -91,7 +102,7 @@ it('通过 actual App Settings 左侧入口与右侧 Toolkit，并让 script、P
   await click('.performance-actions > button:first-child')
   expect(vi.mocked(api.toolkit.script).mock.calls, '只读 script actual API caller 非空').toHaveLength(1)
   const source = node<HTMLTextAreaElement>('[aria-label="Official Performance script source"]')
-  expect(source.readOnly).toBe(true); expect(source.value).toBe('exec agentmux metrics watch\n')
+  expect(source.readOnly).toBe(true); expect(source.value).toBe('exec amux metrics watch\n')
   await click('[aria-label="Back to Performance"]')
   await click('.performance-actions > button:last-child')
   expect(node('.settings-page').dataset.settingsPage).toBe('toolkit')
