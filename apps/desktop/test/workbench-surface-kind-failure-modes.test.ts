@@ -147,7 +147,7 @@ describe('close obligations: what a Region releases must be decided per kind, no
 
 describe('Agent addressability: which Region can be named as an Agent', () => {
   // Deliberately NOT `isSessionSurface`: a Terminal has a `sessionId` but is not an Agent, and the
-  // addresses this feeds (`agentmux send --to-session=…`) only resolve for an Agent. So the two
+  // addresses this feeds (`amux agent send --to-session=…`) only resolve for an Agent. So the two
   // questions differ, and the terminal row below is what states that difference.
 
   it('only the Agent kind yields an address; every other kind explicitly yields none', () => {
